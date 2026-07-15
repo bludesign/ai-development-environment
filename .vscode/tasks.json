@@ -10,7 +10,8 @@
       "type": "shell",
       "label": "dev",
       "group": "build",
-      "command": "npm run dev"
+      "command": "npm run dev",
+      "detail": "Generate code and start Next.js dev server with hot reload"
     },
     {
       "type": "shell",
@@ -19,47 +20,50 @@
         "kind": "build",
         "isDefault": true
       },
-      "command": "npm run build"
+      "command": "npm run build",
+      "detail": "Generate code and create production Next.js standalone build"
     },
     {
       "type": "shell",
       "label": "start",
       "group": "build",
-      "command": "npm run start"
+      "command": "npm run start",
+      "detail": "Start the production standalone server"
     },
     {
       "type": "shell",
       "label": "clean",
       "group": "build",
-      "command": "npm run clean"
+      "command": "npm run clean",
+      "detail": "Remove .next, coverage, generated code, dev database, and supergraph"
     },
     {
       "type": "shell",
       "label": "generate",
       "group": "build",
       "command": "npm run generate",
-      "detail": "Run all code generation (Prisma, schema bundling, GraphQL codegen)"
+      "detail": "Run all code generation (Prisma client, schema bundling, GraphQL codegen)"
     },
     {
       "type": "shell",
       "label": "generate:prisma",
       "group": "build",
       "command": "npm run generate:prisma",
-      "detail": "Generate Prisma client"
+      "detail": "Generate Prisma client from schema.prisma"
     },
     {
       "type": "shell",
       "label": "generate:schema",
       "group": "build",
       "command": "npm run generate:schema",
-      "detail": "Bundle GraphQL SDL files into TypeScript"
+      "detail": "Bundle GraphQL SDL files into TypeScript for standalone builds"
     },
     {
       "type": "shell",
       "label": "generate:graphql",
       "group": "build",
       "command": "npm run generate:graphql",
-      "detail": "Generate GraphQL resolver types via codegen"
+      "detail": "Generate TypeScript resolver types from GraphQL schemas"
     },
     {
       "type": "shell",
@@ -87,49 +91,56 @@
       "label": "supergraph",
       "group": "build",
       "command": "npm run supergraph",
-      "detail": "Compose Apollo Federation supergraph via rover"
+      "detail": "Compose Apollo Federation supergraph via rover (requires dev server)"
     },
     {
       "type": "shell",
       "label": "type-check",
       "group": "build",
-      "command": "npm run type-check"
+      "command": "npm run type-check",
+      "detail": "Run TypeScript compiler with no emit to check for type errors"
     },
     {
       "type": "shell",
       "label": "test-watch",
       "group": "test",
-      "command": "npm test"
+      "command": "npm test",
+      "detail": "Run Vitest in watch mode for interactive development"
     },
     {
       "type": "shell",
       "label": "test",
       "group": "test",
-      "command": "npm run test:run"
+      "command": "npm run test:run",
+      "detail": "Run Vitest once and exit"
     },
     {
       "type": "shell",
       "label": "lint",
       "group": "test",
-      "command": "npm run lint"
+      "command": "npm run lint",
+      "detail": "Check for ESLint violations without fixing"
     },
     {
       "type": "shell",
       "label": "lint-fix",
       "group": "test",
-      "command": "npm run lint:fix"
+      "command": "npm run lint:fix",
+      "detail": "Auto-fix ESLint violations where possible"
     },
     {
       "type": "shell",
       "label": "format",
       "group": "test",
-      "command": "npm run format"
+      "command": "npm run format",
+      "detail": "Format all files with Prettier"
     },
     {
       "type": "shell",
       "label": "format-check",
       "group": "test",
-      "command": "npm run format:check"
+      "command": "npm run format:check",
+      "detail": "Check formatting without writing changes"
     },
     {
       "type": "shell",
@@ -138,13 +149,15 @@
         "kind": "test",
         "isDefault": true
       },
-      "command": "npm run full-check"
+      "command": "npm run full-check",
+      "detail": "Generate, format, lint-fix, type-check, test, and build"
     },
     {
       "type": "shell",
       "label": "full-check-ci",
       "group": "test",
-      "command": "npm run full-check:ci"
+      "command": "npm run full-check:ci",
+      "detail": "CI variant: generate, format-check, lint, type-check, test, and build"
     }
   ]
 }
