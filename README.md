@@ -36,7 +36,7 @@ npm run dev:all
 Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket runs on port `3092`, so an installed Homebrew service can continue using ports `3090` and `3091`. The agent waits for Next.js, then automatically enrolls `<hostname>-dev` on its first run. Later runs reuse the stable identity stored at:
 
 ```text
-~/Library/Application Support/mac-control-agent-dev/config.json
+~/.config/mac-control-agent-dev/config.json
 ```
 
 Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it. `cloudflared` must still be installed before running Cloudflared jobs.
@@ -106,4 +106,4 @@ mac-control-agent status
 mac-control-agent doctor
 ```
 
-The credential and stable agent ID are stored at `~/Library/Application Support/mac-control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.
+The credential and stable agent ID are stored at `~/.config/mac-control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.
