@@ -1,0 +1,17 @@
+// Prisma schema — https://pris.ly/d/prisma-schema
+//
+// Uses the Prisma 7 `prisma-client` generator (TypeScript query compiler, no Rust engine
+// binary) with driver adapters, so the generated client bundles cleanly into the Next.js
+// `standalone` output that the Homebrew service runs.
+//
+// The application currently supports SQLite only. DATABASE_URL controls the file location;
+// src/data/prisma-client.ts rejects other URL schemes before constructing the adapter.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}

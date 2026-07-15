@@ -1,0 +1,8 @@
+federation_version: =2.3.2
+
+# Optional tooling: `npm run supergraph` composes this single subgraph into supergraph.graphql
+# via rover. Requires the dev server running with introspection enabled (npm run dev).
+subgraphs:
+  ai-development-environment:
+    schema:
+      subgraph_url: http://localhost:3000/api/graphql
