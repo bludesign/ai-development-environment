@@ -22,13 +22,10 @@ The production server accepts the standard Next.js `HOSTNAME` and `PORT` environ
 
 ## Homebrew
 
-The Homebrew formula is maintained in [`bludesign/ai-development-environment-tap`](https://github.com/bludesign/ai-development-environment-tap).
-
-Because the tap repository does not use Homebrew's `homebrew-` naming convention, add it with its explicit remote:
+The Homebrew formula is maintained in [`bludesign/homebrew-ai-development-environment`](https://github.com/bludesign/homebrew-ai-development-environment).
 
 ```bash
-brew tap bludesign/ai-development-environment-tap \
-  https://github.com/bludesign/ai-development-environment-tap.git
+brew tap bludesign/ai-development-environment
 brew install ai-development-environment
 brew services start ai-development-environment
 ```
