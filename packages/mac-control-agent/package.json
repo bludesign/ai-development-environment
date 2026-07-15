@@ -9,7 +9,16 @@
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/mac-control-agent.js --banner:js=\"#!/usr/bin/env node\"",
     "dev": "node --watch --watch-preserve-output --import tsx src/index.ts dev",
+    "format": "prettier --write --ignore-path ../../.gitignore --ignore-path ../../.prettierignore .",
+    "format:check": "prettier --check --ignore-path ../../.gitignore --ignore-path ../../.prettierignore .",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
+    "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build",
+    "full-check:dev": "npm run full-check && npm run dev",
     "upgrade": "ncu -u && npm install",
     "upgrade:check": "ncu"
   },
@@ -20,8 +29,12 @@
   "devDependencies": {
     "@types/node": "^24",
     "esbuild": "0.28.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
     "npm-check-updates": "22.2.9",
+    "prettier": "3.9.5",
     "tsx": "4.23.1",
-    "typescript": "^6"
+    "typescript": "^6",
+    "vitest": "4.1.10"
   }
 }
