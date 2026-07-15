@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
 
-import Home from "@/app/page";
+import Home from "@/app/[locale]/page";
 
 test("renders the repository README", () => {
   render(<Home />);

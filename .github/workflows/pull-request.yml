@@ -35,6 +35,9 @@ jobs:
       - name: Generate
         run: npm run generate
 
+      - name: Check translations
+        run: npm run check-translations
+
       - name: Format check
         run: npm run format:check
 

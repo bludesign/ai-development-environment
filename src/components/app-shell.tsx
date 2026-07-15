@@ -1,8 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { Blocks, House, PanelLeft, PanelRight, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Link } from "@/i18n/navigation";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 type AppShellProps = {
@@ -107,6 +108,7 @@ function AppHeader({
   leftSidebar: SidebarControls;
   rightSidebar: SidebarControls;
 }) {
+  const t = useTranslations("shell");
   const leftOpen = leftSidebar.isMobile
     ? leftSidebar.openMobile
     : leftSidebar.open;
@@ -120,15 +122,19 @@ function AppHeader({
       <div className="grid h-14 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
         <SidebarToggle
           expanded={leftOpen}
-          label="navigation"
+          hideLabel={t("hideNavigation")}
           onClick={leftSidebar.toggleSidebar}
+          showLabel={t("showNavigation")}
           side="left"
         />
-        <p className="truncate px-3 text-center text-sm font-medium">Welcome</p>
+        <p className="truncate px-3 text-center text-sm font-medium">
+          {t("welcome")}
+        </p>
         <SidebarToggle
           expanded={rightOpen}
-          label="notifications"
+          hideLabel={t("hideNotifications")}
           onClick={rightSidebar.toggleSidebar}
+          showLabel={t("showNotifications")}
           side="right"
         />
       </div>
@@ -138,26 +144,28 @@ function AppHeader({
 
 function SidebarToggle({
   expanded,
-  label,
+  hideLabel,
   onClick,
+  showLabel,
   side,
 }: {
   expanded: boolean;
-  label: string;
+  hideLabel: string;
   onClick: () => void;
+  showLabel: string;
   side: "left" | "right";
 }) {
-  const action = expanded ? "Hide" : "Show";
+  const label = expanded ? hideLabel : showLabel;
   const Icon = side === "left" ? PanelLeft : PanelRight;
 
   return (
     <Button
       aria-expanded={expanded}
-      aria-label={`${action} ${label}`}
+      aria-label={label}
       className="size-10 touch-manipulation"
       onClick={onClick}
       size="icon-lg"
-      title={`${action} ${label}`}
+      title={label}
       type="button"
       variant="ghost"
     >
@@ -171,11 +179,11 @@ function MobileSidebarClose({ label }: { label: string }) {
 
   return (
     <Button
-      aria-label={`Close ${label}`}
+      aria-label={label}
       className="ml-auto size-10 touch-manipulation md:hidden"
       onClick={() => setOpenMobile(false)}
       size="icon-lg"
-      title={`Close ${label}`}
+      title={label}
       type="button"
       variant="ghost"
     >
@@ -185,13 +193,14 @@ function MobileSidebarClose({ label }: { label: string }) {
 }
 
 function NavigationSidebar() {
+  const t = useTranslations("shell");
   const { isMobile, setOpenMobile } = useSidebar();
 
   return (
     <Sidebar
       collapsible="offcanvas"
-      mobileDescription="Primary navigation for AI Development Environment."
-      mobileTitle="Navigation"
+      mobileDescription={t("navigationDescription")}
+      mobileTitle={t("navigation")}
       side="left"
     >
       <SidebarHeader className="border-b border-sidebar-border pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-2">
@@ -200,14 +209,14 @@ function NavigationSidebar() {
             <Blocks className="size-4" />
           </div>
           <span className="text-sm leading-tight font-semibold">
-            AI Development Environment
+            {t("productName")}
           </span>
-          <MobileSidebarClose label="navigation" />
+          <MobileSidebarClose label={t("closeNavigation")} />
         </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Dashboard</SidebarGroupLabel>
+          <SidebarGroupLabel>{t("dashboard")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -221,7 +230,7 @@ function NavigationSidebar() {
                     }}
                   >
                     <House />
-                    <span>Welcome</span>
+                    <span>{t("welcome")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -234,17 +243,19 @@ function NavigationSidebar() {
 }
 
 function NotificationsSidebar() {
+  const t = useTranslations("shell");
+
   return (
     <Sidebar
       collapsible="offcanvas"
-      mobileDescription="Notification updates and alerts."
-      mobileTitle="Notifications"
+      mobileDescription={t("notificationsDescription")}
+      mobileTitle={t("notifications")}
       side="right"
     >
       <SidebarHeader className="border-b border-sidebar-border pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-2">
         <div className="flex min-h-10 items-center px-2">
-          <h2 className="text-sm font-semibold">Notifications</h2>
-          <MobileSidebarClose label="notifications" />
+          <h2 className="text-sm font-semibold">{t("notifications")}</h2>
+          <MobileSidebarClose label={t("closeNotifications")} />
         </div>
       </SidebarHeader>
       <SidebarContent />

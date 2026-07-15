@@ -116,6 +116,13 @@
     },
     {
       "type": "shell",
+      "label": "check-translations",
+      "group": "test",
+      "command": "npm run check-translations",
+      "detail": "Verify locale and unit-test mock translation keys match English"
+    },
+    {
+      "type": "shell",
       "label": "lint",
       "group": "test",
       "command": "npm run lint",
