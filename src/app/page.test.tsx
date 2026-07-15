@@ -3,13 +3,16 @@ import { expect, test } from "vitest";
 
 import Home from "@/app/page";
 
-test("renders the home page heading", () => {
+test("renders the repository README", () => {
   render(<Home />);
 
   expect(
     screen.getByRole("heading", {
       level: 1,
-      name: "To get started, edit the page.tsx file.",
+      name: "AI Development Environment",
     }),
+  ).toBeDefined();
+  expect(
+    screen.getByRole("heading", { level: 2, name: "GraphQL API" }),
   ).toBeDefined();
 });
