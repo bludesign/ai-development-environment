@@ -12,7 +12,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -85,12 +84,17 @@ function ShellContent({
 
   return (
     <>
-      <SidebarInset className="h-full min-h-0 min-w-0 overflow-y-auto overscroll-contain">
+      <div
+        className="relative flex h-full min-h-0 min-w-0 w-full flex-1 flex-col bg-background"
+        data-slot="sidebar-inset"
+      >
         <AppHeader leftSidebar={leftSidebar} rightSidebar={rightSidebar} />
-        <div className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-          {children}
-        </div>
-      </SidebarInset>
+        <main className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+          <div className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+            {children}
+          </div>
+        </main>
+      </div>
       <NotificationsSidebar />
     </>
   );
@@ -111,20 +115,23 @@ function AppHeader({
     : rightSidebar.open;
 
   return (
-    <header className="sticky top-0 z-30 grid h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center border-b bg-background/95 pt-[env(safe-area-inset-top)] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] backdrop-blur-sm supports-backdrop-filter:bg-background/80 sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
-      <SidebarToggle
-        expanded={leftOpen}
-        label="navigation"
-        onClick={leftSidebar.toggleSidebar}
-        side="left"
-      />
-      <p className="truncate px-3 text-center text-sm font-medium">Welcome</p>
-      <SidebarToggle
-        expanded={rightOpen}
-        label="notifications"
-        onClick={rightSidebar.toggleSidebar}
-        side="right"
-      />
+    <header className="sticky top-0 z-30 shrink-0 border-b bg-background/90 backdrop-blur-xl backdrop-saturate-150 supports-backdrop-filter:bg-background/70">
+      <div aria-hidden="true" className="h-[env(safe-area-inset-top)]" />
+      <div className="grid h-14 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
+        <SidebarToggle
+          expanded={leftOpen}
+          label="navigation"
+          onClick={leftSidebar.toggleSidebar}
+          side="left"
+        />
+        <p className="truncate px-3 text-center text-sm font-medium">Welcome</p>
+        <SidebarToggle
+          expanded={rightOpen}
+          label="notifications"
+          onClick={rightSidebar.toggleSidebar}
+          side="right"
+        />
+      </div>
     </header>
   );
 }
@@ -147,10 +154,11 @@ function SidebarToggle({
     <Button
       aria-expanded={expanded}
       aria-label={`${action} ${label}`}
-      className="size-10"
+      className="size-10 touch-manipulation"
       onClick={onClick}
       size="icon-lg"
       title={`${action} ${label}`}
+      type="button"
       variant="ghost"
     >
       <Icon />
@@ -164,10 +172,11 @@ function MobileSidebarClose({ label }: { label: string }) {
   return (
     <Button
       aria-label={`Close ${label}`}
-      className="ml-auto size-10 md:hidden"
+      className="ml-auto size-10 touch-manipulation md:hidden"
       onClick={() => setOpenMobile(false)}
       size="icon-lg"
       title={`Close ${label}`}
+      type="button"
       variant="ghost"
     >
       <X />

@@ -105,6 +105,15 @@ describe("AppShell", () => {
     ).toBeDefined();
   });
 
+  test("keeps the sticky header outside the page scroll container", () => {
+    renderShell();
+
+    const main = screen.getByRole("main");
+    expect(main.className).toContain("overflow-y-auto");
+    expect(main.querySelector("header")).toBeNull();
+    expect(main.previousElementSibling?.tagName).toBe("HEADER");
+  });
+
   test("starts closed on mobile and opens the requested accessible sheet", async () => {
     setViewportWidth(375);
     renderShell();
