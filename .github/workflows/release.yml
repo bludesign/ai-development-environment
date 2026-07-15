@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to publish to Homebrew
+        description: Existing version tag to publish to GitHub Releases and Homebrew
         required: true
         type: string
 
@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   tag:
+    if: github.event_name == 'push'
     runs-on: dependabot
     permissions:
       contents: write
@@ -75,7 +76,7 @@ jobs:
        github.event_name == 'workflow_dispatch')
     runs-on: dependabot
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -107,6 +108,37 @@ jobs:
           fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.RELEASE_TAG;
+
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              core.info(`GitHub release ${tag} already exists; skipping creation.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              generate_release_notes: true,
+            });
 
       - name: Update Homebrew formula
         uses: mislav/bump-homebrew-formula-action@v4
