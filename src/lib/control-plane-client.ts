@@ -28,8 +28,10 @@ let subscriptionClient: Client | null = null;
 function websocketUrl(): string {
   const configured = process.env.NEXT_PUBLIC_AGENT_WS_URL;
   if (configured) return configured;
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.hostname}:3091/graphql`;
+  if (window.location.protocol === "https:") {
+    return `wss://${window.location.host}/graphql`;
+  }
+  return `ws://${window.location.hostname}:3091/graphql`;
 }
 
 export function controlPlaneSubscriptions(): Client {

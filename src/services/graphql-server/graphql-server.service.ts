@@ -16,9 +16,10 @@ export interface GraphQLContext {
   ipAddress: string | null;
 }
 
-type HeaderSource = Headers | Record<string, string | string[] | undefined>;
+export type HeaderSource =
+  Headers | Record<string, string | string[] | undefined>;
 
-function normalizeHeaders(source: HeaderSource): Headers {
+export function normalizeHeaders(source: HeaderSource): Headers {
   if (source instanceof Headers) return source;
   const headers = new Headers();
   for (const [name, value] of Object.entries(source)) {

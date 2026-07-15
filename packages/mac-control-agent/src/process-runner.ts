@@ -45,7 +45,16 @@ export async function runProcess(
         message,
         createdAt: new Date().toISOString(),
       };
-      logChain = logChain.then(() => options.onLog(log));
+      logChain = logChain.then(async () => {
+        try {
+          await options.onLog(log);
+        } catch (error) {
+          console.error(
+            `Could not append process log ${log.sequence}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      });
     };
 
     const attach = (
@@ -103,9 +112,8 @@ export async function runProcess(
       settled = true;
       clearTimeout(timeout);
       options.signal.removeEventListener("abort", abort);
-      void logChain.then(
-        () => resolve({ exitCode, signal, timedOut, cancelled }),
-        reject,
+      void logChain.then(() =>
+        resolve({ exitCode, signal, timedOut, cancelled }),
       );
     });
   });

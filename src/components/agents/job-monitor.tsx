@@ -1,6 +1,7 @@
 "use client";
 
 import { Square } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -11,10 +12,9 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
+import { JOB_FIELDS, JOB_LOG_FIELDS } from "./graphql-fields";
 import { StatusBadge } from "./status-badge";
 import type { AgentJob, AgentJobLog } from "./types";
-
-const JOB_FIELDS = `id agentId kind payload status error result timeoutSeconds createdAt startedAt finishedAt updatedAt`;
 
 export function JobMonitor({
   jobId,
@@ -23,10 +23,13 @@ export function JobMonitor({
   jobId: string;
   compact?: boolean;
 }) {
+  const t = useTranslations("jobs");
   const [job, setJob] = useState<AgentJob | null>(null);
   const [logs, setLogs] = useState<AgentJobLog[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const output = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
 
   const load = useCallback(async () => {
     try {
@@ -34,7 +37,7 @@ export function JobMonitor({
         agentJob: AgentJob | null;
         agentJobLogs: AgentJobLog[];
       }>(
-        `query Job($id: ID!) { agentJob(id: $id) { ${JOB_FIELDS} } agentJobLogs(jobId: $id) { id jobId sequence stream message createdAt } }`,
+        `query Job($id: ID!) { agentJob(id: $id) { ${JOB_FIELDS} } agentJobLogs(jobId: $id) { ${JOB_LOG_FIELDS} } }`,
         { id: jobId },
       );
       setJob(data.agentJob);
@@ -42,6 +45,8 @@ export function JobMonitor({
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setLoading(false);
     }
   }, [jobId]);
 
@@ -62,7 +67,7 @@ export function JobMonitor({
     );
     const unsubscribeLogs = client.subscribe<{ agentJobLogAdded: AgentJobLog }>(
       {
-        query: `subscription JobLog($jobId: ID!) { agentJobLogAdded(jobId: $jobId) { id jobId sequence stream message createdAt } }`,
+        query: `subscription JobLog($jobId: ID!) { agentJobLogAdded(jobId: $jobId) { ${JOB_LOG_FIELDS} } }`,
         variables: { jobId },
       },
       {
@@ -79,30 +84,37 @@ export function JobMonitor({
         complete: () => undefined,
       },
     );
-    const timer = window.setInterval(() => void load(), 10_000);
     return () => {
       unsubscribeJob();
       unsubscribeLogs();
-      window.clearInterval(timer);
       window.clearTimeout(initialLoad);
     };
   }, [jobId, load]);
 
   useEffect(() => {
-    output.current?.scrollTo({ top: output.current.scrollHeight });
+    if (stickToBottom.current) {
+      output.current?.scrollTo({ top: output.current.scrollHeight });
+    }
   }, [logs]);
 
   const cancel = async () => {
-    const data = await controlPlaneRequest<{ cancelAgentJob: AgentJob }>(
-      `mutation Cancel($jobId: ID!) { cancelAgentJob(jobId: $jobId) { ${JOB_FIELDS} } }`,
-      { jobId },
-    );
-    setJob(data.cancelAgentJob);
+    try {
+      const data = await controlPlaneRequest<{ cancelAgentJob: AgentJob }>(
+        `mutation Cancel($jobId: ID!) { cancelAgentJob(jobId: $jobId) { ${JOB_FIELDS} } }`,
+        { jobId },
+      );
+      setJob(data.cancelAgentJob);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
   };
 
   if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (loading)
+    return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
   if (!job)
-    return <p className="text-sm text-muted-foreground">Loading job…</p>;
+    return <p className="text-sm text-muted-foreground">{t("notFound")}</p>;
 
   return (
     <section
@@ -124,7 +136,7 @@ export function JobMonitor({
         <div className="flex gap-2">
           {compact && (
             <Button asChild size="sm" variant="outline">
-              <Link href={`/jobs/${job.id}`}>Open job</Link>
+              <Link href={`/jobs/${job.id}`}>{t("open")}</Link>
             </Button>
           )}
           {(job.status === "QUEUED" || job.status === "RUNNING") && (
@@ -134,7 +146,7 @@ export function JobMonitor({
               variant="destructive"
             >
               <Square />
-              Cancel
+              {t("cancel")}
             </Button>
           )}
         </div>
@@ -150,9 +162,15 @@ export function JobMonitor({
           "mt-4 overflow-auto rounded-lg border bg-zinc-950 p-3 font-mono text-xs leading-5 text-zinc-100",
           compact ? "h-80" : "h-[32rem]",
         )}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          stickToBottom.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+            24;
+        }}
       >
         {logs.length === 0 ? (
-          <span className="text-zinc-500">Waiting for output…</span>
+          <span className="text-zinc-500">{t("waiting")}</span>
         ) : (
           logs.map((log) => (
             <div

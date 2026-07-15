@@ -1,3 +1,5 @@
+import { TUNNEL_NAME_REGEX } from "@ai-development-environment/agent-contract";
+
 import {
   runProcess,
   type ProcessLog,
@@ -15,7 +17,7 @@ export function validateCloudflaredPayload(
   const value = payload as Record<string, unknown>;
   if (
     typeof value.tunnelName !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value.tunnelName)
+    !TUNNEL_NAME_REGEX.test(value.tunnelName)
   ) {
     throw new Error("Invalid Cloudflared tunnel name");
   }

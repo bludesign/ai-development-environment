@@ -6,5 +6,5 @@ export default async function AgentDetailPage({
   params: Promise<{ locale: string; id: string }>;
 }) {
   const { id } = await params;
-  return <AgentDetail agentId={id} />;
+  return <AgentDetail key={id} agentId={id} />;
 }

@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
+import { TUNNEL_NAME_REGEX } from "@ai-development-environment/agent-contract";
+
 import { getPrismaClient } from "@/data/prisma-client";
 
 import {
@@ -44,7 +46,7 @@ function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
   if (
     typeof value.tunnelName !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value.tunnelName)
+    !TUNNEL_NAME_REGEX.test(value.tunnelName)
   ) {
     throw new Error(
       "cloudflared.runTunnel requires a tunnelName containing only letters, numbers, underscores, or hyphens",
@@ -166,15 +168,6 @@ export class AgentControlService {
     });
     publishAgent(agent);
     return agent;
-  }
-
-  async markDisconnected(agentId: string): Promise<void> {
-    const prisma = await getPrismaClient();
-    const agent = await prisma.agent.update({
-      where: { id: agentId },
-      data: { disconnectedAt: new Date() },
-    });
-    publishAgent(agent);
   }
 
   async listAgents() {
@@ -324,10 +317,11 @@ export class AgentControlService {
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job || job.agentId !== agentId)
       throw new Error("Job not found for this agent");
-    const updated = await prisma.agentJob.update({
-      where: { id: jobId },
+    if (FINAL_JOB_STATUSES.has(job.status)) return job;
+    const completed = await prisma.agentJob.updateMany({
+      where: { id: jobId, agentId, status: { in: ACTIVE_JOB_STATUSES } },
       data: {
-        status: job.status === "CANCELLED" ? "CANCELLED" : status,
+        status,
         resultJson:
           result === undefined || result === null
             ? null
@@ -336,6 +330,14 @@ export class AgentControlService {
         finishedAt: new Date(),
       },
     });
+    const updated = await prisma.agentJob.findUnique({ where: { id: jobId } });
+    if (!updated || updated.agentId !== agentId) {
+      throw new Error("Job not found for this agent");
+    }
+    if (completed.count !== 1) {
+      if (FINAL_JOB_STATUSES.has(updated.status)) return updated;
+      throw new Error(`Job cannot be completed from status ${updated.status}`);
+    }
     publishJob(updated);
     return updated;
   }

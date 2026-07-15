@@ -1,6 +1,9 @@
+import { useTranslations } from "next-intl";
+
 import { cn } from "@/lib/utils";
 
 export function StatusBadge({ status }: { status: string }) {
+  const t = useTranslations("status");
   const active =
     status === "ONLINE" || status === "RUNNING" || status === "SUCCEEDED";
   const failed = status === "FAILED" || status === "TIMED_OUT";
@@ -13,7 +16,7 @@ export function StatusBadge({ status }: { status: string }) {
         !active && !failed && "bg-muted text-muted-foreground",
       )}
     >
-      {status.toLowerCase().replaceAll("_", " ")}
+      {t(status.toLowerCase())}
     </span>
   );
 }

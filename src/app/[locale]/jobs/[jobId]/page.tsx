@@ -1,4 +1,5 @@
 import { ArrowLeft } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { Button } from "@/components/ui/button";
@@ -9,18 +10,19 @@ export default async function JobDetailPage({
 }: {
   params: Promise<{ locale: string; jobId: string }>;
 }) {
-  const { jobId } = await params;
+  const { locale, jobId } = await params;
+  const t = await getTranslations({ locale, namespace: "jobs" });
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <div>
         <Button asChild size="sm" variant="ghost">
           <Link href="/agents">
             <ArrowLeft />
-            Agents
+            {t("back")}
           </Link>
         </Button>
       </div>
-      <JobMonitor jobId={jobId} />
+      <JobMonitor key={jobId} jobId={jobId} />
     </div>
   );
 }

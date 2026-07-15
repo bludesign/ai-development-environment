@@ -1,7 +1,9 @@
 "use client";
 
+import { TUNNEL_NAME_PATTERN } from "@ai-development-environment/agent-contract";
 import { ArrowLeft, Play } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
@@ -9,22 +11,25 @@ import type { Agent, AgentJob } from "@/components/agents/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "@/i18n/navigation";
+import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-const AGENT_FIELDS = `id name hostname version osVersion architecture capabilities connectionStatus ipAddress lastSeenAt disconnectedAt createdAt`;
-const JOB_FIELDS = `id agentId kind payload status error result timeoutSeconds createdAt startedAt finishedAt updatedAt`;
+import { AGENT_FIELDS, JOB_FIELDS } from "./graphql-fields";
 
 export function AgentDetail({ agentId }: { agentId: string }) {
+  const t = useTranslations("agentDetail");
+  const locale = useLocale();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [tunnelName, setTunnelName] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -36,16 +41,21 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       );
       setAgent(data.agent);
       setJobs(data.agentJobs);
-      setSelectedJobId((current) => current ?? data.agentJobs[0]?.id ?? null);
-      setError(null);
+      setSelectedJobId((current) =>
+        current && data.agentJobs.some((job) => job.id === current)
+          ? current
+          : (data.agentJobs[0]?.id ?? null),
+      );
+      setLoadError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setLoadError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setLoading(false);
     }
   }, [agentId]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void load(), 0);
-    const timer = window.setInterval(() => void load(), 10_000);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       agentChanged: Agent;
     }>(
@@ -61,15 +71,47 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       },
     );
     return () => {
-      window.clearInterval(timer);
       window.clearTimeout(initialLoad);
       unsubscribe();
     };
   }, [agentId, load]);
 
+  const activeJobIds = useMemo(
+    () =>
+      jobs
+        .filter((job) => job.status === "QUEUED" || job.status === "RUNNING")
+        .map((job) => job.id),
+    [jobs],
+  );
+
+  useEffect(() => {
+    const client = controlPlaneSubscriptions();
+    const unsubscribers = activeJobIds.map((jobId) =>
+      client.subscribe<{ agentJobChanged: AgentJob }>(
+        {
+          query: `subscription JobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
+          variables: { jobId },
+        },
+        {
+          next: (value) => {
+            const changed = value.data?.agentJobChanged;
+            if (!changed) return;
+            setJobs((current) =>
+              current.map((job) => (job.id === changed.id ? changed : job)),
+            );
+          },
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+    );
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [activeJobIds]);
+
   const startTunnel = async (event: FormEvent) => {
     event.preventDefault();
     setCreating(true);
+    setSubmitError(null);
     try {
       const data = await controlPlaneRequest<{ createAgentJob: AgentJob }>(
         `mutation RunTunnel($input: CreateAgentJobInput!) { createAgentJob(input: $input) { ${JOB_FIELDS} } }`,
@@ -78,29 +120,37 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             agentId,
             kind: "cloudflared.runTunnel",
             payload: { tunnelName },
-            idempotencyKey: `cloudflared:${tunnelName}:${crypto.randomUUID()}`,
+            idempotencyKey: `cloudflared:${tunnelName}:${createClientId()}`,
             timeoutSeconds: 86400,
           },
         },
       );
-      setJobs((current) => [data.createAgentJob, ...current]);
+      setJobs((current) => [
+        data.createAgentJob,
+        ...current.filter((job) => job.id !== data.createAgentJob.id),
+      ]);
       setSelectedJobId(data.createAgentJob.id);
-      setError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      setSubmitError(value instanceof Error ? value.message : String(value));
     } finally {
       setCreating(false);
     }
   };
 
-  if (error && !agent)
+  if (loading)
     return (
-      <p className="mx-auto max-w-6xl text-sm text-destructive">{error}</p>
+      <p className="mx-auto max-w-6xl text-sm text-muted-foreground">
+        {t("loading")}
+      </p>
+    );
+  if (loadError && !agent)
+    return (
+      <p className="mx-auto max-w-6xl text-sm text-destructive">{loadError}</p>
     );
   if (!agent)
     return (
       <p className="mx-auto max-w-6xl text-sm text-muted-foreground">
-        Loading agent…
+        {t("notFound")}
       </p>
     );
 
@@ -110,10 +160,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <Button asChild size="sm" variant="ghost">
           <Link href="/agents">
             <ArrowLeft />
-            Agents
+            {t("back")}
           </Link>
         </Button>
       </div>
+      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -131,58 +182,59 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </div>
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-muted-foreground">Version</dt>
+            <dt className="text-muted-foreground">{t("version")}</dt>
             <dd>{agent.version}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Last seen</dt>
+            <dt className="text-muted-foreground">{t("lastSeen")}</dt>
             <dd>
               {agent.lastSeenAt
-                ? new Date(agent.lastSeenAt).toLocaleString()
-                : "Never"}
+                ? new Date(agent.lastSeenAt).toLocaleString(locale)
+                : t("never")}
             </dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Capabilities</dt>
+            <dt className="text-muted-foreground">{t("capabilities")}</dt>
             <dd>{agent.capabilities.join(", ")}</dd>
           </div>
         </dl>
       </section>
 
       <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <h2 className="font-medium">Run Cloudflared Tunnel</h2>
+        <h2 className="font-medium">{t("runTitle")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Starts the allow-listed cloudflared handler on this Mac. It keeps
-          running in the agent service when you leave this page.
+          {t("runDescription")}
         </p>
         <form
           className="mt-4 flex max-w-xl gap-2"
           onSubmit={(event) => void startTunnel(event)}
         >
           <Input
-            aria-label="Tunnel name"
+            aria-label={t("tunnelName")}
             onChange={(event) => setTunnelName(event.target.value)}
-            pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
-            placeholder="example-tunnel"
+            pattern={TUNNEL_NAME_PATTERN}
+            placeholder={t("tunnelPlaceholder")}
             required
             value={tunnelName}
           />
           <Button disabled={creating} type="submit">
             <Play />
-            {creating ? "Queuing…" : "Run"}
+            {creating ? t("queuing") : t("run")}
           </Button>
         </form>
-        {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+        {submitError && (
+          <p className="mt-3 text-sm text-destructive">{submitError}</p>
+        )}
       </section>
 
-      {selectedJobId && <JobMonitor compact jobId={selectedJobId} />}
+      {selectedJobId && (
+        <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
+      )}
 
       <section>
-        <h2 className="mb-3 font-medium">Job history</h2>
+        <h2 className="mb-3 font-medium">{t("history")}</h2>
         {jobs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No jobs have run on this agent.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("noJobs")}</p>
         ) : (
           <div className="overflow-hidden rounded-xl border">
             {jobs.map((job) => (
@@ -195,7 +247,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{job.kind}</p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(job.createdAt).toLocaleString()}
+                    {new Date(job.createdAt).toLocaleString(locale)}
                   </p>
                 </div>
                 <StatusBadge status={job.status} />

@@ -5,7 +5,7 @@ type Subscriber<T> = {
   push: (value: T) => void;
 };
 
-class AsyncEventBus {
+export class AsyncEventBus {
   private readonly subscribers = new Map<string, Set<Subscriber<unknown>>>();
 
   publish<T>(topic: string, value: T): void {
@@ -40,6 +40,7 @@ class AsyncEventBus {
       if (!active) return;
       active = false;
       subscribers.delete(subscriber as Subscriber<unknown>);
+      if (subscribers.size === 0) this.subscribers.delete(topic);
       for (const waiter of waiters.splice(0)) {
         waiter({ value: undefined as T, done: true });
       }

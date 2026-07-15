@@ -17,7 +17,7 @@ Common commands:
 - `npm run agent:dev` starts only the watch-mode development agent and waits for the local server.
 - `npm run full-check` formats and fixes the project before checking it.
 - `npm run full-check:ci` runs the non-mutating CI checks.
-- `npm run check-translations` verifies that all locale files and the unit-test mock have the same keys.
+- `npm run check-translations` verifies that locale files have matching keys, do not contain strings copied unchanged across every language, and match the unit-test mock.
 - `npm run build` creates a deployable standalone build.
 - `npm run start` starts the standalone production server.
 - `npm run generate` regenerates the Prisma client, bundled GraphQL SDL, and resolver types.

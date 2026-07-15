@@ -54,6 +54,7 @@
     "upgrade:check": "ncu"
   },
   "dependencies": {
+    "@ai-development-environment/agent-contract": "*",
     "@apollo/server": "5.5.1",
     "@apollo/subgraph": "2.14.2",
     "@as-integrations/next": "4.1.0",

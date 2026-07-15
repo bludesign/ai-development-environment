@@ -26,6 +26,22 @@ function requireControlPlane(context: GraphQLContext): void {
   }
 }
 
+function requireOwnedAgent(context: GraphQLContext, agentId: string): void {
+  if (context.agentId && context.agentId !== agentId) {
+    throw new Error("An agent may only read its own resources");
+  }
+}
+
+async function requireOwnedJob(
+  context: GraphQLContext,
+  agentControlService: AgentControlService,
+  jobId: string,
+) {
+  const job = await agentControlService.getJob(jobId);
+  if (job) requireOwnedAgent(context, job.agentId);
+  return job;
+}
+
 function parseJson(value: string | null): unknown {
   return value === null ? null : JSON.parse(value);
 }
@@ -104,9 +120,18 @@ export const createAgentResolvers = (
     expiresAt: (token: { expiresAt: Date }) => token.expiresAt.toISOString(),
   },
   Query: {
-    agents: () => agentControlService.listAgents(),
-    agent: (_root: unknown, { id }: { id: string }) =>
-      agentControlService.getAgent(id),
+    agents: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+      requireControlPlane(context);
+      return agentControlService.listAgents();
+    },
+    agent: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireOwnedAgent(context, id);
+      return agentControlService.getAgent(id);
+    },
     agentSelf: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       const agentId = requireAgent(context);
       return agentControlService.getAgent(agentId);
@@ -114,13 +139,24 @@ export const createAgentResolvers = (
     agentJobs: (
       _root: unknown,
       { agentId, limit }: { agentId: string; limit?: number },
-    ) => agentControlService.listJobs(agentId, limit),
-    agentJob: (_root: unknown, { id }: { id: string }) =>
-      agentControlService.getJob(id),
-    agentJobLogs: (
+      context: GraphQLContext,
+    ) => {
+      requireOwnedAgent(context, agentId);
+      return agentControlService.listJobs(agentId, limit);
+    },
+    agentJob: async (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => requireOwnedJob(context, agentControlService, id),
+    agentJobLogs: async (
       _root: unknown,
       { jobId, afterSequence }: { jobId: string; afterSequence?: number },
-    ) => agentControlService.listLogs(jobId, afterSequence),
+      context: GraphQLContext,
+    ) => {
+      await requireOwnedJob(context, agentControlService, jobId);
+      return agentControlService.listLogs(jobId, afterSequence);
+    },
   },
   Mutation: {
     createAgentEnrollmentToken: (
@@ -220,19 +256,38 @@ export const createAgentResolvers = (
       },
     },
     agentChanged: {
-      subscribe: (_root: unknown, { agentId }: { agentId?: string }) =>
-        agentEventBus.iterate<{ agentChanged: { id: string } }>(
+      subscribe: (
+        _root: unknown,
+        { agentId }: { agentId?: string },
+        context: GraphQLContext,
+      ) => {
+        if (agentId) requireOwnedAgent(context, agentId);
+        else requireControlPlane(context);
+        return agentEventBus.iterate<{ agentChanged: { id: string } }>(
           AGENT_CHANGED_TOPIC,
           agentId ? (event) => event.agentChanged.id === agentId : undefined,
-        ),
+        );
+      },
     },
     agentJobChanged: {
-      subscribe: (_root: unknown, { jobId }: { jobId: string }) =>
-        agentEventBus.iterate(agentJobChangedTopic(jobId)),
+      subscribe: async (
+        _root: unknown,
+        { jobId }: { jobId: string },
+        context: GraphQLContext,
+      ) => {
+        await requireOwnedJob(context, agentControlService, jobId);
+        return agentEventBus.iterate(agentJobChangedTopic(jobId));
+      },
     },
     agentJobLogAdded: {
-      subscribe: (_root: unknown, { jobId }: { jobId: string }) =>
-        agentEventBus.iterate(agentJobLogTopic(jobId)),
+      subscribe: async (
+        _root: unknown,
+        { jobId }: { jobId: string },
+        context: GraphQLContext,
+      ) => {
+        await requireOwnedJob(context, agentControlService, jobId);
+        return agentEventBus.iterate(agentJobLogTopic(jobId));
+      },
     },
   },
 });

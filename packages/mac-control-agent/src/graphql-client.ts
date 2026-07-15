@@ -19,10 +19,16 @@ type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 export class AgentGraphQLClient {
   private readonly server: string;
   private readonly credential: string | null;
+  private readonly requestTimeoutMs: number;
 
-  constructor(server: string, credential: string | null = null) {
+  constructor(
+    server: string,
+    credential: string | null = null,
+    requestTimeoutMs = 10_000,
+  ) {
     this.server = server.replace(/\/$/, "");
     this.credential = credential;
+    this.requestTimeoutMs = requestTimeoutMs;
   }
 
   async request<T>(
@@ -38,6 +44,7 @@ export class AgentGraphQLClient {
           : {}),
       },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     const body = (await response.json()) as GraphQLResponse<T>;
     if (!response.ok || body.errors?.length || !body.data) {
@@ -90,7 +97,10 @@ export class AgentGraphQLClient {
       { agentId },
     );
     return data.agentJobs.filter(
-      (job) => job.status === "QUEUED" || job.status === "RUNNING",
+      (job) =>
+        job.status === "QUEUED" ||
+        job.status === "RUNNING" ||
+        job.status === "CANCELLED",
     );
   }
 
@@ -165,27 +175,56 @@ export function subscribeToAgentEvents(
     job: AgentJob;
   }) => void,
 ): () => void {
-  return client.subscribe<{
-    agentEvents: {
-      type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
-      job: AgentJob;
-    };
-  }>(
-    {
-      query: `subscription AgentEvents($agentId: ID!) {
-        agentEvents(agentId: $agentId) {
-          type
-          job { id agentId kind payload status timeoutSeconds }
-        }
-      }`,
-      variables: { agentId },
-    },
-    {
-      next: (result) => {
-        if (result.data?.agentEvents) onEvent(result.data.agentEvents);
+  let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposeSubscription: () => void = () => undefined;
+
+  const scheduleResubscribe = () => {
+    if (stopped || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      subscribe();
+    }, 1_000);
+    retryTimer.unref();
+  };
+
+  const subscribe = () => {
+    if (stopped) return;
+    disposeSubscription = client.subscribe<{
+      agentEvents: {
+        type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
+        job: AgentJob;
+      };
+    }>(
+      {
+        query: `subscription AgentEvents($agentId: ID!) {
+          agentEvents(agentId: $agentId) {
+            type
+            job { id agentId kind payload status timeoutSeconds }
+          }
+        }`,
+        variables: { agentId },
       },
-      error: (error) => console.error("Agent event subscription error:", error),
-      complete: () => console.log("Agent event subscription completed"),
-    },
-  );
+      {
+        next: (result) => {
+          if (result.data?.agentEvents) onEvent(result.data.agentEvents);
+        },
+        error: (error) => {
+          console.error("Agent event subscription error; retrying:", error);
+          scheduleResubscribe();
+        },
+        complete: () => {
+          console.log("Agent event subscription completed; retrying");
+          scheduleResubscribe();
+        },
+      },
+    );
+  };
+
+  subscribe();
+  return () => {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    disposeSubscription();
+  };
 }

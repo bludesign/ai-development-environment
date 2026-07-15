@@ -17,44 +17,74 @@ export async function runAgent(
   const executor = new JobExecutor(client);
   const inventory = collectInventory();
   let reconciling = false;
-  let acceptDurableJobs = false;
+  let startupRecoveryPending = true;
+  const interruptedJobs = new Set<string>();
+
+  const reconcileJobs = async (recoverInterrupted: boolean) => {
+    let jobs;
+    try {
+      jobs = await client.pendingJobs(config.agentId);
+    } catch (error) {
+      console.error(
+        "Durable job reconciliation failed:",
+        error instanceof Error ? error.message : error,
+      );
+      return false;
+    }
+    await Promise.all(
+      jobs.map(async (job) => {
+        if (job.status === "CANCELLED") {
+          executor.cancel(job.id);
+          return;
+        }
+        if (
+          job.status !== "RUNNING" ||
+          (!recoverInterrupted && !interruptedJobs.has(job.id))
+        ) {
+          executor.execute(job);
+          return;
+        }
+        interruptedJobs.add(job.id);
+        try {
+          await client.completeJob(
+            job.id,
+            "FAILED",
+            undefined,
+            "Agent service restarted while this job was running",
+          );
+          interruptedJobs.delete(job.id);
+        } catch (error) {
+          console.error(
+            `Could not reconcile interrupted job ${job.id}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }),
+    );
+    return true;
+  };
 
   const heartbeat = async () => {
     if (reconciling) return;
     reconciling = true;
     try {
-      await client.heartbeat(inventory);
-      if (acceptDurableJobs) {
-        const durableJobs = await client.pendingJobs(config.agentId);
-        for (const job of durableJobs) {
-          if (job.status === "QUEUED") executor.execute(job);
-        }
+      try {
+        await client.heartbeat(inventory);
+      } catch (error) {
+        console.error(
+          "Heartbeat failed:",
+          error instanceof Error ? error.message : error,
+        );
       }
-    } catch (error) {
-      console.error(
-        "Heartbeat failed:",
-        error instanceof Error ? error.message : error,
-      );
+      if (await reconcileJobs(startupRecoveryPending)) {
+        startupRecoveryPending = false;
+      }
     } finally {
       reconciling = false;
     }
   };
 
   await heartbeat();
-  const jobs = await client.pendingJobs(config.agentId);
-  for (const job of jobs) {
-    if (job.status === "RUNNING") {
-      await client.completeJob(
-        job.id,
-        "FAILED",
-        undefined,
-        "Agent service restarted while this job was running",
-      );
-    } else {
-      executor.execute(job);
-    }
-  }
-  acceptDurableJobs = true;
 
   const subscriptionClient = createAgentSubscriptionClient(config);
   const unsubscribe = subscribeToAgentEvents(

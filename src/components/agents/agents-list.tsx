@@ -6,18 +6,17 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
+import { copyText } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
 import { StatusBadge } from "./status-badge";
+import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
 
-const AGENTS_QUERY = `query Agents { agents {
-  id name hostname version osVersion architecture capabilities connectionStatus
-  ipAddress lastSeenAt disconnectedAt createdAt
-} }`;
+const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
 
 export function AgentsList() {
   const t = useTranslations("agents");
@@ -43,19 +42,29 @@ export function AgentsList() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void load(), 0);
-    const timer = window.setInterval(() => void load(), 15_000);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       agentChanged: Agent;
     }>(
-      { query: `subscription { agentChanged { id } }` },
+      { query: `subscription { agentChanged { ${AGENT_FIELDS} } }` },
       {
-        next: () => void load(),
+        next: (value) => {
+          const changed = value.data?.agentChanged;
+          if (!changed) return;
+          setAgents((current) => {
+            const existing = current.findIndex(
+              (agent) => agent.id === changed.id,
+            );
+            if (existing === -1) return [changed, ...current];
+            return current.map((agent, index) =>
+              index === existing ? changed : agent,
+            );
+          });
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return () => {
-      window.clearInterval(timer);
       window.clearTimeout(initialLoad);
       unsubscribe();
     };
@@ -69,6 +78,14 @@ export function AgentsList() {
       setEnrollment(data.createAgentEnrollmentToken);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  const copyEnrollmentCommand = async () => {
+    try {
+      await copyText(command);
+    } catch {
+      setError(t("copyFailed"));
     }
   };
 
@@ -109,7 +126,7 @@ export function AgentsList() {
             <code className="min-w-0 flex-1 break-all text-xs">{command}</code>
             <Button
               aria-label={t("copy")}
-              onClick={() => void navigator.clipboard.writeText(command)}
+              onClick={() => void copyEnrollmentCommand()}
               size="icon-sm"
               variant="ghost"
             >
