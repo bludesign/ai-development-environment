@@ -23,6 +23,7 @@
     "format:check": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore .",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
+    "pretype-check": "npm run generate",
     "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
