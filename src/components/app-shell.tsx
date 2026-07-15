@@ -195,7 +195,7 @@ function NavigationSidebar() {
       side="left"
     >
       <SidebarHeader className="border-b border-sidebar-border pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-2">
-        <div className="flex min-h-11 items-center gap-2 px-2">
+        <div className="flex min-h-10 items-center gap-2 px-2">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
             <Blocks className="size-4" />
           </div>
@@ -242,7 +242,7 @@ function NotificationsSidebar() {
       side="right"
     >
       <SidebarHeader className="border-b border-sidebar-border pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-2">
-        <div className="flex min-h-11 items-center px-2">
+        <div className="flex min-h-10 items-center px-2">
           <h2 className="text-sm font-semibold">Notifications</h2>
           <MobileSidebarClose label="notifications" />
         </div>
