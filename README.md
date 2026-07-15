@@ -12,7 +12,9 @@ npm ci
 
 Common commands:
 
-- `npm run dev` starts the development server (runs code generation first).
+- `npm run dev:all` starts the development server and a watch-mode local agent.
+- `npm run dev` starts only the development server.
+- `npm run agent:dev` starts only the watch-mode development agent and waits for the local server.
 - `npm run full-check` formats and fixes the project before checking it.
 - `npm run full-check:ci` runs the non-mutating CI checks.
 - `npm run check-translations` verifies that all locale files and the unit-test mock have the same keys.
@@ -22,6 +24,33 @@ Common commands:
 - `npm run db:migrate` creates and applies a development migration; `npm run db:deploy` applies committed migrations; `npm run db:studio` opens Prisma Studio.
 
 Copy `.env.example` to `.env` to configure `DATABASE_URL`. The production server accepts the standard Next.js `HOSTNAME` and `PORT` environment variables plus `DATABASE_URL`.
+
+### One-command agent development
+
+Start the complete local environment with:
+
+```bash
+npm run dev:all
+```
+
+Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket runs on port `3092`, so an installed Homebrew service can continue using ports `3090` and `3091`. The agent waits for Next.js, then automatically enrolls `<hostname>-dev` on its first run. Later runs reuse the stable identity stored at:
+
+```text
+~/Library/Application Support/mac-control-agent-dev/config.json
+```
+
+Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it. `cloudflared` must still be installed before running Cloudflared jobs.
+
+The common overrides are:
+
+```bash
+PORT=3010 \
+AGENT_WS_PORT=3093 \
+NEXT_PUBLIC_AGENT_WS_URL=ws://127.0.0.1:3093/graphql \
+npm run dev:all
+```
+
+For agent-only development, `MAC_CONTROL_AGENT_DEV_SERVER`, `MAC_CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `MAC_CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
 
 ## GraphQL API
 

@@ -2,23 +2,30 @@ import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
 
 export class JobExecutor {
-  private readonly running = new Map<string, AbortController>();
+  private readonly running = new Map<
+    string,
+    { controller: AbortController; task: Promise<void> }
+  >();
 
   constructor(private readonly client: AgentGraphQLClient) {}
 
   execute(job: AgentJob): void {
     if (this.running.has(job.id)) return;
     const controller = new AbortController();
-    this.running.set(job.id, controller);
-    void this.run(job, controller).finally(() => this.running.delete(job.id));
+    const task = this.run(job, controller).finally(() =>
+      this.running.delete(job.id),
+    );
+    this.running.set(job.id, { controller, task });
   }
 
   cancel(jobId: string): void {
-    this.running.get(jobId)?.abort();
+    this.running.get(jobId)?.controller.abort();
   }
 
-  cancelAll(): void {
-    for (const controller of this.running.values()) controller.abort();
+  async cancelAll(): Promise<void> {
+    const jobs = [...this.running.values()];
+    for (const { controller } of jobs) controller.abort();
+    await Promise.allSettled(jobs.map(({ task }) => task));
   }
 
   private async run(job: AgentJob, controller: AbortController): Promise<void> {

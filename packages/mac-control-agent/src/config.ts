@@ -20,6 +20,16 @@ export const configPath = () =>
     "config.json",
   );
 
+export const developmentConfigPath = () =>
+  process.env.MAC_CONTROL_AGENT_DEV_CONFIG ??
+  join(
+    homedir(),
+    "Library",
+    "Application Support",
+    "mac-control-agent-dev",
+    "config.json",
+  );
+
 export function normalizeServer(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -39,11 +49,9 @@ export function defaultWebSocketServer(server: string): string {
   return url.toString();
 }
 
-export async function loadConfig(): Promise<AgentConfig> {
+export async function loadConfig(path = configPath()): Promise<AgentConfig> {
   try {
-    const value = JSON.parse(
-      await readFile(configPath(), "utf8"),
-    ) as AgentConfig;
+    const value = JSON.parse(await readFile(path, "utf8")) as AgentConfig;
     if (
       !value.server ||
       !value.websocketServer ||
@@ -55,12 +63,14 @@ export async function loadConfig(): Promise<AgentConfig> {
     return value;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Agent is not enrolled (${configPath()}): ${detail}`);
+    throw new Error(`Agent is not enrolled (${path}): ${detail}`);
   }
 }
 
-export async function saveConfig(config: AgentConfig): Promise<void> {
-  const path = configPath();
+export async function saveConfig(
+  config: AgentConfig,
+  path = configPath(),
+): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporaryPath = `${path}.${process.pid}.tmp`;
   await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {

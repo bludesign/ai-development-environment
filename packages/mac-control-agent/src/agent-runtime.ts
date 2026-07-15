@@ -78,5 +78,5 @@ export async function runAgent(
   clearInterval(heartbeatTimer);
   unsubscribe();
   await subscriptionClient.dispose();
-  executor.cancelAll();
+  await executor.cancelAll();
 }

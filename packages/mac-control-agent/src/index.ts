@@ -8,6 +8,7 @@ import {
   saveConfig,
 } from "./config.js";
 import { runAgent } from "./agent-runtime.js";
+import { runDevelopmentAgent } from "./dev-runtime.js";
 import { AgentGraphQLClient } from "./graphql-client.js";
 import { collectInventory } from "./inventory.js";
 
@@ -32,6 +33,7 @@ function usage(): void {
 
 Commands:
   enroll --enrollment-token <token> [--server http://127.0.0.1:3090] [--websocket-server ws://127.0.0.1:3091/graphql] [--name <name>]
+  dev [--server http://127.0.0.1:3000] [--websocket-server ws://127.0.0.1:3092/graphql] [--name <name>]
   run
   status
   doctor`);
@@ -136,10 +138,28 @@ async function main(): Promise<void> {
   if (command === "enroll") return enroll(args);
   if (command === "status") return status();
   if (command === "doctor") return doctor();
-  if (command === "run") {
+  if (command === "run" || command === "dev") {
     const controller = new AbortController();
     process.once("SIGINT", () => controller.abort());
     process.once("SIGTERM", () => controller.abort());
+    if (command === "dev") {
+      const options = flags(args);
+      const server =
+        options.server ??
+        process.env.MAC_CONTROL_AGENT_DEV_SERVER ??
+        `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
+      return runDevelopmentAgent(
+        {
+          server,
+          websocketServer:
+            options["websocket-server"] ??
+            process.env.MAC_CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
+            process.env.NEXT_PUBLIC_AGENT_WS_URL,
+          name: options.name,
+        },
+        controller.signal,
+      );
+    }
     return runAgent(await loadConfig(), controller.signal);
   }
   throw new Error(`Unknown command: ${command}`);

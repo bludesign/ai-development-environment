@@ -60,6 +60,16 @@ export class AgentGraphQLClient {
     );
   }
 
+  createEnrollmentToken() {
+    return this.request<{
+      createAgentEnrollmentToken: { token: string; expiresAt: string };
+    }>(
+      `mutation CreateEnrollmentToken {
+        createAgentEnrollmentToken { token expiresAt }
+      }`,
+    );
+  }
+
   heartbeat(inventory: AgentInventory) {
     const { version, osVersion, architecture, capabilities } = inventory;
     return this.request<{ heartbeatAgent: { id: string } }>(
