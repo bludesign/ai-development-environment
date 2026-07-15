@@ -114,7 +114,7 @@ jobs:
           formula-name: ai-development-environment
           tag-name: ${{ steps.release.outputs.tag }}
           download-url: https://github.com/bludesign/ai-development-environment/archive/refs/tags/${{ steps.release.outputs.tag }}.tar.gz
-          homebrew-tap: bludesign/ai-development-environment-tap
+          homebrew-tap: bludesign/homebrew-ai-development-environment
           base-branch: main
           create-pullrequest: false
           create-branch: false
