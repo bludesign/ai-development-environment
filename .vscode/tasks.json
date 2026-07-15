@@ -158,6 +158,13 @@
       "group": "test",
       "command": "npm run full-check:ci",
       "detail": "CI variant: generate, format-check, lint, type-check, test, and build"
+    },
+    {
+      "type": "shell",
+      "label": "full-check:dev",
+      "group": "test",
+      "command": "npm run full-check:dev",
+      "detail": "Generate, format, lint-fix, type-check, test, build, then start the dev server"
     }
   ]
 }

@@ -27,7 +27,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "full-check": "npm run generate && npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
-    "full-check:ci": "npm run generate && npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build"
+    "full-check:ci": "npm run generate && npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build",
+    "full-check:dev": "npm run full-check && npm run dev"
   },
   "dependencies": {
     "@apollo/server": "5.5.1",
