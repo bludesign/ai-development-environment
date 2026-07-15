@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish to Homebrew
+        required: true
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: dependabot
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout pushed code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Create next patch tag
+        id: tag
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in {1..5}; do
+            git fetch --force --tags origin
+            latest_tag="$(git tag --list 'v*.*.*' --sort=-version:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -n 1 || true)"
+
+            if [[ -z "$latest_tag" ]]; then
+              tag="v0.0.1"
+            elif [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              tag="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            else
+              echo "Latest version tag is invalid: $latest_tag" >&2
+              exit 1
+            fi
+
+            git tag --annotate "$tag" --message "$tag" "$TARGET_SHA"
+
+            if git push origin "refs/tags/$tag"; then
+              echo "tag=$tag" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            git tag --delete "$tag"
+            echo "Tag $tag was created concurrently; retrying ($attempt/5)" >&2
+          done
+
+          echo "Unable to create a unique patch tag after 5 attempts" >&2
+          exit 1
+
+  update-homebrew:
+    needs:
+      - tag
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.tag.result == 'success') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: dependabot
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ needs.tag.outputs.tag }}
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            tag="$PUSH_TAG"
+          else
+            tag="$MANUAL_TAG"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH: $tag" >&2
+            exit 1
+          fi
+
+          git fetch --force --tags origin
+          if ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            echo "Release tag does not exist: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v4
+        with:
+          formula-name: ai-development-environment
+          tag-name: ${{ steps.release.outputs.tag }}
+          download-url: https://github.com/bludesign/ai-development-environment/archive/refs/tags/${{ steps.release.outputs.tag }}.tar.gz
+          homebrew-tap: bludesign/ai-development-environment-tap
+          base-branch: main
+          create-pullrequest: false
+          create-branch: false
+        env:
+          COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

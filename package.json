@@ -2,13 +2,24 @@
   "name": "ai-development-environment",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24.16.0 <25"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
+    "postbuild": "cp -R public .next/standalone/ && cp -R .next/static .next/standalone/.next/",
+    "start": "node .next/standalone/server.js",
+    "clean": "rm -rf .next coverage",
+    "format": "prettier --write --ignore-path .gitignore --ignore-path .prettierignore .",
+    "format:check": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore .",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "type-check": "tsc --noEmit",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
+    "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build"
   },
   "dependencies": {
     "next": "16.2.10",
@@ -19,13 +30,14 @@
     "@tailwindcss/postcss": "4.3",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.2",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "19.2",
     "@types/react-dom": "19.2",
     "@vitejs/plugin-react": "6.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "jsdom": "29.1.1",
+    "prettier": "3.9.5",
     "tailwindcss": "4.3",
     "typescript": "^6",
     "vitest": "4.1.10"
