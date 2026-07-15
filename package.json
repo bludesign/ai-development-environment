@@ -9,7 +9,7 @@
     "node": ">=24.16.0 <25"
   },
   "scripts": {
-    "dev": "npm run generate && npm run db:ensure && npm run db:deploy && next dev",
+    "dev": "npm run generate && npm run db:migrate && next dev",
     "dev:all": "PORT=${PORT:-3000} AGENT_WS_HOSTNAME=${AGENT_WS_HOSTNAME:-127.0.0.1} AGENT_WS_PORT=${AGENT_WS_PORT:-3092} NEXT_PUBLIC_AGENT_WS_URL=${NEXT_PUBLIC_AGENT_WS_URL:-ws://127.0.0.1:${AGENT_WS_PORT:-3092}/graphql} concurrently --kill-others --names server,agent --prefix-colors blue,magenta \"npm run dev\" \"npm run agent:dev\"",
     "build": "npm run generate && next build",
     "postbuild": "cp -R public .next/standalone/ && cp -R .next/static .next/standalone/.next/",
@@ -23,7 +23,6 @@
     "generate:graphql": "graphql-codegen --config codegen.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:ensure": "tsx scripts/ensure-sqlite-database.ts",
     "db:studio": "prisma studio",
     "supergraph": "rover supergraph compose --elv2-license accept --config ./supergraph.yaml > supergraph.graphql",
     "clean": "rm -rf .next coverage src/generated prisma/dev.db* supergraph.graphql",
