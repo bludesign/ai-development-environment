@@ -186,6 +186,41 @@
       "group": "build",
       "command": "npm run upgrade:check",
       "detail": "Show available dependency upgrades without modifying package.json"
+    },
+    {
+      "type": "shell",
+      "label": "agent:dev",
+      "group": "build",
+      "command": "npm run agent:dev",
+      "detail": "Start the Mac control agent in development watch mode"
+    },
+    {
+      "type": "shell",
+      "label": "agent:build",
+      "group": "build",
+      "command": "npm run agent:build",
+      "detail": "Create the bundled Mac control agent executable"
+    },
+    {
+      "type": "shell",
+      "label": "agent:type-check",
+      "group": "test",
+      "command": "npm run agent:type-check",
+      "detail": "Run TypeScript checks for the Mac control agent"
+    },
+    {
+      "type": "shell",
+      "label": "agent:upgrade",
+      "group": "build",
+      "command": "npm run upgrade --workspace @ai-development-environment/mac-control-agent",
+      "detail": "Upgrade Mac control agent dependencies with npm-check-updates and install"
+    },
+    {
+      "type": "shell",
+      "label": "agent:upgrade-check",
+      "group": "build",
+      "command": "npm run upgrade:check --workspace @ai-development-environment/mac-control-agent",
+      "detail": "Show available Mac control agent dependency upgrades without modifying package.json"
     }
   ]
 }
