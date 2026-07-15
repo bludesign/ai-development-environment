@@ -16,6 +16,60 @@
     "closeNavigation": "Cerrar navegación",
     "showNotifications": "Mostrar notificaciones",
     "hideNotifications": "Ocultar notificaciones",
-    "closeNotifications": "Cerrar notificaciones"
+    "closeNotifications": "Cerrar notificaciones",
+    "agents": "Agentes"
+  },
+  "agents": {
+    "title": "Agentes",
+    "description": "Gestiona los Macs inscritos y los trabajos duraderos desde un único plano de control.",
+    "refresh": "Actualizar",
+    "enroll": "Registrar agente",
+    "enrollmentTitle": "Comando de registro de un solo uso",
+    "enrollmentDescription": "Ejecuta este comando en el Mac después de instalar control-agent. El Mac se conecta de forma saliente; no abre ningún puerto de escucha.",
+    "copy": "Copiar comando",
+    "copyFailed": "No se pudo copiar el comando. Selecciónalo y cópialo manualmente.",
+    "expires": "El token caduca el {date}",
+    "loading": "Cargando agentes…",
+    "emptyTitle": "No hay agentes registrados",
+    "emptyDescription": "Crea un comando de registro para vincular tu primer Mac.",
+    "version": "Versión",
+    "platform": "Plataforma",
+    "lastSeen": "Visto por última vez",
+    "never": "Nunca"
+  },
+  "agentDetail": {
+    "back": "Agentes",
+    "loading": "Cargando agente…",
+    "notFound": "No se encontró el agente.",
+    "version": "Versión",
+    "lastSeen": "Visto por última vez",
+    "never": "Nunca",
+    "capabilities": "Capacidades",
+    "runTitle": "Ejecutar túnel de Cloudflared",
+    "runDescription": "Inicia el controlador permitido de cloudflared en este Mac. Seguirá ejecutándose en el servicio del agente cuando abandones esta página.",
+    "tunnelName": "Nombre del túnel",
+    "tunnelPlaceholder": "tunel-ejemplo",
+    "queuing": "Añadiendo a la cola…",
+    "run": "Ejecutar",
+    "history": "Historial de trabajos",
+    "noJobs": "No se ha ejecutado ningún trabajo en este agente."
+  },
+  "jobs": {
+    "back": "Agentes",
+    "open": "Abrir trabajo",
+    "cancel": "Cancelar",
+    "loading": "Cargando trabajo…",
+    "notFound": "No se encontró el trabajo.",
+    "waiting": "Esperando la salida…"
+  },
+  "status": {
+    "online": "en línea",
+    "offline": "sin conexión",
+    "queued": "en cola",
+    "running": "en ejecución",
+    "succeeded": "completado",
+    "failed": "fallido",
+    "cancelled": "cancelado",
+    "timed_out": "tiempo agotado"
   }
 }

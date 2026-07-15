@@ -186,6 +186,104 @@
       "group": "build",
       "command": "npm run upgrade:check",
       "detail": "Show available dependency upgrades without modifying package.json"
+    },
+    {
+      "type": "shell",
+      "label": "agent:dev",
+      "group": "build",
+      "command": "npm run agent:dev",
+      "detail": "Start the control agent in development watch mode"
+    },
+    {
+      "type": "shell",
+      "label": "agent:build",
+      "group": "build",
+      "command": "npm run agent:build",
+      "detail": "Create the bundled control agent executable"
+    },
+    {
+      "type": "shell",
+      "label": "agent:format",
+      "group": "test",
+      "command": "npm run agent:format",
+      "detail": "Format control agent files with Prettier"
+    },
+    {
+      "type": "shell",
+      "label": "agent:format-check",
+      "group": "test",
+      "command": "npm run agent:format:check",
+      "detail": "Check control agent formatting without writing changes"
+    },
+    {
+      "type": "shell",
+      "label": "agent:lint",
+      "group": "test",
+      "command": "npm run agent:lint",
+      "detail": "Check the control agent for ESLint violations"
+    },
+    {
+      "type": "shell",
+      "label": "agent:lint-fix",
+      "group": "test",
+      "command": "npm run agent:lint:fix",
+      "detail": "Auto-fix control agent ESLint violations where possible"
+    },
+    {
+      "type": "shell",
+      "label": "agent:type-check",
+      "group": "test",
+      "command": "npm run agent:type-check",
+      "detail": "Run TypeScript checks for the control agent"
+    },
+    {
+      "type": "shell",
+      "label": "agent:test-watch",
+      "group": "test",
+      "command": "npm run agent:test",
+      "detail": "Run control agent tests in watch mode"
+    },
+    {
+      "type": "shell",
+      "label": "agent:test",
+      "group": "test",
+      "command": "npm run agent:test:run",
+      "detail": "Run control agent tests once and exit"
+    },
+    {
+      "type": "shell",
+      "label": "agent:full-check",
+      "group": "test",
+      "command": "npm run agent:full-check",
+      "detail": "Format, lint-fix, type-check, test, and build the control agent"
+    },
+    {
+      "type": "shell",
+      "label": "agent:full-check-ci",
+      "group": "test",
+      "command": "npm run agent:full-check:ci",
+      "detail": "CI variant: format-check, lint, type-check, test, and build the control agent"
+    },
+    {
+      "type": "shell",
+      "label": "agent:full-check:dev",
+      "group": "test",
+      "command": "npm run agent:full-check:dev",
+      "detail": "Format, lint-fix, type-check, test, build, then start the control agent"
+    },
+    {
+      "type": "shell",
+      "label": "agent:upgrade",
+      "group": "build",
+      "command": "npm run upgrade --workspace @ai-development-environment/control-agent",
+      "detail": "Upgrade control agent dependencies with npm-check-updates and install"
+    },
+    {
+      "type": "shell",
+      "label": "agent:upgrade-check",
+      "group": "build",
+      "command": "npm run upgrade:check --workspace @ai-development-environment/control-agent",
+      "detail": "Show available control agent dependency upgrades without modifying package.json"
     }
   ]
 }

@@ -12,16 +12,45 @@ npm ci
 
 Common commands:
 
-- `npm run dev` starts the development server (runs code generation first).
+- `npm run dev:all` starts the development server and a watch-mode local agent.
+- `npm run dev` starts only the development server.
+- `npm run agent:dev` starts only the watch-mode development agent and waits for the local server.
 - `npm run full-check` formats and fixes the project before checking it.
 - `npm run full-check:ci` runs the non-mutating CI checks.
-- `npm run check-translations` verifies that all locale files and the unit-test mock have the same keys.
+- `npm run check-translations` verifies that locale files have matching keys, do not contain strings copied unchanged across every language, and match the unit-test mock.
 - `npm run build` creates a deployable standalone build.
 - `npm run start` starts the standalone production server.
 - `npm run generate` regenerates the Prisma client, bundled GraphQL SDL, and resolver types.
 - `npm run db:migrate` creates and applies a development migration; `npm run db:deploy` applies committed migrations; `npm run db:studio` opens Prisma Studio.
 
 Copy `.env.example` to `.env` to configure `DATABASE_URL`. The production server accepts the standard Next.js `HOSTNAME` and `PORT` environment variables plus `DATABASE_URL`.
+
+### One-command agent development
+
+Start the complete local environment with:
+
+```bash
+npm run dev:all
+```
+
+Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket runs on port `3092`, so an installed Homebrew service can continue using ports `3090` and `3091`. The agent waits for Next.js, then automatically enrolls `<hostname>-dev` on its first run. Later runs reuse the stable identity stored at:
+
+```text
+~/.config/control-agent-dev/config.json
+```
+
+Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it. `cloudflared` must still be installed before running Cloudflared jobs.
+
+The common overrides are:
+
+```bash
+PORT=3010 \
+AGENT_WS_PORT=3093 \
+NEXT_PUBLIC_AGENT_WS_URL=ws://127.0.0.1:3093/graphql \
+npm run dev:all
+```
+
+For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
 
 ## GraphQL API
 
@@ -49,4 +78,32 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
-The service listens on `http://127.0.0.1:3090` by default, applies pending database migrations on start, and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
+The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL`, `AGENT_WS_HOSTNAME`, and `AGENT_WS_PORT` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
+
+## Control agents
+
+The generic TypeScript agent lives in `packages/control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
+
+Install the agent from the tap's repository head until the first agent release is tagged:
+
+```bash
+brew install --HEAD control-agent
+```
+
+Open the app's **Agents** page and create a one-time enrollment command, then run it on the target Mac. The server defaults to the same computer when omitted:
+
+```bash
+control-agent enroll \
+  --server http://127.0.0.1:3090 \
+  --enrollment-token <one-time-token>
+brew services start control-agent
+```
+
+Useful diagnostics:
+
+```bash
+control-agent status
+control-agent doctor
+```
+
+The credential and stable agent ID are stored at `~/.config/control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.

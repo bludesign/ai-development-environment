@@ -16,6 +16,60 @@
     "closeNavigation": "Fermer la navigation",
     "showNotifications": "Afficher les notifications",
     "hideNotifications": "Masquer les notifications",
-    "closeNotifications": "Fermer les notifications"
+    "closeNotifications": "Fermer les notifications",
+    "agents": "Agents"
+  },
+  "agents": {
+    "title": "Agents",
+    "description": "Gérez les Macs inscrits et les tâches durables depuis un plan de contrôle unique.",
+    "refresh": "Actualiser",
+    "enroll": "Inscrire un agent",
+    "enrollmentTitle": "Commande d’inscription à usage unique",
+    "enrollmentDescription": "Exécutez cette commande sur le Mac après avoir installé control-agent. Le Mac établit une connexion sortante ; il n’ouvre aucun port d’écoute.",
+    "copy": "Copier la commande",
+    "copyFailed": "Impossible de copier la commande. Sélectionnez-la et copiez-la manuellement.",
+    "expires": "Le jeton expire le {date}",
+    "loading": "Chargement des agents…",
+    "emptyTitle": "Aucun agent inscrit",
+    "emptyDescription": "Créez une commande d’inscription pour associer votre premier Mac.",
+    "version": "Version",
+    "platform": "Plateforme",
+    "lastSeen": "Dernière activité",
+    "never": "Jamais"
+  },
+  "agentDetail": {
+    "back": "Agents",
+    "loading": "Chargement de l’agent…",
+    "notFound": "Agent introuvable.",
+    "version": "Version",
+    "lastSeen": "Dernière activité",
+    "never": "Jamais",
+    "capabilities": "Fonctionnalités",
+    "runTitle": "Exécuter un tunnel Cloudflared",
+    "runDescription": "Démarre le gestionnaire cloudflared autorisé sur ce Mac. Il continue de s’exécuter dans le service de l’agent lorsque vous quittez cette page.",
+    "tunnelName": "Nom du tunnel",
+    "tunnelPlaceholder": "tunnel-exemple",
+    "queuing": "Mise en file…",
+    "run": "Exécuter",
+    "history": "Historique des tâches",
+    "noJobs": "Aucune tâche n’a été exécutée sur cet agent."
+  },
+  "jobs": {
+    "back": "Agents",
+    "open": "Ouvrir la tâche",
+    "cancel": "Annuler",
+    "loading": "Chargement de la tâche…",
+    "notFound": "Tâche introuvable.",
+    "waiting": "En attente de sortie…"
+  },
+  "status": {
+    "online": "en ligne",
+    "offline": "hors ligne",
+    "queued": "en file",
+    "running": "en cours",
+    "succeeded": "réussie",
+    "failed": "échouée",
+    "cancelled": "annulée",
+    "timed_out": "délai dépassé"
   }
 }

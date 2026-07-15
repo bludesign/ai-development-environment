@@ -22,6 +22,12 @@ interface KeyIssue {
   locale: string;
 }
 
+interface IdenticalTranslationIssue {
+  key: string;
+  locales: string[];
+  value: string;
+}
+
 interface MockValidationResult {
   isValid: boolean;
   issues: KeyIssue[];
@@ -36,14 +42,21 @@ interface MockValidationResult {
 interface ValidationResult {
   isValid: boolean;
   issues: KeyIssue[];
+  identicalTranslations: IdenticalTranslationIssue[];
   mockValidation?: MockValidationResult;
   summary: {
     totalKeys: number;
     locales: string[];
     missingKeysCount: number;
     extraKeysCount: number;
+    identicalTranslationsCount: number;
   };
 }
+
+const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
+  ["metadata.title", "AI Development Environment"],
+  ["shell.productName", "AI Development Environment"],
+]);
 
 function isTranslationData(value: unknown): value is TranslationData {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -63,6 +76,52 @@ function getAllKeys(obj: TranslationData, prefix = ""): string[] {
   }
 
   return keys;
+}
+
+function getValueAtKey(
+  translations: TranslationData,
+  key: string,
+): TranslationValue | undefined {
+  let current: TranslationValue = translations;
+
+  for (const segment of key.split(".")) {
+    if (!isTranslationData(current) || !(segment in current)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function findIdenticalTranslations(
+  translationFiles: TranslationFile[],
+  referenceKeys: Set<string>,
+): IdenticalTranslationIssue[] {
+  if (translationFiles.length < 2) return [];
+
+  return [...referenceKeys].flatMap((key) => {
+    const values = translationFiles.map((file) =>
+      getValueAtKey(file.data, key),
+    );
+    if (
+      values.some((value) => typeof value !== "string") ||
+      new Set(values).size !== 1
+    ) {
+      return [];
+    }
+
+    if (ALLOWED_IDENTICAL_TRANSLATIONS.get(key) === values[0]) return [];
+
+    return [
+      {
+        key,
+        locales: translationFiles.map((file) => file.locale),
+        value: values[0] as string,
+      },
+    ];
+  });
 }
 
 function loadMockTranslations(mockFilePath: string): TranslationData | null {
@@ -200,6 +259,11 @@ function validateTranslations(
     }
   }
 
+  const identicalTranslations = findIdenticalTranslations(
+    translationFiles,
+    referenceKeys,
+  );
+
   let mockValidation: MockValidationResult | undefined;
   if (mockFilePath) {
     const mockTranslations = loadMockTranslations(mockFilePath);
@@ -212,8 +276,12 @@ function validateTranslations(
   }
 
   return {
-    isValid: issues.length === 0 && mockValidation?.isValid !== false,
+    isValid:
+      issues.length === 0 &&
+      identicalTranslations.length === 0 &&
+      mockValidation?.isValid !== false,
     issues,
+    identicalTranslations,
     mockValidation,
     summary: {
       totalKeys: referenceKeys.size,
@@ -221,6 +289,7 @@ function validateTranslations(
       missingKeysCount: issues.filter((issue) => issue.type === "missing")
         .length,
       extraKeysCount: issues.filter((issue) => issue.type === "extra").length,
+      identicalTranslationsCount: identicalTranslations.length,
     },
   };
 }
@@ -229,14 +298,17 @@ function printResults(
   result: ValidationResult,
   translationFiles: TranslationFile[],
 ): void {
-  console.log("🔍 Translation Key Validation Results");
-  console.log("=====================================\n");
+  console.log("🔍 Translation Validation Results");
+  console.log("=================================\n");
   console.log("📊 Summary:");
   console.log(`  Reference locale: ${translationFiles[0].locale}`);
   console.log(`  Total locales: ${result.summary.locales.join(", ")}`);
   console.log(`  Total keys in reference: ${result.summary.totalKeys}`);
   console.log(`  Missing keys: ${result.summary.missingKeysCount}`);
   console.log(`  Extra keys: ${result.summary.extraKeysCount}`);
+  console.log(
+    `  Identical translations: ${result.summary.identicalTranslationsCount}`,
+  );
 
   if (result.mockValidation) {
     console.log(
@@ -253,12 +325,12 @@ function printResults(
 
   if (result.isValid) {
     console.log(
-      "✅ All translation files and mock translations have consistent keys!",
+      "✅ All translation files have localized values and consistent keys!",
     );
     return;
   }
 
-  console.log("❌ Found inconsistencies in translation keys:\n");
+  console.log("❌ Found translation issues:\n");
   const allIssues = [
     ...result.issues,
     ...(result.mockValidation?.issues ?? []),
@@ -288,14 +360,30 @@ function printResults(
     console.log();
   }
 
+  if (result.identicalTranslations.length > 0) {
+    console.log("🌐 IDENTICAL ACROSS ALL LOCALES:");
+    console.log(
+      `  🔵 Potentially untranslated strings (${result.identicalTranslations.length}):`,
+    );
+    result.identicalTranslations
+      .sort((first, second) => first.key.localeCompare(second.key))
+      .forEach((issue) =>
+        console.log(
+          `    = ${issue.key}: ${JSON.stringify(issue.value)} (${issue.locales.join(", ")})`,
+        ),
+      );
+    console.log();
+  }
+
   console.log("💡 Suggestions:");
   console.log("  1. Add missing keys to the respective translation files");
   console.log(
     "  2. Remove extra keys or add them to the reference locale if they should be included",
   );
-  console.log("  3. Use the reference locale as the source of truth");
+  console.log("  3. Translate strings that are identical across every locale");
+  console.log("  4. Use the reference locale as the source of truth");
   if (result.mockValidation && !result.mockValidation.isValid) {
-    console.log("  4. Update src/__mocks__/next-intl.js to match English");
+    console.log("  5. Update src/__mocks__/next-intl.js to match English");
   }
 }
 
@@ -307,8 +395,8 @@ function generateDetailedReport(
 
   console.log("\n📋 Detailed Report:");
   console.log("==================\n");
-  console.log("Key presence matrix:");
-  console.log("(✓ = present, ✗ = missing)\n");
+  console.log("Key validation matrix:");
+  console.log("(✓ = present, ✗ = missing, = = identical across locales)\n");
 
   const allKeys = new Set<string>();
   for (const file of translationFiles) {
@@ -321,6 +409,10 @@ function generateDetailedReport(
   console.log(["Key", ...locales].join("\t"));
 
   const problematicKeys = [...allKeys].sort().filter((key) => {
+    if (result.identicalTranslations.some((issue) => issue.key === key)) {
+      return true;
+    }
+
     const localePresence = translationFiles.filter((file) =>
       getAllKeys(file.data).includes(key),
     ).length;
@@ -336,10 +428,13 @@ function generateDetailedReport(
   });
 
   for (const key of problematicKeys.slice(0, 20)) {
+    const isIdentical = result.identicalTranslations.some(
+      (issue) => issue.key === key,
+    );
     const row = [
       key,
       ...translationFiles.map((file) =>
-        getAllKeys(file.data).includes(key) ? "✓" : "✗",
+        isIdentical ? "=" : getAllKeys(file.data).includes(key) ? "✓" : "✗",
       ),
     ];
     if (result.mockValidation) {
@@ -412,6 +507,7 @@ export {
   printResults,
   validateMockTranslations,
   validateTranslations,
+  type IdenticalTranslationIssue,
   type KeyIssue,
   type MockValidationResult,
   type TranslationFile,

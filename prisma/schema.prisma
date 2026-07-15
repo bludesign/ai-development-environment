@@ -15,3 +15,75 @@ generator client {
 datasource db {
   provider = "sqlite"
 }
+
+model Agent {
+  id               String            @id
+  name             String
+  hostname         String
+  version          String
+  osVersion        String
+  architecture     String
+  capabilitiesJson String
+  secretHash       String            @unique
+  ipAddress        String?
+  lastSeenAt       DateTime?
+  disconnectedAt  DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  jobs             AgentJob[]
+  auditEvents      AgentAuditEvent[]
+}
+
+model AgentEnrollmentToken {
+  id        String    @id
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model AgentJob {
+  id             String        @id
+  agentId        String
+  kind           String
+  payloadJson    String
+  status         String
+  idempotencyKey String
+  resultJson     String?
+  error          String?
+  timeoutSeconds Int
+  createdAt      DateTime      @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  updatedAt      DateTime      @updatedAt
+  agent          Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  logs           AgentJobLog[]
+
+  @@unique([agentId, idempotencyKey])
+  @@index([agentId, status, createdAt])
+}
+
+model AgentJobLog {
+  id        String   @id
+  jobId     String
+  sequence  Int
+  stream    String
+  message   String
+  createdAt DateTime @default(now())
+  job       AgentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, sequence])
+  @@index([jobId, createdAt])
+}
+
+model AgentAuditEvent {
+  id        String   @id
+  agentId   String?
+  action    String
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  agent     Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([agentId, createdAt])
+}
