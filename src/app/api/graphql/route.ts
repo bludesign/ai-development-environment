@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 
 import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
 
+export const runtime = "nodejs";
+
 let handler: ((request: NextRequest) => Promise<Response>) | null = null;
 
 async function getHandler(): Promise<
