@@ -1,0 +1,11 @@
+extend schema
+  @link(
+    url: "https://specs.apollographql.org/federation/v2.3"
+    import: ["@key"]
+  )
+
+"Root query type — extended by domain-specific schema files as models are added."
+type Query {
+  "Health check that also verifies database connectivity. Returns \"ok\" or \"degraded\"."
+  health: String!
+}
