@@ -43,8 +43,8 @@ Data access uses [Prisma 7](https://www.prisma.io/) with the `prisma-client` gen
 The datasource `provider` is fixed in `prisma/schema.prisma` (it cannot be changed by an environment variable), and migrations are provider-specific. To move from SQLite to an external Postgres database:
 
 1. Change `provider = "sqlite"` to `provider = "postgresql"` in `prisma/schema.prisma`.
-2. Re-baseline migrations for Postgres: remove `prisma/migrations/` and run `npm run db:migrate` against the Postgres database (or maintain a separate migration lineage).
-3. Set `DATABASE_URL` to a `postgresql://…` connection string. The `@prisma/adapter-pg` and `pg` packages are already installed and the runtime adapter switch handles the scheme automatically — no application code changes are required.
+2. Set `DATABASE_URL` to a `postgresql://…` connection string.
+3. Re-baseline migrations for Postgres: remove `prisma/migrations/`, run `npm run db:migrate` against the Postgres database (or maintain a separate migration lineage), then regenerate and rebuild the application. The generated provider marker rejects a URL that does not match the generated Prisma client, preventing an incompatible adapter from reaching Prisma at runtime. The `@prisma/adapter-pg` and `pg` packages are already installed, so no application code changes are required.
 4. Keep the schema portable (avoid SQLite- or Postgres-only column types) so future switches stay mechanical.
 
 ## Homebrew
@@ -57,4 +57,4 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
-The service listens on `http://127.0.0.1:3090` by default, applies pending database migrations on start, and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`. Point `DATABASE_URL` at a `postgresql://…` URL to use an external Postgres database (see [Switching to Postgres](#switching-to-postgres)).
+The service listens on `http://127.0.0.1:3090` by default, applies pending database migrations on start, and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`. The distributed Homebrew build is generated for SQLite; changing only `DATABASE_URL` to Postgres is rejected. A Postgres deployment must be rebuilt from source by following [Switching to Postgres](#switching-to-postgres).

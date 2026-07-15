@@ -1,4 +1,4 @@
-import { prisma } from "@/data/prisma-client";
+import { getPrismaClient } from "@/data/prisma-client";
 
 /**
  * Thin data-access layer injected into GraphQL resolver factories. It grows one method per
@@ -8,6 +8,7 @@ import { prisma } from "@/data/prisma-client";
 export class PrismaService {
   async healthCheck(): Promise<boolean> {
     try {
+      const prisma = await getPrismaClient();
       await prisma.$queryRawUnsafe("SELECT 1");
       return true;
     } catch (error) {

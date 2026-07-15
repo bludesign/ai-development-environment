@@ -11,9 +11,8 @@ export interface GraphQLContext {
   prismaService: PrismaService;
 }
 
-// Owns the single ApolloServer instance and the services injected into resolvers. Built once
-// and memoized; `src/instrumentation.ts` warms it at process start and the route handler
-// reuses it per request.
+// Owns the single ApolloServer instance and the services injected into resolvers. The route
+// handler initializes it lazily on the first GraphQL request and reuses it thereafter.
 class GraphQLServerService {
   private server: ApolloServer<GraphQLContext> | null = null;
   private prismaService: PrismaService | null = null;
@@ -48,10 +47,6 @@ class GraphQLServerService {
         ? [ApolloServerPluginLandingPageLocalDefault({ footer: false })]
         : [ApolloServerPluginLandingPageProductionDefault({ footer: false })],
     });
-  }
-
-  async initialize(): Promise<void> {
-    await this.initializeServer();
   }
 
   async createContext(): Promise<GraphQLContext> {
