@@ -13,7 +13,8 @@ async function getHandler(): Promise<
   if (handler === null) {
     const server = await SharedGraphQLServerService.getServer();
     handler = startServerAndCreateNextHandler(server, {
-      context: () => SharedGraphQLServerService.createContext(),
+      context: (request) =>
+        SharedGraphQLServerService.createContext(request.headers),
     });
   }
 

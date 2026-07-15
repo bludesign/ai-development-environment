@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Blocks, House, PanelLeft, PanelRight, X } from "lucide-react";
+import { Blocks, Cpu, House, PanelLeft, PanelRight, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Link } from "@/i18n/navigation";
+import { Link, usePathname } from "@/i18n/navigation";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 type AppShellProps = {
@@ -195,6 +195,7 @@ function MobileSidebarClose({ label }: { label: string }) {
 function NavigationSidebar() {
   const t = useTranslations("shell");
   const { isMobile, setOpenMobile } = useSidebar();
+  const pathname = usePathname();
 
   return (
     <Sidebar
@@ -220,7 +221,7 @@ function NavigationSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive>
+                <SidebarMenuButton asChild isActive={pathname === "/"}>
                   <Link
                     href="/"
                     onClick={() => {
@@ -231,6 +232,25 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={
+                    pathname.startsWith("/agents") ||
+                    pathname.startsWith("/jobs")
+                  }
+                >
+                  <Link
+                    href="/agents"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Cpu />
+                    <span>{t("agents")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

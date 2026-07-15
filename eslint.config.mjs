@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated code (Prisma client, GraphQL resolver types, bundled SDL).
     "src/generated/**",
+    "packages/*/dist/**",
   ]),
 ]);
 

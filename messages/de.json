@@ -16,6 +16,24 @@
     "closeNavigation": "Navigation schließen",
     "showNotifications": "Benachrichtigungen anzeigen",
     "hideNotifications": "Benachrichtigungen ausblenden",
-    "closeNotifications": "Benachrichtigungen schließen"
+    "closeNotifications": "Benachrichtigungen schließen",
+    "agents": "Agents"
+  },
+  "agents": {
+    "title": "Agents",
+    "description": "Manage enrolled Macs and durable jobs from one control plane.",
+    "refresh": "Refresh",
+    "enroll": "Enroll agent",
+    "enrollmentTitle": "One-time enrollment command",
+    "enrollmentDescription": "Run this on the Mac after installing mac-control-agent. The Mac connects outbound; it does not open a listening port.",
+    "copy": "Copy command",
+    "expires": "Token expires {date}",
+    "loading": "Loading agents…",
+    "emptyTitle": "No agents enrolled",
+    "emptyDescription": "Create an enrollment command to pair your first Mac.",
+    "version": "Version",
+    "platform": "Platform",
+    "lastSeen": "Last seen",
+    "never": "Never"
   }
 }

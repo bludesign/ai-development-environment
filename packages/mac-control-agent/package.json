@@ -1,0 +1,22 @@
+{
+  "name": "@ai-development-environment/mac-control-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mac-control-agent": "dist/mac-control-agent.js"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/mac-control-agent.js --banner:js=\"#!/usr/bin/env node\"",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "graphql": "^16.0.0",
+    "graphql-ws": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.0"
+  }
+}

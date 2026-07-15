@@ -1,0 +1,146 @@
+scalar JSON
+
+enum AgentConnectionStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum AgentJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMED_OUT
+}
+
+enum AgentLogStream {
+  STDOUT
+  STDERR
+  SYSTEM
+}
+
+enum AgentEventType {
+  JOB_AVAILABLE
+  JOB_CANCEL_REQUESTED
+}
+
+type Agent {
+  id: ID!
+  name: String!
+  hostname: String!
+  version: String!
+  osVersion: String!
+  architecture: String!
+  capabilities: [String!]!
+  connectionStatus: AgentConnectionStatus!
+  ipAddress: String
+  lastSeenAt: String
+  disconnectedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AgentEnrollmentToken {
+  token: String!
+  expiresAt: String!
+}
+
+type EnrolledAgent {
+  agent: Agent!
+  credential: String!
+}
+
+type AgentJob {
+  id: ID!
+  agentId: ID!
+  kind: String!
+  payload: JSON!
+  status: AgentJobStatus!
+  idempotencyKey: String!
+  result: JSON
+  error: String
+  timeoutSeconds: Int!
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+  updatedAt: String!
+}
+
+type AgentJobLog {
+  id: ID!
+  jobId: ID!
+  sequence: Int!
+  stream: AgentLogStream!
+  message: String!
+  createdAt: String!
+}
+
+type AgentEvent {
+  type: AgentEventType!
+  job: AgentJob!
+}
+
+input EnrollAgentInput {
+  enrollmentToken: String!
+  name: String!
+  hostname: String!
+  version: String!
+  osVersion: String!
+  architecture: String!
+  capabilities: [String!]!
+}
+
+input AgentHeartbeatInput {
+  version: String!
+  osVersion: String!
+  architecture: String!
+  capabilities: [String!]!
+}
+
+input CreateAgentJobInput {
+  agentId: ID!
+  kind: String!
+  payload: JSON!
+  idempotencyKey: String!
+  timeoutSeconds: Int = 86400
+}
+
+input AgentJobLogInput {
+  sequence: Int!
+  stream: AgentLogStream!
+  message: String!
+  createdAt: String!
+}
+
+extend type Query {
+  agents: [Agent!]!
+  agent(id: ID!): Agent
+  agentSelf: Agent
+  agentJobs(agentId: ID!, limit: Int = 50): [AgentJob!]!
+  agentJob(id: ID!): AgentJob
+  agentJobLogs(jobId: ID!, afterSequence: Int = -1): [AgentJobLog!]!
+}
+
+type Mutation {
+  createAgentEnrollmentToken(expiresInMinutes: Int = 15): AgentEnrollmentToken!
+  enrollAgent(input: EnrollAgentInput!): EnrolledAgent!
+  heartbeatAgent(input: AgentHeartbeatInput!): Agent!
+  createAgentJob(input: CreateAgentJobInput!): AgentJob!
+  claimAgentJob(jobId: ID!): AgentJob!
+  appendAgentJobLogs(jobId: ID!, logs: [AgentJobLogInput!]!): [AgentJobLog!]!
+  completeAgentJob(
+    jobId: ID!
+    status: AgentJobStatus!
+    result: JSON
+    error: String
+  ): AgentJob!
+  cancelAgentJob(jobId: ID!): AgentJob!
+}
+
+type Subscription {
+  agentEvents(agentId: ID!): AgentEvent!
+  agentChanged(agentId: ID): Agent!
+  agentJobChanged(jobId: ID!): AgentJob!
+  agentJobLogAdded(jobId: ID!): AgentJobLog!
+}

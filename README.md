@@ -49,4 +49,32 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
-The service listens on `http://127.0.0.1:3090` by default, applies pending database migrations on start, and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
+The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL`, `AGENT_WS_HOSTNAME`, and `AGENT_WS_PORT` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
+
+## macOS control agents
+
+The generic TypeScript agent lives in `packages/mac-control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
+
+Install the agent from the tap's repository head until the first agent release is tagged:
+
+```bash
+brew install --HEAD mac-control-agent
+```
+
+Open the app's **Agents** page and create a one-time enrollment command, then run it on the target Mac. The server defaults to the same computer when omitted:
+
+```bash
+mac-control-agent enroll \
+  --server http://127.0.0.1:3090 \
+  --enrollment-token <one-time-token>
+brew services start mac-control-agent
+```
+
+Useful diagnostics:
+
+```bash
+mac-control-agent status
+mac-control-agent doctor
+```
+
+The credential and stable agent ID are stored at `~/Library/Application Support/mac-control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.
