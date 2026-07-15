@@ -1,0 +1,94 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "PATH": "${env:HOME}/.asdf/shims:${env:PATH}"
+    }
+  },
+  "tasks": [
+    {
+      "type": "shell",
+      "label": "dev",
+      "group": "build",
+      "command": "npm run dev"
+    },
+    {
+      "type": "shell",
+      "label": "build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "command": "npm run build"
+    },
+    {
+      "type": "shell",
+      "label": "start",
+      "group": "build",
+      "command": "npm run start"
+    },
+    {
+      "type": "shell",
+      "label": "clean",
+      "group": "build",
+      "command": "npm run clean"
+    },
+    {
+      "type": "shell",
+      "label": "type-check",
+      "group": "build",
+      "command": "npm run type-check"
+    },
+    {
+      "type": "shell",
+      "label": "test-watch",
+      "group": "test",
+      "command": "npm test"
+    },
+    {
+      "type": "shell",
+      "label": "test",
+      "group": "test",
+      "command": "npm run test:run"
+    },
+    {
+      "type": "shell",
+      "label": "lint",
+      "group": "test",
+      "command": "npm run lint"
+    },
+    {
+      "type": "shell",
+      "label": "lint-fix",
+      "group": "test",
+      "command": "npm run lint:fix"
+    },
+    {
+      "type": "shell",
+      "label": "format",
+      "group": "test",
+      "command": "npm run format"
+    },
+    {
+      "type": "shell",
+      "label": "format-check",
+      "group": "test",
+      "command": "npm run format:check"
+    },
+    {
+      "type": "shell",
+      "label": "full-check",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "command": "npm run full-check"
+    },
+    {
+      "type": "shell",
+      "label": "full-check-ci",
+      "group": "test",
+      "command": "npm run full-check:ci"
+    }
+  ]
+}
