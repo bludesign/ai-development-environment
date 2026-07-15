@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "AI Development Environment",
+    "description": "Un entorno de desarrollo centrado en la inteligencia artificial."
+  },
+  "shell": {
+    "productName": "AI Development Environment",
+    "welcome": "Bienvenido",
+    "dashboard": "Panel de control",
+    "navigation": "Navegación",
+    "navigationDescription": "Navegación principal de AI Development Environment.",
+    "notifications": "Notificaciones",
+    "notificationsDescription": "Actualizaciones y alertas de notificaciones.",
+    "showNavigation": "Mostrar navegación",
+    "hideNavigation": "Ocultar navegación",
+    "closeNavigation": "Cerrar navegación",
+    "showNotifications": "Mostrar notificaciones",
+    "hideNotifications": "Ocultar notificaciones",
+    "closeNotifications": "Cerrar notificaciones"
+  }
+}
