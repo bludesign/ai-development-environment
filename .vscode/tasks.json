@@ -35,6 +35,62 @@
     },
     {
       "type": "shell",
+      "label": "generate",
+      "group": "build",
+      "command": "npm run generate",
+      "detail": "Run all code generation (Prisma, schema bundling, GraphQL codegen)"
+    },
+    {
+      "type": "shell",
+      "label": "generate:prisma",
+      "group": "build",
+      "command": "npm run generate:prisma",
+      "detail": "Generate Prisma client"
+    },
+    {
+      "type": "shell",
+      "label": "generate:schema",
+      "group": "build",
+      "command": "npm run generate:schema",
+      "detail": "Bundle GraphQL SDL files into TypeScript"
+    },
+    {
+      "type": "shell",
+      "label": "generate:graphql",
+      "group": "build",
+      "command": "npm run generate:graphql",
+      "detail": "Generate GraphQL resolver types via codegen"
+    },
+    {
+      "type": "shell",
+      "label": "db:migrate",
+      "group": "build",
+      "command": "npm run db:migrate",
+      "detail": "Create and apply Prisma migrations (dev)"
+    },
+    {
+      "type": "shell",
+      "label": "db:deploy",
+      "group": "build",
+      "command": "npm run db:deploy",
+      "detail": "Apply pending Prisma migrations (production)"
+    },
+    {
+      "type": "shell",
+      "label": "db:studio",
+      "group": "build",
+      "command": "npm run db:studio",
+      "detail": "Open Prisma Studio database browser"
+    },
+    {
+      "type": "shell",
+      "label": "supergraph",
+      "group": "build",
+      "command": "npm run supergraph",
+      "detail": "Compose Apollo Federation supergraph via rover"
+    },
+    {
+      "type": "shell",
       "label": "type-check",
       "group": "build",
       "command": "npm run type-check"
