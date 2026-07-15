@@ -4,11 +4,8 @@
 // binary) with driver adapters, so the generated client bundles cleanly into the Next.js
 // `standalone` output that the Homebrew service runs.
 //
-// The datasource `provider` is fixed at generate time and cannot be an env var. To move to
-// Postgres later: change `provider` to "postgresql", re-baseline the migrations directory
-// for Postgres, and point DATABASE_URL at the Postgres server. The runtime client
-// (src/data/prisma-client.ts) already selects the adapter by URL scheme, so no app code
-// changes are needed. See README / the migration runbook for details.
+// The application currently supports SQLite only. DATABASE_URL controls the file location;
+// src/data/prisma-client.ts rejects other URL schemes before constructing the adapter.
 
 generator client {
   provider = "prisma-client"
