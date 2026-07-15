@@ -90,7 +90,7 @@ export function AgentsList() {
   };
 
   const command = enrollment
-    ? `mac-control-agent enroll --server ${typeof window === "undefined" ? "http://127.0.0.1:3090" : window.location.origin} --enrollment-token ${enrollment.token}`
+    ? `control-agent enroll --server ${typeof window === "undefined" ? "http://127.0.0.1:3090" : window.location.origin} --enrollment-token ${enrollment.token}`
     : "";
 
   return (

@@ -154,7 +154,7 @@ jobs:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Mac control agent formula
+      - name: Update control agent formula
         uses: actions/github-script@v8
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -164,7 +164,7 @@ jobs:
             const crypto = require("node:crypto");
             const owner = "bludesign";
             const repo = "homebrew-ai-development-environment";
-            const path = "Formula/mac-control-agent.rb";
+            const path = "Formula/control-agent.rb";
             const branch = "main";
             const tag = process.env.RELEASE_TAG;
             const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/archive/refs/tags/${tag}.tar.gz`;
@@ -213,6 +213,6 @@ jobs:
               path,
               branch,
               sha: response.data.sha,
-              message: `mac-control-agent ${tag.replace(/^v/, "")}`,
+              message: `control-agent ${tag.replace(/^v/, "")}`,
               content: Buffer.from(formula).toString("base64"),
             });

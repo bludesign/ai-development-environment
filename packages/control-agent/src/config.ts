@@ -11,12 +11,12 @@ export type AgentConfig = {
 };
 
 export const configPath = () =>
-  process.env.MAC_CONTROL_AGENT_CONFIG ??
-  join(homedir(), ".config", "mac-control-agent", "config.json");
+  process.env.CONTROL_AGENT_CONFIG ??
+  join(homedir(), ".config", "control-agent", "config.json");
 
 export const developmentConfigPath = () =>
-  process.env.MAC_CONTROL_AGENT_DEV_CONFIG ??
-  join(homedir(), ".config", "mac-control-agent-dev", "config.json");
+  process.env.CONTROL_AGENT_DEV_CONFIG ??
+  join(homedir(), ".config", "control-agent-dev", "config.json");
 
 export function normalizeServer(value: string): string {
   const url = new URL(value);

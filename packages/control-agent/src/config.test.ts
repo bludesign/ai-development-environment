@@ -18,7 +18,7 @@ afterEach(async () => {
 
 describe("agent configuration", () => {
   test("writes development credentials with owner-only permissions", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "mac-control-agent-"));
+    const directory = await mkdtemp(join(tmpdir(), "control-agent-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "nested", "config.json");
     const config: AgentConfig = {

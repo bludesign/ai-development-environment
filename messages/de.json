@@ -25,7 +25,7 @@
     "refresh": "Aktualisieren",
     "enroll": "Agent registrieren",
     "enrollmentTitle": "Einmaliger Registrierungsbefehl",
-    "enrollmentDescription": "Führen Sie diesen Befehl nach der Installation von mac-control-agent auf dem Mac aus. Der Mac stellt eine ausgehende Verbindung her; er öffnet keinen Port für eingehende Verbindungen.",
+    "enrollmentDescription": "Führen Sie diesen Befehl nach der Installation von control-agent auf dem Mac aus. Der Mac stellt eine ausgehende Verbindung her; er öffnet keinen Port für eingehende Verbindungen.",
     "copy": "Befehl kopieren",
     "copyFailed": "Der Befehl konnte nicht kopiert werden. Wählen Sie ihn aus und kopieren Sie ihn manuell.",
     "expires": "Token läuft am {date} ab",

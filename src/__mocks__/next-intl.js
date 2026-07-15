@@ -32,7 +32,7 @@ const mockTranslations = {
     enroll: "Enroll agent",
     enrollmentTitle: "One-time enrollment command",
     enrollmentDescription:
-      "Run this on the Mac after installing mac-control-agent. The Mac connects outbound; it does not open a listening port.",
+      "Run this on the Mac after installing control-agent. The Mac connects outbound; it does not open a listening port.",
     copy: "Copy command",
     copyFailed: "Could not copy the command. Select and copy it manually.",
     expires: "Token expires {date}",

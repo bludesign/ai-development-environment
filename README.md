@@ -36,7 +36,7 @@ npm run dev:all
 Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket runs on port `3092`, so an installed Homebrew service can continue using ports `3090` and `3091`. The agent waits for Next.js, then automatically enrolls `<hostname>-dev` on its first run. Later runs reuse the stable identity stored at:
 
 ```text
-~/.config/mac-control-agent-dev/config.json
+~/.config/control-agent-dev/config.json
 ```
 
 Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it. `cloudflared` must still be installed before running Cloudflared jobs.
@@ -50,7 +50,7 @@ NEXT_PUBLIC_AGENT_WS_URL=ws://127.0.0.1:3093/graphql \
 npm run dev:all
 ```
 
-For agent-only development, `MAC_CONTROL_AGENT_DEV_SERVER`, `MAC_CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `MAC_CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
+For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
 
 ## GraphQL API
 
@@ -80,30 +80,30 @@ brew services start ai-development-environment
 
 The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL`, `AGENT_WS_HOSTNAME`, and `AGENT_WS_PORT` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
 
-## macOS control agents
+## Control agents
 
-The generic TypeScript agent lives in `packages/mac-control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
+The generic TypeScript agent lives in `packages/control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
 
 Install the agent from the tap's repository head until the first agent release is tagged:
 
 ```bash
-brew install --HEAD mac-control-agent
+brew install --HEAD control-agent
 ```
 
 Open the app's **Agents** page and create a one-time enrollment command, then run it on the target Mac. The server defaults to the same computer when omitted:
 
 ```bash
-mac-control-agent enroll \
+control-agent enroll \
   --server http://127.0.0.1:3090 \
   --enrollment-token <one-time-token>
-brew services start mac-control-agent
+brew services start control-agent
 ```
 
 Useful diagnostics:
 
 ```bash
-mac-control-agent status
-mac-control-agent doctor
+control-agent status
+control-agent doctor
 ```
 
-The credential and stable agent ID are stored at `~/.config/mac-control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.
+The credential and stable agent ID are stored at `~/.config/control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.

@@ -1,13 +1,13 @@
 {
-  "name": "@ai-development-environment/mac-control-agent",
+  "name": "@ai-development-environment/control-agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "mac-control-agent": "dist/mac-control-agent.js"
+    "control-agent": "dist/control-agent.js"
   },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/mac-control-agent.js --banner:js=\"#!/usr/bin/env node\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/control-agent.js --banner:js=\"#!/usr/bin/env node\"",
     "dev": "node --watch --watch-preserve-output --import tsx src/index.ts dev",
     "format": "prettier --write --ignore-path ../../.gitignore --ignore-path ../../.prettierignore .",
     "format:check": "prettier --check --ignore-path ../../.gitignore --ignore-path ../../.prettierignore .",

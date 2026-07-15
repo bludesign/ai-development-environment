@@ -53,7 +53,7 @@ describe("development agent preparation", () => {
       {
         server: enrolledConfig.server,
         websocketServer: enrolledConfig.websocketServer,
-        configFile: "/tmp/mac-control-agent-dev-test.json",
+        configFile: "/tmp/control-agent-dev-test.json",
       },
       new AbortController().signal,
       {
@@ -74,7 +74,7 @@ describe("development agent preparation", () => {
     });
     expect(save).toHaveBeenCalledWith(
       enrolledConfig,
-      "/tmp/mac-control-agent-dev-test.json",
+      "/tmp/control-agent-dev-test.json",
     );
     expect(config).toEqual(enrolledConfig);
   });

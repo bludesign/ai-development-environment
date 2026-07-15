@@ -25,7 +25,7 @@
     "refresh": "Actualizar",
     "enroll": "Registrar agente",
     "enrollmentTitle": "Comando de registro de un solo uso",
-    "enrollmentDescription": "Ejecuta este comando en el Mac después de instalar mac-control-agent. El Mac se conecta de forma saliente; no abre ningún puerto de escucha.",
+    "enrollmentDescription": "Ejecuta este comando en el Mac después de instalar control-agent. El Mac se conecta de forma saliente; no abre ningún puerto de escucha.",
     "copy": "Copiar comando",
     "copyFailed": "No se pudo copiar el comando. Selecciónalo y cópialo manualmente.",
     "expires": "El token caduca el {date}",

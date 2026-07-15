@@ -29,7 +29,7 @@ function flags(args: string[]): Record<string, string> {
 }
 
 function usage(): void {
-  console.log(`mac-control-agent <command>
+  console.log(`control-agent <command>
 
 Commands:
   enroll --enrollment-token <token> [--server http://127.0.0.1:3090] [--websocket-server ws://127.0.0.1:3091/graphql] [--name <name>]
@@ -146,14 +146,14 @@ async function main(): Promise<void> {
       const options = flags(args);
       const server =
         options.server ??
-        process.env.MAC_CONTROL_AGENT_DEV_SERVER ??
+        process.env.CONTROL_AGENT_DEV_SERVER ??
         `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
       return runDevelopmentAgent(
         {
           server,
           websocketServer:
             options["websocket-server"] ??
-            process.env.MAC_CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
+            process.env.CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
             process.env.NEXT_PUBLIC_AGENT_WS_URL,
           name: options.name,
         },

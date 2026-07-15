@@ -25,7 +25,7 @@
     "refresh": "Actualiser",
     "enroll": "Inscrire un agent",
     "enrollmentTitle": "Commande d’inscription à usage unique",
-    "enrollmentDescription": "Exécutez cette commande sur le Mac après avoir installé mac-control-agent. Le Mac établit une connexion sortante ; il n’ouvre aucun port d’écoute.",
+    "enrollmentDescription": "Exécutez cette commande sur le Mac après avoir installé control-agent. Le Mac établit une connexion sortante ; il n’ouvre aucun port d’écoute.",
     "copy": "Copier la commande",
     "copyFailed": "Impossible de copier la commande. Sélectionnez-la et copiez-la manuellement.",
     "expires": "Le jeton expire le {date}",
