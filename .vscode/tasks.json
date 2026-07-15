@@ -165,6 +165,20 @@
       "group": "test",
       "command": "npm run full-check:dev",
       "detail": "Generate, format, lint-fix, type-check, test, build, then start the dev server"
+    },
+    {
+      "type": "shell",
+      "label": "upgrade",
+      "group": "build",
+      "command": "npm run upgrade",
+      "detail": "Upgrade all dependencies in package.json with npm-check-updates and install"
+    },
+    {
+      "type": "shell",
+      "label": "upgrade-check",
+      "group": "build",
+      "command": "npm run upgrade:check",
+      "detail": "Show available dependency upgrades without modifying package.json"
     }
   ]
 }
