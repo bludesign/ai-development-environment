@@ -60,6 +60,7 @@ model AgentJob {
   updatedAt      DateTime      @updatedAt
   ccusageCollectionId String?
   codebaseId       String?
+  worktreeId       String?
   visibility       String        @default("USER")
   agent          Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
   ccusageCollection CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
@@ -70,6 +71,7 @@ model AgentJob {
   @@index([agentId, status, createdAt])
   @@index([ccusageCollectionId, status])
   @@index([codebaseId, status, createdAt])
+  @@index([worktreeId, status, createdAt])
 }
 
 model CodebaseRepository {
@@ -78,6 +80,7 @@ model CodebaseRepository {
   displayOrigin   String
   name            String
   description     String     @default("")
+  jiraBranchRegex String?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   codebases       Codebase[]
@@ -99,13 +102,18 @@ model Codebase {
   syncState         String             @default("UNKNOWN")
   availability      String             @default("AVAILABLE")
   statusError       String?
+  defaultBranch     String?
+  remoteBranchesJson String           @default("[]")
   lastCheckedAt     DateTime?
   lastFetchedAt     DateTime?
+  lastFetchAttemptAt DateTime?
+  lastFetchError    String?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   repository        CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   agent             Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
   jobs              AgentJob[]
+  worktrees         Worktree[]
 
   @@unique([agentId, folder])
   @@index([repositoryId])
@@ -115,8 +123,69 @@ model Codebase {
 model CodebaseSettings {
   id                     String   @id
   refreshIntervalSeconds Int      @default(30)
+  fetchIntervalSeconds   Int      @default(300)
+  defaultJiraBranchRegex String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+}
+
+model Worktree {
+  id                 String                  @id
+  codebaseId         String
+  gitDirectory       String
+  folder             String
+  relativePath       String
+  primary            Boolean                 @default(false)
+  branch             String?
+  headSha            String?
+  upstream           String?
+  ahead              Int?
+  behind             Int?
+  syncState          String                  @default("UNKNOWN")
+  baseBranchOverride String?
+  baseAhead          Int?
+  baseBehind         Int?
+  highlightColor     String?
+  availability       String                  @default("AVAILABLE")
+  statusError        String?
+  lastCheckedAt      DateTime?
+  missingAt          DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  codebase           Codebase                @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
+  tags               WorktreeTagAssignment[]
+
+  @@unique([codebaseId, gitDirectory])
+  @@index([codebaseId, missingAt])
+  @@index([missingAt])
+}
+
+model WorktreeTag {
+  id          String                  @id
+  name        String                  @unique
+  color       String
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  assignments WorktreeTagAssignment[]
+
+  @@index([name])
+}
+
+model WorktreeTagAssignment {
+  worktreeId String
+  tagId      String
+  worktree   Worktree    @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  tag        WorktreeTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([worktreeId, tagId])
+  @@index([tagId])
+}
+
+model WorktreeSettings {
+  id            String   @id
+  editorVariant String   @default("CODE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model ExternalMcpServer {

@@ -55,6 +55,8 @@ type RawPullRequest = {
   url: string;
   createdAt: string;
   updatedAt: string;
+  headRefName: string;
+  headRepository: { nameWithOwner: string } | null;
   repository: {
     id: string;
     nameWithOwner: string;
@@ -170,6 +172,8 @@ const PULL_REQUEST_FRAGMENT = `
     url
     createdAt
     updatedAt
+    headRefName
+    headRepository { nameWithOwner }
     repository { id nameWithOwner url }
     labels(first: 100) {
       nodes { name }
@@ -1349,6 +1353,60 @@ export class GitHubService {
       ),
       truncated,
     };
+  }
+
+  async pullRequestForBranch(
+    canonicalOrigin: string,
+    branch: string,
+  ): Promise<GitHubPullRequestView | null> {
+    return (
+      (await this.pullRequestsForOrigin(canonicalOrigin)).find(
+        (pullRequest) =>
+          (pullRequest as GitHubPullRequestView & { headRefName?: string })
+            .headRefName === branch,
+      ) ?? null
+    );
+  }
+
+  async pullRequestsForOrigin(
+    canonicalOrigin: string,
+  ): Promise<Array<GitHubPullRequestView & { headRefName: string }>> {
+    const match = canonicalOrigin.match(/^github\.com\/([^/]+)\/([^/]+)$/i);
+    if (!match?.[1] || !match[2]) return [];
+    const token = await this.requireToken();
+    const owner = match[1];
+    const name = match[2];
+    const repository: GitHubRepositoryView = {
+      id: canonicalOrigin,
+      githubId: "",
+      owner,
+      name,
+      nameWithOwner: `${owner}/${name}`,
+      url: `https://github.com/${owner}/${name}`,
+      jiraKeyRegex: null,
+    };
+    const [rawItems, appSettings] = await Promise.all([
+      this.repositoryPullRequests(repository, token),
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const matching = rawItems.filter(
+      (pullRequest) =>
+        pullRequest.headRepository?.nameWithOwner.toLowerCase() ===
+        repository.nameWithOwner.toLowerCase(),
+    );
+    return Promise.all(
+      matching.map(async (raw) => ({
+        ...(await this.normalizePullRequest(
+          raw,
+          null,
+          token,
+          Boolean(appSettings),
+        )),
+        headRefName: raw.headRefName,
+      })),
+    );
   }
 
   async pullRequest(

@@ -7,6 +7,7 @@ import {
 import { collectInventory } from "./inventory.js";
 import { JobExecutor } from "./job-executor.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
+import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -15,8 +16,9 @@ export async function runAgent(
   signal: AbortSignal,
 ): Promise<void> {
   const client = new AgentGraphQLClient(config.server, config.credential);
-  const executor = new JobExecutor(client);
-  const codebaseMonitor = new CodebaseMonitor(client);
+  const repositoryCoordinator = new RepositoryCoordinator();
+  const executor = new JobExecutor(client, repositoryCoordinator);
+  const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);
   const inventory = collectInventory();
   let reconciling = false;
   let codebaseTimer: ReturnType<typeof setTimeout> | undefined;

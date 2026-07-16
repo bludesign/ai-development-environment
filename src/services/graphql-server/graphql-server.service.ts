@@ -73,6 +73,7 @@ class GraphQLServerService {
       this.services.ccusageService,
       this.services.codebasesService,
       this.services.toolsService,
+      this.services.worktreesService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when

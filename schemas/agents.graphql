@@ -54,6 +54,7 @@ type EnrolledAgent {
 type AgentJob {
   id: ID!
   agentId: ID!
+  worktreeId: ID
   kind: String!
   payload: JSON!
   status: AgentJobStatus!

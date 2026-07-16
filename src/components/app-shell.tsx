@@ -7,6 +7,7 @@ import {
   Cpu,
   Database,
   GitPullRequest,
+  GitBranch,
   FolderGit2,
   House,
   PanelLeft,
@@ -246,6 +247,22 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/worktrees")}
+                >
+                  <Link
+                    href="/worktrees"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <GitBranch />
+                    <span>{t("worktrees")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

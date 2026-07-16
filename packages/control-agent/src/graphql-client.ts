@@ -4,6 +4,7 @@ import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
 import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
+import type { CodebaseWorktreeReport } from "@ai-development-environment/agent-contract/worktrees";
 
 export type AgentJob = {
   id: string;
@@ -19,10 +20,18 @@ export type AgentCodebaseRegistration = {
   id: string;
   folder: string;
   canonicalOrigin: string;
+  defaultBranch: string | null;
+  lastFetchedAt: string | null;
+  lastFetchAttemptAt: string | null;
+  worktrees: Array<{
+    gitDirectory: string;
+    baseBranchOverride: string | null;
+  }>;
 };
 
 export type AgentCodebaseConfiguration = {
   refreshIntervalSeconds: number;
+  fetchIntervalSeconds: number;
   codebases: AgentCodebaseRegistration[];
 };
 
@@ -165,8 +174,20 @@ export class AgentGraphQLClient {
         id: string;
         folder: string;
         canonicalOrigin: string;
+        defaultBranch: string | null;
+        lastFetchedAt: string | null;
+        lastFetchAttemptAt: string | null;
+        worktrees: Array<{
+          gitDirectory: string;
+          baseBranchOverride: string | null;
+        }>;
       }>;
-    }>(`query AgentCodebases { agentCodebases { id folder canonicalOrigin } }`);
+    }>(`query AgentCodebases {
+      agentCodebases {
+        id folder canonicalOrigin defaultBranch lastFetchedAt lastFetchAttemptAt
+        worktrees { gitDirectory baseBranchOverride }
+      }
+    }`);
     return data.agentCodebases;
   }
 
@@ -176,7 +197,11 @@ export class AgentGraphQLClient {
     }>(`query AgentCodebaseConfiguration {
       agentCodebaseConfiguration {
         refreshIntervalSeconds
-        codebases { id folder canonicalOrigin }
+        fetchIntervalSeconds
+        codebases {
+          id folder canonicalOrigin defaultBranch lastFetchedAt lastFetchAttemptAt
+          worktrees { gitDirectory baseBranchOverride }
+        }
       }
     }`);
     return data.agentCodebaseConfiguration;
@@ -186,6 +211,15 @@ export class AgentGraphQLClient {
     return this.request<{ reportCodebaseStatuses: Array<{ id: string }> }>(
       `mutation ReportCodebaseStatuses($reports: [CodebaseStatusReportInput!]!) {
         reportCodebaseStatuses(reports: $reports) { id }
+      }`,
+      { reports },
+    );
+  }
+
+  reportWorktrees(reports: CodebaseWorktreeReport[]) {
+    return this.request<{ reportWorktrees: Array<{ id: string }> }>(
+      `mutation ReportWorktrees($reports: [CodebaseWorktreeReportInput!]!) {
+        reportWorktrees(reports: $reports) { id }
       }`,
       { reports },
     );

@@ -9,6 +9,12 @@ import {
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
+  DEFAULT_JIRA_BRANCH_REGEX,
+  DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract/worktrees";
+import {
   ChevronRight,
   Download,
   Folder,
@@ -84,12 +90,12 @@ const RECONCILE_INTERVAL_MS = 30_000;
 const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
-  statusError lastCheckedAt lastFetchedAt
+  statusError defaultBranch remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
   agent { ${AGENT_FIELDS} }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
 `;
 const REPOSITORY_FIELDS = `
-  id canonicalOrigin displayOrigin name description createdAt updatedAt
+  id canonicalOrigin displayOrigin name description jiraBranchRegex createdAt updatedAt
   codebases { ${CODEBASE_FIELDS} }
 `;
 
@@ -119,7 +125,7 @@ export function CodebasesPage() {
         agents: Agent[];
       }>(`query CodebaseOverview {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
-        codebaseSettings { refreshIntervalSeconds updatedAt }
+        codebaseSettings { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
         agents { ${AGENT_FIELDS} }
       }`);
       if (loadId !== latestLoad.current) return;
@@ -381,6 +387,14 @@ function CodebaseSettingsDialog({
         DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
     ),
   );
+  const [fetchValue, setFetchValue] = useState(
+    String(
+      settings?.fetchIntervalSeconds ?? DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+    ),
+  );
+  const [jiraRegex, setJiraRegex] = useState(
+    settings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_BRANCH_REGEX,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshIntervalSeconds = Number(value);
@@ -388,10 +402,21 @@ function CodebaseSettingsDialog({
     Number.isInteger(refreshIntervalSeconds) &&
     refreshIntervalSeconds >= MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS &&
     refreshIntervalSeconds <= MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS;
+  const fetchIntervalSeconds = Number(fetchValue);
+  const fetchValid =
+    Number.isInteger(fetchIntervalSeconds) &&
+    fetchIntervalSeconds >= MIN_WORKTREE_FETCH_INTERVAL_SECONDS &&
+    fetchIntervalSeconds <= MAX_WORKTREE_FETCH_INTERVAL_SECONDS;
+  let regexValid = true;
+  try {
+    if (jiraRegex) void new RegExp(jiraRegex, "i");
+  } catch {
+    regexValid = false;
+  }
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || !fetchValid || !regexValid) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -399,10 +424,16 @@ function CodebaseSettingsDialog({
       }>(
         `mutation UpdateCodebaseSettings($input: UpdateCodebaseSettingsInput!) {
           updateCodebaseSettings(input: $input) {
-            refreshIntervalSeconds updatedAt
+            refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt
           }
         }`,
-        { input: { refreshIntervalSeconds } },
+        {
+          input: {
+            refreshIntervalSeconds,
+            fetchIntervalSeconds,
+            defaultJiraBranchRegex: jiraRegex,
+          },
+        },
       );
       onSaved(data.updateCodebaseSettings);
     } catch (value) {
@@ -447,6 +478,41 @@ function CodebaseSettingsDialog({
               })}
             </p>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="codebase-fetch-interval">
+              {t("fetchInterval")}
+            </Label>
+            <Input
+              id="codebase-fetch-interval"
+              inputMode="numeric"
+              max={MAX_WORKTREE_FETCH_INTERVAL_SECONDS}
+              min={MIN_WORKTREE_FETCH_INTERVAL_SECONDS}
+              onChange={(event) => setFetchValue(event.target.value)}
+              required
+              step={1}
+              type="number"
+              value={fetchValue}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("fetchIntervalHelp", {
+                min: MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+                max: MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+              })}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="default-jira-branch-regex">
+              {t("defaultJiraBranchRegex")}
+            </Label>
+            <Input
+              id="default-jira-branch-regex"
+              onChange={(event) => setJiraRegex(event.target.value)}
+              value={jiraRegex}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("jiraBranchRegexHelp")}
+            </p>
+          </div>
           <DialogFooter>
             <Button
               onClick={() => onOpenChange(false)}
@@ -455,7 +521,10 @@ function CodebaseSettingsDialog({
             >
               {t("cancel")}
             </Button>
-            <Button disabled={busy || !valid} type="submit">
+            <Button
+              disabled={busy || !valid || !fetchValid || !regexValid}
+              type="submit"
+            >
               {busy && <Spinner />} {t("save")}
             </Button>
           </DialogFooter>
@@ -1062,6 +1131,9 @@ function EditRepositoryDialog({
   const t = useTranslations("codebases");
   const [name, setName] = useState(repository?.name ?? "");
   const [description, setDescription] = useState(repository?.description ?? "");
+  const [jiraBranchRegex, setJiraBranchRegex] = useState(
+    repository?.jiraBranchRegex ?? "",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (event: FormEvent) => {
@@ -1073,7 +1145,14 @@ function EditRepositoryDialog({
         `mutation UpdateCodebaseRepository($input: UpdateCodebaseRepositoryInput!) {
           updateCodebaseRepository(input: $input) { id }
         }`,
-        { input: { id: repository.id, name, description } },
+        {
+          input: {
+            id: repository.id,
+            name,
+            description,
+            jiraBranchRegex: jiraBranchRegex || null,
+          },
+        },
       );
       await onSaved();
     } catch (value) {
@@ -1104,6 +1183,20 @@ function EditRepositoryDialog({
               required
               value={name}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-codebase-jira-regex">
+              {t("jiraBranchRegex")}
+            </Label>
+            <Input
+              id="edit-codebase-jira-regex"
+              onChange={(event) => setJiraBranchRegex(event.target.value)}
+              placeholder={t("inheritDefaultRegex")}
+              value={jiraBranchRegex}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("jiraBranchRegexHelp")}
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-codebase-description">

@@ -13,6 +13,12 @@ import {
   codebaseBrowsePayload,
   codebaseJobPayload,
 } from "@ai-development-environment/agent-contract/codebases";
+import {
+  WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_JOB_KINDS,
+  WORKTREE_OPERATION_JOB_KIND,
+  worktreeJobPayload,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -38,12 +44,14 @@ export const SUPPORTED_AGENT_JOBS = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
   ...CODEBASE_JOB_KINDS,
+  ...WORKTREE_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
   id: string;
   agentId: string;
   codebaseId: string | null;
+  worktreeId: string | null;
   kind: string;
   status: string;
   resultJson: string | null;
@@ -78,6 +86,13 @@ export function validateJob(kind: string, payload: unknown): void {
     kind === CODEBASE_FETCH_JOB_KIND
   ) {
     codebaseJobPayload(value);
+    return;
+  }
+  if (
+    kind === WORKTREE_INSPECT_JOB_KIND ||
+    kind === WORKTREE_OPERATION_JOB_KIND
+  ) {
+    worktreeJobPayload(value);
     return;
   }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
@@ -269,6 +284,7 @@ export class AgentControlService {
     timeoutSeconds?: number | null;
     ccusageCollectionId?: string | null;
     codebaseId?: string | null;
+    worktreeId?: string | null;
     visibility?: "USER" | "SYSTEM";
   }) {
     validateJob(input.kind, input.payload);
@@ -314,6 +330,7 @@ export class AgentControlService {
           timeoutSeconds,
           ccusageCollectionId: input.ccusageCollectionId ?? null,
           codebaseId: input.codebaseId ?? null,
+          worktreeId: input.worktreeId ?? null,
           visibility: input.visibility ?? "USER",
         },
       });

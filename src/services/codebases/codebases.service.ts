@@ -13,6 +13,12 @@ import {
   type CodebaseSnapshot,
   type CodebaseStatusReport,
 } from "@ai-development-environment/agent-contract/codebases";
+import {
+  DEFAULT_JIRA_BRANCH_REGEX,
+  DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
@@ -110,7 +116,14 @@ export class CodebasesService {
       select: {
         id: true,
         folder: true,
+        defaultBranch: true,
+        lastFetchedAt: true,
+        lastFetchAttemptAt: true,
         repository: { select: { canonicalOrigin: true } },
+        worktrees: {
+          where: { missingAt: null },
+          select: { gitDirectory: true, baseBranchOverride: true },
+        },
       },
     });
   }
@@ -126,6 +139,8 @@ export class CodebasesService {
       create: {
         id: SETTINGS_ID,
         refreshIntervalSeconds: DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+        fetchIntervalSeconds: DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+        defaultJiraBranchRegex: DEFAULT_JIRA_BRANCH_REGEX,
       },
       update: {},
     });
@@ -138,11 +153,26 @@ export class CodebasesService {
     ]);
     return {
       refreshIntervalSeconds: settings.refreshIntervalSeconds,
+      fetchIntervalSeconds: settings.fetchIntervalSeconds,
       codebases,
     };
   }
 
-  async updateSettings(refreshIntervalSeconds: number) {
+  async updateSettings(
+    input:
+      | number
+      | {
+          refreshIntervalSeconds: number;
+          fetchIntervalSeconds: number;
+          defaultJiraBranchRegex: string;
+        },
+  ) {
+    const refreshIntervalSeconds =
+      typeof input === "number" ? input : input.refreshIntervalSeconds;
+    const fetchIntervalSeconds =
+      typeof input === "number"
+        ? DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS
+        : input.fetchIntervalSeconds;
     if (
       !Number.isInteger(refreshIntervalSeconds) ||
       refreshIntervalSeconds < MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS ||
@@ -152,11 +182,42 @@ export class CodebasesService {
         `Refresh interval must be an integer from ${MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS} to ${MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS} seconds`,
       );
     }
+    if (
+      !Number.isInteger(fetchIntervalSeconds) ||
+      fetchIntervalSeconds < MIN_WORKTREE_FETCH_INTERVAL_SECONDS ||
+      fetchIntervalSeconds > MAX_WORKTREE_FETCH_INTERVAL_SECONDS
+    ) {
+      throw new Error(
+        `Fetch interval must be an integer from ${MIN_WORKTREE_FETCH_INTERVAL_SECONDS} to ${MAX_WORKTREE_FETCH_INTERVAL_SECONDS} seconds`,
+      );
+    }
+    const defaultJiraBranchRegex =
+      typeof input === "number"
+        ? DEFAULT_JIRA_BRANCH_REGEX
+        : input.defaultJiraBranchRegex.trim();
+    if (defaultJiraBranchRegex) {
+      try {
+        void new RegExp(defaultJiraBranchRegex, "i");
+      } catch {
+        throw new Error("Default Jira branch regex is invalid");
+      }
+    }
     const prisma = await getPrismaClient();
+    const data =
+      typeof input === "number"
+        ? { refreshIntervalSeconds }
+        : {
+            refreshIntervalSeconds,
+            fetchIntervalSeconds,
+            defaultJiraBranchRegex,
+          };
     const settings = await prisma.codebaseSettings.upsert({
       where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID, refreshIntervalSeconds },
-      update: { refreshIntervalSeconds },
+      create: {
+        id: SETTINGS_ID,
+        ...data,
+      },
+      update: data,
     });
     this.publish(null, null);
     return settings;
@@ -306,6 +367,7 @@ export class CodebasesService {
     id: string,
     nameValue: string,
     descriptionValue: string,
+    jiraBranchRegexValue?: string | null,
   ) {
     const name = nameValue.trim();
     const description = descriptionValue.trim();
@@ -315,10 +377,18 @@ export class CodebasesService {
     if (description.length > 2_000) {
       throw new Error("Description must be 2,000 characters or fewer");
     }
+    const jiraBranchRegex = jiraBranchRegexValue?.trim() || null;
+    if (jiraBranchRegex) {
+      try {
+        void new RegExp(jiraBranchRegex, "i");
+      } catch {
+        throw new Error("Jira branch regex is invalid");
+      }
+    }
     const prisma = await getPrismaClient();
     const repository = await prisma.codebaseRepository.update({
       where: { id },
-      data: { name, description },
+      data: { name, description, jiraBranchRegex },
     });
     this.publish(null, id);
     return repository;

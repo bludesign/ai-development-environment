@@ -22,6 +22,7 @@ type CodebaseRepository {
   displayOrigin: String!
   name: String!
   description: String!
+  jiraBranchRegex: String
   codebases: [Codebase!]!
   createdAt: String!
   updatedAt: String!
@@ -39,8 +40,12 @@ type Codebase {
   syncState: CodebaseSyncState!
   availability: CodebaseAvailability!
   statusError: String
+  defaultBranch: String
+  remoteBranches: [String!]!
   lastCheckedAt: String
   lastFetchedAt: String
+  lastFetchAttemptAt: String
+  lastFetchError: String
   createdAt: String!
   updatedAt: String!
   agent: Agent!
@@ -92,6 +97,8 @@ type CodebaseOverview {
 
 type CodebaseSettings {
   refreshIntervalSeconds: Int!
+  fetchIntervalSeconds: Int!
+  defaultJiraBranchRegex: String!
   updatedAt: String!
 }
 
@@ -99,10 +106,20 @@ type AgentCodebaseRegistration {
   id: ID!
   folder: String!
   canonicalOrigin: String!
+  defaultBranch: String
+  lastFetchedAt: String
+  lastFetchAttemptAt: String
+  worktrees: [AgentWorktreeConfiguration!]!
+}
+
+type AgentWorktreeConfiguration {
+  gitDirectory: String!
+  baseBranchOverride: String
 }
 
 type AgentCodebaseConfiguration {
   refreshIntervalSeconds: Int!
+  fetchIntervalSeconds: Int!
   codebases: [AgentCodebaseRegistration!]!
 }
 
@@ -149,10 +166,13 @@ input UpdateCodebaseRepositoryInput {
   id: ID!
   name: String!
   description: String!
+  jiraBranchRegex: String
 }
 
 input UpdateCodebaseSettingsInput {
   refreshIntervalSeconds: Int!
+  fetchIntervalSeconds: Int!
+  defaultJiraBranchRegex: String!
 }
 
 input RunCodebaseOperationInput {

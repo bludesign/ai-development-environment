@@ -15,6 +15,11 @@ import {
   inspectCodebaseFolder,
   refreshCodebase,
 } from "./codebases.js";
+import {
+  WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_OPERATION_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
+import { inspectWorktree, operateWorktree } from "./worktrees.js";
 
 export type AgentJobHandler = (
   payload: unknown,
@@ -30,4 +35,6 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_INSPECT_JOB_KIND]: inspectCodebaseFolder,
   [CODEBASE_REFRESH_JOB_KIND]: refreshCodebase,
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,
+  [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
+  [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
 };
