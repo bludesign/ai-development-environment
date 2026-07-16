@@ -13,6 +13,7 @@ import {
   PanelRight,
   Settings,
   TicketCheck,
+  Wrench,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -368,6 +369,22 @@ function NavigationSidebar() {
           <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/tools")}
+                >
+                  <Link
+                    href="/tools"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Wrench />
+                    <span>{t("tools")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild

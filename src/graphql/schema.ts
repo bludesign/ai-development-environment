@@ -18,6 +18,8 @@ import { JiraService } from "@/services/jira";
 import { CcusageService } from "@/services/ccusage";
 import { CodebasesService } from "@/services/codebases";
 import { createCodebaseResolvers } from "./resolvers/codebases";
+import { createToolsResolvers } from "./resolvers/tools";
+import type { ToolsService } from "@/services/tools";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -31,6 +33,7 @@ export const createSchema = (
   gitHubService: GitHubService,
   ccusageService: CcusageService,
   codebasesService: CodebasesService,
+  toolsService: ToolsService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -39,6 +42,7 @@ export const createSchema = (
     createGitHubResolvers(gitHubService),
     createCcusageResolvers(ccusageService),
     createCodebaseResolvers(codebasesService),
+    createToolsResolvers(toolsService),
   ]);
 
   return buildSubgraphSchema({

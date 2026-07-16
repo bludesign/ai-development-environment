@@ -1,0 +1,52 @@
+enum ExternalMcpTransport {
+  STREAMABLE_HTTP
+  SSE
+}
+
+type ExternalMcpServerHeader {
+  id: ID!
+  name: String!
+  valueConfigured: Boolean!
+}
+
+type ExternalMcpServer {
+  id: ID!
+  name: String!
+  url: String!
+  transport: ExternalMcpTransport!
+  toolNamePrefix: String!
+  headers: [ExternalMcpServerHeader!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ExternalMcpServerRemoval {
+  id: ID!
+}
+
+input ExternalMcpServerHeaderInput {
+  id: ID
+  name: String!
+  value: String
+}
+
+input ExternalMcpServerInput {
+  name: String!
+  url: String!
+  transport: ExternalMcpTransport!
+  toolNamePrefix: String
+  headers: [ExternalMcpServerHeaderInput!]!
+}
+
+extend type Query {
+  externalMcpServers: [ExternalMcpServer!]!
+}
+
+extend type Mutation {
+  createExternalMcpServer(input: ExternalMcpServerInput!): ExternalMcpServer!
+  updateExternalMcpServer(
+    id: ID!
+    input: ExternalMcpServerInput!
+  ): ExternalMcpServer!
+  deleteExternalMcpServer(id: ID!): ExternalMcpServerRemoval!
+}
