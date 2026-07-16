@@ -75,6 +75,8 @@
     "offlineAgents": "Hors ligne : {agents}",
     "unsupportedAgents": "Mise à jour requise : {agents}",
     "failedAgents": "Échec : {agents}",
+    "costChartTitle": "Coût quotidien par modèle",
+    "costChartDescription": "Utilisation quotidienne cumulée en USD sur la période sélectionnée.",
     "totalCost": "Coût total",
     "totalTokens": "Total des jetons",
     "inputTokens": "Jetons d’entrée",

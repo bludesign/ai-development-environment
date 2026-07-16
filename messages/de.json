@@ -75,6 +75,8 @@
     "offlineAgents": "Offline: {agents}",
     "unsupportedAgents": "Aktualisierung erforderlich: {agents}",
     "failedAgents": "Fehlgeschlagen: {agents}",
+    "costChartTitle": "Tägliche Kosten nach Modell",
+    "costChartDescription": "Gestapelte tägliche Nutzung in USD für den ausgewählten Zeitraum.",
     "totalCost": "Gesamtkosten",
     "totalTokens": "Token gesamt",
     "inputTokens": "Eingabe-Token",

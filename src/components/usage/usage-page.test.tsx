@@ -155,6 +155,7 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Offline: Agent OFFLINE/)).toBeDefined();
     expect(screen.getByText(/Update required: Agent OLD/)).toBeDefined();
     expect(screen.getByText(/Failed: Agent B/)).toBeDefined();
+    expect(screen.getByText("Daily cost by model")).toBeDefined();
     expect(screen.getAllByText("$1.26").length).toBeGreaterThan(0);
     expect(
       screen

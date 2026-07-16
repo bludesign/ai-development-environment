@@ -75,6 +75,8 @@
     "offlineAgents": "Sin conexión: {agents}",
     "unsupportedAgents": "Actualización necesaria: {agents}",
     "failedAgents": "Con errores: {agents}",
+    "costChartTitle": "Coste diario por modelo",
+    "costChartDescription": "Uso diario acumulado en USD para el intervalo seleccionado.",
     "totalCost": "Coste total",
     "totalTokens": "Tokens totales",
     "inputTokens": "Tokens de entrada",

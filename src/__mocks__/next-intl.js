@@ -85,6 +85,9 @@ const mockTranslations = {
     offlineAgents: "Offline: {agents}",
     unsupportedAgents: "Update required: {agents}",
     failedAgents: "Failed: {agents}",
+    costChartTitle: "Daily cost by model",
+    costChartDescription:
+      "Stacked USD usage for each day in the selected range.",
     totalCost: "Total cost",
     totalTokens: "Total tokens",
     inputTokens: "Input tokens",

@@ -43,6 +43,7 @@ import {
   type UsageRangeDays,
   type UsageReportSource,
 } from "./aggregate-usage";
+import { UsageCostChart } from "./usage-cost-chart";
 
 const JOB_TIMEOUT_SECONDS = 120;
 const COLLECTION_DEADLINE_MS = 150_000;
@@ -445,6 +446,7 @@ export function UsagePage() {
         />
       ) : successful.length > 0 ? (
         <>
+          <UsageCostChart days={usage.days} />
           <SummaryTiles metrics={usage.totals} />
           <UsageTable days={usage.days} locale={locale} totals={usage.totals} />
         </>
