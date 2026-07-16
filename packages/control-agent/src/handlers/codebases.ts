@@ -20,6 +20,16 @@ const successfulProcess = {
   cancelled: false,
 } as const;
 
+class InterruptedGitInspection extends Error {
+  constructor(readonly result: CaptureResult) {
+    super(
+      result.cancelled
+        ? "Git inspection was cancelled"
+        : "Git inspection timed out",
+    );
+  }
+}
+
 function cleanError(value: unknown): string {
   const message = value instanceof Error ? value.message : String(value);
   return message
@@ -33,7 +43,7 @@ async function git(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<CaptureResult> {
-  return captureCommand({
+  const result = await captureCommand({
     command: "git",
     args: ["-C", folder, ...args],
     timeoutMs,
@@ -44,6 +54,10 @@ async function git(
       GIT_OPTIONAL_LOCKS: "0",
     },
   });
+  if (result.cancelled || result.timedOut) {
+    throw new InterruptedGitInspection(result);
+  }
+  return result;
 }
 
 function baseSnapshot(folder: string): CodebaseSnapshot {
@@ -76,12 +90,14 @@ async function fetchedAt(commonDirectory: string): Promise<string | null> {
   }
 }
 
-export async function inspectCodebase(
+async function inspectCodebaseProcess(
   selectedFolder: string,
   timeoutMs: number,
   signal: AbortSignal,
   expectedOrigin?: string,
-): Promise<CodebaseSnapshot> {
+): Promise<
+  (typeof successfulProcess & { snapshot: CodebaseSnapshot }) | CaptureResult
+> {
   const fallbackFolder = resolve(selectedFolder);
   const base = baseSnapshot(fallbackFolder);
   let selected: string;
@@ -91,9 +107,12 @@ export async function inspectCodebase(
       throw new Error("Folder is not a directory");
   } catch (error) {
     return {
-      ...base,
-      availability: "MISSING",
-      error: cleanError(error),
+      ...successfulProcess,
+      snapshot: {
+        ...base,
+        availability: "MISSING",
+        error: cleanError(error),
+      },
     };
   }
 
@@ -106,12 +125,15 @@ export async function inspectCodebase(
     );
     if (rootResult.exitCode !== 0) {
       return {
-        ...base,
-        folder: selected,
-        availability: "NOT_REPOSITORY",
-        error: cleanError(
-          rootResult.stderr || "Folder is not a Git repository",
-        ),
+        ...successfulProcess,
+        snapshot: {
+          ...base,
+          folder: selected,
+          availability: "NOT_REPOSITORY",
+          error: cleanError(
+            rootResult.stderr || "Folder is not a Git repository",
+          ),
+        },
       };
     }
     const folder = await realpath(rootResult.stdout.trim());
@@ -123,10 +145,13 @@ export async function inspectCodebase(
     );
     if (bare.stdout.trim() === "true") {
       return {
-        ...base,
-        folder,
-        availability: "NOT_REPOSITORY",
-        error: "Bare repositories are not supported",
+        ...successfulProcess,
+        snapshot: {
+          ...base,
+          folder,
+          availability: "NOT_REPOSITORY",
+          error: "Bare repositories are not supported",
+        },
       };
     }
     const [
@@ -152,10 +177,13 @@ export async function inspectCodebase(
     ]);
     if (originResult.exitCode !== 0) {
       return {
-        ...base,
-        folder,
-        availability: "ERROR",
-        error: "Repository does not have an origin remote",
+        ...successfulProcess,
+        snapshot: {
+          ...base,
+          folder,
+          availability: "ERROR",
+          error: "Repository does not have an origin remote",
+        },
       };
     }
     const origin = normalizeGitOrigin(originResult.stdout.trim());
@@ -213,30 +241,59 @@ export async function inspectCodebase(
     const mismatch =
       expectedOrigin !== undefined && origin.canonicalOrigin !== expectedOrigin;
     return {
-      folder,
-      observedOrigin: origin.sanitizedOrigin,
-      canonicalOrigin: origin.canonicalOrigin,
-      displayOrigin: origin.displayOrigin,
-      branch,
-      headSha: headResult.exitCode === 0 ? headResult.stdout.trim() : null,
-      upstream,
-      ahead,
-      behind,
-      syncState,
-      availability: mismatch ? "ORIGIN_MISMATCH" : "AVAILABLE",
-      error: mismatch ? `Origin changed to ${origin.displayOrigin}` : null,
-      checkedAt: new Date().toISOString(),
-      fetchedAt: await fetchedAt(commonDirectory),
-      linkedWorktree,
+      ...successfulProcess,
+      snapshot: {
+        folder,
+        observedOrigin: origin.sanitizedOrigin,
+        canonicalOrigin: origin.canonicalOrigin,
+        displayOrigin: origin.displayOrigin,
+        branch,
+        headSha: headResult.exitCode === 0 ? headResult.stdout.trim() : null,
+        upstream,
+        ahead,
+        behind,
+        syncState,
+        availability: mismatch ? "ORIGIN_MISMATCH" : "AVAILABLE",
+        error: mismatch ? `Origin changed to ${origin.displayOrigin}` : null,
+        checkedAt: new Date().toISOString(),
+        fetchedAt: await fetchedAt(commonDirectory),
+        linkedWorktree,
+      },
     };
   } catch (error) {
+    if (error instanceof InterruptedGitInspection) return error.result;
     return {
-      ...base,
-      folder: selected,
-      availability: "ERROR",
-      error: cleanError(error),
+      ...successfulProcess,
+      snapshot: {
+        ...base,
+        folder: selected,
+        availability: "ERROR",
+        error: cleanError(error),
+      },
     };
   }
+}
+
+export async function inspectCodebase(
+  selectedFolder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  expectedOrigin?: string,
+): Promise<CodebaseSnapshot> {
+  const result = await inspectCodebaseProcess(
+    selectedFolder,
+    timeoutMs,
+    signal,
+    expectedOrigin,
+  );
+  if (!("snapshot" in result)) {
+    throw new Error(
+      result.cancelled
+        ? "Git inspection was cancelled"
+        : "Git inspection timed out",
+    );
+  }
+  return result.snapshot;
 }
 
 export const browseCodebaseDirectories: AgentJobHandler = async (payload) => {
@@ -286,10 +343,7 @@ export const inspectCodebaseFolder: AgentJobHandler = async (
   signal,
 ) => {
   const input = codebaseJobPayload(payload);
-  return {
-    ...successfulProcess,
-    snapshot: await inspectCodebase(input.folder, timeoutMs, signal),
-  };
+  return inspectCodebaseProcess(input.folder, timeoutMs, signal);
 };
 
 export const refreshCodebase: AgentJobHandler = inspectCodebaseFolder;
@@ -300,27 +354,32 @@ export const fetchCodebase: AgentJobHandler = async (
   signal,
 ) => {
   const input = codebaseJobPayload(payload);
-  const before = await inspectCodebase(
+  const beforeResult = await inspectCodebaseProcess(
     input.folder,
     Math.min(timeoutMs, 30_000),
     signal,
     input.expectedOrigin,
   );
+  if (!("snapshot" in beforeResult)) return beforeResult;
+  const before = beforeResult.snapshot;
   if (before.availability !== "AVAILABLE") {
     return { ...successfulProcess, exitCode: 1, snapshot: before };
   }
-  const result = await git(
-    input.folder,
-    ["fetch", "origin"],
-    timeoutMs,
-    signal,
-  );
-  const snapshot = await inspectCodebase(
+  let result: CaptureResult;
+  try {
+    result = await git(input.folder, ["fetch", "origin"], timeoutMs, signal);
+  } catch (error) {
+    if (error instanceof InterruptedGitInspection) return error.result;
+    throw error;
+  }
+  const afterResult = await inspectCodebaseProcess(
     input.folder,
     Math.min(timeoutMs, 30_000),
     signal,
     input.expectedOrigin,
   );
+  if (!("snapshot" in afterResult)) return afterResult;
+  const snapshot = afterResult.snapshot;
   if (result.exitCode !== 0) {
     snapshot.error = cleanError(result.stderr || "Git fetch failed");
   } else if (!snapshot.fetchedAt) {

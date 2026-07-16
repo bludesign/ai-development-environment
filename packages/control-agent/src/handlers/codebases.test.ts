@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { inspectCodebase } from "./codebases.js";
+import { inspectCodebase, inspectCodebaseFolder } from "./codebases.js";
 
 const execute = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -113,5 +113,35 @@ describe("codebase Git inspection", () => {
     expect(
       await inspectCodebase(parent, 10_000, new AbortController().signal),
     ).toMatchObject({ availability: "NOT_REPOSITORY" });
+  });
+
+  test("propagates cancellation from Git inspection without a snapshot", async () => {
+    const folder = await repository();
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await inspectCodebaseFolder(
+      { folder },
+      10_000,
+      controller.signal,
+      async () => undefined,
+    );
+
+    expect(result).toMatchObject({ cancelled: true, timedOut: false });
+    expect("snapshot" in result).toBe(false);
+  });
+
+  test("propagates Git inspection timeouts without a snapshot", async () => {
+    const folder = await repository();
+
+    const result = await inspectCodebaseFolder(
+      { folder },
+      0,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect(result).toMatchObject({ cancelled: false, timedOut: true });
+    expect("snapshot" in result).toBe(false);
   });
 });

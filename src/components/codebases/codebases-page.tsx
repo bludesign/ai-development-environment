@@ -21,7 +21,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
@@ -73,6 +80,7 @@ import type {
 } from "./types";
 
 const RECONCILE_INTERVAL_MS = 30_000;
+const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
   statusError lastCheckedAt lastFetchedAt
@@ -99,8 +107,10 @@ export function CodebasesPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<CodebaseRepository | null>(null);
+  const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
+    const loadId = ++latestLoad.current;
     try {
       const data = await controlPlaneRequest<{
         codebaseOverview: { repositories: CodebaseRepository[] };
@@ -111,18 +121,21 @@ export function CodebasesPage() {
         codebaseSettings { refreshIntervalSeconds updatedAt }
         agents { ${AGENT_FIELDS} }
       }`);
+      if (loadId !== latestLoad.current) return;
       setRepositories(data.codebaseOverview.repositories);
       setSettings(data.codebaseSettings);
       setAgents(data.agents);
       setError(null);
     } catch (value) {
+      if (loadId !== latestLoad.current) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (loadId === latestLoad.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    let eventReload: number | null = null;
     const initial = window.setTimeout(() => void load(), 0);
     const reconcile = window.setInterval(
       () => void load(),
@@ -137,7 +150,13 @@ export function CodebasesPage() {
         }`,
       },
       {
-        next: () => void load(),
+        next: () => {
+          if (eventReload !== null) window.clearTimeout(eventReload);
+          eventReload = window.setTimeout(() => {
+            eventReload = null;
+            void load();
+          }, OVERVIEW_EVENT_DEBOUNCE_MS);
+        },
         error: () => undefined,
         complete: () => undefined,
       },
@@ -145,6 +164,8 @@ export function CodebasesPage() {
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(reconcile);
+      if (eventReload !== null) window.clearTimeout(eventReload);
+      latestLoad.current += 1;
       unsubscribe();
     };
   }, [load]);
@@ -729,6 +750,7 @@ function AddCodebaseDialog({
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
   const compatible = agents.filter(
     (agent) =>
       agent.connectionStatus === "ONLINE" &&
@@ -737,6 +759,7 @@ function AddCodebaseDialog({
   );
 
   const reset = () => {
+    requestSequence.current += 1;
     setAgentId("");
     setListing(null);
     setInspection(null);
@@ -744,10 +767,17 @@ function AddCodebaseDialog({
     setDescription("");
     setError(null);
     setShowHidden(false);
+    setBusy(false);
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) reset();
+    onOpenChange(nextOpen);
   };
 
   const browse = async (path: string | null) => {
     if (!agentId) return;
+    const requestId = ++requestSequence.current;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -760,18 +790,21 @@ function AddCodebaseDialog({
         }`,
         { input: { agentId, path, requestId: createClientId() } },
       );
+      if (requestId !== requestSequence.current) return;
       setListing(data.browseAgentDirectory);
       setInspection(null);
       setError(null);
     } catch (value) {
+      if (requestId !== requestSequence.current) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(false);
+      if (requestId === requestSequence.current) setBusy(false);
     }
   };
 
   const inspect = async () => {
     if (!listing) return;
+    const requestId = ++requestSequence.current;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -788,6 +821,7 @@ function AddCodebaseDialog({
           input: { agentId, folder: listing.path, requestId: createClientId() },
         },
       );
+      if (requestId !== requestSequence.current) return;
       const next = data.inspectAgentCodebase;
       setInspection(next);
       const suggested = next.snapshot.displayOrigin.split("/").at(-1) ?? "";
@@ -795,9 +829,10 @@ function AddCodebaseDialog({
       setDescription(next.existingRepository?.description ?? "");
       setError(null);
     } catch (value) {
+      if (requestId !== requestSequence.current) return;
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(false);
+      if (requestId === requestSequence.current) setBusy(false);
     }
   };
 
@@ -837,13 +872,7 @@ function AddCodebaseDialog({
     : [];
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) reset();
-        onOpenChange(nextOpen);
-      }}
-    >
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("addTitle")}</DialogTitle>
@@ -859,9 +888,12 @@ function AddCodebaseDialog({
             <Label htmlFor="codebase-agent">{t("agent")}</Label>
             <Select
               onValueChange={(value) => {
+                requestSequence.current += 1;
                 setAgentId(value);
                 setListing(null);
                 setInspection(null);
+                setBusy(false);
+                setError(null);
               }}
               value={agentId}
             >
@@ -1007,7 +1039,7 @@ function AddCodebaseDialog({
           )}
           <DialogFooter>
             <Button
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
               type="button"
               variant="outline"
             >

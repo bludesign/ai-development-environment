@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -22,7 +23,20 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
-const subscribe = vi.fn(() => vi.fn());
+let subscriptionNext: (() => void) | null = null;
+const subscriptionImplementation = (
+  _request: unknown,
+  sink: { next: (value: unknown) => void },
+) => {
+  subscriptionNext = () =>
+    sink.next({
+      data: {
+        codebaseOverviewChanged: { codebaseId: null, repositoryId: null },
+      },
+    });
+  return vi.fn();
+};
+const subscribe = vi.fn(subscriptionImplementation);
 
 class ResizeObserverMock {
   observe() {}
@@ -86,8 +100,9 @@ describe("CodebasesPage", () => {
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
     Element.prototype.scrollIntoView = vi.fn();
+    subscriptionNext = null;
     subscribe.mockReset();
-    subscribe.mockImplementation(() => vi.fn());
+    subscribe.mockImplementation(subscriptionImplementation);
     subscriptions.mockReturnValue({ subscribe } as never);
     request.mockImplementation(async (query) => {
       if (String(query).includes("query CodebaseOverview")) {
@@ -152,6 +167,23 @@ describe("CodebasesPage", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  test("coalesces burst status events into one overview reload", async () => {
+    render(<CodebasesPage />);
+    await screen.findByText("Studio Mac");
+    const overviewCalls = () =>
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query CodebaseOverview"),
+      ).length;
+    const before = overviewCalls();
+
+    act(() => {
+      for (let index = 0; index < 25; index += 1) subscriptionNext?.();
+    });
+
+    expect(overviewCalls()).toBe(before);
+    await waitFor(() => expect(overviewCalls()).toBe(before + 1));
   });
 
   test("browses, inspects, and confirms a new codebase", async () => {
@@ -229,6 +261,79 @@ describe("CodebasesPage", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("resets the add dialog when cancel is clicked", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query CodebaseOverview")) {
+        return {
+          codebaseOverview: { repositories: [] },
+          codebaseSettings: {
+            refreshIntervalSeconds: 30,
+            updatedAt: new Date(0).toISOString(),
+          },
+          agents: [agent],
+        } as never;
+      }
+      if (operation.includes("mutation BrowseAgentDirectory")) {
+        return {
+          browseAgentDirectory: {
+            path: "/Users/test/codex",
+            parentPath: "/Users/test",
+            homePath: "/Users/test",
+            entries: [],
+            truncated: false,
+          },
+        } as never;
+      }
+      if (operation.includes("mutation InspectAgentCodebase")) {
+        return {
+          inspectAgentCodebase: {
+            jobId: "inspection-1",
+            snapshot: {
+              folder: "/Users/test/codex",
+              observedOrigin: "git@github.com:openai/codex.git",
+              canonicalOrigin: "github.com/openai/codex",
+              displayOrigin: "github.com/openai/codex",
+              branch: "main",
+              syncState: "IN_SYNC",
+            },
+            existingRepository: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<CodebasesPage />);
+    await screen.findByText("No codebases yet");
+    fireEvent.click(screen.getByRole("button", { name: "Add codebase" }));
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Agent" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const agentOptions = await screen.findAllByText(
+      "Studio Mac · studio.local",
+    );
+    fireEvent.click(
+      agentOptions.find((element) => element.tagName === "SPAN") ??
+        agentOptions[0],
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
+    await screen.findByText("Inspect this folder");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Inspect this folder" }),
+    );
+    await screen.findByDisplayValue("codex");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Add codebase" }));
+
+    expect(await screen.findByText("Select an online agent")).toBeDefined();
+    expect(screen.queryByDisplayValue("codex")).toBeNull();
   });
 
   test("confirms removal without deleting the agent folder and reloads", async () => {

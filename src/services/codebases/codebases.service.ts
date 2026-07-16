@@ -26,6 +26,7 @@ import {
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
 const SETTINGS_ID = "default";
+const ACTIVE_CODEBASE_JOB_STATUSES = ["QUEUED", "RUNNING"];
 
 type CompletedJob = {
   id: string;
@@ -355,11 +356,20 @@ export class CodebasesService {
 
   async report(agentId: string, reports: CodebaseStatusReport[]) {
     const updated = [];
-    for (const report of reports.slice(0, 500)) {
-      const snapshot = parseCodebaseSnapshot(report.snapshot);
-      updated.push(
-        await this.applySnapshot(agentId, report.codebaseId, snapshot),
-      );
+    let changed = false;
+    try {
+      for (const report of reports.slice(0, 500)) {
+        const snapshot = parseCodebaseSnapshot(report.snapshot);
+        const applied = await this.applySnapshot(
+          agentId,
+          report.codebaseId,
+          snapshot,
+        );
+        updated.push(applied.codebase);
+        changed ||= applied.changed;
+      }
+    } finally {
+      if (changed) this.publish(null, null);
     }
     return updated;
   }
@@ -373,11 +383,23 @@ export class CodebasesService {
     const prisma = await getPrismaClient();
     const codebases = await prisma.codebase.findMany({
       where: { id: { in: [...new Set(codebaseIds)].slice(0, 500) } },
-      include: { agent: true, repository: true },
+      include: {
+        agent: true,
+        repository: true,
+        jobs: {
+          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
     const jobs = [];
     const skipped: Array<{ codebaseId: string; reason: string }> = [];
     for (const codebase of codebases) {
+      if (codebase.jobs.length > 0) {
+        skipped.push({ codebaseId: codebase.id, reason: "ACTIVE_OPERATION" });
+        continue;
+      }
       if (!online(codebase.agent)) {
         skipped.push({ codebaseId: codebase.id, reason: "OFFLINE" });
         continue;
@@ -396,20 +418,32 @@ export class CodebasesService {
         });
         continue;
       }
-      jobs.push(
-        await this.agentControl.createJob({
-          agentId: codebase.agentId,
-          codebaseId: codebase.id,
-          kind,
-          payload: {
+      try {
+        jobs.push(
+          await this.agentControl.createJob({
+            agentId: codebase.agentId,
             codebaseId: codebase.id,
-            folder: codebase.folder,
-            expectedOrigin: codebase.repository.canonicalOrigin,
+            kind,
+            payload: {
+              codebaseId: codebase.id,
+              folder: codebase.folder,
+              expectedOrigin: codebase.repository.canonicalOrigin,
+            },
+            idempotencyKey: `codebase:${kind}:${requestId}:${codebase.id}`,
+            timeoutSeconds: kind === CODEBASE_FETCH_JOB_KIND ? 300 : 30,
+          }),
+        );
+      } catch (error) {
+        const active = await prisma.agentJob.findFirst({
+          where: {
+            codebaseId: codebase.id,
+            status: { in: ACTIVE_CODEBASE_JOB_STATUSES },
           },
-          idempotencyKey: `codebase:${kind}:${requestId}:${codebase.id}`,
-          timeoutSeconds: kind === CODEBASE_FETCH_JOB_KIND ? 300 : 30,
-        }),
-      );
+          select: { id: true },
+        });
+        if (!active) throw error;
+        skipped.push({ codebaseId: codebase.id, reason: "ACTIVE_OPERATION" });
+      }
     }
     return { jobs, skipped };
   }
@@ -424,11 +458,14 @@ export class CodebasesService {
     if (!result || typeof result !== "object" || Array.isArray(result)) return;
     const snapshotValue = (result as Record<string, unknown>).snapshot;
     if (!snapshotValue) return;
-    await this.applySnapshot(
+    const applied = await this.applySnapshot(
       job.agentId,
       job.codebaseId,
       parseCodebaseSnapshot(snapshotValue),
     );
+    if (applied.changed) {
+      this.publish(applied.codebase.id, applied.codebase.repositoryId);
+    }
   }
 
   private async applySnapshot(
@@ -444,31 +481,58 @@ export class CodebasesService {
     if (!current || current.agentId !== agentId) {
       throw new Error("Codebase not found for this agent");
     }
+    const checkedAt = new Date(snapshot.checkedAt);
     const mismatch =
       snapshot.canonicalOrigin !== null &&
       snapshot.canonicalOrigin !== current.repository.canonicalOrigin;
     const incomingFetched = snapshot.fetchedAt
       ? new Date(snapshot.fetchedAt)
       : null;
-    const fetchedAt =
-      incomingFetched &&
-      (!current.lastFetchedAt || incomingFetched > current.lastFetchedAt)
-        ? incomingFetched
-        : current.lastFetchedAt;
-    const updated = await prisma.codebase.update({
-      where: { id: codebaseId },
+    const changed = await prisma.codebase.updateMany({
+      where: {
+        id: codebaseId,
+        agentId,
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: checkedAt } }],
+      },
       data: {
-        ...this.snapshotData(snapshot, fetchedAt),
-        observedOrigin: snapshot.observedOrigin ?? current.observedOrigin,
+        folder: snapshot.folder,
+        ...(snapshot.observedOrigin === null
+          ? {}
+          : { observedOrigin: snapshot.observedOrigin }),
+        branch: snapshot.branch,
+        headSha: snapshot.headSha,
+        upstream: snapshot.upstream,
+        ahead: snapshot.ahead,
+        behind: snapshot.behind,
+        syncState: snapshot.syncState,
         availability: mismatch ? "ORIGIN_MISMATCH" : snapshot.availability,
         statusError: mismatch
           ? `Origin changed to ${snapshot.displayOrigin ?? "an unknown remote"}`
           : snapshot.error,
+        lastCheckedAt: checkedAt,
       },
+    });
+    if (changed.count > 0 && incomingFetched) {
+      await prisma.codebase.updateMany({
+        where: {
+          id: codebaseId,
+          agentId,
+          OR: [
+            { lastFetchedAt: null },
+            { lastFetchedAt: { lt: incomingFetched } },
+          ],
+        },
+        data: { lastFetchedAt: incomingFetched },
+      });
+    }
+    const codebase = await prisma.codebase.findUnique({
+      where: { id: codebaseId },
       include: { agent: true, repository: true, jobs: true },
     });
-    this.publish(updated.id, updated.repositoryId);
-    return updated;
+    if (!codebase || codebase.agentId !== agentId) {
+      throw new Error("Codebase not found for this agent");
+    }
+    return { codebase, changed: changed.count > 0 };
   }
 
   private snapshotData(snapshot: CodebaseSnapshot, fetchedAt: Date | null) {

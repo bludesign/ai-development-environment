@@ -7,7 +7,11 @@ import {
   CODEBASE_FETCH_JOB_KIND,
   type CodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
-import type { AgentControlService } from "@/services/agent-control";
+import {
+  CODEBASE_CHANGED_TOPIC,
+  agentEventBus,
+  type AgentControlService,
+} from "@/services/agent-control";
 
 import { CodebasesService } from "./codebases.service";
 
@@ -45,19 +49,14 @@ describe("CodebasesService", () => {
       agentId: "agent-1",
       repositoryId: "repository-1",
       observedOrigin: "git@example.com:old/repo.git",
+      lastCheckedAt: new Date(5),
       lastFetchedAt: new Date(5),
       repository: { canonicalOrigin: "example.com/old/repo" },
     };
     const prisma = {
       codebase: {
         findUnique: vi.fn().mockResolvedValue(current),
-        update: vi.fn(async ({ data }) => ({
-          ...current,
-          ...data,
-          agent: {},
-          repository: current.repository,
-          jobs: [],
-        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     getPrismaClient.mockResolvedValue(prisma);
@@ -65,15 +64,104 @@ describe("CodebasesService", () => {
 
     await service.report("agent-1", [{ codebaseId: "codebase-1", snapshot }]);
 
-    expect(prisma.codebase.update).toHaveBeenCalledWith(
+    expect(prisma.codebase.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           availability: "ORIGIN_MISMATCH",
-          lastFetchedAt: new Date(5),
+          lastCheckedAt: new Date(10),
           statusError: "Origin changed to example.com/new/repo",
         }),
       }),
     );
+    expect(prisma.codebase.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ lastFetchedAt: null }, { lastFetchedAt: { lt: new Date(1) } }],
+        }),
+        data: { lastFetchedAt: new Date(1) },
+      }),
+    );
+  });
+
+  test("atomically ignores snapshots older than the stored status", async () => {
+    const current = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      repositoryId: "repository-1",
+      observedOrigin: "git@example.com:new/repo.git",
+      lastCheckedAt: new Date(20),
+      lastFetchedAt: new Date(20),
+      repository: { canonicalOrigin: "example.com/new/repo" },
+    };
+    const prisma = {
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue(current),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const publish = vi.spyOn(agentEventBus, "publish");
+    const service = new CodebasesService(control());
+
+    await service.report("agent-1", [{ codebaseId: "codebase-1", snapshot }]);
+
+    expect(prisma.codebase.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.codebase.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(10) } },
+          ],
+        }),
+      }),
+    );
+    expect(publish).not.toHaveBeenCalledWith(
+      CODEBASE_CHANGED_TOPIC,
+      expect.anything(),
+    );
+    publish.mockRestore();
+  });
+
+  test("publishes one overview change for a status report batch", async () => {
+    const current = (id: string) => ({
+      id,
+      agentId: "agent-1",
+      repositoryId: `repository-${id}`,
+      observedOrigin: snapshot.observedOrigin,
+      lastCheckedAt: null,
+      lastFetchedAt: null,
+      repository: { canonicalOrigin: snapshot.canonicalOrigin },
+    });
+    const prisma = {
+      codebase: {
+        findUnique: vi.fn(({ where }) => Promise.resolve(current(where.id))),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const publish = vi.spyOn(agentEventBus, "publish");
+    const service = new CodebasesService(control());
+
+    await service.report("agent-1", [
+      { codebaseId: "codebase-1", snapshot },
+      { codebaseId: "codebase-2", snapshot },
+    ]);
+
+    expect(
+      publish.mock.calls.filter(([topic]) => topic === CODEBASE_CHANGED_TOPIC),
+    ).toEqual([
+      [
+        CODEBASE_CHANGED_TOPIC,
+        {
+          codebaseOverviewChanged: {
+            codebaseId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+    ]);
+    publish.mockRestore();
   });
 
   test("queues bulk fetch only for online capable available codebases", async () => {
@@ -93,6 +181,7 @@ describe("CodebasesService", () => {
             availability: "AVAILABLE",
             agent: capable,
             repository: { canonicalOrigin: "example.com/ready" },
+            jobs: [],
           },
           {
             id: "offline",
@@ -101,6 +190,7 @@ describe("CodebasesService", () => {
             availability: "AVAILABLE",
             agent: { ...capable, lastSeenAt: new Date(0) },
             repository: { canonicalOrigin: "example.com/offline" },
+            jobs: [],
           },
           {
             id: "mismatch",
@@ -109,6 +199,16 @@ describe("CodebasesService", () => {
             availability: "ORIGIN_MISMATCH",
             agent: capable,
             repository: { canonicalOrigin: "example.com/mismatch" },
+            jobs: [],
+          },
+          {
+            id: "active",
+            agentId: "agent-1",
+            folder: "/active",
+            availability: "AVAILABLE",
+            agent: capable,
+            repository: { canonicalOrigin: "example.com/active" },
+            jobs: [{ id: "job-active" }],
           },
         ]),
       },
@@ -119,7 +219,7 @@ describe("CodebasesService", () => {
 
     const result = await service.runOperation(
       CODEBASE_FETCH_JOB_KIND,
-      ["ready", "offline", "mismatch"],
+      ["ready", "offline", "mismatch", "active"],
       "request-1",
     );
 
@@ -128,7 +228,47 @@ describe("CodebasesService", () => {
     expect(result.skipped).toEqual([
       { codebaseId: "offline", reason: "OFFLINE" },
       { codebaseId: "mismatch", reason: "ORIGIN_MISMATCH" },
+      { codebaseId: "active", reason: "ACTIVE_OPERATION" },
     ]);
+  });
+
+  test("skips a codebase when another request wins the scheduling race", async () => {
+    const capable = {
+      lastSeenAt: new Date(),
+      disconnectedAt: null,
+      capabilitiesJson: JSON.stringify([CODEBASE_FETCH_JOB_KIND]),
+    };
+    const prisma = {
+      codebase: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "ready",
+            agentId: "agent-1",
+            folder: "/ready",
+            availability: "AVAILABLE",
+            agent: capable,
+            repository: { canonicalOrigin: "example.com/ready" },
+            jobs: [],
+          },
+        ]),
+      },
+      agentJob: {
+        findFirst: vi.fn().mockResolvedValue({ id: "concurrent-job" }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = control();
+    vi.mocked(agentControl.createJob).mockRejectedValue(
+      new Error("unique constraint failed"),
+    );
+    const service = new CodebasesService(agentControl);
+
+    await expect(
+      service.runOperation(CODEBASE_FETCH_JOB_KIND, ["ready"], "request-2"),
+    ).resolves.toEqual({
+      jobs: [],
+      skipped: [{ codebaseId: "ready", reason: "ACTIVE_OPERATION" }],
+    });
   });
 
   test("removes repository metadata with its final registered codebase", async () => {
