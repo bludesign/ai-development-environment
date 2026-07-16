@@ -1,0 +1,284 @@
+enum JiraSourceKind {
+  JQL
+  BOARD
+}
+
+enum JiraCallSource {
+  LIVE
+  CACHE
+  ERROR
+}
+
+type JiraSettings {
+  siteUrl: String
+  email: String
+  tokenConfigured: Boolean!
+  cacheTtlSeconds: Int!
+  updatedAt: String!
+}
+
+type JiraCacheMeta {
+  source: JiraCallSource!
+  stale: Boolean!
+  fetchedAt: String!
+}
+
+type JiraSource {
+  id: ID!
+  projectId: ID!
+  name: String!
+  kind: JiraSourceKind!
+  value: String!
+  boardId: Int
+  position: Int!
+}
+
+type JiraProject {
+  id: ID!
+  jiraId: ID!
+  key: String!
+  name: String!
+  avatarUrl: String
+  position: Int!
+  sources: [JiraSource!]!
+}
+
+type JiraAvailableProject {
+  jiraId: ID!
+  key: String!
+  name: String!
+  avatarUrl: String
+}
+
+type JiraTicketSummary {
+  id: ID!
+  key: String!
+  summary: String!
+  statusId: String!
+  status: String!
+  statusCategory: String!
+  issueType: String
+  priority: String
+  assignee: String
+  assigneeAvatarUrl: String
+  projectKey: String!
+  updatedAt: String
+}
+
+type JiraTicketBoard {
+  source: JiraSource!
+  tickets: [JiraTicketSummary!]!
+  statusOrder: [String!]!
+  cache: JiraCacheMeta!
+  truncated: Boolean!
+  warnings: [String!]!
+}
+
+type JiraPerson {
+  accountId: String
+  displayName: String!
+  avatarUrl: String
+}
+
+type JiraNamedValue {
+  id: String
+  name: String!
+}
+
+type JiraComment {
+  id: ID!
+  author: JiraPerson
+  body: JSON
+  createdAt: String
+  updatedAt: String
+}
+
+type JiraAttachment {
+  id: ID!
+  filename: String!
+  contentUrl: String
+  mimeType: String
+  size: Int
+  author: JiraPerson
+  createdAt: String
+}
+
+type JiraIssueLink {
+  relationship: String!
+  key: String!
+  summary: String!
+  status: String
+}
+
+type JiraTicketDetail {
+  id: ID!
+  key: String!
+  summary: String!
+  statusId: String!
+  status: String!
+  statusCategory: String!
+  issueType: String
+  priority: String
+  assignee: String
+  assigneeAvatarUrl: String
+  projectKey: String!
+  updatedAt: String
+  jiraUrl: String!
+  description: JSON
+  reporter: JiraPerson
+  creator: JiraPerson
+  labels: [String!]!
+  components: [JiraNamedValue!]!
+  fixVersions: [JiraNamedValue!]!
+  affectedVersions: [JiraNamedValue!]!
+  sprintNames: [String!]!
+  parent: JiraIssueLink
+  subtasks: [JiraIssueLink!]!
+  issueLinks: [JiraIssueLink!]!
+  attachments: [JiraAttachment!]!
+  comments: [JiraComment!]!
+  createdAt: String
+  dueAt: String
+  resolvedAt: String
+  timeTracking: JSON
+  cache: JiraCacheMeta!
+  commentsCache: JiraCacheMeta!
+}
+
+type JiraConnectionTest {
+  accountId: String
+  displayName: String!
+  emailAddress: String
+  cache: JiraCacheMeta!
+}
+
+type JiraMetricWindow {
+  window: String!
+  total: Int!
+  live: Int!
+  cache: Int!
+  errors: Int!
+  averageMs: Int!
+}
+
+type JiraOperationMetric {
+  operation: String!
+  windows: [JiraMetricWindow!]!
+}
+
+type JiraCacheMetrics {
+  windows: [JiraMetricWindow!]!
+  operations: [JiraOperationMetric!]!
+}
+
+type JiraApiCall {
+  id: ID!
+  operation: String!
+  requestSummary: String!
+  source: JiraCallSource!
+  durationMs: Int!
+  statusCode: Int
+  error: String
+  itemCount: Int
+  servedStale: Boolean!
+  createdAt: String!
+}
+
+type JiraApiCallPage {
+  items: [JiraApiCall!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type JiraCachedTicket {
+  issueKey: ID!
+  projectKey: String!
+  summary: String!
+  status: String
+  coverage: String!
+  stale: Boolean!
+  summaryFetchedAt: String
+  detailFetchedAt: String
+  commentsFetchedAt: String
+  updatedAt: String!
+}
+
+type JiraCachedTicketPage {
+  items: [JiraCachedTicket!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type JiraCachedEntryReference {
+  id: ID!
+  operation: String!
+  fetchedAt: String!
+}
+
+type JiraCachedTicketDetail {
+  issueKey: ID!
+  projectKey: String!
+  summary: String!
+  status: String
+  coverage: String!
+  stale: Boolean!
+  summaryFetchedAt: String
+  detailFetchedAt: String
+  commentsFetchedAt: String
+  updatedAt: String!
+  summaryData: JSON
+  detailData: JSON
+  commentsData: JSON
+  cacheEntries: [JiraCachedEntryReference!]!
+}
+
+input SaveJiraSettingsInput {
+  siteUrl: String!
+  email: String!
+  apiToken: String
+  resetSite: Boolean = false
+}
+
+input CreateJiraSourceInput {
+  projectId: ID!
+  name: String!
+  kind: JiraSourceKind!
+  value: String!
+}
+
+input UpdateJiraSourceInput {
+  id: ID!
+  name: String!
+  kind: JiraSourceKind!
+  value: String!
+}
+
+extend type Query {
+  jiraSettings: JiraSettings!
+  jiraAvailableProjects: [JiraAvailableProject!]!
+  jiraProjects: [JiraProject!]!
+  jiraTicketBoard(sourceId: ID!): JiraTicketBoard!
+  jiraTicket(issueKey: ID!): JiraTicketDetail!
+  jiraCacheMetrics: JiraCacheMetrics!
+  jiraApiCalls(limit: Int = 50, offset: Int = 0): JiraApiCallPage!
+  jiraCachedTickets(limit: Int = 50, offset: Int = 0): JiraCachedTicketPage!
+  jiraCachedTicket(issueKey: ID!): JiraCachedTicketDetail
+}
+
+extend type Mutation {
+  saveJiraSettings(input: SaveJiraSettingsInput!): JiraSettings!
+  testJiraConnection: JiraConnectionTest!
+  clearJiraCredentials: JiraSettings!
+  addJiraProject(jiraId: ID!): [JiraProject!]!
+  removeJiraProject(projectId: ID!): [JiraProject!]!
+  createJiraSource(input: CreateJiraSourceInput!): [JiraProject!]!
+  updateJiraSource(input: UpdateJiraSourceInput!): [JiraProject!]!
+  deleteJiraSource(id: ID!): [JiraProject!]!
+  refreshJiraSource(sourceId: ID!): JiraTicketBoard!
+  updateJiraCacheTtl(ttlMinutes: Int!): JiraSettings!
+  clearJiraCache: Boolean!
+  refreshJiraCachedTicket(issueKey: ID!): JiraTicketDetail!
+  deleteJiraCachedTicket(issueKey: ID!): Boolean!
+}
