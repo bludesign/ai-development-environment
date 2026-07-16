@@ -1,3 +1,5 @@
+import type { GraphQLResolveInfo, SelectionSetNode } from "graphql";
+
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   GitHubAuditContext,
@@ -15,6 +17,66 @@ function requireControlPlane(context: GraphQLContext): void {
 
 function auditContext(context: GraphQLContext): GitHubAuditContext {
   return { actor: "control-plane", ipAddress: context.ipAddress };
+}
+
+function selectionIncludesField(
+  selectionSet: SelectionSetNode,
+  fieldName: string,
+  info: GraphQLResolveInfo,
+  visitedFragments = new Set<string>(),
+): boolean {
+  for (const selection of selectionSet.selections) {
+    if (selection.kind === "Field") {
+      if (selection.name.value === fieldName) return true;
+      if (
+        selection.selectionSet &&
+        selectionIncludesField(
+          selection.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    } else if (selection.kind === "InlineFragment") {
+      if (
+        selectionIncludesField(
+          selection.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    } else if (!visitedFragments.has(selection.name.value)) {
+      visitedFragments.add(selection.name.value);
+      const fragment = info.fragments[selection.name.value];
+      if (
+        fragment &&
+        selectionIncludesField(
+          fragment.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function requestsPipelineJobs(info?: GraphQLResolveInfo): boolean {
+  return Boolean(
+    info?.fieldNodes.some((fieldNode) =>
+      fieldNode.selectionSet
+        ? selectionIncludesField(fieldNode.selectionSet, "jobs", info)
+        : false,
+    ),
+  );
 }
 
 export const createGitHubResolvers = (gitHubService: GitHubService) => ({
@@ -58,9 +120,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
         repositoryId,
       }: { scope: GitHubPullRequestScope; repositoryId?: string | null },
       context: GraphQLContext,
+      info?: GraphQLResolveInfo,
     ) => {
       requireControlPlane(context);
-      return gitHubService.pullRequests(scope, repositoryId);
+      return requestsPipelineJobs(info)
+        ? gitHubService.pullRequests(scope, repositoryId, {
+            includePipelineJobs: true,
+          })
+        : gitHubService.pullRequests(scope, repositoryId);
     },
     githubPullRequest: (
       _root: unknown,

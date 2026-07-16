@@ -376,6 +376,76 @@ describe("GitHub service", () => {
     ).toBe(true);
   });
 
+  test("hydrates workflow jobs for pull request list queries that request them", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/actions/runs/1/jobs")) {
+        return response({
+          total_count: 1,
+          jobs: [
+            {
+              id: 11,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+              html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+              steps: [
+                {
+                  number: 1,
+                  name: "Set up job",
+                  status: "completed",
+                  conclusion: "success",
+                },
+                {
+                  number: 2,
+                  name: "Run tests",
+                  status: "completed",
+                  conclusion: "failure",
+                },
+              ],
+            },
+          ],
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as { query: string };
+      if (body.query.includes("query GitHubRepositoryPullRequests")) {
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  rawPullRequest("pull-request-1", "APP-42 Add API", {
+                    pipeline: "FAILURE",
+                  }),
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequests(
+      "REPOSITORY",
+      "local-repository-1",
+      { includePipelineJobs: true },
+    );
+
+    expect(result.items[0]?.pipelines[0]?.jobs).toEqual([
+      expect.objectContaining({
+        id: "11",
+        name: "test",
+        status: "FAILURE",
+        steps: [
+          expect.objectContaining({ name: "Set up job", status: "SUCCESS" }),
+          expect.objectContaining({ name: "Run tests", status: "FAILURE" }),
+        ],
+      }),
+    ]);
+  });
+
   test("requires credentials and redacts a token echoed by GitHub", async () => {
     state.apiToken = null;
     await expect(new GitHubService().testConnection()).rejects.toThrow(

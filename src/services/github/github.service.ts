@@ -1219,6 +1219,7 @@ export class GitHubService {
   async pullRequests(
     scope: GitHubPullRequestScope,
     repositoryId?: string | null,
+    options: { includePipelineJobs?: boolean } = {},
   ): Promise<GitHubPullRequestPage> {
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
@@ -1289,16 +1290,43 @@ export class GitHubService {
       }
     }
 
+    const items = await Promise.all(
+      rawItems.map((pullRequest) =>
+        this.normalizePullRequest(
+          pullRequest,
+          regexByGitHubId.get(pullRequest.repository.id) ?? null,
+          token,
+          appConfigured,
+        ),
+      ),
+    );
+    if (!options.includePipelineJobs) return { items, truncated };
+
     return {
       items: await Promise.all(
-        rawItems.map((pullRequest) =>
-          this.normalizePullRequest(
-            pullRequest,
-            regexByGitHubId.get(pullRequest.repository.id) ?? null,
-            token,
-            appConfigured,
-          ),
-        ),
+        items.map(async (pullRequest) => {
+          const { owner, name } = normalizeGitHubRepositoryName(
+            pullRequest.repositoryNameWithOwner,
+          );
+          return {
+            ...pullRequest,
+            pipelines: await Promise.all(
+              pullRequest.pipelines.map(async (pipeline) => {
+                if (!pipeline.workflowRunId) return pipeline;
+                return {
+                  ...pipeline,
+                  jobs: await this.workflowJobs(
+                    owner,
+                    name,
+                    pipeline.workflowRunId,
+                    token,
+                    appConfigured,
+                  ),
+                };
+              }),
+            ),
+          };
+        }),
       ),
       truncated,
     };

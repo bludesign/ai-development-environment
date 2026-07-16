@@ -1,4 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
+import {
+  parse,
+  type GraphQLResolveInfo,
+  type OperationDefinitionNode,
+} from "graphql";
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { GitHubService } from "@/services/github";
@@ -7,6 +12,29 @@ import { createGitHubResolvers } from "./github";
 
 function context(agentId: string | null): GraphQLContext {
   return { agentId, ipAddress: "127.0.0.1" } as GraphQLContext;
+}
+
+function resolveInfo(source: string): GraphQLResolveInfo {
+  const document = parse(source);
+  const operation = document.definitions.find(
+    (definition): definition is OperationDefinitionNode =>
+      definition.kind === "OperationDefinition",
+  );
+  if (!operation) throw new Error("Query operation is required");
+  const fieldNode = operation.selectionSet.selections.find(
+    (selection) => selection.kind === "Field",
+  );
+  if (!fieldNode || fieldNode.kind !== "Field") {
+    throw new Error("Query field is required");
+  }
+  return {
+    fieldNodes: [fieldNode],
+    fragments: Object.fromEntries(
+      document.definitions
+        .filter((definition) => definition.kind === "FragmentDefinition")
+        .map((fragment) => [fragment.name.value, fragment]),
+    ),
+  } as unknown as GraphQLResolveInfo;
 }
 
 describe("GitHub resolvers", () => {
@@ -108,5 +136,37 @@ describe("GitHub resolvers", () => {
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(safeSettings).not.toHaveProperty("apiToken");
+  });
+
+  test("hydrates pipeline jobs when the list query selects them", async () => {
+    const service = {
+      pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service);
+    const info = resolveInfo(`
+      query PullRequests($scope: GitHubPullRequestScope!) {
+        githubPullRequests(scope: $scope) {
+          items {
+            ...PipelineJobs
+          }
+        }
+      }
+      fragment PipelineJobs on GitHubPullRequest {
+        pipelines {
+          jobs { name status }
+        }
+      }
+    `);
+
+    await resolvers.Query.githubPullRequests(
+      {},
+      { scope: "MINE" },
+      context(null),
+      info,
+    );
+
+    expect(service.pullRequests).toHaveBeenCalledWith("MINE", undefined, {
+      includePipelineJobs: true,
+    });
   });
 });
