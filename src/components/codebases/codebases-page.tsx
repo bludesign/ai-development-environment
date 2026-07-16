@@ -24,6 +24,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,13 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
@@ -665,23 +673,25 @@ function AddCodebaseDialog({
           )}
           <div className="space-y-2">
             <Label htmlFor="codebase-agent">{t("agent")}</Label>
-            <select
-              className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
-              id="codebase-agent"
-              onChange={(event) => {
-                setAgentId(event.target.value);
+            <Select
+              onValueChange={(value) => {
+                setAgentId(value);
                 setListing(null);
                 setInspection(null);
               }}
               value={agentId}
             >
-              <option value="">{t("selectAgent")}</option>
-              {compatible.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name} · {agent.hostname}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full" id="codebase-agent">
+                <SelectValue placeholder={t("selectAgent")} />
+              </SelectTrigger>
+              <SelectContent>
+                {compatible.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name} · {agent.hostname}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           {agentId && !listing && (
             <Button
@@ -722,12 +732,10 @@ function AddCodebaseDialog({
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <input
+                <Checkbox
                   checked={showHidden}
-                  className="size-4"
                   id="show-hidden"
-                  onChange={(event) => setShowHidden(event.target.checked)}
-                  type="checkbox"
+                  onCheckedChange={(value) => setShowHidden(Boolean(value))}
                 />
                 <Label htmlFor="show-hidden">{t("showHidden")}</Label>
               </div>
@@ -735,14 +743,16 @@ function AddCodebaseDialog({
                 {listing.entries
                   .filter((entry) => showHidden || !entry.hidden)
                   .map((entry) => (
-                    <button
-                      className="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-muted"
+                    <Button
+                      className="h-auto w-full justify-start rounded-none border-b px-3 py-2 last:border-0"
                       key={entry.path}
                       onClick={() => void browse(entry.path)}
+                      size="sm"
                       type="button"
+                      variant="ghost"
                     >
                       <Folder className="size-4" /> {entry.name}
-                    </button>
+                    </Button>
                   ))}
               </div>
               {listing.truncated && (

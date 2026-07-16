@@ -23,6 +23,12 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const subscribe = vi.fn(() => vi.fn());
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 const agent = {
   id: "agent-1",
   name: "Studio Mac",
@@ -74,6 +80,11 @@ const repository = {
 
 describe("CodebasesPage", () => {
   beforeEach(() => {
+    global.ResizeObserver = ResizeObserverMock;
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+    Element.prototype.scrollIntoView = vi.fn();
     subscribe.mockReset();
     subscribe.mockImplementation(() => vi.fn());
     subscriptions.mockReturnValue({ subscribe } as never);
@@ -166,9 +177,18 @@ describe("CodebasesPage", () => {
     render(<CodebasesPage />);
     await screen.findByText("No codebases yet");
     fireEvent.click(screen.getByRole("button", { name: "Add codebase" }));
-    fireEvent.change(screen.getByLabelText("Agent"), {
-      target: { value: "agent-1" },
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Agent" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
     });
+    const agentOptions = await screen.findAllByText(
+      "Studio Mac · studio.local",
+    );
+    fireEvent.click(
+      agentOptions.find((element) => element.tagName === "SPAN") ??
+        agentOptions[0],
+    );
     fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
     expect(await screen.findByText("Inspect this folder")).toBeDefined();
     fireEvent.click(
