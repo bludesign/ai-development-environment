@@ -1,11 +1,16 @@
 "use client";
 
-import { ArrowLeft, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -27,6 +32,7 @@ function date(value: string | null) {
 
 export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
   const t = useTranslations("jiraCacheDetail");
+  const tc = useTranslations("common");
   const router = useRouter();
   const [ticket, setTicket] = useState<JiraCachedTicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,7 +78,6 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
   };
 
   const remove = async () => {
-    if (!window.confirm(t("confirmDelete", { issueKey }))) return;
     setBusy(true);
     try {
       await controlPlaneRequest(
@@ -112,30 +117,37 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
             <RefreshCw className={busy ? "animate-spin" : undefined} />
             {t("refresh")}
           </Button>
-          <Button
-            disabled={busy || !ticket}
-            onClick={() => void remove()}
-            variant="destructive"
-          >
-            <Trash2 />
-            {t("delete")}
-          </Button>
+          <ConfirmationDialog
+            actionLabel={t("delete")}
+            cancelLabel={tc("cancel")}
+            description={tc("cannotBeUndone")}
+            onConfirm={remove}
+            title={t("confirmDelete", { issueKey })}
+            trigger={
+              <Button disabled={busy || !ticket} variant="destructive">
+                <Trash2 />
+                {t("delete")}
+              </Button>
+            }
+          />
         </div>
       </div>
       {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
+          <Spinner />
           {t("loading")}
         </div>
       ) : !ticket ? (
-        <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          {t("notFound")}
-        </div>
+        <Empty className="border py-10">
+          <EmptyHeader>
+            <EmptyDescription>{t("notFound")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -169,10 +181,10 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
           <JsonPanel title={t("summaryData")} value={ticket.summaryData} />
           <JsonPanel title={t("detailData")} value={ticket.detailData} />
           <JsonPanel title={t("commentsData")} value={ticket.commentsData} />
-          <section className="overflow-hidden rounded-xl border bg-card">
-            <div className="border-b p-4">
-              <h2 className="font-semibold">{t("relatedEntries")}</h2>
-            </div>
+          <Card className="gap-0 py-0">
+            <CardHeader className="border-b py-4">
+              <CardTitle>{t("relatedEntries")}</CardTitle>
+            </CardHeader>
             {ticket.cacheEntries.length === 0 ? (
               <p className="p-6 text-sm text-muted-foreground">
                 {t("noEntries")}
@@ -201,7 +213,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
                 </TableBody>
               </Table>
             )}
-          </section>
+          </Card>
         </>
       )}
     </section>
@@ -210,20 +222,22 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
 
 function Metadata({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-xl border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
+    <Card>
+      <CardContent>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <div className="mt-1 text-sm font-medium">{value}</div>
+      </CardContent>
+    </Card>
   );
 }
 
 function JsonPanel({ title, value }: { title: string; value: unknown }) {
   const t = useTranslations("jiraCacheDetail");
   return (
-    <section className="overflow-hidden rounded-xl border bg-card">
-      <div className="border-b p-4">
-        <h2 className="font-semibold">{title}</h2>
-      </div>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
       {value === null ? (
         <p className="p-6 text-sm text-muted-foreground">{t("notFetched")}</p>
       ) : (
@@ -231,6 +245,6 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
           {JSON.stringify(value, null, 2)}
         </pre>
       )}
-    </section>
+    </Card>
   );
 }

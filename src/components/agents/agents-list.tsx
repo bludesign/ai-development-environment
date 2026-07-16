@@ -4,7 +4,17 @@ import { Copy, Laptop, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { copyText } from "@/lib/browser-utils";
 import {
@@ -117,80 +127,93 @@ export function AgentsList() {
       </div>
 
       {enrollment && (
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <h2 className="font-medium">{t("enrollmentTitle")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("enrollmentDescription")}
-          </p>
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-muted p-3">
-            <code className="min-w-0 flex-1 break-all text-xs">{command}</code>
-            <Button
-              aria-label={t("copy")}
-              onClick={() => void copyEnrollmentCommand()}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <Copy />
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t("expires", {
-              date: new Date(enrollment.expiresAt).toLocaleString(),
-            })}
-          </p>
-        </div>
+        <Card>
+          <CardContent>
+            <h2 className="font-medium">{t("enrollmentTitle")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t("enrollmentDescription")}
+            </p>
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-muted p-3">
+              <code className="min-w-0 flex-1 break-all text-xs">
+                {command}
+              </code>
+              <Button
+                aria-label={t("copy")}
+                onClick={() => void copyEnrollmentCommand()}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <Copy />
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t("expires", {
+                date: new Date(enrollment.expiresAt).toLocaleString(),
+              })}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {error && (
-        <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {loading ? (
-        <p className="text-sm text-muted-foreground">{t("loading")}</p>
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner />
+          {t("loading")}
+        </p>
       ) : agents.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-10 text-center">
-          <Laptop className="mx-auto size-8 text-muted-foreground" />
-          <h2 className="mt-3 font-medium">{t("emptyTitle")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("emptyDescription")}
-          </p>
-        </div>
+        <Empty className="border py-10">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Laptop />
+            </EmptyMedia>
+            <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
+            <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {agents.map((agent) => (
             <Link
               key={agent.id}
               href={`/agents/${agent.id}`}
-              className="rounded-xl border bg-card p-4 shadow-sm transition-colors hover:bg-muted/50"
+              className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="truncate font-medium">{agent.name}</h2>
-                  <p className="truncate text-sm text-muted-foreground">
-                    {agent.hostname}
-                  </p>
-                </div>
-                <StatusBadge status={agent.connectionStatus} />
-              </div>
-              <dl className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                <div>
-                  <dt>{t("version")}</dt>
-                  <dd className="text-foreground">{agent.version}</dd>
-                </div>
-                <div>
-                  <dt>{t("platform")}</dt>
-                  <dd className="text-foreground">{agent.architecture}</dd>
-                </div>
-                <div className="col-span-2">
-                  <dt>{t("lastSeen")}</dt>
-                  <dd className="text-foreground">
-                    {agent.lastSeenAt
-                      ? new Date(agent.lastSeenAt).toLocaleString()
-                      : t("never")}
-                  </dd>
-                </div>
-              </dl>
+              <Card className="h-full transition-colors hover:bg-muted/50">
+                <CardContent>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="truncate font-medium">{agent.name}</h2>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {agent.hostname}
+                      </p>
+                    </div>
+                    <StatusBadge status={agent.connectionStatus} />
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div>
+                      <dt>{t("version")}</dt>
+                      <dd className="text-foreground">{agent.version}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("platform")}</dt>
+                      <dd className="text-foreground">{agent.architecture}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt>{t("lastSeen")}</dt>
+                      <dd className="text-foreground">
+                        {agent.lastSeenAt
+                          ? new Date(agent.lastSeenAt).toLocaleString()
+                          : t("never")}
+                      </dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
             </Link>
           ))}
         </div>

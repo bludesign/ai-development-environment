@@ -68,4 +68,67 @@ describe("JiraSettingsPage", () => {
     });
     expect(screen.queryByDisplayValue("replacement-token")).toBeNull();
   });
+
+  test("requires confirmation before saving a changed Jira site", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query { jiraSettings")) {
+        return {
+          jiraSettings: {
+            siteUrl: "https://old.atlassian.net",
+            email: "user@example.com",
+            tokenConfigured: true,
+            cacheTtlSeconds: 300,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      return {
+        saveJiraSettings: {
+          siteUrl: "https://new.atlassian.net",
+          email: "user@example.com",
+          tokenConfigured: true,
+          cacheTtlSeconds: 300,
+          updatedAt: new Date().toISOString(),
+        },
+      } as never;
+    });
+
+    render(<JiraSettingsPage />);
+    const siteInput = (await screen.findByLabelText(
+      "Jira Cloud site URL",
+    )) as HTMLInputElement;
+    fireEvent.change(siteInput, {
+      target: { value: "https://new.atlassian.net" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Changing the Jira site removes all saved Jira projects, sources, and cached data. Continue?",
+      ),
+    ).toBeDefined();
+    expect(
+      requestMock.mock.calls.some(([query]) =>
+        String(query).includes("SaveJiraSettings"),
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("SaveJiraSettings"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            resetSite: true,
+            siteUrl: "https://new.atlassian.net",
+          }),
+        }),
+      ),
+    );
+  });
 });

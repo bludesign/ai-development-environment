@@ -2,12 +2,10 @@
 
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   Columns3,
   ExternalLink,
   FolderKanban,
-  LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -18,12 +16,15 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { DropdownMenu } from "radix-ui";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { AdfRenderer } from "@/components/jira/adf-renderer";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -32,8 +33,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { Item } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -41,6 +63,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -228,28 +251,30 @@ export function JiraTicketsPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
+          <Spinner />
           {t("loading")}
         </div>
       ) : projects.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-10 text-center">
-          <FolderKanban className="mx-auto size-9 text-muted-foreground" />
-          <h2 className="mt-3 font-medium">{t("emptyProjects")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("emptyProjectsDescription")}
-          </p>
+        <Empty className="border py-10">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FolderKanban />
+            </EmptyMedia>
+            <EmptyTitle>{t("emptyProjects")}</EmptyTitle>
+            <EmptyDescription>{t("emptyProjectsDescription")}</EmptyDescription>
+          </EmptyHeader>
           <Button className="mt-4" onClick={() => setManagerOpen(true)}>
             <Plus />
             {t("addProject")}
           </Button>
-        </div>
+        </Empty>
       ) : (
         <>
           <div className="overflow-x-auto pb-1">
@@ -295,112 +320,115 @@ export function JiraTicketsPage() {
               </Tabs>
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <h2 className="font-medium">{t("emptySources")}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t("emptySourcesDescription")}
-              </p>
+            <Empty className="border py-8">
+              <EmptyHeader>
+                <EmptyTitle>{t("emptySources")}</EmptyTitle>
+                <EmptyDescription>
+                  {t("emptySourcesDescription")}
+                </EmptyDescription>
+              </EmptyHeader>
               <Button className="mt-4" onClick={() => setManagerOpen(true)}>
                 <Plus />
                 {t("addSource")}
               </Button>
-            </div>
+            </Empty>
           )}
 
           {board?.cache.stale && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              {t("staleWarning")}
-            </div>
+            <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
+              <AlertTriangle />
+              <AlertDescription className="text-current">
+                {t("staleWarning")}
+              </AlertDescription>
+            </Alert>
           )}
           {board?.truncated && (
-            <div className="rounded-lg border bg-muted p-3 text-sm">
-              {t("truncatedWarning")}
-            </div>
+            <Alert className="bg-muted">
+              <AlertDescription>{t("truncatedWarning")}</AlertDescription>
+            </Alert>
           )}
           {board?.warnings.map((warning) => (
-            <div
-              key={warning}
-              className="rounded-lg border bg-muted p-3 text-sm"
-            >
-              {warning}
-            </div>
+            <Alert className="bg-muted" key={warning}>
+              <AlertDescription>{warning}</AlertDescription>
+            </Alert>
           ))}
 
           {selectedSource && boardLoading && !board ? (
             <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" />
+              <Spinner />
               {t("loadingTickets")}
             </div>
           ) : board && board.tickets.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-              {t("emptyTickets")}
-            </div>
+            <Empty className="border py-10">
+              <EmptyHeader>
+                <EmptyDescription>{t("emptyTickets")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : board ? (
             layout === "table" ? (
               <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (
-                  <section
-                    key={status}
-                    className="overflow-hidden rounded-xl border bg-card"
-                  >
-                    <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
+                  <Card key={status} className="gap-0 py-0">
+                    <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-2 border-b bg-muted/40 py-3">
                       <h2 className="font-medium">{status}</h2>
                       <Badge>{tickets.length}</Badge>
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="hover:bg-transparent">
-                          <TableHead>{t("ticket")}</TableHead>
-                          <TableHead>{t("issueType")}</TableHead>
-                          <TableHead>{t("priority")}</TableHead>
-                          <TableHead>{t("assignee")}</TableHead>
-                          <TableHead>{t("updated")}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {tickets.map((ticket) => (
-                          <TableRow key={ticket.key}>
-                            <TableCell className="min-w-80 whitespace-normal">
-                              <button
-                                className="group block text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                onClick={() =>
-                                  replaceParams({ issue: ticket.key })
-                                }
-                                type="button"
-                              >
-                                <span className="block text-xs font-semibold text-primary group-hover:underline">
-                                  {ticket.key}
-                                </span>
-                                <span className="mt-1 block font-medium">
-                                  {ticket.summary}
-                                </span>
-                              </button>
-                            </TableCell>
-                            <TableCell>
-                              {ticket.issueType ?? t("issue")}
-                            </TableCell>
-                            <TableCell>
-                              {ticket.priority ? (
-                                <Badge>{ticket.priority}</Badge>
-                              ) : (
-                                "—"
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <span className="flex items-center gap-1.5">
-                                <UserRound className="size-3.5 text-muted-foreground" />
-                                {ticket.assignee ?? t("unassigned")}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {displayDate(ticket.updatedAt)}
-                            </TableCell>
+                    </CardHeader>
+                    <CardContent className="px-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>{t("ticket")}</TableHead>
+                            <TableHead>{t("issueType")}</TableHead>
+                            <TableHead>{t("priority")}</TableHead>
+                            <TableHead>{t("assignee")}</TableHead>
+                            <TableHead>{t("updated")}</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </section>
+                        </TableHeader>
+                        <TableBody>
+                          {tickets.map((ticket) => (
+                            <TableRow key={ticket.key}>
+                              <TableCell className="min-w-80 whitespace-normal">
+                                <Button
+                                  className="group h-auto w-full justify-start p-0 text-left whitespace-normal"
+                                  onClick={() =>
+                                    replaceParams({ issue: ticket.key })
+                                  }
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <span className="block text-xs font-semibold text-primary group-hover:underline">
+                                    {ticket.key}
+                                  </span>
+                                  <span className="mt-1 block font-medium">
+                                    {ticket.summary}
+                                  </span>
+                                </Button>
+                              </TableCell>
+                              <TableCell>
+                                {ticket.issueType ?? t("issue")}
+                              </TableCell>
+                              <TableCell>
+                                {ticket.priority ? (
+                                  <Badge>{ticket.priority}</Badge>
+                                ) : (
+                                  "—"
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <span className="flex items-center gap-1.5">
+                                  <UserRound className="size-3.5 text-muted-foreground" />
+                                  {ticket.assignee ?? t("unassigned")}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {displayDate(ticket.updatedAt)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             ) : (
@@ -417,11 +445,12 @@ export function JiraTicketsPage() {
                       </div>
                       <div className="space-y-2">
                         {tickets.map((ticket) => (
-                          <button
+                          <Button
                             key={ticket.key}
-                            className="w-full rounded-lg border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="h-auto w-full flex-col items-stretch rounded-lg p-3 text-left whitespace-normal shadow-sm"
                             onClick={() => replaceParams({ issue: ticket.key })}
                             type="button"
+                            variant="outline"
                           >
                             <div className="flex items-start justify-between gap-2">
                               <span className="text-xs font-semibold text-primary">
@@ -443,7 +472,7 @@ export function JiraTicketsPage() {
                                 </span>
                               </span>
                             </div>
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </section>
@@ -487,8 +516,8 @@ function StatusMultiSelect({
 }) {
   const selected = new Set(value);
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
           aria-label={label}
           className="w-full justify-between font-normal"
@@ -501,40 +530,29 @@ function StatusMultiSelect({
           </span>
           <ChevronDown className="shrink-0" />
         </Button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="start"
-          className="z-60 max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-        >
-          {statuses.map((status) => (
-            <DropdownMenu.CheckboxItem
-              checked={selected.has(status.id)}
-              className="relative flex cursor-default items-center rounded-sm py-1.5 pr-2 pl-8 text-sm outline-none select-none focus:bg-accent"
-              key={status.id}
-              onCheckedChange={(checked) =>
-                onChange(
-                  checked
-                    ? [...selected, status.id]
-                    : value.filter((statusId) => statusId !== status.id),
-                )
-              }
-              onSelect={(event) => event.preventDefault()}
-            >
-              <span className="absolute left-2 flex size-4 items-center justify-center">
-                <DropdownMenu.ItemIndicator>
-                  <Check className="size-4" />
-                </DropdownMenu.ItemIndicator>
-              </span>
-              <span className="truncate">{status.name}</span>
-              <span className="ml-auto pl-2 text-xs text-muted-foreground">
-                {status.category}
-              </span>
-            </DropdownMenu.CheckboxItem>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="z-60 max-h-64">
+        {statuses.map((status) => (
+          <DropdownMenuCheckboxItem
+            checked={selected.has(status.id)}
+            key={status.id}
+            onCheckedChange={(checked) =>
+              onChange(
+                checked
+                  ? [...selected, status.id]
+                  : value.filter((statusId) => statusId !== status.id),
+              )
+            }
+            onSelect={(event) => event.preventDefault()}
+          >
+            <span className="truncate">{status.name}</span>
+            <span className="ml-auto mr-5 pl-2 text-xs text-muted-foreground">
+              {status.category}
+            </span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -552,6 +570,7 @@ function JiraManagerDialog({
   onProjectsChanged: (projects: JiraProjectView[]) => void;
 }) {
   const t = useTranslations("jiraTickets");
+  const tc = useTranslations("common");
   const [available, setAvailable] = useState<JiraAvailableProject[]>([]);
   const [projectId, setProjectId] = useState("");
   const [managedProjectId, setManagedProjectId] = useState<string | null>(null);
@@ -658,7 +677,6 @@ function JiraManagerDialog({
   };
 
   const removeProject = async (id: string) => {
-    if (!window.confirm(t("confirmRemoveProject"))) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -725,7 +743,6 @@ function JiraManagerDialog({
   };
 
   const deleteSource = async (id: string) => {
-    if (!window.confirm(t("confirmDeleteSource"))) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -786,25 +803,28 @@ function JiraManagerDialog({
           <DialogDescription>{t("manageDescription")}</DialogDescription>
         </DialogHeader>
         {error && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
         <div className="grid min-w-0 gap-6 md:grid-cols-2">
           <section className="min-w-0 space-y-3">
             <h3 className="font-medium">{t("projects")}</h3>
             <div className="flex gap-2">
-              <Select
-                aria-label={t("availableProjects")}
-                onChange={(event) => setProjectId(event.target.value)}
-                value={projectId}
-              >
-                <option value="">{t("selectProject")}</option>
-                {unusedProjects.map((project) => (
-                  <option key={project.jiraId} value={project.jiraId}>
-                    {project.key} · {project.name}
-                  </option>
-                ))}
+              <Select onValueChange={setProjectId} value={projectId}>
+                <SelectTrigger
+                  aria-label={t("availableProjects")}
+                  className="w-full"
+                >
+                  <SelectValue placeholder={t("selectProject")} />
+                </SelectTrigger>
+                <SelectContent className="z-60">
+                  {unusedProjects.map((project) => (
+                    <SelectItem key={project.jiraId} value={project.jiraId}>
+                      {project.key} · {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
               <Button
                 disabled={!projectId || busy}
@@ -817,19 +837,21 @@ function JiraManagerDialog({
             </div>
             <div className="space-y-2">
               {projects.map((project) => (
-                <div
+                <Item
                   key={project.id}
-                  className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border p-1 ${
+                  className={`min-w-0 gap-2 p-1 ${
                     project.id === selectedProject?.id
                       ? "border-primary bg-primary/5"
                       : ""
                   }`}
+                  variant="outline"
                 >
-                  <button
+                  <Button
                     aria-pressed={project.id === selectedProject?.id}
-                    className="min-w-0 flex-1 rounded-md p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="h-auto min-w-0 flex-1 flex-col items-start p-2 text-left whitespace-normal"
                     onClick={() => chooseProject(project.id)}
                     type="button"
+                    variant="ghost"
                   >
                     <p className="truncate text-sm font-medium">
                       {project.key} · {project.name}
@@ -837,17 +859,21 @@ function JiraManagerDialog({
                     <p className="text-xs text-muted-foreground">
                       {t("sourceCount", { count: project.sources.length })}
                     </p>
-                  </button>
-                  <Button
-                    disabled={busy}
-                    onClick={() => void removeProject(project.id)}
-                    size="icon-sm"
-                    variant="ghost"
-                  >
-                    <Trash2 />
-                    <span className="sr-only">{t("removeProject")}</span>
                   </Button>
-                </div>
+                  <ConfirmationDialog
+                    actionLabel={t("removeProject")}
+                    cancelLabel={tc("cancel")}
+                    description={tc("cannotBeUndone")}
+                    onConfirm={() => removeProject(project.id)}
+                    title={t("confirmRemoveProject")}
+                    trigger={
+                      <Button disabled={busy} size="icon-sm" variant="ghost">
+                        <Trash2 />
+                        <span className="sr-only">{t("removeProject")}</span>
+                      </Button>
+                    }
+                  />
+                </Item>
               ))}
             </div>
           </section>
@@ -856,9 +882,10 @@ function JiraManagerDialog({
               {t("sourcesFor", { project: selectedProject?.key ?? "—" })}
             </h3>
             {selectedProject?.sources.map((source) => (
-              <div
+              <Item
                 key={source.id}
-                className="flex min-w-0 items-start justify-between gap-2 overflow-hidden rounded-lg border p-3"
+                className="min-w-0 items-start gap-2 overflow-hidden"
+                variant="outline"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{source.name}</p>
@@ -883,17 +910,21 @@ function JiraManagerDialog({
                     <Pencil />
                     <span className="sr-only">{t("editSource")}</span>
                   </Button>
-                  <Button
-                    disabled={busy}
-                    onClick={() => void deleteSource(source.id)}
-                    size="icon-sm"
-                    variant="ghost"
-                  >
-                    <Trash2 />
-                    <span className="sr-only">{t("deleteSource")}</span>
-                  </Button>
+                  <ConfirmationDialog
+                    actionLabel={t("deleteSource")}
+                    cancelLabel={tc("cancel")}
+                    description={tc("cannotBeUndone")}
+                    onConfirm={() => deleteSource(source.id)}
+                    title={t("confirmDeleteSource")}
+                    trigger={
+                      <Button disabled={busy} size="icon-sm" variant="ghost">
+                        <Trash2 />
+                        <span className="sr-only">{t("deleteSource")}</span>
+                      </Button>
+                    }
+                  />
                 </div>
-              </div>
+              </Item>
             ))}
             {selectedProject && (
               <form
@@ -901,12 +932,12 @@ function JiraManagerDialog({
                 onSubmit={(event) => void saveSource(event)}
               >
                 <div>
-                  <label
+                  <Label
                     className="mb-1 block text-xs font-medium"
                     htmlFor="source-name"
                   >
                     {t("sourceName")}
-                  </label>
+                  </Label>
                   <Input
                     id="source-name"
                     maxLength={100}
@@ -916,30 +947,34 @@ function JiraManagerDialog({
                   />
                 </div>
                 <div>
-                  <label
+                  <Label
                     className="mb-1 block text-xs font-medium"
                     htmlFor="source-kind"
                   >
                     {t("sourceType")}
-                  </label>
+                  </Label>
                   <Select
-                    id="source-kind"
-                    onChange={(event) =>
-                      setSourceKind(event.target.value as JiraSourceKind)
+                    onValueChange={(value) =>
+                      setSourceKind(value as JiraSourceKind)
                     }
                     value={sourceKind}
                   >
-                    <option value="JQL">JQL</option>
-                    <option value="BOARD">{t("boardUrl")}</option>
+                    <SelectTrigger className="w-full" id="source-kind">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-60">
+                      <SelectItem value="JQL">JQL</SelectItem>
+                      <SelectItem value="BOARD">{t("boardUrl")}</SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label
+                  <Label
                     className="mb-1 block text-xs font-medium"
                     htmlFor="source-value"
                   >
                     {sourceKind === "JQL" ? "JQL" : t("boardUrl")}
-                  </label>
+                  </Label>
                   <Textarea
                     id="source-value"
                     onChange={(event) => setSourceValue(event.target.value)}
@@ -978,48 +1013,58 @@ function JiraManagerDialog({
                   </p>
                 </div>
                 <div>
-                  <label
+                  <Label
                     className="mb-1 block text-xs font-medium"
                     htmlFor="ticket-assignment-filter"
                   >
                     {t("ticketsToShow")}
-                  </label>
+                  </Label>
                   <Select
-                    id="ticket-assignment-filter"
-                    onChange={(event) =>
-                      setAssignmentFilter(
-                        event.target.value as JiraTicketAssignmentFilter,
-                      )
+                    onValueChange={(value) =>
+                      setAssignmentFilter(value as JiraTicketAssignmentFilter)
                     }
                     value={assignmentFilter}
                   >
-                    <option value="ALL">{t("allTickets")}</option>
-                    <option value="UNASSIGNED_OR_SELF">
-                      {t("unassignedOrSelfAssigned")}
-                    </option>
-                    <option value="SELF_IN_PROGRESS">
-                      {t("selfAssignedInProgress")}
-                    </option>
+                    <SelectTrigger
+                      className="w-full"
+                      id="ticket-assignment-filter"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-60">
+                      <SelectItem value="ALL">{t("allTickets")}</SelectItem>
+                      <SelectItem value="UNASSIGNED_OR_SELF">
+                        {t("unassignedOrSelfAssigned")}
+                      </SelectItem>
+                      <SelectItem value="SELF_IN_PROGRESS">
+                        {t("selfAssignedInProgress")}
+                      </SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
+                <div className="flex items-start gap-2 text-sm">
+                  <Checkbox
                     checked={hideCompletedTickets}
-                    className="mt-0.5 size-4 rounded border-input accent-primary"
-                    onChange={(event) =>
-                      setHideCompletedTickets(event.target.checked)
+                    className="mt-0.5"
+                    id="hide-completed-tickets"
+                    onCheckedChange={(checked) =>
+                      setHideCompletedTickets(checked === true)
                     }
-                    type="checkbox"
                   />
-                  <span>
-                    <span className="block font-medium">
-                      {t("hideCompletedTickets")}
+                  <Label
+                    className="block leading-normal"
+                    htmlFor="hide-completed-tickets"
+                  >
+                    <span>
+                      <span className="block font-medium">
+                        {t("hideCompletedTickets")}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {t("hideCompletedTicketsDescription")}
+                      </span>
                     </span>
-                    <span className="block text-xs text-muted-foreground">
-                      {t("hideCompletedTicketsDescription")}
-                    </span>
-                  </span>
-                </label>
+                  </Label>
+                </div>
                 <div>
                   <p className="mb-1 text-xs font-medium">
                     {t("completedStatuses")}
@@ -1114,22 +1159,22 @@ function TicketDrawer({
         <div className="space-y-6 px-4 pb-6">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" />
+              <Spinner />
               {t("loadingTicket")}
             </div>
           )}
           {error && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           {ticket && (
             <>
               {(ticket.cache.stale || ticket.commentsCache.stale) && (
-                <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                  <AlertTriangle className="size-4 shrink-0" />
-                  {t("staleTicket")}
-                </div>
+                <Alert className="border-amber-500/30 bg-amber-500/10">
+                  <AlertTriangle />
+                  <AlertDescription>{t("staleTicket")}</AlertDescription>
+                </Alert>
               )}
               <div className="flex flex-wrap gap-2">
                 <Badge>{ticket.status}</Badge>

@@ -3,6 +3,11 @@
     "title": "AI Development Environment",
     "description": "Eine auf künstliche Intelligenz ausgerichtete Entwicklungsumgebung."
   },
+  "common": {
+    "cancel": "Abbrechen",
+    "continue": "Fortfahren",
+    "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden."
+  },
   "shell": {
     "productName": "AI Development Environment",
     "welcome": "Willkommen",

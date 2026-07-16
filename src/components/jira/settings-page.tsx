@@ -1,19 +1,17 @@
 "use client";
 
-import {
-  CheckCircle2,
-  KeyRound,
-  LoaderCircle,
-  Save,
-  Trash2,
-  Unplug,
-} from "lucide-react";
+import { CheckCircle2, KeyRound, Save, Trash2, Unplug } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraSettingsView } from "@/services/jira/types";
 
@@ -28,6 +26,7 @@ type ConnectionResult = {
 
 export function JiraSettingsPage() {
   const t = useTranslations("jiraSettings");
+  const tc = useTranslations("common");
   const [settings, setSettings] = useState<JiraSettingsView | null>(null);
   const [siteUrl, setSiteUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -37,6 +36,7 @@ export function JiraSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmSiteChangeOpen, setConfirmSiteChangeOpen] = useState(false);
 
   const applySettings = (next: JiraSettingsView) => {
     setSettings(next);
@@ -63,13 +63,7 @@ export function JiraSettingsPage() {
     return () => window.clearTimeout(timeout);
   }, [load]);
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    const siteChanged = Boolean(
-      settings?.siteUrl &&
-      settings.siteUrl !== siteUrl.trim().replace(/\/$/, ""),
-    );
-    if (siteChanged && !window.confirm(t("confirmSiteChange"))) return;
+  const persistSettings = async (siteChanged: boolean) => {
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -97,6 +91,19 @@ export function JiraSettingsPage() {
     }
   };
 
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    const siteChanged = Boolean(
+      settings?.siteUrl &&
+      settings.siteUrl !== siteUrl.trim().replace(/\/$/, ""),
+    );
+    if (siteChanged) {
+      setConfirmSiteChangeOpen(true);
+      return;
+    }
+    void persistSettings(false);
+  };
+
   const testConnection = async () => {
     setBusy(true);
     try {
@@ -118,7 +125,6 @@ export function JiraSettingsPage() {
   };
 
   const clearCredentials = async () => {
-    if (!window.confirm(t("confirmRemove"))) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -143,134 +149,160 @@ export function JiraSettingsPage() {
       </div>
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
+          <Spinner />
           {t("loading")}
         </div>
       ) : (
-        <form
-          className="space-y-5 rounded-xl border bg-card p-5 shadow-sm"
-          onSubmit={(event) => void save(event)}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <KeyRound className="size-5" />
-              <h2 className="font-semibold">{t("credentials")}</h2>
-            </div>
-            <Badge
-              className={
-                settings?.tokenConfigured
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                  : undefined
-              }
-            >
-              {settings?.tokenConfigured ? t("configured") : t("notConfigured")}
-            </Badge>
-          </div>
-          {error && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-          {notice && (
-            <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 className="size-4" />
-              {notice}
-            </div>
-          )}
-          <div>
-            <label
-              className="mb-1.5 block text-sm font-medium"
-              htmlFor="jira-site-url"
-            >
-              {t("siteUrl")}
-            </label>
-            <Input
-              autoComplete="url"
-              id="jira-site-url"
-              onChange={(event) => setSiteUrl(event.target.value)}
-              placeholder="https://example.atlassian.net"
-              required
-              type="url"
-              value={siteUrl}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("siteUrlHelp")}
-            </p>
-          </div>
-          <div>
-            <label
-              className="mb-1.5 block text-sm font-medium"
-              htmlFor="jira-email"
-            >
-              {t("email")}
-            </label>
-            <Input
-              autoComplete="username"
-              id="jira-email"
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </div>
-          <div>
-            <label
-              className="mb-1.5 block text-sm font-medium"
-              htmlFor="jira-token"
-            >
-              {t("apiToken")}
-            </label>
-            <Input
-              autoComplete="new-password"
-              id="jira-token"
-              onChange={(event) => setApiToken(event.target.value)}
-              placeholder={
-                settings?.tokenConfigured
-                  ? t("tokenPlaceholderConfigured")
-                  : t("tokenPlaceholder")
-              }
-              required={!settings?.tokenConfigured}
-              type="password"
-              value={apiToken}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {settings?.tokenConfigured ? t("tokenKeepHelp") : t("tokenHelp")}
-            </p>
-          </div>
-          {connection && (
-            <div className="rounded-lg bg-muted p-3 text-sm">
-              <p className="font-medium">{connection.displayName}</p>
-              <p className="text-muted-foreground">
-                {connection.emailAddress ?? connection.accountId}
-              </p>
-            </div>
-          )}
-          <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
-            <Button
-              disabled={busy || !settings?.tokenConfigured}
-              onClick={() => void clearCredentials()}
-              type="button"
-              variant="ghost"
-            >
-              <Trash2 />
-              {t("remove")}
-            </Button>
-            <Button
-              disabled={busy || !settings?.tokenConfigured}
-              onClick={() => void testConnection()}
-              type="button"
-              variant="outline"
-            >
-              <Unplug />
-              {t("test")}
-            </Button>
-            <Button disabled={busy} type="submit">
-              {busy ? <LoaderCircle className="animate-spin" /> : <Save />}
-              {t("save")}
-            </Button>
-          </div>
+        <form onSubmit={save}>
+          <Card>
+            <CardContent className="space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="size-5" />
+                  <h2 className="font-semibold">{t("credentials")}</h2>
+                </div>
+                <Badge
+                  className={
+                    settings?.tokenConfigured
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : undefined
+                  }
+                >
+                  {settings?.tokenConfigured
+                    ? t("configured")
+                    : t("notConfigured")}
+                </Badge>
+              </div>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              {notice && (
+                <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                  <CheckCircle2 />
+                  <AlertDescription className="text-current">
+                    {notice}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="jira-site-url"
+                >
+                  {t("siteUrl")}
+                </Label>
+                <Input
+                  autoComplete="url"
+                  id="jira-site-url"
+                  onChange={(event) => setSiteUrl(event.target.value)}
+                  placeholder="https://example.atlassian.net"
+                  required
+                  type="url"
+                  value={siteUrl}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("siteUrlHelp")}
+                </p>
+              </div>
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="jira-email"
+                >
+                  {t("email")}
+                </Label>
+                <Input
+                  autoComplete="username"
+                  id="jira-email"
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                  type="email"
+                  value={email}
+                />
+              </div>
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="jira-token"
+                >
+                  {t("apiToken")}
+                </Label>
+                <Input
+                  autoComplete="new-password"
+                  id="jira-token"
+                  onChange={(event) => setApiToken(event.target.value)}
+                  placeholder={
+                    settings?.tokenConfigured
+                      ? t("tokenPlaceholderConfigured")
+                      : t("tokenPlaceholder")
+                  }
+                  required={!settings?.tokenConfigured}
+                  type="password"
+                  value={apiToken}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {settings?.tokenConfigured
+                    ? t("tokenKeepHelp")
+                    : t("tokenHelp")}
+                </p>
+              </div>
+              {connection && (
+                <Alert className="bg-muted">
+                  <div>
+                    <p className="font-medium">{connection.displayName}</p>
+                    <p className="text-muted-foreground">
+                      {connection.emailAddress ?? connection.accountId}
+                    </p>
+                  </div>
+                </Alert>
+              )}
+              <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                <ConfirmationDialog
+                  actionLabel={t("remove")}
+                  cancelLabel={tc("cancel")}
+                  description={tc("cannotBeUndone")}
+                  onConfirm={clearCredentials}
+                  title={t("confirmRemove")}
+                  trigger={
+                    <Button
+                      disabled={busy || !settings?.tokenConfigured}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                      {t("remove")}
+                    </Button>
+                  }
+                />
+                <Button
+                  disabled={busy || !settings?.tokenConfigured}
+                  onClick={() => void testConnection()}
+                  type="button"
+                  variant="outline"
+                >
+                  <Unplug />
+                  {t("test")}
+                </Button>
+                <Button disabled={busy} type="submit">
+                  {busy ? <Spinner /> : <Save />}
+                  {t("save")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </form>
       )}
+      <ConfirmationDialog
+        actionLabel={tc("continue")}
+        cancelLabel={tc("cancel")}
+        description={tc("cannotBeUndone")}
+        onConfirm={() => persistSettings(true)}
+        onOpenChange={setConfirmSiteChangeOpen}
+        open={confirmSiteChangeOpen}
+        title={t("confirmSiteChange")}
+      />
     </section>
   );
 }

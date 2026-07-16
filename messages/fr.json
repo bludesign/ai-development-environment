@@ -3,6 +3,11 @@
     "title": "AI Development Environment",
     "description": "Un environnement de développement axé sur l’intelligence artificielle."
   },
+  "common": {
+    "cancel": "Annuler",
+    "continue": "Continuer",
+    "cannotBeUndone": "Cette action est irréversible."
+  },
   "shell": {
     "productName": "AI Development Environment",
     "welcome": "Bienvenue",

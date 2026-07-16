@@ -1,19 +1,28 @@
 "use client";
 
-import {
-  Database,
-  ExternalLink,
-  LoaderCircle,
-  RefreshCw,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { Database, ExternalLink, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Empty as EmptyState,
+  EmptyDescription,
+  EmptyHeader,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -63,6 +72,7 @@ function sourceClass(source: string) {
 
 export function JiraCachePage() {
   const t = useTranslations("jiraCache");
+  const tc = useTranslations("common");
   const [data, setData] = useState<CachePageData | null>(null);
   const [ttlMinutes, setTtlMinutes] = useState("5");
   const [callOffset, setCallOffset] = useState(0);
@@ -117,7 +127,6 @@ export function JiraCachePage() {
   };
 
   const clearCache = async () => {
-    if (!window.confirm(t("confirmClear"))) return;
     setBusyKey("clear");
     try {
       await controlPlaneRequest("mutation { clearJiraCache }");
@@ -146,7 +155,6 @@ export function JiraCachePage() {
   };
 
   const deleteTicket = async (issueKey: string) => {
-    if (!window.confirm(t("confirmDeleteTicket", { issueKey }))) return;
     setBusyKey(issueKey);
     try {
       await controlPlaneRequest(
@@ -177,9 +185,9 @@ export function JiraCachePage() {
             className="flex gap-2"
             onSubmit={(event) => void updateTtl(event)}
           >
-            <label className="sr-only" htmlFor="cache-ttl">
+            <Label className="sr-only" htmlFor="cache-ttl">
               {t("ttl")}
-            </label>
+            </Label>
             <Input
               className="w-28"
               id="cache-ttl"
@@ -199,24 +207,29 @@ export function JiraCachePage() {
               {t("saveTtl")}
             </Button>
           </form>
-          <Button
-            disabled={busyKey === "clear"}
-            onClick={() => void clearCache()}
-            variant="destructive"
-          >
-            <Trash2 />
-            {t("clearCache")}
-          </Button>
+          <ConfirmationDialog
+            actionLabel={t("clearCache")}
+            cancelLabel={tc("cancel")}
+            description={tc("cannotBeUndone")}
+            onConfirm={clearCache}
+            title={t("confirmClear")}
+            trigger={
+              <Button disabled={busyKey === "clear"} variant="destructive">
+                <Trash2 />
+                {t("clearCache")}
+              </Button>
+            }
+          />
         </div>
       </div>
       {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {loading && !data ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
+          <Spinner />
           {t("loading")}
         </div>
       ) : (
@@ -399,17 +412,27 @@ export function JiraCachePage() {
                                 />
                                 <span className="sr-only">{t("refresh")}</span>
                               </Button>
-                              <Button
-                                disabled={busyKey === ticket.issueKey}
-                                onClick={() =>
-                                  void deleteTicket(ticket.issueKey)
+                              <ConfirmationDialog
+                                actionLabel={t("delete")}
+                                cancelLabel={tc("cancel")}
+                                description={tc("cannotBeUndone")}
+                                onConfirm={() => deleteTicket(ticket.issueKey)}
+                                title={t("confirmDeleteTicket", {
+                                  issueKey: ticket.issueKey,
+                                })}
+                                trigger={
+                                  <Button
+                                    disabled={busyKey === ticket.issueKey}
+                                    size="icon-sm"
+                                    variant="ghost"
+                                  >
+                                    <Trash2 />
+                                    <span className="sr-only">
+                                      {t("delete")}
+                                    </span>
+                                  </Button>
                                 }
-                                size="icon-sm"
-                                variant="ghost"
-                              >
-                                <Trash2 />
-                                <span className="sr-only">{t("delete")}</span>
-                              </Button>
+                              />
                             </div>
                           </TableCell>
                         </TableRow>
@@ -434,27 +457,29 @@ export function JiraCachePage() {
 function MetricCard({ metric }: { metric: JiraMetricWindow }) {
   const t = useTranslations("jiraCache");
   return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="font-medium">{metric.window}</span>
-        <Database className="size-4 text-muted-foreground" />
-      </div>
-      <p className="mt-3 text-3xl font-semibold">{metric.total}</p>
-      <p className="text-xs text-muted-foreground">
-        {t("average", { ms: metric.averageMs })}
-      </p>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <span>
-          {t("live")} {metric.live}
-        </span>
-        <span>
-          {t("cache")} {metric.cache}
-        </span>
-        <span>
-          {t("errors")} {metric.errors}
-        </span>
-      </div>
-    </div>
+    <Card>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <span className="font-medium">{metric.window}</span>
+          <Database className="size-4 text-muted-foreground" />
+        </div>
+        <p className="mt-3 text-3xl font-semibold">{metric.total}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("average", { ms: metric.averageMs })}
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <span>
+            {t("live")} {metric.live}
+          </span>
+          <span>
+            {t("cache")} {metric.cache}
+          </span>
+          <span>
+            {t("errors")} {metric.errors}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -468,21 +493,23 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="border-b p-4">
-        <h2 className="font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
       {children}
-    </section>
+    </Card>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="p-8 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
+    <EmptyState className="py-8">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </EmptyState>
   );
 }
 

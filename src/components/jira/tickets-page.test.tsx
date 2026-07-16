@@ -21,6 +21,20 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
+
+async function chooseSelectOption(label: string, option: string) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
 afterEach(() => {
   cleanup();
   requestMock.mockReset();
@@ -114,6 +128,16 @@ describe("JiraTicketsPage", () => {
         { sourceId: "source-1" },
       ),
     );
+
+    const ticketButton = screen.getByRole("button", {
+      name: /APP-1.*Open login screen/i,
+    });
+    ticketButton.focus();
+    expect(document.activeElement).toBe(ticketButton);
+    fireEvent.click(ticketButton);
+    expect(new URLSearchParams(window.location.search).get("issue")).toBe(
+      "APP-1",
+    );
   });
 
   test("adds a source to the project selected in the manager", async () => {
@@ -170,8 +194,9 @@ describe("JiraTicketsPage", () => {
     fireEvent.change(screen.getByLabelText("Source name"), {
       target: { value: "Operations queue" },
     });
-    fireEvent.change(screen.getByLabelText("JQL"), {
-      target: { value: "project = OPS" },
+    await chooseSelectOption("Source type", "Board URL");
+    fireEvent.change(screen.getByLabelText("Board URL"), {
+      target: { value: "https://example.atlassian.net/board/7" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add source" }));
 
@@ -182,16 +207,14 @@ describe("JiraTicketsPage", () => {
           input: {
             projectId: "project-2",
             name: "Operations queue",
-            kind: "JQL",
-            value: "project = OPS",
+            kind: "BOARD",
+            value: "https://example.atlassian.net/board/7",
           },
         },
       ),
     );
 
-    fireEvent.change(screen.getByLabelText("Tickets to show"), {
-      target: { value: "SELF_IN_PROGRESS" },
-    });
+    await chooseSelectOption("Tickets to show", "My in-progress tickets");
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Hide completed tickets/ }),
     );
@@ -221,6 +244,62 @@ describe("JiraTicketsPage", () => {
             completedStatusIds: ["done"],
           },
         },
+      ),
+    );
+  });
+
+  test("selects and adds an available Jira project", async () => {
+    const existingProject = {
+      id: "project-1",
+      jiraId: "10000",
+      key: "APP",
+      name: "Application",
+      avatarUrl: null,
+      position: 0,
+      ticketAssignmentFilter: "ALL",
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+      sources: [],
+    };
+    const addedProject = {
+      ...existingProject,
+      id: "project-2",
+      jiraId: "10001",
+      key: "OPS",
+      name: "Operations",
+      position: 1,
+    };
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query JiraProjects"))
+        return { jiraProjects: [existingProject] } as never;
+      if (query.includes("jiraAvailableProjects"))
+        return {
+          jiraAvailableProjects: [
+            {
+              jiraId: addedProject.jiraId,
+              key: addedProject.key,
+              name: addedProject.name,
+              avatarUrl: null,
+            },
+          ],
+        } as never;
+      if (query.includes("AddJiraProject"))
+        return { addJiraProject: [existingProject, addedProject] } as never;
+      if (query.includes("JiraProjectStatuses"))
+        return { jiraProjectStatuses: [] } as never;
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<JiraTicketsPage />);
+    await screen.findByRole("tab", { name: "APP · Application" });
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await chooseSelectOption("Available Jira projects", "OPS · Operations");
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("AddJiraProject"),
+        { jiraId: "10001" },
       ),
     );
   });

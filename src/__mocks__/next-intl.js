@@ -8,6 +8,11 @@ const mockTranslations = {
     title: "AI Development Environment",
     description: "An AI-focused development environment.",
   },
+  common: {
+    cancel: "Cancel",
+    continue: "Continue",
+    cannotBeUndone: "This action cannot be undone.",
+  },
   shell: {
     productName: "AI Development Environment",
     welcome: "Welcome",

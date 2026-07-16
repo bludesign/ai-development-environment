@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
 
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+} from "@/components/ui/table";
+
 type AdfNode = {
   type?: string;
   text?: string;
@@ -125,7 +134,7 @@ function renderNode(node: AdfNode, key: string): ReactNode {
         </pre>
       );
     case "rule":
-      return <hr key={key} className="border-border" />;
+      return <Separator key={key} />;
     case "mention":
       return (
         <span key={key} className="rounded bg-primary/10 px-1 text-primary">
@@ -140,25 +149,23 @@ function renderNode(node: AdfNode, key: string): ReactNode {
       );
     case "table":
       return (
-        <div key={key} className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <tbody>{children}</tbody>
-          </table>
-        </div>
+        <Table key={key} className="border-collapse">
+          <TableBody>{children}</TableBody>
+        </Table>
       );
     case "tableRow":
-      return <tr key={key}>{children}</tr>;
+      return <TableRow key={key}>{children}</TableRow>;
     case "tableHeader":
       return (
-        <th key={key} className="border bg-muted p-2 text-left font-medium">
+        <TableHead key={key} className="border bg-muted p-2">
           {children}
-        </th>
+        </TableHead>
       );
     case "tableCell":
       return (
-        <td key={key} className="border p-2 align-top">
+        <TableCell key={key} className="border p-2 align-top">
           {children}
-        </td>
+        </TableCell>
       );
     default:
       return children.length > 0 ? <span key={key}>{children}</span> : null;
