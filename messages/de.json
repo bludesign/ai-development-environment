@@ -626,7 +626,10 @@
     "unset": "Nicht gesetzt",
     "true": "Wahr",
     "false": "Falsch",
+    "jsonArguments": "Argumente (JSON-Objekt)",
     "invalidJson": "Gültiges JSON eingeben.",
+    "invalidJsonObject": "Ein JSON-Objekt eingeben.",
+    "jsonObjectPlaceholder": "Schlüssel-Wert-Paare als JSON-Objekt eingeben",
     "jsonPlaceholder": "JSON eingeben, zum Beispiel []"
   },
   "status": {

@@ -25,6 +25,7 @@ const BUILTIN_GROUP_ID = "builtin:codebases";
 const EXTERNAL_GROUP_PREFIX = "external:";
 const CONNECT_TIMEOUT_MS = 15_000;
 const CALL_TIMEOUT_MS = 120_000;
+const MAX_TOOLS_LIST_PAGES = 100;
 const RESERVED_HEADERS = new Set([
   "accept",
   "connection",
@@ -422,11 +423,33 @@ export class ToolsService {
         : new SSEClientTransport(new URL(server.url), {
             fetch: configuredFetch,
           });
+    let closePromise: Promise<void> | undefined;
+    const closeClient = () => {
+      closePromise ??= client.close().catch(() => undefined);
+      return closePromise;
+    };
     try {
-      await client.connect(clientTransport, { timeout: CONNECT_TIMEOUT_MS });
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          client.connect(clientTransport, { timeout: CONNECT_TIMEOUT_MS }),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+              void closeClient();
+              reject(
+                new Error(
+                  `External MCP server connection timed out after ${CONNECT_TIMEOUT_MS}ms`,
+                ),
+              );
+            }, CONNECT_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
       return await action(client);
     } finally {
-      await client.close().catch(() => undefined);
+      await closeClient();
     }
   }
 
@@ -435,11 +458,14 @@ export class ToolsService {
   ): Promise<ToolCatalogItem[]> {
     return this.withClient(server, async (client) => {
       const tools: ToolCatalogItem[] = [];
+      const seenCursors = new Set<string>();
+      let pageCount = 0;
       let cursor: string | undefined;
       do {
         const result = await client.listTools(cursor ? { cursor } : undefined, {
           timeout: CONNECT_TIMEOUT_MS,
         });
+        pageCount += 1;
         tools.push(
           ...result.tools.map((tool) => ({
             name: tool.name,
@@ -449,7 +475,21 @@ export class ToolsService {
             outputSchema: tool.outputSchema ?? null,
           })),
         );
-        cursor = result.nextCursor;
+        const nextCursor = result.nextCursor;
+        if (nextCursor) {
+          if (seenCursors.has(nextCursor)) {
+            throw new Error(
+              "External MCP server returned a repeated tools/list cursor",
+            );
+          }
+          if (pageCount >= MAX_TOOLS_LIST_PAGES) {
+            throw new Error(
+              `External MCP server exceeded the tools/list pagination limit of ${MAX_TOOLS_LIST_PAGES} pages`,
+            );
+          }
+          seenCursors.add(nextCursor);
+        }
+        cursor = nextCursor;
       } while (cursor);
       return tools;
     });

@@ -626,7 +626,10 @@
     "unset": "Non défini",
     "true": "Vrai",
     "false": "Faux",
+    "jsonArguments": "Arguments (objet JSON)",
     "invalidJson": "Saisissez un JSON valide.",
+    "invalidJsonObject": "Saisissez un objet JSON.",
+    "jsonObjectPlaceholder": "Saisissez des paires clé-valeur dans un objet JSON",
     "jsonPlaceholder": "Saisissez du JSON, par exemple []"
   },
   "status": {

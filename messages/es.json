@@ -626,7 +626,10 @@
     "unset": "Sin definir",
     "true": "Verdadero",
     "false": "Falso",
+    "jsonArguments": "Argumentos (objeto JSON)",
     "invalidJson": "Introduce un JSON válido.",
+    "invalidJsonObject": "Introduce un objeto JSON.",
+    "jsonObjectPlaceholder": "Introduce pares clave-valor como un objeto JSON",
     "jsonPlaceholder": "Introduce JSON, por ejemplo []"
   },
   "status": {

@@ -781,6 +781,13 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
+function acceptsDynamicRootArguments(schema: JsonSchema): boolean {
+  return (
+    Object.keys(asProperties(schema.properties)).length === 0 &&
+    schema.additionalProperties !== false
+  );
+}
+
 function setAtPath(
   source: Record<string, unknown>,
   path: string[],
@@ -832,7 +839,9 @@ function ToolRunner({
     "IDLE",
   );
   const properties = asProperties(schema.properties);
+  const dynamicRootArguments = acceptsDynamicRootArguments(schema);
   const required = new Set(asStringArray(schema.required));
+  const rootArgumentsId = `${groupId}-${toolName}-arguments`;
 
   const run = async (event: FormEvent) => {
     event.preventDefault();
@@ -875,7 +884,22 @@ function ToolRunner({
     <form className="grid gap-4 lg:grid-cols-2" onSubmit={run}>
       <div className="space-y-4">
         <h4 className="text-sm font-medium">{t("parameters")}</h4>
-        {Object.keys(properties).length === 0 ? (
+        {dynamicRootArguments ? (
+          <div>
+            <Label className="mb-1.5 block" htmlFor={rootArgumentsId}>
+              {t("jsonArguments")}
+            </Label>
+            <JsonParameter
+              id={rootArgumentsId}
+              objectOnly
+              onChange={(next) =>
+                setArgumentsValue(next as Record<string, unknown>)
+              }
+              required
+              value={argumentsValue}
+            />
+          </div>
+        ) : Object.keys(properties).length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("noParameters")}</p>
         ) : (
           Object.entries(properties).map(([name, property]) => (
@@ -1101,11 +1125,13 @@ function ParameterField({
 
 function JsonParameter({
   id,
+  objectOnly = false,
   onChange,
   required,
   value,
 }: {
   id: string;
+  objectOnly?: boolean;
   onChange: (value: unknown) => void;
   required: boolean;
   value: unknown;
@@ -1127,13 +1153,23 @@ function JsonParameter({
           return;
         }
         try {
-          onChange(JSON.parse(next));
+          const parsed: unknown = JSON.parse(next);
+          if (
+            objectOnly &&
+            (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+          ) {
+            event.target.setCustomValidity(t("invalidJsonObject"));
+            return;
+          }
+          onChange(parsed);
           event.target.setCustomValidity("");
         } catch {
           event.target.setCustomValidity(t("invalidJson"));
         }
       }}
-      placeholder={t("jsonPlaceholder")}
+      placeholder={
+        objectOnly ? t("jsonObjectPlaceholder") : t("jsonPlaceholder")
+      }
       required={required}
       value={text}
     />

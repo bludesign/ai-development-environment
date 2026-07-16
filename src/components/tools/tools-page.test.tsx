@@ -122,6 +122,64 @@ describe("ToolsPage", () => {
     });
   });
 
+  test("runs a tool with dynamic root arguments from a JSON object editor", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/api/tools/catalog")) {
+          return Response.json({
+            groups: [
+              {
+                id: "external:dynamic",
+                name: "Dynamic server",
+                source: "EXTERNAL",
+                transport: "STREAMABLE_HTTP",
+                url: "https://example.com/mcp",
+                error: null,
+                tools: [
+                  {
+                    name: "dynamic_lookup",
+                    title: "Dynamic lookup",
+                    description: "Looks up dynamic fields.",
+                    inputSchema: {
+                      type: "object",
+                      additionalProperties: { type: "string" },
+                    },
+                    outputSchema: null,
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          groupId: "external:dynamic",
+          name: "dynamic_lookup",
+          arguments: { region: "us-east" },
+        });
+        return Response.json({ result: { found: true } });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ToolsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand dynamic_lookup" }),
+    );
+    const editor = screen.getByLabelText("Arguments (JSON object)");
+    expect((editor as HTMLTextAreaElement).value).toBe("{}");
+    fireEvent.change(editor, {
+      target: { value: '{"region":"us-east"}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+
+    expect(await screen.findByText(/"found": true/)).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tools/call",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   test("creates an external server with write-only headers", async () => {
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("query ExternalMcpServers")) {

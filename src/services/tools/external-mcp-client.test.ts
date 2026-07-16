@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   callTool: vi.fn(),
@@ -93,6 +93,10 @@ describe("external MCP client transport", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   test("discovers HTTP and SSE servers independently and applies prefixes", async () => {
     const service = new ToolsService({} as never);
 
@@ -126,6 +130,65 @@ describe("external MCP client transport", () => {
       undefined,
       expect.objectContaining({ timeout: 120_000 }),
     );
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  test("times out and closes a client whose transport startup hangs", async () => {
+    vi.useFakeTimers();
+    mocks.connect.mockImplementation(() => new Promise<void>(() => undefined));
+    const service = new ToolsService({} as never);
+
+    const call = service.callTool({
+      groupId: "external:sse-1",
+      name: "sse_search",
+      arguments: {},
+    });
+    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+    const rejection = expect(call).rejects.toThrow(
+      "External MCP server connection timed out after 15000ms",
+    );
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(mocks.close).toHaveBeenCalledOnce();
+    expect(mocks.callTool).not.toHaveBeenCalled();
+  });
+
+  test("stops tools/list pagination when a cursor repeats", async () => {
+    mocks.getPrismaClient.mockResolvedValue({
+      externalMcpServer: {
+        findMany: vi.fn().mockResolvedValue([httpServer]),
+      },
+    });
+    mocks.listTools.mockResolvedValue({ tools: [], nextCursor: "repeat" });
+    const service = new ToolsService({} as never);
+
+    const catalog = await service.catalog();
+
+    expect(catalog.groups[1].error).toContain("repeated tools/list cursor");
+    expect(mocks.listTools).toHaveBeenCalledTimes(2);
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  test("limits tools/list pagination with unique cursors", async () => {
+    mocks.getPrismaClient.mockResolvedValue({
+      externalMcpServer: {
+        findMany: vi.fn().mockResolvedValue([httpServer]),
+      },
+    });
+    mocks.listTools.mockImplementation(async () => ({
+      tools: [],
+      nextCursor: `cursor-${mocks.listTools.mock.calls.length}`,
+    }));
+    const service = new ToolsService({} as never);
+
+    const catalog = await service.catalog();
+
+    expect(catalog.groups[1].error).toContain(
+      "tools/list pagination limit of 100 pages",
+    );
+    expect(mocks.listTools).toHaveBeenCalledTimes(100);
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 });

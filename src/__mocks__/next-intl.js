@@ -687,7 +687,10 @@ const mockTranslations = {
     unset: "Unset",
     true: "True",
     false: "False",
+    jsonArguments: "Arguments (JSON object)",
     invalidJson: "Enter valid JSON.",
+    invalidJsonObject: "Enter a JSON object.",
+    jsonObjectPlaceholder: "Enter key/value pairs as a JSON object",
     jsonPlaceholder: "Enter JSON, for example []",
   },
   status: {
