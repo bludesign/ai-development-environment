@@ -37,6 +37,11 @@ export type CodebaseRepository = {
   updatedAt: string;
 };
 
+export type CodebaseSettings = {
+  refreshIntervalSeconds: number;
+  updatedAt: string;
+};
+
 export type DirectoryListing = {
   path: string;
   parentPath: string | null;

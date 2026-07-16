@@ -554,7 +554,17 @@
     "cancel": "Abbrechen",
     "confirm": "Codebasis bestätigen",
     "editTitle": "Repository-Details bearbeiten",
-    "save": "Speichern"
+    "save": "Speichern",
+    "remove": "Entfernen",
+    "confirmRemoveTitle": "Registrierung der Codebasis entfernen?",
+    "confirmRemoveDescription": "Die Registrierung für {folder} wird entfernt. Der Ordner und alle darin enthaltenen Dateien bleiben auf dem Agenten unverändert.",
+    "removed": "Die Registrierung der Codebasis wurde entfernt.",
+    "settings": "Einstellungen",
+    "settingsTitle": "Einstellungen für den Codebasisstatus",
+    "settingsDescription": "Legen Sie fest, wie oft aktualisierte Agenten registrierte Ordner prüfen und den Git-Status melden.",
+    "refreshInterval": "Aktualisierungsintervall des Agenten (Sekunden)",
+    "refreshIntervalHelp": "Wählen Sie eine ganze Zahl von {min} bis {max}. Jeder Agent wartet nach einer abgeschlossenen Prüfung so lange. Git-Remotes werden nicht kontaktiert.",
+    "settingsSaved": "Das Aktualisierungsintervall des Agenten wurde gespeichert."
   },
   "status": {
     "online": "online",

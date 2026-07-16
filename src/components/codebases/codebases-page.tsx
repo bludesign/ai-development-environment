@@ -2,8 +2,11 @@
 
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
+  MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
   ChevronRight,
@@ -14,12 +17,15 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Settings2,
+  Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +67,7 @@ import { cn } from "@/lib/utils";
 import type {
   Codebase,
   CodebaseRepository,
+  CodebaseSettings,
   DirectoryListing,
   Inspection,
 } from "./types";
@@ -83,24 +90,29 @@ export function CodebasesPage() {
   const t = useTranslations("codebases");
   const [repositories, setRepositories] = useState<CodebaseRepository[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [settings, setSettings] = useState<CodebaseSettings | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>("agents");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<CodebaseRepository | null>(null);
 
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
         codebaseOverview: { repositories: CodebaseRepository[] };
+        codebaseSettings: CodebaseSettings;
         agents: Agent[];
       }>(`query CodebaseOverview {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
+        codebaseSettings { refreshIntervalSeconds updatedAt }
         agents { ${AGENT_FIELDS} }
       }`);
       setRepositories(data.codebaseOverview.repositories);
+      setSettings(data.codebaseSettings);
       setAgents(data.agents);
       setError(null);
     } catch (value) {
@@ -117,7 +129,7 @@ export function CodebasesPage() {
       RECONCILE_INTERVAL_MS,
     );
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      codebaseOverviewChanged: { repositoryId: string };
+      codebaseOverviewChanged: { repositoryId: string | null };
     }>(
       {
         query: `subscription CodebaseOverviewChanged {
@@ -181,6 +193,26 @@ export function CodebasesPage() {
     }
   };
 
+  const removeCodebase = async (id: string) => {
+    setBusy(true);
+    try {
+      await controlPlaneRequest(
+        `mutation RemoveCodebase($id: ID!) {
+          removeCodebase(id: $id) { id repositoryId repositoryRemoved }
+        }`,
+        { id },
+      );
+      setNotice(t("removed"));
+      setError(null);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -208,6 +240,14 @@ export function CodebasesPage() {
           >
             <Download />
             {t("fetchAll")}
+          </Button>
+          <Button
+            disabled={!settings}
+            onClick={() => setSettingsOpen(true)}
+            variant="outline"
+          >
+            <Settings2 />
+            {t("settings")}
           </Button>
           <Button onClick={() => setAddOpen(true)}>
             <Plus />
@@ -269,12 +309,14 @@ export function CodebasesPage() {
           agents={agents}
           entries={codebases}
           onFetch={(id) => runOperation("fetchCodebases", [id])}
+          onRemove={removeCodebase}
         />
       ) : (
         <RepositoryGroups
           repositories={repositories}
           onEdit={setEditing}
           onFetch={(id) => runOperation("fetchCodebases", [id])}
+          onRemove={removeCodebase}
         />
       )}
 
@@ -286,6 +328,18 @@ export function CodebasesPage() {
         }}
         onOpenChange={setAddOpen}
         open={addOpen}
+      />
+      <CodebaseSettingsDialog
+        key={`${settingsOpen ? "open" : "closed"}-${settings?.refreshIntervalSeconds ?? DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS}`}
+        onOpenChange={setSettingsOpen}
+        onSaved={(nextSettings) => {
+          setSettings(nextSettings);
+          setSettingsOpen(false);
+          setNotice(t("settingsSaved"));
+          setError(null);
+        }}
+        open={settingsOpen}
+        settings={settings}
       />
       <EditRepositoryDialog
         key={editing?.id ?? "closed"}
@@ -300,14 +354,118 @@ export function CodebasesPage() {
   );
 }
 
+function CodebaseSettingsDialog({
+  open,
+  settings,
+  onOpenChange,
+  onSaved,
+}: {
+  open: boolean;
+  settings: CodebaseSettings | null;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (settings: CodebaseSettings) => void;
+}) {
+  const t = useTranslations("codebases");
+  const [value, setValue] = useState(
+    String(
+      settings?.refreshIntervalSeconds ??
+        DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+    ),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const refreshIntervalSeconds = Number(value);
+  const valid =
+    Number.isInteger(refreshIntervalSeconds) &&
+    refreshIntervalSeconds >= MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS &&
+    refreshIntervalSeconds <= MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS;
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        updateCodebaseSettings: CodebaseSettings;
+      }>(
+        `mutation UpdateCodebaseSettings($input: UpdateCodebaseSettingsInput!) {
+          updateCodebaseSettings(input: $input) {
+            refreshIntervalSeconds updatedAt
+          }
+        }`,
+        { input: { refreshIntervalSeconds } },
+      );
+      onSaved(data.updateCodebaseSettings);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("settingsTitle")}</DialogTitle>
+          <DialogDescription>{t("settingsDescription")}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={save}>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="codebase-refresh-interval">
+              {t("refreshInterval")}
+            </Label>
+            <Input
+              id="codebase-refresh-interval"
+              inputMode="numeric"
+              max={MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS}
+              min={MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS}
+              onChange={(event) => setValue(event.target.value)}
+              required
+              step={1}
+              type="number"
+              value={value}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("refreshIntervalHelp", {
+                min: MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+                max: MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+              })}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => onOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
+              {t("cancel")}
+            </Button>
+            <Button disabled={busy || !valid} type="submit">
+              {busy && <Spinner />} {t("save")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AgentGroups({
   agents,
   entries,
   onFetch,
+  onRemove,
 }: {
   agents: Agent[];
   entries: Array<{ codebase: Codebase; repository: CodebaseRepository }>;
   onFetch: (id: string) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
 }) {
   const t = useTranslations("codebases");
   return (
@@ -339,6 +497,7 @@ function AgentGroups({
                   codebase={codebase}
                   key={codebase.id}
                   onFetch={onFetch}
+                  onRemove={onRemove}
                   repository={repository}
                   showAgent={false}
                 />
@@ -354,10 +513,12 @@ function RepositoryGroups({
   repositories,
   onEdit,
   onFetch,
+  onRemove,
 }: {
   repositories: CodebaseRepository[];
   onEdit: (repository: CodebaseRepository) => void;
   onFetch: (id: string) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
 }) {
   const t = useTranslations("codebases");
   return (
@@ -390,6 +551,7 @@ function RepositoryGroups({
                 codebase={codebase}
                 key={codebase.id}
                 onFetch={onFetch}
+                onRemove={onRemove}
                 repository={repository}
                 showAgent
                 showMetadata={false}
@@ -406,12 +568,14 @@ function CodebaseCard({
   codebase,
   repository,
   onFetch,
+  onRemove,
   showAgent,
   showMetadata = true,
 }: {
   codebase: Codebase;
   repository: CodebaseRepository;
   onFetch: (id: string) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
   showAgent: boolean;
   showMetadata?: boolean;
 }) {
@@ -492,14 +656,34 @@ function CodebaseCard({
                 ? t("offline")
                 : ""}
           </p>
-          <Button
-            disabled={!canFetch}
-            onClick={() => void onFetch(codebase.id)}
-            size="sm"
-            variant="outline"
-          >
-            {active ? <Spinner /> : <Download />} {t("fetch")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <ConfirmationDialog
+              actionLabel={t("remove")}
+              cancelLabel={t("cancel")}
+              description={t("confirmRemoveDescription", {
+                folder: codebase.folder,
+              })}
+              onConfirm={() => onRemove(codebase.id)}
+              title={t("confirmRemoveTitle")}
+              trigger={
+                <Button
+                  disabled={Boolean(active)}
+                  size="sm"
+                  variant="destructive"
+                >
+                  <Trash2 /> {t("remove")}
+                </Button>
+              }
+            />
+            <Button
+              disabled={!canFetch}
+              onClick={() => void onFetch(codebase.id)}
+              size="sm"
+              variant="outline"
+            >
+              {active ? <Spinner /> : <Download />} {t("fetch")}
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

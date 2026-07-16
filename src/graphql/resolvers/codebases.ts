@@ -31,6 +31,9 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
+  CodebaseSettings: {
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+  },
   Codebase: {
     lastCheckedAt: (value: { lastCheckedAt: Date | null }) =>
       iso(value.lastCheckedAt),
@@ -53,8 +56,21 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       requireControlPlane(context);
       return service.overview();
     },
+    codebaseSettings: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.settings();
+    },
     agentCodebases: (_root: unknown, _args: unknown, context: GraphQLContext) =>
       service.agentCodebases(requireAgent(context)),
+    agentCodebaseConfiguration: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => service.agentConfiguration(requireAgent(context)),
   },
   Mutation: {
     browseAgentDirectory: (
@@ -102,6 +118,22 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     ) => {
       requireControlPlane(context);
       return service.updateRepository(input.id, input.name, input.description);
+    },
+    updateCodebaseSettings: (
+      _root: unknown,
+      { input }: { input: { refreshIntervalSeconds: number } },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.updateSettings(input.refreshIntervalSeconds);
+    },
+    removeCodebase: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.removeCodebase(id);
     },
     refreshCodebases: (
       _root: unknown,

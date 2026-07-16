@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -92,12 +93,33 @@ describe("CodebasesPage", () => {
       if (String(query).includes("query CodebaseOverview")) {
         return {
           codebaseOverview: { repositories: [repository] },
+          codebaseSettings: {
+            refreshIntervalSeconds: 30,
+            updatedAt: new Date(0).toISOString(),
+          },
           agents: [agent],
         } as never;
       }
       if (String(query).includes("mutation RunCodebaseOperation")) {
         return {
           fetchCodebases: { jobs: [{ id: "job-1" }], skipped: [] },
+        } as never;
+      }
+      if (String(query).includes("mutation RemoveCodebase")) {
+        return {
+          removeCodebase: {
+            id: "codebase-1",
+            repositoryId: "repository-1",
+            repositoryRemoved: true,
+          },
+        } as never;
+      }
+      if (String(query).includes("mutation UpdateCodebaseSettings")) {
+        return {
+          updateCodebaseSettings: {
+            refreshIntervalSeconds: 120,
+            updatedAt: new Date().toISOString(),
+          },
         } as never;
       }
       throw new Error(`Unexpected operation: ${query}`);
@@ -138,6 +160,10 @@ describe("CodebasesPage", () => {
       if (operation.includes("query CodebaseOverview")) {
         return {
           codebaseOverview: { repositories: [] },
+          codebaseSettings: {
+            refreshIntervalSeconds: 30,
+            updatedAt: new Date(0).toISOString(),
+          },
           agents: [agent],
         } as never;
       }
@@ -203,5 +229,70 @@ describe("CodebasesPage", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("confirms removal without deleting the agent folder and reloads", async () => {
+    render(<CodebasesPage />);
+    await screen.findByText("Studio Mac");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByText("Remove codebase registration?"),
+    ).toBeDefined();
+    expect(
+      within(dialog).getByText(
+        /The folder and all of its files will remain untouched on the agent/,
+      ),
+    ).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => {
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("mutation RemoveCodebase") &&
+            variables?.id === "codebase-1",
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        request.mock.calls.filter(([query]) =>
+          String(query).includes("query CodebaseOverview"),
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  test("updates the agent-side status refresh interval", async () => {
+    render(<CodebasesPage />);
+    await screen.findByText("Studio Mac");
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const input = await screen.findByLabelText(
+      "Agent refresh interval (seconds)",
+    );
+    expect((input as HTMLInputElement).value).toBe("30");
+    expect(screen.getByText(/Git remotes are not contacted/)).toBeDefined();
+    fireEvent.change(input, { target: { value: "120" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("mutation UpdateCodebaseSettings") &&
+            (
+              variables as {
+                input?: { refreshIntervalSeconds?: number };
+              }
+            )?.input?.refreshIntervalSeconds === 120,
+        ),
+      ).toBe(true);
+    });
+    expect(
+      await screen.findByText("Agent refresh interval saved."),
+    ).toBeDefined();
   });
 });

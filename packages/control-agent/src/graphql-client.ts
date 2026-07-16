@@ -15,6 +15,17 @@ export type AgentJob = {
   timeoutSeconds: number;
 };
 
+export type AgentCodebaseRegistration = {
+  id: string;
+  folder: string;
+  canonicalOrigin: string;
+};
+
+export type AgentCodebaseConfiguration = {
+  refreshIntervalSeconds: number;
+  codebases: AgentCodebaseRegistration[];
+};
+
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
 export class AgentGraphQLClient {
@@ -148,9 +159,7 @@ export class AgentGraphQLClient {
     return this.request<{ health: string }>(`query Health { health }`);
   }
 
-  async agentCodebases(): Promise<
-    Array<{ id: string; folder: string; canonicalOrigin: string }>
-  > {
+  async agentCodebases(): Promise<AgentCodebaseRegistration[]> {
     const data = await this.request<{
       agentCodebases: Array<{
         id: string;
@@ -159,6 +168,18 @@ export class AgentGraphQLClient {
       }>;
     }>(`query AgentCodebases { agentCodebases { id folder canonicalOrigin } }`);
     return data.agentCodebases;
+  }
+
+  async agentCodebaseConfiguration(): Promise<AgentCodebaseConfiguration> {
+    const data = await this.request<{
+      agentCodebaseConfiguration: AgentCodebaseConfiguration;
+    }>(`query AgentCodebaseConfiguration {
+      agentCodebaseConfiguration {
+        refreshIntervalSeconds
+        codebases { id folder canonicalOrigin }
+      }
+    }`);
+    return data.agentCodebaseConfiguration;
   }
 
   reportCodebaseStatuses(reports: CodebaseStatusReport[]) {

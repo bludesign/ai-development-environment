@@ -112,6 +112,13 @@ model Codebase {
   @@index([agentId, availability])
 }
 
+model CodebaseSettings {
+  id                     String   @id
+  refreshIntervalSeconds Int      @default(30)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
 model CcusageCollection {
   id         String                   @id
   deadlineAt DateTime

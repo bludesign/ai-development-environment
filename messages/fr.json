@@ -554,7 +554,17 @@
     "cancel": "Annuler",
     "confirm": "Confirmer la base de code",
     "editTitle": "Modifier les détails du dépôt",
-    "save": "Enregistrer"
+    "save": "Enregistrer",
+    "remove": "Supprimer",
+    "confirmRemoveTitle": "Supprimer l’enregistrement de la base de code ?",
+    "confirmRemoveDescription": "L’enregistrement de {folder} sera supprimé. Le dossier et tous ses fichiers resteront intacts sur l’agent.",
+    "removed": "L’enregistrement de la base de code a été supprimé.",
+    "settings": "Paramètres",
+    "settingsTitle": "Paramètres d’état des bases de code",
+    "settingsDescription": "Définissez la fréquence à laquelle les agents à jour inspectent les dossiers enregistrés et signalent l’état Git.",
+    "refreshInterval": "Intervalle d’actualisation de l’agent (secondes)",
+    "refreshIntervalHelp": "Choisissez un entier compris entre {min} et {max}. Chaque agent attend cette durée après la fin d’une analyse. Aucun serveur Git distant n’est contacté.",
+    "settingsSaved": "L’intervalle d’actualisation de l’agent a été enregistré."
   },
   "status": {
     "online": "en ligne",

@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
+  MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_REFRESH_JOB_KIND,
   parseCodebaseDirectoryListing,
   parseCodebaseSnapshot,
@@ -22,6 +25,7 @@ import {
 
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
+const SETTINGS_ID = "default";
 
 type CompletedJob = {
   id: string;
@@ -108,6 +112,53 @@ export class CodebasesService {
         repository: { select: { canonicalOrigin: true } },
       },
     });
+  }
+
+  async settings() {
+    const prisma = await getPrismaClient();
+    const existing = await prisma.codebaseSettings.findUnique({
+      where: { id: SETTINGS_ID },
+    });
+    if (existing) return existing;
+    return prisma.codebaseSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: {
+        id: SETTINGS_ID,
+        refreshIntervalSeconds: DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+      },
+      update: {},
+    });
+  }
+
+  async agentConfiguration(agentId: string) {
+    const [settings, codebases] = await Promise.all([
+      this.settings(),
+      this.agentCodebases(agentId),
+    ]);
+    return {
+      refreshIntervalSeconds: settings.refreshIntervalSeconds,
+      codebases,
+    };
+  }
+
+  async updateSettings(refreshIntervalSeconds: number) {
+    if (
+      !Number.isInteger(refreshIntervalSeconds) ||
+      refreshIntervalSeconds < MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS ||
+      refreshIntervalSeconds > MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS
+    ) {
+      throw new Error(
+        `Refresh interval must be an integer from ${MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS} to ${MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS} seconds`,
+      );
+    }
+    const prisma = await getPrismaClient();
+    const settings = await prisma.codebaseSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: { id: SETTINGS_ID, refreshIntervalSeconds },
+      update: { refreshIntervalSeconds },
+    });
+    this.publish(null, null);
+    return settings;
   }
 
   async browse(agentId: string, path: string | null, requestId: string) {
@@ -270,6 +321,36 @@ export class CodebasesService {
     });
     this.publish(null, id);
     return repository;
+  }
+
+  async removeCodebase(id: string) {
+    const prisma = await getPrismaClient();
+    const removal = await prisma.$transaction(async (transaction) => {
+      const codebase = await transaction.codebase.findUnique({
+        where: { id },
+        select: { id: true, repositoryId: true },
+      });
+      if (!codebase) throw new Error("Codebase not found");
+
+      await transaction.codebase.delete({ where: { id } });
+      const remaining = await transaction.codebase.count({
+        where: { repositoryId: codebase.repositoryId },
+      });
+      const repositoryRemoved = remaining === 0;
+      if (repositoryRemoved) {
+        await transaction.codebaseRepository.delete({
+          where: { id: codebase.repositoryId },
+        });
+      }
+
+      return {
+        id: codebase.id,
+        repositoryId: codebase.repositoryId,
+        repositoryRemoved,
+      };
+    });
+    this.publish(removal.id, removal.repositoryId);
+    return removal;
   }
 
   async report(agentId: string, reports: CodebaseStatusReport[]) {
@@ -442,7 +523,7 @@ export class CodebasesService {
     }
   }
 
-  private publish(codebaseId: string | null, repositoryId: string) {
+  private publish(codebaseId: string | null, repositoryId: string | null) {
     agentEventBus.publish(CODEBASE_CHANGED_TOPIC, {
       codebaseOverviewChanged: { codebaseId, repositoryId },
     });

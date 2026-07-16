@@ -49,6 +49,32 @@ describe("AgentGraphQLClient", () => {
       { id: "cancelled", status: "CANCELLED" },
     ]);
   });
+
+  test("loads owned codebases with the configured reconciliation interval", async () => {
+    const client = new AgentGraphQLClient("http://control.test");
+    const request = vi.spyOn(client, "request").mockResolvedValue({
+      agentCodebaseConfiguration: {
+        refreshIntervalSeconds: 120,
+        codebases: [
+          {
+            id: "codebase-1",
+            folder: "/repo",
+            canonicalOrigin: "example/repo",
+          },
+        ],
+      },
+    });
+
+    await expect(client.agentCodebaseConfiguration()).resolves.toEqual({
+      refreshIntervalSeconds: 120,
+      codebases: [
+        { id: "codebase-1", folder: "/repo", canonicalOrigin: "example/repo" },
+      ],
+    });
+    expect(request.mock.calls[0]?.[0]).toContain(
+      "query AgentCodebaseConfiguration",
+    );
+  });
 });
 
 describe("subscribeToAgentEvents", () => {

@@ -1,4 +1,9 @@
-import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
+import {
+  DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  type CodebaseStatusReport,
+} from "@ai-development-environment/agent-contract/codebases";
 
 import type { AgentGraphQLClient } from "./graphql-client.js";
 import { inspectCodebase } from "./handlers/codebases.js";
@@ -8,14 +13,29 @@ const CONCURRENCY = 4;
 
 export class CodebaseMonitor {
   private running = false;
+  private intervalMs = DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS * 1_000;
 
   constructor(private readonly client: AgentGraphQLClient) {}
+
+  get reconcileIntervalMs(): number {
+    return this.intervalMs;
+  }
 
   async reconcile(signal: AbortSignal): Promise<void> {
     if (this.running || signal.aborted) return;
     this.running = true;
     try {
-      const codebases = await this.client.agentCodebases();
+      const configuration = await this.client.agentCodebaseConfiguration();
+      if (
+        Number.isInteger(configuration.refreshIntervalSeconds) &&
+        configuration.refreshIntervalSeconds >=
+          MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS &&
+        configuration.refreshIntervalSeconds <=
+          MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS
+      ) {
+        this.intervalMs = configuration.refreshIntervalSeconds * 1_000;
+      }
+      const codebases = configuration.codebases;
       const reports: CodebaseStatusReport[] = [];
       for (let index = 0; index < codebases.length; index += CONCURRENCY) {
         const batch = codebases.slice(index, index + CONCURRENCY);

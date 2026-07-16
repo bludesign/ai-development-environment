@@ -9,7 +9,6 @@ import { JobExecutor } from "./job-executor.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const CODEBASE_RECONCILE_INTERVAL_MS = 30_000;
 
 export async function runAgent(
   config: AgentConfig,
@@ -20,6 +19,7 @@ export async function runAgent(
   const codebaseMonitor = new CodebaseMonitor(client);
   const inventory = collectInventory();
   let reconciling = false;
+  let codebaseTimer: ReturnType<typeof setTimeout> | undefined;
   let startupRecoveryPending = true;
   const interruptedJobs = new Set<string>();
 
@@ -87,8 +87,18 @@ export async function runAgent(
     }
   };
 
+  const reconcileCodebases = async () => {
+    await codebaseMonitor.reconcile(signal);
+    if (!signal.aborted) {
+      codebaseTimer = setTimeout(
+        () => void reconcileCodebases(),
+        codebaseMonitor.reconcileIntervalMs,
+      );
+    }
+  };
+
   await heartbeat();
-  void codebaseMonitor.reconcile(signal);
+  void reconcileCodebases();
 
   const subscriptionClient = createAgentSubscriptionClient(config);
   const unsubscribe = subscribeToAgentEvents(
@@ -103,10 +113,6 @@ export async function runAgent(
     () => void heartbeat(),
     HEARTBEAT_INTERVAL_MS,
   );
-  const codebaseTimer = setInterval(
-    () => void codebaseMonitor.reconcile(signal),
-    CODEBASE_RECONCILE_INTERVAL_MS,
-  );
 
   await new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
@@ -114,7 +120,7 @@ export async function runAgent(
   });
 
   clearInterval(heartbeatTimer);
-  clearInterval(codebaseTimer);
+  if (codebaseTimer) clearTimeout(codebaseTimer);
   unsubscribe();
   await subscriptionClient.dispose();
   await executor.cancelAll();

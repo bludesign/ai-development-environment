@@ -554,7 +554,17 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar base de código",
     "editTitle": "Editar detalles del repositorio",
-    "save": "Guardar"
+    "save": "Guardar",
+    "remove": "Eliminar",
+    "confirmRemoveTitle": "¿Eliminar el registro de la base de código?",
+    "confirmRemoveDescription": "Se eliminará el registro de {folder}. La carpeta y todos sus archivos permanecerán intactos en el agente.",
+    "removed": "Se eliminó el registro de la base de código.",
+    "settings": "Configuración",
+    "settingsTitle": "Configuración del estado de las bases de código",
+    "settingsDescription": "Define con qué frecuencia los agentes actualizados inspeccionan las carpetas registradas e informan del estado de Git.",
+    "refreshInterval": "Intervalo de actualización del agente (segundos)",
+    "refreshIntervalHelp": "Elige un número entero entre {min} y {max}. Cada agente espera este tiempo tras completar un análisis. No se contacta con los servidores remotos de Git.",
+    "settingsSaved": "Se guardó el intervalo de actualización del agente."
   },
   "status": {
     "online": "en línea",

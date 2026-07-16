@@ -554,7 +554,17 @@
     "cancel": "Cancel",
     "confirm": "Confirm codebase",
     "editTitle": "Edit repository details",
-    "save": "Save"
+    "save": "Save",
+    "remove": "Remove",
+    "confirmRemoveTitle": "Remove codebase registration?",
+    "confirmRemoveDescription": "The registration for {folder} will be removed. The folder and all of its files will remain untouched on the agent.",
+    "removed": "Codebase registration removed.",
+    "settings": "Settings",
+    "settingsTitle": "Codebase status settings",
+    "settingsDescription": "Set how often updated agents inspect registered folders and report Git status.",
+    "refreshInterval": "Agent refresh interval (seconds)",
+    "refreshIntervalHelp": "Choose an integer from {min} to {max}. Each agent waits this long after a scan completes. Git remotes are not contacted.",
+    "settingsSaved": "Agent refresh interval saved."
   },
   "status": {
     "online": "online",

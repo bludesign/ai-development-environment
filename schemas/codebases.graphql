@@ -90,10 +90,20 @@ type CodebaseOverview {
   repositories: [CodebaseRepository!]!
 }
 
+type CodebaseSettings {
+  refreshIntervalSeconds: Int!
+  updatedAt: String!
+}
+
 type AgentCodebaseRegistration {
   id: ID!
   folder: String!
   canonicalOrigin: String!
+}
+
+type AgentCodebaseConfiguration {
+  refreshIntervalSeconds: Int!
+  codebases: [AgentCodebaseRegistration!]!
 }
 
 type CodebaseOperationSkip {
@@ -106,9 +116,15 @@ type CodebaseOperationBatch {
   skipped: [CodebaseOperationSkip!]!
 }
 
+type CodebaseRemoval {
+  id: ID!
+  repositoryId: ID!
+  repositoryRemoved: Boolean!
+}
+
 type CodebaseOverviewChange {
   codebaseId: ID
-  repositoryId: ID!
+  repositoryId: ID
 }
 
 input BrowseAgentDirectoryInput {
@@ -133,6 +149,10 @@ input UpdateCodebaseRepositoryInput {
   id: ID!
   name: String!
   description: String!
+}
+
+input UpdateCodebaseSettingsInput {
+  refreshIntervalSeconds: Int!
 }
 
 input RunCodebaseOperationInput {
@@ -165,7 +185,9 @@ input CodebaseStatusReportInput {
 
 extend type Query {
   codebaseOverview: CodebaseOverview!
+  codebaseSettings: CodebaseSettings!
   agentCodebases: [AgentCodebaseRegistration!]!
+  agentCodebaseConfiguration: AgentCodebaseConfiguration!
 }
 
 extend type Mutation {
@@ -177,6 +199,8 @@ extend type Mutation {
   updateCodebaseRepository(
     input: UpdateCodebaseRepositoryInput!
   ): CodebaseRepository!
+  updateCodebaseSettings(input: UpdateCodebaseSettingsInput!): CodebaseSettings!
+  removeCodebase(id: ID!): CodebaseRemoval!
   refreshCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
   fetchCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
   reportCodebaseStatuses(reports: [CodebaseStatusReportInput!]!): [Codebase!]!

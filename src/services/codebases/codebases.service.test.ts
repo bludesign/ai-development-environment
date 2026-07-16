@@ -130,4 +130,134 @@ describe("CodebasesService", () => {
       { codebaseId: "mismatch", reason: "ORIGIN_MISMATCH" },
     ]);
   });
+
+  test("removes repository metadata with its final registered codebase", async () => {
+    const transaction = {
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "codebase-1",
+          repositoryId: "repository-1",
+        }),
+        delete: vi.fn().mockResolvedValue({}),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      codebaseRepository: {
+        delete: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await expect(service.removeCodebase("codebase-1")).resolves.toEqual({
+      id: "codebase-1",
+      repositoryId: "repository-1",
+      repositoryRemoved: true,
+    });
+
+    expect(transaction.codebase.delete).toHaveBeenCalledWith({
+      where: { id: "codebase-1" },
+    });
+    expect(transaction.codebaseRepository.delete).toHaveBeenCalledWith({
+      where: { id: "repository-1" },
+    });
+  });
+
+  test("keeps shared repository metadata when another codebase remains", async () => {
+    const transaction = {
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "codebase-1",
+          repositoryId: "repository-1",
+        }),
+        delete: vi.fn().mockResolvedValue({}),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      codebaseRepository: {
+        delete: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await expect(service.removeCodebase("codebase-1")).resolves.toEqual({
+      id: "codebase-1",
+      repositoryId: "repository-1",
+      repositoryRemoved: false,
+    });
+
+    expect(transaction.codebaseRepository.delete).not.toHaveBeenCalled();
+  });
+
+  test("returns the refresh interval with only the requesting agent's codebases", async () => {
+    const updatedAt = new Date(0);
+    const prisma = {
+      codebaseSettings: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "default",
+          refreshIntervalSeconds: 120,
+          updatedAt,
+        }),
+      },
+      codebase: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "codebase-1",
+            folder: "/repo",
+            repository: { canonicalOrigin: "example.com/repo" },
+          },
+        ]),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await expect(service.agentConfiguration("agent-1")).resolves.toEqual({
+      refreshIntervalSeconds: 120,
+      codebases: [
+        {
+          id: "codebase-1",
+          folder: "/repo",
+          repository: { canonicalOrigin: "example.com/repo" },
+        },
+      ],
+    });
+    expect(prisma.codebase.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { agentId: "agent-1" } }),
+    );
+  });
+
+  test("validates and persists the agent refresh interval", async () => {
+    const updatedAt = new Date(0);
+    const prisma = {
+      codebaseSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          id: "default",
+          refreshIntervalSeconds: 120,
+          updatedAt,
+        }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await expect(service.updateSettings(120)).resolves.toEqual({
+      id: "default",
+      refreshIntervalSeconds: 120,
+      updatedAt,
+    });
+    expect(prisma.codebaseSettings.upsert).toHaveBeenCalledWith({
+      where: { id: "default" },
+      create: { id: "default", refreshIntervalSeconds: 120 },
+      update: { refreshIntervalSeconds: 120 },
+    });
+    await expect(service.updateSettings(9)).rejects.toThrow(
+      "Refresh interval must be an integer from 10 to 3600 seconds",
+    );
+  });
 });
