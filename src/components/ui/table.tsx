@@ -21,6 +21,15 @@ export function TableBody({ className, ...props }: ComponentProps<"tbody">) {
   return <tbody className={cn("divide-y", className)} {...props} />;
 }
 
+export function TableFooter({ className, ...props }: ComponentProps<"tfoot">) {
+  return (
+    <tfoot
+      className={cn("border-t bg-muted/50 font-medium", className)}
+      {...props}
+    />
+  );
+}
+
 export function TableRow({ className, ...props }: ComponentProps<"tr">) {
   return (
     <tr

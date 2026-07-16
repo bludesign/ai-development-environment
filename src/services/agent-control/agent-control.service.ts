@@ -1,6 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { TUNNEL_NAME_REGEX } from "@ai-development-environment/agent-contract";
+import {
+  CCUSAGE_REPORT_JOB_KIND,
+  TUNNEL_NAME_REGEX,
+} from "@ai-development-environment/agent-contract";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -21,7 +24,10 @@ const FINAL_JOB_STATUSES = new Set([
 ]);
 
 export const AGENT_ONLINE_WINDOW_MS = 45_000;
-export const SUPPORTED_AGENT_JOBS = ["cloudflared.runTunnel"] as const;
+export const SUPPORTED_AGENT_JOBS = [
+  "cloudflared.runTunnel",
+  CCUSAGE_REPORT_JOB_KIND,
+] as const;
 
 export type RequestIdentity = {
   agentId: string | null;
@@ -39,11 +45,20 @@ function parsePayload(payload: unknown): Record<string, unknown> {
   return payload as Record<string, unknown>;
 }
 
-function validateJob(kind: string, payload: unknown): void {
+export function validateJob(kind: string, payload: unknown): void {
+  const value = parsePayload(payload);
+  if (kind === CCUSAGE_REPORT_JOB_KIND) {
+    const unexpected = Object.keys(value);
+    if (unexpected.length > 0) {
+      throw new Error(
+        `Unexpected ccusage.report payload field: ${unexpected[0]}`,
+      );
+    }
+    return;
+  }
   if (kind !== "cloudflared.runTunnel") {
     throw new Error(`Unsupported agent job kind: ${kind}`);
   }
-  const value = parsePayload(payload);
   if (
     typeof value.tunnelName !== "string" ||
     !TUNNEL_NAME_REGEX.test(value.tunnelName)
