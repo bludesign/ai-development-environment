@@ -108,6 +108,7 @@ describe("JiraTicketsPage", () => {
     render(<JiraTicketsPage />);
 
     expect(await screen.findByRole("tab", { name: "APP" })).toBeDefined();
+    expect(screen.queryByRole("tab", { name: "Current sprint" })).toBeNull();
     expect(await screen.findByText("In Progress")).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();

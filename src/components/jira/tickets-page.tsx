@@ -299,7 +299,7 @@ export function JiraTicketsPage() {
             </Tabs>
           </div>
 
-          {selectedProject && selectedProject.sources.length > 0 ? (
+          {selectedProject && selectedProject.sources.length > 1 ? (
             <div className="overflow-x-auto border-b pb-3">
               <Tabs
                 value={selectedSource?.id}
@@ -319,7 +319,7 @@ export function JiraTicketsPage() {
                 </TabsList>
               </Tabs>
             </div>
-          ) : (
+          ) : selectedProject?.sources.length === 0 ? (
             <Empty className="border py-8">
               <EmptyHeader>
                 <EmptyTitle>{t("emptySources")}</EmptyTitle>
@@ -332,7 +332,7 @@ export function JiraTicketsPage() {
                 {t("addSource")}
               </Button>
             </Empty>
-          )}
+          ) : null}
 
           {board?.cache.stale && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
