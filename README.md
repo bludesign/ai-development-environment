@@ -64,6 +64,17 @@ The SDL lives in `schemas/**/*.graphql` and is bundled into the app by `scripts/
 }
 ```
 
+## Codebase REST and MCP APIs
+
+Read-only codebase data is also available through REST and the Model Context Protocol:
+
+- `GET /api/codebases` lists registered codebase checkouts.
+- `GET /api/codebases/by-path?path=/absolute/folder` resolves one checkout by its exact path.
+- `GET /api/openapi.json` serves the OpenAPI 3.1 contract for both REST operations.
+- `/api/mcp` is a stateless Streamable HTTP MCP endpoint exposing `get_codebases` and `get_codebase`.
+
+The localized `/en/tools` page discovers and runs these built-in tools. It can also manage and test external Streamable HTTP or legacy SSE MCP servers; saved custom header values remain server-side and are never returned to the browser.
+
 ## Database (Prisma)
 
 Data access uses [Prisma 7](https://www.prisma.io/) with the `prisma-client` generator (TypeScript query compiler, no native query-engine binary) and the better-sqlite3 driver adapter. It defaults to a SQLite file at `prisma/dev.db`; set `DATABASE_URL` to another `file:` URL to change its location. Other database URL schemes are rejected. Migrations are versioned in `prisma/migrations/` and applied with `prisma migrate deploy`.

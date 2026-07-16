@@ -119,6 +119,32 @@ model CodebaseSettings {
   updatedAt              DateTime @updatedAt
 }
 
+model ExternalMcpServer {
+  id             String                    @id
+  name           String                    @unique
+  url            String
+  transport      String
+  toolNamePrefix String                    @default("")
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  headers        ExternalMcpServerHeader[]
+
+  @@index([name])
+}
+
+model ExternalMcpServerHeader {
+  id        String            @id
+  serverId  String
+  name      String
+  value     String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  server    ExternalMcpServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, name])
+  @@index([serverId])
+}
+
 model CcusageCollection {
   id         String                   @id
   deadlineAt DateTime

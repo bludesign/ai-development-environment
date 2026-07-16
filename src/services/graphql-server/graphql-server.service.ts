@@ -5,13 +5,13 @@ import {
 } from "@apollo/server/plugin/landingPage/default";
 
 import { createSchema } from "@/graphql/schema";
-import { AgentControlService } from "@/services/agent-control";
-import { PrismaService } from "@/services/prisma";
-import { JiraService } from "@/services/jira";
-import { GitHubService } from "@/services/github";
-import { CcusageService } from "@/services/ccusage";
+import type { AgentControlService } from "@/services/agent-control";
+import type { PrismaService } from "@/services/prisma";
 import type { GraphQLSchema } from "graphql";
-import { CodebasesService } from "@/services/codebases";
+import {
+  getServerServices,
+  type ServerServices,
+} from "@/services/server-services";
 
 export interface GraphQLContext {
   prismaService: PrismaService;
@@ -47,13 +47,8 @@ export function requestIpAddress(headers: Headers): string | null {
 // handler initializes it lazily on the first GraphQL request and reuses it thereafter.
 class GraphQLServerService {
   private server: ApolloServer<GraphQLContext> | null = null;
-  private prismaService: PrismaService | null = null;
-  private jiraService: JiraService | null = null;
-  private gitHubService: GitHubService | null = null;
-  private agentControlService: AgentControlService | null = null;
-  private ccusageService: CcusageService | null = null;
+  private services: ServerServices | null = null;
   private schema: GraphQLSchema | null = null;
-  private codebasesService: CodebasesService | null = null;
   private initPromise: Promise<void> | null = null;
 
   private async initializeServer(): Promise<void> {
@@ -69,19 +64,15 @@ class GraphQLServerService {
   }
 
   private async buildServer(): Promise<void> {
-    this.prismaService = new PrismaService();
-    this.agentControlService = new AgentControlService();
-    this.ccusageService = new CcusageService(this.agentControlService);
-    this.codebasesService = new CodebasesService(this.agentControlService);
-    this.jiraService = new JiraService();
-    this.gitHubService = new GitHubService();
+    this.services = getServerServices();
     this.schema = createSchema(
-      this.prismaService,
-      this.agentControlService,
-      this.jiraService,
-      this.gitHubService,
-      this.ccusageService,
-      this.codebasesService,
+      this.services.prismaService,
+      this.services.agentControlService,
+      this.services.jiraService,
+      this.services.gitHubService,
+      this.services.ccusageService,
+      this.services.codebasesService,
+      this.services.toolsService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when
@@ -104,17 +95,17 @@ class GraphQLServerService {
   ): Promise<GraphQLContext> {
     await this.initializeServer();
 
-    if (!this.prismaService || !this.agentControlService) {
+    if (!this.services) {
       throw new Error("GraphQL services not initialized");
     }
 
     const headers = normalizeHeaders(source);
-    const agentId = await this.agentControlService.authenticate(
+    const agentId = await this.services.agentControlService.authenticate(
       bearerCredential(headers),
     );
     return {
-      prismaService: this.prismaService,
-      agentControlService: this.agentControlService,
+      prismaService: this.services.prismaService,
+      agentControlService: this.services.agentControlService,
       agentId,
       ipAddress: requestIpAddress(headers),
     };
