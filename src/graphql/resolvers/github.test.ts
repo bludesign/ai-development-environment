@@ -6,7 +6,7 @@ import type { GitHubService } from "@/services/github";
 import { createGitHubResolvers } from "./github";
 
 function context(agentId: string | null): GraphQLContext {
-  return { agentId } as GraphQLContext;
+  return { agentId, ipAddress: "127.0.0.1" } as GraphQLContext;
 }
 
 describe("GitHub resolvers", () => {
@@ -38,12 +38,18 @@ describe("GitHub resolvers", () => {
     };
     const service = {
       saveSettings: vi.fn().mockResolvedValue(safeSettings),
+      saveAppSettings: vi.fn().mockResolvedValue({ configured: true }),
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service);
     const input = { apiToken: "secret-token" };
+    const appInput = {
+      appId: "123",
+      installationId: "456",
+      privateKey: "private-key",
+    };
 
     await expect(
       resolvers.Mutation.saveGitHubSettings({}, { input }, context(null)),
@@ -56,6 +62,15 @@ describe("GitHub resolvers", () => {
       ),
     ).resolves.toEqual({ items: [], truncated: false });
     expect(service.saveSettings).toHaveBeenCalledWith(input);
+    await resolvers.Mutation.saveGitHubAppSettings(
+      {},
+      { input: appInput },
+      context(null),
+    );
+    expect(service.saveAppSettings).toHaveBeenCalledWith(appInput, {
+      actor: "control-plane",
+      ipAddress: "127.0.0.1",
+    });
     expect(service.pullRequests).toHaveBeenCalledWith(
       "REPOSITORY",
       "repository-1",
@@ -74,6 +89,7 @@ describe("GitHub resolvers", () => {
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
+      { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(safeSettings).not.toHaveProperty("apiToken");
   });

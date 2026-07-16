@@ -1,5 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { GitHubPullRequestScope, GitHubService } from "@/services/github";
+import type {
+  GitHubAuditContext,
+  GitHubPullRequestScope,
+  GitHubService,
+} from "@/services/github";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -7,6 +11,10 @@ function requireControlPlane(context: GraphQLContext): void {
       "Agent credentials cannot perform control-plane operations",
     );
   }
+}
+
+function auditContext(context: GraphQLContext): GitHubAuditContext {
+  return { actor: "control-plane", ipAddress: context.ipAddress };
 }
 
 export const createGitHubResolvers = (gitHubService: GitHubService) => ({
@@ -18,6 +26,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.getSettings();
+    },
+    githubAppSettings: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.getAppSettings();
     },
     githubRepositories: (
       _root: unknown,
@@ -64,6 +80,22 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.saveSettings(input);
     },
+    saveGitHubAppSettings: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          appId: string;
+          installationId: string;
+          privateKey?: string | null;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.saveAppSettings(input, auditContext(context));
+    },
     testGitHubConnection: (
       _root: unknown,
       _args: unknown,
@@ -72,6 +104,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.testConnection();
     },
+    testGitHubAppConnection: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.testAppConnection(auditContext(context));
+    },
     clearGitHubCredentials: (
       _root: unknown,
       _args: unknown,
@@ -79,6 +119,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.clearCredentials();
+    },
+    clearGitHubAppCredentials: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearAppCredentials(auditContext(context));
     },
     addGitHubRepository: (
       _root: unknown,
@@ -117,7 +165,11 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.retryPipeline(repositoryId, checkSuiteId);
+      return gitHubService.retryPipeline(
+        repositoryId,
+        checkSuiteId,
+        auditContext(context),
+      );
     },
   },
 });

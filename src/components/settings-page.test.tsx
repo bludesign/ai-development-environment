@@ -81,4 +81,108 @@ describe("SettingsPage", () => {
     );
     expect(screen.queryByDisplayValue("replacement-token")).toBeNull();
   });
+
+  test("guides setup and keeps the GitHub App private key write-only", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("jiraSettings")) {
+        return {
+          jiraSettings: {
+            siteUrl: null,
+            email: null,
+            tokenConfigured: false,
+            cacheTtlSeconds: 300,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubSettings")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubAppSettings")) {
+        return {
+          githubAppSettings: {
+            configured: false,
+            appId: null,
+            installationId: null,
+            privateKeyConfigured: false,
+            keyFingerprint: null,
+            appSlug: null,
+            accountLogin: null,
+            repositorySelection: null,
+            actionsPermission: null,
+            verifiedAt: null,
+            updatedAt: null,
+          },
+        } as never;
+      }
+      if (query.includes("SaveGitHubAppSettings")) {
+        return {
+          saveGitHubAppSettings: {
+            configured: true,
+            appId: "123",
+            installationId: "456",
+            privateKeyConfigured: true,
+            keyFingerprint: "SHA256:fingerprint",
+            appSlug: "workflow-rerunner",
+            accountLogin: "acme",
+            repositorySelection: "selected",
+            actionsPermission: "write",
+            verifiedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<SettingsPage />);
+
+    const appId = await screen.findByLabelText("GitHub App ID");
+    const installationId = screen.getByLabelText("Installation ID");
+    const privateKey = screen.getByLabelText(
+      "PEM private key",
+    ) as HTMLTextAreaElement;
+    expect(
+      screen.getByRole("link", { name: /New GitHub App/ }).getAttribute("href"),
+    ).toBe("https://github.com/settings/apps/new");
+    expect(screen.getByText(/Actions to Read and write/)).toBeDefined();
+
+    fireEvent.change(appId, { target: { value: "123" } });
+    fireEvent.change(installationId, { target: { value: "456" } });
+    fireEvent.change(privateKey, {
+      target: {
+        value: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+      },
+    });
+    const form = appId.closest("form");
+    fireEvent.click(
+      within(form as HTMLFormElement).getByRole("button", {
+        name: "Save and verify",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("SaveGitHubAppSettings"),
+        {
+          input: {
+            appId: "123",
+            installationId: "456",
+            privateKey:
+              "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+          },
+        },
+      ),
+    );
+    expect(privateKey.value).toBe("");
+    expect(screen.queryByDisplayValue(/BEGIN PRIVATE KEY/)).toBeNull();
+    expect(
+      screen.getByText("Connected to workflow-rerunner on acme"),
+    ).toBeDefined();
+  });
 });

@@ -65,7 +65,7 @@ const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry } reviewDecision unresolvedReviewThreadCount createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount createdAt";
 
 type TabKey = "mine" | "review" | `repo:${string}`;
 

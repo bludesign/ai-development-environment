@@ -47,7 +47,7 @@ import type {
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry } reviewDecision unresolvedReviewThreadCount createdAt body author { login avatarUrl url } assignees { login avatarUrl url } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount createdAt body author { login avatarUrl url } assignees { login avatarUrl url } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);

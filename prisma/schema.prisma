@@ -201,6 +201,40 @@ model GitHubSettings {
   updatedAt DateTime @updatedAt
 }
 
+model GitHubAppSettings {
+  id                  String   @id
+  appId               String
+  installationId      String
+  privateKey          String
+  apiBaseUrl           String   @default("https://api.github.com")
+  graphqlUrl           String   @default("https://api.github.com/graphql")
+  keyFingerprint      String
+  appSlug              String
+  accountLogin         String
+  repositorySelection String
+  actionsPermission   String
+  verifiedAt          DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model GitHubAuditEvent {
+  id              String   @id
+  scopeId         String   @default("default")
+  actor           String
+  ipAddress       String?
+  operation       String
+  repositoryId    String?
+  checkSuiteId    String?
+  githubRequestId String?
+  outcome         String
+  errorCode       String?
+  createdAt       DateTime @default(now())
+
+  @@index([operation, createdAt])
+  @@index([repositoryId, createdAt])
+}
+
 model GitHubRepository {
   id             String   @id
   githubId       String   @unique
