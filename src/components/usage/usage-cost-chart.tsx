@@ -78,6 +78,15 @@ export function buildUsageCostChartData(
   return { data, series };
 }
 
+export function totalUsageCostForChartRow(
+  row: unknown,
+  series: UsageCostSeries[],
+): number {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return 0;
+  const values = row as Record<string, unknown>;
+  return series.reduce((sum, model) => sum + Number(values[model.key] ?? 0), 0);
+}
+
 export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
   const t = useTranslations("usage");
   const locale = useLocale();
@@ -149,21 +158,34 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  formatter={(value, name, item) => (
-                    <div className="flex w-full min-w-40 items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-[2px]"
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span className="flex-1 text-muted-foreground">
-                        {config[String(name)]?.label ?? String(name)}
-                      </span>
-                      <span className="font-mono font-medium tabular-nums">
-                        {currency.format(Number(value))}
-                      </span>
-                    </div>
-                  )}
+                  formatter={(value, name, item, index, row) => {
+                    const total = totalUsageCostForChartRow(row, series);
+                    return (
+                      <div className="grid w-full min-w-40 gap-1.5">
+                        <div className="flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="size-2.5 shrink-0 rounded-[2px]"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="flex-1 text-muted-foreground">
+                            {config[String(name)]?.label ?? String(name)}
+                          </span>
+                          <span className="font-mono font-medium tabular-nums">
+                            {currency.format(Number(value))}
+                          </span>
+                        </div>
+                        {index === series.length - 1 && (
+                          <div className="flex items-center justify-between gap-4 border-t pt-1.5 font-medium">
+                            <span>{t("total")}</span>
+                            <span className="font-mono tabular-nums">
+                              {currency.format(total)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
                   labelFormatter={(value) => formatPeriod(String(value))}
                 />
               }
