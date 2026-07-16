@@ -83,3 +83,5 @@ export const AGENT_CHANGED_TOPIC = "agent.changed";
 export const agentEventsTopic = (agentId: string) => `agent.${agentId}.events`;
 export const agentJobChangedTopic = (jobId: string) => `job.${jobId}.changed`;
 export const agentJobLogTopic = (jobId: string) => `job.${jobId}.log`;
+export const ccusageCollectionChangedTopic = (collectionId: string) =>
+  `ccusage.${collectionId}.changed`;

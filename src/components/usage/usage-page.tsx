@@ -1,16 +1,12 @@
 "use client";
 
-import {
-  CCUSAGE_REPORT_JOB_KIND,
-  parseCcusageJobResult,
-  type CcusageReport,
-} from "@ai-development-environment/agent-contract";
+import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
-import { JOB_FIELDS } from "@/components/agents/graphql-fields";
-import type { Agent, AgentJob } from "@/components/agents/types";
+import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import type { Agent } from "@/components/agents/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,19 +32,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import {
-  aggregateUsage,
-  filterUsageByDays,
-  type UsageMetrics,
-  type UsageRangeDays,
-  type UsageReportSource,
-} from "./aggregate-usage";
+import type { AggregatedUsage, UsageMetrics } from "./aggregate-usage";
 import { UsageCostChart } from "./usage-cost-chart";
 
-const JOB_TIMEOUT_SECONDS = 120;
-const COLLECTION_DEADLINE_MS = 150_000;
 const RECONCILE_INTERVAL_MS = 2_000;
-const TERMINAL_STATUSES = new Set<AgentJob["status"]>([
+const TERMINAL_STATUSES = new Set<CollectionStatus>([
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
@@ -56,292 +44,167 @@ const TERMINAL_STATUSES = new Set<AgentJob["status"]>([
 ]);
 
 type CollectionStatus =
-  AgentJob["status"] | "QUEUING" | "OFFLINE" | "UNSUPPORTED" | "INVALID";
+  | "QUEUING"
+  | "QUEUED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELLED"
+  | "TIMED_OUT"
+  | "OFFLINE"
+  | "UNSUPPORTED"
+  | "INVALID";
 
 type AgentCollection = {
   agent: Agent;
   status: CollectionStatus;
-  jobId?: string;
-  error?: string;
+  jobId: string | null;
+  error: string | null;
 };
 
-type ReportsByAgent = Record<string, CcusageReport>;
-type UsageRange = "ALL" | "7" | "30";
+type UsageRange = "ALL" | "LAST_7_DAYS" | "LAST_30_DAYS";
 
-const RANGE_DAYS: Record<UsageRange, UsageRangeDays> = {
-  ALL: null,
-  "7": 7,
-  "30": 30,
+type CcusageCollection = {
+  id: string;
+  status: "COLLECTING" | "COMPLETED";
+  createdAt: string;
+  deadlineAt: string;
+  finishedAt: string | null;
+  progress: {
+    eligibleCount: number;
+    finishedCount: number;
+    successfulCount: number;
+    agents: AgentCollection[];
+  };
+  aggregate: AggregatedUsage;
+  allAggregate: { days: Array<{ period: string }> };
 };
+
+const METRICS_FIELDS = `inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens totalCost`;
+const COLLECTION_FIELDS = `
+  id status createdAt deadlineAt finishedAt
+  progress {
+    eligibleCount finishedCount successfulCount
+    agents { agent { ${AGENT_FIELDS} } status jobId error }
+  }
+  aggregate(range: $range) {
+    totals { ${METRICS_FIELDS} }
+    days {
+      period sources ${METRICS_FIELDS}
+      models {
+        modelName unattributed ${METRICS_FIELDS}
+        agents { agentId agentName hostname sources ${METRICS_FIELDS} }
+      }
+    }
+  }
+  allAggregate: aggregate(range: ALL) { days { period } }
+`;
 
 function terminal(status: CollectionStatus): boolean {
-  return (
-    status === "INVALID" || TERMINAL_STATUSES.has(status as AgentJob["status"])
-  );
+  return status === "INVALID" || TERMINAL_STATUSES.has(status);
 }
 
 export function UsagePage() {
   const t = useTranslations("usage");
   const locale = useLocale();
-  const [refreshGeneration, setRefreshGeneration] = useState(0);
-  const [records, setRecords] = useState<AgentCollection[]>([]);
-  const [reports, setReports] = useState<ReportsByAgent>({});
+  const [requestId, setRequestId] = useState(createClientId);
+  const [collection, setCollection] = useState<CcusageCollection | null>(null);
   const [loading, setLoading] = useState(true);
-  const [collecting, setCollecting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [range, setRange] = useState<UsageRange>("ALL");
 
   useEffect(() => {
     let disposed = false;
+    let completed = false;
     let reconcileTimer: number | undefined;
-    let deadlineTimer: number | undefined;
-    const unsubscribers: Array<() => void> = [];
-    const jobs = new Map<string, { agent: Agent; job: AgentJob }>();
-    const eligibleIds = new Set<string>();
-    const completedIds = new Set<string>();
-
-    const updateRecord = (
-      agentId: string,
-      update: Partial<Omit<AgentCollection, "agent">>,
-    ) => {
+    const applyCollection = (next: CcusageCollection) => {
       if (disposed) return;
-      setRecords((current) =>
-        current.map((record) =>
-          record.agent.id === agentId ? { ...record, ...update } : record,
-        ),
-      );
-    };
-
-    const finishIfComplete = () => {
-      if (
-        !disposed &&
-        eligibleIds.size > 0 &&
-        completedIds.size === eligibleIds.size
-      ) {
-        setCollecting(false);
+      setCollection(next);
+      setLoading(false);
+      setLoadError(null);
+      if (next.status === "COMPLETED") {
+        completed = true;
         if (reconcileTimer !== undefined) {
           window.clearInterval(reconcileTimer);
           reconcileTimer = undefined;
         }
-        if (deadlineTimer !== undefined) {
-          window.clearTimeout(deadlineTimer);
-          deadlineTimer = undefined;
-        }
       }
     };
-
-    const applyJob = (agent: Agent, job: AgentJob) => {
-      if (disposed || completedIds.has(agent.id)) return;
-      jobs.set(agent.id, { agent, job });
-      if (!terminal(job.status)) {
-        updateRecord(agent.id, { jobId: job.id, status: job.status });
-        return;
-      }
-
-      completedIds.add(agent.id);
-      if (job.status === "SUCCEEDED") {
-        try {
-          const result = parseCcusageJobResult(job.result);
-          setReports((current) => ({
-            ...current,
-            [agent.id]: result.report,
-          }));
-          updateRecord(agent.id, {
-            jobId: job.id,
-            status: "SUCCEEDED",
-            error: undefined,
-          });
-        } catch (error) {
-          updateRecord(agent.id, {
-            jobId: job.id,
-            status: "INVALID",
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      } else {
-        updateRecord(agent.id, {
-          jobId: job.id,
-          status: job.status,
-          error: job.error ?? undefined,
-        });
-      }
-      finishIfComplete();
-    };
-
-    const reconcile = async (agent: Agent, jobId: string) => {
+    const reconcile = async () => {
       try {
-        const data = await controlPlaneRequest<{ agentJob: AgentJob | null }>(
-          `query UsageJob($id: ID!) { agentJob(id: $id) { ${JOB_FIELDS} } }`,
-          { id: jobId },
+        const data = await controlPlaneRequest<{
+          ccusageCollection: CcusageCollection | null;
+        }>(
+          `query CcusageCollection($id: ID!, $range: CcusageRange!) {
+            ccusageCollection(id: $id) { ${COLLECTION_FIELDS} }
+          }`,
+          { id: requestId, range },
         );
-        if (data.agentJob) applyJob(agent, data.agentJob);
+        if (data.ccusageCollection) applyCollection(data.ccusageCollection);
       } catch {
-        // The subscription or next reconciliation pass can still deliver the job.
+        // The blocking mutation, subscription, or next pass can still deliver it.
       }
     };
-
-    const cancelJob = (jobId: string) => {
-      void controlPlaneRequest(
-        "mutation CancelUsageJob($jobId: ID!) { cancelAgentJob(jobId: $jobId) { id } }",
-        { jobId },
-      ).catch(() => undefined);
-    };
-
-    const run = async () => {
-      setLoading(true);
-      setCollecting(false);
-      setLoadError(null);
-      setReports({});
-      setRecords([]);
-      try {
-        const data = await controlPlaneRequest<{ agents: Agent[] }>(
-          "query UsageAgents { agents { id name hostname version osVersion architecture capabilities connectionStatus ipAddress lastSeenAt disconnectedAt createdAt } }",
-        );
-        if (disposed) return;
-
-        const initialRecords = data.agents.map<AgentCollection>((agent) => {
-          if (agent.connectionStatus !== "ONLINE") {
-            return { agent, status: "OFFLINE" };
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      ccusageCollectionChanged: CcusageCollection;
+    }>(
+      {
+        query: `subscription CcusageCollectionChanged($id: ID!, $range: CcusageRange!) {
+          ccusageCollectionChanged(id: $id) { ${COLLECTION_FIELDS} }
+        }`,
+        variables: { id: requestId, range },
+      },
+      {
+        next: (value) => {
+          if (value.data?.ccusageCollectionChanged) {
+            applyCollection(value.data.ccusageCollectionChanged);
           }
-          if (!agent.capabilities.includes(CCUSAGE_REPORT_JOB_KIND)) {
-            return { agent, status: "UNSUPPORTED" };
-          }
-          eligibleIds.add(agent.id);
-          return { agent, status: "QUEUING" };
-        });
-        setRecords(initialRecords);
-        setLoading(false);
-        if (eligibleIds.size === 0) return;
-        setCollecting(true);
-
-        deadlineTimer = window.setTimeout(() => {
-          for (const agentId of eligibleIds) {
-            if (completedIds.has(agentId)) continue;
-            completedIds.add(agentId);
-            const entry = jobs.get(agentId);
-            updateRecord(agentId, {
-              status: "TIMED_OUT",
-              error: undefined,
-            });
-            if (entry) {
-              cancelJob(entry.job.id);
-            }
-          }
-          finishIfComplete();
-        }, COLLECTION_DEADLINE_MS);
-
-        const refreshId = createClientId();
-        await Promise.all(
-          data.agents
-            .filter((agent) => eligibleIds.has(agent.id))
-            .map(async (agent) => {
-              try {
-                const result = await controlPlaneRequest<{
-                  createAgentJob: AgentJob;
-                }>(
-                  `mutation CollectUsage($input: CreateAgentJobInput!) { createAgentJob(input: $input) { ${JOB_FIELDS} } }`,
-                  {
-                    input: {
-                      agentId: agent.id,
-                      kind: CCUSAGE_REPORT_JOB_KIND,
-                      payload: {},
-                      idempotencyKey: `ccusage:${refreshId}`,
-                      timeoutSeconds: JOB_TIMEOUT_SECONDS,
-                    },
-                  },
-                );
-                if (disposed) return;
-                const job = result.createAgentJob;
-                if (completedIds.has(agent.id)) {
-                  cancelJob(job.id);
-                  return;
-                }
-                jobs.set(agent.id, { agent, job });
-                updateRecord(agent.id, { jobId: job.id, status: job.status });
-                const unsubscribe = controlPlaneSubscriptions().subscribe<{
-                  agentJobChanged: AgentJob;
-                }>(
-                  {
-                    query: `subscription UsageJobChanged($jobId: ID!) { agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} } }`,
-                    variables: { jobId: job.id },
-                  },
-                  {
-                    next: (value) => {
-                      if (value.data?.agentJobChanged) {
-                        applyJob(agent, value.data.agentJobChanged);
-                      }
-                    },
-                    error: () => undefined,
-                    complete: () => undefined,
-                  },
-                );
-                unsubscribers.push(unsubscribe);
-                applyJob(agent, job);
-                await reconcile(agent, job.id);
-              } catch (error) {
-                if (disposed || completedIds.has(agent.id)) return;
-                completedIds.add(agent.id);
-                updateRecord(agent.id, {
-                  status: "FAILED",
-                  error: error instanceof Error ? error.message : String(error),
-                });
-                finishIfComplete();
-              }
-            }),
-        );
-        if (disposed) return;
-        finishIfComplete();
-        if (completedIds.size < eligibleIds.size) {
-          reconcileTimer = window.setInterval(() => {
-            for (const [agentId, entry] of jobs) {
-              if (!completedIds.has(agentId)) {
-                void reconcile(entry.agent, entry.job.id);
-              }
-            }
-          }, RECONCILE_INTERVAL_MS);
-        }
-      } catch (error) {
-        if (disposed) return;
-        setLoadError(error instanceof Error ? error.message : String(error));
-        setLoading(false);
-        setCollecting(false);
-      }
-    };
-
-    void run();
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    void reconcile();
+    if (!completed) {
+      reconcileTimer = window.setInterval(
+        () => void reconcile(),
+        RECONCILE_INTERVAL_MS,
+      );
+    }
     return () => {
       disposed = true;
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      unsubscribe();
       if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
-      if (deadlineTimer !== undefined) window.clearTimeout(deadlineTimer);
     };
-  }, [refreshGeneration]);
+  }, [range, requestId]);
 
-  const reportSources = useMemo<UsageReportSource[]>(
-    () =>
-      records.flatMap((record) => {
-        const report = reports[record.agent.id];
-        return report ? [{ agent: record.agent, report }] : [];
-      }),
-    [records, reports],
-  );
-  const allUsage = useMemo(
-    () => aggregateUsage(reportSources),
-    [reportSources],
-  );
-  const usage = useMemo(
-    () => filterUsageByDays(allUsage, RANGE_DAYS[range]),
-    [allUsage, range],
-  );
+  useEffect(() => {
+    let disposed = false;
+    void controlPlaneRequest<{ collectCcusage: { id: string } }>(
+      `mutation CollectCcusage($requestId: ID!) {
+        collectCcusage(requestId: $requestId) { id }
+      }`,
+      { requestId },
+    ).catch((error) => {
+      if (disposed) return;
+      setLoadError(error instanceof Error ? error.message : String(error));
+      setLoading(false);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [requestId]);
+
+  const records = collection?.progress.agents ?? [];
+  const usage = collection?.aggregate;
+  const collecting = collection?.status === "COLLECTING";
   const successful = records.filter((record) => record.status === "SUCCEEDED");
   const eligible = records.filter(
     (record) => record.status !== "OFFLINE" && record.status !== "UNSUPPORTED",
   );
-  const offline = records.filter(
-    (record) => record.agent.connectionStatus === "OFFLINE",
-  );
+  const offline = records.filter((record) => record.status === "OFFLINE");
   const unsupported = records.filter(
-    (record) => !record.agent.capabilities.includes(CCUSAGE_REPORT_JOB_KIND),
+    (record) => record.status === "UNSUPPORTED",
   );
   const failures = records.filter(
     (record) => terminal(record.status) && record.status !== "SUCCEEDED",
@@ -367,8 +230,8 @@ export function UsagePage() {
             {(
               [
                 ["ALL", t("allData")],
-                ["7", t("last7Days")],
-                ["30", t("last30Days")],
+                ["LAST_7_DAYS", t("last7Days")],
+                ["LAST_30_DAYS", t("last30Days")],
               ] as const
             ).map(([value, label]) => (
               <Button
@@ -385,7 +248,12 @@ export function UsagePage() {
           </div>
           <Button
             disabled={loading || collecting}
-            onClick={() => setRefreshGeneration((current) => current + 1)}
+            onClick={() => {
+              setCollection(null);
+              setLoading(true);
+              setLoadError(null);
+              setRequestId(createClientId());
+            }}
             variant="outline"
           >
             <RefreshCw className={collecting ? "animate-spin" : undefined} />
@@ -403,10 +271,12 @@ export function UsagePage() {
       {(collecting || records.length > 0) && (
         <CollectionStatusPanel
           collecting={collecting}
-          eligibleCount={eligible.length}
+          eligibleCount={collection?.progress.eligibleCount ?? eligible.length}
           failures={failures}
           offline={offline}
-          successfulCount={successful.length}
+          successfulCount={
+            collection?.progress.successfulCount ?? successful.length
+          }
           unsupported={unsupported}
         />
       )}
@@ -443,17 +313,18 @@ export function UsagePage() {
           title={t("collectionFailed")}
           description={t("collectionFailedDescription")}
         />
-      ) : successful.length > 0 && allUsage.days.length === 0 ? (
+      ) : successful.length > 0 &&
+        collection?.allAggregate.days.length === 0 ? (
         <UsageEmpty
           title={t("zeroUsage")}
           description={t("zeroUsageDescription")}
         />
-      ) : successful.length > 0 && usage.days.length === 0 ? (
+      ) : successful.length > 0 && usage && usage.days.length === 0 ? (
         <UsageEmpty
           title={t("noUsageInRange")}
           description={t("noUsageInRangeDescription")}
         />
-      ) : successful.length > 0 ? (
+      ) : successful.length > 0 && usage ? (
         <>
           <UsageCostChart days={usage.days} />
           <SummaryTiles metrics={usage.totals} />
@@ -553,7 +424,7 @@ function UsageTable({
   locale,
   totals,
 }: {
-  days: ReturnType<typeof aggregateUsage>["days"];
+  days: AggregatedUsage["days"];
   locale: string;
   totals: UsageMetrics;
 }) {

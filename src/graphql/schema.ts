@@ -10,10 +10,12 @@ import { AgentControlService } from "@/services/agent-control";
 
 import { createAgentResolvers } from "./resolvers/agents";
 import { createHealthResolvers } from "./resolvers/health";
+import { createCcusageResolvers } from "./resolvers/ccusage";
 import { createJiraResolvers } from "./resolvers/jira";
 import { createGitHubResolvers } from "./resolvers/github";
 import { GitHubService } from "@/services/github";
 import { JiraService } from "@/services/jira";
+import { CcusageService } from "@/services/ccusage";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -25,12 +27,14 @@ export const createSchema = (
   agentControlService: AgentControlService,
   jiraService: JiraService,
   gitHubService: GitHubService,
+  ccusageService: CcusageService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
     createAgentResolvers(agentControlService),
     createJiraResolvers(jiraService),
     createGitHubResolvers(gitHubService),
+    createCcusageResolvers(ccusageService),
   ]);
 
   return buildSubgraphSchema({

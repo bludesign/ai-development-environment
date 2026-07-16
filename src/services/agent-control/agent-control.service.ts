@@ -13,6 +13,7 @@ import {
   agentEventsTopic,
   agentJobChangedTopic,
   agentJobLogTopic,
+  ccusageCollectionChangedTopic,
 } from "./event-bus";
 
 const ACTIVE_JOB_STATUSES = ["QUEUED", "RUNNING"];
@@ -77,8 +78,17 @@ function publishAgent(agent: unknown): void {
   agentEventBus.publish(AGENT_CHANGED_TOPIC, { agentChanged: agent });
 }
 
-function publishJob(job: { id: string }): void {
+function publishJob(job: {
+  id: string;
+  ccusageCollectionId?: string | null;
+}): void {
   agentEventBus.publish(agentJobChangedTopic(job.id), { agentJobChanged: job });
+  if (job.ccusageCollectionId) {
+    agentEventBus.publish(
+      ccusageCollectionChangedTopic(job.ccusageCollectionId),
+      { ccusageCollectionChanged: { id: job.ccusageCollectionId } },
+    );
+  }
 }
 
 export class AgentControlService {
@@ -215,6 +225,7 @@ export class AgentControlService {
     payload: unknown;
     idempotencyKey: string;
     timeoutSeconds?: number | null;
+    ccusageCollectionId?: string | null;
   }) {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
@@ -232,18 +243,55 @@ export class AgentControlService {
         },
       },
     });
-    if (existing) return existing;
-    const job = await prisma.agentJob.create({
-      data: {
-        id: randomUUID(),
-        agentId: input.agentId,
-        kind: input.kind,
-        payloadJson: JSON.stringify(input.payload),
-        status: "QUEUED",
-        idempotencyKey: input.idempotencyKey,
-        timeoutSeconds,
-      },
-    });
+    if (existing) {
+      if (
+        input.ccusageCollectionId &&
+        existing.ccusageCollectionId !== input.ccusageCollectionId
+      ) {
+        const attached = await prisma.agentJob.update({
+          where: { id: existing.id },
+          data: { ccusageCollectionId: input.ccusageCollectionId },
+        });
+        publishJob(attached);
+        return attached;
+      }
+      return existing;
+    }
+    let job;
+    try {
+      job = await prisma.agentJob.create({
+        data: {
+          id: randomUUID(),
+          agentId: input.agentId,
+          kind: input.kind,
+          payloadJson: JSON.stringify(input.payload),
+          status: "QUEUED",
+          idempotencyKey: input.idempotencyKey,
+          timeoutSeconds,
+          ccusageCollectionId: input.ccusageCollectionId ?? null,
+        },
+      });
+    } catch (error) {
+      const concurrent = await prisma.agentJob.findUnique({
+        where: {
+          agentId_idempotencyKey: {
+            agentId: input.agentId,
+            idempotencyKey: input.idempotencyKey,
+          },
+        },
+      });
+      if (!concurrent) throw error;
+      if (
+        input.ccusageCollectionId &&
+        concurrent.ccusageCollectionId !== input.ccusageCollectionId
+      ) {
+        return prisma.agentJob.update({
+          where: { id: concurrent.id },
+          data: { ccusageCollectionId: input.ccusageCollectionId },
+        });
+      }
+      return concurrent;
+    }
     await prisma.agentAuditEvent.create({
       data: {
         id: randomUUID(),
@@ -371,6 +419,34 @@ export class AgentControlService {
       agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
     });
     return updated;
+  }
+
+  async timeoutCollectionJobs(collectionId: string) {
+    const prisma = await getPrismaClient();
+    const jobs = await prisma.agentJob.findMany({
+      where: {
+        ccusageCollectionId: collectionId,
+        status: { in: ACTIVE_JOB_STATUSES },
+      },
+    });
+    const timedOut = [];
+    for (const job of jobs) {
+      const changed = await prisma.agentJob.updateMany({
+        where: { id: job.id, status: { in: ACTIVE_JOB_STATUSES } },
+        data: { status: "TIMED_OUT", finishedAt: new Date() },
+      });
+      if (changed.count !== 1) continue;
+      const updated = await prisma.agentJob.findUnique({
+        where: { id: job.id },
+      });
+      if (!updated) continue;
+      timedOut.push(updated);
+      publishJob(updated);
+      agentEventBus.publish(agentEventsTopic(updated.agentId), {
+        agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
+      });
+    }
+    return timedOut;
   }
 
   async listLogs(jobId: string, afterSequence = -1) {

@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import type { Agent, AgentJob } from "@/components/agents/types";
+import type { Agent } from "@/components/agents/types";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -46,59 +46,82 @@ function agent(
   };
 }
 
-const report = {
-  daily: [
+const metrics = {
+  inputTokens: 10,
+  outputTokens: 20,
+  cacheCreationTokens: 30,
+  cacheReadTokens: 40,
+  totalTokens: 100,
+  totalCost: 1.256,
+};
+
+const aggregate = {
+  days: [
     {
-      agent: "all",
+      ...metrics,
       period: "2026-07-16",
-      inputTokens: 10,
-      outputTokens: 20,
-      cacheCreationTokens: 30,
-      cacheReadTokens: 40,
-      totalTokens: 100,
-      totalCost: 1.256,
-      metadata: { agents: ["codex"] },
-      modelsUsed: ["gpt-5"],
-      modelBreakdowns: [
+      sources: ["codex"],
+      models: [
         {
+          ...metrics,
           modelName: "gpt-5",
-          inputTokens: 10,
-          outputTokens: 20,
-          cacheCreationTokens: 30,
-          cacheReadTokens: 40,
-          cost: 1.256,
+          unattributed: false,
+          agents: [
+            {
+              ...metrics,
+              agentId: "a",
+              agentName: "Agent A",
+              hostname: "a.local",
+              sources: ["codex"],
+            },
+          ],
         },
       ],
     },
   ],
-  totals: {
-    inputTokens: 10,
-    outputTokens: 20,
-    cacheCreationTokens: 30,
-    cacheReadTokens: 40,
-    totalTokens: 100,
-    totalCost: 1.256,
-  },
+  totals: metrics,
 };
 
-function job(
-  agentId: string,
-  status: AgentJob["status"],
-  result: unknown = null,
-): AgentJob {
+function collection(status: "COLLECTING" | "COMPLETED" = "COMPLETED") {
   return {
-    id: `job-${agentId}`,
-    agentId,
-    kind: "ccusage.report",
-    payload: {},
+    id: "collection-1",
     status,
-    error: status === "FAILED" ? "ccusage executable not found" : null,
-    result,
-    timeoutSeconds: 120,
     createdAt: new Date(0).toISOString(),
-    startedAt: new Date(0).toISOString(),
-    finishedAt: status === "QUEUED" ? null : new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
+    deadlineAt: new Date(150_000).toISOString(),
+    finishedAt: status === "COMPLETED" ? new Date(1).toISOString() : null,
+    progress: {
+      eligibleCount: 2,
+      finishedCount: status === "COMPLETED" ? 2 : 1,
+      successfulCount: 1,
+      agents: [
+        {
+          agent: agent("a", "ONLINE"),
+          status: "SUCCEEDED",
+          jobId: "job-a",
+          error: null,
+        },
+        {
+          agent: agent("b", "ONLINE"),
+          status: status === "COMPLETED" ? "FAILED" : "RUNNING",
+          jobId: "job-b",
+          error: status === "COMPLETED" ? "ccusage executable not found" : null,
+        },
+        {
+          agent: agent("offline", "OFFLINE"),
+          status: "OFFLINE",
+          jobId: null,
+          error: null,
+        },
+        {
+          agent: agent("old", "ONLINE", ["cloudflared.runTunnel"]),
+          status: "UNSUPPORTED",
+          jobId: null,
+          error: null,
+        },
+      ],
+    },
+    aggregate,
+    allAggregate: { days: [{ period: "2026-07-16" }] },
   };
 }
 
@@ -107,35 +130,12 @@ describe("UsagePage", () => {
     subscribe.mockReset();
     subscribe.mockImplementation(() => vi.fn());
     subscriptionsMock.mockReturnValue({ subscribe } as never);
-    requestMock.mockImplementation(async (query, variables) => {
-      if (query.includes("UsageAgents")) {
-        return {
-          agents: [
-            agent("a", "ONLINE"),
-            agent("b", "ONLINE"),
-            agent("offline", "OFFLINE"),
-            agent("old", "ONLINE", ["cloudflared.runTunnel"]),
-          ],
-        } as never;
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query CcusageCollection")) {
+        return { ccusageCollection: collection() } as never;
       }
-      if (query.includes("CollectUsage")) {
-        const agentId = (variables?.input as { agentId: string }).agentId;
-        return { createAgentJob: job(agentId, "QUEUED") } as never;
-      }
-      if (query.includes("query UsageJob")) {
-        const agentId = String(variables?.id).replace("job-", "");
-        return {
-          agentJob:
-            agentId === "a"
-              ? job("a", "SUCCEEDED", {
-                  exitCode: 0,
-                  signal: null,
-                  timedOut: false,
-                  cancelled: false,
-                  report,
-                })
-              : job("b", "FAILED"),
-        } as never;
+      if (query.includes("mutation CollectCcusage")) {
+        return { collectCcusage: { id: "collection-1" } } as never;
       }
       throw new Error(`Unexpected query: ${query}`);
     });
@@ -148,7 +148,7 @@ describe("UsagePage", () => {
     subscriptionsMock.mockReset();
   });
 
-  test("collects compatible online agents, keeps partial results, and expands the hierarchy", async () => {
+  test("renders backend progress and aggregate without recollecting on range changes", async () => {
     render(<UsagePage />);
 
     expect(
@@ -159,66 +159,56 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Failed: Agent B/)).toBeDefined();
     expect(screen.getByText("Daily cost by model")).toBeDefined();
     expect(screen.getAllByText("$1.26").length).toBeGreaterThan(0);
-    expect(
-      screen
-        .getByRole("button", { name: "All data" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
-    expect(
-      screen
-        .getByRole("button", { name: "7 days" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-
-    const collectionCalls = requestMock.mock.calls.filter(([query]) =>
-      String(query).includes("CollectUsage"),
-    );
-    expect(collectionCalls).toHaveLength(2);
-    expect(
-      collectionCalls.map(
-        ([, variables]) => (variables?.input as { agentId: string }).agentId,
-      ),
-    ).toEqual(expect.arrayContaining(["a", "b"]));
 
     const dateButton = screen.getByRole("button", {
       name: "Show models for 2026-07-16",
     });
-    expect(dateButton.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(dateButton);
-    expect(dateButton.getAttribute("aria-expanded")).toBe("true");
-
-    const modelButton = screen.getByRole("button", {
-      name: "Show agents using gpt-5",
-    });
-    fireEvent.click(modelButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show agents using gpt-5" }),
+    );
     expect(screen.getByText("Agent A")).toBeDefined();
     expect(screen.getByText("a.local · codex")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    await waitFor(() => {
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query CcusageCollection") &&
+            variables?.range === "LAST_7_DAYS",
+        ),
+      ).toBe(true);
+    });
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("mutation CollectCcusage"),
+      ),
+    ).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
     await waitFor(() => {
       expect(
         requestMock.mock.calls.filter(([query]) =>
-          String(query).includes("CollectUsage"),
+          String(query).includes("mutation CollectCcusage"),
         ),
-      ).toHaveLength(4);
+      ).toHaveLength(2);
     });
   });
 
-  test("ends collection when a job-creation request stalls", async () => {
+  test("uses query reconciliation when the progress subscription is silent", async () => {
     vi.useFakeTimers();
-    let resolveCreation!: (value: { createAgentJob: AgentJob }) => void;
-    const creation = new Promise<{ createAgentJob: AgentJob }>((resolve) => {
-      resolveCreation = resolve;
-    });
+    let reads = 0;
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("UsageAgents")) {
-        return { agents: [agent("a", "ONLINE")] } as never;
+      if (query.includes("query CcusageCollection")) {
+        reads += 1;
+        return {
+          ccusageCollection: reads === 1 ? null : collection("COLLECTING"),
+        } as never;
       }
-      if (query.includes("CollectUsage")) {
-        return creation as never;
+      if (query.includes("mutation CollectCcusage")) {
+        return new Promise(() => undefined) as never;
       }
-      if (query.includes("CancelUsageJob")) return { id: "job-a" } as never;
       throw new Error(`Unexpected query: ${query}`);
     });
 
@@ -226,33 +216,12 @@ describe("UsagePage", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-
-    expect(
-      screen
-        .getByRole("button", { name: "Refresh usage" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.queryByText("Daily cost by model")).toBeNull();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(150_000);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
-
-    expect(screen.getByText(/Failed: Agent A/)).toBeDefined();
-    expect(
-      screen
-        .getByRole("button", { name: "Refresh usage" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
-
-    await act(async () => {
-      resolveCreation({ createAgentJob: job("a", "QUEUED") });
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(screen.getByText(/Failed: Agent A/)).toBeDefined();
-    expect(
-      requestMock.mock.calls.filter(([query]) =>
-        String(query).includes("CancelUsageJob"),
-      ),
-    ).toHaveLength(1);
+    expect(screen.getByText("Daily cost by model")).toBeDefined();
+    expect(screen.getByText("1 of 2 compatible agents reported")).toBeDefined();
   });
 });
