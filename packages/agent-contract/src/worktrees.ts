@@ -2,9 +2,11 @@ import type { CodebaseSyncState } from "./codebases.ts";
 
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
+export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_WATCH_JOB_KIND,
 ] as const;
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
@@ -24,6 +26,13 @@ export const WORKTREE_OPERATIONS = [
 
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
+export type WorktreeWatchAction = "START" | "STOP";
+
+export type WorktreeActivityReport = {
+  codebaseId: string;
+  gitDirectory: string;
+  observedAt: string;
+};
 
 export type WorktreeInventoryItem = {
   gitDirectory: string;
@@ -272,5 +281,79 @@ export function worktreeJobPayload(value: unknown): {
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
+  };
+}
+
+export function worktreeWatchJobPayload(value: unknown): {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string | null;
+  action: WorktreeWatchAction;
+  watchId: string;
+} {
+  const payload = objectValue(value, "worktree watch payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "action",
+    "watchId",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree watch payload field: ${unexpected}`);
+  }
+  if (!(["START", "STOP"] as unknown[]).includes(payload.action)) {
+    throw new Error("worktree watch payload.action is invalid");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree watch payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree watch payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree watch payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree watch payload.expectedOrigin",
+    ),
+    baseBranch: nullableString(
+      payload.baseBranch,
+      "worktree watch payload.baseBranch",
+    ),
+    action: payload.action as WorktreeWatchAction,
+    watchId: stringValue(payload.watchId, "worktree watch payload.watchId"),
+  };
+}
+
+export function parseWorktreeActivityReport(
+  value: unknown,
+): WorktreeActivityReport {
+  const report = objectValue(value, "worktree activity report");
+  const allowed = new Set(["codebaseId", "gitDirectory", "observedAt"]);
+  const unexpected = Object.keys(report).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree activity field: ${unexpected}`);
+  }
+  return {
+    codebaseId: stringValue(
+      report.codebaseId,
+      "worktree activity report.codebaseId",
+    ),
+    gitDirectory: stringValue(
+      report.gitDirectory,
+      "worktree activity report.gitDirectory",
+    ),
+    observedAt: dateString(
+      report.observedAt,
+      "worktree activity report.observedAt",
+    ),
   };
 }

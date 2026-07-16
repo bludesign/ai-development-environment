@@ -4,7 +4,10 @@ import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
 import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
-import type { CodebaseWorktreeReport } from "@ai-development-environment/agent-contract/worktrees";
+import type {
+  CodebaseWorktreeReport,
+  WorktreeActivityReport,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 export type AgentJob = {
   id: string;
@@ -15,6 +18,16 @@ export type AgentJob = {
     "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
   timeoutSeconds: number;
 };
+
+export type AgentEvent =
+  | {
+      type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
+      job: AgentJob;
+    }
+  | {
+      type: "CODEBASE_RECONCILE_REQUESTED";
+      job: null;
+    };
 
 export type AgentCodebaseRegistration = {
   id: string;
@@ -224,6 +237,17 @@ export class AgentGraphQLClient {
       { reports },
     );
   }
+
+  reportWorktreeActivity(input: WorktreeActivityReport) {
+    return this.request<{
+      reportWorktreeActivity: { worktreeId: string; observedAt: string };
+    }>(
+      `mutation ReportWorktreeActivity($input: WorktreeActivityReportInput!) {
+        reportWorktreeActivity(input: $input) { worktreeId observedAt }
+      }`,
+      { input },
+    );
+  }
 }
 
 export function createAgentSubscriptionClient(config: AgentConfig): Client {
@@ -248,10 +272,7 @@ export function createAgentSubscriptionClient(config: AgentConfig): Client {
 export function subscribeToAgentEvents(
   client: Client,
   agentId: string,
-  onEvent: (event: {
-    type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
-    job: AgentJob;
-  }) => void,
+  onEvent: (event: AgentEvent) => void,
 ): () => void {
   let stopped = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -269,10 +290,7 @@ export function subscribeToAgentEvents(
   const subscribe = () => {
     if (stopped) return;
     disposeSubscription = client.subscribe<{
-      agentEvents: {
-        type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
-        job: AgentJob;
-      };
+      agentEvents: AgentEvent;
     }>(
       {
         query: `subscription AgentEvents($agentId: ID!) {

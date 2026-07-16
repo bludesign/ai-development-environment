@@ -23,6 +23,7 @@ enum AgentLogStream {
 enum AgentEventType {
   JOB_AVAILABLE
   JOB_CANCEL_REQUESTED
+  CODEBASE_RECONCILE_REQUESTED
 }
 
 type Agent {
@@ -33,6 +34,7 @@ type Agent {
   osVersion: String!
   architecture: String!
   capabilities: [String!]!
+  baseRepoDirectory: String
   connectionStatus: AgentConnectionStatus!
   ipAddress: String
   lastSeenAt: String
@@ -79,7 +81,7 @@ type AgentJobLog {
 
 type AgentEvent {
   type: AgentEventType!
-  job: AgentJob!
+  job: AgentJob
 }
 
 input EnrollAgentInput {
@@ -137,6 +139,7 @@ type Mutation {
     error: String
   ): AgentJob!
   cancelAgentJob(jobId: ID!): AgentJob!
+  updateAgentBaseRepoDirectory(agentId: ID!, baseRepoDirectory: String): Agent!
 }
 
 type Subscription {

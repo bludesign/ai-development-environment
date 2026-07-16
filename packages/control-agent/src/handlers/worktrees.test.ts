@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  closeAllWorktreeWatches,
   discoverWorktrees,
   inspectWorktreeDetail,
   operateWorktree,
+  watchWorktree,
 } from "./worktrees.js";
 
 const execute = promisify(execFile);
@@ -50,6 +52,7 @@ async function repository() {
 }
 
 afterEach(async () => {
+  closeAllWorktreeWatches();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -159,6 +162,52 @@ describe("worktree inventory and inspection", () => {
     expect((await git(folder, "status", "--porcelain")).stdout).toContain(
       "A  new.txt",
     );
+  });
+
+  test("debounces live worktree activity and stops watching on demand", async () => {
+    const folder = await repository();
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const reportWorktreeActivity = vi.fn(async () => ({}));
+    const payload = {
+      codebaseId: "codebase-1",
+      folder,
+      gitDirectory,
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      watchId: "watch-1",
+    };
+
+    await watchWorktree(
+      { ...payload, action: "START" },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+      { reportWorktreeActivity },
+    );
+    await writeFile(join(folder, "watched.txt"), "one\ntwo\n");
+
+    await vi.waitFor(
+      () =>
+        expect(reportWorktreeActivity).toHaveBeenCalledWith(
+          expect.objectContaining({ codebaseId: "codebase-1", gitDirectory }),
+        ),
+      { timeout: 3_000 },
+    );
+
+    await watchWorktree(
+      { ...payload, action: "STOP" },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    reportWorktreeActivity.mockClear();
+    await writeFile(join(folder, "watched.txt"), "stopped\n");
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(reportWorktreeActivity).not.toHaveBeenCalled();
   });
 
   test("blocks sync when the worktree is dirty", async () => {

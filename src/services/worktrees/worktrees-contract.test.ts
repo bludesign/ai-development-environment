@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   parseCodebaseWorktreeReport,
+  parseWorktreeActivityReport,
   worktreeJobPayload,
+  worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 describe("worktree agent contract", () => {
@@ -57,5 +59,28 @@ describe("worktree agent contract", () => {
     expect(() => worktreeJobPayload({ ...base, command: "rm -rf /" })).toThrow(
       "Unexpected worktree payload field",
     );
+  });
+
+  test("validates watcher jobs and activity reports", () => {
+    const watch = worktreeWatchJobPayload({
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      action: "START",
+      watchId: "watch-1",
+    });
+    expect(watch).toMatchObject({ action: "START", watchId: "watch-1" });
+    expect(() =>
+      worktreeWatchJobPayload({ ...watch, action: "SHELL" }),
+    ).toThrow("action is invalid");
+    expect(
+      parseWorktreeActivityReport({
+        codebaseId: "codebase-1",
+        gitDirectory: "/repo/.git",
+        observedAt: new Date(0).toISOString(),
+      }),
+    ).toMatchObject({ codebaseId: "codebase-1" });
   });
 });

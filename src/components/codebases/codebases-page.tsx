@@ -15,11 +15,8 @@ import {
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
-  ChevronRight,
   Download,
-  Folder,
   FolderGit2,
-  Home,
   Pencil,
   Plus,
   RefreshCw,
@@ -37,13 +34,13 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -82,7 +79,6 @@ import type {
   Codebase,
   CodebaseRepository,
   CodebaseSettings,
-  DirectoryListing,
   Inspection,
 } from "./types";
 
@@ -800,9 +796,7 @@ function AddCodebaseDialog({
 }) {
   const t = useTranslations("codebases");
   const [agentId, setAgentId] = useState("");
-  const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -818,12 +812,10 @@ function AddCodebaseDialog({
   const reset = () => {
     requestSequence.current += 1;
     setAgentId("");
-    setListing(null);
     setInspection(null);
     setName("");
     setDescription("");
     setError(null);
-    setShowHidden(false);
     setBusy(false);
   };
 
@@ -832,35 +824,7 @@ function AddCodebaseDialog({
     onOpenChange(nextOpen);
   };
 
-  const browse = async (path: string | null) => {
-    if (!agentId) return;
-    const requestId = ++requestSequence.current;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        browseAgentDirectory: DirectoryListing;
-      }>(
-        `mutation BrowseAgentDirectory($input: BrowseAgentDirectoryInput!) {
-          browseAgentDirectory(input: $input) {
-            path parentPath homePath truncated entries { name path hidden }
-          }
-        }`,
-        { input: { agentId, path, requestId: createClientId() } },
-      );
-      if (requestId !== requestSequence.current) return;
-      setListing(data.browseAgentDirectory);
-      setInspection(null);
-      setError(null);
-    } catch (value) {
-      if (requestId !== requestSequence.current) return;
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (requestId === requestSequence.current) setBusy(false);
-    }
-  };
-
-  const inspect = async () => {
-    if (!listing) return;
+  const inspect = async (folder: string) => {
     const requestId = ++requestSequence.current;
     setBusy(true);
     try {
@@ -875,7 +839,7 @@ function AddCodebaseDialog({
           }
         }`,
         {
-          input: { agentId, folder: listing.path, requestId: createClientId() },
+          input: { agentId, folder, requestId: createClientId() },
         },
       );
       if (requestId !== requestSequence.current) return;
@@ -913,21 +877,6 @@ function AddCodebaseDialog({
     }
   };
 
-  const breadcrumbs = listing
-    ? listing.path === "/"
-      ? [{ label: "/", path: "/" }]
-      : [
-          { label: "/", path: "/" },
-          ...listing.path
-            .split("/")
-            .filter(Boolean)
-            .map((label, index, parts) => ({
-              label,
-              path: `/${parts.slice(0, index + 1).join("/")}`,
-            })),
-        ]
-    : [];
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -947,7 +896,6 @@ function AddCodebaseDialog({
               onValueChange={(value) => {
                 requestSequence.current += 1;
                 setAgentId(value);
-                setListing(null);
                 setInspection(null);
                 setBusy(false);
                 setError(null);
@@ -966,81 +914,15 @@ function AddCodebaseDialog({
               </SelectContent>
             </Select>
           </div>
-          {agentId && !listing && (
-            <Button
+          {agentId && !inspection && (
+            <AgentDirectoryBrowser
+              agentId={agentId}
               disabled={busy}
-              onClick={() => void browse(null)}
-              type="button"
-              variant="outline"
-            >
-              {busy ? <Spinner /> : <Folder />} {t("browseHome")}
-            </Button>
-          )}
-          {listing && !inspection && (
-            <div className="space-y-3 rounded-lg border p-3">
-              <div className="flex flex-wrap items-center gap-1">
-                <Button
-                  aria-label={t("home")}
-                  onClick={() => void browse(listing.homePath)}
-                  size="icon-sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Home />
-                </Button>
-                {breadcrumbs.map((crumb, index) => (
-                  <span className="flex items-center" key={crumb.path}>
-                    {index > 0 && (
-                      <ChevronRight className="size-3 text-muted-foreground" />
-                    )}
-                    <Button
-                      onClick={() => void browse(crumb.path)}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {crumb.label}
-                    </Button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={showHidden}
-                  id="show-hidden"
-                  onCheckedChange={(value) => setShowHidden(Boolean(value))}
-                />
-                <Label htmlFor="show-hidden">{t("showHidden")}</Label>
-              </div>
-              <div className="max-h-64 overflow-y-auto rounded-md border">
-                {listing.entries
-                  .filter((entry) => showHidden || !entry.hidden)
-                  .map((entry) => (
-                    <Button
-                      className="h-auto w-full justify-start rounded-none border-b px-3 py-2 last:border-0"
-                      key={entry.path}
-                      onClick={() => void browse(entry.path)}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Folder className="size-4" /> {entry.name}
-                    </Button>
-                  ))}
-              </div>
-              {listing.truncated && (
-                <p className="text-xs text-muted-foreground">
-                  {t("truncated")}
-                </p>
-              )}
-              <Button
-                disabled={busy}
-                onClick={() => void inspect()}
-                type="button"
-              >
-                {busy ? <Spinner /> : <FolderGit2 />} {t("selectFolder")}
-              </Button>
-            </div>
+              key={agentId}
+              onSelect={inspect}
+              selectIcon={<FolderGit2 />}
+              selectLabel={t("selectFolder")}
+            />
           )}
           {inspection && (
             <div className="space-y-4 rounded-lg border p-4">

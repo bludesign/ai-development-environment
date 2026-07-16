@@ -1,12 +1,21 @@
 "use client";
 
-import { Copy, Laptop, Plus, RefreshCw } from "lucide-react";
+import { CODEBASE_BROWSE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
+import { Copy, FolderCog, Laptop, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Empty,
   EmptyDescription,
@@ -14,6 +23,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { copyText } from "@/lib/browser-utils";
@@ -37,6 +54,8 @@ export function AgentsList() {
     token: string;
     expiresAt: string;
   } | null>(null);
+  const [repositoryDirectoriesOpen, setRepositoryDirectoriesOpen] =
+    useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +134,13 @@ export function AgentsList() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            onClick={() => setRepositoryDirectoriesOpen(true)}
+            variant="outline"
+          >
+            <FolderCog />
+            {t("repositoryDirectories")}
+          </Button>
           <Button onClick={() => void load()} variant="outline">
             <RefreshCw />
             {t("refresh")}
@@ -211,6 +237,15 @@ export function AgentsList() {
                           : t("never")}
                       </dd>
                     </div>
+                    <div className="col-span-2 min-w-0">
+                      <dt>{t("baseRepoDirectory")}</dt>
+                      <dd
+                        className="truncate font-mono text-foreground"
+                        title={agent.baseRepoDirectory ?? t("notConfigured")}
+                      >
+                        {agent.baseRepoDirectory ?? t("notConfigured")}
+                      </dd>
+                    </div>
                   </dl>
                 </CardContent>
               </Card>
@@ -218,6 +253,147 @@ export function AgentsList() {
           ))}
         </div>
       )}
+      <BaseRepoDirectoryDialog
+        agents={agents}
+        onOpenChange={setRepositoryDirectoriesOpen}
+        onSaved={(updated) =>
+          setAgents((current) =>
+            current.map((agent) => (agent.id === updated.id ? updated : agent)),
+          )
+        }
+        open={repositoryDirectoriesOpen}
+      />
     </section>
+  );
+}
+
+function BaseRepoDirectoryDialog({
+  agents,
+  onOpenChange,
+  onSaved,
+  open,
+}: {
+  agents: Agent[];
+  onOpenChange: (open: boolean) => void;
+  onSaved: (agent: Agent) => void;
+  open: boolean;
+}) {
+  const t = useTranslations("agents");
+  const [agentId, setAgentId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const compatible = agents.filter(
+    (agent) =>
+      agent.connectionStatus === "ONLINE" &&
+      agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND),
+  );
+  const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setAgentId("");
+      setBusy(false);
+      setError(null);
+    }
+    onOpenChange(nextOpen);
+  };
+
+  const save = async (baseRepoDirectory: string | null) => {
+    if (!agentId) return;
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        updateAgentBaseRepoDirectory: Agent;
+      }>(
+        `mutation UpdateAgentBaseRepoDirectory($agentId: ID!, $baseRepoDirectory: String) {
+          updateAgentBaseRepoDirectory(agentId: $agentId, baseRepoDirectory: $baseRepoDirectory) {
+            ${AGENT_FIELDS}
+          }
+        }`,
+        { agentId, baseRepoDirectory },
+      );
+      onSaved(data.updateAgentBaseRepoDirectory);
+      handleOpenChange(false);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("baseRepoDirectory")}</DialogTitle>
+          <DialogDescription>
+            {t("baseRepoDirectoryDescription")}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {compatible.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("noDirectoryAgents")}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="base-directory-agent">{t("agent")}</Label>
+              <Select
+                onValueChange={(value) => {
+                  setAgentId(value);
+                  setError(null);
+                }}
+                value={agentId}
+              >
+                <SelectTrigger className="w-full" id="base-directory-agent">
+                  <SelectValue placeholder={t("selectAgent")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {compatible.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name} · {agent.hostname}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {selectedAgent && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted p-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("currentDirectory")}
+                </p>
+                <p className="mt-1 break-all font-mono text-xs">
+                  {selectedAgent.baseRepoDirectory ?? t("notConfigured")}
+                </p>
+              </div>
+              <AgentDirectoryBrowser
+                agentId={selectedAgent.id}
+                disabled={busy}
+                key={selectedAgent.id}
+                onSelect={(path) => save(path)}
+                selectLabel={t("useDirectory")}
+              />
+              {selectedAgent.baseRepoDirectory && (
+                <Button
+                  disabled={busy}
+                  onClick={() => void save(null)}
+                  type="button"
+                  variant="outline"
+                >
+                  <Trash2 /> {t("clearDirectory")}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

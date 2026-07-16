@@ -5,6 +5,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import {
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_INSPECT_JOB_KIND,
   type CodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
@@ -81,6 +82,56 @@ describe("CodebasesService", () => {
         data: { lastFetchedAt: new Date(1) },
       }),
     );
+  });
+
+  test("requests an immediate reconcile after confirming a codebase", async () => {
+    const repository = {
+      id: "repository-1",
+      canonicalOrigin: snapshot.canonicalOrigin,
+    };
+    const confirmed = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      repositoryId: repository.id,
+      repository,
+      agent: {},
+      jobs: [],
+    };
+    const transaction = {
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue(repository),
+      },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(confirmed),
+      },
+    };
+    const prisma = {
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "inspection-1",
+          agentId: "agent-1",
+          kind: CODEBASE_INSPECT_JOB_KIND,
+          status: "SUCCEEDED",
+          resultJson: JSON.stringify({ snapshot }),
+          error: null,
+          finishedAt: new Date(),
+        }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = control();
+    const requestCodebaseReconcile = vi.fn().mockReturnValue(1);
+    Object.assign(agentControl, { requestCodebaseReconcile });
+    const service = new CodebasesService(agentControl);
+
+    await expect(
+      service.confirm({ inspectionJobId: "inspection-1" }),
+    ).resolves.toBe(confirmed);
+
+    expect(requestCodebaseReconcile).toHaveBeenCalledWith(["agent-1"]);
   });
 
   test("atomically ignores snapshots older than the stored status", async () => {

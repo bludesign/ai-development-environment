@@ -266,6 +266,7 @@ describe("WorktreesPage", () => {
     fireEvent.click(screen.getByText("feature/AIDE-24"));
     expect(await screen.findByText("old-file.ts")).toBeDefined();
 
+    request.mockResolvedValueOnce({ refreshWorktrees: 1 } as never);
     request.mockResolvedValueOnce(overviewResponse as never);
     request.mockResolvedValueOnce({
       inspectWorktree: {
@@ -291,6 +292,85 @@ describe("WorktreesPage", () => {
 
     expect(await screen.findByText("new-file.ts")).toBeDefined();
     expect(screen.queryByText("old-file.ts")).toBeNull();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation RefreshWorktrees"),
+    );
+  });
+
+  test("refreshes expanded details when live worktree activity arrives", async () => {
+    const activityCallbacks: Array<() => void> = [];
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeInspectionChanged")) {
+            activityCallbacks.push(() =>
+              sink.next({
+                data: {
+                  worktreeInspectionChanged: {
+                    worktreeId: "worktree-1",
+                    observedAt: new Date().toISOString(),
+                  },
+                },
+              }),
+            );
+          }
+          return vi.fn();
+        },
+      ),
+    } as never);
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    request.mockResolvedValueOnce({
+      inspectWorktree: {
+        commits: [],
+        changes: [
+          {
+            path: "before-save.ts",
+            staged: false,
+            unstaged: true,
+            untracked: false,
+            conflicted: false,
+            stagedAdditions: null,
+            stagedDeletions: null,
+            unstagedAdditions: 1,
+            unstagedDeletions: 0,
+          },
+        ],
+        commitsTruncated: false,
+        changesTruncated: false,
+      },
+    } as never);
+    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    expect(await screen.findByText("before-save.ts")).toBeDefined();
+    await waitFor(() => expect(activityCallbacks).toHaveLength(1));
+
+    request.mockResolvedValueOnce({
+      inspectWorktree: {
+        commits: [],
+        changes: [
+          {
+            path: "after-save.ts",
+            staged: false,
+            unstaged: true,
+            untracked: false,
+            conflicted: false,
+            stagedAdditions: null,
+            stagedDeletions: null,
+            unstagedAdditions: 2,
+            unstagedDeletions: 0,
+          },
+        ],
+        commitsTruncated: false,
+        changesTruncated: false,
+      },
+    } as never);
+    activityCallbacks[0]!();
+
+    expect(await screen.findByText("after-save.ts")).toBeDefined();
+    expect(screen.queryByText("before-save.ts")).toBeNull();
   });
 
   test("switches to the compact table and remembers the choice", async () => {

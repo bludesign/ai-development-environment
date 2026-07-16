@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { posix, win32 } from "node:path";
 
 import {
   parseCodebaseWorktreeReport,
+  parseWorktreeActivityReport,
   parseWorktreeInventoryItem,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_OPERATIONS,
+  WORKTREE_WATCH_JOB_KIND,
   type CodebaseWorktreeReport,
+  type WorktreeActivityReport,
   type WorktreeEditorVariant,
   type WorktreeOperation,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -19,6 +23,7 @@ import {
   agentEventBus,
   agentJobChangedTopic,
   WORKTREE_CHANGED_TOPIC,
+  worktreeInspectionTopic,
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
@@ -71,6 +76,22 @@ type WorktreePayloadSource = {
     repository: { canonicalOrigin: string };
   };
 };
+type WorktreeWatchPayload = {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string | null;
+};
+type WorktreeWatchDemand = {
+  subscribers: number;
+  watchId: string;
+  agentId: string;
+  worktreeId: string;
+  codebaseId: string;
+  payload: WorktreeWatchPayload;
+  started: Promise<void>;
+};
 
 function online(agent: {
   lastSeenAt: Date | null;
@@ -116,6 +137,30 @@ function ticketKey(branch: string | null, pattern: string): string | null {
   }
 }
 
+function windowsPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+export function worktreeDisplayPath(
+  folder: string,
+  reportedRelativePath: string,
+  baseRepoDirectory: string | null,
+): string {
+  if (!baseRepoDirectory) return reportedRelativePath;
+  const usesWindowsPaths = windowsPath(baseRepoDirectory);
+  if (usesWindowsPaths !== windowsPath(folder)) return folder;
+  const path = usesWindowsPaths ? win32 : posix;
+  const relativePath = path.relative(baseRepoDirectory, folder);
+  if (
+    path.isAbsolute(relativePath) ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`)
+  ) {
+    return folder;
+  }
+  return relativePath || ".";
+}
+
 function resultObject(job: {
   status: string;
   resultJson: string | null;
@@ -139,6 +184,7 @@ export class WorktreesService {
       items: Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>;
     }
   >();
+  private readonly watchDemand = new Map<string, WorktreeWatchDemand>();
 
   constructor(
     private readonly agentControl: AgentControlService,
@@ -174,6 +220,16 @@ export class WorktreesService {
     return settings;
   }
 
+  async requestRefresh() {
+    const prisma = await getPrismaClient();
+    const codebases = await prisma.codebase.findMany({
+      select: { agentId: true },
+    });
+    return this.agentControl.requestCodebaseReconcile(
+      codebases.map((codebase) => codebase.agentId),
+    );
+  }
+
   private async cleanupExpired() {
     const prisma = await getPrismaClient();
     await prisma.worktree.deleteMany({
@@ -188,6 +244,11 @@ export class WorktreesService {
       worktree.codebase.repository.jiraBranchRegex ?? defaultRegex;
     return {
       ...worktree,
+      relativePath: worktreeDisplayPath(
+        worktree.folder,
+        worktree.relativePath,
+        worktree.codebase.agent.baseRepoDirectory,
+      ),
       tags: worktree.tags.map((assignment) => assignment.tag),
       activeJob:
         worktree.codebase.jobs.find(
@@ -411,6 +472,31 @@ export class WorktreesService {
       where: { id: { in: updatedIds } },
       include: worktreeInclude,
     });
+  }
+
+  async reportActivity(agentId: string, value: WorktreeActivityReport) {
+    const report = parseWorktreeActivityReport(value);
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findFirst({
+      where: {
+        codebaseId: report.codebaseId,
+        gitDirectory: report.gitDirectory,
+        missingAt: null,
+        codebase: { agentId },
+      },
+      select: { id: true },
+    });
+    if (!worktree) throw new Error("Worktree activity source was not found");
+    const activity = {
+      worktreeId: worktree.id,
+      observedAt: report.observedAt,
+    };
+    if (this.watchDemand.has(worktree.id)) {
+      agentEventBus.publish(worktreeInspectionTopic(worktree.id), {
+        worktreeInspectionChanged: activity,
+      });
+    }
+    return activity;
   }
 
   private inventoryData(item: ReturnType<typeof parseWorktreeInventoryItem>) {
@@ -647,6 +733,99 @@ export class WorktreesService {
 
   subscribe() {
     return agentEventBus.iterate(WORKTREE_CHANGED_TOPIC);
+  }
+
+  async *subscribeInspection(worktreeId: string) {
+    const events = agentEventBus.iterate<{
+      worktreeInspectionChanged: {
+        worktreeId: string;
+        observedAt: string;
+      };
+    }>(worktreeInspectionTopic(worktreeId));
+    let acquired = false;
+    try {
+      await this.acquireWatch(worktreeId);
+      acquired = true;
+      for await (const event of events) yield event;
+    } finally {
+      await events.return?.();
+      if (acquired) await this.releaseWatch(worktreeId);
+    }
+  }
+
+  private async acquireWatch(worktreeId: string) {
+    const current = this.watchDemand.get(worktreeId);
+    if (current) {
+      current.subscribers += 1;
+      await current.started;
+      return;
+    }
+    const worktree = await this.requireRunnable(
+      worktreeId,
+      WORKTREE_WATCH_JOB_KIND,
+    );
+    const watchId = randomUUID();
+    const payload = this.payload(worktree);
+    const demand = {
+      subscribers: 1,
+      watchId,
+      agentId: worktree.codebase.agentId,
+      worktreeId: worktree.id,
+      codebaseId: worktree.codebaseId,
+      payload,
+      started: Promise.resolve(),
+    } satisfies WorktreeWatchDemand;
+    demand.started = this.runWatchAction(demand, "START");
+    this.watchDemand.set(worktreeId, demand);
+    try {
+      await demand.started;
+    } catch (error) {
+      if (this.watchDemand.get(worktreeId) === demand) {
+        this.watchDemand.delete(worktreeId);
+      }
+      throw error;
+    }
+  }
+
+  private async releaseWatch(worktreeId: string) {
+    const demand = this.watchDemand.get(worktreeId);
+    if (!demand) return;
+    demand.subscribers -= 1;
+    if (demand.subscribers > 0) return;
+    this.watchDemand.delete(worktreeId);
+    try {
+      await demand.started;
+      await this.runWatchAction(demand, "STOP");
+    } catch (error) {
+      console.error(
+        "Could not stop worktree watcher:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  private async runWatchAction(
+    demand: WorktreeWatchDemand,
+    action: "START" | "STOP",
+  ) {
+    const job = await this.agentControl.createJob({
+      agentId: demand.agentId,
+      codebaseId: demand.codebaseId,
+      worktreeId: demand.worktreeId,
+      kind: WORKTREE_WATCH_JOB_KIND,
+      payload: { ...demand.payload, action, watchId: demand.watchId },
+      idempotencyKey: `worktree:watch:${action}:${demand.watchId}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      resultObject(await this.waitForJob(job.id));
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
   }
 
   private publish(worktreeId: string | null, codebaseId: string | null) {

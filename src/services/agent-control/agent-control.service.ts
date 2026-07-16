@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { posix, win32 } from "node:path";
 
 import {
   CCUSAGE_REPORT_JOB_KIND,
@@ -17,7 +18,9 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_JOB_KINDS,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
+  worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -95,6 +98,10 @@ export function validateJob(kind: string, payload: unknown): void {
     worktreeJobPayload(value);
     return;
   }
+  if (kind === WORKTREE_WATCH_JOB_KIND) {
+    worktreeWatchJobPayload(value);
+    return;
+  }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
     const unexpected = Object.keys(value);
     if (unexpected.length > 0) {
@@ -143,6 +150,16 @@ export class AgentControlService {
 
   registerCompletionHandler(kind: string, handler: CompletionHandler): void {
     this.completionHandlers.set(kind, handler);
+  }
+
+  requestCodebaseReconcile(agentIds: string[]): number {
+    const uniqueAgentIds = [...new Set(agentIds.filter(Boolean))];
+    for (const agentId of uniqueAgentIds) {
+      agentEventBus.publish(agentEventsTopic(agentId), {
+        agentEvents: { type: "CODEBASE_RECONCILE_REQUESTED", job: null },
+      });
+    }
+    return uniqueAgentIds.length;
   }
 
   private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
@@ -260,6 +277,29 @@ export class AgentControlService {
   async getAgent(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agent.findUnique({ where: { id } });
+  }
+
+  async updateBaseRepoDirectory(
+    agentId: string,
+    baseRepoDirectory: string | null,
+  ) {
+    if (
+      baseRepoDirectory !== null &&
+      (!baseRepoDirectory ||
+        baseRepoDirectory.length > 4_096 ||
+        baseRepoDirectory.includes("\0") ||
+        (!posix.isAbsolute(baseRepoDirectory) &&
+          !win32.isAbsolute(baseRepoDirectory)))
+    ) {
+      throw new Error("Base repository directory must be an absolute path");
+    }
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { baseRepoDirectory },
+    });
+    publishAgent(agent);
+    return agent;
   }
 
   async listJobs(agentId: string, limit = 50, includeSystem = false) {

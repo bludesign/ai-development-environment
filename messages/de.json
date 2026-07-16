@@ -51,7 +51,17 @@
     "version": "Version",
     "platform": "Plattform",
     "lastSeen": "Zuletzt gesehen",
-    "never": "Nie"
+    "never": "Nie",
+    "repositoryDirectories": "Repository-Verzeichnisse",
+    "baseRepoDirectory": "Basisverzeichnis für Repositorys",
+    "baseRepoDirectoryDescription": "Wählen Sie den Ordner auf einem Agenten, der dessen Repositorys enthält. Darin liegende Worktree-Pfade werden relativ zu diesem Ordner angezeigt.",
+    "agent": "Agent",
+    "selectAgent": "Online-Agent auswählen",
+    "noDirectoryAgents": "Kein Online-Agent unterstützt die Verzeichnisnavigation.",
+    "currentDirectory": "Aktuelles Verzeichnis",
+    "notConfigured": "Nicht konfiguriert",
+    "useDirectory": "Dieses Verzeichnis verwenden",
+    "clearDirectory": "Verzeichnis löschen"
   },
   "usage": {
     "title": "Nutzung",
@@ -603,7 +613,7 @@
     "neverFetched": "nie",
     "secondsAgo": "vor {count} Sek.",
     "branch": "Branch",
-    "path": "Relativer Pfad",
+    "path": "Pfad",
     "baseBranch": "Basis-Branch",
     "saveBase": "Basis-Branch speichern",
     "inheritBase": "Remote-Standard übernehmen",

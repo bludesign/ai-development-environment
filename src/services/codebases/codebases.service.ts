@@ -360,6 +360,7 @@ export class CodebasesService {
     await prisma.agentJob.deleteMany({
       where: { id: input.inspectionJobId, visibility: "SYSTEM" },
     });
+    this.agentControl.requestCodebaseReconcile([confirmed.agentId]);
     return confirmed;
   }
 

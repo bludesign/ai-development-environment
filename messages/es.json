@@ -51,7 +51,17 @@
     "version": "Versión",
     "platform": "Plataforma",
     "lastSeen": "Visto por última vez",
-    "never": "Nunca"
+    "never": "Nunca",
+    "repositoryDirectories": "Directorios de repositorios",
+    "baseRepoDirectory": "Directorio base de repositorios",
+    "baseRepoDirectoryDescription": "Elige la carpeta de un agente que contiene sus repositorios. Las rutas de los worktrees que estén dentro se mostrarán relativas a esta carpeta.",
+    "agent": "Agente",
+    "selectAgent": "Seleccionar un agente en línea",
+    "noDirectoryAgents": "Ningún agente en línea admite la exploración de directorios.",
+    "currentDirectory": "Directorio actual",
+    "notConfigured": "Sin configurar",
+    "useDirectory": "Usar este directorio",
+    "clearDirectory": "Borrar directorio"
   },
   "usage": {
     "title": "Uso",
@@ -603,7 +613,7 @@
     "neverFetched": "nunca",
     "secondsAgo": "hace {count} s",
     "branch": "Rama",
-    "path": "Ruta relativa",
+    "path": "Ruta",
     "baseBranch": "Rama base",
     "saveBase": "Guardar rama base",
     "inheritBase": "Heredar valor remoto",

@@ -7,10 +7,10 @@ import type { AgentControlService } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 
-import { WorktreesService } from "./worktrees.service";
+import { WorktreesService, worktreeDisplayPath } from "./worktrees.service";
 
-function service() {
-  const control = {
+function service(control?: AgentControlService) {
+  control ??= {
     registerCompletionHandler: vi.fn(),
   } as unknown as AgentControlService;
   const jira = {} as JiraService;
@@ -51,6 +51,32 @@ function report(complete = true) {
 
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("requests an immediate reconcile from every codebase agent", async () => {
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { agentId: "agent-1" },
+            { agentId: "agent-1" },
+            { agentId: "agent-2" },
+          ]),
+      },
+    });
+    const requestCodebaseReconcile = vi.fn().mockReturnValue(2);
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      requestCodebaseReconcile,
+    } as unknown as AgentControlService;
+
+    await expect(service(control).requestRefresh()).resolves.toBe(2);
+    expect(requestCodebaseReconcile).toHaveBeenCalledWith([
+      "agent-1",
+      "agent-1",
+      "agent-2",
+    ]);
+  });
 
   test("upserts inventory and tombstones rows absent from a complete scan", async () => {
     const transaction = {
@@ -144,5 +170,157 @@ describe("WorktreesService", () => {
     await expect(
       service().saveTag({ name: "ready", color: "green" }),
     ).rejects.toThrow("Tag names must be unique");
+  });
+
+  test("accepts activity only from the agent that owns the worktree", async () => {
+    const findFirst = vi.fn().mockResolvedValueOnce({ id: "worktree-1" });
+    getPrismaClient.mockResolvedValue({ worktree: { findFirst } });
+    const activity = {
+      codebaseId: "codebase-1",
+      gitDirectory: "/repo/.git",
+      observedAt: new Date(0).toISOString(),
+    };
+
+    await expect(
+      service().reportActivity("agent-1", activity),
+    ).resolves.toEqual({
+      worktreeId: "worktree-1",
+      observedAt: activity.observedAt,
+    });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ codebase: { agentId: "agent-1" } }),
+      }),
+    );
+
+    findFirst.mockResolvedValueOnce(null);
+    await expect(service().reportActivity("agent-2", activity)).rejects.toThrow(
+      "source was not found",
+    );
+  });
+
+  test("starts a demand-scoped watcher and stops it after unsubscribe", async () => {
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob: vi
+        .fn()
+        .mockResolvedValueOnce({ id: "watch-start" })
+        .mockResolvedValueOnce({ id: "watch-stop" }),
+      getJob: vi.fn((id: string) =>
+        Promise.resolve({
+          id,
+          status: "SUCCEEDED",
+          resultJson: '{"exitCode":0}',
+          error: null,
+        }),
+      ),
+    } as unknown as AgentControlService;
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      baseBranchOverride: null,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify(["worktree.watch"]),
+        },
+        repository: { canonicalOrigin: "github.com/openai/codex" },
+      },
+    };
+    const prisma = {
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue(runnable),
+        findFirst: vi.fn().mockResolvedValue({ id: "worktree-1" }),
+      },
+      agentJob: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn(),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const worktrees = service(control);
+    const iterator = worktrees.subscribeInspection("worktree-1");
+    const next = iterator.next();
+    await vi.waitFor(() => expect(control.createJob).toHaveBeenCalledTimes(1));
+
+    await worktrees.reportActivity("agent-1", {
+      codebaseId: "codebase-1",
+      gitDirectory: "/repo/.git",
+      observedAt: new Date(0).toISOString(),
+    });
+    await expect(next).resolves.toMatchObject({
+      value: {
+        worktreeInspectionChanged: { worktreeId: "worktree-1" },
+      },
+    });
+    await iterator.return(undefined);
+
+    expect(control.createJob).toHaveBeenCalledTimes(2);
+    expect(control.createJob).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "worktree.watch",
+        payload: expect.objectContaining({ action: "START" }),
+      }),
+    );
+    expect(control.createJob).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        kind: "worktree.watch",
+        payload: expect.objectContaining({ action: "STOP" }),
+      }),
+    );
+  });
+});
+
+describe("worktreeDisplayPath", () => {
+  test("uses the agent repository root for paths inside it", () => {
+    expect(
+      worktreeDisplayPath(
+        "/Users/test/Repositories/codex/.worktrees/feature",
+        ".worktrees/feature",
+        "/Users/test/Repositories",
+      ),
+    ).toBe("codex/.worktrees/feature");
+  });
+
+  test("uses the full directory for worktrees outside the repository root", () => {
+    expect(
+      worktreeDisplayPath(
+        "/Users/test/Worktrees/feature",
+        "../Worktrees/feature",
+        "/Users/test/Repositories",
+      ),
+    ).toBe("/Users/test/Worktrees/feature");
+  });
+
+  test("preserves the reported relative path when no root is configured", () => {
+    expect(
+      worktreeDisplayPath("/Users/test/Repositories/codex", ".", null),
+    ).toBe(".");
+  });
+
+  test("handles Windows repository directories on a non-Windows server", () => {
+    expect(
+      worktreeDisplayPath(
+        "C:\\Users\\test\\Repositories\\codex",
+        ".",
+        "C:\\Users\\test\\Repositories",
+      ),
+    ).toBe("codex");
+    expect(
+      worktreeDisplayPath(
+        "D:\\Worktrees\\feature",
+        "..\\feature",
+        "C:\\Users\\test\\Repositories",
+      ),
+    ).toBe("D:\\Worktrees\\feature");
   });
 });

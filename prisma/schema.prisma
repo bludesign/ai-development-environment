@@ -25,6 +25,7 @@ model Agent {
   architecture     String
   capabilitiesJson String
   secretHash       String            @unique
+  baseRepoDirectory String?
   ipAddress        String?
   lastSeenAt       DateTime?
   disconnectedAt  DateTime?

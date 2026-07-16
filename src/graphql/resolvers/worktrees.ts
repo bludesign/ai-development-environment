@@ -1,5 +1,6 @@
 import type {
   CodebaseWorktreeReport,
+  WorktreeActivityReport,
   WorktreeEditorVariant,
   WorktreeOperation,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -64,11 +65,24 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
     },
   },
   Mutation: {
+    refreshWorktrees: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.requestRefresh();
+    },
     reportWorktrees: (
       _root: unknown,
       { reports }: { reports: CodebaseWorktreeReport[] },
       context: GraphQLContext,
     ) => service.report(requireAgent(context), reports),
+    reportWorktreeActivity: (
+      _root: unknown,
+      { input }: { input: WorktreeActivityReport },
+      context: GraphQLContext,
+    ) => service.reportActivity(requireAgent(context), input),
     inspectWorktree: (
       _root: unknown,
       { id, requestId }: { id: string; requestId: string },
@@ -167,6 +181,16 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);
         return service.subscribe();
+      },
+    },
+    worktreeInspectionChanged: {
+      subscribe: (
+        _root: unknown,
+        { worktreeId }: { worktreeId: string },
+        context: GraphQLContext,
+      ) => {
+        requireControlPlane(context);
+        return service.subscribeInspection(worktreeId);
       },
     },
   },

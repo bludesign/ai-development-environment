@@ -18,14 +18,25 @@ import {
 import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_WATCH_JOB_KIND,
+  type WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
-import { inspectWorktree, operateWorktree } from "./worktrees.js";
+import {
+  inspectWorktree,
+  operateWorktree,
+  watchWorktree,
+} from "./worktrees.js";
+
+export type AgentJobHandlerContext = {
+  reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
+};
 
 export type AgentJobHandler = (
   payload: unknown,
   timeoutMs: number,
   signal: AbortSignal,
   onLog: (log: ProcessLog) => Promise<void>,
+  context?: AgentJobHandlerContext,
 ) => Promise<ProcessResult>;
 
 export const handlers: Readonly<Record<string, AgentJobHandler>> = {
@@ -37,4 +48,5 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
+  [WORKTREE_WATCH_JOB_KIND]: watchWorktree,
 };

@@ -51,7 +51,17 @@
     "version": "Version",
     "platform": "Plateforme",
     "lastSeen": "Dernière activité",
-    "never": "Jamais"
+    "never": "Jamais",
+    "repositoryDirectories": "Répertoires de dépôts",
+    "baseRepoDirectory": "Répertoire de base des dépôts",
+    "baseRepoDirectoryDescription": "Choisissez le dossier d’un agent qui contient ses dépôts. Les chemins des worktrees qui s’y trouvent seront affichés relativement à ce dossier.",
+    "agent": "Agent",
+    "selectAgent": "Sélectionner un agent en ligne",
+    "noDirectoryAgents": "Aucun agent en ligne ne prend en charge la navigation dans les répertoires.",
+    "currentDirectory": "Répertoire actuel",
+    "notConfigured": "Non configuré",
+    "useDirectory": "Utiliser ce répertoire",
+    "clearDirectory": "Effacer le répertoire"
   },
   "usage": {
     "title": "Utilisation",
@@ -603,7 +613,7 @@
     "neverFetched": "jamais",
     "secondsAgo": "il y a {count} s",
     "branch": "Branche",
-    "path": "Chemin relatif",
+    "path": "Chemin",
     "baseBranch": "Branche de base",
     "saveBase": "Enregistrer la branche de base",
     "inheritBase": "Hériter de la valeur distante",

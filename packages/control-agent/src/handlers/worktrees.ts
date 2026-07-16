@@ -1,9 +1,12 @@
+import { watch, type FSWatcher } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { relative } from "node:path";
 
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
   worktreeJobPayload,
+  worktreeWatchJobPayload,
+  type WorktreeActivityReport,
   type WorktreeChange,
   type WorktreeCommit,
   type WorktreeDetail,
@@ -11,7 +14,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
-import type { AgentJobHandler } from "./index.js";
+import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
 
 const successfulProcess = {
   exitCode: 0,
@@ -19,6 +22,75 @@ const successfulProcess = {
   timedOut: false,
   cancelled: false,
 } as const;
+const WATCH_DEBOUNCE_MS = 500;
+
+type ActiveWorktreeWatch = {
+  watchId: string;
+  codebaseId: string;
+  gitDirectory: string;
+  watchers: FSWatcher[];
+  reporter: AgentJobHandlerContext["reportWorktreeActivity"];
+  timer: ReturnType<typeof setTimeout> | null;
+  reporting: boolean;
+  pending: boolean;
+};
+
+const activeWorktreeWatches = new Map<string, ActiveWorktreeWatch>();
+
+function closeWorktreeWatch(entry: ActiveWorktreeWatch): void {
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = null;
+  for (const watcher of entry.watchers) watcher.close();
+  entry.watchers.length = 0;
+}
+
+export function closeAllWorktreeWatches(): void {
+  for (const entry of activeWorktreeWatches.values()) {
+    closeWorktreeWatch(entry);
+  }
+  activeWorktreeWatches.clear();
+}
+
+async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
+  if (activeWorktreeWatches.get(entry.gitDirectory) !== entry) return;
+  if (entry.reporting) {
+    entry.pending = true;
+    return;
+  }
+  entry.reporting = true;
+  entry.pending = false;
+  const report: WorktreeActivityReport = {
+    codebaseId: entry.codebaseId,
+    gitDirectory: entry.gitDirectory,
+    observedAt: new Date().toISOString(),
+  };
+  try {
+    await entry.reporter(report);
+  } catch (error) {
+    console.error(
+      "Could not report worktree activity:",
+      error instanceof Error ? error.message : error,
+    );
+  } finally {
+    entry.reporting = false;
+    if (
+      entry.pending &&
+      activeWorktreeWatches.get(entry.gitDirectory) === entry
+    ) {
+      scheduleWorktreeActivity(entry);
+    }
+  }
+}
+
+function scheduleWorktreeActivity(entry: ActiveWorktreeWatch): void {
+  entry.pending = true;
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    entry.timer = null;
+    void flushWorktreeActivity(entry);
+  }, WATCH_DEBOUNCE_MS);
+  entry.timer.unref();
+}
 
 type WorktreeEntry = {
   folder: string;
@@ -472,6 +544,64 @@ export async function inspectWorktreeDetail(
     changesTruncated: changeResult.truncated,
   };
 }
+
+export const watchWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  _onLog,
+  context,
+) => {
+  const input = worktreeWatchJobPayload(payload);
+  const current = activeWorktreeWatches.get(input.gitDirectory);
+  if (input.action === "STOP") {
+    if (current?.watchId === input.watchId) {
+      closeWorktreeWatch(current);
+      activeWorktreeWatches.delete(input.gitDirectory);
+    }
+    return successfulProcess;
+  }
+
+  if (!context) throw new Error("Worktree activity reporting is unavailable");
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  if (current?.watchId === input.watchId) return successfulProcess;
+  if (current) {
+    closeWorktreeWatch(current);
+    activeWorktreeWatches.delete(input.gitDirectory);
+  }
+
+  const entry: ActiveWorktreeWatch = {
+    watchId: input.watchId,
+    codebaseId: input.codebaseId,
+    gitDirectory: input.gitDirectory,
+    watchers: [],
+    reporter: context.reportWorktreeActivity,
+    timer: null,
+    reporting: false,
+    pending: false,
+  };
+  activeWorktreeWatches.set(input.gitDirectory, entry);
+  try {
+    for (const target of new Set([folder, input.gitDirectory])) {
+      const watcher = watch(target, { recursive: true }, () =>
+        scheduleWorktreeActivity(entry),
+      );
+      watcher.on("error", (error) => {
+        console.error(
+          `Worktree watcher failed for ${target}:`,
+          error instanceof Error ? error.message : error,
+        );
+      });
+      watcher.unref();
+      entry.watchers.push(watcher);
+    }
+  } catch (error) {
+    closeWorktreeWatch(entry);
+    activeWorktreeWatches.delete(input.gitDirectory);
+    throw error;
+  }
+  return successfulProcess;
+};
 
 export const inspectWorktree: AgentJobHandler = async (
   payload,

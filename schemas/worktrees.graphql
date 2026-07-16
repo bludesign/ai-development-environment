@@ -109,6 +109,11 @@ type WorktreeOverviewChange {
   codebaseId: ID
 }
 
+type WorktreeActivity {
+  worktreeId: ID!
+  observedAt: String!
+}
+
 input WorktreeInventoryInput {
   gitDirectory: String!
   folder: String!
@@ -138,6 +143,12 @@ input CodebaseWorktreeReportInput {
   worktrees: [WorktreeInventoryInput!]!
 }
 
+input WorktreeActivityReportInput {
+  codebaseId: ID!
+  gitDirectory: String!
+  observedAt: String!
+}
+
 input SaveWorktreeTagInput {
   id: ID
   name: String!
@@ -157,7 +168,9 @@ extend type Query {
 }
 
 extend type Mutation {
+  refreshWorktrees: Int!
   reportWorktrees(reports: [CodebaseWorktreeReportInput!]!): [Worktree!]!
+  reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
   inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!
   runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
   updateWorktreeBaseBranch(id: ID!, baseBranch: String): Worktree!
@@ -172,4 +185,5 @@ extend type Mutation {
 
 extend type Subscription {
   worktreeOverviewChanged: WorktreeOverviewChange!
+  worktreeInspectionChanged(worktreeId: ID!): WorktreeActivity!
 }

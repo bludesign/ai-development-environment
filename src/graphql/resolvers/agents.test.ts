@@ -40,4 +40,27 @@ describe("agent read ownership", () => {
     ).rejects.toThrow("only read its own resources");
     expect(service.listLogs).not.toHaveBeenCalled();
   });
+
+  test("only the control plane can update the base repository directory", async () => {
+    const service = {
+      updateBaseRepoDirectory: vi.fn().mockResolvedValue({ id: "agent-1" }),
+    } as unknown as AgentControlService;
+    const mutation =
+      createAgentResolvers(service).Mutation.updateAgentBaseRepoDirectory;
+
+    expect(() =>
+      mutation(
+        {},
+        { agentId: "agent-1", baseRepoDirectory: "/Users/test/Repositories" },
+        context("agent-1"),
+      ),
+    ).toThrow("cannot perform control-plane operations");
+    await expect(
+      mutation(
+        {},
+        { agentId: "agent-1", baseRepoDirectory: "/Users/test/Repositories" },
+        context(null),
+      ),
+    ).resolves.toEqual({ id: "agent-1" });
+  });
 });

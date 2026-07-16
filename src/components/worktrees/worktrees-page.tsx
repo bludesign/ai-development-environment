@@ -130,6 +130,7 @@ const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId
     commitsTruncated changesTruncated
   }
 }`;
+const LIVE_INSPECTION_POLL_MS = 15_000;
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -184,6 +185,59 @@ async function inspectWorktree(worktreeId: string): Promise<WorktreeDetail> {
     requestId: createClientId(),
   });
   return data.inspectWorktree;
+}
+
+function useLiveWorktreeInspection(
+  worktreeId: string,
+  enabled: boolean,
+  inspect: () => Promise<void>,
+) {
+  const running = useRef(false);
+  const pending = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (running.current) {
+      pending.current = true;
+      return;
+    }
+    running.current = true;
+    try {
+      do {
+        pending.current = false;
+        await inspect();
+      } while (pending.current && enabled);
+    } finally {
+      running.current = false;
+    }
+  }, [enabled, inspect]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
+      {
+        query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
+          worktreeInspectionChanged(worktreeId: $worktreeId) { worktreeId observedAt }
+        }`,
+        variables: { worktreeId },
+      },
+      {
+        next: () => void refresh(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const poll = window.setInterval(
+      () => void refresh(),
+      LIVE_INSPECTION_POLL_MS,
+    );
+    return () => {
+      pending.current = false;
+      window.clearInterval(poll);
+      unsubscribe();
+    };
+  }, [enabled, refresh, worktreeId]);
+
+  return refresh;
 }
 
 const colorClasses: Record<string, string> = {
@@ -304,8 +358,22 @@ export function WorktreesPage() {
 
   const refresh = async () => {
     setLoading(true);
-    await load();
-    setInspectionRefreshToken((value) => value + 1);
+    setBusy(true);
+    try {
+      await controlPlaneRequest(
+        `mutation RefreshWorktrees {
+          refreshWorktrees
+        }`,
+      );
+      await load();
+      setInspectionRefreshToken((value) => value + 1);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+      setLoading(false);
+    }
   };
 
   const fetchNow = async () => {
@@ -624,18 +692,23 @@ function WorktreeCard(props: WorktreeItemProps) {
       if (request === detailRequest.current) setDetailLoading(false);
     }
   }, [onError, worktree.id]);
+  const refreshInspection = useLiveWorktreeInspection(
+    worktree.id,
+    expanded && detail !== null,
+    inspect,
+  );
   useEffect(() => {
     if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
     lastInspectionRefreshToken.current = inspectionRefreshToken;
     if (!expanded) return;
-    const timer = window.setTimeout(() => void inspect(), 0);
+    const timer = window.setTimeout(() => void refreshInspection(), 0);
     return () => window.clearTimeout(timer);
-  }, [expanded, inspect, inspectionRefreshToken]);
+  }, [expanded, inspectionRefreshToken, refreshInspection]);
   const toggle = () => {
     const next = !expanded;
     setExpanded(next);
     if (!next || detail) return;
-    void inspect();
+    void refreshInspection();
   };
   return (
     <Card
@@ -679,7 +752,7 @@ function WorktreeCard(props: WorktreeItemProps) {
           {...props}
           onCompleted={async () => {
             await props.onReload();
-            if (expanded) await inspect();
+            if (expanded) await refreshInspection();
           }}
         />
       </CardFooter>
@@ -1335,17 +1408,22 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       if (request === detailRequest.current) setDetailLoading(false);
     }
   }, [onError, worktree.id]);
+  const refreshInspection = useLiveWorktreeInspection(
+    worktree.id,
+    expanded && detail !== null,
+    inspect,
+  );
   useEffect(() => {
     if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
     lastInspectionRefreshToken.current = inspectionRefreshToken;
     if (!expanded) return;
-    const timer = window.setTimeout(() => void inspect(), 0);
+    const timer = window.setTimeout(() => void refreshInspection(), 0);
     return () => window.clearTimeout(timer);
-  }, [expanded, inspect, inspectionRefreshToken]);
+  }, [expanded, inspectionRefreshToken, refreshInspection]);
   const expand = () => {
     const next = !expanded;
     setExpanded(next);
-    if (next && !detail) void inspect();
+    if (next && !detail) void refreshInspection();
   };
   const highlight =
     worktree.highlightColor && colorClasses[worktree.highlightColor];
@@ -1398,7 +1476,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             {...props}
             onCompleted={async () => {
               await props.onReload();
-              if (expanded) await inspect();
+              if (expanded) await refreshInspection();
             }}
           />
         </TableCell>
