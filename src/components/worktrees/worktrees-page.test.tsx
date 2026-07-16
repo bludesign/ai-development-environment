@@ -12,7 +12,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import { WorktreesPage } from "./worktrees-page";
+import { displayedWorktreePath, WorktreesPage } from "./worktrees-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -21,6 +21,23 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+
+describe("displayedWorktreePath", () => {
+  test("uses the full path without a base and outside a configured base", () => {
+    expect(displayedWorktreePath("/Users/test/repo", null)).toBe(
+      "/Users/test/repo",
+    );
+    expect(
+      displayedWorktreePath("/Users/test/worktrees/repo", "/Users/test/repos"),
+    ).toBe("/Users/test/worktrees/repo");
+  });
+
+  test("uses a relative path inside a configured base", () => {
+    expect(
+      displayedWorktreePath("/Users/test/repos/project", "/Users/test/repos"),
+    ).toBe("project");
+  });
+});
 
 describe("WorktreesPage", () => {
   beforeEach(() => {
@@ -53,6 +70,7 @@ describe("WorktreesPage", () => {
               osVersion: "macOS",
               architecture: "arm64",
               capabilities: ["worktree.inspect", "worktree.operation"],
+              baseRepoDirectory: null,
               connectionStatus: "ONLINE",
               ipAddress: null,
               lastSeenAt: new Date().toISOString(),
@@ -152,6 +170,8 @@ describe("WorktreesPage", () => {
     expect(screen.getByText("AIDE-24 — Add worktrees page")).toBeDefined();
     expect(screen.queryByText("Primary")).toBeNull();
     expect(screen.getByText("Ready")).toBeDefined();
+    expect(screen.getByText("/repo")).toBeDefined();
+    expect(screen.queryByText(".")).toBeNull();
     expect(screen.getByText("Current · 1 ahead").className).toContain(
       "dark:text-emerald-300",
     );

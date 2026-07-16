@@ -244,5 +244,13 @@ describe("AgentDetail", () => {
       ),
     );
     expect(await screen.findByText("/Users/test/Repositories")).toBeDefined();
+    const clearDirectory = screen.getByRole("button", {
+      name: "Clear directory",
+    });
+    const browseHome = screen.getByRole("button", {
+      name: "Browse home folder",
+    });
+    expect(clearDirectory.parentElement?.className).toContain("flex");
+    expect(clearDirectory.parentElement?.contains(browseHome)).toBe(true);
   });
 });

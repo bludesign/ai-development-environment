@@ -143,10 +143,9 @@ function windowsPath(value: string): boolean {
 
 export function worktreeDisplayPath(
   folder: string,
-  reportedRelativePath: string,
   baseRepoDirectory: string | null,
 ): string {
-  if (!baseRepoDirectory) return reportedRelativePath;
+  if (!baseRepoDirectory) return folder;
   const usesWindowsPaths = windowsPath(baseRepoDirectory);
   if (usesWindowsPaths !== windowsPath(folder)) return folder;
   const path = usesWindowsPaths ? win32 : posix;
@@ -246,7 +245,6 @@ export class WorktreesService {
       ...worktree,
       relativePath: worktreeDisplayPath(
         worktree.folder,
-        worktree.relativePath,
         worktree.codebase.agent.baseRepoDirectory,
       ),
       tags: worktree.tags.map((assignment) => assignment.tag),

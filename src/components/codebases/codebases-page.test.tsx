@@ -57,6 +57,7 @@ const agent = {
     "codebase.refresh",
     "codebase.fetch",
   ],
+  baseRepoDirectory: null,
   connectionStatus: "ONLINE",
   ipAddress: null,
   lastSeenAt: new Date().toISOString(),
@@ -187,6 +188,10 @@ describe("CodebasesPage", () => {
   });
 
   test("browses, inspects, and confirms a new codebase", async () => {
+    const configuredAgent = {
+      ...agent,
+      baseRepoDirectory: "/Users/test/Repositories",
+    };
     request.mockImplementation(async (query) => {
       const operation = String(query);
       if (operation.includes("query CodebaseOverview")) {
@@ -196,7 +201,7 @@ describe("CodebasesPage", () => {
             refreshIntervalSeconds: 30,
             updatedAt: new Date(0).toISOString(),
           },
-          agents: [agent],
+          agents: [configuredAgent],
         } as never;
       }
       if (operation.includes("mutation BrowseAgentDirectory")) {
@@ -247,8 +252,16 @@ describe("CodebasesPage", () => {
       agentOptions.find((element) => element.tagName === "SPAN") ??
         agentOptions[0],
     );
-    fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
     expect(await screen.findByText("Inspect this folder")).toBeDefined();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation BrowseAgentDirectory"),
+      expect.objectContaining({
+        input: expect.objectContaining({
+          agentId: "agent-1",
+          path: "/Users/test/Repositories",
+        }),
+      }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Inspect this folder" }),
     );

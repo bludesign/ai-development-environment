@@ -285,7 +285,6 @@ describe("worktreeDisplayPath", () => {
     expect(
       worktreeDisplayPath(
         "/Users/test/Repositories/codex/.worktrees/feature",
-        ".worktrees/feature",
         "/Users/test/Repositories",
       ),
     ).toBe("codex/.worktrees/feature");
@@ -295,30 +294,27 @@ describe("worktreeDisplayPath", () => {
     expect(
       worktreeDisplayPath(
         "/Users/test/Worktrees/feature",
-        "../Worktrees/feature",
         "/Users/test/Repositories",
       ),
     ).toBe("/Users/test/Worktrees/feature");
   });
 
-  test("preserves the reported relative path when no root is configured", () => {
-    expect(
-      worktreeDisplayPath("/Users/test/Repositories/codex", ".", null),
-    ).toBe(".");
+  test("uses the full directory when no root is configured", () => {
+    expect(worktreeDisplayPath("/Users/test/Repositories/codex", null)).toBe(
+      "/Users/test/Repositories/codex",
+    );
   });
 
   test("handles Windows repository directories on a non-Windows server", () => {
     expect(
       worktreeDisplayPath(
         "C:\\Users\\test\\Repositories\\codex",
-        ".",
         "C:\\Users\\test\\Repositories",
       ),
     ).toBe("codex");
     expect(
       worktreeDisplayPath(
         "D:\\Worktrees\\feature",
-        "..\\feature",
         "C:\\Users\\test\\Repositories",
       ),
     ).toBe("D:\\Worktrees\\feature");

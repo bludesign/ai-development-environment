@@ -264,20 +264,22 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               <AlertDescription>{directoryError}</AlertDescription>
             </Alert>
           )}
-          <div className="mt-4 space-y-3">
-            {canBrowseDirectories ? (
-              <AgentDirectoryBrowser
-                agentId={agent.id}
-                disabled={directoryBusy}
-                key={`${agent.id}:${agent.baseRepoDirectory ?? ""}`}
-                onSelect={(path) => saveBaseRepoDirectory(path)}
-                selectLabel={t("useDirectory")}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {t("directoryBrowsingUnavailable")}
-              </p>
-            )}
+          <div className="mt-4 flex flex-wrap items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {canBrowseDirectories ? (
+                <AgentDirectoryBrowser
+                  agentId={agent.id}
+                  disabled={directoryBusy}
+                  key={`${agent.id}:${agent.baseRepoDirectory ?? ""}`}
+                  onSelect={(path) => saveBaseRepoDirectory(path)}
+                  selectLabel={t("useDirectory")}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("directoryBrowsingUnavailable")}
+                </p>
+              )}
+            </div>
             {agent.baseRepoDirectory && (
               <Button
                 disabled={directoryBusy}

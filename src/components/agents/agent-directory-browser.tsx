@@ -2,7 +2,7 @@
 
 import { ChevronRight, Folder, FolderCheck, Home } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import type { DirectoryListing } from "@/components/codebases/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,12 +30,14 @@ function pathBreadcrumbs(path: string) {
 export function AgentDirectoryBrowser({
   agentId,
   disabled = false,
+  initialPath = null,
   onSelect,
   selectIcon,
   selectLabel,
 }: {
   agentId: string;
   disabled?: boolean;
+  initialPath?: string | null;
   onSelect: (path: string) => Promise<void> | void;
   selectIcon?: ReactNode;
   selectLabel: string;
@@ -47,37 +49,46 @@ export function AgentDirectoryBrowser({
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
+  const browse = useCallback(
+    async (path: string | null) => {
+      const requestId = ++requestSequence.current;
+      setBusy(true);
+      try {
+        const data = await controlPlaneRequest<{
+          browseAgentDirectory: DirectoryListing;
+        }>(
+          `mutation BrowseAgentDirectory($input: BrowseAgentDirectoryInput!) {
+            browseAgentDirectory(input: $input) {
+              path parentPath homePath truncated entries { name path hidden }
+            }
+          }`,
+          { input: { agentId, path, requestId: createClientId() } },
+        );
+        if (requestId !== requestSequence.current) return;
+        setListing(data.browseAgentDirectory);
+        setError(null);
+      } catch (value) {
+        if (requestId !== requestSequence.current) return;
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (requestId === requestSequence.current) setBusy(false);
+      }
+    },
+    [agentId],
+  );
+
+  useEffect(() => {
+    if (!initialPath) return;
+    const timer = window.setTimeout(() => void browse(initialPath), 0);
+    return () => window.clearTimeout(timer);
+  }, [browse, initialPath]);
+
   useEffect(
     () => () => {
       requestSequence.current += 1;
     },
     [],
   );
-
-  const browse = async (path: string | null) => {
-    const requestId = ++requestSequence.current;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        browseAgentDirectory: DirectoryListing;
-      }>(
-        `mutation BrowseAgentDirectory($input: BrowseAgentDirectoryInput!) {
-          browseAgentDirectory(input: $input) {
-            path parentPath homePath truncated entries { name path hidden }
-          }
-        }`,
-        { input: { agentId, path, requestId: createClientId() } },
-      );
-      if (requestId !== requestSequence.current) return;
-      setListing(data.browseAgentDirectory);
-      setError(null);
-    } catch (value) {
-      if (requestId !== requestSequence.current) return;
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (requestId === requestSequence.current) setBusy(false);
-    }
-  };
 
   if (!listing) {
     return (

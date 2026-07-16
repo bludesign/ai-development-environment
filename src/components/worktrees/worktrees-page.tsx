@@ -132,6 +132,33 @@ const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId
 }`;
 const LIVE_INSPECTION_POLL_MS = 15_000;
 
+export function displayedWorktreePath(
+  folder: string,
+  baseRepoDirectory: string | null | undefined,
+): string {
+  if (!baseRepoDirectory) return folder;
+  const windows =
+    /^[A-Za-z]:[\\/]/.test(baseRepoDirectory) ||
+    baseRepoDirectory.startsWith("\\\\");
+  const separator = windows ? "\\" : "/";
+  const normalize = (value: string) =>
+    windows ? value.replaceAll("/", "\\") : value;
+  const trimTrailingSeparators = (value: string) => {
+    const root = windows ? /^[A-Za-z]:\\$/.test(value) : value === "/";
+    return root ? value : value.replace(/[\\/]+$/, "");
+  };
+  const base = trimTrailingSeparators(normalize(baseRepoDirectory));
+  const worktree = trimTrailingSeparators(normalize(folder));
+  const comparableBase = windows ? base.toLocaleLowerCase() : base;
+  const comparableWorktree = windows ? worktree.toLocaleLowerCase() : worktree;
+  if (comparableWorktree === comparableBase) return ".";
+  const prefix = base.endsWith(separator) ? base : `${base}${separator}`;
+  const comparablePrefix = windows ? prefix.toLocaleLowerCase() : prefix;
+  return comparableWorktree.startsWith(comparablePrefix)
+    ? worktree.slice(prefix.length)
+    : folder;
+}
+
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
   if (issueKey) params.set("issue", issueKey);
@@ -594,6 +621,7 @@ function AgentSection({
               {group.worktrees.map((worktree) => (
                 <WorktreeCard
                   allTags={allTags}
+                  baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
                   editorVariant={editorVariant}
                   group={group}
                   inspectionRefreshToken={inspectionRefreshToken}
@@ -610,6 +638,7 @@ function AgentSection({
           ) : (
             <WorktreeTable
               allTags={allTags}
+              baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
               editorVariant={editorVariant}
               group={group}
               inspectionRefreshToken={inspectionRefreshToken}
@@ -764,6 +793,7 @@ type WorktreeItemProps = {
   worktree: Worktree;
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
+  baseRepoDirectory: string | null;
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
   inspectionRefreshToken: number;
   onReload: () => Promise<void>;
@@ -814,11 +844,15 @@ function WorktreeTicketLink({
 }
 
 function WorktreeMetadata(props: WorktreeItemProps) {
-  const { worktree, group } = props;
+  const { worktree, group, baseRepoDirectory } = props;
   const t = useTranslations("worktrees");
   return (
     <div className="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
-      <Info label={t("path")} mono value={worktree.relativePath} />
+      <Info
+        label={t("path")}
+        mono
+        value={displayedWorktreePath(worktree.folder, baseRepoDirectory)}
+      />
       <BaseBranchControl {...props} />
       <div>
         <p className="text-xs text-muted-foreground">{t("upstreamStatus")}</p>
@@ -1386,7 +1420,8 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
 }
 
 function WorktreeTableRows(props: WorktreeItemProps) {
-  const { inspectionRefreshToken, onError, worktree } = props;
+  const { baseRepoDirectory, inspectionRefreshToken, onError, worktree } =
+    props;
   const t = useTranslations("worktrees");
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
@@ -1444,7 +1479,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           )}
         </TableCell>
         <TableCell className="font-mono text-xs">
-          {worktree.relativePath}
+          {displayedWorktreePath(worktree.folder, baseRepoDirectory)}
         </TableCell>
         <TableCell>{worktree.baseBranch ?? "—"}</TableCell>
         <TableCell>

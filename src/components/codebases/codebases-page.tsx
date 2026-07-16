@@ -808,6 +808,7 @@ function AddCodebaseDialog({
       agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND) &&
       agent.capabilities.includes(CODEBASE_INSPECT_JOB_KIND),
   );
+  const selectedAgent = compatible.find((agent) => agent.id === agentId);
 
   const reset = () => {
     requestSequence.current += 1;
@@ -918,6 +919,7 @@ function AddCodebaseDialog({
             <AgentDirectoryBrowser
               agentId={agentId}
               disabled={busy}
+              initialPath={selectedAgent?.baseRepoDirectory}
               key={agentId}
               onSelect={inspect}
               selectIcon={<FolderGit2 />}
