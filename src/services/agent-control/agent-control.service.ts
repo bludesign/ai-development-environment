@@ -1,6 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { TUNNEL_NAME_REGEX } from "@ai-development-environment/agent-contract";
+import {
+  CCUSAGE_REPORT_JOB_KIND,
+  TUNNEL_NAME_REGEX,
+} from "@ai-development-environment/agent-contract";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -10,6 +13,7 @@ import {
   agentEventsTopic,
   agentJobChangedTopic,
   agentJobLogTopic,
+  ccusageCollectionChangedTopic,
 } from "./event-bus";
 
 const ACTIVE_JOB_STATUSES = ["QUEUED", "RUNNING"];
@@ -21,7 +25,10 @@ const FINAL_JOB_STATUSES = new Set([
 ]);
 
 export const AGENT_ONLINE_WINDOW_MS = 45_000;
-export const SUPPORTED_AGENT_JOBS = ["cloudflared.runTunnel"] as const;
+export const SUPPORTED_AGENT_JOBS = [
+  "cloudflared.runTunnel",
+  CCUSAGE_REPORT_JOB_KIND,
+] as const;
 
 export type RequestIdentity = {
   agentId: string | null;
@@ -39,11 +46,20 @@ function parsePayload(payload: unknown): Record<string, unknown> {
   return payload as Record<string, unknown>;
 }
 
-function validateJob(kind: string, payload: unknown): void {
+export function validateJob(kind: string, payload: unknown): void {
+  const value = parsePayload(payload);
+  if (kind === CCUSAGE_REPORT_JOB_KIND) {
+    const unexpected = Object.keys(value);
+    if (unexpected.length > 0) {
+      throw new Error(
+        `Unexpected ccusage.report payload field: ${unexpected[0]}`,
+      );
+    }
+    return;
+  }
   if (kind !== "cloudflared.runTunnel") {
     throw new Error(`Unsupported agent job kind: ${kind}`);
   }
-  const value = parsePayload(payload);
   if (
     typeof value.tunnelName !== "string" ||
     !TUNNEL_NAME_REGEX.test(value.tunnelName)
@@ -62,8 +78,17 @@ function publishAgent(agent: unknown): void {
   agentEventBus.publish(AGENT_CHANGED_TOPIC, { agentChanged: agent });
 }
 
-function publishJob(job: { id: string }): void {
+function publishJob(job: {
+  id: string;
+  ccusageCollectionId?: string | null;
+}): void {
   agentEventBus.publish(agentJobChangedTopic(job.id), { agentJobChanged: job });
+  if (job.ccusageCollectionId) {
+    agentEventBus.publish(
+      ccusageCollectionChangedTopic(job.ccusageCollectionId),
+      { ccusageCollectionChanged: { id: job.ccusageCollectionId } },
+    );
+  }
 }
 
 export class AgentControlService {
@@ -200,6 +225,7 @@ export class AgentControlService {
     payload: unknown;
     idempotencyKey: string;
     timeoutSeconds?: number | null;
+    ccusageCollectionId?: string | null;
   }) {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
@@ -217,18 +243,55 @@ export class AgentControlService {
         },
       },
     });
-    if (existing) return existing;
-    const job = await prisma.agentJob.create({
-      data: {
-        id: randomUUID(),
-        agentId: input.agentId,
-        kind: input.kind,
-        payloadJson: JSON.stringify(input.payload),
-        status: "QUEUED",
-        idempotencyKey: input.idempotencyKey,
-        timeoutSeconds,
-      },
-    });
+    if (existing) {
+      if (
+        input.ccusageCollectionId &&
+        existing.ccusageCollectionId !== input.ccusageCollectionId
+      ) {
+        const attached = await prisma.agentJob.update({
+          where: { id: existing.id },
+          data: { ccusageCollectionId: input.ccusageCollectionId },
+        });
+        publishJob(attached);
+        return attached;
+      }
+      return existing;
+    }
+    let job;
+    try {
+      job = await prisma.agentJob.create({
+        data: {
+          id: randomUUID(),
+          agentId: input.agentId,
+          kind: input.kind,
+          payloadJson: JSON.stringify(input.payload),
+          status: "QUEUED",
+          idempotencyKey: input.idempotencyKey,
+          timeoutSeconds,
+          ccusageCollectionId: input.ccusageCollectionId ?? null,
+        },
+      });
+    } catch (error) {
+      const concurrent = await prisma.agentJob.findUnique({
+        where: {
+          agentId_idempotencyKey: {
+            agentId: input.agentId,
+            idempotencyKey: input.idempotencyKey,
+          },
+        },
+      });
+      if (!concurrent) throw error;
+      if (
+        input.ccusageCollectionId &&
+        concurrent.ccusageCollectionId !== input.ccusageCollectionId
+      ) {
+        return prisma.agentJob.update({
+          where: { id: concurrent.id },
+          data: { ccusageCollectionId: input.ccusageCollectionId },
+        });
+      }
+      return concurrent;
+    }
     await prisma.agentAuditEvent.create({
       data: {
         id: randomUUID(),
@@ -356,6 +419,34 @@ export class AgentControlService {
       agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
     });
     return updated;
+  }
+
+  async timeoutCollectionJobs(collectionId: string) {
+    const prisma = await getPrismaClient();
+    const jobs = await prisma.agentJob.findMany({
+      where: {
+        ccusageCollectionId: collectionId,
+        status: { in: ACTIVE_JOB_STATUSES },
+      },
+    });
+    const timedOut = [];
+    for (const job of jobs) {
+      const changed = await prisma.agentJob.updateMany({
+        where: { id: job.id, status: { in: ACTIVE_JOB_STATUSES } },
+        data: { status: "TIMED_OUT", finishedAt: new Date() },
+      });
+      if (changed.count !== 1) continue;
+      const updated = await prisma.agentJob.findUnique({
+        where: { id: job.id },
+      });
+      if (!updated) continue;
+      timedOut.push(updated);
+      publishJob(updated);
+      agentEventBus.publish(agentEventsTopic(updated.agentId), {
+        agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
+      });
+    }
+    return timedOut;
   }
 
   async listLogs(jobId: string, afterSequence = -1) {

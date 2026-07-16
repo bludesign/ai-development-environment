@@ -9,6 +9,7 @@ import { AgentControlService } from "@/services/agent-control";
 import { PrismaService } from "@/services/prisma";
 import { JiraService } from "@/services/jira";
 import { GitHubService } from "@/services/github";
+import { CcusageService } from "@/services/ccusage";
 import type { GraphQLSchema } from "graphql";
 
 export interface GraphQLContext {
@@ -49,6 +50,7 @@ class GraphQLServerService {
   private jiraService: JiraService | null = null;
   private gitHubService: GitHubService | null = null;
   private agentControlService: AgentControlService | null = null;
+  private ccusageService: CcusageService | null = null;
   private schema: GraphQLSchema | null = null;
   private initPromise: Promise<void> | null = null;
 
@@ -67,6 +69,7 @@ class GraphQLServerService {
   private async buildServer(): Promise<void> {
     this.prismaService = new PrismaService();
     this.agentControlService = new AgentControlService();
+    this.ccusageService = new CcusageService(this.agentControlService);
     this.jiraService = new JiraService();
     this.gitHubService = new GitHubService();
     this.schema = createSchema(
@@ -74,6 +77,7 @@ class GraphQLServerService {
       this.agentControlService,
       this.jiraService,
       this.gitHubService,
+      this.ccusageService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when

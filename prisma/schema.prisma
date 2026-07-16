@@ -31,6 +31,7 @@ model Agent {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   jobs             AgentJob[]
+  ccusageCollections CcusageCollectionAgent[]
   auditEvents      AgentAuditEvent[]
 }
 
@@ -56,11 +57,38 @@ model AgentJob {
   startedAt      DateTime?
   finishedAt     DateTime?
   updatedAt      DateTime      @updatedAt
+  ccusageCollectionId String?
   agent          Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
   logs           AgentJobLog[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
+  @@index([ccusageCollectionId, status])
+}
+
+model CcusageCollection {
+  id         String                   @id
+  deadlineAt DateTime
+  finishedAt DateTime?
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+  agents     CcusageCollectionAgent[]
+  jobs       AgentJob[]
+
+  @@index([finishedAt, deadlineAt])
+}
+
+model CcusageCollectionAgent {
+  collectionId String
+  agentId      String
+  initialStatus String
+  error        String?
+  collection   CcusageCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  agent        Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, agentId])
+  @@index([agentId])
 }
 
 model AgentJobLog {

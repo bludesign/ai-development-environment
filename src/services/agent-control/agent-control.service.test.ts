@@ -4,7 +4,11 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
-import { AgentControlService } from "./agent-control.service";
+import {
+  AgentControlService,
+  SUPPORTED_AGENT_JOBS,
+  validateJob,
+} from "./agent-control.service";
 
 function persistedJob(status: string, resultJson: string | null = null) {
   return {
@@ -63,5 +67,18 @@ describe("AgentControlService.completeJob", () => {
     );
 
     expect(result).toBe(cancelled);
+  });
+});
+
+describe("agent job validation", () => {
+  test("accepts only an empty ccusage report payload", () => {
+    expect(SUPPORTED_AGENT_JOBS).toContain("ccusage.report");
+    expect(() => validateJob("ccusage.report", {})).not.toThrow();
+    expect(() =>
+      validateJob("ccusage.report", { since: "2026-01-01" }),
+    ).toThrow("Unexpected ccusage.report payload field");
+    expect(() => validateJob("ccusage.report", [])).toThrow(
+      "payload must be an object",
+    );
   });
 });

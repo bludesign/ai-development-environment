@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   Blocks,
+  ChartNoAxesCombined,
   Cpu,
   Database,
   GitPullRequest,
@@ -262,6 +263,22 @@ function NavigationSidebar() {
                   >
                     <Cpu />
                     <span>{t("agents")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/usage")}
+                >
+                  <Link
+                    href="/usage"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ChartNoAxesCombined />
+                    <span>{t("usage")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

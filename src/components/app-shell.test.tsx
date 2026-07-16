@@ -70,6 +70,10 @@ describe("AppShell", () => {
   test("opens both sidebars on desktop by default and toggles them independently", () => {
     renderShell();
 
+    expect(
+      screen.getByRole("link", { name: "Usage" }).getAttribute("href"),
+    ).toBe("/usage");
+
     const leftToggle = screen.getByRole("button", {
       name: "Hide navigation",
     });

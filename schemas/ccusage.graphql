@@ -1,0 +1,110 @@
+enum CcusageRange {
+  ALL
+  LAST_7_DAYS
+  LAST_30_DAYS
+}
+
+enum CcusageCollectionStatus {
+  COLLECTING
+  COMPLETED
+}
+
+enum CcusageAgentStatus {
+  QUEUING
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMED_OUT
+  OFFLINE
+  UNSUPPORTED
+  INVALID
+}
+
+type CcusageMetrics {
+  inputTokens: Float!
+  outputTokens: Float!
+  cacheCreationTokens: Float!
+  cacheReadTokens: Float!
+  totalTokens: Float!
+  totalCost: Float!
+}
+
+type CcusageAgentUsage {
+  agentId: ID!
+  agentName: String!
+  hostname: String!
+  sources: [String!]!
+  inputTokens: Float!
+  outputTokens: Float!
+  cacheCreationTokens: Float!
+  cacheReadTokens: Float!
+  totalTokens: Float!
+  totalCost: Float!
+}
+
+type CcusageModelUsage {
+  modelName: String!
+  unattributed: Boolean!
+  agents: [CcusageAgentUsage!]!
+  inputTokens: Float!
+  outputTokens: Float!
+  cacheCreationTokens: Float!
+  cacheReadTokens: Float!
+  totalTokens: Float!
+  totalCost: Float!
+}
+
+type CcusageDayUsage {
+  period: String!
+  sources: [String!]!
+  models: [CcusageModelUsage!]!
+  inputTokens: Float!
+  outputTokens: Float!
+  cacheCreationTokens: Float!
+  cacheReadTokens: Float!
+  totalTokens: Float!
+  totalCost: Float!
+}
+
+type CcusageAggregate {
+  days: [CcusageDayUsage!]!
+  totals: CcusageMetrics!
+}
+
+type CcusageAgentProgress {
+  agent: Agent!
+  status: CcusageAgentStatus!
+  jobId: ID
+  error: String
+}
+
+type CcusageProgress {
+  eligibleCount: Int!
+  finishedCount: Int!
+  successfulCount: Int!
+  agents: [CcusageAgentProgress!]!
+}
+
+type CcusageCollection {
+  id: ID!
+  status: CcusageCollectionStatus!
+  createdAt: String!
+  deadlineAt: String!
+  finishedAt: String
+  progress: CcusageProgress!
+  aggregate(range: CcusageRange = ALL): CcusageAggregate!
+}
+
+extend type Query {
+  ccusageCollection(id: ID!): CcusageCollection
+}
+
+extend type Mutation {
+  collectCcusage(requestId: ID): CcusageCollection!
+}
+
+extend type Subscription {
+  ccusageCollectionChanged(id: ID!): CcusageCollection!
+}
