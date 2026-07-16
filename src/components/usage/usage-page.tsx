@@ -38,7 +38,9 @@ import {
 
 import {
   aggregateUsage,
+  filterUsageByDays,
   type UsageMetrics,
+  type UsageRangeDays,
   type UsageReportSource,
 } from "./aggregate-usage";
 
@@ -63,6 +65,13 @@ type AgentCollection = {
 };
 
 type ReportsByAgent = Record<string, CcusageReport>;
+type UsageRange = "ALL" | "7" | "30";
+
+const RANGE_DAYS: Record<UsageRange, UsageRangeDays> = {
+  ALL: null,
+  "7": 7,
+  "30": 30,
+};
 
 function terminal(status: CollectionStatus): boolean {
   return (
@@ -79,6 +88,7 @@ export function UsagePage() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [range, setRange] = useState<UsageRange>("ALL");
 
   useEffect(() => {
     let disposed = false;
@@ -305,7 +315,14 @@ export function UsagePage() {
       }),
     [records, reports],
   );
-  const usage = useMemo(() => aggregateUsage(reportSources), [reportSources]);
+  const allUsage = useMemo(
+    () => aggregateUsage(reportSources),
+    [reportSources],
+  );
+  const usage = useMemo(
+    () => filterUsageByDays(allUsage, RANGE_DAYS[range]),
+    [allUsage, range],
+  );
   const successful = records.filter((record) => record.status === "SUCCEEDED");
   const eligible = records.filter(
     (record) => record.status !== "OFFLINE" && record.status !== "UNSUPPORTED",
@@ -331,14 +348,40 @@ export function UsagePage() {
             {t("description")}
           </p>
         </div>
-        <Button
-          disabled={loading || collecting}
-          onClick={() => setRefreshGeneration((current) => current + 1)}
-          variant="outline"
-        >
-          <RefreshCw className={collecting ? "animate-spin" : undefined} />
-          {t("refresh")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            aria-label={t("rangeLabel")}
+            className="flex items-center gap-1"
+            role="group"
+          >
+            {(
+              [
+                ["ALL", t("allData")],
+                ["7", t("last7Days")],
+                ["30", t("last30Days")],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                aria-pressed={range === value}
+                key={value}
+                onClick={() => setRange(value)}
+                size="sm"
+                type="button"
+                variant={range === value ? "default" : "outline"}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <Button
+            disabled={loading || collecting}
+            onClick={() => setRefreshGeneration((current) => current + 1)}
+            variant="outline"
+          >
+            <RefreshCw className={collecting ? "animate-spin" : undefined} />
+            {t("refresh")}
+          </Button>
+        </div>
       </div>
 
       {loadError && (
@@ -390,10 +433,15 @@ export function UsagePage() {
           title={t("collectionFailed")}
           description={t("collectionFailedDescription")}
         />
-      ) : successful.length > 0 && usage.days.length === 0 ? (
+      ) : successful.length > 0 && allUsage.days.length === 0 ? (
         <UsageEmpty
           title={t("zeroUsage")}
           description={t("zeroUsageDescription")}
+        />
+      ) : successful.length > 0 && usage.days.length === 0 ? (
+        <UsageEmpty
+          title={t("noUsageInRange")}
+          description={t("noUsageInRangeDescription")}
         />
       ) : successful.length > 0 ? (
         <>
@@ -464,7 +512,8 @@ function SummaryTiles({ metrics }: { metrics: UsageMetrics }) {
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
   const tiles = [
     [t("totalCost"), currency.format(metrics.totalCost)],
@@ -643,7 +692,8 @@ function MetricCells({ metrics }: { metrics: UsageMetrics }) {
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
   return (
     <>

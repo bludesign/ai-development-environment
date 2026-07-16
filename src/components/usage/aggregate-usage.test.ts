@@ -4,7 +4,11 @@ import type {
 } from "@ai-development-environment/agent-contract";
 import { describe, expect, test } from "vitest";
 
-import { aggregateUsage, type UsageReportSource } from "./aggregate-usage";
+import {
+  aggregateUsage,
+  filterUsageByDays,
+  type UsageReportSource,
+} from "./aggregate-usage";
 
 function daily(
   period: string,
@@ -158,5 +162,51 @@ describe("aggregateUsage", () => {
         totalCost: 0,
       },
     });
+  });
+
+  test("filters inclusive rolling ranges and recalculates visible totals", () => {
+    const usage = aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([
+          daily("2026-07-10", "gpt-5", {
+            input: 1,
+            output: 2,
+            creation: 3,
+            read: 4,
+            cost: 0.1,
+          }),
+          daily("2026-07-09", "gpt-5", {
+            input: 10,
+            output: 20,
+            creation: 30,
+            read: 40,
+            cost: 1,
+          }),
+          daily("2026-06-16", "gpt-5", {
+            input: 100,
+            output: 200,
+            creation: 300,
+            read: 400,
+            cost: 10,
+          }),
+        ]),
+      },
+    ]);
+
+    const sevenDays = filterUsageByDays(usage, 7, new Date(2026, 6, 16));
+    expect(sevenDays.days.map((day) => day.period)).toEqual(["2026-07-10"]);
+    expect(sevenDays.totals).toMatchObject({ totalTokens: 10, totalCost: 0.1 });
+
+    const thirtyDays = filterUsageByDays(usage, 30, new Date(2026, 6, 16));
+    expect(thirtyDays.days.map((day) => day.period)).toEqual([
+      "2026-07-10",
+      "2026-07-09",
+    ]);
+    expect(thirtyDays.totals).toMatchObject({
+      totalTokens: 110,
+      totalCost: 1.1,
+    });
+    expect(filterUsageByDays(usage, null)).toBe(usage);
   });
 });

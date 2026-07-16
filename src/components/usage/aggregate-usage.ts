@@ -38,6 +38,8 @@ export type AggregatedUsage = {
   totals: UsageMetrics;
 };
 
+export type UsageRangeDays = 7 | 30 | null;
+
 type MutableAgentRow = UsageAgentRow & { sourceSet: Set<string> };
 type MutableModelRow = Omit<UsageModelRow, "agents"> & {
   agents: Map<string, MutableAgentRow>;
@@ -184,4 +186,25 @@ export function aggregateUsage(reports: UsageReportSource[]): AggregatedUsage {
         })),
       })),
   };
+}
+
+function localPeriod(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function filterUsageByDays(
+  usage: AggregatedUsage,
+  days: UsageRangeDays,
+  today = new Date(),
+): AggregatedUsage {
+  if (days === null) return usage;
+  const cutoffDate = new Date(today);
+  cutoffDate.setHours(0, 0, 0, 0);
+  cutoffDate.setDate(cutoffDate.getDate() - (days - 1));
+  const cutoff = localPeriod(cutoffDate);
+  const filteredDays = usage.days.filter((day) => day.period >= cutoff);
+  const totals = emptyUsageMetrics();
+  filteredDays.forEach((day) => addMetrics(totals, day));
+  return { days: filteredDays, totals };
 }

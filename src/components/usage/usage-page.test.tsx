@@ -55,7 +55,7 @@ const report = {
       cacheCreationTokens: 30,
       cacheReadTokens: 40,
       totalTokens: 100,
-      totalCost: 1.25,
+      totalCost: 1.256,
       metadata: { agents: ["codex"] },
       modelsUsed: ["gpt-5"],
       modelBreakdowns: [
@@ -65,7 +65,7 @@ const report = {
           outputTokens: 20,
           cacheCreationTokens: 30,
           cacheReadTokens: 40,
-          cost: 1.25,
+          cost: 1.256,
         },
       ],
     },
@@ -76,7 +76,7 @@ const report = {
     cacheCreationTokens: 30,
     cacheReadTokens: 40,
     totalTokens: 100,
-    totalCost: 1.25,
+    totalCost: 1.256,
   },
 };
 
@@ -155,7 +155,18 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Offline: Agent OFFLINE/)).toBeDefined();
     expect(screen.getByText(/Update required: Agent OLD/)).toBeDefined();
     expect(screen.getByText(/Failed: Agent B/)).toBeDefined();
-    expect(screen.getAllByText("$1.25").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$1.26").length).toBeGreaterThan(0);
+    expect(
+      screen
+        .getByRole("button", { name: "All data" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    expect(
+      screen
+        .getByRole("button", { name: "7 days" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
 
     const collectionCalls = requestMock.mock.calls.filter(([query]) =>
       String(query).includes("CollectUsage"),
