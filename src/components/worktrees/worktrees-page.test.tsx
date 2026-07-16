@@ -196,10 +196,11 @@ describe("WorktreesPage", () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Customize worktree" }),
-      { button: 0, ctrlKey: false },
-    );
+    const tagsTrigger = screen.getByRole("button", {
+      name: "Tags: feature/AIDE-24",
+    });
+    expect(tagsTrigger.className).not.toContain("focus-visible:ring");
+    fireEvent.pointerDown(tagsTrigger, { button: 0, ctrlKey: false });
     await waitFor(() =>
       expect(
         document.querySelector('[data-slot="dropdown-menu-content"]'),
@@ -207,6 +208,7 @@ describe("WorktreesPage", () => {
     );
 
     const menu = document.querySelector('[data-slot="dropdown-menu-content"]')!;
+    expect(menu.getAttribute("data-align")).toBe("start");
     const labels = menu.querySelectorAll('[data-slot="dropdown-menu-label"]');
     expect(labels).toHaveLength(2);
     for (const label of labels) {

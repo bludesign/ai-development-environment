@@ -896,7 +896,7 @@ function WorktreeCard(props: WorktreeItemProps) {
       <CardHeader className="border-b">
         <CardTitle>
           <Button
-            className="h-auto max-w-full justify-start px-2 py-1 text-left"
+            className="h-auto max-w-full justify-start gap-1 p-1 text-left"
             onClick={() => void toggle()}
             variant="ghost"
           >
@@ -1012,14 +1012,7 @@ function WorktreeMetadata(props: WorktreeItemProps) {
       <MetadataRow label={t("upToDate")}>
         <BaseFreshnessBadge worktree={worktree} />
       </MetadataRow>
-      <MetadataRow label={t("tags")}>
-        {worktree.tags.map((tag) => (
-          <TagBadge key={tag.id} tag={tag} />
-        ))}
-        {!worktree.tags.length && (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </MetadataRow>
+      <WorktreeTagsMenu {...props} />
       <MetadataRow label={t("pullRequest")}>
         <PullRequestBadges worktree={worktree} />
       </MetadataRow>
@@ -1053,6 +1046,44 @@ function MetadataRow({
         {children}
       </div>
     </div>
+  );
+}
+
+function WorktreeTagsMenu({
+  compact = false,
+  ...props
+}: WorktreeItemProps & { compact?: boolean }) {
+  const { worktree } = props;
+  const t = useTranslations("worktrees");
+  return (
+    <WorktreeMenus
+      {...props}
+      contentAlign={compact ? "end" : "start"}
+      trigger={
+        <button
+          aria-label={`${t("tags")}: ${worktree.branch ?? t("detached")}`}
+          className={cn(
+            "flex max-w-full items-center gap-2 rounded-md py-1 text-left hover:bg-muted focus-visible:outline-none",
+            compact ? "min-h-7 px-1" : "w-full",
+          )}
+          type="button"
+        >
+          {!compact && (
+            <span className="w-24 shrink-0 text-xs text-muted-foreground">
+              {t("tags")}
+            </span>
+          )}
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {worktree.tags.map((tag) => (
+              <TagBadge key={tag.id} tag={tag} />
+            ))}
+            {!worktree.tags.length && (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </span>
+        </button>
+      }
+    />
   );
 }
 
@@ -1266,8 +1297,21 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
   );
 }
 
-function WorktreeMenus(props: WorktreeItemProps) {
-  const { worktree, allTags, onUpdate, onError, onManageTags } = props;
+function WorktreeMenus(
+  props: WorktreeItemProps & {
+    contentAlign?: "start" | "end";
+    trigger?: React.ReactElement;
+  },
+) {
+  const {
+    worktree,
+    allTags,
+    onUpdate,
+    onError,
+    onManageTags,
+    contentAlign = "end",
+    trigger,
+  } = props;
   const t = useTranslations("worktrees");
   const assigned = new Set(worktree.tags.map((tag) => tag.id));
   const assign = async (tagId: string, checked: boolean) => {
@@ -1302,11 +1346,13 @@ function WorktreeMenus(props: WorktreeItemProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button aria-label={t("customize")} size="icon-sm" variant="ghost">
-          <MoreHorizontal />
-        </Button>
+        {trigger ?? (
+          <Button aria-label={t("customize")} size="icon-sm" variant="ghost">
+            <MoreHorizontal />
+          </Button>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
+      <DropdownMenuContent align={contentAlign} className="w-72">
         <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
           <Tags className="size-3" />
           <span>{t("tags")}</span>
@@ -1791,11 +1837,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           <BaseFreshnessBadge worktree={worktree} />
         </TableCell>
         <TableCell>
-          <div className="flex gap-1">
-            {worktree.tags.map((tag) => (
-              <TagBadge key={tag.id} tag={tag} />
-            ))}
-          </div>
+          <WorktreeTagsMenu {...props} compact />
         </TableCell>
         <TableCell>
           <div className="flex flex-wrap items-center gap-1.5">
