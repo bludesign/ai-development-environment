@@ -151,6 +151,11 @@ describe("SettingsPage", () => {
       screen.getByRole("link", { name: /New GitHub App/ }).getAttribute("href"),
     ).toBe("https://github.com/settings/apps/new");
     expect(screen.getByText(/Actions to Read and write/)).toBeDefined();
+    expect(
+      screen.getByText(
+        "https://github.com/organizations/<Organization-name>/settings/installations/<ID>",
+      ),
+    ).toBeDefined();
 
     fireEvent.change(appId, { target: { value: "123" } });
     fireEvent.change(installationId, { target: { value: "456" } });

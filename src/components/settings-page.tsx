@@ -268,6 +268,13 @@ function GitHubAppSettingsCard() {
                   </li>
                   <li>{t("stepPermissions")}</li>
                   <li>{t("stepInstall")}</li>
+                  <li>
+                    {t("stepInstallationId")}{" "}
+                    <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                      https://github.com/organizations/&lt;Organization-name&gt;/settings/installations/&lt;ID&gt;
+                    </code>
+                    {t("stepInstallationIdSuffix")}
+                  </li>
                   <li>{t("stepCredentials")}</li>
                 </ol>
               </div>

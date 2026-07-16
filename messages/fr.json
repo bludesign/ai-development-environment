@@ -278,6 +278,8 @@
     "stepHomepageSuffix": " comme URL de page d’accueil. Laissez l’URL de rappel vide et désactivez les webhooks.",
     "stepPermissions": "Réglez Repository permissions → Actions sur Read and write. Metadata reste automatiquement en lecture seule ; aucun droit Checks n’est nécessaire.",
     "stepInstall": "Créez l’app, générez une clé privée, puis installez-la uniquement sur les dépôts que ce déploiement doit contrôler.",
+    "stepInstallationId": "Après l’installation, ouvrez la page Configure de l’app. L’identifiant d’installation est le dernier nombre de l’URL, par exemple",
+    "stepInstallationIdSuffix": ". Remplacez Organization-name par votre organisation et copiez la valeur finale de l’ID.",
     "stepCredentials": "Copiez l’identifiant de l’app et celui de l’installation, puis collez-les avec le fichier PEM téléchargé.",
     "appId": "Identifiant de la GitHub App",
     "appIdPlaceholder": "Saisissez l’identifiant numérique de l’app",

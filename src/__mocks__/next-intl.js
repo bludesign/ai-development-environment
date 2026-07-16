@@ -308,6 +308,10 @@ const mockTranslations = {
       "Set Repository permissions → Actions to Read and write. Metadata remains read-only automatically; Checks permission is not required.",
     stepInstall:
       "Create the app, generate a private key, then install it on only the repositories this deployment should control.",
+    stepInstallationId:
+      "After installation, open the app’s Configure page. The installation ID is the final number in its URL, for example",
+    stepInstallationIdSuffix:
+      ". Replace Organization-name with your organization; copy the final ID value.",
     stepCredentials:
       "Copy the App ID and installation ID, then paste them and the downloaded PEM below.",
     appId: "GitHub App ID",
