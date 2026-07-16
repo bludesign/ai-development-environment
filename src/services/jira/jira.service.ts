@@ -48,6 +48,7 @@ type CacheCall<T> = {
   requestSummary: string;
   sourceId?: string | null;
   force?: boolean;
+  allowStaleOnError?: boolean;
   fetcher: () => Promise<T>;
   itemCount?: (value: T) => number | null;
 };
@@ -475,11 +476,17 @@ export class JiraService {
       params: {},
       requestSummary: "Current Jira user",
       force: true,
+      allowStaleOnError: false,
       fetcher: async () => {
         const { version3 } = await this.getClients();
         return version3.myself.getCurrentUser();
       },
     });
+    if (result.stale) {
+      throw new Error(
+        "Jira connection test failed because the live request failed",
+      );
+    }
     const user = asRecord(result.value);
     return {
       accountId: asString(user.accountId),
@@ -1159,7 +1166,8 @@ export class JiraService {
           entryId: entry.id,
         };
       } catch (error) {
-        const canServeStale = existing !== null;
+        const canServeStale =
+          existing !== null && call.allowStaleOnError !== false;
         await this.logCall({
           operation: call.operation,
           requestSummary: call.requestSummary,
@@ -1170,7 +1178,7 @@ export class JiraService {
           servedStale: canServeStale,
           sourceId: call.sourceId,
         });
-        if (existing) {
+        if (canServeStale) {
           return {
             value: parseJson(existing.responseJson) as T,
             source: "ERROR",
@@ -1515,7 +1523,6 @@ export class JiraService {
     issues: RawIssue[],
     fetchedAt: Date,
   ) {
-    if (issues.length === 0) return;
     const prisma = await getPrismaClient();
     await prisma.$transaction(async (transaction) => {
       for (const issue of issues) {
@@ -1538,11 +1545,17 @@ export class JiraService {
       await transaction.jiraCacheEntryIssue.deleteMany({
         where: { cacheEntryId: entryId },
       });
-      await transaction.jiraCacheEntryIssue.createMany({
-        data: [
-          ...new Set(issues.map((issue) => issue.key).filter(Boolean)),
-        ].map((issueKey) => ({ cacheEntryId: entryId, issueKey: issueKey! })),
-      });
+      const issueKeys = [
+        ...new Set(issues.map((issue) => issue.key).filter(Boolean)),
+      ];
+      if (issueKeys.length > 0) {
+        await transaction.jiraCacheEntryIssue.createMany({
+          data: issueKeys.map((issueKey) => ({
+            cacheEntryId: entryId,
+            issueKey: issueKey!,
+          })),
+        });
+      }
     });
   }
 

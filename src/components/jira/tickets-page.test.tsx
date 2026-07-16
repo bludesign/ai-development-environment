@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,7 +13,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { JiraTicketsPage } from "./tickets-page";
 
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -138,6 +139,124 @@ describe("JiraTicketsPage", () => {
     expect(new URLSearchParams(window.location.search).get("issue")).toBe(
       "APP-1",
     );
+  });
+
+  test("ignores a board response for a superseded source request", async () => {
+    const source = (id: string, name: string) => ({
+      id,
+      projectId: "project-1",
+      name,
+      kind: "JQL",
+      value: `project = APP AND source = ${id}`,
+      boardId: null,
+      position: id === "source-1" ? 0 : 1,
+    });
+    const board = (sourceId: string, sourceName: string, summary: string) => ({
+      source: source(sourceId, sourceName),
+      tickets: [
+        {
+          id: `${sourceId}-ticket`,
+          key: sourceId === "source-1" ? "APP-1" : "APP-2",
+          summary,
+          statusId: "1",
+          status: "To Do",
+          statusCategory: "new",
+          issueType: "Task",
+          priority: null,
+          assignee: null,
+          assigneeAccountId: null,
+          assigneeAvatarUrl: null,
+          projectKey: "APP",
+          updatedAt: null,
+        },
+      ],
+      statusOrder: ["To Do"],
+      cache: {
+        source: "LIVE",
+        stale: false,
+        fetchedAt: new Date().toISOString(),
+      },
+      truncated: false,
+      warnings: [],
+    });
+    const firstBoard = board("source-1", "First source", "First ticket");
+    const secondBoard = board("source-2", "Second source", "Second ticket");
+    let resolveFirst!: (value: { jiraTicketBoard: typeof firstBoard }) => void;
+    let resolveSecond!: (value: {
+      jiraTicketBoard: typeof secondBoard;
+    }) => void;
+    const firstRequest = new Promise<{ jiraTicketBoard: typeof firstBoard }>(
+      (resolve) => (resolveFirst = resolve),
+    );
+    const secondRequest = new Promise<{ jiraTicketBoard: typeof secondBoard }>(
+      (resolve) => (resolveSecond = resolve),
+    );
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query JiraProjects")) {
+        return {
+          jiraProjects: [
+            {
+              id: "project-1",
+              jiraId: "10000",
+              key: "APP",
+              name: "Application",
+              avatarUrl: null,
+              position: 0,
+              ticketAssignmentFilter: "ALL",
+              hideCompletedTickets: false,
+              completedStatusIds: [],
+              sources: [
+                source("source-1", "First source"),
+                source("source-2", "Second source"),
+              ],
+            },
+          ],
+        } as never;
+      }
+      if (query.includes("JiraTicketBoard")) {
+        return (
+          variables?.sourceId === "source-1" ? firstRequest : secondRequest
+        ) as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+    window.history.replaceState(
+      null,
+      "",
+      "/?project=project-1&source=source-1",
+    );
+    const { rerender } = render(<JiraTicketsPage />);
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("JiraTicketBoard"),
+        { sourceId: "source-1" },
+      ),
+    );
+
+    window.history.replaceState(
+      null,
+      "",
+      "/?project=project-1&source=source-2",
+    );
+    rerender(<JiraTicketsPage />);
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("JiraTicketBoard"),
+        { sourceId: "source-2" },
+      ),
+    );
+    await act(async () => {
+      resolveSecond({ jiraTicketBoard: secondBoard });
+      await secondRequest;
+    });
+    expect(await screen.findByText("Second ticket")).toBeDefined();
+
+    await act(async () => {
+      resolveFirst({ jiraTicketBoard: firstBoard });
+      await firstRequest;
+    });
+    await waitFor(() => expect(screen.queryByText("First ticket")).toBeNull());
+    expect(screen.getByText("Second ticket")).toBeDefined();
   });
 
   test("adds a source to the project selected in the manager", async () => {

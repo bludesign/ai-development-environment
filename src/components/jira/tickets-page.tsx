@@ -16,7 +16,14 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { AdfRenderer } from "@/components/jira/adf-renderer";
@@ -171,6 +178,8 @@ export function JiraTicketsPage() {
     ) ??
     selectedProject?.sources[0] ??
     null;
+  const boardRequestIdRef = useRef(0);
+  const displayedBoard = board?.source.id === selectedSource?.id ? board : null;
 
   const loadProjects = useCallback(async () => {
     try {
@@ -202,7 +211,9 @@ export function JiraTicketsPage() {
   }, [requestedProjectId, requestedSourceId, selectedProject, selectedSource]);
 
   const loadBoard = useCallback(async (sourceId: string, force = false) => {
+    const requestId = ++boardRequestIdRef.current;
     setBoardLoading(true);
+    setBoard((current) => (current?.source.id === sourceId ? current : null));
     try {
       const operation = force
         ? `mutation RefreshJiraSource($sourceId: ID!) { refreshJiraSource(sourceId: $sourceId) { ${BOARD_FIELDS} } }`
@@ -211,38 +222,48 @@ export function JiraTicketsPage() {
         operation,
         { sourceId },
       );
+      if (requestId !== boardRequestIdRef.current) return;
       setBoard(force ? data.refreshJiraSource : data.jiraTicketBoard);
       setError(null);
     } catch (value) {
+      if (requestId !== boardRequestIdRef.current) return;
       setError(value instanceof Error ? value.message : String(value));
       setBoard(null);
     } finally {
-      setBoardLoading(false);
+      if (requestId === boardRequestIdRef.current) setBoardLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (!selectedSource) {
-      const timeout = window.setTimeout(() => setBoard(null), 0);
+      boardRequestIdRef.current += 1;
+      const timeout = window.setTimeout(() => {
+        setBoard(null);
+        setBoardLoading(false);
+      }, 0);
       return () => window.clearTimeout(timeout);
     }
     const timeout = window.setTimeout(
       () => void loadBoard(selectedSource.id),
       0,
     );
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      boardRequestIdRef.current += 1;
+    };
   }, [loadBoard, selectedSource]);
 
   const groupedTickets = useMemo(() => {
     const groups = new Map<string, JiraTicketSummary[]>();
-    for (const status of board?.statusOrder ?? []) groups.set(status, []);
-    for (const ticket of board?.tickets ?? []) {
+    for (const status of displayedBoard?.statusOrder ?? [])
+      groups.set(status, []);
+    for (const ticket of displayedBoard?.tickets ?? []) {
       const group = groups.get(ticket.status) ?? [];
       group.push(ticket);
       groups.set(ticket.status, group);
     }
     return [...groups.entries()];
-  }, [board]);
+  }, [displayedBoard]);
 
   return (
     <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-5">
@@ -366,7 +387,7 @@ export function JiraTicketsPage() {
             </Empty>
           ) : null}
 
-          {board?.cache.stale && (
+          {displayedBoard?.cache.stale && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
               <AlertTriangle />
               <AlertDescription className="text-current">
@@ -374,29 +395,29 @@ export function JiraTicketsPage() {
               </AlertDescription>
             </Alert>
           )}
-          {board?.truncated && (
+          {displayedBoard?.truncated && (
             <Alert className="bg-muted">
               <AlertDescription>{t("truncatedWarning")}</AlertDescription>
             </Alert>
           )}
-          {board?.warnings.map((warning) => (
+          {displayedBoard?.warnings.map((warning) => (
             <Alert className="bg-muted" key={warning}>
               <AlertDescription>{warning}</AlertDescription>
             </Alert>
           ))}
 
-          {selectedSource && boardLoading && !board ? (
+          {selectedSource && boardLoading && !displayedBoard ? (
             <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
               <Spinner />
               {t("loadingTickets")}
             </div>
-          ) : board && board.tickets.length === 0 ? (
+          ) : displayedBoard && displayedBoard.tickets.length === 0 ? (
             <Empty className="border py-10">
               <EmptyHeader>
                 <EmptyDescription>{t("emptyTickets")}</EmptyDescription>
               </EmptyHeader>
             </Empty>
-          ) : board ? (
+          ) : displayedBoard ? (
             layout === "table" ? (
               <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (

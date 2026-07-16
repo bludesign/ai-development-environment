@@ -11,42 +11,80 @@ const state = vi.hoisted(() => ({
     sourceId: string | null;
   },
   calls: [] as Array<Record<string, unknown>>,
+  currentUser: vi.fn(),
+  issueLinks: [] as Array<{ cacheEntryId: string; issueKey: string }>,
+}));
+
+vi.mock("jira.js", () => ({
+  AgileClient: class {},
+  Version3Client: class {
+    myself = { getCurrentUser: state.currentUser };
+  },
 }));
 
 vi.mock("@/data/prisma-client", () => ({
-  getPrismaClient: async () => ({
-    jiraSettings: {
-      findUnique: async () => ({
-        id: "default",
-        siteUrl: "https://example.atlassian.net",
-        email: "user@example.com",
-        apiToken: "secret-token",
-        cacheTtlSeconds: 300,
-      }),
-    },
-    jiraCacheEntry: {
-      findUnique: async () => state.entry,
-      upsert: async ({
-        create,
-        update,
+  getPrismaClient: async () => {
+    const jiraCachedTicket = {
+      upsert: async () => ({}),
+    };
+    const jiraCacheEntryIssue = {
+      deleteMany: async ({ where }: { where: { cacheEntryId: string } }) => {
+        state.issueLinks = state.issueLinks.filter(
+          (link) => link.cacheEntryId !== where.cacheEntryId,
+        );
+        return { count: 0 };
+      },
+      createMany: async ({
+        data,
       }: {
-        create: typeof state.entry;
-        update: Partial<NonNullable<typeof state.entry>>;
+        data: Array<{ cacheEntryId: string; issueKey: string }>;
       }) => {
-        state.entry = state.entry
-          ? { ...state.entry, ...update }
-          : (create as NonNullable<typeof state.entry>);
-        return state.entry;
+        state.issueLinks.push(...data);
+        return { count: data.length };
       },
-    },
-    jiraApiCallLog: {
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        state.calls.push(data);
-        return data;
+    };
+    return {
+      jiraSettings: {
+        findUnique: async () => ({
+          id: "default",
+          siteUrl: "https://example.atlassian.net",
+          email: "user@example.com",
+          apiToken: "secret-token",
+          cacheTtlSeconds: 300,
+        }),
       },
-      deleteMany: async () => ({ count: 0 }),
-    },
-  }),
+      jiraCacheEntry: {
+        findUnique: async () => state.entry,
+        upsert: async ({
+          create,
+          update,
+        }: {
+          create: typeof state.entry;
+          update: Partial<NonNullable<typeof state.entry>>;
+        }) => {
+          state.entry = state.entry
+            ? { ...state.entry, ...update }
+            : (create as NonNullable<typeof state.entry>);
+          return state.entry;
+        },
+      },
+      jiraApiCallLog: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          state.calls.push(data);
+          return data;
+        },
+        deleteMany: async () => ({ count: 0 }),
+      },
+      jiraCachedTicket,
+      jiraCacheEntryIssue,
+      $transaction: async (
+        callback: (transaction: {
+          jiraCachedTicket: typeof jiraCachedTicket;
+          jiraCacheEntryIssue: typeof jiraCacheEntryIssue;
+        }) => Promise<unknown>,
+      ) => callback({ jiraCachedTicket, jiraCacheEntryIssue }),
+    };
+  },
 }));
 
 import { JiraService } from "./jira.service";
@@ -56,6 +94,8 @@ type CacheInvoker = {
     operation: string;
     params: Record<string, unknown>;
     requestSummary: string;
+    force?: boolean;
+    allowStaleOnError?: boolean;
     fetcher: () => Promise<T>;
     itemCount?: (value: T) => number | null;
   }): Promise<{
@@ -63,6 +103,11 @@ type CacheInvoker = {
     source: "LIVE" | "CACHE" | "ERROR";
     stale: boolean;
   }>;
+  storeSummaries(
+    entryId: string,
+    issues: Array<Record<string, unknown>>,
+    fetchedAt: Date,
+  ): Promise<void>;
 };
 
 function invoker() {
@@ -72,6 +117,8 @@ function invoker() {
 beforeEach(() => {
   state.entry = null;
   state.calls = [];
+  state.currentUser.mockReset();
+  state.issueLinks = [];
 });
 
 describe("Jira SDK cache wrapper", () => {
@@ -128,6 +175,62 @@ describe("Jira SDK cache wrapper", () => {
       servedStale: true,
       error: "Jira unavailable",
     });
+  });
+
+  test("does not accept stale data when testing the Jira connection", async () => {
+    const service = new JiraService();
+    state.currentUser.mockResolvedValueOnce({
+      accountId: "account-1",
+      displayName: "Example User",
+    });
+    await expect(service.testConnection()).resolves.toMatchObject({
+      accountId: "account-1",
+    });
+    state.currentUser.mockRejectedValueOnce(new Error("Jira unavailable"));
+
+    await expect(service.testConnection()).rejects.toThrow("Jira unavailable");
+    expect(state.calls.at(-1)).toMatchObject({
+      source: "ERROR",
+      servedStale: false,
+    });
+  });
+
+  test("rejects a stale connection result from a coalesced request", async () => {
+    const service = new JiraService();
+    const internal = service as unknown as {
+      cachedCall: () => Promise<{
+        value: { accountId: string };
+        source: "ERROR";
+        stale: boolean;
+        fetchedAt: Date;
+        entryId: string;
+      }>;
+    };
+    internal.cachedCall = vi.fn().mockResolvedValue({
+      value: { accountId: "account-1" },
+      source: "ERROR",
+      stale: true,
+      fetchedAt: new Date(),
+      entryId: "entry-1",
+    });
+
+    await expect(service.testConnection()).rejects.toThrow(
+      "live request failed",
+    );
+  });
+
+  test("clears cache-entry issue links when a refreshed page is empty", async () => {
+    const service = invoker();
+    state.issueLinks = [
+      { cacheEntryId: "entry-1", issueKey: "APP-1" },
+      { cacheEntryId: "entry-2", issueKey: "APP-2" },
+    ];
+
+    await service.storeSummaries("entry-1", [], new Date());
+
+    expect(state.issueLinks).toEqual([
+      { cacheEntryId: "entry-2", issueKey: "APP-2" },
+    ]);
   });
 
   test("coalesces concurrent misses and records the follower as a cache call", async () => {
