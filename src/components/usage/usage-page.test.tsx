@@ -170,7 +170,7 @@ describe("UsagePage", () => {
     expect(screen.getByText("Agent A")).toBeDefined();
     expect(screen.getByText("a.local · codex")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    fireEvent.click(screen.getByRole("tab", { name: "7 days" }));
     await waitFor(() => {
       expect(
         requestMock.mock.calls.some(

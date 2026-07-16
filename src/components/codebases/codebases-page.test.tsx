@@ -155,7 +155,7 @@ describe("CodebasesPage", () => {
     expect(screen.getByText("In sync")).toBeDefined();
     expect(screen.getByText("Developer tooling")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
     expect(await screen.findByText("github.com/openai/codex")).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDefined();
 

@@ -17,6 +17,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -222,30 +223,24 @@ export function UsagePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            aria-label={t("rangeLabel")}
-            className="flex items-center gap-1"
-            role="group"
+          <Tabs
+            onValueChange={(value) => setRange(value as UsageRange)}
+            value={range}
           >
-            {(
-              [
-                ["ALL", t("allData")],
-                ["LAST_7_DAYS", t("last7Days")],
-                ["LAST_30_DAYS", t("last30Days")],
-              ] as const
-            ).map(([value, label]) => (
-              <Button
-                aria-pressed={range === value}
-                key={value}
-                onClick={() => setRange(value)}
-                size="sm"
-                type="button"
-                variant={range === value ? "default" : "outline"}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
+            <TabsList aria-label={t("rangeLabel")}>
+              {(
+                [
+                  ["ALL", t("allData")],
+                  ["LAST_7_DAYS", t("last7Days")],
+                  ["LAST_30_DAYS", t("last30Days")],
+                ] as const
+              ).map(([value, label]) => (
+                <TabsTrigger key={value} value={value}>
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
           <Button
             disabled={loading || collecting}
             onClick={() => {

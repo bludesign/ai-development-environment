@@ -63,6 +63,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
 import {
@@ -288,28 +289,15 @@ export function CodebasesPage() {
         </Alert>
       )}
 
-      <div
-        aria-label={t("groupBy")}
-        className="inline-flex w-fit items-center gap-1 rounded-lg bg-muted p-1"
-        role="group"
+      <Tabs
+        onValueChange={(value) => setGroupMode(value as GroupMode)}
+        value={groupMode}
       >
-        <Button
-          aria-pressed={groupMode === "agents"}
-          onClick={() => setGroupMode("agents")}
-          size="sm"
-          variant={groupMode === "agents" ? "default" : "ghost"}
-        >
-          {t("agents")}
-        </Button>
-        <Button
-          aria-pressed={groupMode === "repositories"}
-          onClick={() => setGroupMode("repositories")}
-          size="sm"
-          variant={groupMode === "repositories" ? "default" : "ghost"}
-        >
-          {t("repositories")}
-        </Button>
-      </div>
+        <TabsList aria-label={t("groupBy")}>
+          <TabsTrigger value="agents">{t("agents")}</TabsTrigger>
+          <TabsTrigger value="repositories">{t("repositories")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
