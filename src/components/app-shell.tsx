@@ -1,7 +1,17 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Blocks, Cpu, House, PanelLeft, PanelRight, X } from "lucide-react";
+import {
+  Blocks,
+  Cpu,
+  Database,
+  House,
+  PanelLeft,
+  PanelRight,
+  Settings,
+  TicketCheck,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -251,6 +261,68 @@ function NavigationSidebar() {
                   >
                     <Cpu />
                     <span>{t("agents")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("jira")}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/jira/tickets")}
+                >
+                  <Link
+                    href="/jira/tickets"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <TicketCheck />
+                    <span>{t("tickets")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/jira/cache")}
+                >
+                  <Link
+                    href="/jira/cache"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Database />
+                    <span>{t("cache")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/settings")}
+                >
+                  <Link
+                    href="/settings"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Settings />
+                    <span>{t("settings")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

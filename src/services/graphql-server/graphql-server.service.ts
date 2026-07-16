@@ -7,6 +7,7 @@ import {
 import { createSchema } from "@/graphql/schema";
 import { AgentControlService } from "@/services/agent-control";
 import { PrismaService } from "@/services/prisma";
+import { JiraService } from "@/services/jira";
 import type { GraphQLSchema } from "graphql";
 
 export interface GraphQLContext {
@@ -44,6 +45,7 @@ export function requestIpAddress(headers: Headers): string | null {
 class GraphQLServerService {
   private server: ApolloServer<GraphQLContext> | null = null;
   private prismaService: PrismaService | null = null;
+  private jiraService: JiraService | null = null;
   private agentControlService: AgentControlService | null = null;
   private schema: GraphQLSchema | null = null;
   private initPromise: Promise<void> | null = null;
@@ -63,7 +65,12 @@ class GraphQLServerService {
   private async buildServer(): Promise<void> {
     this.prismaService = new PrismaService();
     this.agentControlService = new AgentControlService();
-    this.schema = createSchema(this.prismaService, this.agentControlService);
+    this.jiraService = new JiraService();
+    this.schema = createSchema(
+      this.prismaService,
+      this.agentControlService,
+      this.jiraService,
+    );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when
     // APOLLO_SANDBOX=true is set explicitly (e.g. to inspect the brew service).

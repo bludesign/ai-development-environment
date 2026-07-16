@@ -87,3 +87,109 @@ model AgentAuditEvent {
 
   @@index([agentId, createdAt])
 }
+
+model JiraSettings {
+  id              String   @id
+  siteUrl         String?
+  email           String?
+  apiToken        String?
+  cacheTtlSeconds Int      @default(300)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model JiraProject {
+  id                     String       @id
+  jiraId                 String       @unique
+  key                    String       @unique
+  name                   String
+  avatarUrl              String?
+  position               Int          @default(0)
+  ticketAssignmentFilter String       @default("ALL")
+  hideCompletedTickets   Boolean      @default(false)
+  completedStatusIdsJson String       @default("[]")
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  sources                JiraSource[]
+}
+
+model JiraSource {
+  id           String              @id
+  projectId    String
+  name         String
+  kind         String
+  value        String
+  boardId      Int?
+  position     Int                 @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  project      JiraProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cacheEntries JiraCacheEntry[]
+  apiCalls     JiraApiCallLog[]
+
+  @@unique([projectId, name])
+  @@index([projectId, position])
+}
+
+model JiraCacheEntry {
+  id           String                @id
+  cacheKey     String                @unique
+  operation    String
+  paramsJson   String
+  responseJson String
+  fetchedAt    DateTime
+  sourceId     String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  source       JiraSource?           @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  issues       JiraCacheEntryIssue[]
+
+  @@index([operation, fetchedAt])
+  @@index([sourceId, fetchedAt])
+}
+
+model JiraCachedTicket {
+  issueKey          String                @id
+  projectKey        String
+  summaryJson       String?
+  summaryFetchedAt  DateTime?
+  detailJson        String?
+  detailFetchedAt   DateTime?
+  commentsJson      String?
+  commentsFetchedAt DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  cacheEntries      JiraCacheEntryIssue[]
+
+  @@index([projectKey, updatedAt])
+  @@index([updatedAt])
+}
+
+model JiraCacheEntryIssue {
+  cacheEntryId String
+  issueKey     String
+  cacheEntry   JiraCacheEntry   @relation(fields: [cacheEntryId], references: [id], onDelete: Cascade)
+  ticket       JiraCachedTicket @relation(fields: [issueKey], references: [issueKey], onDelete: Cascade)
+
+  @@id([cacheEntryId, issueKey])
+  @@index([issueKey])
+}
+
+model JiraApiCallLog {
+  id             String      @id
+  operation      String
+  requestSummary String
+  source         String
+  durationMs     Int
+  statusCode     Int?
+  error          String?
+  itemCount      Int?
+  servedStale    Boolean     @default(false)
+  sourceId       String?
+  createdAt      DateTime    @default(now())
+  jiraSource     JiraSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([operation, source, createdAt])
+  @@index([sourceId, createdAt])
+}

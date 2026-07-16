@@ -8,8 +8,13 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
 import type { Agent, AgentJob } from "@/components/agents/types";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Item } from "@/components/ui/item";
+import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import {
@@ -139,7 +144,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
   if (loading)
     return (
-      <p className="mx-auto max-w-6xl text-sm text-muted-foreground">
+      <p className="mx-auto flex max-w-6xl items-center gap-2 text-sm text-muted-foreground">
+        <Spinner />
         {t("loading")}
       </p>
     );
@@ -164,68 +170,80 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           </Link>
         </Button>
       </div>
-      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                {agent.name}
-              </h1>
-              <StatusBadge status={agent.connectionStatus} />
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
+      )}
+      <Card>
+        <CardContent>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {agent.name}
+                </h1>
+                <StatusBadge status={agent.connectionStatus} />
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {agent.hostname} · {agent.osVersion} · {agent.architecture}
+              </p>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {agent.hostname} · {agent.osVersion} · {agent.architecture}
+            <p className="font-mono text-xs text-muted-foreground">
+              {agent.id}
             </p>
           </div>
-          <p className="font-mono text-xs text-muted-foreground">{agent.id}</p>
-        </div>
-        <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
-          <div>
-            <dt className="text-muted-foreground">{t("version")}</dt>
-            <dd>{agent.version}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">{t("lastSeen")}</dt>
-            <dd>
-              {agent.lastSeenAt
-                ? new Date(agent.lastSeenAt).toLocaleString(locale)
-                : t("never")}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">{t("capabilities")}</dt>
-            <dd>{agent.capabilities.join(", ")}</dd>
-          </div>
-        </dl>
-      </section>
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">{t("version")}</dt>
+              <dd>{agent.version}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">{t("lastSeen")}</dt>
+              <dd>
+                {agent.lastSeenAt
+                  ? new Date(agent.lastSeenAt).toLocaleString(locale)
+                  : t("never")}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">{t("capabilities")}</dt>
+              <dd>{agent.capabilities.join(", ")}</dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <h2 className="font-medium">{t("runTitle")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("runDescription")}
-        </p>
-        <form
-          className="mt-4 flex max-w-xl gap-2"
-          onSubmit={(event) => void startTunnel(event)}
-        >
-          <Input
-            aria-label={t("tunnelName")}
-            onChange={(event) => setTunnelName(event.target.value)}
-            pattern={TUNNEL_NAME_PATTERN}
-            placeholder={t("tunnelPlaceholder")}
-            required
-            value={tunnelName}
-          />
-          <Button disabled={creating} type="submit">
-            <Play />
-            {creating ? t("queuing") : t("run")}
-          </Button>
-        </form>
-        {submitError && (
-          <p className="mt-3 text-sm text-destructive">{submitError}</p>
-        )}
-      </section>
+      <Card>
+        <CardContent>
+          <h2 className="font-medium">{t("runTitle")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("runDescription")}
+          </p>
+          <form
+            className="mt-4 flex max-w-xl gap-2"
+            onSubmit={(event) => void startTunnel(event)}
+          >
+            <Input
+              aria-label={t("tunnelName")}
+              onChange={(event) => setTunnelName(event.target.value)}
+              pattern={TUNNEL_NAME_PATTERN}
+              placeholder={t("tunnelPlaceholder")}
+              required
+              value={tunnelName}
+            />
+            <Button disabled={creating} type="submit">
+              <Play />
+              {creating ? t("queuing") : t("run")}
+            </Button>
+          </form>
+          {submitError && (
+            <Alert className="mt-3" variant="destructive">
+              <AlertDescription>{submitError}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       {selectedJobId && (
         <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
@@ -234,24 +252,34 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       <section>
         <h2 className="mb-3 font-medium">{t("history")}</h2>
         {jobs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noJobs")}</p>
+          <Empty>
+            <EmptyHeader>
+              <EmptyDescription>{t("noJobs")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="overflow-hidden rounded-xl border">
             {jobs.map((job) => (
-              <button
+              <Item
                 key={job.id}
-                className="flex w-full items-center justify-between gap-4 border-b p-3 text-left last:border-b-0 hover:bg-muted/50"
-                onClick={() => setSelectedJobId(job.id)}
-                type="button"
+                asChild
+                className="rounded-none border-0 border-b p-0 last:border-b-0"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{job.kind}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(job.createdAt).toLocaleString(locale)}
-                  </p>
-                </div>
-                <StatusBadge status={job.status} />
-              </button>
+                <Button
+                  className="h-auto w-full justify-between gap-4 rounded-none p-3 text-left whitespace-normal"
+                  onClick={() => setSelectedJobId(job.id)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{job.kind}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(job.createdAt).toLocaleString(locale)}
+                    </p>
+                  </div>
+                  <StatusBadge status={job.status} />
+                </Button>
+              </Item>
             ))}
           </div>
         )}

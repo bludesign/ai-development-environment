@@ -56,6 +56,7 @@ interface ValidationResult {
 const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["metadata.title", "AI Development Environment"],
   ["shell.productName", "AI Development Environment"],
+  ["shell.jira", "Jira"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {
