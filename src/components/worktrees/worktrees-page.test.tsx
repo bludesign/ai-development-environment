@@ -180,6 +180,9 @@ describe("WorktreesPage", () => {
     ).not.toBeNull();
     expect(screen.queryByText("Primary")).toBeNull();
     expect(screen.getByText("Ready")).toBeDefined();
+    expect(
+      screen.getByText("Ready").closest('[data-slot="badge"]')?.className,
+    ).toContain("dark:text-green-300");
     expect(screen.getByText("/repo")).toBeDefined();
     expect(screen.queryByText(".")).toBeNull();
     expect(screen.getByText("Yes").className).toContain(
@@ -187,6 +190,35 @@ describe("WorktreesPage", () => {
     );
     expect(screen.getByText("Commits: 1")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
+  });
+
+  test("uses compact menu labels and the expanded bright color palette", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-slot="dropdown-menu-content"]'),
+      ).toBeTruthy(),
+    );
+
+    const menu = document.querySelector('[data-slot="dropdown-menu-content"]')!;
+    const labels = menu.querySelectorAll('[data-slot="dropdown-menu-label"]');
+    expect(labels).toHaveLength(2);
+    for (const label of labels) {
+      expect(label.className).toContain("items-center");
+      expect(label.querySelector("svg")?.getAttribute("class")).toContain(
+        "size-3",
+      );
+    }
+    expect(menu.querySelector('button[aria-label="fuchsia"]')).toBeTruthy();
+    expect(
+      menu.querySelector('button[aria-label="fuchsia"]')?.className,
+    ).toContain("bg-fuchsia-500");
   });
 
   test("opens the Jira ticket drawer from the ticket key and title", async () => {

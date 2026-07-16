@@ -34,16 +34,23 @@ const MISSING_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
 export const WORKTREE_COLORS = [
   "gray",
+  "stone",
   "red",
+  "rose",
   "orange",
   "amber",
   "yellow",
   "lime",
   "green",
+  "emerald",
   "teal",
   "cyan",
+  "sky",
   "blue",
+  "indigo",
   "violet",
+  "purple",
+  "fuchsia",
   "pink",
 ] as const;
 

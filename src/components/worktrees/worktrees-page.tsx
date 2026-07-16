@@ -2,6 +2,8 @@
 
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -104,16 +106,23 @@ import type {
 
 const COLORS = [
   "gray",
+  "stone",
   "red",
+  "rose",
   "orange",
   "amber",
   "yellow",
   "lime",
   "green",
+  "emerald",
   "teal",
   "cyan",
+  "sky",
   "blue",
+  "indigo",
   "violet",
+  "purple",
+  "fuchsia",
   "pink",
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
@@ -310,19 +319,80 @@ function useWorktreeActivitySubscription(
   }, [enabled, worktreeId]);
 }
 
-const colorClasses: Record<string, string> = {
+const highlightColorClasses: Record<string, string> = {
   gray: "border-slate-500/30 bg-slate-500/10",
+  stone: "border-stone-500/30 bg-stone-500/10",
   red: "border-red-500/30 bg-red-500/10",
+  rose: "border-rose-500/30 bg-rose-500/10",
   orange: "border-orange-500/30 bg-orange-500/10",
   amber: "border-amber-500/30 bg-amber-500/10",
   yellow: "border-yellow-500/30 bg-yellow-500/10",
   lime: "border-lime-500/30 bg-lime-500/10",
   green: "border-green-500/30 bg-green-500/10",
+  emerald: "border-emerald-500/30 bg-emerald-500/10",
   teal: "border-teal-500/30 bg-teal-500/10",
   cyan: "border-cyan-500/30 bg-cyan-500/10",
+  sky: "border-sky-500/30 bg-sky-500/10",
   blue: "border-blue-500/30 bg-blue-500/10",
+  indigo: "border-indigo-500/30 bg-indigo-500/10",
   violet: "border-violet-500/30 bg-violet-500/10",
+  purple: "border-purple-500/30 bg-purple-500/10",
+  fuchsia: "border-fuchsia-500/30 bg-fuchsia-500/10",
   pink: "border-pink-500/30 bg-pink-500/10",
+};
+
+const tagColorClasses: Record<string, string> = {
+  gray: "border-slate-500/40 bg-slate-500/15 text-slate-700 dark:text-slate-300",
+  stone:
+    "border-stone-500/40 bg-stone-500/15 text-stone-700 dark:text-stone-300",
+  red: "border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-300",
+  rose: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  orange:
+    "border-orange-500/40 bg-orange-500/15 text-orange-700 dark:text-orange-300",
+  amber:
+    "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-300",
+  yellow:
+    "border-yellow-500/40 bg-yellow-500/15 text-yellow-800 dark:text-yellow-300",
+  lime: "border-lime-500/40 bg-lime-500/15 text-lime-800 dark:text-lime-300",
+  green:
+    "border-green-500/40 bg-green-500/15 text-green-700 dark:text-green-300",
+  emerald:
+    "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  teal: "border-teal-500/40 bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  cyan: "border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+  sky: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  blue: "border-blue-500/40 bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  indigo:
+    "border-indigo-500/40 bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  violet:
+    "border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  purple:
+    "border-purple-500/40 bg-purple-500/15 text-purple-700 dark:text-purple-300",
+  fuchsia:
+    "border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
+  pink: "border-pink-500/40 bg-pink-500/15 text-pink-700 dark:text-pink-300",
+};
+
+const colorSwatchClasses: Record<string, string> = {
+  gray: "border-slate-600 bg-slate-500",
+  stone: "border-stone-600 bg-stone-500",
+  red: "border-red-600 bg-red-500",
+  rose: "border-rose-600 bg-rose-500",
+  orange: "border-orange-600 bg-orange-500",
+  amber: "border-amber-600 bg-amber-500",
+  yellow: "border-yellow-600 bg-yellow-500",
+  lime: "border-lime-600 bg-lime-500",
+  green: "border-green-600 bg-green-500",
+  emerald: "border-emerald-600 bg-emerald-500",
+  teal: "border-teal-600 bg-teal-500",
+  cyan: "border-cyan-600 bg-cyan-500",
+  sky: "border-sky-600 bg-sky-500",
+  blue: "border-blue-600 bg-blue-500",
+  indigo: "border-indigo-600 bg-indigo-500",
+  violet: "border-violet-600 bg-violet-500",
+  purple: "border-purple-600 bg-purple-500",
+  fuchsia: "border-fuchsia-600 bg-fuchsia-500",
+  pink: "border-pink-600 bg-pink-500",
 };
 
 function reviewClass(value: string) {
@@ -819,7 +889,8 @@ function WorktreeCard(props: WorktreeItemProps) {
   return (
     <Card
       className={cn(
-        worktree.highlightColor && colorClasses[worktree.highlightColor],
+        worktree.highlightColor &&
+          highlightColorClasses[worktree.highlightColor],
       )}
     >
       <CardHeader className="border-b">
@@ -905,15 +976,12 @@ function WorktreeTicketLink({
       )}
     >
       {!worktree.ticketKey ? (
-        <p
-          className="min-w-0 flex-1 truncate text-muted-foreground"
-          title={label}
-        >
+        <p className="min-w-0 truncate text-muted-foreground" title={label}>
           {label}
         </p>
       ) : (
         <button
-          className="min-w-0 flex-1 truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-w-0 truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onOpenTicket(worktree.ticketKey!)}
           title={label}
           type="button"
@@ -1058,15 +1126,20 @@ function OriginStatusBadges({ worktree }: { worktree: Worktree }) {
     return (
       <>
         {worktree.ahead !== null && (
-          <Badge variant="outline">
+          <Badge
+            className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+            variant="outline"
+          >
+            <ArrowUp data-icon="inline-start" />
             {t("ahead", { count: worktree.ahead })}
           </Badge>
         )}
         {worktree.behind !== null && (
           <Badge
-            className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
             variant="outline"
           >
+            <ArrowDown data-icon="inline-start" />
             {t("behind", { count: worktree.behind })}
           </Badge>
         )}
@@ -1132,7 +1205,10 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
         <p className="text-xs text-muted-foreground">{t("baseBranch")}</p>
       )}
       <div
-        className={cn("flex min-w-0 items-center gap-1", !compact && "mt-0.5")}
+        className={cn(
+          "flex min-h-6 min-w-0 items-center gap-1",
+          !compact && "mt-0.5",
+        )}
       >
         {editing ? (
           <Select
@@ -1149,7 +1225,7 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
           >
             <SelectTrigger
               aria-label={t("baseBranch")}
-              className="h-7 min-w-40 max-w-full"
+              className="h-7 min-w-40 max-w-full font-mono text-xs"
               size="sm"
             >
               <SelectValue placeholder={t("baseUnavailable")} />
@@ -1169,7 +1245,10 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
           </Select>
         ) : (
           <>
-            <span className="truncate" title={worktree.baseBranch ?? undefined}>
+            <span
+              className="truncate font-mono text-xs"
+              title={worktree.baseBranch ?? undefined}
+            >
               {worktree.baseBranch ?? "—"}
             </span>
             <Button
@@ -1228,8 +1307,9 @@ function WorktreeMenus(props: WorktreeItemProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
-        <DropdownMenuLabel>
-          <Tags /> {t("tags")}
+        <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+          <Tags className="size-3" />
+          <span>{t("tags")}</span>
         </DropdownMenuLabel>
         {allTags.map((tag) => (
           <DropdownMenuCheckboxItem
@@ -1240,7 +1320,7 @@ function WorktreeMenus(props: WorktreeItemProps) {
             <span
               className={cn(
                 "size-3 rounded-full border",
-                colorClasses[tag.color],
+                colorSwatchClasses[tag.color],
               )}
             />{" "}
             {tag.name}
@@ -1250,8 +1330,9 @@ function WorktreeMenus(props: WorktreeItemProps) {
           <Plus /> {t("manageTags")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>
-          <Paintbrush /> {t("highlight")}
+        <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+          <Paintbrush className="size-3" />
+          <span>{t("highlight")}</span>
         </DropdownMenuLabel>
         <div
           className="grid grid-cols-7 gap-1 p-2"
@@ -1270,7 +1351,7 @@ function WorktreeMenus(props: WorktreeItemProps) {
               aria-label={color}
               className={cn(
                 "size-7 rounded border",
-                colorClasses[color],
+                colorSwatchClasses[color],
                 worktree.highlightColor === color && "ring-2 ring-foreground",
               )}
               key={color}
@@ -1683,7 +1764,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
     if (next && !detail) void refreshInspection();
   };
   const highlight =
-    worktree.highlightColor && colorClasses[worktree.highlightColor];
+    worktree.highlightColor && highlightColorClasses[worktree.highlightColor];
   return (
     <Fragment>
       <TableRow className={cn(highlight)}>
@@ -1760,7 +1841,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
 }
 
 function TagBadge({ tag }: { tag: WorktreeTag }) {
-  return <Badge className={colorClasses[tag.color]}>{tag.name}</Badge>;
+  return <Badge className={tagColorClasses[tag.color]}>{tag.name}</Badge>;
 }
 
 function Info({
@@ -1775,7 +1856,13 @@ function Info({
   return (
     <div className="min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("truncate", mono && "font-mono text-xs")} title={value}>
+      <p
+        className={cn(
+          "flex min-h-6 items-center truncate",
+          mono && "font-mono text-xs",
+        )}
+        title={value}
+      >
         {value}
       </p>
     </div>
@@ -1883,7 +1970,7 @@ function TagManagerDialog({
                 aria-label={item}
                 className={cn(
                   "size-7 rounded border",
-                  colorClasses[item],
+                  colorSwatchClasses[item],
                   color === item && "ring-2 ring-foreground",
                 )}
                 key={item}
