@@ -115,6 +115,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
   const startTunnel = async (event: FormEvent) => {
     event.preventDefault();
+    const resolvedTunnelName = tunnelName || t("tunnelPlaceholder");
     setCreating(true);
     setSubmitError(null);
     try {
@@ -124,8 +125,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           input: {
             agentId,
             kind: "cloudflared.runTunnel",
-            payload: { tunnelName },
-            idempotencyKey: `cloudflared:${tunnelName}:${createClientId()}`,
+            payload: { tunnelName: resolvedTunnelName },
+            idempotencyKey: `cloudflared:${resolvedTunnelName}:${createClientId()}`,
             timeoutSeconds: 86400,
           },
         },
@@ -229,7 +230,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               onChange={(event) => setTunnelName(event.target.value)}
               pattern={TUNNEL_NAME_PATTERN}
               placeholder={t("tunnelPlaceholder")}
-              required
               value={tunnelName}
             />
             <Button disabled={creating} type="submit">

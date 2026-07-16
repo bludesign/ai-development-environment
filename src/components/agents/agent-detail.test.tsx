@@ -35,6 +35,72 @@ afterEach(() => {
 });
 
 describe("AgentDetail", () => {
+  test("uses the localized placeholder when the tunnel name is empty", async () => {
+    const createdAt = new Date(0).toISOString();
+    const job: AgentJob = {
+      id: "job-dev-tunnel",
+      agentId: "agent-1",
+      kind: "cloudflared.runTunnel",
+      payload: { tunnelName: "dev-tunnel" },
+      status: "QUEUED",
+      error: null,
+      result: null,
+      timeoutSeconds: 86400,
+      createdAt,
+      startedAt: null,
+      finishedAt: null,
+      updatedAt: createdAt,
+    };
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query AgentDetail")) {
+        return {
+          agent: {
+            id: "agent-1",
+            name: "Development Mac",
+            hostname: "dev-mac.local",
+            version: "1.0.0",
+            osVersion: "macOS",
+            architecture: "arm64",
+            capabilities: ["cloudflared.runTunnel"],
+            connectionStatus: "ONLINE",
+            ipAddress: null,
+            lastSeenAt: createdAt,
+            disconnectedAt: null,
+            createdAt,
+          },
+          agentJobs: [],
+        } as never;
+      }
+      if (query.includes("mutation RunTunnel")) {
+        return { createAgentJob: job } as never;
+      }
+      if (query.includes("query Job")) {
+        return { agentJob: job, agentJobLogs: [] } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<AgentDetail agentId="agent-1" />);
+    const input = await screen.findByRole("textbox", { name: "Tunnel name" });
+    expect(input.getAttribute("placeholder")).toBe("dev-tunnel");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunTunnel"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            payload: { tunnelName: "dev-tunnel" },
+            idempotencyKey: expect.stringMatching(/^cloudflared:dev-tunnel:/),
+          }),
+        }),
+      ),
+    );
+  });
+
   test("keeps job-history items keyboard-focusable and selects another job", async () => {
     const createdAt = new Date(0).toISOString();
     const jobs: AgentJob[] = [

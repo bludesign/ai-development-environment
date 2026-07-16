@@ -112,7 +112,7 @@
     "runTitle": "Exécuter un tunnel Cloudflared",
     "runDescription": "Démarre le gestionnaire cloudflared autorisé sur ce Mac. Il continue de s’exécuter dans le service de l’agent lorsque vous quittez cette page.",
     "tunnelName": "Nom du tunnel",
-    "tunnelPlaceholder": "tunnel-exemple",
+    "tunnelPlaceholder": "tunnel-developpement",
     "queuing": "Mise en file…",
     "run": "Exécuter",
     "history": "Historique des tâches",

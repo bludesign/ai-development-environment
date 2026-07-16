@@ -124,7 +124,7 @@ const mockTranslations = {
     runDescription:
       "Starts the allow-listed cloudflared handler on this Mac. It keeps running in the agent service when you leave this page.",
     tunnelName: "Tunnel name",
-    tunnelPlaceholder: "example-tunnel",
+    tunnelPlaceholder: "dev-tunnel",
     queuing: "Queuing…",
     run: "Run",
     history: "Job history",

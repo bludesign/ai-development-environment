@@ -112,7 +112,7 @@
     "runTitle": "Cloudflared-Tunnel starten",
     "runDescription": "Startet den zugelassenen cloudflared-Handler auf diesem Mac. Er läuft im Agent-Dienst weiter, wenn Sie diese Seite verlassen.",
     "tunnelName": "Tunnelname",
-    "tunnelPlaceholder": "beispiel-tunnel",
+    "tunnelPlaceholder": "entwicklungs-tunnel",
     "queuing": "Wird eingereiht…",
     "run": "Starten",
     "history": "Auftragsverlauf",

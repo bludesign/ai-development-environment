@@ -112,7 +112,7 @@
     "runTitle": "Ejecutar túnel de Cloudflared",
     "runDescription": "Inicia el controlador permitido de cloudflared en este Mac. Seguirá ejecutándose en el servicio del agente cuando abandones esta página.",
     "tunnelName": "Nombre del túnel",
-    "tunnelPlaceholder": "tunel-ejemplo",
+    "tunnelPlaceholder": "tunel-desarrollo",
     "queuing": "Añadiendo a la cola…",
     "run": "Ejecutar",
     "history": "Historial de trabajos",
