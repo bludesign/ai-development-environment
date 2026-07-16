@@ -91,6 +91,7 @@
     "total": "Total",
     "cost": "Coût",
     "grandTotal": "Total général",
+    "unattributedTokens": "Jetons non attribués",
     "modelCount": "{count} modèles",
     "agentCount": "{count} agents",
     "showModels": "Afficher les modèles du {date}",

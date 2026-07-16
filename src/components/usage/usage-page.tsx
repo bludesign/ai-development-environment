@@ -180,6 +180,13 @@ export function UsagePage() {
       }
     };
 
+    const cancelJob = (jobId: string) => {
+      void controlPlaneRequest(
+        "mutation CancelUsageJob($jobId: ID!) { cancelAgentJob(jobId: $jobId) { id } }",
+        { jobId },
+      ).catch(() => undefined);
+    };
+
     const run = async () => {
       setLoading(true);
       setCollecting(false);
@@ -207,6 +214,22 @@ export function UsagePage() {
         if (eligibleIds.size === 0) return;
         setCollecting(true);
 
+        deadlineTimer = window.setTimeout(() => {
+          for (const agentId of eligibleIds) {
+            if (completedIds.has(agentId)) continue;
+            completedIds.add(agentId);
+            const entry = jobs.get(agentId);
+            updateRecord(agentId, {
+              status: "TIMED_OUT",
+              error: undefined,
+            });
+            if (entry) {
+              cancelJob(entry.job.id);
+            }
+          }
+          finishIfComplete();
+        }, COLLECTION_DEADLINE_MS);
+
         const refreshId = createClientId();
         await Promise.all(
           data.agents
@@ -229,6 +252,10 @@ export function UsagePage() {
                 );
                 if (disposed) return;
                 const job = result.createAgentJob;
+                if (completedIds.has(agent.id)) {
+                  cancelJob(job.id);
+                  return;
+                }
                 jobs.set(agent.id, { agent, job });
                 updateRecord(agent.id, { jobId: job.id, status: job.status });
                 const unsubscribe = controlPlaneSubscriptions().subscribe<{
@@ -252,7 +279,7 @@ export function UsagePage() {
                 applyJob(agent, job);
                 await reconcile(agent, job.id);
               } catch (error) {
-                if (disposed) return;
+                if (disposed || completedIds.has(agent.id)) return;
                 completedIds.add(agent.id);
                 updateRecord(agent.id, {
                   status: "FAILED",
@@ -272,24 +299,6 @@ export function UsagePage() {
               }
             }
           }, RECONCILE_INTERVAL_MS);
-          deadlineTimer = window.setTimeout(() => {
-            for (const agentId of eligibleIds) {
-              if (completedIds.has(agentId)) continue;
-              completedIds.add(agentId);
-              const entry = jobs.get(agentId);
-              updateRecord(agentId, {
-                status: "TIMED_OUT",
-                error: undefined,
-              });
-              if (entry) {
-                void controlPlaneRequest(
-                  "mutation CancelUsageJob($jobId: ID!) { cancelAgentJob(jobId: $jobId) { id } }",
-                  { jobId: entry.job.id },
-                ).catch(() => undefined);
-              }
-            }
-            finishIfComplete();
-          }, COLLECTION_DEADLINE_MS);
         }
       } catch (error) {
         if (disposed) return;
@@ -617,7 +626,10 @@ function UsageTable({
                 </TableRow>
                 {dayExpanded &&
                   day.models.map((model) => {
-                    const modelKey = `${day.period}:${model.modelName}`;
+                    const modelLabel = model.unattributed
+                      ? t("unattributedTokens")
+                      : model.modelName;
+                    const modelKey = `${day.period}:${model.unattributed ? "unattributed" : model.modelName}`;
                     const modelExpanded = expandedModels.has(modelKey);
                     return (
                       <Fragment key={modelKey}>
@@ -630,7 +642,7 @@ function UsageTable({
                               aria-expanded={modelExpanded}
                               aria-label={t(
                                 modelExpanded ? "hideAgents" : "showAgents",
-                                { model: model.modelName },
+                                { model: modelLabel },
                               )}
                               className="flex items-center gap-2 pl-6 text-left"
                               onClick={(event) => {
@@ -645,7 +657,7 @@ function UsageTable({
                                 <ChevronRight />
                               )}
                               <span>
-                                {model.modelName}
+                                {modelLabel}
                                 <span className="ml-2 text-xs text-muted-foreground">
                                   {t("agentCount", {
                                     count: model.agents.length,

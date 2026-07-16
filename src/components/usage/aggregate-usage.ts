@@ -25,6 +25,7 @@ export type UsageAgentRow = UsageMetrics & {
 export type UsageModelRow = UsageMetrics & {
   modelName: string;
   agents: UsageAgentRow[];
+  unattributed?: boolean;
 };
 
 export type UsageDayRow = UsageMetrics & {
@@ -45,9 +46,11 @@ type MutableModelRow = Omit<UsageModelRow, "agents"> & {
   agents: Map<string, MutableAgentRow>;
 };
 type MutableDayRow = Omit<UsageDayRow, "models" | "sources"> & {
-  models: Map<string, MutableModelRow>;
+  models: Map<string | symbol, MutableModelRow>;
   sourceSet: Set<string>;
 };
+
+const UNATTRIBUTED_MODEL_KEY = Symbol("unattributed");
 
 export function emptyUsageMetrics(): UsageMetrics {
   return {
@@ -84,6 +87,42 @@ function modelMetrics(model: CcusageModelBreakdown): UsageMetrics {
   };
 }
 
+function addUnattributedTokens(
+  day: MutableDayRow,
+  agent: UsageReportSource["agent"],
+  sources: string[],
+  totalTokens: number,
+): void {
+  if (totalTokens <= 0) return;
+
+  let model = day.models.get(UNATTRIBUTED_MODEL_KEY);
+  if (!model) {
+    model = {
+      ...emptyUsageMetrics(),
+      modelName: "Unattributed tokens",
+      agents: new Map(),
+      unattributed: true,
+    };
+    day.models.set(UNATTRIBUTED_MODEL_KEY, model);
+  }
+  model.totalTokens += totalTokens;
+
+  let agentRow = model.agents.get(agent.id);
+  if (!agentRow) {
+    agentRow = {
+      ...emptyUsageMetrics(),
+      agentId: agent.id,
+      agentName: agent.name,
+      hostname: agent.hostname,
+      sources: [],
+      sourceSet: new Set(),
+    };
+    model.agents.set(agent.id, agentRow);
+  }
+  agentRow.totalTokens += totalTokens;
+  sources.forEach((source) => agentRow.sourceSet.add(source));
+}
+
 function byUsage(
   first: UsageMetrics & { modelName?: string; agentName?: string },
   second: UsageMetrics & { modelName?: string; agentName?: string },
@@ -117,8 +156,10 @@ export function aggregateUsage(reports: UsageReportSource[]): AggregatedUsage {
       addMetrics(day, entry);
       entry.metadata.agents.forEach((source) => day.sourceSet.add(source));
 
+      let attributedTotalTokens = 0;
       for (const breakdown of entry.modelBreakdowns) {
         const metrics = modelMetrics(breakdown);
+        attributedTotalTokens += metrics.totalTokens;
         let model = day.models.get(breakdown.modelName);
         if (!model) {
           model = {
@@ -147,6 +188,12 @@ export function aggregateUsage(reports: UsageReportSource[]): AggregatedUsage {
           agentRow.sourceSet.add(source),
         );
       }
+      addUnattributedTokens(
+        day,
+        agent,
+        entry.metadata.agents,
+        entry.totalTokens - attributedTotalTokens,
+      );
     }
   }
 
@@ -171,6 +218,7 @@ export function aggregateUsage(reports: UsageReportSource[]): AggregatedUsage {
           totalTokens: model.totalTokens,
           totalCost: model.totalCost,
           modelName: model.modelName,
+          ...(model.unattributed ? { unattributed: true } : {}),
           agents: [...model.agents.values()].sort(byUsage).map((agent) => ({
             inputTokens: agent.inputTokens,
             outputTokens: agent.outputTokens,

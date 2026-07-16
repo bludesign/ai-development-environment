@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -142,6 +143,7 @@ describe("UsagePage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     requestMock.mockReset();
     subscriptionsMock.mockReset();
   });
@@ -201,5 +203,56 @@ describe("UsagePage", () => {
         ),
       ).toHaveLength(4);
     });
+  });
+
+  test("ends collection when a job-creation request stalls", async () => {
+    vi.useFakeTimers();
+    let resolveCreation!: (value: { createAgentJob: AgentJob }) => void;
+    const creation = new Promise<{ createAgentJob: AgentJob }>((resolve) => {
+      resolveCreation = resolve;
+    });
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("UsageAgents")) {
+        return { agents: [agent("a", "ONLINE")] } as never;
+      }
+      if (query.includes("CollectUsage")) {
+        return creation as never;
+      }
+      if (query.includes("CancelUsageJob")) return { id: "job-a" } as never;
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<UsagePage />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(
+      screen
+        .getByRole("button", { name: "Refresh usage" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150_000);
+    });
+
+    expect(screen.getByText(/Failed: Agent A/)).toBeDefined();
+    expect(
+      screen
+        .getByRole("button", { name: "Refresh usage" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+
+    await act(async () => {
+      resolveCreation({ createAgentJob: job("a", "QUEUED") });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText(/Failed: Agent A/)).toBeDefined();
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        String(query).includes("CancelUsageJob"),
+      ),
+    ).toHaveLength(1);
   });
 });

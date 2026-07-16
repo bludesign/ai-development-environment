@@ -35,8 +35,13 @@ function day(period: string, models: UsageModelRow[]): UsageDayRow {
 
 describe("buildUsageCostChartData", () => {
   test("builds chronological stacked series ordered by model cost", () => {
+    const unattributed = {
+      ...model("Unattributed tokens", 0),
+      totalTokens: 25,
+      unattributed: true,
+    };
     const result = buildUsageCostChartData([
-      day("2026-07-16", [model("gpt-5", 2), model("claude", 1)]),
+      day("2026-07-16", [model("gpt-5", 2), model("claude", 1), unattributed]),
       day("2026-07-15", [model("gpt-5", 3)]),
     ]);
 

@@ -46,12 +46,13 @@ export function buildUsageCostChartData(
 ): UsageCostChartData {
   const totals = new Map<string, number>();
   days.forEach((day) =>
-    day.models.forEach((model) =>
+    day.models.forEach((model) => {
+      if (model.unattributed) return;
       totals.set(
         model.modelName,
         (totals.get(model.modelName) ?? 0) + model.totalCost,
-      ),
-    ),
+      );
+    }),
   );
   const series = [...totals.entries()]
     .sort(
@@ -70,6 +71,7 @@ export function buildUsageCostChartData(
       row[item.key] = 0;
     });
     day.models.forEach((model) => {
+      if (model.unattributed) return;
       const key = keysByModel.get(model.modelName);
       if (key) row[key] = model.totalCost;
     });

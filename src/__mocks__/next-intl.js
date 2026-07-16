@@ -102,6 +102,7 @@ const mockTranslations = {
     total: "Total",
     cost: "Cost",
     grandTotal: "Grand total",
+    unattributedTokens: "Unattributed tokens",
     modelCount: "{count} models",
     agentCount: "{count} agents",
     showModels: "Show models for {date}",

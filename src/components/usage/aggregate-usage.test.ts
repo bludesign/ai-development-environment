@@ -164,6 +164,47 @@ describe("aggregateUsage", () => {
     });
   });
 
+  test("preserves daily tokens omitted from model breakdowns as unattributed", () => {
+    const entry = daily("2026-07-16", "gpt-5", {
+      input: 10,
+      output: 20,
+      creation: 30,
+      read: 40,
+      cost: 1,
+    });
+    entry.totalTokens = 125;
+
+    const usage = aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([entry]),
+      },
+    ]);
+
+    expect(usage.days[0]?.totalTokens).toBe(125);
+    expect(usage.totals.totalTokens).toBe(125);
+    expect(
+      usage.days[0]?.models.reduce(
+        (total, model) => total + model.totalTokens,
+        0,
+      ),
+    ).toBe(125);
+    expect(usage.days[0]?.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          unattributed: true,
+          totalTokens: 25,
+          agents: [
+            expect.objectContaining({
+              agentId: "agent-a",
+              totalTokens: 25,
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
   test("filters inclusive rolling ranges and recalculates visible totals", () => {
     const usage = aggregateUsage([
       {
