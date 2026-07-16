@@ -120,6 +120,23 @@ type GitHubPipeline {
   checkSuiteId: ID
   canRetry: Boolean!
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  jobs: [GitHubWorkflowJob!]!
+}
+
+type GitHubWorkflowJobStep {
+  number: Int!
+  name: String!
+  status: GitHubPipelineState!
+}
+
+type GitHubWorkflowJob {
+  id: ID!
+  name: String!
+  status: GitHubPipelineState!
+  url: String
+  canRetry: Boolean!
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  steps: [GitHubWorkflowJobStep!]!
 }
 
 type GitHubPullRequestActor {
@@ -213,4 +230,9 @@ extend type Mutation {
   ): [GitHubRepository!]!
   removeGitHubRepository(id: ID!): [GitHubRepository!]!
   retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
+  retryGitHubWorkflowJob(
+    repositoryId: ID!
+    checkSuiteId: ID!
+    jobId: ID!
+  ): Boolean!
 }

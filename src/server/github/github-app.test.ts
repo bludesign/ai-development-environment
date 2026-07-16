@@ -9,6 +9,7 @@ import {
   clearGitHubAppTokenCache,
   githubAppGraphql,
   GitHubAppError,
+  rerunGitHubActionsJob,
   rerunGitHubActionsWorkflow,
   verifyGitHubAppConfiguration,
 } from "./github-app";
@@ -223,5 +224,48 @@ describe("GitHub App authentication", () => {
     expect((caught as Error).message).toContain("[REDACTED]");
     expect((caught as Error).message).not.toContain("secret-token");
     expect((caught as Error).message).not.toContain("BEGIN RSA PRIVATE KEY");
+  });
+
+  test("verifies a job belongs to the workflow run before rerunning it", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/access_tokens")) return tokenResponse();
+      if (url.endsWith("/actions/jobs/11")) {
+        return response({ id: 11, run_id: 987, status: "completed" });
+      }
+      if (url.endsWith("/actions/jobs/11/rerun")) {
+        expect(init?.method).toBe("POST");
+        return response(null, 201, "JOB-RERUN-1");
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      rerunGitHubActionsJob(credentials, {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        jobId: "11",
+      }),
+    ).resolves.toEqual({ githubRequestId: "JOB-RERUN-1" });
+  });
+
+  test("rejects a job from another workflow run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/access_tokens")) return tokenResponse();
+        return response({ id: 11, run_id: 654, status: "completed" });
+      }),
+    );
+
+    await expect(
+      rerunGitHubActionsJob(credentials, {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        jobId: "11",
+      }),
+    ).rejects.toMatchObject({ code: "ACTIONS_JOB_RUN_MISMATCH" });
   });
 });

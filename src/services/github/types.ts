@@ -92,6 +92,24 @@ export type GitHubPipelineView = {
   checkSuiteId: string | null;
   canRetry: boolean;
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
+  jobs: GitHubWorkflowJobView[];
+  workflowRunId?: string | null;
+};
+
+export type GitHubWorkflowJobStepView = {
+  number: number;
+  name: string;
+  status: GitHubPipelineState;
+};
+
+export type GitHubWorkflowJobView = {
+  id: string;
+  name: string;
+  status: GitHubPipelineState;
+  url: string | null;
+  canRetry: boolean;
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
+  steps: GitHubWorkflowJobStepView[];
 };
 
 export type GitHubPullRequestView = {

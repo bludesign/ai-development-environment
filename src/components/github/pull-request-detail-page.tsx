@@ -2,14 +2,17 @@
 
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, MouseEvent, useCallback, useEffect, useState } from "react";
 
 import {
   PipelineMenu,
@@ -44,10 +47,11 @@ import type {
   GitHubPipelineView,
   GitHubPullRequestDetail,
   GitHubReviewDecision,
+  GitHubWorkflowJobView,
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount createdAt body author { login avatarUrl url } assignees { login avatarUrl url } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt body author { login avatarUrl url } assignees { login avatarUrl url } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -128,7 +132,45 @@ export function PullRequestDetailPage({
             ...current,
             pipelineStatus: "PENDING",
             pipelines: current.pipelines.map((item) =>
-              item.id === pipeline.id ? pipeline : item,
+              item.id === pipeline.id
+                ? { ...pipeline, jobs: pipeline.jobs ?? item.jobs }
+                : item,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const jobRetried = (pipelineId: string, jobId: string) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            pipelineStatus: "PENDING",
+            pipelines: current.pipelines.map((pipeline) =>
+              pipeline.id === pipelineId
+                ? {
+                    ...pipeline,
+                    status: "QUEUED",
+                    canRetry: false,
+                    retryUnavailableReason: "NOT_COMPLETED",
+                    jobs: pipeline.jobs.map((job) =>
+                      job.id === jobId
+                        ? {
+                            ...job,
+                            status: "QUEUED",
+                            canRetry: false,
+                            retryUnavailableReason: "NOT_COMPLETED",
+                            steps: [],
+                          }
+                        : {
+                            ...job,
+                            canRetry: false,
+                            retryUnavailableReason: "NOT_COMPLETED",
+                          },
+                    ),
+                  }
+                : pipeline,
             ),
           }
         : current,
@@ -285,45 +327,80 @@ export function PullRequestDetailPage({
                   </TableHeader>
                   <TableBody>
                     {pullRequest.pipelines.map((pipeline) => (
-                      <TableRow key={pipeline.id}>
-                        <TableCell className="font-medium">
-                          {pipeline.name}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={pipelineStateClass(pipeline.status)}
-                          >
-                            {tp(`pipelineStates.${pipeline.status}`)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-2">
-                            {pipeline.url ? (
-                              <Button asChild size="sm" variant="outline">
-                                <a
-                                  href={pipeline.url}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
+                      <Fragment key={pipeline.id}>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            {pipeline.name}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={pipelineStateClass(pipeline.status)}
+                            >
+                              {tp(`pipelineStates.${pipeline.status}`)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex justify-end gap-2">
+                              {pipeline.url ? (
+                                <Button asChild size="sm" variant="outline">
+                                  <a
+                                    href={pipeline.url}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    {t("viewPipeline")}
+                                    <ExternalLink />
+                                  </a>
+                                </Button>
+                              ) : (
+                                <Button disabled size="sm" variant="outline">
                                   {t("viewPipeline")}
                                   <ExternalLink />
-                                </a>
-                              </Button>
-                            ) : (
-                              <Button disabled size="sm" variant="outline">
-                                {t("viewPipeline")}
-                                <ExternalLink />
-                              </Button>
-                            )}
-                            <RetryPipelineButton
-                              onError={setError}
-                              onPipelineRetried={pipelineRetried}
-                              pipeline={pipeline}
-                              repositoryId={pullRequest.repositoryGithubId}
-                            />
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                                </Button>
+                              )}
+                              <RetryPipelineButton
+                                onError={setError}
+                                onPipelineRetried={pipelineRetried}
+                                pipeline={pipeline}
+                                repositoryId={pullRequest.repositoryGithubId}
+                              />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        <TableRow className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell className="p-0" colSpan={3}>
+                            <div className="border-l-2 border-muted-foreground/20 py-1 pl-4">
+                              <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                {t("jobCount", {
+                                  count: pipeline.jobs.length,
+                                })}
+                              </p>
+                              {pipeline.jobs.length === 0 ? (
+                                <p className="px-3 pb-3 text-sm text-muted-foreground">
+                                  {t("noJobs")}
+                                </p>
+                              ) : (
+                                <div className="divide-y">
+                                  {pipeline.jobs.map((job) => (
+                                    <WorkflowJob
+                                      checkSuiteId={pipeline.checkSuiteId}
+                                      job={job}
+                                      key={job.id}
+                                      onError={setError}
+                                      onRetried={() =>
+                                        jobRetried(pipeline.id, job.id)
+                                      }
+                                      repositoryId={
+                                        pullRequest.repositoryGithubId
+                                      }
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>
@@ -418,6 +495,161 @@ export function PullRequestDetailPage({
         onClose={() => replaceIssueParam(null)}
       />
     </section>
+  );
+}
+
+function WorkflowJob({
+  job,
+  repositoryId,
+  checkSuiteId,
+  onRetried,
+  onError,
+}: {
+  job: GitHubWorkflowJobView;
+  repositoryId: string;
+  checkSuiteId: string | null;
+  onRetried: () => void;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("pullRequestDetail");
+  const tp = useTranslations("pullRequests");
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <button
+          aria-expanded={expanded}
+          aria-label={t(expanded ? "hideJobSteps" : "showJobSteps", {
+            job: job.name,
+          })}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setExpanded((current) => !current)}
+          type="button"
+        >
+          {expanded ? (
+            <ChevronDown className="size-4 shrink-0" />
+          ) : (
+            <ChevronRight className="size-4 shrink-0" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {job.name}
+          </span>
+          <Badge className={pipelineStateClass(job.status)}>
+            {tp(`pipelineStates.${job.status}`)}
+          </Badge>
+        </button>
+        {job.url && (
+          <Button asChild size="icon-sm" variant="ghost">
+            <a
+              aria-label={t("viewJob", { job: job.name })}
+              href={job.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ExternalLink />
+            </a>
+          </Button>
+        )}
+        <RetryWorkflowJobButton
+          checkSuiteId={checkSuiteId}
+          job={job}
+          onError={onError}
+          onRetried={onRetried}
+          repositoryId={repositoryId}
+        />
+      </div>
+      {expanded && (
+        <div className="mx-4 mb-3 ml-10 rounded-md border bg-background p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t("steps")}
+          </p>
+          {job.steps.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("noSteps")}</p>
+          ) : (
+            <ol className="space-y-2">
+              {job.steps.map((step) => (
+                <li
+                  className="flex items-center gap-3 text-sm"
+                  key={step.number}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] text-muted-foreground">
+                    {step.number}
+                  </span>
+                  <span className="min-w-0 flex-1">{step.name}</span>
+                  <Badge className={pipelineStateClass(step.status)}>
+                    {tp(`pipelineStates.${step.status}`)}
+                  </Badge>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RetryWorkflowJobButton({
+  job,
+  repositoryId,
+  checkSuiteId,
+  onRetried,
+  onError,
+}: {
+  job: GitHubWorkflowJobView;
+  repositoryId: string;
+  checkSuiteId: string | null;
+  onRetried: () => void;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("pullRequestDetail");
+  const tp = useTranslations("pullRequests");
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!job.canRetry || !checkSuiteId) return;
+    setRetrying(true);
+    try {
+      await controlPlaneRequest<{ retryGitHubWorkflowJob: boolean }>(
+        `mutation RetryGitHubWorkflowJob(
+          $repositoryId: ID!
+          $checkSuiteId: ID!
+          $jobId: ID!
+        ) {
+          retryGitHubWorkflowJob(
+            repositoryId: $repositoryId
+            checkSuiteId: $checkSuiteId
+            jobId: $jobId
+          )
+        }`,
+        { repositoryId, checkSuiteId, jobId: job.id },
+      );
+      onRetried();
+      onError(null);
+    } catch (value) {
+      onError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const unavailableMessage = job.retryUnavailableReason
+    ? tp(`retryUnavailable.${job.retryUnavailableReason}`)
+    : undefined;
+  return (
+    <Button
+      aria-label={t("retryJob", { job: job.name })}
+      disabled={retrying || !job.canRetry || !checkSuiteId}
+      onClick={(event) => void retry(event)}
+      size="sm"
+      title={unavailableMessage}
+      variant="outline"
+    >
+      {retrying ? <Spinner /> : <RotateCcw />}
+      {retrying ? tp("retrying") : tp("retry")}
+    </Button>
   );
 }
 

@@ -28,7 +28,7 @@ import type {
 } from "@/services/github/types";
 
 const PIPELINE_FIELDS =
-  "id name status url checkSuiteId canRetry retryUnavailableReason";
+  "id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } }";
 
 export function RetryPipelineButton({
   pipeline,

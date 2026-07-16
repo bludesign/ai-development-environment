@@ -171,5 +171,22 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
         auditContext(context),
       );
     },
+    retryGitHubWorkflowJob: (
+      _root: unknown,
+      {
+        repositoryId,
+        checkSuiteId,
+        jobId,
+      }: { repositoryId: string; checkSuiteId: string; jobId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.retryWorkflowJob(
+        repositoryId,
+        checkSuiteId,
+        jobId,
+        auditContext(context),
+      );
+    },
   },
 });

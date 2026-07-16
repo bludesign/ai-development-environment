@@ -53,6 +53,7 @@ const appClient = vi.hoisted(() => ({
   clearTokenCache: vi.fn(),
   graphql: vi.fn(),
   rerun: vi.fn(),
+  rerunJob: vi.fn(),
   verify: vi.fn(),
 }));
 
@@ -63,6 +64,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     ...original,
     clearGitHubAppTokenCache: appClient.clearTokenCache,
     githubAppGraphql: appClient.graphql,
+    rerunGitHubActionsJob: appClient.rerunJob,
     rerunGitHubActionsWorkflow: appClient.rerun,
     verifyGitHubAppConfiguration: appClient.verify,
   };
@@ -245,6 +247,8 @@ beforeEach(() => {
   });
   appClient.rerun.mockReset();
   appClient.rerun.mockResolvedValue({ githubRequestId: "REST-1" });
+  appClient.rerunJob.mockReset();
+  appClient.rerunJob.mockResolvedValue({ githubRequestId: "REST-JOB-1" });
   appClient.verify.mockReset();
   appClient.verify.mockImplementation(async (credentials) => ({
     appId: credentials.appId.trim(),
@@ -393,7 +397,35 @@ describe("GitHub service", () => {
   });
 
   test("reruns an installed GitHub Actions workflow without a managed repository", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/actions/runs/1/jobs")) {
+        return response({
+          total_count: 1,
+          jobs: [
+            {
+              id: 11,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+              html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+              steps: [
+                {
+                  number: 1,
+                  name: "Set up job",
+                  status: "completed",
+                  conclusion: "success",
+                },
+                {
+                  number: 2,
+                  name: "Run tests",
+                  status: "completed",
+                  conclusion: "failure",
+                },
+              ],
+            },
+          ],
+        });
+      }
       const body = JSON.parse(String(init?.body)) as {
         query: string;
         variables: Record<string, unknown>;
@@ -432,7 +464,10 @@ describe("GitHub service", () => {
           },
         });
       }
-      if (body.query.includes("query GitHubRetryPipelineCheckSuite")) {
+      if (
+        body.query.includes("query GitHubRetryPipelineCheckSuite") ||
+        body.query.includes("query GitHubRetryWorkflowJobCheckSuite")
+      ) {
         return response({
           data: {
             node: {
@@ -469,7 +504,24 @@ describe("GitHub service", () => {
       headRefName: "feature/app-42",
       changedFiles: 3,
       commitCount: 2,
-      pipelines: [{ name: "CI", status: "SUCCESS" }],
+      pipelines: [
+        {
+          name: "CI",
+          status: "SUCCESS",
+          jobs: [
+            {
+              id: "11",
+              name: "test",
+              status: "FAILURE",
+              canRetry: true,
+              steps: [
+                { number: 1, name: "Set up job", status: "SUCCESS" },
+                { number: 2, name: "Run tests", status: "FAILURE" },
+              ],
+            },
+          ],
+        },
+      ],
     });
     state.repositories = [];
     await expect(
@@ -496,6 +548,33 @@ describe("GitHub service", () => {
       expect.objectContaining({
         operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
         githubRequestId: "REST-1",
+        outcome: "SUCCESS",
+      }),
+    );
+    await expect(
+      new GitHubService().retryWorkflowJob(
+        "repository-1",
+        "check-suite-1",
+        "11",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(appClient.rerunJob).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123" }),
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        jobId: "11",
+      },
+    );
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
+        githubRequestId: "REST-JOB-1",
         outcome: "SUCCESS",
       }),
     );

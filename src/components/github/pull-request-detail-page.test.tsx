@@ -36,6 +36,21 @@ const pipeline = {
   url: "https://github.com/acme/widgets/actions/runs/1",
   checkSuiteId: "check-suite-1",
   canRetry: true,
+  retryUnavailableReason: null,
+  jobs: [
+    {
+      id: "job-11",
+      name: "test",
+      status: "FAILURE",
+      url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+      canRetry: true,
+      retryUnavailableReason: null,
+      steps: [
+        { number: 1, name: "Set up job", status: "SUCCESS" },
+        { number: 2, name: "Run tests", status: "FAILURE" },
+      ],
+    },
+  ],
 };
 
 const detail = {
@@ -88,6 +103,9 @@ beforeEach(() => {
         },
       } as never;
     }
+    if (query.includes("RetryGitHubWorkflowJob")) {
+      return { retryGitHubWorkflowJob: true } as never;
+    }
     throw new Error(`Unexpected operation: ${query}`);
   });
 });
@@ -111,6 +129,15 @@ describe("PullRequestDetailPage", () => {
     expect(screen.getByText("+20")).toBeDefined();
     expect(screen.getByText("−5")).toBeDefined();
     expect(screen.getByText("CI")).toBeDefined();
+    expect(screen.getByText("1 jobs")).toBeDefined();
+    const jobButton = screen.getByRole("button", {
+      name: "Show steps for test",
+    });
+    expect(jobButton.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(jobButton);
+    expect(jobButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Set up job")).toBeDefined();
+    expect(screen.getByText("Run tests")).toBeDefined();
     expect(screen.getByText("Changes requested")).toBeDefined();
     const jiraBadge = screen.getByRole("button", { name: "APP-42" });
     for (const className of ["rounded-full", "px-2", "py-0.5", "text-xs"]) {
@@ -136,6 +163,18 @@ describe("PullRequestDetailPage", () => {
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubPipeline"),
         { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry test" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("RetryGitHubWorkflowJob"),
+        {
+          repositoryId: "repository-1",
+          checkSuiteId: "check-suite-1",
+          jobId: "job-11",
+        },
       ),
     );
   });

@@ -365,30 +365,30 @@ function GitHubAppSettingsCard() {
               </div>
 
               {settings?.configured && (
-                <Alert className="bg-muted">
+                <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
                   <KeyRound />
-                  <AlertDescription>
+                  <AlertDescription className="text-emerald-700 dark:text-emerald-300">
                     <p className="font-medium">
                       {t("connectedAs", {
                         app: settings.appSlug ?? "—",
                         account: settings.accountLogin ?? "—",
                       })}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-xs">
                       {t("connectionDetails", {
                         permission: settings.actionsPermission ?? "—",
                         selection: settings.repositorySelection ?? "—",
                       })}
                     </p>
                     {settings.verifiedAt && (
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs">
                         {t("lastVerified", {
                           date: new Date(settings.verifiedAt).toLocaleString(),
                         })}
                       </p>
                     )}
                     {settings.keyFingerprint && (
-                      <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                      <p className="mt-1 break-all font-mono text-xs">
                         {settings.keyFingerprint}
                       </p>
                     )}

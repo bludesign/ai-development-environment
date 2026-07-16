@@ -6,6 +6,7 @@ import {
   githubAppGraphql,
   GitHubAppError,
   type GitHubAppCredentials,
+  rerunGitHubActionsJob,
   rerunGitHubActionsWorkflow,
   verifyGitHubAppConfiguration,
 } from "@/server/github/github-app";
@@ -25,6 +26,7 @@ import type {
   GitHubReviewDecision,
   GitHubSettingsView,
   GitHubViewer,
+  GitHubWorkflowJobView,
 } from "./types";
 
 const SETTINGS_ID = "default";
@@ -120,6 +122,20 @@ type RawPullRequestDetail = RawPullRequest & {
   changedFiles: number;
   commits: { totalCount: number };
   mergedAt: string | null;
+};
+
+type RawWorkflowJob = {
+  id: string | number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string | null;
+  steps?: Array<{
+    number: number;
+    name: string;
+    status: string;
+    conclusion: string | null;
+  }>;
 };
 
 type GitHubResponse<T> = {
@@ -273,7 +289,7 @@ function pipelineState(
   status: string | null | undefined,
   conclusion?: string | null,
 ): GitHubPipelineState {
-  const value = conclusion || status || "NONE";
+  const value = (conclusion || status || "NONE").toUpperCase();
   if (
     value === "ACTION_REQUIRED" ||
     value === "CANCELLED" ||
@@ -324,6 +340,10 @@ function checkSuitePipeline(
     checkSuiteId: checkSuite.id,
     canRetry: unavailableReason === null,
     retryUnavailableReason: unavailableReason,
+    jobs: [],
+    workflowRunId: workflowRun?.databaseId
+      ? String(workflowRun.databaseId)
+      : null,
   };
 }
 
@@ -345,6 +365,8 @@ function normalizePipelines(
         checkSuiteId: null,
         canRetry: false,
         retryUnavailableReason: "NOT_GITHUB_ACTIONS",
+        jobs: [],
+        workflowRunId: null,
       });
     }
   }
@@ -409,6 +431,93 @@ export class GitHubService {
       throw new Error(sanitizeError(message, token));
     }
     return body.data;
+  }
+
+  private async restRequest<T>(url: string, token: string): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "user-agent": "ai-development-environment",
+          "x-github-api-version": "2022-11-28",
+        },
+        cache: "no-store",
+      });
+    } catch (error) {
+      throw new Error(
+        sanitizeError(
+          error instanceof Error ? error.message : String(error),
+          token,
+        ),
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error(`GitHub returned HTTP ${response.status}`);
+    }
+    if (!response.ok) {
+      const message =
+        body &&
+        typeof body === "object" &&
+        "message" in body &&
+        typeof body.message === "string"
+          ? body.message
+          : `GitHub returned HTTP ${response.status}`;
+      throw new Error(sanitizeError(message, token));
+    }
+    return body as T;
+  }
+
+  private async workflowJobs(
+    owner: string,
+    repository: string,
+    workflowRunId: string,
+    token: string,
+    appConfigured: boolean,
+  ): Promise<GitHubWorkflowJobView[]> {
+    const jobs: RawWorkflowJob[] = [];
+    let page = 1;
+    let totalCount = 0;
+    do {
+      const result = await this.restRequest<{
+        total_count: number;
+        jobs: RawWorkflowJob[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repository,
+        )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=latest&per_page=100&page=${page}`,
+        token,
+      );
+      totalCount = result.total_count;
+      jobs.push(...result.jobs);
+      page += 1;
+    } while (jobs.length < totalCount);
+
+    return jobs.map((job) => {
+      const completed = job.status.toLowerCase() === "completed";
+      return {
+        id: String(job.id),
+        name: job.name,
+        status: pipelineState(job.status, job.conclusion),
+        url: job.html_url,
+        canRetry: completed && appConfigured,
+        retryUnavailableReason: !completed
+          ? "NOT_COMPLETED"
+          : appConfigured
+            ? null
+            : "GITHUB_APP_NOT_CONFIGURED",
+        steps: (job.steps ?? []).map((step) => ({
+          number: step.number,
+          name: step.name,
+          status: pipelineState(step.status, step.conclusion),
+        })),
+      };
+    });
   }
 
   private async requireToken(): Promise<string> {
@@ -1260,8 +1369,25 @@ export class GitHubService {
       token,
       Boolean(appSettings),
     );
+    const pipelines = await Promise.all(
+      summary.pipelines.map(async (pipeline) => {
+        const workflowRunId = pipeline.workflowRunId;
+        if (!workflowRunId) return pipeline;
+        return {
+          ...pipeline,
+          jobs: await this.workflowJobs(
+            owner,
+            name,
+            workflowRunId,
+            token,
+            Boolean(appSettings),
+          ),
+        };
+      }),
+    );
     return {
       ...summary,
+      pipelines,
       body: pullRequest.body,
       author: pullRequest.author,
       assignees: connectionNodes(pullRequest.assignees),
@@ -1385,6 +1511,123 @@ export class GitHubService {
     } catch (error) {
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
+        repositoryId,
+        checkSuiteId,
+        githubRequestId:
+          error instanceof GitHubAppError ? error.githubRequestId : null,
+        outcome: "FAILURE",
+        errorCode:
+          error instanceof GitHubAppError
+            ? error.code
+            : "GITHUB_APP_REQUEST_FAILED",
+      });
+      throw error;
+    }
+  }
+
+  async retryWorkflowJob(
+    repositoryId: string,
+    checkSuiteId: string,
+    jobId: string,
+    auditContext: GitHubAuditContext,
+  ): Promise<boolean> {
+    if (!repositoryId.trim() || !checkSuiteId.trim() || !jobId.trim()) {
+      throw new Error("Repository, check suite, and job IDs are required");
+    }
+    try {
+      const token = await this.requireToken();
+      const data = await this.request<{ node: RawRetryCheckSuite | null }>(
+        `query GitHubRetryWorkflowJobCheckSuite($checkSuiteId: ID!) {
+          node(id: $checkSuiteId) {
+            ... on CheckSuite {
+              id
+              status
+              conclusion
+              url
+              app { name slug }
+              repository { id name owner { login } }
+              workflowRun {
+                databaseId
+                url
+                runNumber
+                workflow { name }
+              }
+            }
+          }
+        }`,
+        { checkSuiteId },
+        token,
+      );
+      const checkSuite = data.node;
+      if (!checkSuite) {
+        throw new GitHubAppError(
+          "CHECK_SUITE_NOT_FOUND",
+          "The GitHub check suite was not found",
+        );
+      }
+      if (checkSuite.repository.id !== repositoryId) {
+        throw new GitHubAppError(
+          "CHECK_SUITE_REPOSITORY_MISMATCH",
+          "The check suite does not belong to the selected repository",
+        );
+      }
+      if (checkSuite.app?.slug !== "github-actions") {
+        throw new GitHubAppError(
+          "NOT_GITHUB_ACTIONS",
+          "Only GitHub Actions workflow jobs can be retried",
+        );
+      }
+      if (checkSuite.status !== "COMPLETED") {
+        throw new GitHubAppError(
+          "WORKFLOW_NOT_COMPLETED",
+          "The GitHub Actions workflow must be completed before a job can be retried",
+        );
+      }
+      if (!checkSuite.workflowRun?.databaseId) {
+        throw new GitHubAppError(
+          "WORKFLOW_RUN_UNAVAILABLE",
+          "GitHub did not return a workflow run for this check suite",
+        );
+      }
+
+      const credentials = await this.requireAppCredentials();
+      const access = await githubAppGraphql<{
+        repository: { id: string } | null;
+      }>(
+        credentials,
+        `query VerifyGitHubAppRepository($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) { id }
+        }`,
+        {
+          owner: checkSuite.repository.owner.login,
+          name: checkSuite.repository.name,
+        },
+      );
+      if (access.data.repository?.id !== repositoryId) {
+        throw new GitHubAppError(
+          "REPOSITORY_NOT_INSTALLED",
+          "The repository is not available to the GitHub App installation",
+          access.githubRequestId,
+        );
+      }
+
+      const result = await rerunGitHubActionsJob(credentials, {
+        owner: checkSuite.repository.owner.login,
+        repository: checkSuite.repository.name,
+        workflowRunId: String(checkSuite.workflowRun.databaseId),
+        jobId,
+      });
+      await this.audit(auditContext, {
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
+        repositoryId,
+        checkSuiteId,
+        githubRequestId: result.githubRequestId,
+        outcome: "SUCCESS",
+      });
+      return true;
+    } catch (error) {
+      await this.audit(auditContext, {
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,
         checkSuiteId,
         githubRequestId:

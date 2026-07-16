@@ -26,6 +26,7 @@ describe("RetryPipelineButton", () => {
           checkSuiteId: "check-suite-1",
           canRetry: false,
           retryUnavailableReason: "GITHUB_APP_NOT_CONFIGURED",
+          jobs: [],
         }}
         repositoryId="repository-1"
       />,

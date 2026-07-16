@@ -42,6 +42,7 @@ describe("GitHub resolvers", () => {
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
+      retryWorkflowJob: vi.fn().mockResolvedValue(true),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service);
     const input = { apiToken: "secret-token" };
@@ -85,10 +86,25 @@ describe("GitHub resolvers", () => {
       { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
       context(null),
     );
+    await resolvers.Mutation.retryGitHubWorkflowJob(
+      {},
+      {
+        repositoryId: "repository-1",
+        checkSuiteId: "check-suite-1",
+        jobId: "job-11",
+      },
+      context(null),
+    );
     expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
+      { actor: "control-plane", ipAddress: "127.0.0.1" },
+    );
+    expect(service.retryWorkflowJob).toHaveBeenCalledWith(
+      "repository-1",
+      "check-suite-1",
+      "job-11",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(safeSettings).not.toHaveProperty("apiToken");

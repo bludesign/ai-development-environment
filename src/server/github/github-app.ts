@@ -15,6 +15,9 @@ const TOKEN_REFRESH_CUSHION_MS = 5 * 60 * 1000;
 
 export type GitHubAppErrorCode =
   | "ACTIONS_PERMISSION_REQUIRED"
+  | "ACTIONS_JOB_NOT_COMPLETED"
+  | "ACTIONS_JOB_NOT_FOUND"
+  | "ACTIONS_JOB_RUN_MISMATCH"
   | "APP_INSTALLATION_MISMATCH"
   | "CHECK_SUITE_NOT_FOUND"
   | "CHECK_SUITE_REPOSITORY_MISMATCH"
@@ -495,6 +498,95 @@ export async function rerunGitHubActionsWorkflow(
         ? "The repository or workflow run is not available to this installation"
         : responseMessage(body, response.status, [
             token,
+            credentials.privateKey,
+          ]),
+      githubRequestId,
+    );
+  }
+  return { githubRequestId };
+}
+
+export async function rerunGitHubActionsJob(
+  credentials: GitHubAppCredentials,
+  input: {
+    owner: string;
+    repository: string;
+    workflowRunId: string;
+    jobId: string;
+  },
+): Promise<{ githubRequestId: string | null }> {
+  const repositoryUrl = `${credentials.apiBaseUrl}/repos/${encodeURIComponent(
+    input.owner,
+  )}/${encodeURIComponent(input.repository)}`;
+  const jobUrl = `${repositoryUrl}/actions/jobs/${encodeURIComponent(input.jobId)}`;
+  const jobResult = await withInstallationToken(credentials, (token) =>
+    githubFetch(jobUrl, {
+      headers: githubHeaders(`Bearer ${token}`),
+    }),
+  );
+  const jobRequestId = requestId(jobResult.response);
+  if (jobResult.response.status === 401) {
+    throw new GitHubAppError(
+      "GITHUB_APP_UNAUTHORIZED",
+      "GitHub rejected the installation access token",
+      jobRequestId,
+    );
+  }
+  const jobBody = await responseBody(jobResult.response);
+  if (!jobResult.response.ok || !jobBody || typeof jobBody !== "object") {
+    throw new GitHubAppError(
+      jobResult.response.status === 404
+        ? "ACTIONS_JOB_NOT_FOUND"
+        : "GITHUB_APP_REQUEST_FAILED",
+      jobResult.response.status === 404
+        ? "The GitHub Actions job is not available to this installation"
+        : responseMessage(jobBody, jobResult.response.status, [
+            jobResult.token,
+            credentials.privateKey,
+          ]),
+      jobRequestId,
+    );
+  }
+  const job = jobBody as { run_id?: string | number; status?: string };
+  if (String(job.run_id ?? "") !== input.workflowRunId) {
+    throw new GitHubAppError(
+      "ACTIONS_JOB_RUN_MISMATCH",
+      "The GitHub Actions job does not belong to the selected workflow run",
+      jobRequestId,
+    );
+  }
+  if (job.status?.toLowerCase() !== "completed") {
+    throw new GitHubAppError(
+      "ACTIONS_JOB_NOT_COMPLETED",
+      "The GitHub Actions job must be completed before it can be retried",
+      jobRequestId,
+    );
+  }
+
+  const rerunResult = await withInstallationToken(credentials, (token) =>
+    githubFetch(`${jobUrl}/rerun`, {
+      method: "POST",
+      headers: githubHeaders(`Bearer ${token}`),
+    }),
+  );
+  const githubRequestId = requestId(rerunResult.response);
+  if (rerunResult.response.status === 401) {
+    throw new GitHubAppError(
+      "GITHUB_APP_UNAUTHORIZED",
+      "GitHub rejected the installation access token",
+      githubRequestId,
+    );
+  }
+  if (!rerunResult.response.ok) {
+    const body = await responseBody(rerunResult.response);
+    throw new GitHubAppError(
+      rerunResult.response.status === 404
+        ? "ACTIONS_JOB_NOT_FOUND"
+        : "GITHUB_APP_REQUEST_FAILED",
+      rerunResult.response.status === 404
+        ? "The GitHub Actions job is not available to this installation"
+        : responseMessage(body, rerunResult.response.status, [
+            rerunResult.token,
             credentials.privateKey,
           ]),
       githubRequestId,
