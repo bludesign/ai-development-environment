@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("JiraTicketsPage", () => {
-  test("loads project/source tabs, groups tickets by exact status, and refreshes", async () => {
+  test("defaults to status tables, switches layouts, and refreshes", async () => {
     const board = {
       source: {
         id: "source-1",
@@ -55,7 +55,7 @@ describe("JiraTicketsPage", () => {
           updatedAt: new Date().toISOString(),
         },
       ],
-      statusOrder: ["In Progress"],
+      statusOrder: ["In Progress", "Done"],
       cache: {
         source: "CACHE",
         stale: false,
@@ -93,7 +93,15 @@ describe("JiraTicketsPage", () => {
       await screen.findByRole("tab", { name: "APP · Application" }),
     ).toBeDefined();
     expect(await screen.findByText("In Progress")).toBeDefined();
+    expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Board layout" }));
+    expect(screen.queryAllByRole("table")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Table layout" }));
+    expect(screen.getAllByRole("table")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>

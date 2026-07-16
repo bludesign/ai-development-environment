@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Columns3,
   ExternalLink,
   FolderKanban,
   LoaderCircle,
@@ -9,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Table2,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -36,6 +38,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -86,6 +96,7 @@ export function JiraTicketsPage() {
   const [boardLoading, setBoardLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [layout, setLayout] = useState<"table" | "board">("table");
 
   const requestedProjectId = searchParams.get("project");
   const requestedSourceId = searchParams.get("source");
@@ -185,6 +196,15 @@ export function JiraTicketsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            onClick={() =>
+              setLayout((current) => (current === "table" ? "board" : "table"))
+            }
+            variant="outline"
+          >
+            {layout === "table" ? <Columns3 /> : <Table2 />}
+            {layout === "table" ? t("showBoardLayout") : t("showTableLayout")}
+          </Button>
           <Button
             disabled={!selectedSource || boardLoading}
             onClick={() =>
@@ -312,52 +332,120 @@ export function JiraTicketsPage() {
               {t("emptyTickets")}
             </div>
           ) : board ? (
-            <div className="overflow-x-auto pb-4">
-              <div className="flex min-w-max items-start gap-4">
+            layout === "table" ? (
+              <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (
                   <section
                     key={status}
-                    className="w-[19rem] rounded-xl bg-muted/50 p-3"
+                    className="overflow-hidden rounded-xl border bg-card"
                   >
-                    <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
                       <h2 className="font-medium">{status}</h2>
                       <Badge>{tickets.length}</Badge>
                     </div>
-                    <div className="space-y-2">
-                      {tickets.map((ticket) => (
-                        <button
-                          key={ticket.key}
-                          className="w-full rounded-lg border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => replaceParams({ issue: ticket.key })}
-                          type="button"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-xs font-semibold text-primary">
-                              {ticket.key}
-                            </span>
-                            {ticket.priority && (
-                              <Badge>{ticket.priority}</Badge>
-                            )}
-                          </div>
-                          <p className="mt-2 line-clamp-3 text-sm font-medium">
-                            {ticket.summary}
-                          </p>
-                          <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                            <span>{ticket.issueType ?? t("issue")}</span>
-                            <span className="flex min-w-0 items-center gap-1">
-                              <UserRound className="size-3" />
-                              <span className="truncate">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>{t("ticket")}</TableHead>
+                          <TableHead>{t("issueType")}</TableHead>
+                          <TableHead>{t("priority")}</TableHead>
+                          <TableHead>{t("assignee")}</TableHead>
+                          <TableHead>{t("updated")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tickets.map((ticket) => (
+                          <TableRow key={ticket.key}>
+                            <TableCell className="min-w-80 whitespace-normal">
+                              <button
+                                className="group block text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() =>
+                                  replaceParams({ issue: ticket.key })
+                                }
+                                type="button"
+                              >
+                                <span className="block text-xs font-semibold text-primary group-hover:underline">
+                                  {ticket.key}
+                                </span>
+                                <span className="mt-1 block font-medium">
+                                  {ticket.summary}
+                                </span>
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              {ticket.issueType ?? t("issue")}
+                            </TableCell>
+                            <TableCell>
+                              {ticket.priority ? (
+                                <Badge>{ticket.priority}</Badge>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className="flex items-center gap-1.5">
+                                <UserRound className="size-3.5 text-muted-foreground" />
                                 {ticket.assignee ?? t("unassigned")}
                               </span>
-                            </span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {displayDate(ticket.updatedAt)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </section>
                 ))}
               </div>
-            </div>
+            ) : (
+              <div className="overflow-x-auto pb-4">
+                <div className="flex min-w-max items-start gap-4">
+                  {groupedTickets.map(([status, tickets]) => (
+                    <section
+                      key={status}
+                      className="w-[19rem] rounded-xl bg-muted/50 p-3"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h2 className="font-medium">{status}</h2>
+                        <Badge>{tickets.length}</Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {tickets.map((ticket) => (
+                          <button
+                            key={ticket.key}
+                            className="w-full rounded-lg border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => replaceParams({ issue: ticket.key })}
+                            type="button"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-xs font-semibold text-primary">
+                                {ticket.key}
+                              </span>
+                              {ticket.priority && (
+                                <Badge>{ticket.priority}</Badge>
+                              )}
+                            </div>
+                            <p className="mt-2 line-clamp-3 text-sm font-medium">
+                              {ticket.summary}
+                            </p>
+                            <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <span>{ticket.issueType ?? t("issue")}</span>
+                              <span className="flex min-w-0 items-center gap-1">
+                                <UserRound className="size-3" />
+                                <span className="truncate">
+                                  {ticket.assignee ?? t("unassigned")}
+                                </span>
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </div>
+            )
           ) : null}
         </>
       )}
