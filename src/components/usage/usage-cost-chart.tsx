@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -125,7 +125,7 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
       </CardHeader>
       <CardContent className="px-2 pt-4 sm:px-6">
         <ChartContainer className="h-80 w-full aspect-auto" config={config}>
-          <AreaChart
+          <BarChart
             accessibilityLayer
             data={data}
             margin={{ left: 4, right: 12, top: 8 }}
@@ -174,18 +174,15 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
               }
             />
             {series.map((item) => (
-              <Area
+              <Bar
                 dataKey={item.key}
-                dot={false}
                 fill={`var(--color-${item.key})`}
-                fillOpacity={0.4}
                 key={item.key}
+                maxBarSize={48}
                 stackId="cost"
-                stroke={`var(--color-${item.key})`}
-                type="monotone"
               />
             ))}
-          </AreaChart>
+          </BarChart>
         </ChartContainer>
       </CardContent>
     </Card>
