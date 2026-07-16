@@ -12,6 +12,7 @@ enum WorktreeOperation {
   RESET
   STASH_ALL
   STAGE_ALL
+  UNSTAGE_ALL
 }
 
 type WorktreeTag {
@@ -44,6 +45,7 @@ type Worktree {
   baseBranchOverride: String
   baseAhead: Int
   baseBehind: Int
+  hasStagedChanges: Boolean!
   hasUnstagedChanges: Boolean!
   highlightColor: String
   availability: String!
@@ -113,6 +115,7 @@ type WorktreeOverviewChange {
 
 type WorktreeActivity {
   worktreeId: ID!
+  hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
   observedAt: String!
 }
@@ -130,6 +133,7 @@ input WorktreeInventoryInput {
   syncState: CodebaseSyncState!
   baseAhead: Int
   baseBehind: Int
+  hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
   availability: String!
   error: String
@@ -150,6 +154,7 @@ input CodebaseWorktreeReportInput {
 input WorktreeActivityReportInput {
   codebaseId: ID!
   gitDirectory: String!
+  hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
   observedAt: String!
 }

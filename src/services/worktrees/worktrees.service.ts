@@ -497,15 +497,28 @@ export class WorktreesService {
       select: { id: true, codebaseId: true },
     });
     if (!worktree) throw new Error("Worktree activity source was not found");
-    if (report.hasUnstagedChanges !== undefined) {
+    if (
+      report.hasStagedChanges !== undefined ||
+      report.hasUnstagedChanges !== undefined
+    ) {
       await prisma.worktree.update({
         where: { id: worktree.id },
-        data: { hasUnstagedChanges: report.hasUnstagedChanges },
+        data: {
+          ...(report.hasStagedChanges === undefined
+            ? {}
+            : { hasStagedChanges: report.hasStagedChanges }),
+          ...(report.hasUnstagedChanges === undefined
+            ? {}
+            : { hasUnstagedChanges: report.hasUnstagedChanges }),
+        },
       });
       this.publish(worktree.id, worktree.codebaseId);
     }
     const activity = {
       worktreeId: worktree.id,
+      ...(report.hasStagedChanges === undefined
+        ? {}
+        : { hasStagedChanges: report.hasStagedChanges }),
       ...(report.hasUnstagedChanges === undefined
         ? {}
         : { hasUnstagedChanges: report.hasUnstagedChanges }),
@@ -532,6 +545,7 @@ export class WorktreesService {
       syncState: item.syncState,
       baseAhead: item.baseAhead,
       baseBehind: item.baseBehind,
+      hasStagedChanges: item.hasStagedChanges ?? false,
       hasUnstagedChanges: item.hasUnstagedChanges ?? false,
       availability: item.availability,
       statusError: item.error,
@@ -766,6 +780,7 @@ export class WorktreesService {
     const events = agentEventBus.iterate<{
       worktreeInspectionChanged: {
         worktreeId: string;
+        hasStagedChanges?: boolean;
         hasUnstagedChanges?: boolean;
         observedAt: string;
       };
@@ -889,6 +904,7 @@ export class WorktreesService {
         syncState: item.syncState,
         baseAhead: item.baseAhead,
         baseBehind: item.baseBehind,
+        hasStagedChanges: item.hasStagedChanges ?? false,
         hasUnstagedChanges: item.hasUnstagedChanges ?? false,
         availability: item.availability,
         statusError: item.error,

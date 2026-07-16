@@ -22,6 +22,7 @@ export const WORKTREE_OPERATIONS = [
   "RESET",
   "STASH_ALL",
   "STAGE_ALL",
+  "UNSTAGE_ALL",
 ] as const;
 
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
@@ -31,6 +32,7 @@ export type WorktreeWatchAction = "START" | "STOP";
 export type WorktreeActivityReport = {
   codebaseId: string;
   gitDirectory: string;
+  hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
   observedAt: string;
 };
@@ -48,6 +50,7 @@ export type WorktreeInventoryItem = {
   syncState: CodebaseSyncState;
   baseAhead: number | null;
   baseBehind: number | null;
+  hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
   availability: "AVAILABLE" | "MISSING" | "ERROR";
   error: string | null;
@@ -190,6 +193,10 @@ export function parseWorktreeInventoryItem(
     syncState: syncState(item.syncState, `${name}.syncState`),
     baseAhead: nullableCount(item.baseAhead, `${name}.baseAhead`),
     baseBehind: nullableCount(item.baseBehind, `${name}.baseBehind`),
+    hasStagedChanges: optionalBoolean(
+      item.hasStagedChanges,
+      `${name}.hasStagedChanges`,
+    ),
     hasUnstagedChanges: optionalBoolean(
       item.hasUnstagedChanges,
       `${name}.hasUnstagedChanges`,
@@ -352,6 +359,7 @@ export function parseWorktreeActivityReport(
   const allowed = new Set([
     "codebaseId",
     "gitDirectory",
+    "hasStagedChanges",
     "hasUnstagedChanges",
     "observedAt",
   ]);
@@ -367,6 +375,10 @@ export function parseWorktreeActivityReport(
     gitDirectory: stringValue(
       report.gitDirectory,
       "worktree activity report.gitDirectory",
+    ),
+    hasStagedChanges: optionalBoolean(
+      report.hasStagedChanges,
+      "worktree activity report.hasStagedChanges",
     ),
     hasUnstagedChanges: optionalBoolean(
       report.hasUnstagedChanges,

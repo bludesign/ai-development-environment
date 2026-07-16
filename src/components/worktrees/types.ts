@@ -30,6 +30,7 @@ export type Worktree = {
   baseBranchOverride: string | null;
   baseAhead: number | null;
   baseBehind: number | null;
+  hasStagedChanges: boolean;
   hasUnstagedChanges: boolean;
   highlightColor: string | null;
   availability: string;

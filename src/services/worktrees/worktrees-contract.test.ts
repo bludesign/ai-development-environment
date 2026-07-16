@@ -32,6 +32,7 @@ describe("worktree agent contract", () => {
             syncState: "IN_SYNC",
             baseAhead: 0,
             baseBehind: 0,
+            hasStagedChanges: false,
             hasUnstagedChanges: false,
             availability: "AVAILABLE",
             error: null,
@@ -80,11 +81,13 @@ describe("worktree agent contract", () => {
       parseWorktreeActivityReport({
         codebaseId: "codebase-1",
         gitDirectory: "/repo/.git",
+        hasStagedChanges: false,
         hasUnstagedChanges: true,
         observedAt: new Date(0).toISOString(),
       }),
     ).toMatchObject({
       codebaseId: "codebase-1",
+      hasStagedChanges: false,
       hasUnstagedChanges: true,
     });
   });

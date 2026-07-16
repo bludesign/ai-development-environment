@@ -39,16 +39,27 @@ type ActiveWorktreeWatch = {
 
 const activeWorktreeWatches = new Map<string, ActiveWorktreeWatch>();
 
-function statusHasUnstagedChanges(value: string): boolean {
+function statusChangeState(value: string): {
+  hasStagedChanges: boolean;
+  hasUnstagedChanges: boolean;
+} {
   const entries = value.split("\0").filter(Boolean);
+  let hasStagedChanges = false;
+  let hasUnstagedChanges = false;
   for (let index = 0; index < entries.length; index += 1) {
     const code = entries[index]!.slice(0, 2);
-    if (code === "??" || (code[1] !== " " && code[1] !== "!")) return true;
+    const untracked = code === "??";
+    if (!untracked && code[0] !== " " && code[0] !== "?" && code[0] !== "!") {
+      hasStagedChanges = true;
+    }
+    if (untracked || (code[1] !== " " && code[1] !== "?" && code[1] !== "!")) {
+      hasUnstagedChanges = true;
+    }
     if ((code[0] === "R" || code[0] === "C") && entries[index + 1]) {
       index += 1;
     }
   }
-  return false;
+  return { hasStagedChanges, hasUnstagedChanges };
 }
 
 function closeWorktreeWatch(entry: ActiveWorktreeWatch): void {
@@ -89,9 +100,7 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
-      ...(status.exitCode === 0
-        ? { hasUnstagedChanges: statusHasUnstagedChanges(status.stdout) }
-        : {}),
+      ...(status.exitCode === 0 ? statusChangeState(status.stdout) : {}),
       observedAt: new Date().toISOString(),
     };
     await entry.reporter(report);
@@ -334,10 +343,9 @@ export async function inspectWorktreeItem(
       syncState,
       baseAhead: baseCounts.ahead,
       baseBehind: baseCounts.behind,
-      hasUnstagedChanges:
-        statusResult.exitCode === 0
-          ? statusHasUnstagedChanges(statusResult.stdout)
-          : false,
+      ...(statusResult.exitCode === 0
+        ? statusChangeState(statusResult.stdout)
+        : { hasStagedChanges: false, hasUnstagedChanges: false }),
       availability: "AVAILABLE",
       error: null,
       checkedAt,
@@ -356,6 +364,7 @@ export async function inspectWorktreeItem(
       syncState: "UNKNOWN",
       baseAhead: null,
       baseBehind: null,
+      hasStagedChanges: false,
       hasUnstagedChanges: false,
       availability: "ERROR",
       error: cleanError(error),
@@ -764,6 +773,9 @@ export const operateWorktree: AgentJobHandler = async (
       break;
     case "STAGE_ALL":
       await runGit(["add", "--all"], "Stage failed");
+      break;
+    case "UNSTAGE_ALL":
+      await runGit(["reset", "--mixed", "HEAD"], "Unstage failed");
       break;
   }
 

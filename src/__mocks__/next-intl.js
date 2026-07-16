@@ -718,6 +718,7 @@ const mockTranslations = {
     reset: "Reset",
     stashAll: "Stash all",
     stageAll: "Stage all",
+    unstageAll: "Unstage all",
     confirmAction: "Confirm",
     operationRunning: "Operation in progress…",
     loadingDetails: "Loading commits and changes…",
@@ -732,6 +733,8 @@ const mockTranslations = {
     truncated: "Only the first supported results are shown.",
     status: "Status",
     pullRequest: "Pull request",
+    openInGitHub: "Open in GitHub",
+    openDetails: "Open details",
     hiddenTitle: "Hidden worktrees",
     hiddenDescription:
       "Missing worktrees are retained for seven days. Rediscovery restores their saved metadata.",

@@ -8,7 +8,9 @@ import {
   ChevronDown,
   ChevronRight,
   Code2,
+  ExternalLink,
   GitBranch,
+  GitPullRequest,
   Grid2X2,
   List,
   MoreHorizontal,
@@ -94,6 +96,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
+import { Link } from "@/i18n/navigation";
 
 import type {
   Worktree,
@@ -130,7 +133,7 @@ const PULL_REQUEST_FIELDS =
   "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt";
 const WORKTREE_FIELDS = `
   id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
-  baseBranch baseBranchOverride baseAhead baseBehind hasUnstagedChanges highlightColor availability statusError
+  baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges highlightColor availability statusError
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
@@ -196,7 +199,22 @@ type Operation =
   | "PUSH"
   | "RESET"
   | "STASH_ALL"
-  | "STAGE_ALL";
+  | "STAGE_ALL"
+  | "UNSTAGE_ALL";
+
+export function worktreeChangeActionState(
+  worktree: Pick<Worktree, "hasStagedChanges" | "hasUnstagedChanges">,
+) {
+  const hasChanges = worktree.hasStagedChanges || worktree.hasUnstagedChanges;
+  const allChangesStaged =
+    worktree.hasStagedChanges && !worktree.hasUnstagedChanges;
+  return {
+    hasChanges,
+    stageOperation: allChangesStaged
+      ? ("UNSTAGE_ALL" as const)
+      : ("STAGE_ALL" as const),
+  };
+}
 
 async function waitForWorktreeJob(jobId: string): Promise<void> {
   const deadline = new Date().getTime() + 10 * 60_000;
@@ -256,6 +274,7 @@ function useQueuedWorktreeInspection(inspect: () => Promise<void>) {
 
 type WorktreeActivity = {
   worktreeId: string;
+  hasStagedChanges: boolean | null;
   hasUnstagedChanges: boolean | null;
   observedAt: string;
 };
@@ -290,7 +309,7 @@ function useWorktreeActivitySubscription(
         {
           query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
             worktreeInspectionChanged(worktreeId: $worktreeId) {
-              worktreeId hasUnstagedChanges observedAt
+              worktreeId hasStagedChanges hasUnstagedChanges observedAt
             }
           }`,
           variables: { worktreeId },
@@ -920,7 +939,11 @@ function WorktreeCard(props: WorktreeItemProps) {
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
-        <WorktreeMetadata {...props} />
+        <WorktreeMetadata
+          {...props}
+          detailsExpanded={expanded}
+          onToggleDetails={toggle}
+        />
         {detailLoading && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner /> {t("loadingDetails")}
@@ -996,8 +1019,19 @@ function WorktreeTicketLink({
   );
 }
 
-function WorktreeMetadata(props: WorktreeItemProps) {
-  const { worktree, group, baseRepoDirectory } = props;
+function WorktreeMetadata(
+  props: WorktreeItemProps & {
+    detailsExpanded?: boolean;
+    onToggleDetails?: () => void;
+  },
+) {
+  const {
+    worktree,
+    group,
+    baseRepoDirectory,
+    detailsExpanded,
+    onToggleDetails,
+  } = props;
   const t = useTranslations("worktrees");
   return (
     <div className="space-y-3 text-sm">
@@ -1014,7 +1048,11 @@ function WorktreeMetadata(props: WorktreeItemProps) {
       </MetadataRow>
       <WorktreeTagsMenu {...props} />
       <MetadataRow label={t("pullRequest")}>
-        <PullRequestBadges worktree={worktree} />
+        <PullRequestBadges
+          detailsExpanded={detailsExpanded}
+          onToggleDetails={onToggleDetails}
+          worktree={worktree}
+        />
       </MetadataRow>
       <div className="flex flex-wrap items-center gap-2">
         {worktree.statusError && (
@@ -1056,34 +1094,37 @@ function WorktreeTagsMenu({
   const { worktree } = props;
   const t = useTranslations("worktrees");
   return (
-    <WorktreeMenus
-      {...props}
-      contentAlign={compact ? "end" : "start"}
-      trigger={
-        <button
-          aria-label={`${t("tags")}: ${worktree.branch ?? t("detached")}`}
-          className={cn(
-            "flex max-w-full items-center gap-2 rounded-md py-1 text-left hover:bg-muted focus-visible:outline-none",
-            compact ? "min-h-7 px-1" : "w-full",
-          )}
-          type="button"
-        >
-          {!compact && (
-            <span className="w-24 shrink-0 text-xs text-muted-foreground">
-              {t("tags")}
-            </span>
-          )}
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {worktree.tags.map((tag) => (
-              <TagBadge key={tag.id} tag={tag} />
-            ))}
-            {!worktree.tags.length && (
-              <span className="text-muted-foreground">—</span>
+    <div className="flex flex-wrap items-center gap-2">
+      {!compact && (
+        <span className="w-24 shrink-0 text-xs text-muted-foreground">
+          {t("tags")}
+        </span>
+      )}
+      <WorktreeMenus
+        {...props}
+        contentAlign={compact ? "end" : "start"}
+        contentAlignOffset={compact ? 0 : -100}
+        trigger={
+          <button
+            aria-label={`${t("tags")}: ${worktree.branch ?? t("detached")}`}
+            className={cn(
+              "flex min-h-7 max-w-full items-center rounded-md px-1 py-1 text-left hover:bg-muted focus-visible:outline-none",
+              !compact && "-mx-1",
             )}
-          </span>
-        </button>
-      }
-    />
+            type="button"
+          >
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {worktree.tags.map((tag) => (
+                <TagBadge key={tag.id} tag={tag} />
+              ))}
+              {!worktree.tags.length && (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </span>
+          </button>
+        }
+      />
+    </div>
   );
 }
 
@@ -1110,15 +1151,21 @@ function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
   );
 }
 
-function PullRequestBadges({ worktree }: { worktree: Worktree }) {
+function PullRequestBadges({
+  worktree,
+  detailsExpanded,
+  onToggleDetails,
+}: {
+  worktree: Worktree;
+  detailsExpanded?: boolean;
+  onToggleDetails?: () => void;
+}) {
   const t = useTranslations("worktrees");
   return (
     <>
       {worktree.pullRequest ? (
         <>
-          <a href={worktree.pullRequest.url} rel="noreferrer" target="_blank">
-            <Badge>PR #{worktree.pullRequest.number}</Badge>
-          </a>
+          <PullRequestMenu pullRequest={worktree.pullRequest} />
           <PipelineMenu
             pipelineStatus={worktree.pullRequest.pipelineStatus}
             pipelines={worktree.pullRequest.pipelines}
@@ -1131,10 +1178,55 @@ function PullRequestBadges({ worktree }: { worktree: Worktree }) {
       ) : (
         <span className="text-muted-foreground">—</span>
       )}
-      <Badge variant="secondary">
-        {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
-      </Badge>
+      {onToggleDetails ? (
+        <Badge asChild variant="secondary">
+          <button
+            aria-expanded={detailsExpanded}
+            onClick={onToggleDetails}
+            type="button"
+          >
+            {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
+          </button>
+        </Badge>
+      ) : (
+        <Badge variant="secondary">
+          {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
+        </Badge>
+      )}
     </>
+  );
+}
+
+function PullRequestMenu({
+  pullRequest,
+}: {
+  pullRequest: NonNullable<Worktree["pullRequest"]>;
+}) {
+  const t = useTranslations("worktrees");
+  const [owner, repository] = pullRequest.repositoryNameWithOwner.split("/");
+  const detailsHref = `/pull-requests/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repository ?? "")}/${pullRequest.number}`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Badge asChild>
+          <button type="button">PR #{pullRequest.number}</button>
+        </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44">
+        <DropdownMenuItem asChild>
+          <a href={pullRequest.url} rel="noreferrer" target="_blank">
+            <ExternalLink />
+            {t("openInGitHub")}
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={detailsHref}>
+            <GitPullRequest />
+            {t("openDetails")}
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1300,6 +1392,7 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
 function WorktreeMenus(
   props: WorktreeItemProps & {
     contentAlign?: "start" | "end";
+    contentAlignOffset?: number;
     trigger?: React.ReactElement;
   },
 ) {
@@ -1310,6 +1403,7 @@ function WorktreeMenus(
     onError,
     onManageTags,
     contentAlign = "end",
+    contentAlignOffset = 0,
     trigger,
   } = props;
   const t = useTranslations("worktrees");
@@ -1352,7 +1446,11 @@ function WorktreeMenus(
           </Button>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={contentAlign} className="w-72">
+      <DropdownMenuContent
+        align={contentAlign}
+        alignOffset={contentAlignOffset}
+        className="w-72"
+      >
         <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
           <Tags className="size-3" />
           <span>{t("tags")}</span>
@@ -1418,6 +1516,7 @@ function ActionRow(
   const t = useTranslations("worktrees");
   const unavailable =
     worktree.availability !== "AVAILABLE" || Boolean(worktree.activeJob);
+  const changeActions = worktreeChangeActionState(worktree);
   return (
     <div className="flex flex-wrap gap-2">
       {editorVariant !== "NONE" && (
@@ -1446,7 +1545,12 @@ function ActionRow(
         label={t("sync")}
         operation="SYNC"
         props={props}
-        disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
+        disabled={
+          unavailable ||
+          !worktree.upstream ||
+          !worktree.baseBranch ||
+          worktree.baseBehind === 0
+        }
       />
       <OperationButton
         icon={<Upload />}
@@ -1468,14 +1572,18 @@ function ActionRow(
         label={t("stashAll")}
         operation="STASH_ALL"
         props={props}
-        disabled={unavailable}
+        disabled={unavailable || !changeActions.hasChanges}
       />
       <OperationButton
         icon={<Check />}
-        label={t("stageAll")}
-        operation="STAGE_ALL"
+        label={
+          changeActions.stageOperation === "UNSTAGE_ALL"
+            ? t("unstageAll")
+            : t("stageAll")
+        }
+        operation={changeActions.stageOperation}
         props={props}
-        disabled={unavailable}
+        disabled={unavailable || !changeActions.hasChanges}
       />
       {worktree.activeJob && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1841,7 +1949,11 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         </TableCell>
         <TableCell>
           <div className="flex flex-wrap items-center gap-1.5">
-            <PullRequestBadges worktree={worktree} />
+            <PullRequestBadges
+              detailsExpanded={expanded}
+              onToggleDetails={expand}
+              worktree={worktree}
+            />
           </div>
         </TableCell>
         <TableCell>

@@ -162,6 +162,25 @@ describe("worktree inventory and inspection", () => {
     expect((await git(folder, "status", "--porcelain")).stdout).toContain(
       "A  new.txt",
     );
+
+    const unstageResult = await operateWorktree(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        operation: "UNSTAGE_ALL",
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect(unstageResult.exitCode).toBe(0);
+    expect((await git(folder, "status", "--porcelain")).stdout).toContain(
+      "?? new.txt",
+    );
   });
 
   test("debounces live worktree activity and stops watching on demand", async () => {
@@ -196,6 +215,7 @@ describe("worktree inventory and inspection", () => {
           expect.objectContaining({
             codebaseId: "codebase-1",
             gitDirectory,
+            hasStagedChanges: false,
             hasUnstagedChanges: true,
           }),
         ),

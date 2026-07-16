@@ -12,7 +12,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import { displayedWorktreePath, WorktreesPage } from "./worktrees-page";
+import {
+  displayedWorktreePath,
+  WorktreesPage,
+  worktreeChangeActionState,
+} from "./worktrees-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -36,6 +40,29 @@ describe("displayedWorktreePath", () => {
     expect(
       displayedWorktreePath("/Users/test/repos/project", "/Users/test/repos"),
     ).toBe("project");
+  });
+});
+
+describe("worktreeChangeActionState", () => {
+  test("chooses stage, unstage, and disabled change actions", () => {
+    expect(
+      worktreeChangeActionState({
+        hasStagedChanges: false,
+        hasUnstagedChanges: false,
+      }),
+    ).toEqual({ hasChanges: false, stageOperation: "STAGE_ALL" });
+    expect(
+      worktreeChangeActionState({
+        hasStagedChanges: true,
+        hasUnstagedChanges: false,
+      }),
+    ).toEqual({ hasChanges: true, stageOperation: "UNSTAGE_ALL" });
+    expect(
+      worktreeChangeActionState({
+        hasStagedChanges: true,
+        hasUnstagedChanges: true,
+      }),
+    ).toEqual({ hasChanges: true, stageOperation: "STAGE_ALL" });
   });
 });
 
@@ -133,6 +160,7 @@ describe("WorktreesPage", () => {
                     baseBranchOverride: null,
                     baseAhead: 1,
                     baseBehind: 0,
+                    hasStagedChanges: false,
                     hasUnstagedChanges: false,
                     highlightColor: "blue",
                     availability: "AVAILABLE",
@@ -140,7 +168,22 @@ describe("WorktreesPage", () => {
                     ticketKey: "AIDE-24",
                     ticketTitle: "Add worktrees page",
                     ticketStatus: "In Progress",
-                    pullRequest: null,
+                    pullRequest: {
+                      id: "pull-request-1",
+                      number: 17,
+                      title: "Add worktrees page",
+                      url: "https://github.com/openai/codex/pull/17",
+                      repositoryGithubId: "repository-1",
+                      repositoryNameWithOwner: "openai/codex",
+                      repositoryUrl: "https://github.com/openai/codex",
+                      labels: [],
+                      jiraKey: "AIDE-24",
+                      pipelineStatus: "NONE",
+                      pipelines: [],
+                      reviewDecision: "NONE",
+                      unresolvedReviewThreadCount: 0,
+                      createdAt: new Date(0).toISOString(),
+                    },
                     tags: [
                       {
                         id: "tag-1",
@@ -190,6 +233,18 @@ describe("WorktreesPage", () => {
     );
     expect(screen.getByText("Commits: 1")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: "Sync" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Stash all" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   test("uses compact menu labels and the expanded bright color palette", async () => {
@@ -221,6 +276,28 @@ describe("WorktreesPage", () => {
     expect(
       menu.querySelector('button[aria-label="fuchsia"]')?.className,
     ).toContain("bg-fuchsia-500");
+  });
+
+  test("opens pull request actions from the PR badge", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "PR #17" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+
+    const github = await screen.findByRole("menuitem", {
+      name: "Open in GitHub",
+    });
+    const details = screen.getByRole("menuitem", { name: "Open details" });
+    expect(github.getAttribute("href")).toBe(
+      "https://github.com/openai/codex/pull/17",
+    );
+    expect(github.getAttribute("target")).toBe("_blank");
+    expect(details.getAttribute("href")).toContain(
+      "/pull-requests/openai/codex/17",
+    );
   });
 
   test("opens the Jira ticket drawer from the ticket key and title", async () => {
@@ -256,7 +333,7 @@ describe("WorktreesPage", () => {
     expect(await screen.findAllByRole("option")).toHaveLength(2);
   });
 
-  test("shows commits and changes as stacked compact tables", async () => {
+  test("toggles stacked commit and change tables from the commits badge", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
     request.mockResolvedValueOnce({
@@ -289,7 +366,9 @@ describe("WorktreesPage", () => {
       },
     } as never);
 
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    const commitsBadge = screen.getByRole("button", { name: "Commits: 1" });
+    expect(commitsBadge.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(commitsBadge);
 
     expect(
       await screen.findByRole("table", { name: "Commits (1)" }),
@@ -314,6 +393,9 @@ describe("WorktreesPage", () => {
     ).toBeLessThan(
       tables.indexOf(screen.getByRole("table", { name: "Commits (1)" })),
     );
+    expect(commitsBadge.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(commitsBadge);
+    expect(screen.queryByRole("table", { name: "Commits (1)" })).toBeNull();
   });
 
   test("refreshes the inspection for an expanded worktree", async () => {
@@ -388,6 +470,7 @@ describe("WorktreesPage", () => {
                 data: {
                   worktreeInspectionChanged: {
                     worktreeId: "worktree-1",
+                    hasStagedChanges: false,
                     hasUnstagedChanges: true,
                     observedAt: new Date().toISOString(),
                   },

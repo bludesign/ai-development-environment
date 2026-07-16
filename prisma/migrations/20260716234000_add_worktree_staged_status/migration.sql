@@ -1,0 +1,1 @@
+ALTER TABLE "Worktree" ADD COLUMN "hasStagedChanges" BOOLEAN NOT NULL DEFAULT false;

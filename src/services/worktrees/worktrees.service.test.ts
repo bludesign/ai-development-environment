@@ -181,6 +181,7 @@ describe("WorktreesService", () => {
     const activity = {
       codebaseId: "codebase-1",
       gitDirectory: "/repo/.git",
+      hasStagedChanges: false,
       hasUnstagedChanges: true,
       observedAt: new Date(0).toISOString(),
     };
@@ -189,12 +190,13 @@ describe("WorktreesService", () => {
       service().reportActivity("agent-1", activity),
     ).resolves.toEqual({
       worktreeId: "worktree-1",
+      hasStagedChanges: false,
       hasUnstagedChanges: true,
       observedAt: activity.observedAt,
     });
     expect(update).toHaveBeenCalledWith({
       where: { id: "worktree-1" },
-      data: { hasUnstagedChanges: true },
+      data: { hasStagedChanges: false, hasUnstagedChanges: true },
     });
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

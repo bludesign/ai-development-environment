@@ -17,24 +17,24 @@ datasource db {
 }
 
 model Agent {
-  id               String            @id
-  name             String
-  hostname         String
-  version          String
-  osVersion        String
-  architecture     String
-  capabilitiesJson String
-  secretHash       String            @unique
-  baseRepoDirectory String?
-  ipAddress        String?
-  lastSeenAt       DateTime?
-  disconnectedAt  DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  jobs             AgentJob[]
+  id                 String                   @id
+  name               String
+  hostname           String
+  version            String
+  osVersion          String
+  architecture       String
+  capabilitiesJson   String
+  secretHash         String                   @unique
+  baseRepoDirectory  String?
+  ipAddress          String?
+  lastSeenAt         DateTime?
+  disconnectedAt     DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  jobs               AgentJob[]
   ccusageCollections CcusageCollectionAgent[]
-  auditEvents      AgentAuditEvent[]
-  codebases        Codebase[]
+  auditEvents        AgentAuditEvent[]
+  codebases          Codebase[]
 }
 
 model AgentEnrollmentToken {
@@ -46,27 +46,27 @@ model AgentEnrollmentToken {
 }
 
 model AgentJob {
-  id             String        @id
-  agentId        String
-  kind           String
-  payloadJson    String
-  status         String
-  idempotencyKey String
-  resultJson     String?
-  error          String?
-  timeoutSeconds Int
-  createdAt      DateTime      @default(now())
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  updatedAt      DateTime      @updatedAt
+  id                  String             @id
+  agentId             String
+  kind                String
+  payloadJson         String
+  status              String
+  idempotencyKey      String
+  resultJson          String?
+  error               String?
+  timeoutSeconds      Int
+  createdAt           DateTime           @default(now())
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  updatedAt           DateTime           @updatedAt
   ccusageCollectionId String?
-  codebaseId       String?
-  worktreeId       String?
-  visibility       String        @default("USER")
-  agent          Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  ccusageCollection CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
-  codebase       Codebase?     @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
-  logs           AgentJobLog[]
+  codebaseId          String?
+  worktreeId          String?
+  visibility          String             @default("USER")
+  agent               Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection   CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  codebase            Codebase?          @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  logs                AgentJobLog[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -90,31 +90,31 @@ model CodebaseRepository {
 }
 
 model Codebase {
-  id                String             @id
-  repositoryId      String
-  agentId           String
-  folder            String
-  observedOrigin    String
-  branch            String?
-  headSha           String?
-  upstream          String?
-  ahead             Int?
-  behind            Int?
-  syncState         String             @default("UNKNOWN")
-  availability      String             @default("AVAILABLE")
-  statusError       String?
-  defaultBranch     String?
-  remoteBranchesJson String           @default("[]")
-  lastCheckedAt     DateTime?
-  lastFetchedAt     DateTime?
+  id                 String             @id
+  repositoryId       String
+  agentId            String
+  folder             String
+  observedOrigin     String
+  branch             String?
+  headSha            String?
+  upstream           String?
+  ahead              Int?
+  behind             Int?
+  syncState          String             @default("UNKNOWN")
+  availability       String             @default("AVAILABLE")
+  statusError        String?
+  defaultBranch      String?
+  remoteBranchesJson String             @default("[]")
+  lastCheckedAt      DateTime?
+  lastFetchedAt      DateTime?
   lastFetchAttemptAt DateTime?
-  lastFetchError    String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  repository        CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  agent             Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  jobs              AgentJob[]
-  worktrees         Worktree[]
+  lastFetchError     String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  repository         CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  agent              Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  jobs               AgentJob[]
+  worktrees          Worktree[]
 
   @@unique([agentId, folder])
   @@index([repositoryId])
@@ -146,6 +146,7 @@ model Worktree {
   baseBranchOverride String?
   baseAhead          Int?
   baseBehind         Int?
+  hasStagedChanges   Boolean                 @default(false)
   hasUnstagedChanges Boolean                 @default(false)
   highlightColor     String?
   availability       String                  @default("AVAILABLE")
@@ -229,12 +230,12 @@ model CcusageCollection {
 }
 
 model CcusageCollectionAgent {
-  collectionId String
-  agentId      String
+  collectionId  String
+  agentId       String
   initialStatus String
-  error        String?
-  collection   CcusageCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  agent        Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  error         String?
+  collection    CcusageCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  agent         Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@id([collectionId, agentId])
   @@index([agentId])
@@ -291,16 +292,16 @@ model JiraProject {
 }
 
 model JiraSource {
-  id           String              @id
+  id           String           @id
   projectId    String
   name         String
   kind         String
   value        String
   boardId      Int?
-  position     Int                 @default(0)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  project      JiraProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  position     Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  project      JiraProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   cacheEntries JiraCacheEntry[]
   apiCalls     JiraApiCallLog[]
 
@@ -383,11 +384,11 @@ model GitHubAppSettings {
   appId               String
   installationId      String
   privateKey          String
-  apiBaseUrl           String   @default("https://api.github.com")
-  graphqlUrl           String   @default("https://api.github.com/graphql")
+  apiBaseUrl          String   @default("https://api.github.com")
+  graphqlUrl          String   @default("https://api.github.com/graphql")
   keyFingerprint      String
-  appSlug              String
-  accountLogin         String
+  appSlug             String
+  accountLogin        String
   repositorySelection String
   actionsPermission   String
   verifiedAt          DateTime
@@ -414,15 +415,15 @@ model GitHubAuditEvent {
 }
 
 model GitHubRepository {
-  id             String   @id
-  githubId       String   @unique
-  owner          String
-  name           String
-  nameWithOwner  String   @unique
-  url            String
-  jiraKeyRegex   String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id
+  githubId      String   @unique
+  owner         String
+  name          String
+  nameWithOwner String   @unique
+  url           String
+  jiraKeyRegex  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([nameWithOwner])
 }
