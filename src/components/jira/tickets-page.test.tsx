@@ -107,9 +107,7 @@ describe("JiraTicketsPage", () => {
 
     render(<JiraTicketsPage />);
 
-    expect(
-      await screen.findByRole("tab", { name: "APP · Application" }),
-    ).toBeDefined();
+    expect(await screen.findByRole("tab", { name: "APP" })).toBeDefined();
     expect(await screen.findByText("In Progress")).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();
@@ -186,7 +184,7 @@ describe("JiraTicketsPage", () => {
     });
 
     render(<JiraTicketsPage />);
-    await screen.findByRole("tab", { name: "APP · Application" });
+    await screen.findByRole("tab", { name: "APP" });
     fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     fireEvent.click(
       await screen.findByRole("button", { name: /OPS · Operations/ }),
@@ -291,7 +289,7 @@ describe("JiraTicketsPage", () => {
     });
 
     render(<JiraTicketsPage />);
-    await screen.findByRole("tab", { name: "APP · Application" });
+    await screen.findByRole("tab", { name: "APP" });
     fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     await chooseSelectOption("Available Jira projects", "OPS · Operations");
     fireEvent.click(screen.getByRole("button", { name: "Add project" }));

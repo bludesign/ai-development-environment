@@ -292,7 +292,7 @@ export function JiraTicketsPage() {
               <TabsList aria-label={t("projectTabs")}>
                 {projects.map((project) => (
                   <TabsTrigger key={project.id} value={project.id}>
-                    {project.key} · {project.name}
+                    {project.key}
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -389,7 +389,7 @@ export function JiraTicketsPage() {
                             <TableRow key={ticket.key}>
                               <TableCell className="min-w-80 whitespace-normal">
                                 <Button
-                                  className="group h-auto w-full justify-start p-0 text-left whitespace-normal"
+                                  className="group h-auto w-full flex-col items-start justify-start gap-0 px-1 py-0.5 text-left whitespace-normal"
                                   onClick={() =>
                                     replaceParams({ issue: ticket.key })
                                   }
