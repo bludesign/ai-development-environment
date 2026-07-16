@@ -796,6 +796,7 @@ function AddCodebaseDialog({
 }) {
   const t = useTranslations("codebases");
   const [agentId, setAgentId] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -813,6 +814,7 @@ function AddCodebaseDialog({
   const reset = () => {
     requestSequence.current += 1;
     setAgentId("");
+    setSelectedFolder(null);
     setInspection(null);
     setName("");
     setDescription("");
@@ -897,6 +899,7 @@ function AddCodebaseDialog({
               onValueChange={(value) => {
                 requestSequence.current += 1;
                 setAgentId(value);
+                setSelectedFolder(null);
                 setInspection(null);
                 setBusy(false);
                 setError(null);
@@ -921,9 +924,7 @@ function AddCodebaseDialog({
               disabled={busy}
               initialPath={selectedAgent?.baseRepoDirectory}
               key={agentId}
-              onSelect={inspect}
-              selectIcon={<FolderGit2 />}
-              selectLabel={t("selectFolder")}
+              onPathChange={setSelectedFolder}
             />
           )}
           {inspection && (
@@ -978,24 +979,35 @@ function AddCodebaseDialog({
               )}
             </div>
           )}
-          <DialogFooter>
-            <Button
-              onClick={() => handleOpenChange(false)}
-              type="button"
-              variant="outline"
-            >
-              {t("cancel")}
-            </Button>
-            {inspection && (
+          <DialogFooter className="flex-row items-center justify-between sm:justify-between">
+            {selectedFolder && !inspection && (
               <Button
-                disabled={
-                  busy || (!inspection.existingRepository && !name.trim())
-                }
-                type="submit"
+                disabled={busy}
+                onClick={() => void inspect(selectedFolder)}
+                type="button"
               >
-                {busy && <Spinner />} {t("confirm")}
+                {busy ? <Spinner /> : <FolderGit2 />} {t("addFolder")}
               </Button>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                onClick={() => handleOpenChange(false)}
+                type="button"
+                variant="outline"
+              >
+                {t("cancel")}
+              </Button>
+              {inspection && (
+                <Button
+                  disabled={
+                    busy || (!inspection.existingRepository && !name.trim())
+                  }
+                  type="submit"
+                >
+                  {busy && <Spinner />} {t("confirm")}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

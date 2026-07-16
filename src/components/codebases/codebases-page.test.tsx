@@ -252,7 +252,9 @@ describe("CodebasesPage", () => {
       agentOptions.find((element) => element.tagName === "SPAN") ??
         agentOptions[0],
     );
-    expect(await screen.findByText("Inspect this folder")).toBeDefined();
+    const addFolder = await screen.findByRole("button", {
+      name: "Add this folder",
+    });
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation BrowseAgentDirectory"),
       expect.objectContaining({
@@ -262,9 +264,10 @@ describe("CodebasesPage", () => {
         }),
       }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Inspect this folder" }),
-    );
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(addFolder.parentElement?.dataset.slot).toBe("dialog-footer");
+    expect(addFolder.parentElement?.contains(cancel)).toBe(true);
+    fireEvent.click(addFolder);
     expect(await screen.findByDisplayValue("codex")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Confirm codebase" }));
     await waitFor(() =>
@@ -335,10 +338,8 @@ describe("CodebasesPage", () => {
         agentOptions[0],
     );
     fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
-    await screen.findByText("Inspect this folder");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Inspect this folder" }),
-    );
+    await screen.findByText("Add this folder");
+    fireEvent.click(screen.getByRole("button", { name: "Add this folder" }));
     await screen.findByDisplayValue("codex");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

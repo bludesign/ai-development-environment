@@ -623,7 +623,7 @@ const mockTranslations = {
     home: "Home",
     showHidden: "Show hidden folders",
     truncated: "Only the first 1,000 folders are shown.",
-    selectFolder: "Inspect this folder",
+    addFolder: "Add this folder",
     detached: "Detached HEAD",
     existingOrigin: "This origin already uses the shared name “{name}”.",
     name: "Repository name",

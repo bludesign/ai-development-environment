@@ -566,7 +566,7 @@
     "home": "Startordner",
     "showHidden": "Versteckte Ordner anzeigen",
     "truncated": "Nur die ersten 1.000 Ordner werden angezeigt.",
-    "selectFolder": "Diesen Ordner prüfen",
+    "addFolder": "Diesen Ordner hinzufügen",
     "detached": "Losgelöster HEAD",
     "existingOrigin": "Dieser Ursprung verwendet bereits den gemeinsamen Namen „{name}“.",
     "name": "Repository-Name",

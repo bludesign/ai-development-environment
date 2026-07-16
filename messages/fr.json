@@ -566,7 +566,7 @@
     "home": "Accueil",
     "showHidden": "Afficher les dossiers cachés",
     "truncated": "Seuls les 1 000 premiers dossiers sont affichés.",
-    "selectFolder": "Inspecter ce dossier",
+    "addFolder": "Ajouter ce dossier",
     "detached": "HEAD détachée",
     "existingOrigin": "Cette origine utilise déjà le nom partagé « {name} ».",
     "name": "Nom du dépôt",

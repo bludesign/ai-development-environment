@@ -31,6 +31,7 @@ export function AgentDirectoryBrowser({
   agentId,
   disabled = false,
   initialPath = null,
+  onPathChange,
   onSelect,
   selectIcon,
   selectLabel,
@@ -38,9 +39,10 @@ export function AgentDirectoryBrowser({
   agentId: string;
   disabled?: boolean;
   initialPath?: string | null;
-  onSelect: (path: string) => Promise<void> | void;
+  onPathChange?: (path: string) => void;
+  onSelect?: (path: string) => Promise<void> | void;
   selectIcon?: ReactNode;
-  selectLabel: string;
+  selectLabel?: string;
 }) {
   const t = useTranslations("codebases");
   const [listing, setListing] = useState<DirectoryListing | null>(null);
@@ -66,6 +68,7 @@ export function AgentDirectoryBrowser({
         );
         if (requestId !== requestSequence.current) return;
         setListing(data.browseAgentDirectory);
+        onPathChange?.(data.browseAgentDirectory.path);
         setError(null);
       } catch (value) {
         if (requestId !== requestSequence.current) return;
@@ -74,7 +77,7 @@ export function AgentDirectoryBrowser({
         if (requestId === requestSequence.current) setBusy(false);
       }
     },
-    [agentId],
+    [agentId, onPathChange],
   );
 
   useEffect(() => {
@@ -174,13 +177,16 @@ export function AgentDirectoryBrowser({
       {listing.truncated && (
         <p className="text-xs text-muted-foreground">{t("truncated")}</p>
       )}
-      <Button
-        disabled={busy || disabled}
-        onClick={() => void onSelect(listing.path)}
-        type="button"
-      >
-        {disabled ? <Spinner /> : (selectIcon ?? <FolderCheck />)} {selectLabel}
-      </Button>
+      {onSelect && selectLabel && (
+        <Button
+          disabled={busy || disabled}
+          onClick={() => void onSelect(listing.path)}
+          type="button"
+        >
+          {disabled ? <Spinner /> : (selectIcon ?? <FolderCheck />)}{" "}
+          {selectLabel}
+        </Button>
+      )}
     </div>
   );
 }
