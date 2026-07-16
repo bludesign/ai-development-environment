@@ -65,6 +65,7 @@ describe("AgentDetail", () => {
             osVersion: "macOS",
             architecture: "arm64",
             capabilities: ["cloudflared.runTunnel"],
+            baseRepoDirectory: null,
             connectionStatus: "ONLINE",
             ipAddress: null,
             lastSeenAt: createdAt,
@@ -147,6 +148,7 @@ describe("AgentDetail", () => {
             osVersion: "macOS",
             architecture: "arm64",
             capabilities: ["cloudflared.runTunnel"],
+            baseRepoDirectory: null,
             connectionStatus: "ONLINE",
             ipAddress: null,
             lastSeenAt: createdAt,
@@ -177,5 +179,70 @@ describe("AgentDetail", () => {
         { id: "job-2" },
       ),
     );
+  });
+
+  test("browses and saves the base repository directory for this agent", async () => {
+    const createdAt = new Date(0).toISOString();
+    const agent = {
+      id: "agent-1",
+      name: "Development Mac",
+      hostname: "dev-mac.local",
+      version: "1.0.0",
+      osVersion: "macOS",
+      architecture: "arm64",
+      capabilities: ["codebase.browse"],
+      baseRepoDirectory: null,
+      connectionStatus: "ONLINE" as const,
+      ipAddress: null,
+      lastSeenAt: createdAt,
+      disconnectedAt: null,
+      createdAt,
+    };
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query AgentDetail")) {
+        return { agent, agentJobs: [] } as never;
+      }
+      if (query.includes("mutation BrowseAgentDirectory")) {
+        return {
+          browseAgentDirectory: {
+            path: "/Users/test/Repositories",
+            parentPath: "/Users/test",
+            homePath: "/Users/test",
+            entries: [],
+            truncated: false,
+          },
+        } as never;
+      }
+      if (query.includes("mutation UpdateAgentBaseRepoDirectory")) {
+        return {
+          updateAgentBaseRepoDirectory: {
+            ...agent,
+            baseRepoDirectory: "/Users/test/Repositories",
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<AgentDetail agentId="agent-1" />);
+    expect(await screen.findByText("Base repository directory")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use this directory" }),
+    );
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("mutation UpdateAgentBaseRepoDirectory"),
+        {
+          agentId: "agent-1",
+          baseRepoDirectory: "/Users/test/Repositories",
+        },
+      ),
+    );
+    expect(await screen.findByText("/Users/test/Repositories")).toBeDefined();
   });
 });

@@ -51,17 +51,7 @@
     "version": "Versión",
     "platform": "Plataforma",
     "lastSeen": "Visto por última vez",
-    "never": "Nunca",
-    "repositoryDirectories": "Directorios de repositorios",
-    "baseRepoDirectory": "Directorio base de repositorios",
-    "baseRepoDirectoryDescription": "Elige la carpeta de un agente que contiene sus repositorios. Las rutas de los worktrees que estén dentro se mostrarán relativas a esta carpeta.",
-    "agent": "Agente",
-    "selectAgent": "Seleccionar un agente en línea",
-    "noDirectoryAgents": "Ningún agente en línea admite la exploración de directorios.",
-    "currentDirectory": "Directorio actual",
-    "notConfigured": "Sin configurar",
-    "useDirectory": "Usar este directorio",
-    "clearDirectory": "Borrar directorio"
+    "never": "Nunca"
   },
   "usage": {
     "title": "Uso",
@@ -127,7 +117,14 @@
     "queuing": "Añadiendo a la cola…",
     "run": "Ejecutar",
     "history": "Historial de trabajos",
-    "noJobs": "No se ha ejecutado ningún trabajo en este agente."
+    "noJobs": "No se ha ejecutado ningún trabajo en este agente.",
+    "baseRepoDirectory": "Directorio base de repositorios",
+    "baseRepoDirectoryDescription": "Elige la carpeta de este agente que contiene sus repositorios. Las rutas de los worktrees que estén dentro se mostrarán relativas a esta carpeta.",
+    "currentDirectory": "Directorio actual",
+    "notConfigured": "Sin configurar",
+    "useDirectory": "Usar este directorio",
+    "clearDirectory": "Borrar directorio",
+    "directoryBrowsingUnavailable": "Conecta este agente y actualízalo si es necesario para explorar directorios."
   },
   "jobs": {
     "back": "Agentes",

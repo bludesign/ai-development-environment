@@ -51,17 +51,7 @@
     "version": "Version",
     "platform": "Platform",
     "lastSeen": "Last seen",
-    "never": "Never",
-    "repositoryDirectories": "Repository directories",
-    "baseRepoDirectory": "Base repository directory",
-    "baseRepoDirectoryDescription": "Choose the folder on an agent that contains its repositories. Worktree paths inside it are shown relative to this folder.",
-    "agent": "Agent",
-    "selectAgent": "Select an online agent",
-    "noDirectoryAgents": "No online agents support directory browsing.",
-    "currentDirectory": "Current directory",
-    "notConfigured": "Not configured",
-    "useDirectory": "Use this directory",
-    "clearDirectory": "Clear directory"
+    "never": "Never"
   },
   "usage": {
     "title": "Usage",
@@ -127,7 +117,14 @@
     "queuing": "Queuing…",
     "run": "Run",
     "history": "Job history",
-    "noJobs": "No jobs have run on this agent."
+    "noJobs": "No jobs have run on this agent.",
+    "baseRepoDirectory": "Base repository directory",
+    "baseRepoDirectoryDescription": "Choose the folder on this agent that contains its repositories. Worktree paths inside it are shown relative to this folder.",
+    "currentDirectory": "Current directory",
+    "notConfigured": "Not configured",
+    "useDirectory": "Use this directory",
+    "clearDirectory": "Clear directory",
+    "directoryBrowsingUnavailable": "Connect this agent and update it if needed to browse directories."
   },
   "jobs": {
     "back": "Agents",

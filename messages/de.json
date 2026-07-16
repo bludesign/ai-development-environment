@@ -51,17 +51,7 @@
     "version": "Version",
     "platform": "Plattform",
     "lastSeen": "Zuletzt gesehen",
-    "never": "Nie",
-    "repositoryDirectories": "Repository-Verzeichnisse",
-    "baseRepoDirectory": "Basisverzeichnis für Repositorys",
-    "baseRepoDirectoryDescription": "Wählen Sie den Ordner auf einem Agenten, der dessen Repositorys enthält. Darin liegende Worktree-Pfade werden relativ zu diesem Ordner angezeigt.",
-    "agent": "Agent",
-    "selectAgent": "Online-Agent auswählen",
-    "noDirectoryAgents": "Kein Online-Agent unterstützt die Verzeichnisnavigation.",
-    "currentDirectory": "Aktuelles Verzeichnis",
-    "notConfigured": "Nicht konfiguriert",
-    "useDirectory": "Dieses Verzeichnis verwenden",
-    "clearDirectory": "Verzeichnis löschen"
+    "never": "Nie"
   },
   "usage": {
     "title": "Nutzung",
@@ -127,7 +117,14 @@
     "queuing": "Wird eingereiht…",
     "run": "Starten",
     "history": "Auftragsverlauf",
-    "noJobs": "Auf diesem Agent wurden noch keine Aufträge ausgeführt."
+    "noJobs": "Auf diesem Agent wurden noch keine Aufträge ausgeführt.",
+    "baseRepoDirectory": "Basisverzeichnis für Repositorys",
+    "baseRepoDirectoryDescription": "Wählen Sie den Ordner auf diesem Agenten, der seine Repositorys enthält. Darin liegende Worktree-Pfade werden relativ zu diesem Ordner angezeigt.",
+    "currentDirectory": "Aktuelles Verzeichnis",
+    "notConfigured": "Nicht konfiguriert",
+    "useDirectory": "Dieses Verzeichnis verwenden",
+    "clearDirectory": "Verzeichnis löschen",
+    "directoryBrowsingUnavailable": "Verbinden Sie diesen Agenten und aktualisieren Sie ihn bei Bedarf, um Verzeichnisse zu durchsuchen."
   },
   "jobs": {
     "back": "Agenten",

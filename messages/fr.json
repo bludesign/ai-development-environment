@@ -51,17 +51,7 @@
     "version": "Version",
     "platform": "Plateforme",
     "lastSeen": "Dernière activité",
-    "never": "Jamais",
-    "repositoryDirectories": "Répertoires de dépôts",
-    "baseRepoDirectory": "Répertoire de base des dépôts",
-    "baseRepoDirectoryDescription": "Choisissez le dossier d’un agent qui contient ses dépôts. Les chemins des worktrees qui s’y trouvent seront affichés relativement à ce dossier.",
-    "agent": "Agent",
-    "selectAgent": "Sélectionner un agent en ligne",
-    "noDirectoryAgents": "Aucun agent en ligne ne prend en charge la navigation dans les répertoires.",
-    "currentDirectory": "Répertoire actuel",
-    "notConfigured": "Non configuré",
-    "useDirectory": "Utiliser ce répertoire",
-    "clearDirectory": "Effacer le répertoire"
+    "never": "Jamais"
   },
   "usage": {
     "title": "Utilisation",
@@ -127,7 +117,14 @@
     "queuing": "Mise en file…",
     "run": "Exécuter",
     "history": "Historique des tâches",
-    "noJobs": "Aucune tâche n’a été exécutée sur cet agent."
+    "noJobs": "Aucune tâche n’a été exécutée sur cet agent.",
+    "baseRepoDirectory": "Répertoire de base des dépôts",
+    "baseRepoDirectoryDescription": "Choisissez le dossier de cet agent qui contient ses dépôts. Les chemins des worktrees qui s’y trouvent seront affichés relativement à ce dossier.",
+    "currentDirectory": "Répertoire actuel",
+    "notConfigured": "Non configuré",
+    "useDirectory": "Utiliser ce répertoire",
+    "clearDirectory": "Effacer le répertoire",
+    "directoryBrowsingUnavailable": "Connectez cet agent et mettez-le à jour si nécessaire pour parcourir les répertoires."
   },
   "jobs": {
     "back": "Agents",
