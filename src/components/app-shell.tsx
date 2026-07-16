@@ -5,6 +5,7 @@ import {
   Blocks,
   Cpu,
   Database,
+  GitPullRequest,
   House,
   PanelLeft,
   PanelRight,
@@ -261,6 +262,29 @@ function NavigationSidebar() {
                   >
                     <Cpu />
                     <span>{t("agents")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("github")}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/pull-requests")}
+                >
+                  <Link
+                    href="/pull-requests"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <GitPullRequest />
+                    <span>{t("pullRequests")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

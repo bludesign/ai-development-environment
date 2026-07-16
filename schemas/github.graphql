@@ -1,0 +1,113 @@
+enum GitHubPullRequestScope {
+  MINE
+  REVIEW_REQUESTED
+  REPOSITORY
+}
+
+enum GitHubPipelineStatus {
+  ERROR
+  EXPECTED
+  FAILURE
+  PENDING
+  SUCCESS
+  NONE
+}
+
+enum GitHubReviewDecision {
+  APPROVED
+  CHANGES_REQUESTED
+  REVIEW_REQUIRED
+  NONE
+}
+
+type GitHubSettings {
+  tokenConfigured: Boolean!
+  updatedAt: String!
+}
+
+type GitHubViewer {
+  login: String!
+  name: String
+  avatarUrl: String!
+  url: String!
+}
+
+type GitHubRepository {
+  id: ID!
+  githubId: ID!
+  owner: String!
+  name: String!
+  nameWithOwner: String!
+  url: String!
+  jiraKeyRegex: String
+}
+
+type GitHubRepositoryCandidate {
+  githubId: ID!
+  nameWithOwner: String!
+  url: String!
+  isPrivate: Boolean!
+  managed: Boolean!
+}
+
+type GitHubRepositoryCandidatePage {
+  items: [GitHubRepositoryCandidate!]!
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type GitHubPullRequest {
+  id: ID!
+  number: Int!
+  title: String!
+  url: String!
+  repositoryGithubId: ID!
+  repositoryNameWithOwner: String!
+  repositoryUrl: String!
+  labels: [String!]!
+  jiraKey: String
+  pipelineStatus: GitHubPipelineStatus!
+  reviewDecision: GitHubReviewDecision!
+  unresolvedReviewThreadCount: Int!
+  createdAt: String!
+}
+
+type GitHubPullRequestPage {
+  items: [GitHubPullRequest!]!
+  truncated: Boolean!
+}
+
+input SaveGitHubSettingsInput {
+  apiToken: String
+}
+
+input AddGitHubRepositoryInput {
+  nameWithOwner: String!
+  jiraKeyRegex: String
+}
+
+input UpdateGitHubRepositoryInput {
+  id: ID!
+  jiraKeyRegex: String
+}
+
+extend type Query {
+  githubSettings: GitHubSettings!
+  githubRepositories: [GitHubRepository!]!
+  githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
+  githubPullRequests(
+    scope: GitHubPullRequestScope!
+    repositoryId: ID
+  ): GitHubPullRequestPage!
+}
+
+extend type Mutation {
+  saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
+  testGitHubConnection: GitHubViewer!
+  clearGitHubCredentials: GitHubSettings!
+  addGitHubRepository(input: AddGitHubRepositoryInput!): [GitHubRepository!]!
+  updateGitHubRepository(
+    input: UpdateGitHubRepositoryInput!
+  ): [GitHubRepository!]!
+  removeGitHubRepository(id: ID!): [GitHubRepository!]!
+}

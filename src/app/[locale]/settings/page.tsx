@@ -1,5 +1,5 @@
-import { JiraSettingsPage } from "@/components/jira/settings-page";
+import { SettingsPage as SettingsPageContent } from "@/components/settings-page";
 
 export default function SettingsPage() {
-  return <JiraSettingsPage />;
+  return <SettingsPageContent />;
 }

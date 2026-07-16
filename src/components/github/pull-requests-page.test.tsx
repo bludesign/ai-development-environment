@@ -1,0 +1,230 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import { controlPlaneRequest } from "@/lib/control-plane-client";
+
+import { PullRequestsPage } from "./pull-requests-page";
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+
+vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneRequest: vi.fn(),
+}));
+
+const requestMock = vi.mocked(controlPlaneRequest);
+const openMock = vi.fn();
+
+function activateTab(tab: HTMLElement) {
+  fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
+  fireEvent.click(tab);
+}
+
+const repository = {
+  id: "local-repository-1",
+  githubId: "repository-1",
+  owner: "acme",
+  name: "widgets",
+  nameWithOwner: "acme/widgets",
+  url: "https://github.com/acme/widgets",
+  jiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+};
+
+const pullRequest = {
+  id: "pull-request-1",
+  number: 17,
+  title: "APP-42 Add the API",
+  url: "https://github.com/acme/widgets/pull/17",
+  repositoryGithubId: "repository-1",
+  repositoryNameWithOwner: "acme/widgets",
+  repositoryUrl: "https://github.com/acme/widgets",
+  labels: ["backend", "ready"],
+  jiraKey: "APP-42",
+  pipelineStatus: "SUCCESS",
+  reviewDecision: "APPROVED",
+  unresolvedReviewThreadCount: 2,
+  createdAt: "2026-07-01T00:00:00.000Z",
+};
+
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
+
+beforeEach(() => {
+  Object.defineProperty(window, "open", {
+    configurable: true,
+    value: openMock,
+  });
+  window.history.replaceState(null, "", "/pull-requests");
+  openMock.mockReset();
+});
+
+afterEach(() => {
+  cleanup();
+  requestMock.mockReset();
+});
+
+function configureRequests() {
+  requestMock.mockImplementation(async (query, variables) => {
+    if (query.includes("GitHubPullRequestConfiguration")) {
+      return {
+        githubSettings: {
+          tokenConfigured: true,
+          updatedAt: new Date(0).toISOString(),
+        },
+        githubRepositories: [repository],
+      } as never;
+    }
+    if (query.includes("query GitHubPullRequests")) {
+      return {
+        githubPullRequests: {
+          items:
+            variables?.scope === "REVIEW_REQUESTED"
+              ? [{ ...pullRequest, id: "review-1", title: "Review this" }]
+              : [pullRequest],
+          truncated: false,
+        },
+      } as never;
+    }
+    if (query.includes("GitHubAvailableRepositories")) {
+      return {
+        githubAvailableRepositories: {
+          items: [
+            {
+              githubId: "repository-2",
+              nameWithOwner: "acme/platform",
+              url: "https://github.com/acme/platform",
+              isPrivate: true,
+              managed: false,
+            },
+          ],
+          hasNextPage: false,
+          endCursor: null,
+        },
+      } as never;
+    }
+    if (query.includes("AddGitHubRepository")) {
+      return {
+        addGitHubRepository: [
+          repository,
+          {
+            ...repository,
+            id: "local-repository-2",
+            githubId: "repository-2",
+            name: "platform",
+            nameWithOwner: "acme/platform",
+            url: "https://github.com/acme/platform",
+          },
+        ],
+      } as never;
+    }
+    if (query.includes("query JiraTicket")) {
+      throw new Error("Jira is not configured in this test");
+    }
+    throw new Error(`Unexpected operation: ${query}`);
+  });
+}
+
+describe("PullRequestsPage", () => {
+  test("renders pull request fields, loads tabs lazily, refreshes, and routes clicks correctly", async () => {
+    configureRequests();
+    render(<PullRequestsPage />);
+
+    expect(await screen.findByRole("tab", { name: "Mine" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Review requests" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "acme/widgets" })).toBeDefined();
+
+    const title = await screen.findByRole("link", {
+      name: "APP-42 Add the API",
+    });
+    const row = title.closest("tr");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLTableRowElement).getByText("backend"),
+    ).toBeDefined();
+    expect(
+      within(row as HTMLTableRowElement).getByText("Passed").className,
+    ).toContain("bg-emerald-500/10");
+    expect(
+      within(row as HTMLTableRowElement).getByText("Approved").className,
+    ).toContain("bg-emerald-500/10");
+
+    fireEvent.click(row as HTMLTableRowElement);
+    expect(openMock).toHaveBeenCalledWith(
+      pullRequest.url,
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    activateTab(screen.getByRole("tab", { name: "Review requests" }));
+    const reviewTitle = await screen.findByText("Review this");
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("query GitHubPullRequests"),
+      { scope: "REVIEW_REQUESTED", repositoryId: null },
+    );
+
+    const callsBeforeRefresh = requestMock.mock.calls.filter(([query]) =>
+      String(query).includes("query GitHubPullRequests"),
+    ).length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.filter(([query]) =>
+          String(query).includes("query GitHubPullRequests"),
+        ).length,
+      ).toBeGreaterThan(callsBeforeRefresh),
+    );
+
+    const reviewRow = reviewTitle.closest("tr");
+    expect(reviewRow).not.toBeNull();
+    fireEvent.click(
+      within(reviewRow as HTMLTableRowElement).getByRole("button", {
+        name: "APP-42",
+      }),
+    );
+    expect(new URLSearchParams(window.location.search).get("issue")).toBe(
+      "APP-42",
+    );
+    expect(openMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("browses repositories and supports exact owner/name entry", async () => {
+    configureRequests();
+    render(<PullRequestsPage />);
+    await screen.findByRole("tab", { name: "Mine" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    expect(await screen.findByText("acme/platform")).toBeDefined();
+    expect(screen.getByText("Private repository")).toBeDefined();
+
+    activateTab(screen.getByRole("tab", { name: "Enter manually" }));
+    fireEvent.change(screen.getByLabelText("Repository owner/name"), {
+      target: { value: "acme/platform" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add repository" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("AddGitHubRepository"),
+        expect.objectContaining({
+          input: expect.objectContaining({ nameWithOwner: "acme/platform" }),
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(
+      await screen.findByRole("tab", { name: "acme/platform" }),
+    ).toBeDefined();
+  });
+});
