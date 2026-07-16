@@ -154,7 +154,7 @@ describe("PullRequestDetailPage", () => {
     expect(jobViewButton.textContent).toContain("View");
     expect(screen.getByText("Changes requested")).toBeDefined();
     const jiraBadge = screen.getByRole("button", { name: "APP-42" });
-    for (const className of ["rounded-full", "px-2", "py-0.5", "text-xs"]) {
+    for (const className of ["rounded-4xl", "px-2", "py-0.5", "text-xs"]) {
       expect(jiraBadge.className).toContain(className);
     }
     expect(

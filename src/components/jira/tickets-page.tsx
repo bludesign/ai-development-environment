@@ -848,7 +848,7 @@ function JiraManagerDialog({
       }}
       open={open}
     >
-      <DialogContent className="max-w-4xl overflow-x-hidden">
+      <DialogContent className="overflow-x-hidden sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{t("manageTitle")}</DialogTitle>
           <DialogDescription>{t("manageDescription")}</DialogDescription>

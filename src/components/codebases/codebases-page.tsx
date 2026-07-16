@@ -861,7 +861,7 @@ function AddCodebaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("addTitle")}</DialogTitle>
           <DialogDescription>{t("addDescription")}</DialogDescription>
