@@ -84,10 +84,10 @@ The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL We
 
 The generic TypeScript agent lives in `packages/control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
 
-Install the agent from the tap's repository head until the first agent release is tagged:
+Install the agent from the tap:
 
 ```bash
-brew install --HEAD control-agent
+brew install control-agent
 ```
 
 Open the app's **Agents** page and create a one-time enrollment command, then run it on the target Mac. The server defaults to the same computer when omitted:
