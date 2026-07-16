@@ -8,18 +8,24 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { copyText } from "@/lib/browser-utils";
 
 import { ToolsPage } from "./tools-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
 }));
+vi.mock("@/lib/browser-utils", () => ({
+  copyText: vi.fn(),
+}));
 
 const requestMock = vi.mocked(controlPlaneRequest);
+const copyTextMock = vi.mocked(copyText);
 
 afterEach(() => {
   cleanup();
   requestMock.mockReset();
+  copyTextMock.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -78,15 +84,36 @@ describe("ToolsPage", () => {
       target: { value: "codebase" },
     });
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Expand get_codebase" }),
-    );
+    const toolRow = await screen.findByRole("button", {
+      name: "Expand get_codebase",
+    });
+    fireEvent.click(screen.getByText("Get a codebase by path."));
+    expect(toolRow.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(toolRow, { key: " " });
+    expect(toolRow.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.keyDown(toolRow, { key: "Enter" });
+    expect(toolRow.getAttribute("aria-expanded")).toBe("true");
     fireEvent.change(screen.getByLabelText(/path/), {
       target: { value: "/work/repo" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
 
     expect(await screen.findByText(/\/work\/repo/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
+    await waitFor(() =>
+      expect(copyTextMock).toHaveBeenCalledWith(
+        JSON.stringify(
+          {
+            structuredContent: { codebase: { path: "/work/repo" } },
+          },
+          null,
+          2,
+        ),
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Response copied" }),
+    ).toBeDefined();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/tools/call",

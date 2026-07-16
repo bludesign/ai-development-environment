@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Pencil,
   Plus,
   RotateCw,
@@ -56,6 +58,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { copyText } from "@/lib/browser-utils";
 
 import type {
   ExternalMcpHeaderDraft,
@@ -687,24 +690,33 @@ function ToolRow({
 }) {
   const t = useTranslations("tools");
   const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = () => setExpanded((value) => !value);
   return (
     <Fragment>
-      <TableRow>
+      <TableRow
+        aria-expanded={expanded}
+        aria-label={
+          expanded
+            ? t("collapseTool", { name: tool.name })
+            : t("expandTool", { name: tool.name })
+        }
+        className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        onClick={toggleExpanded}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggleExpanded();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
         <TableCell>
-          <Button
-            aria-expanded={expanded}
-            aria-label={
-              expanded
-                ? t("collapseTool", { name: tool.name })
-                : t("expandTool", { name: tool.name })
-            }
-            onClick={() => setExpanded((value) => !value)}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-          </Button>
+          {expanded ? (
+            <ChevronDown className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
         </TableCell>
         <TableCell>
           <p className="font-mono text-xs font-medium">{tool.name}</p>
@@ -816,6 +828,9 @@ function ToolRunner({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<unknown>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"IDLE" | "COPIED" | "FAILED">(
+    "IDLE",
+  );
   const properties = asProperties(schema.properties);
   const required = new Set(asStringArray(schema.required));
 
@@ -823,6 +838,7 @@ function ToolRunner({
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setCopyState("IDLE");
     try {
       const body = (await responseJson(
         await fetch("/api/tools/call", {
@@ -841,6 +857,17 @@ function ToolRunner({
       setResult(undefined);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const responseText =
+    result === undefined ? "" : JSON.stringify(result, null, 2);
+  const copyResponse = async () => {
+    try {
+      await copyText(responseText);
+      setCopyState("COPIED");
+    } catch {
+      setCopyState("FAILED");
     }
   };
 
@@ -871,7 +898,26 @@ function ToolRunner({
         </Button>
       </div>
       <div className="min-w-0 space-y-2">
-        <h4 className="text-sm font-medium">{t("response")}</h4>
+        <div className="flex min-h-7 items-center justify-between gap-2">
+          <h4 className="text-sm font-medium">{t("response")}</h4>
+          {result !== undefined && (
+            <Button
+              aria-label={
+                copyState === "COPIED" ? t("copied") : t("copyResponse")
+              }
+              onClick={() => void copyResponse()}
+              size="icon-sm"
+              title={copyState === "COPIED" ? t("copied") : t("copyResponse")}
+              type="button"
+              variant="ghost"
+            >
+              {copyState === "COPIED" ? <Check /> : <Copy />}
+            </Button>
+          )}
+        </div>
+        {copyState === "FAILED" && (
+          <p className="text-xs text-destructive">{t("copyFailed")}</p>
+        )}
         {error ? (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -882,7 +928,7 @@ function ToolRunner({
           </div>
         ) : (
           <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
-            {JSON.stringify(result, null, 2)}
+            {responseText}
           </pre>
         )}
       </div>
