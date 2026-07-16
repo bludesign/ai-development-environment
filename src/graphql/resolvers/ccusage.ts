@@ -68,6 +68,7 @@ export const createCcusageResolvers = (ccusageService: CcusageService) => ({
         await ccusageService.initialize();
         return ccusageService.subscribe(id);
       },
+      resolve: (snapshot: CcusageCollectionSnapshot) => snapshot,
     },
   },
 });

@@ -54,6 +54,14 @@ describe("ccusage resolvers", () => {
     expect(service.collect).toHaveBeenCalledWith("collection-1");
   });
 
+  test("resolves bare collection snapshots from the progress subscription", () => {
+    const resolvers = createCcusageResolvers({} as CcusageService);
+
+    expect(
+      resolvers.Subscription.ccusageCollectionChanged.resolve(snapshot),
+    ).toBe(snapshot);
+  });
+
   test("rejects agent credentials for query, mutation, and subscription", async () => {
     const service = {} as CcusageService;
     const resolvers = createCcusageResolvers(service);

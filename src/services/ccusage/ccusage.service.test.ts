@@ -250,4 +250,73 @@ describe("CcusageService", () => {
     expect(snapshot?.status).toBe("COMPLETED");
     expect(snapshot?.progress.agents[0]?.status).toBe("TIMED_OUT");
   });
+
+  test("finalizes expired restored members that never received a job", async () => {
+    let initialStatus = "QUEUING";
+    let finishedAt: Date | null = null;
+    const deadlineAt = new Date("2026-07-16T12:00:00Z");
+    const createdAt = new Date("2026-07-16T11:57:30Z");
+    const prisma = {
+      ccusageCollection: {
+        findMany: vi.fn().mockResolvedValue([{ id: "collection-1" }]),
+        findUnique: vi.fn(async ({ include }: { include?: unknown }) =>
+          include
+            ? {
+                id: "collection-1",
+                deadlineAt,
+                finishedAt,
+                createdAt,
+                updatedAt: createdAt,
+                agents: [
+                  {
+                    agentId: "alpha",
+                    initialStatus,
+                    error: null,
+                    agent: agent("alpha"),
+                  },
+                ],
+                jobs: [],
+              }
+            : { id: "collection-1", deadlineAt, finishedAt },
+        ),
+        updateMany: vi.fn(async ({ data }: { data: { finishedAt: Date } }) => {
+          finishedAt = data.finishedAt;
+          return { count: 1 };
+        }),
+      },
+      ccusageCollectionAgent: {
+        updateMany: vi.fn(
+          async ({ data }: { data: { initialStatus: string } }) => {
+            initialStatus = data.initialStatus;
+            return { count: 1 };
+          },
+        ),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = {
+      timeoutCollectionJobs: vi.fn().mockResolvedValue([]),
+    } as unknown as AgentControlService;
+    const service = new CcusageService(
+      agentControl,
+      () => new Date("2026-07-16T12:00:01Z"),
+    );
+
+    await service.initialize();
+    const snapshot = await service.getCollection("collection-1");
+
+    expect(prisma.ccusageCollectionAgent.updateMany).toHaveBeenCalledWith({
+      where: {
+        collectionId: "collection-1",
+        agentId: { in: ["alpha"] },
+        initialStatus: "QUEUING",
+      },
+      data: { initialStatus: "TIMED_OUT" },
+    });
+    expect(snapshot?.status).toBe("COMPLETED");
+    expect(snapshot?.progress.agents[0]).toMatchObject({
+      jobId: null,
+      status: "TIMED_OUT",
+    });
+  });
 });

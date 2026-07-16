@@ -245,6 +245,7 @@ export class CcusageService {
       collection.finishedAt === null &&
       collection.deadlineAt.getTime() <= this.now().getTime()
     ) {
+      await this.timeoutMembersWithoutJobs(collection);
       await this.agentControlService.timeoutCollectionJobs(id);
       collection = (await this.loadCollection(id)) ?? collection;
     }
@@ -412,6 +413,32 @@ export class CcusageService {
         jobs: true,
       },
     }) as Promise<PersistedCollection | null>;
+  }
+
+  private async timeoutMembersWithoutJobs(
+    collection: PersistedCollection,
+  ): Promise<void> {
+    const agentsWithJobs = new Set(
+      collection.jobs.map(({ agentId }) => agentId),
+    );
+    const agentIds = collection.agents
+      .filter(
+        ({ agentId, initialStatus }) =>
+          initialStatus === "QUEUING" && !agentsWithJobs.has(agentId),
+      )
+      .map(({ agentId }) => agentId);
+    if (agentIds.length === 0) return;
+
+    const prisma = await getPrismaClient();
+    const updated = await prisma.ccusageCollectionAgent.updateMany({
+      where: {
+        collectionId: collection.id,
+        agentId: { in: agentIds },
+        initialStatus: "QUEUING",
+      },
+      data: { initialStatus: "TIMED_OUT" },
+    });
+    if (updated.count > 0) this.publish(collection.id);
   }
 
   private snapshot(collection: PersistedCollection): CcusageCollectionSnapshot {
