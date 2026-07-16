@@ -66,6 +66,20 @@ export type GitHubAppVerification = {
   githubRequestId: string | null;
 };
 
+export type GitHubActionsWorkflowJob = {
+  id: string | number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string | null;
+  steps?: Array<{
+    number: number;
+    name: string;
+    status: string;
+    conclusion: string | null;
+  }>;
+};
+
 type PreparedCredentials = GitHubAppCredentials & {
   privateKeyPkcs8: string;
   keyFingerprint: string;
@@ -504,6 +518,59 @@ export async function rerunGitHubActionsWorkflow(
     );
   }
   return { githubRequestId };
+}
+
+export async function listGitHubActionsWorkflowJobs(
+  credentials: GitHubAppCredentials,
+  input: { owner: string; repository: string; workflowRunId: string },
+): Promise<GitHubActionsWorkflowJob[]> {
+  const jobs: GitHubActionsWorkflowJob[] = [];
+  let page = 1;
+  let totalCount = 0;
+  do {
+    const url = `${credentials.apiBaseUrl}/repos/${encodeURIComponent(
+      input.owner,
+    )}/${encodeURIComponent(input.repository)}/actions/runs/${encodeURIComponent(
+      input.workflowRunId,
+    )}/jobs?filter=latest&per_page=100&page=${page}`;
+    const requestResult = await withInstallationToken(credentials, (token) =>
+      githubFetch(url, {
+        headers: githubHeaders(`Bearer ${token}`),
+      }),
+    );
+    const { response, token } = requestResult;
+    const githubRequestId = requestId(response);
+    if (response.status === 401) {
+      throw new GitHubAppError(
+        "GITHUB_APP_UNAUTHORIZED",
+        "GitHub rejected the installation access token",
+        githubRequestId,
+      );
+    }
+    const body = await responseBody(response);
+    if (!response.ok || !body || typeof body !== "object") {
+      throw new GitHubAppError(
+        "GITHUB_APP_REQUEST_FAILED",
+        responseMessage(body, response.status, [token, credentials.privateKey]),
+        githubRequestId,
+      );
+    }
+    const result = body as {
+      total_count?: number;
+      jobs?: GitHubActionsWorkflowJob[];
+    };
+    if (!Number.isInteger(result.total_count) || !Array.isArray(result.jobs)) {
+      throw new GitHubAppError(
+        "GITHUB_APP_REQUEST_FAILED",
+        "GitHub returned an invalid workflow jobs response",
+        githubRequestId,
+      );
+    }
+    totalCount = result.total_count ?? 0;
+    jobs.push(...result.jobs);
+    page += 1;
+  } while (jobs.length < totalCount);
+  return jobs;
 }
 
 export async function rerunGitHubActionsJob(

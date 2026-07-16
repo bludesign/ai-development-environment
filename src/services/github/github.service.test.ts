@@ -52,6 +52,7 @@ const state = vi.hoisted(() => ({
 const appClient = vi.hoisted(() => ({
   clearTokenCache: vi.fn(),
   graphql: vi.fn(),
+  listJobs: vi.fn(),
   rerun: vi.fn(),
   rerunJob: vi.fn(),
   verify: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     ...original,
     clearGitHubAppTokenCache: appClient.clearTokenCache,
     githubAppGraphql: appClient.graphql,
+    listGitHubActionsWorkflowJobs: appClient.listJobs,
     rerunGitHubActionsJob: appClient.rerunJob,
     rerunGitHubActionsWorkflow: appClient.rerun,
     verifyGitHubAppConfiguration: appClient.verify,
@@ -245,6 +247,30 @@ beforeEach(() => {
     data: { repository: { id: "repository-1" } },
     githubRequestId: "GRAPHQL-1",
   });
+  appClient.listJobs.mockReset();
+  appClient.listJobs.mockResolvedValue([
+    {
+      id: 11,
+      name: "test",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+      steps: [
+        {
+          number: 1,
+          name: "Set up job",
+          status: "completed",
+          conclusion: "success",
+        },
+        {
+          number: 2,
+          name: "Run tests",
+          status: "completed",
+          conclusion: "failure",
+        },
+      ],
+    },
+  ]);
   appClient.rerun.mockReset();
   appClient.rerun.mockResolvedValue({ githubRequestId: "REST-1" });
   appClient.rerunJob.mockReset();
@@ -377,6 +403,7 @@ describe("GitHub service", () => {
   });
 
   test("hydrates workflow jobs for pull request list queries that request them", async () => {
+    state.appSettings = null;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/actions/runs/1/jobs")) {
         return response({
@@ -438,12 +465,21 @@ describe("GitHub service", () => {
         id: "11",
         name: "test",
         status: "FAILURE",
+        canRetry: false,
         steps: [
           expect.objectContaining({ name: "Set up job", status: "SUCCESS" }),
           expect.objectContaining({ name: "Run tests", status: "FAILURE" }),
         ],
       }),
     ]);
+    expect(appClient.listJobs).not.toHaveBeenCalled();
+    expect(
+      (
+        fetchMock.mock.calls.find(([url]) =>
+          url.includes("/actions/runs/1/jobs"),
+        )?.[1]?.headers as Record<string, string>
+      ).authorization,
+    ).toBe("Bearer secret-token");
   });
 
   test("requires credentials and redacts a token echoed by GitHub", async () => {
@@ -593,6 +629,10 @@ describe("GitHub service", () => {
         },
       ],
     });
+    expect(appClient.listJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123", installationId: "456" }),
+      { owner: "acme", repository: "widgets", workflowRunId: "1" },
+    );
     state.repositories = [];
     await expect(
       new GitHubService().retryPipeline("repository-1", "check-suite-1", {
@@ -644,8 +684,28 @@ describe("GitHub service", () => {
     expect(state.auditEvents).toContainEqual(
       expect.objectContaining({
         operation: "GITHUB_ACTIONS_JOB_RERUN",
+        jobId: "11",
         githubRequestId: "REST-JOB-1",
         outcome: "SUCCESS",
+      }),
+    );
+    appClient.rerunJob.mockRejectedValueOnce(new Error("rerun failed"));
+    await expect(
+      new GitHubService().retryWorkflowJob(
+        "repository-1",
+        "check-suite-1",
+        "12",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
+    ).rejects.toThrow("rerun failed");
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
+        jobId: "12",
+        outcome: "FAILURE",
       }),
     );
   });

@@ -5,6 +5,8 @@ import {
   clearGitHubAppTokenCache,
   githubAppGraphql,
   GitHubAppError,
+  listGitHubActionsWorkflowJobs,
+  type GitHubActionsWorkflowJob,
   type GitHubAppCredentials,
   rerunGitHubActionsJob,
   rerunGitHubActionsWorkflow,
@@ -122,20 +124,6 @@ type RawPullRequestDetail = RawPullRequest & {
   changedFiles: number;
   commits: { totalCount: number };
   mergedAt: string | null;
-};
-
-type RawWorkflowJob = {
-  id: string | number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-  html_url: string | null;
-  steps?: Array<{
-    number: number;
-    name: string;
-    status: string;
-    conclusion: string | null;
-  }>;
 };
 
 type GitHubResponse<T> = {
@@ -478,25 +466,16 @@ export class GitHubService {
     repository: string,
     workflowRunId: string,
     token: string,
-    appConfigured: boolean,
+    appCredentials: GitHubAppCredentials | null,
   ): Promise<GitHubWorkflowJobView[]> {
-    const jobs: RawWorkflowJob[] = [];
-    let page = 1;
-    let totalCount = 0;
-    do {
-      const result = await this.restRequest<{
-        total_count: number;
-        jobs: RawWorkflowJob[];
-      }>(
-        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+    const jobs: GitHubActionsWorkflowJob[] = appCredentials
+      ? await listGitHubActionsWorkflowJobs(appCredentials, {
+          owner,
           repository,
-        )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=latest&per_page=100&page=${page}`,
-        token,
-      );
-      totalCount = result.total_count;
-      jobs.push(...result.jobs);
-      page += 1;
-    } while (jobs.length < totalCount);
+          workflowRunId,
+        })
+      : await this.patWorkflowJobs(owner, repository, workflowRunId, token);
+    const appConfigured = appCredentials !== null;
 
     return jobs.map((job) => {
       const completed = job.status.toLowerCase() === "completed";
@@ -518,6 +497,32 @@ export class GitHubService {
         })),
       };
     });
+  }
+
+  private async patWorkflowJobs(
+    owner: string,
+    repository: string,
+    workflowRunId: string,
+    token: string,
+  ): Promise<GitHubActionsWorkflowJob[]> {
+    const jobs: GitHubActionsWorkflowJob[] = [];
+    let page = 1;
+    let totalCount = 0;
+    do {
+      const result = await this.restRequest<{
+        total_count: number;
+        jobs: GitHubActionsWorkflowJob[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repository,
+        )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=latest&per_page=100&page=${page}`,
+        token,
+      );
+      totalCount = result.total_count;
+      jobs.push(...result.jobs);
+      page += 1;
+    } while (jobs.length < totalCount);
+    return jobs;
   }
 
   private async requireToken(): Promise<string> {
@@ -578,6 +583,7 @@ export class GitHubService {
       operation: string;
       repositoryId?: string | null;
       checkSuiteId?: string | null;
+      jobId?: string | null;
       githubRequestId?: string | null;
       outcome: "SUCCESS" | "FAILURE";
       errorCode?: string | null;
@@ -594,6 +600,7 @@ export class GitHubService {
           operation: input.operation,
           repositoryId: input.repositoryId ?? null,
           checkSuiteId: input.checkSuiteId ?? null,
+          jobId: input.jobId ?? null,
           githubRequestId: input.githubRequestId ?? null,
           outcome: input.outcome,
           errorCode: input.errorCode ?? null,
@@ -653,6 +660,17 @@ export class GitHubService {
         "A verified GitHub App is required to rerun GitHub Actions workflows",
       );
     }
+    return this.appCredentials(settings);
+  }
+
+  private appCredentials(settings: {
+    appId: string;
+    installationId: string;
+    privateKey: string;
+    apiBaseUrl: string;
+    graphqlUrl: string;
+    keyFingerprint: string;
+  }): GitHubAppCredentials {
     return {
       appId: settings.appId,
       installationId: settings.installationId,
@@ -1224,12 +1242,13 @@ export class GitHubService {
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
     const repositories = await prisma.gitHubRepository.findMany();
-    const appConfigured = Boolean(
-      await prisma.gitHubAppSettings.findUnique({
-        where: { id: GITHUB_APP_SETTINGS_ID },
-        select: { id: true },
-      }),
-    );
+    const appSettings = await prisma.gitHubAppSettings.findUnique({
+      where: { id: GITHUB_APP_SETTINGS_ID },
+    });
+    const appConfigured = Boolean(appSettings);
+    const appCredentials = appSettings
+      ? this.appCredentials(appSettings)
+      : null;
     const regexByGitHubId = new Map(
       repositories.map((repository) => [
         repository.githubId,
@@ -1320,7 +1339,7 @@ export class GitHubService {
                     name,
                     pipeline.workflowRunId,
                     token,
-                    appConfigured,
+                    appCredentials,
                   ),
                 };
               }),
@@ -1385,7 +1404,6 @@ export class GitHubService {
       prisma.gitHubRepository.findMany(),
       prisma.gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
-        select: { id: true },
       }),
     ]);
     const managedRepository = managedRepositories.find(
@@ -1408,7 +1426,7 @@ export class GitHubService {
             name,
             workflowRunId,
             token,
-            Boolean(appSettings),
+            appSettings ? this.appCredentials(appSettings) : null,
           ),
         };
       }),
@@ -1649,6 +1667,7 @@ export class GitHubService {
         operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,
         checkSuiteId,
+        jobId,
         githubRequestId: result.githubRequestId,
         outcome: "SUCCESS",
       });
@@ -1658,6 +1677,7 @@ export class GitHubService {
         operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,
         checkSuiteId,
+        jobId,
         githubRequestId:
           error instanceof GitHubAppError ? error.githubRequestId : null,
         outcome: "FAILURE",

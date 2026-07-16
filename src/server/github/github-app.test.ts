@@ -9,6 +9,7 @@ import {
   clearGitHubAppTokenCache,
   githubAppGraphql,
   GitHubAppError,
+  listGitHubActionsWorkflowJobs,
   rerunGitHubActionsJob,
   rerunGitHubActionsWorkflow,
   verifyGitHubAppConfiguration,
@@ -224,6 +225,40 @@ describe("GitHub App authentication", () => {
     expect((caught as Error).message).toContain("[REDACTED]");
     expect((caught as Error).message).not.toContain("secret-token");
     expect((caught as Error).message).not.toContain("BEGIN RSA PRIVATE KEY");
+  });
+
+  test("lists workflow jobs with the installation token", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/access_tokens")) return tokenResponse();
+      if (url.includes("/actions/runs/987/jobs")) {
+        expect((init?.headers as Record<string, string>).authorization).toBe(
+          "Bearer installation-token",
+        );
+        return response({
+          total_count: 1,
+          jobs: [
+            {
+              id: 11,
+              name: "test",
+              status: "completed",
+              conclusion: "success",
+              html_url:
+                "https://github.com/acme/widgets/actions/runs/987/job/11",
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listGitHubActionsWorkflowJobs(credentials, {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: 11, name: "test" })]);
   });
 
   test("verifies a job belongs to the workflow run before rerunning it", async () => {

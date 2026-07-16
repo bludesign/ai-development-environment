@@ -226,6 +226,7 @@ model GitHubAuditEvent {
   operation       String
   repositoryId    String?
   checkSuiteId    String?
+  jobId           String?
   githubRequestId String?
   outcome         String
   errorCode       String?
