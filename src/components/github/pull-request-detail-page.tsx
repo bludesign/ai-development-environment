@@ -369,7 +369,7 @@ export function PullRequestDetailPage({
                         </TableRow>
                         <TableRow className="bg-muted/20 hover:bg-muted/20">
                           <TableCell className="p-0" colSpan={3}>
-                            <div className="border-l-2 border-muted-foreground/20 py-1 pl-4">
+                            <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
                               <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                                 {t("jobCount", {
                                   count: pipeline.jobs.length,
@@ -540,13 +540,14 @@ function WorkflowJob({
           </Badge>
         </button>
         {job.url && (
-          <Button asChild size="icon-sm" variant="ghost">
+          <Button asChild size="sm" variant="outline">
             <a
               aria-label={t("viewJob", { job: job.name })}
               href={job.url}
               rel="noreferrer"
               target="_blank"
             >
+              {t("viewPipeline")}
               <ExternalLink />
             </a>
           </Button>
@@ -560,7 +561,7 @@ function WorkflowJob({
         />
       </div>
       {expanded && (
-        <div className="mx-4 mb-3 ml-10 rounded-md border bg-background p-3">
+        <div className="mb-3 w-full rounded-md border bg-background p-3">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t("steps")}
           </p>

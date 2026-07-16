@@ -138,6 +138,20 @@ describe("PullRequestDetailPage", () => {
     expect(jobButton.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Set up job")).toBeDefined();
     expect(screen.getByText("Run tests")).toBeDefined();
+    const stepsPanel = screen.getByText("Steps").parentElement;
+    expect(stepsPanel?.className).toContain("w-full");
+    expect(stepsPanel?.className).not.toContain("ml-10");
+    expect(stepsPanel?.className).not.toContain("mx-4");
+    const jobsContainer =
+      stepsPanel?.parentElement?.parentElement?.parentElement;
+    expect(jobsContainer?.className).toContain("px-4");
+    expect(jobsContainer?.className).not.toContain("pl-4");
+    const jobViewButton = screen.getByRole("link", {
+      name: "View test on GitHub",
+    });
+    expect(jobViewButton.getAttribute("data-variant")).toBe("outline");
+    expect(jobViewButton.getAttribute("data-size")).toBe("sm");
+    expect(jobViewButton.textContent).toContain("View");
     expect(screen.getByText("Changes requested")).toBeDefined();
     const jiraBadge = screen.getByRole("button", { name: "APP-42" });
     for (const className of ["rounded-full", "px-2", "py-0.5", "text-xs"]) {
