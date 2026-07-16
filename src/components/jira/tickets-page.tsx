@@ -348,10 +348,7 @@ export function JiraTicketsPage() {
                   replaceParams({ source: sourceId, issue: null })
                 }
               >
-                <TabsList
-                  aria-label={t("sourceTabs")}
-                  className="bg-transparent p-0"
-                >
+                <TabsList aria-label={t("sourceTabs")} variant="line">
                   {selectedProject.sources.map((source) => (
                     <TabsTrigger key={source.id} value={source.id}>
                       {source.name}
@@ -851,7 +848,7 @@ function JiraManagerDialog({
       }}
       open={open}
     >
-      <DialogContent className="max-w-4xl overflow-x-hidden">
+      <DialogContent className="overflow-x-hidden sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{t("manageTitle")}</DialogTitle>
           <DialogDescription>{t("manageDescription")}</DialogDescription>

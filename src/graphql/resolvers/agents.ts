@@ -142,7 +142,11 @@ export const createAgentResolvers = (
       context: GraphQLContext,
     ) => {
       requireOwnedAgent(context, agentId);
-      return agentControlService.listJobs(agentId, limit);
+      return agentControlService.listJobs(
+        agentId,
+        limit,
+        Boolean(context.agentId),
+      );
     },
     agentJob: async (
       _root: unknown,

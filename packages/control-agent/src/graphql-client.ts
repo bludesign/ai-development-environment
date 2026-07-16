@@ -3,6 +3,7 @@ import { createClient, type Client } from "graphql-ws";
 import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
+import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
 
 export type AgentJob = {
   id: string;
@@ -12,6 +13,17 @@ export type AgentJob = {
   status:
     "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
   timeoutSeconds: number;
+};
+
+export type AgentCodebaseRegistration = {
+  id: string;
+  folder: string;
+  canonicalOrigin: string;
+};
+
+export type AgentCodebaseConfiguration = {
+  refreshIntervalSeconds: number;
+  codebases: AgentCodebaseRegistration[];
 };
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
@@ -145,6 +157,38 @@ export class AgentGraphQLClient {
 
   health() {
     return this.request<{ health: string }>(`query Health { health }`);
+  }
+
+  async agentCodebases(): Promise<AgentCodebaseRegistration[]> {
+    const data = await this.request<{
+      agentCodebases: Array<{
+        id: string;
+        folder: string;
+        canonicalOrigin: string;
+      }>;
+    }>(`query AgentCodebases { agentCodebases { id folder canonicalOrigin } }`);
+    return data.agentCodebases;
+  }
+
+  async agentCodebaseConfiguration(): Promise<AgentCodebaseConfiguration> {
+    const data = await this.request<{
+      agentCodebaseConfiguration: AgentCodebaseConfiguration;
+    }>(`query AgentCodebaseConfiguration {
+      agentCodebaseConfiguration {
+        refreshIntervalSeconds
+        codebases { id folder canonicalOrigin }
+      }
+    }`);
+    return data.agentCodebaseConfiguration;
+  }
+
+  reportCodebaseStatuses(reports: CodebaseStatusReport[]) {
+    return this.request<{ reportCodebaseStatuses: Array<{ id: string }> }>(
+      `mutation ReportCodebaseStatuses($reports: [CodebaseStatusReportInput!]!) {
+        reportCodebaseStatuses(reports: $reports) { id }
+      }`,
+      { reports },
+    );
   }
 }
 

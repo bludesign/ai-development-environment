@@ -4,6 +4,15 @@ import {
   CCUSAGE_REPORT_JOB_KIND,
   TUNNEL_NAME_REGEX,
 } from "@ai-development-environment/agent-contract";
+import {
+  CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_INSPECT_JOB_KIND,
+  CODEBASE_JOB_KINDS,
+  CODEBASE_REFRESH_JOB_KIND,
+  codebaseBrowsePayload,
+  codebaseJobPayload,
+} from "@ai-development-environment/agent-contract/codebases";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -28,7 +37,18 @@ export const AGENT_ONLINE_WINDOW_MS = 45_000;
 export const SUPPORTED_AGENT_JOBS = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
+  ...CODEBASE_JOB_KINDS,
 ] as const;
+
+type CompletionHandler = (job: {
+  id: string;
+  agentId: string;
+  codebaseId: string | null;
+  kind: string;
+  status: string;
+  resultJson: string | null;
+  error: string | null;
+}) => Promise<void>;
 
 export type RequestIdentity = {
   agentId: string | null;
@@ -48,6 +68,18 @@ function parsePayload(payload: unknown): Record<string, unknown> {
 
 export function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
+  if (kind === CODEBASE_BROWSE_JOB_KIND) {
+    codebaseBrowsePayload(value);
+    return;
+  }
+  if (
+    kind === CODEBASE_INSPECT_JOB_KIND ||
+    kind === CODEBASE_REFRESH_JOB_KIND ||
+    kind === CODEBASE_FETCH_JOB_KIND
+  ) {
+    codebaseJobPayload(value);
+    return;
+  }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
     const unexpected = Object.keys(value);
     if (unexpected.length > 0) {
@@ -92,6 +124,16 @@ function publishJob(job: {
 }
 
 export class AgentControlService {
+  private readonly completionHandlers = new Map<string, CompletionHandler>();
+
+  registerCompletionHandler(kind: string, handler: CompletionHandler): void {
+    this.completionHandlers.set(kind, handler);
+  }
+
+  private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
+    await this.completionHandlers.get(job.kind)?.(job);
+  }
+
   async authenticate(credential: string | null): Promise<string | null> {
     if (!credential) return null;
     const prisma = await getPrismaClient();
@@ -205,10 +247,10 @@ export class AgentControlService {
     return prisma.agent.findUnique({ where: { id } });
   }
 
-  async listJobs(agentId: string, limit = 50) {
+  async listJobs(agentId: string, limit = 50, includeSystem = false) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findMany({
-      where: { agentId },
+      where: { agentId, ...(includeSystem ? {} : { visibility: "USER" }) },
       orderBy: { createdAt: "desc" },
       take: Math.max(1, Math.min(limit, 200)),
     });
@@ -226,6 +268,8 @@ export class AgentControlService {
     idempotencyKey: string;
     timeoutSeconds?: number | null;
     ccusageCollectionId?: string | null;
+    codebaseId?: string | null;
+    visibility?: "USER" | "SYSTEM";
   }) {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
@@ -269,6 +313,8 @@ export class AgentControlService {
           idempotencyKey: input.idempotencyKey,
           timeoutSeconds,
           ccusageCollectionId: input.ccusageCollectionId ?? null,
+          codebaseId: input.codebaseId ?? null,
+          visibility: input.visibility ?? "USER",
         },
       });
     } catch (error) {
@@ -380,7 +426,10 @@ export class AgentControlService {
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job || job.agentId !== agentId)
       throw new Error("Job not found for this agent");
-    if (FINAL_JOB_STATUSES.has(job.status)) return job;
+    if (FINAL_JOB_STATUSES.has(job.status)) {
+      await this.projectCompletion(job);
+      return job;
+    }
     const completed = await prisma.agentJob.updateMany({
       where: { id: jobId, agentId, status: { in: ACTIVE_JOB_STATUSES } },
       data: {
@@ -398,9 +447,13 @@ export class AgentControlService {
       throw new Error("Job not found for this agent");
     }
     if (completed.count !== 1) {
-      if (FINAL_JOB_STATUSES.has(updated.status)) return updated;
+      if (FINAL_JOB_STATUSES.has(updated.status)) {
+        await this.projectCompletion(updated);
+        return updated;
+      }
       throw new Error(`Job cannot be completed from status ${updated.status}`);
     }
+    await this.projectCompletion(updated);
     publishJob(updated);
     return updated;
   }

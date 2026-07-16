@@ -85,3 +85,4 @@ export const agentJobChangedTopic = (jobId: string) => `job.${jobId}.changed`;
 export const agentJobLogTopic = (jobId: string) => `job.${jobId}.log`;
 export const ccusageCollectionChangedTopic = (collectionId: string) =>
   `ccusage.${collectionId}.changed`;
+export const CODEBASE_CHANGED_TOPIC = "codebase.changed";

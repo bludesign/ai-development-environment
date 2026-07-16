@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   heartbeat: vi.fn(),
@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   subscribe: vi.fn(),
   unsubscribe: vi.fn(),
   dispose: vi.fn(),
+  codebaseReconcile: vi.fn(),
+  codebaseIntervalMs: 30_000,
 }));
 
 vi.mock("./graphql-client.js", () => ({
@@ -45,6 +47,17 @@ vi.mock("./job-executor.js", () => ({
   },
 }));
 
+vi.mock("./codebase-monitor.js", () => ({
+  CodebaseMonitor: class {
+    get reconcileIntervalMs() {
+      return mocks.codebaseIntervalMs;
+    }
+    reconcile(...args: unknown[]) {
+      return mocks.codebaseReconcile(...args);
+    }
+  },
+}));
+
 vi.mock("./inventory.js", () => ({
   collectInventory: () => ({
     hostname: "test.local",
@@ -73,8 +86,12 @@ beforeEach(() => {
   mocks.completeJob.mockResolvedValue({});
   mocks.cancelAll.mockResolvedValue(undefined);
   mocks.dispose.mockResolvedValue(undefined);
+  mocks.codebaseReconcile.mockResolvedValue(undefined);
+  mocks.codebaseIntervalMs = 30_000;
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("runAgent startup reconciliation", () => {
   test("stays running when the initial durable-job query fails", async () => {
@@ -105,6 +122,23 @@ describe("runAgent startup reconciliation", () => {
       "Agent service restarted while this job was running",
     );
     expect(mocks.execute).toHaveBeenCalledWith(queuedJob);
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  test("uses the configured delay after each completed codebase scan", async () => {
+    vi.useFakeTimers();
+    mocks.codebaseIntervalMs = 120_000;
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+
+    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(2);
 
     controller.abort();
     await expect(running).resolves.toBeUndefined();

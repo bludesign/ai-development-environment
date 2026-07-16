@@ -7,6 +7,7 @@ import {
   Cpu,
   Database,
   GitPullRequest,
+  FolderGit2,
   House,
   PanelLeft,
   PanelRight,
@@ -244,6 +245,22 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/codebases")}
+                >
+                  <Link
+                    href="/codebases"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <FolderGit2 />
+                    <span>{t("codebases")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

@@ -6,6 +6,7 @@ import {
 } from "./graphql-client.js";
 import { collectInventory } from "./inventory.js";
 import { JobExecutor } from "./job-executor.js";
+import { CodebaseMonitor } from "./codebase-monitor.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -15,8 +16,10 @@ export async function runAgent(
 ): Promise<void> {
   const client = new AgentGraphQLClient(config.server, config.credential);
   const executor = new JobExecutor(client);
+  const codebaseMonitor = new CodebaseMonitor(client);
   const inventory = collectInventory();
   let reconciling = false;
+  let codebaseTimer: ReturnType<typeof setTimeout> | undefined;
   let startupRecoveryPending = true;
   const interruptedJobs = new Set<string>();
 
@@ -84,7 +87,18 @@ export async function runAgent(
     }
   };
 
+  const reconcileCodebases = async () => {
+    await codebaseMonitor.reconcile(signal);
+    if (!signal.aborted) {
+      codebaseTimer = setTimeout(
+        () => void reconcileCodebases(),
+        codebaseMonitor.reconcileIntervalMs,
+      );
+    }
+  };
+
   await heartbeat();
+  void reconcileCodebases();
 
   const subscriptionClient = createAgentSubscriptionClient(config);
   const unsubscribe = subscribeToAgentEvents(
@@ -106,6 +120,7 @@ export async function runAgent(
   });
 
   clearInterval(heartbeatTimer);
+  if (codebaseTimer) clearTimeout(codebaseTimer);
   unsubscribe();
   await subscriptionClient.dispose();
   await executor.cancelAll();

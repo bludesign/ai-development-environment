@@ -58,6 +58,7 @@
     "@apollo/server": "5.5.1",
     "@apollo/subgraph": "2.14.2",
     "@as-integrations/next": "4.1.0",
+    "@base-ui/react": "^1.6.0",
     "@graphql-tools/merge": "9.2.0",
     "@mdx-js/loader": "3.1.1",
     "@next/mdx": "16.2.10",
