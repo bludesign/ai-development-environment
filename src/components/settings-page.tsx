@@ -10,9 +10,10 @@ import {
   ShieldCheck,
   Trash2,
   Unplug,
+  Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
@@ -58,6 +59,7 @@ function GitHubAppSettingsCard() {
   const [installationId, setInstallationId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [deploymentUrl, setDeploymentUrl] = useState("");
+  const [draggingPem, setDraggingPem] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -162,6 +164,38 @@ function GitHubAppSettingsCard() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const loadPemFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pem")) {
+      setError(t("pemFileInvalid"));
+      setNotice(null);
+      return;
+    }
+    try {
+      const contents = await file.text();
+      if (
+        !/-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(contents) ||
+        !/-----END (?:RSA )?PRIVATE KEY-----/.test(contents)
+      ) {
+        setError(t("pemFileInvalid"));
+        setNotice(null);
+        return;
+      }
+      setPrivateKey(contents);
+      setError(null);
+      setNotice(t("pemFileLoaded", { filename: file.name }));
+    } catch {
+      setError(t("pemFileReadError"));
+      setNotice(null);
+    }
+  };
+
+  const dropPemFile = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDraggingPem(false);
+    const file = event.dataTransfer.files.item(0);
+    if (file) void loadPemFile(file);
   };
 
   return (
@@ -280,19 +314,42 @@ function GitHubAppSettingsCard() {
                 >
                   {t("privateKey")}
                 </Label>
-                <Textarea
-                  autoComplete="new-password"
-                  className="min-h-40 font-mono text-xs"
-                  id="github-app-private-key"
-                  onChange={(event) => setPrivateKey(event.target.value)}
-                  placeholder={
-                    settings?.privateKeyConfigured
-                      ? t("privateKeyPlaceholderConfigured")
-                      : t("privateKeyPlaceholder")
-                  }
-                  required={!settings?.privateKeyConfigured}
-                  value={privateKey}
-                />
+                <div
+                  aria-label={t("privateKeyDropZone")}
+                  className={`rounded-md border border-dashed p-2 transition-colors ${
+                    draggingPem ? "border-primary bg-primary/5" : "border-input"
+                  }`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setDraggingPem(true);
+                  }}
+                  onDragLeave={() => setDraggingPem(false)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    setDraggingPem(true);
+                  }}
+                  onDrop={dropPemFile}
+                  role="group"
+                >
+                  <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Upload className="size-3.5" />
+                    {t("pemDropHint")}
+                  </p>
+                  <Textarea
+                    autoComplete="new-password"
+                    className="min-h-40 border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+                    id="github-app-private-key"
+                    onChange={(event) => setPrivateKey(event.target.value)}
+                    placeholder={
+                      settings?.privateKeyConfigured
+                        ? t("privateKeyPlaceholderConfigured")
+                        : t("privateKeyPlaceholder")
+                    }
+                    required={!settings?.privateKeyConfigured}
+                    value={privateKey}
+                  />
+                </div>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {settings?.privateKeyConfigured
                     ? t("privateKeyKeepHelp")

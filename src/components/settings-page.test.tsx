@@ -154,11 +154,43 @@ describe("SettingsPage", () => {
 
     fireEvent.change(appId, { target: { value: "123" } });
     fireEvent.change(installationId, { target: { value: "456" } });
-    fireEvent.change(privateKey, {
-      target: {
-        value: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+    const dropZone = screen.getByRole("group", {
+      name: "PEM private key drop zone",
+    });
+    const invalidFile = new File(["not a key"], "notes.txt", {
+      type: "text/plain",
+    });
+    Object.defineProperty(invalidFile, "text", {
+      value: async () => "not a key",
+    });
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: { item: () => invalidFile, length: 1, 0: invalidFile },
       },
     });
+    expect(
+      await screen.findByText(
+        "Drop a valid .pem file containing an RSA private key.",
+      ),
+    ).toBeDefined();
+
+    const pem =
+      "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
+    const pemFile = new File([pem], "workflow-rerunner.pem", {
+      type: "application/x-pem-file",
+    });
+    Object.defineProperty(pemFile, "text", { value: async () => pem });
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: { item: () => pemFile, length: 1, 0: pemFile },
+      },
+    });
+    await waitFor(() => expect(privateKey.value).toBe(pem));
+    expect(
+      screen.getByText(
+        "Loaded workflow-rerunner.pem. Save and verify to use this key.",
+      ),
+    ).toBeDefined();
     const form = appId.closest("form");
     fireEvent.click(
       within(form as HTMLFormElement).getByRole("button", {
@@ -173,8 +205,7 @@ describe("SettingsPage", () => {
           input: {
             appId: "123",
             installationId: "456",
-            privateKey:
-              "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+            privateKey: pem,
           },
         },
       ),

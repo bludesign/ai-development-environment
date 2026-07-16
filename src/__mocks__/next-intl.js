@@ -315,6 +315,11 @@ const mockTranslations = {
     installationId: "Installation ID",
     installationIdPlaceholder: "Enter the numeric installation ID",
     privateKey: "PEM private key",
+    privateKeyDropZone: "PEM private key drop zone",
+    pemDropHint: "Drop a .pem file here, or paste the key below.",
+    pemFileLoaded: "Loaded {filename}. Save and verify to use this key.",
+    pemFileInvalid: "Drop a valid .pem file containing an RSA private key.",
+    pemFileReadError: "The dropped PEM file could not be read.",
     privateKeyPlaceholder: "Paste the downloaded GitHub App PEM",
     privateKeyPlaceholderConfigured:
       "Leave blank to keep the configured private key",
