@@ -31,6 +31,7 @@ import {
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,6 +123,25 @@ const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError
   defaultBranch remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
 `;
+const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
+  inspectWorktree(id: $id, requestId: $requestId) {
+    commits { sha subject authorName authoredAt additions deletions }
+    changes { path staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
+    commitsTruncated changesTruncated
+  }
+}`;
+
+function replaceIssueParam(issueKey: string | null) {
+  const params = new URLSearchParams(window.location.search);
+  if (issueKey) params.set("issue", issueKey);
+  else params.delete("issue");
+  const query = params.toString();
+  window.history.pushState(
+    null,
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}`,
+  );
+}
 
 type Layout = "cards" | "table";
 type Operation =
@@ -156,6 +176,16 @@ async function waitForWorktreeJob(jobId: string): Promise<void> {
   );
 }
 
+async function inspectWorktree(worktreeId: string): Promise<WorktreeDetail> {
+  const data = await controlPlaneRequest<{
+    inspectWorktree: WorktreeDetail;
+  }>(INSPECT_WORKTREE_MUTATION, {
+    id: worktreeId,
+    requestId: createClientId(),
+  });
+  return data.inspectWorktree;
+}
+
 const colorClasses: Record<string, string> = {
   gray: "border-slate-500/30 bg-slate-500/10",
   red: "border-red-500/30 bg-red-500/10",
@@ -181,6 +211,10 @@ function reviewClass(value: string) {
 
 export function WorktreesPage() {
   const t = useTranslations("worktrees");
+  const [jiraIssueKey, setJiraIssueKey] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("issue");
+  });
   const [overview, setOverview] = useState<WorktreeOverview | null>(null);
   const [layout, setLayout] = useState<Layout>(() => {
     if (typeof window === "undefined") return "cards";
@@ -191,6 +225,7 @@ export function WorktreesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const latestLoad = useRef(0);
@@ -250,9 +285,27 @@ export function WorktreesPage() {
     };
   }, [load]);
 
+  useEffect(() => {
+    const syncIssueFromUrl = () =>
+      setJiraIssueKey(new URLSearchParams(window.location.search).get("issue"));
+    window.addEventListener("popstate", syncIssueFromUrl);
+    return () => window.removeEventListener("popstate", syncIssueFromUrl);
+  }, []);
+
+  const selectJiraIssue = (issueKey: string | null) => {
+    replaceIssueParam(issueKey);
+    setJiraIssueKey(issueKey);
+  };
+
   const setLayoutAndRemember = (next: Layout) => {
     setLayout(next);
     window.localStorage.setItem(LAYOUT_KEY, next);
+  };
+
+  const refresh = async () => {
+    setLoading(true);
+    await load();
+    setInspectionRefreshToken((value) => value + 1);
   };
 
   const fetchNow = async () => {
@@ -319,7 +372,11 @@ export function WorktreesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => void load()} variant="outline">
+          <Button
+            disabled={busy}
+            onClick={() => void refresh()}
+            variant="outline"
+          >
             <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
             {t("refresh")}
           </Button>
@@ -385,10 +442,12 @@ export function WorktreesPage() {
             agentGroup={agentGroup}
             allTags={overview.tags}
             editorVariant={overview.settings.editorVariant}
+            inspectionRefreshToken={inspectionRefreshToken}
             key={agentGroup.agent.id}
             layout={layout}
             onError={setError}
             onManageTags={() => setTagManagerOpen(true)}
+            onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
             onUpdate={updateLocalWorktree}
           />
@@ -406,6 +465,10 @@ export function WorktreesPage() {
         onOpenChange={setHiddenOpen}
         open={hiddenOpen}
       />
+      <JiraTicketDrawer
+        issueKey={jiraIssueKey}
+        onClose={() => selectJiraIssue(null)}
+      />
     </section>
   );
 }
@@ -415,19 +478,23 @@ function AgentSection({
   layout,
   allTags,
   editorVariant,
+  inspectionRefreshToken,
   onReload,
   onUpdate,
   onError,
   onManageTags,
+  onOpenTicket,
 }: {
   agentGroup: WorktreeAgentGroup;
   layout: Layout;
   allTags: WorktreeTag[];
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
+  inspectionRefreshToken: number;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
   onError: (error: string | null) => void;
   onManageTags: () => void;
+  onOpenTicket: (issueKey: string) => void;
 }) {
   const t = useTranslations("worktrees");
   return (
@@ -461,9 +528,11 @@ function AgentSection({
                   allTags={allTags}
                   editorVariant={editorVariant}
                   group={group}
+                  inspectionRefreshToken={inspectionRefreshToken}
                   key={worktree.id}
                   onError={onError}
                   onManageTags={onManageTags}
+                  onOpenTicket={onOpenTicket}
                   onReload={onReload}
                   onUpdate={onUpdate}
                   worktree={worktree}
@@ -475,8 +544,10 @@ function AgentSection({
               allTags={allTags}
               editorVariant={editorVariant}
               group={group}
+              inspectionRefreshToken={inspectionRefreshToken}
               onError={onError}
               onManageTags={onManageTags}
+              onOpenTicket={onOpenTicket}
               onReload={onReload}
               onUpdate={onUpdate}
             />
@@ -531,36 +602,40 @@ function FetchAge({
 }
 
 function WorktreeCard(props: WorktreeItemProps) {
-  const { worktree } = props;
+  const { inspectionRefreshToken, onError, worktree } = props;
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequest = useRef(0);
+  const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const t = useTranslations("worktrees");
-  const toggle = async () => {
+  const inspect = useCallback(async () => {
+    const request = ++detailRequest.current;
+    setDetailLoading(true);
+    try {
+      const next = await inspectWorktree(worktree.id);
+      if (request !== detailRequest.current) return;
+      setDetail(next);
+      onError(null);
+    } catch (value) {
+      if (request === detailRequest.current)
+        onError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (request === detailRequest.current) setDetailLoading(false);
+    }
+  }, [onError, worktree.id]);
+  useEffect(() => {
+    if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
+    lastInspectionRefreshToken.current = inspectionRefreshToken;
+    if (!expanded) return;
+    const timer = window.setTimeout(() => void inspect(), 0);
+    return () => window.clearTimeout(timer);
+  }, [expanded, inspect, inspectionRefreshToken]);
+  const toggle = () => {
     const next = !expanded;
     setExpanded(next);
     if (!next || detail) return;
-    setDetailLoading(true);
-    try {
-      const data = await controlPlaneRequest<{
-        inspectWorktree: WorktreeDetail;
-      }>(
-        `mutation InspectWorktree($id: ID!, $requestId: ID!) {
-          inspectWorktree(id: $id, requestId: $requestId) {
-            commits { sha subject authorName authoredAt additions deletions }
-            changes { path staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
-            commitsTruncated changesTruncated
-          }
-        }`,
-        { id: worktree.id, requestId: createClientId() },
-      );
-      setDetail(data.inspectWorktree);
-      props.onError(null);
-    } catch (value) {
-      props.onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setDetailLoading(false);
-    }
+    void inspect();
   };
   return (
     <Card
@@ -581,13 +656,9 @@ function WorktreeCard(props: WorktreeItemProps) {
                 worktree.headSha?.slice(0, 10) ??
                 t("detached")}
             </span>
-            {worktree.primary && <Badge>{t("primary")}</Badge>}
           </Button>
           {(worktree.ticketKey || worktree.ticketTitle) && (
-            <p className="mt-1 text-sm font-normal text-muted-foreground">
-              {worktree.ticketKey}
-              {worktree.ticketTitle ? ` — ${worktree.ticketTitle}` : ""}
-            </p>
+            <WorktreeTicketLink {...props} />
           )}
         </CardTitle>
         <CardAction>
@@ -606,9 +677,9 @@ function WorktreeCard(props: WorktreeItemProps) {
       <CardFooter className="flex-wrap gap-2">
         <ActionRow
           {...props}
-          onCompleted={() => {
-            setDetail(null);
-            return props.onReload();
+          onCompleted={async () => {
+            await props.onReload();
+            if (expanded) await inspect();
           }}
         />
       </CardFooter>
@@ -621,11 +692,53 @@ type WorktreeItemProps = {
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
+  inspectionRefreshToken: number;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
   onError: (error: string | null) => void;
   onManageTags: () => void;
+  onOpenTicket: (issueKey: string) => void;
 };
+
+function WorktreeTicketLink({
+  worktree,
+  onOpenTicket,
+  compact = false,
+}: Pick<WorktreeItemProps, "worktree" | "onOpenTicket"> & {
+  compact?: boolean;
+}) {
+  const label = `${worktree.ticketKey ?? ""}${
+    worktree.ticketTitle
+      ? `${worktree.ticketKey ? " — " : ""}${worktree.ticketTitle}`
+      : ""
+  }`;
+  if (!worktree.ticketKey) {
+    return (
+      <p
+        className={cn(
+          "truncate text-muted-foreground",
+          compact ? "text-xs" : "mt-1 text-sm font-normal",
+        )}
+        title={label}
+      >
+        {label}
+      </p>
+    );
+  }
+  return (
+    <button
+      className={cn(
+        "block max-w-full truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        compact ? "text-xs" : "mt-1 text-sm font-normal",
+      )}
+      onClick={() => onOpenTicket(worktree.ticketKey!)}
+      title={label}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
 
 function WorktreeMetadata(props: WorktreeItemProps) {
   const { worktree, group } = props;
@@ -643,11 +756,12 @@ function WorktreeMetadata(props: WorktreeItemProps) {
         <Badge
           className={
             worktree.baseBehind === 0
-              ? "border-emerald-500/30 bg-emerald-500/10"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
               : worktree.baseBehind
-                ? "border-amber-500/30 bg-amber-500/10"
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
                 : undefined
           }
+          variant="outline"
         >
           {worktree.baseBehind === null
             ? t("unknown")
@@ -1017,82 +1131,154 @@ function DetailPanel({ detail }: { detail: WorktreeDetail }) {
   const t = useTranslations("worktrees");
   const locale = useLocale();
   return (
-    <div className="grid gap-5 border-t pt-4 xl:grid-cols-2">
-      <div>
-        <h4 className="mb-2 font-medium">
-          {t("commits", { count: detail.commits.length })}
-        </h4>
-        <div className="max-h-80 space-y-1 overflow-y-auto rounded-md border">
-          {detail.commits.length ? (
-            detail.commits.map((commit) => (
-              <div
-                className="grid grid-cols-[auto_1fr_auto] gap-2 border-b p-2 text-xs last:border-0"
-                key={commit.sha}
-              >
-                <code>{commit.sha.slice(0, 8)}</code>
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{commit.subject}</p>
-                  <p className="text-muted-foreground">
-                    {commit.authorName} ·{" "}
-                    {new Date(commit.authoredAt).toLocaleString(locale)}
-                  </p>
-                </div>
-                <span>
-                  <span className="text-emerald-600">+{commit.additions}</span>{" "}
-                  <span className="text-red-600">−{commit.deletions}</span>
-                </span>
-              </div>
-            ))
-          ) : (
-            <p className="p-3 text-sm text-muted-foreground">
-              {t("noCommits")}
-            </p>
-          )}
-        </div>
-      </div>
-      <div>
+    <div
+      className="w-full space-y-4 border-t pt-4"
+      data-testid="worktree-detail"
+    >
+      <section className="w-full">
         <h4 className="mb-2 font-medium">
           {t("changes", { count: detail.changes.length })}
         </h4>
-        <div className="max-h-80 space-y-1 overflow-y-auto rounded-md border">
+        <div className="max-h-80 overflow-auto rounded-md border">
           {detail.changes.length ? (
-            detail.changes.map((change) => (
-              <div
-                className="flex items-center gap-2 border-b p-2 text-xs last:border-0"
-                key={change.path}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono">
-                  {change.path}
-                </span>
-                {change.conflicted && <Badge>{t("conflicted")}</Badge>}
-                {change.staged && <Badge>{t("staged")}</Badge>}
-                {change.unstaged && <Badge>{t("unstaged")}</Badge>}
-                {change.untracked && <Badge>{t("untracked")}</Badge>}
-                <span className="text-emerald-600">
-                  +
-                  {(change.stagedAdditions ?? 0) +
-                    (change.unstagedAdditions ?? 0)}
-                </span>
-                <span className="text-red-600">
-                  −
-                  {(change.stagedDeletions ?? 0) +
-                    (change.unstagedDeletions ?? 0)}
-                </span>
-              </div>
-            ))
+            <Table
+              aria-label={t("changes", { count: detail.changes.length })}
+              className="table-fixed text-xs"
+            >
+              <TableBody>
+                {detail.changes.map((change) => (
+                  <TableRow key={change.path}>
+                    <TableCell className="max-w-0 px-2 py-1.5 font-mono">
+                      <span className="block truncate" title={change.path}>
+                        {change.path}
+                      </span>
+                    </TableCell>
+                    <TableCell className="w-px px-2 py-1.5">
+                      <div className="flex items-center justify-end gap-2">
+                        {change.conflicted && (
+                          <Badge className="px-1.5" variant="destructive">
+                            {t("conflicted")}
+                          </Badge>
+                        )}
+                        {change.staged && (
+                          <ChangeState
+                            additions={change.stagedAdditions}
+                            deletions={change.stagedDeletions}
+                            label={t("staged")}
+                          />
+                        )}
+                        {change.unstaged && (
+                          <ChangeState
+                            additions={change.unstagedAdditions}
+                            deletions={change.unstagedDeletions}
+                            label={t("unstaged")}
+                          />
+                        )}
+                        {change.untracked && (
+                          <ChangeState
+                            additions={change.unstagedAdditions}
+                            deletions={change.unstagedDeletions}
+                            label={t("untracked")}
+                          />
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
             <p className="p-3 text-sm text-muted-foreground">
               {t("noChanges")}
             </p>
           )}
         </div>
-      </div>
+      </section>
+      <section className="w-full">
+        <h4 className="mb-2 font-medium">
+          {t("commits", { count: detail.commits.length })}
+        </h4>
+        <div className="max-h-80 overflow-auto rounded-md border">
+          {detail.commits.length ? (
+            <Table
+              aria-label={t("commits", { count: detail.commits.length })}
+              className="table-fixed text-xs"
+            >
+              <TableBody>
+                {detail.commits.map((commit) => (
+                  <TableRow key={commit.sha}>
+                    <TableCell className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
+                      {commit.sha.slice(0, 8)}
+                    </TableCell>
+                    <TableCell className="max-w-0 px-2 py-1.5">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span className="truncate font-medium">
+                          {commit.subject}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {commit.authorName} ·{" "}
+                          {new Date(commit.authoredAt).toLocaleString(locale)}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-24 px-2 py-1.5 text-right">
+                      <LineCounts
+                        additions={commit.additions}
+                        deletions={commit.deletions}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="p-3 text-sm text-muted-foreground">
+              {t("noCommits")}
+            </p>
+          )}
+        </div>
+      </section>
       {(detail.commitsTruncated || detail.changesTruncated) && (
-        <p className="text-xs text-muted-foreground xl:col-span-2">
-          {t("truncated")}
-        </p>
+        <p className="text-xs text-muted-foreground">{t("truncated")}</p>
       )}
     </div>
+  );
+}
+
+function ChangeState({
+  label,
+  additions,
+  deletions,
+}: {
+  label: string;
+  additions: number | null;
+  deletions: number | null;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
+      <span>{label}</span>
+      <LineCounts additions={additions} deletions={deletions} />
+    </span>
+  );
+}
+
+function LineCounts({
+  additions,
+  deletions,
+}: {
+  additions: number | null;
+  deletions: number | null;
+}) {
+  if (additions === null && deletions === null) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <span className="inline-flex gap-1 tabular-nums">
+      <span className="text-emerald-700 dark:text-emerald-400">
+        +{additions ?? 0}
+      </span>
+      <span className="text-red-700 dark:text-red-400">−{deletions ?? 0}</span>
+    </span>
   );
 }
 
@@ -1127,24 +1313,39 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
 }
 
 function WorktreeTableRows(props: WorktreeItemProps) {
-  const { worktree } = props;
+  const { inspectionRefreshToken, onError, worktree } = props;
   const t = useTranslations("worktrees");
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
-  const expand = async () => {
-    setExpanded((value) => !value);
-    if (detail || expanded) return;
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequest = useRef(0);
+  const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
+  const inspect = useCallback(async () => {
+    const request = ++detailRequest.current;
+    setDetailLoading(true);
     try {
-      const data = await controlPlaneRequest<{
-        inspectWorktree: WorktreeDetail;
-      }>(
-        `mutation InspectWorktree($id: ID!, $requestId: ID!) { inspectWorktree(id: $id, requestId: $requestId) { commits { sha subject authorName authoredAt additions deletions } changes { path staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions } commitsTruncated changesTruncated } }`,
-        { id: worktree.id, requestId: createClientId() },
-      );
-      setDetail(data.inspectWorktree);
+      const next = await inspectWorktree(worktree.id);
+      if (request !== detailRequest.current) return;
+      setDetail(next);
+      onError(null);
     } catch (value) {
-      props.onError(value instanceof Error ? value.message : String(value));
+      if (request === detailRequest.current)
+        onError(value instanceof Error ? value.message : String(value));
+    } finally {
+      if (request === detailRequest.current) setDetailLoading(false);
     }
+  }, [onError, worktree.id]);
+  useEffect(() => {
+    if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
+    lastInspectionRefreshToken.current = inspectionRefreshToken;
+    if (!expanded) return;
+    const timer = window.setTimeout(() => void inspect(), 0);
+    return () => window.clearTimeout(timer);
+  }, [expanded, inspect, inspectionRefreshToken]);
+  const expand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !detail) void inspect();
   };
   const highlight =
     worktree.highlightColor && colorClasses[worktree.highlightColor];
@@ -1160,11 +1361,8 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             {expanded ? <ChevronDown /> : <ChevronRight />}
             {worktree.branch ?? t("detached")}
           </Button>
-          {worktree.ticketKey && (
-            <p className="text-xs text-muted-foreground">
-              {worktree.ticketKey}{" "}
-              {worktree.ticketTitle && `— ${worktree.ticketTitle}`}
-            </p>
+          {(worktree.ticketKey || worktree.ticketTitle) && (
+            <WorktreeTicketLink {...props} compact />
           )}
         </TableCell>
         <TableCell className="font-mono text-xs">
@@ -1196,13 +1394,23 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       </TableRow>
       <TableRow className={cn(highlight)}>
         <TableCell colSpan={7}>
-          <ActionRow {...props} onCompleted={props.onReload} />
+          <ActionRow
+            {...props}
+            onCompleted={async () => {
+              await props.onReload();
+              if (expanded) await inspect();
+            }}
+          />
         </TableCell>
       </TableRow>
       {expanded && (
         <TableRow className={cn(highlight)}>
           <TableCell colSpan={7}>
-            {detail ? <DetailPanel detail={detail} /> : <Spinner />}
+            {detailLoading && !detail ? (
+              <Spinner />
+            ) : detail ? (
+              <DetailPanel detail={detail} />
+            ) : null}
           </TableCell>
         </TableRow>
       )}

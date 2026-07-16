@@ -643,7 +643,7 @@
     "operationRunning": "Operación en curso…",
     "loadingDetails": "Cargando commits y cambios…",
     "commits": "Confirmaciones ({count})",
-    "changes": "Cambios sin confirmar ({count})",
+    "changes": "Cambios ({count})",
     "noCommits": "Ningún commit difiere de la rama base.",
     "noChanges": "El worktree está limpio.",
     "conflicted": "En conflicto",

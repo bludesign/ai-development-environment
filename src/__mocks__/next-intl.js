@@ -706,7 +706,7 @@ const mockTranslations = {
     operationRunning: "Operation in progress…",
     loadingDetails: "Loading commits and changes…",
     commits: "Commits ({count})",
-    changes: "Uncommitted changes ({count})",
+    changes: "Changes ({count})",
     noCommits: "No commits differ from the base branch.",
     noChanges: "The worktree is clean.",
     conflicted: "Conflicted",

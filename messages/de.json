@@ -643,7 +643,7 @@
     "operationRunning": "Vorgang läuft…",
     "loadingDetails": "Commits und Änderungen werden geladen…",
     "commits": "Übernahmen ({count})",
-    "changes": "Nicht übernommene Änderungen ({count})",
+    "changes": "Änderungen ({count})",
     "noCommits": "Keine Commits unterscheiden sich vom Basis-Branch.",
     "noChanges": "Der Worktree ist sauber.",
     "conflicted": "Konflikt",
