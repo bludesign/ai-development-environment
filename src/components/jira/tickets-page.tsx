@@ -21,6 +21,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { AdfRenderer } from "@/components/jira/adf-renderer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -97,6 +98,16 @@ const PERSON_FIELDS = "accountId displayName avatarUrl";
 const LINK_FIELDS = "relationship key summary status";
 const DETAIL_FIELDS = `${SUMMARY_FIELDS} jiraUrl description reporter { ${PERSON_FIELDS} } creator { ${PERSON_FIELDS} } labels components { id name } fixVersions { id name } affectedVersions { id name } sprintNames parent { ${LINK_FIELDS} } subtasks { ${LINK_FIELDS} } issueLinks { ${LINK_FIELDS} } attachments { id filename contentUrl mimeType size author { ${PERSON_FIELDS} } createdAt } comments { id author { ${PERSON_FIELDS} } body createdAt updatedAt } createdAt dueAt resolvedAt timeTracking cache { ${CACHE_FIELDS} } commentsCache { ${CACHE_FIELDS} }`;
 
+const PRIORITY_CLASSES: Record<string, string> = {
+  highest: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
+  high: "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300",
+  medium:
+    "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  low: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  lowest:
+    "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300",
+};
+
 function replaceParams(changes: Record<string, string | null>) {
   const params = new URLSearchParams(window.location.search);
   for (const [key, value] of Object.entries(changes)) {
@@ -113,6 +124,27 @@ function replaceParams(changes: Record<string, string | null>) {
 
 function displayDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
+}
+
+function priorityClass(priority: string) {
+  return PRIORITY_CLASSES[priority.trim().toLowerCase()];
+}
+
+function AssigneeAvatar({
+  avatarUrl,
+  compact = false,
+}: {
+  avatarUrl: string | null;
+  compact?: boolean;
+}) {
+  return (
+    <Avatar aria-hidden="true" className={compact ? "size-4" : "size-5"}>
+      <AvatarImage alt="" src={avatarUrl ?? undefined} />
+      <AvatarFallback>
+        <UserRound className={compact ? "size-3" : "size-3.5"} />
+      </AvatarFallback>
+    </Avatar>
+  );
 }
 
 export function JiraTicketsPage() {
@@ -409,14 +441,20 @@ export function JiraTicketsPage() {
                               </TableCell>
                               <TableCell>
                                 {ticket.priority ? (
-                                  <Badge>{ticket.priority}</Badge>
+                                  <Badge
+                                    className={priorityClass(ticket.priority)}
+                                  >
+                                    {ticket.priority}
+                                  </Badge>
                                 ) : (
                                   "—"
                                 )}
                               </TableCell>
                               <TableCell>
                                 <span className="flex items-center gap-1.5">
-                                  <UserRound className="size-3.5 text-muted-foreground" />
+                                  <AssigneeAvatar
+                                    avatarUrl={ticket.assigneeAvatarUrl}
+                                  />
                                   {ticket.assignee ?? t("unassigned")}
                                 </span>
                               </TableCell>
@@ -457,7 +495,11 @@ export function JiraTicketsPage() {
                                 {ticket.key}
                               </span>
                               {ticket.priority && (
-                                <Badge>{ticket.priority}</Badge>
+                                <Badge
+                                  className={priorityClass(ticket.priority)}
+                                >
+                                  {ticket.priority}
+                                </Badge>
                               )}
                             </div>
                             <p className="mt-2 line-clamp-3 text-sm font-medium">
@@ -466,7 +508,10 @@ export function JiraTicketsPage() {
                             <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                               <span>{ticket.issueType ?? t("issue")}</span>
                               <span className="flex min-w-0 items-center gap-1">
-                                <UserRound className="size-3" />
+                                <AssigneeAvatar
+                                  avatarUrl={ticket.assigneeAvatarUrl}
+                                  compact
+                                />
                                 <span className="truncate">
                                   {ticket.assignee ?? t("unassigned")}
                                 </span>
@@ -1179,7 +1224,11 @@ function TicketDrawer({
               <div className="flex flex-wrap gap-2">
                 <Badge>{ticket.status}</Badge>
                 {ticket.issueType && <Badge>{ticket.issueType}</Badge>}
-                {ticket.priority && <Badge>{ticket.priority}</Badge>}
+                {ticket.priority && (
+                  <Badge className={priorityClass(ticket.priority)}>
+                    {ticket.priority}
+                  </Badge>
+                )}
                 <a
                   className="ml-auto inline-flex items-center gap-1 text-sm text-primary hover:underline"
                   href={ticket.jiraUrl}

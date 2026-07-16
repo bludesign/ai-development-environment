@@ -112,6 +112,7 @@ describe("JiraTicketsPage", () => {
     expect(await screen.findByText("In Progress")).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
     expect(screen.getByText("Open login screen")).toBeDefined();
+    expect(screen.getByText("High").className).toContain("bg-orange-500/10");
     expect(screen.getAllByRole("table")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Board layout" }));
