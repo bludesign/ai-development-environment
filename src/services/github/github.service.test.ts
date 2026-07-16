@@ -2,6 +2,38 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   apiToken: "secret-token" as string | null,
+  appSettings: {
+    id: "default",
+    appId: "123",
+    installationId: "456",
+    privateKey: "stored-private-key",
+    apiBaseUrl: "https://api.github.com",
+    graphqlUrl: "https://api.github.com/graphql",
+    keyFingerprint: "SHA256:fingerprint",
+    appSlug: "workflow-rerunner",
+    accountLogin: "acme",
+    repositorySelection: "selected",
+    actionsPermission: "write",
+    verifiedAt: new Date(0),
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  } as {
+    id: string;
+    appId: string;
+    installationId: string;
+    privateKey: string;
+    apiBaseUrl: string;
+    graphqlUrl: string;
+    keyFingerprint: string;
+    appSlug: string;
+    accountLogin: string;
+    repositorySelection: string;
+    actionsPermission: string;
+    verifiedAt: Date;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null,
+  auditEvents: [] as Array<Record<string, unknown>>,
   repositories: [
     {
       id: "local-repository-1",
@@ -17,6 +49,29 @@ const state = vi.hoisted(() => ({
   ],
 }));
 
+const appClient = vi.hoisted(() => ({
+  clearTokenCache: vi.fn(),
+  graphql: vi.fn(),
+  listJobs: vi.fn(),
+  rerun: vi.fn(),
+  rerunJob: vi.fn(),
+  verify: vi.fn(),
+}));
+
+vi.mock("@/server/github/github-app", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/server/github/github-app")>();
+  return {
+    ...original,
+    clearGitHubAppTokenCache: appClient.clearTokenCache,
+    githubAppGraphql: appClient.graphql,
+    listGitHubActionsWorkflowJobs: appClient.listJobs,
+    rerunGitHubActionsJob: appClient.rerunJob,
+    rerunGitHubActionsWorkflow: appClient.rerun,
+    verifyGitHubAppConfiguration: appClient.verify,
+  };
+});
+
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitHubSettings: {
@@ -25,6 +80,47 @@ vi.mock("@/data/prisma-client", () => ({
     },
     gitHubRepository: {
       findMany: async () => state.repositories,
+      findUnique: async ({ where }: { where: { githubId?: string } }) =>
+        state.repositories.find(
+          (repository) => repository.githubId === where.githubId,
+        ) ?? null,
+    },
+    gitHubAppSettings: {
+      findUnique: async () => state.appSettings,
+      upsert: async ({
+        create,
+        update,
+      }: {
+        create: object;
+        update: object;
+      }) => {
+        const now = new Date();
+        state.appSettings = state.appSettings
+          ? { ...state.appSettings, ...update, updatedAt: now }
+          : ({ ...create, createdAt: now, updatedAt: now } as NonNullable<
+              typeof state.appSettings
+            >);
+        return state.appSettings;
+      },
+      update: async ({ data }: { data: object }) => {
+        if (!state.appSettings) throw new Error("Missing settings");
+        state.appSettings = {
+          ...state.appSettings,
+          ...data,
+          updatedAt: new Date(),
+        };
+        return state.appSettings;
+      },
+      deleteMany: async () => {
+        state.appSettings = null;
+        return { count: 1 };
+      },
+    },
+    gitHubAuditEvent: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        state.auditEvents.push(data);
+        return data;
+      },
     },
   }),
 }));
@@ -88,8 +184,9 @@ function rawPullRequest(
                   status: "COMPLETED",
                   conclusion: options.pipeline,
                   url: "https://github.com/acme/widgets/checks",
-                  app: { name: "GitHub Actions" },
+                  app: { name: "GitHub Actions", slug: "github-actions" },
                   workflowRun: {
+                    databaseId: "1",
                     url: "https://github.com/acme/widgets/actions/runs/1",
                     runNumber: 1,
                     workflow: { name: "CI" },
@@ -114,6 +211,82 @@ function rawPullRequest(
 
 beforeEach(() => {
   state.apiToken = "secret-token";
+  state.repositories = [
+    {
+      id: "local-repository-1",
+      githubId: "repository-1",
+      owner: "acme",
+      name: "widgets",
+      nameWithOwner: "acme/widgets",
+      url: "https://github.com/acme/widgets",
+      jiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+  ];
+  state.appSettings = {
+    id: "default",
+    appId: "123",
+    installationId: "456",
+    privateKey: "stored-private-key",
+    apiBaseUrl: "https://api.github.com",
+    graphqlUrl: "https://api.github.com/graphql",
+    keyFingerprint: "SHA256:fingerprint",
+    appSlug: "workflow-rerunner",
+    accountLogin: "acme",
+    repositorySelection: "selected",
+    actionsPermission: "write",
+    verifiedAt: new Date(0),
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+  state.auditEvents = [];
+  appClient.clearTokenCache.mockReset();
+  appClient.graphql.mockReset();
+  appClient.graphql.mockResolvedValue({
+    data: { repository: { id: "repository-1" } },
+    githubRequestId: "GRAPHQL-1",
+  });
+  appClient.listJobs.mockReset();
+  appClient.listJobs.mockResolvedValue([
+    {
+      id: 11,
+      name: "test",
+      status: "completed",
+      conclusion: "failure",
+      html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+      steps: [
+        {
+          number: 1,
+          name: "Set up job",
+          status: "completed",
+          conclusion: "success",
+        },
+        {
+          number: 2,
+          name: "Run tests",
+          status: "completed",
+          conclusion: "failure",
+        },
+      ],
+    },
+  ]);
+  appClient.rerun.mockReset();
+  appClient.rerun.mockResolvedValue({ githubRequestId: "REST-1" });
+  appClient.rerunJob.mockReset();
+  appClient.rerunJob.mockResolvedValue({ githubRequestId: "REST-JOB-1" });
+  appClient.verify.mockReset();
+  appClient.verify.mockImplementation(async (credentials) => ({
+    appId: credentials.appId.trim(),
+    installationId: credentials.installationId.trim(),
+    keyFingerprint: "SHA256:new-fingerprint",
+    appSlug: "workflow-rerunner",
+    accountLogin: "acme",
+    repositorySelection: "selected",
+    actionsPermission: "write",
+    viewerLogin: "workflow-rerunner[bot]",
+    verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
+  }));
   vi.unstubAllGlobals();
 });
 
@@ -229,6 +402,86 @@ describe("GitHub service", () => {
     ).toBe(true);
   });
 
+  test("hydrates workflow jobs for pull request list queries that request them", async () => {
+    state.appSettings = null;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/actions/runs/1/jobs")) {
+        return response({
+          total_count: 1,
+          jobs: [
+            {
+              id: 11,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+              html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+              steps: [
+                {
+                  number: 1,
+                  name: "Set up job",
+                  status: "completed",
+                  conclusion: "success",
+                },
+                {
+                  number: 2,
+                  name: "Run tests",
+                  status: "completed",
+                  conclusion: "failure",
+                },
+              ],
+            },
+          ],
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as { query: string };
+      if (body.query.includes("query GitHubRepositoryPullRequests")) {
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  rawPullRequest("pull-request-1", "APP-42 Add API", {
+                    pipeline: "FAILURE",
+                  }),
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequests(
+      "REPOSITORY",
+      "local-repository-1",
+      { includePipelineJobs: true },
+    );
+
+    expect(result.items[0]?.pipelines[0]?.jobs).toEqual([
+      expect.objectContaining({
+        id: "11",
+        name: "test",
+        status: "FAILURE",
+        canRetry: false,
+        steps: [
+          expect.objectContaining({ name: "Set up job", status: "SUCCESS" }),
+          expect.objectContaining({ name: "Run tests", status: "FAILURE" }),
+        ],
+      }),
+    ]);
+    expect(appClient.listJobs).not.toHaveBeenCalled();
+    expect(
+      (
+        fetchMock.mock.calls.find(([url]) =>
+          url.includes("/actions/runs/1/jobs"),
+        )?.[1]?.headers as Record<string, string>
+      ).authorization,
+    ).toBe("Bearer secret-token");
+  });
+
   test("requires credentials and redacts a token echoed by GitHub", async () => {
     state.apiToken = null;
     await expect(new GitHubService().testConnection()).rejects.toThrow(
@@ -249,8 +502,36 @@ describe("GitHub service", () => {
     );
   });
 
-  test("loads pull request details and rerequests a check suite", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+  test("reruns an installed GitHub Actions workflow without a managed repository", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/actions/runs/1/jobs")) {
+        return response({
+          total_count: 1,
+          jobs: [
+            {
+              id: 11,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+              html_url: "https://github.com/acme/widgets/actions/runs/1/job/11",
+              steps: [
+                {
+                  number: 1,
+                  name: "Set up job",
+                  status: "completed",
+                  conclusion: "success",
+                },
+                {
+                  number: 2,
+                  name: "Run tests",
+                  status: "completed",
+                  conclusion: "failure",
+                },
+              ],
+            },
+          ],
+        });
+      }
       const body = JSON.parse(String(init?.body)) as {
         query: string;
         variables: Record<string, unknown>;
@@ -289,21 +570,28 @@ describe("GitHub service", () => {
           },
         });
       }
-      if (body.query.includes("mutation GitHubRetryPipeline")) {
+      if (
+        body.query.includes("query GitHubRetryPipelineCheckSuite") ||
+        body.query.includes("query GitHubRetryWorkflowJobCheckSuite")
+      ) {
         return response({
           data: {
-            rerequestCheckSuite: {
-              checkSuite: {
-                id: "check-suite-1",
-                status: "QUEUED",
-                conclusion: null,
-                url: "https://github.com/acme/widgets/checks",
-                app: { name: "GitHub Actions" },
-                workflowRun: {
-                  url: "https://github.com/acme/widgets/actions/runs/1",
-                  runNumber: 1,
-                  workflow: { name: "CI" },
-                },
+            node: {
+              id: "check-suite-1",
+              status: "COMPLETED",
+              conclusion: "FAILURE",
+              url: "https://github.com/acme/widgets/checks",
+              app: { name: "GitHub Actions", slug: "github-actions" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
+              workflowRun: {
+                databaseId: "987",
+                url: "https://github.com/acme/widgets/actions/runs/987",
+                runNumber: 1,
+                workflow: { name: "CI" },
               },
             },
           },
@@ -322,20 +610,322 @@ describe("GitHub service", () => {
       headRefName: "feature/app-42",
       changedFiles: 3,
       commitCount: 2,
-      pipelines: [{ name: "CI", status: "SUCCESS" }],
+      pipelines: [
+        {
+          name: "CI",
+          status: "SUCCESS",
+          jobs: [
+            {
+              id: "11",
+              name: "test",
+              status: "FAILURE",
+              canRetry: true,
+              steps: [
+                { number: 1, name: "Set up job", status: "SUCCESS" },
+                { number: 2, name: "Run tests", status: "FAILURE" },
+              ],
+            },
+          ],
+        },
+      ],
     });
+    expect(appClient.listJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123", installationId: "456" }),
+      { owner: "acme", repository: "widgets", workflowRunId: "1" },
+    );
+    state.repositories = [];
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1"),
+      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
+        actor: "control-plane",
+        ipAddress: "127.0.0.1",
+      }),
     ).resolves.toMatchObject({
       id: "check-suite-1",
       name: "CI",
       status: "QUEUED",
       canRetry: false,
     });
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "https://api.github.com/graphql",
+    expect(appClient.graphql).toHaveBeenCalledWith(
+      expect.objectContaining({ installationId: "456" }),
+      expect.stringContaining("VerifyGitHubAppRepository"),
+      { owner: "acme", name: "widgets" },
+    );
+    expect(appClient.rerun).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123" }),
+      { owner: "acme", repository: "widgets", workflowRunId: "987" },
+    );
+    expect(state.auditEvents).toContainEqual(
       expect.objectContaining({
-        body: expect.stringContaining('"checkSuiteId":"check-suite-1"'),
+        operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
+        githubRequestId: "REST-1",
+        outcome: "SUCCESS",
+      }),
+    );
+    await expect(
+      new GitHubService().retryWorkflowJob(
+        "repository-1",
+        "check-suite-1",
+        "11",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(appClient.rerunJob).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123" }),
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        jobId: "11",
+      },
+    );
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
+        jobId: "11",
+        githubRequestId: "REST-JOB-1",
+        outcome: "SUCCESS",
+      }),
+    );
+    appClient.rerunJob.mockRejectedValueOnce(new Error("rerun failed"));
+    await expect(
+      new GitHubService().retryWorkflowJob(
+        "repository-1",
+        "check-suite-1",
+        "12",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
+    ).rejects.toThrow("rerun failed");
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        operation: "GITHUB_ACTIONS_JOB_RERUN",
+        jobId: "12",
+        outcome: "FAILURE",
+      }),
+    );
+  });
+
+  test("keeps the App private key write-only and verifies before replacing settings", async () => {
+    const service = new GitHubService();
+    await expect(
+      service.saveAppSettings(
+        { appId: "123", installationId: "789", privateKey: null },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).resolves.toMatchObject({
+      configured: true,
+      appId: "123",
+      installationId: "789",
+      privateKeyConfigured: true,
+      keyFingerprint: "SHA256:new-fingerprint",
+    });
+    expect(appClient.verify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        privateKey: "stored-private-key",
+        installationId: "789",
+      }),
+    );
+    expect(await service.getAppSettings()).not.toHaveProperty("privateKey");
+
+    await expect(
+      service.saveAppSettings(
+        { appId: "999", installationId: "789", privateKey: null },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).rejects.toThrow("replacement private key");
+    expect(state.appSettings?.appId).toBe("123");
+  });
+
+  test("rejects suites outside the managed repository before using App credentials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        response({
+          data: {
+            node: {
+              id: "check-suite-1",
+              status: "COMPLETED",
+              conclusion: "FAILURE",
+              url: "https://github.com/checks/1",
+              app: { name: "GitHub Actions", slug: "github-actions" },
+              repository: {
+                id: "different-repository",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
+              workflowRun: {
+                databaseId: "987",
+                url: "https://github.com/actions/runs/987",
+                runNumber: 1,
+                workflow: { name: "CI" },
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
+        actor: "control-plane",
+        ipAddress: null,
+      }),
+    ).rejects.toThrow("does not belong");
+    expect(appClient.rerun).not.toHaveBeenCalled();
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        errorCode: "CHECK_SUITE_REPOSITORY_MISMATCH",
+        outcome: "FAILURE",
+      }),
+    );
+  });
+
+  test.each([
+    ["NOT_GITHUB_ACTIONS", { app: { name: "CircleCI", slug: "circleci" } }],
+    ["WORKFLOW_NOT_COMPLETED", { status: "IN_PROGRESS" }],
+    ["WORKFLOW_RUN_UNAVAILABLE", { workflowRun: null }],
+  ])("rejects an unsafe workflow with %s", async (errorCode, override) => {
+    const checkSuite = {
+      id: "check-suite-1",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      url: "https://github.com/acme/widgets/checks/1",
+      app: { name: "GitHub Actions", slug: "github-actions" },
+      repository: {
+        id: "repository-1",
+        name: "widgets",
+        owner: { login: "acme" },
+      },
+      workflowRun: {
+        databaseId: "987",
+        url: "https://github.com/acme/widgets/actions/runs/987",
+        runNumber: 1,
+        workflow: { name: "CI" },
+      },
+      ...override,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(response({ data: { node: checkSuite } })),
+    );
+
+    await expect(
+      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
+        actor: "control-plane",
+        ipAddress: null,
+      }),
+    ).rejects.toMatchObject({ code: errorCode });
+    expect(appClient.rerun).not.toHaveBeenCalled();
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({ errorCode, outcome: "FAILURE" }),
+    );
+  });
+
+  test("rejects repositories that are not installed for the configured App", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        response({
+          data: {
+            node: {
+              id: "check-suite-1",
+              status: "COMPLETED",
+              conclusion: "FAILURE",
+              url: "https://github.com/acme/widgets/checks/1",
+              app: { name: "GitHub Actions", slug: "github-actions" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
+              workflowRun: {
+                databaseId: "987",
+                url: "https://github.com/acme/widgets/actions/runs/987",
+                runNumber: 1,
+                workflow: { name: "CI" },
+              },
+            },
+          },
+        }),
+      ),
+    );
+    appClient.graphql.mockResolvedValue({
+      data: { repository: null },
+      githubRequestId: "GRAPHQL-404",
+    });
+
+    await expect(
+      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
+        actor: "control-plane",
+        ipAddress: null,
+      }),
+    ).rejects.toMatchObject({ code: "REPOSITORY_NOT_INSTALLED" });
+    expect(appClient.rerun).not.toHaveBeenCalled();
+  });
+
+  test("requires a verified GitHub App before rerunning", async () => {
+    state.appSettings = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        response({
+          data: {
+            node: {
+              id: "check-suite-1",
+              status: "COMPLETED",
+              conclusion: "FAILURE",
+              url: "https://github.com/acme/widgets/checks/1",
+              app: { name: "GitHub Actions", slug: "github-actions" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
+              workflowRun: {
+                databaseId: "987",
+                url: "https://github.com/acme/widgets/actions/runs/987",
+                runNumber: 1,
+                workflow: { name: "CI" },
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
+        actor: "control-plane",
+        ipAddress: null,
+      }),
+    ).rejects.toMatchObject({ code: "GITHUB_APP_NOT_CONFIGURED" });
+    expect(appClient.rerun).not.toHaveBeenCalled();
+  });
+
+  test("preserves verified settings when replacement verification fails", async () => {
+    const previous = state.appSettings;
+    appClient.verify.mockRejectedValue(new Error("GitHub unavailable"));
+
+    await expect(
+      new GitHubService().saveAppSettings(
+        {
+          appId: "123",
+          installationId: "999",
+          privateKey: "replacement-private-key",
+        },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).rejects.toThrow("GitHub unavailable");
+    expect(state.appSettings).toEqual(previous);
+    expect(state.auditEvents).toContainEqual(
+      expect.objectContaining({
+        operation: "GITHUB_APP_SETTINGS_SAVE",
+        outcome: "FAILURE",
       }),
     );
   });

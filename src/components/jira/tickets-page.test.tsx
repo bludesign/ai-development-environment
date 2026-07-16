@@ -36,8 +36,11 @@ async function chooseSelectOption(label: string, option: string) {
   fireEvent.click(await screen.findByRole("option", { name: option }));
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Radix FocusScope restores focus in a zero-delay timer when a dialog
+  // unmounts. Let it run before Vitest tears down JSDOM's Event globals.
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   requestMock.mockReset();
   window.history.replaceState(null, "", "/");
 });

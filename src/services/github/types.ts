@@ -23,9 +23,34 @@ export type GitHubPipelineState =
 export type GitHubReviewDecision =
   "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | "NONE";
 
+export type GitHubPipelineRetryUnavailableReason =
+  | "GITHUB_APP_NOT_CONFIGURED"
+  | "NOT_COMPLETED"
+  | "NOT_GITHUB_ACTIONS"
+  | "WORKFLOW_RUN_UNAVAILABLE";
+
 export type GitHubSettingsView = {
   tokenConfigured: boolean;
   updatedAt: string;
+};
+
+export type GitHubAppSettingsView = {
+  configured: boolean;
+  appId: string | null;
+  installationId: string | null;
+  privateKeyConfigured: boolean;
+  keyFingerprint: string | null;
+  appSlug: string | null;
+  accountLogin: string | null;
+  repositorySelection: string | null;
+  actionsPermission: string | null;
+  verifiedAt: string | null;
+  updatedAt: string | null;
+};
+
+export type GitHubAuditContext = {
+  actor: "control-plane";
+  ipAddress: string | null;
 };
 
 export type GitHubViewer = {
@@ -66,6 +91,25 @@ export type GitHubPipelineView = {
   url: string | null;
   checkSuiteId: string | null;
   canRetry: boolean;
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
+  jobs: GitHubWorkflowJobView[];
+  workflowRunId?: string | null;
+};
+
+export type GitHubWorkflowJobStepView = {
+  number: number;
+  name: string;
+  status: GitHubPipelineState;
+};
+
+export type GitHubWorkflowJobView = {
+  id: string;
+  name: string;
+  status: GitHubPipelineState;
+  url: string | null;
+  canRetry: boolean;
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
+  steps: GitHubWorkflowJobStepView[];
 };
 
 export type GitHubPullRequestView = {

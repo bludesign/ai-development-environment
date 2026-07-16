@@ -2,13 +2,18 @@
 
 import {
   CheckCircle2,
+  ExternalLink,
   GitPullRequest,
+  KeyRound,
+  RotateCw,
   Save,
+  ShieldCheck,
   Trash2,
   Unplug,
+  Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
@@ -19,10 +24,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type { GitHubSettingsView, GitHubViewer } from "@/services/github/types";
+import type {
+  GitHubAppSettingsView,
+  GitHubSettingsView,
+  GitHubViewer,
+} from "@/services/github/types";
 
 const SETTINGS_FIELDS = "tokenConfigured updatedAt";
+const APP_SETTINGS_FIELDS =
+  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt updatedAt";
 
 export function SettingsPage() {
   const t = useTranslations("settings");
@@ -34,7 +46,399 @@ export function SettingsPage() {
       </div>
       <JiraSettingsPage embedded />
       <GitHubSettingsCard />
+      <GitHubAppSettingsCard />
     </section>
+  );
+}
+
+function GitHubAppSettingsCard() {
+  const t = useTranslations("githubAppSettings");
+  const tc = useTranslations("common");
+  const [settings, setSettings] = useState<GitHubAppSettingsView | null>(null);
+  const [appId, setAppId] = useState("");
+  const [installationId, setInstallationId] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [deploymentUrl, setDeploymentUrl] = useState("");
+  const [draggingPem, setDraggingPem] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const applySettings = useCallback((next: GitHubAppSettingsView) => {
+    setSettings(next);
+    setAppId(next.appId ?? "");
+    setInstallationId(next.installationId ?? "");
+    setPrivateKey("");
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await controlPlaneRequest<{
+        githubAppSettings: GitHubAppSettingsView;
+      }>(
+        `query GitHubAppSettings { githubAppSettings { ${APP_SETTINGS_FIELDS} } }`,
+      );
+      applySettings(data.githubAppSettings);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setLoading(false);
+    }
+  }, [applySettings]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDeploymentUrl(window.location.origin);
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [load]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        saveGitHubAppSettings: GitHubAppSettingsView;
+      }>(
+        `mutation SaveGitHubAppSettings($input: SaveGitHubAppSettingsInput!) {
+          saveGitHubAppSettings(input: $input) { ${APP_SETTINGS_FIELDS} }
+        }`,
+        {
+          input: {
+            appId: appId.trim(),
+            installationId: installationId.trim(),
+            privateKey: privateKey || null,
+          },
+        },
+      );
+      applySettings(data.saveGitHubAppSettings);
+      setError(null);
+      setNotice(privateKey && settings?.configured ? t("rotated") : t("saved"));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testConnection = async () => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        testGitHubAppConnection: GitHubAppSettingsView;
+      }>(
+        `mutation TestGitHubAppConnection {
+          testGitHubAppConnection { ${APP_SETTINGS_FIELDS} }
+        }`,
+      );
+      applySettings(data.testGitHubAppConnection);
+      setError(null);
+      setNotice(t("connectionSucceeded"));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearCredentials = async () => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        clearGitHubAppCredentials: GitHubAppSettingsView;
+      }>(
+        `mutation ClearGitHubAppCredentials {
+          clearGitHubAppCredentials { ${APP_SETTINGS_FIELDS} }
+        }`,
+      );
+      applySettings(data.clearGitHubAppCredentials);
+      setError(null);
+      setNotice(t("removed"));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadPemFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pem")) {
+      setError(t("pemFileInvalid"));
+      setNotice(null);
+      return;
+    }
+    try {
+      const contents = await file.text();
+      if (
+        !/-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(contents) ||
+        !/-----END (?:RSA )?PRIVATE KEY-----/.test(contents)
+      ) {
+        setError(t("pemFileInvalid"));
+        setNotice(null);
+        return;
+      }
+      setPrivateKey(contents);
+      setError(null);
+      setNotice(t("pemFileLoaded", { filename: file.name }));
+    } catch {
+      setError(t("pemFileReadError"));
+      setNotice(null);
+    }
+  };
+
+  const dropPemFile = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDraggingPem(false);
+    const file = event.dataTransfer.files.item(0);
+    if (file) void loadPemFile(file);
+  };
+
+  return (
+    <form onSubmit={save}>
+      <Card>
+        <CardContent className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="size-5" />
+              <div>
+                <h2 className="font-semibold">{t("title")}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t("description")}
+                </p>
+              </div>
+            </div>
+            <Badge
+              className={
+                settings?.configured
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : undefined
+              }
+            >
+              {settings?.configured ? t("verified") : t("notConfigured")}
+            </Badge>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              {t("loading")}
+            </div>
+          ) : (
+            <>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              {notice && (
+                <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                  <CheckCircle2 />
+                  <AlertDescription className="text-current">
+                    {notice}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <h3 className="font-medium">{t("setupTitle")}</h3>
+                <ol className="mt-3 list-decimal space-y-3 pl-5 text-sm text-muted-foreground">
+                  <li>
+                    {t("stepRegister")}{" "}
+                    <a
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                      href="https://github.com/settings/apps/new"
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {t("registerLink")}
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </li>
+                  <li>
+                    {t("stepHomepage")}{" "}
+                    <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                      {deploymentUrl}
+                    </code>
+                    {t("stepHomepageSuffix")}
+                  </li>
+                  <li>{t("stepPermissions")}</li>
+                  <li>{t("stepInstall")}</li>
+                  <li>
+                    {t("stepInstallationId")}{" "}
+                    <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                      https://github.com/organizations/&lt;Organization-name&gt;/settings/installations/&lt;ID&gt;
+                    </code>
+                    {t("stepInstallationIdSuffix")}
+                  </li>
+                  <li>{t("stepCredentials")}</li>
+                </ol>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label
+                    className="mb-1.5 block text-sm font-medium"
+                    htmlFor="github-app-id"
+                  >
+                    {t("appId")}
+                  </Label>
+                  <Input
+                    id="github-app-id"
+                    inputMode="numeric"
+                    onChange={(event) => setAppId(event.target.value)}
+                    placeholder={t("appIdPlaceholder")}
+                    required
+                    value={appId}
+                  />
+                </div>
+                <div>
+                  <Label
+                    className="mb-1.5 block text-sm font-medium"
+                    htmlFor="github-installation-id"
+                  >
+                    {t("installationId")}
+                  </Label>
+                  <Input
+                    id="github-installation-id"
+                    inputMode="numeric"
+                    onChange={(event) => setInstallationId(event.target.value)}
+                    placeholder={t("installationIdPlaceholder")}
+                    required
+                    value={installationId}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="github-app-private-key"
+                >
+                  {t("privateKey")}
+                </Label>
+                <div
+                  aria-label={t("privateKeyDropZone")}
+                  className={`rounded-md border border-dashed p-2 transition-colors ${
+                    draggingPem ? "border-primary bg-primary/5" : "border-input"
+                  }`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setDraggingPem(true);
+                  }}
+                  onDragLeave={() => setDraggingPem(false)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    setDraggingPem(true);
+                  }}
+                  onDrop={dropPemFile}
+                  role="group"
+                >
+                  <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Upload className="size-3.5" />
+                    {t("pemDropHint")}
+                  </p>
+                  <Textarea
+                    autoComplete="new-password"
+                    className="min-h-40 border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+                    id="github-app-private-key"
+                    onChange={(event) => setPrivateKey(event.target.value)}
+                    placeholder={
+                      settings?.privateKeyConfigured
+                        ? t("privateKeyPlaceholderConfigured")
+                        : t("privateKeyPlaceholder")
+                    }
+                    required={!settings?.privateKeyConfigured}
+                    value={privateKey}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {settings?.privateKeyConfigured
+                    ? t("privateKeyKeepHelp")
+                    : t("privateKeyHelp")}
+                </p>
+              </div>
+
+              {settings?.configured && (
+                <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                  <KeyRound />
+                  <AlertDescription className="text-emerald-700 dark:text-emerald-300">
+                    <p className="font-medium">
+                      {t("connectedAs", {
+                        app: settings.appSlug ?? "—",
+                        account: settings.accountLogin ?? "—",
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs">
+                      {t("connectionDetails", {
+                        permission: settings.actionsPermission ?? "—",
+                        selection: settings.repositorySelection ?? "—",
+                      })}
+                    </p>
+                    {settings.verifiedAt && (
+                      <p className="mt-1 text-xs">
+                        {t("lastVerified", {
+                          date: new Date(settings.verifiedAt).toLocaleString(),
+                        })}
+                      </p>
+                    )}
+                    {settings.keyFingerprint && (
+                      <p className="mt-1 break-all font-mono text-xs">
+                        {settings.keyFingerprint}
+                      </p>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                <ConfirmationDialog
+                  actionLabel={t("remove")}
+                  cancelLabel={tc("cancel")}
+                  description={t("confirmRemoveDescription")}
+                  onConfirm={clearCredentials}
+                  title={t("confirmRemove")}
+                  trigger={
+                    <Button
+                      disabled={busy || !settings?.configured}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                      {t("remove")}
+                    </Button>
+                  }
+                />
+                <Button
+                  disabled={busy || !settings?.configured}
+                  onClick={() => void testConnection()}
+                  type="button"
+                  variant="outline"
+                >
+                  <Unplug />
+                  {t("test")}
+                </Button>
+                <Button disabled={busy} type="submit">
+                  {busy ? (
+                    <Spinner />
+                  ) : privateKey && settings?.configured ? (
+                    <RotateCw />
+                  ) : (
+                    <Save />
+                  )}
+                  {privateKey && settings?.configured ? t("rotate") : t("save")}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </form>
   );
 }
 

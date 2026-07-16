@@ -278,7 +278,7 @@ const mockTranslations = {
     tokenPlaceholder: "Paste a GitHub personal access token",
     tokenPlaceholderConfigured: "Leave blank to keep the saved token",
     tokenHelp:
-      "Grant read access to the repositories and pull requests you want to display. Retrying pipelines also requires Checks read/write access.",
+      "Grant read access to the repositories and pull requests you want to display. This token is used only for pull request views.",
     tokenKeepHelp:
       "Leave this blank unless you want to replace the saved token.",
     save: "Save settings",
@@ -290,6 +290,62 @@ const mockTranslations = {
     confirmRemove: "Remove GitHub credentials?",
     confirmRemoveDescription:
       "The saved token will be removed. Managed repository and Jira regex settings will be kept.",
+  },
+  githubAppSettings: {
+    title: "GitHub App pipeline retries",
+    description: "Use your own GitHub App to rerun GitHub Actions workflows.",
+    loading: "Loading GitHub App settings…",
+    verified: "Verified",
+    notConfigured: "Not configured",
+    setupTitle: "Set up your GitHub App",
+    stepRegister:
+      "Register a uniquely named GitHub App, such as “AI Environment Check Rerunner,” from",
+    registerLink: "New GitHub App",
+    stepHomepage: "Use",
+    stepHomepageSuffix:
+      " as the Homepage URL. Leave the callback URL empty and disable webhooks.",
+    stepPermissions:
+      "Set Repository permissions → Actions to Read and write. Metadata remains read-only automatically; Checks permission is not required.",
+    stepInstall:
+      "Create the app, generate a private key, then install it on only the repositories this deployment should control.",
+    stepInstallationId:
+      "After installation, open the app’s Configure page. The installation ID is the final number in its URL, for example",
+    stepInstallationIdSuffix:
+      ". Replace Organization-name with your organization; copy the final ID value.",
+    stepCredentials:
+      "Copy the App ID and installation ID, then paste them and the downloaded PEM below.",
+    appId: "GitHub App ID",
+    appIdPlaceholder: "Enter the numeric App ID",
+    installationId: "Installation ID",
+    installationIdPlaceholder: "Enter the numeric installation ID",
+    privateKey: "PEM private key",
+    privateKeyDropZone: "PEM private key drop zone",
+    pemDropHint: "Drop a .pem file here, or paste the key below.",
+    pemFileLoaded: "Loaded {filename}. Save and verify to use this key.",
+    pemFileInvalid: "Drop a valid .pem file containing an RSA private key.",
+    pemFileReadError: "The dropped PEM file could not be read.",
+    privateKeyPlaceholder: "Paste the downloaded GitHub App PEM",
+    privateKeyPlaceholderConfigured:
+      "Leave blank to keep the configured private key",
+    privateKeyHelp:
+      "The key is sent only to the Next.js server and is never returned to the browser.",
+    privateKeyKeepHelp:
+      "A private key is configured. Paste a replacement PEM only when rotating it.",
+    connectedAs: "Connected to {app} on {account}",
+    connectionDetails: "Actions: {permission}; repositories: {selection}",
+    lastVerified: "Last verified: {date}",
+    save: "Save and verify",
+    rotate: "Rotate key and verify",
+    test: "Test connection",
+    remove: "Remove GitHub App",
+    saved: "GitHub App saved and verified.",
+    rotated: "GitHub App private key rotated and verified.",
+    connectionSucceeded: "GitHub App connection verified.",
+    removed:
+      "GitHub App credentials removed. The personal token and managed repositories were kept.",
+    confirmRemove: "Remove GitHub App credentials?",
+    confirmRemoveDescription:
+      "The App ID, installation ID, and private key will be removed. Pull request credentials and managed repositories will be kept.",
   },
   pullRequests: {
     title: "Pull Requests",
@@ -340,6 +396,14 @@ const mockTranslations = {
     noPipelines: "No pipeline checks were reported.",
     retry: "Retry",
     retrying: "Retrying…",
+    retryUnavailable: {
+      GITHUB_APP_NOT_CONFIGURED:
+        "Configure and verify a GitHub App in Settings to retry this workflow.",
+      NOT_COMPLETED: "Only completed workflows can be retried.",
+      NOT_GITHUB_ACTIONS: "Only GitHub Actions workflow runs can be retried.",
+      WORKFLOW_RUN_UNAVAILABLE:
+        "GitHub did not provide a workflow run for this check suite.",
+    },
     reviewStates: {
       APPROVED: "Approved",
       CHANGES_REQUESTED: "Changes requested",
@@ -400,6 +464,14 @@ const mockTranslations = {
     pipelineStatus: "Status",
     pipelineDetails: "Details",
     viewPipeline: "View",
+    jobCount: "{count} jobs",
+    noJobs: "No jobs were reported for this run.",
+    viewJob: "View {job} on GitHub",
+    retryJob: "Retry {job}",
+    showJobSteps: "Show steps for {job}",
+    hideJobSteps: "Hide steps for {job}",
+    steps: "Steps",
+    noSteps: "No steps have been reported for this job yet.",
     details: "Pull request details",
     branches: "Branches",
     changes: "Changes",

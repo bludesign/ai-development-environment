@@ -14,6 +14,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubPipelineState,
@@ -21,7 +27,8 @@ import type {
   GitHubPipelineView,
 } from "@/services/github/types";
 
-const PIPELINE_FIELDS = "id name status url checkSuiteId canRetry";
+const PIPELINE_FIELDS =
+  "id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } }";
 
 export function RetryPipelineButton({
   pipeline,
@@ -66,7 +73,7 @@ export function RetryPipelineButton({
     }
   };
 
-  return (
+  const button = (
     <Button
       disabled={retrying || !pipeline.canRetry || !pipeline.checkSuiteId}
       onClick={(event) => void retry(event)}
@@ -76,6 +83,27 @@ export function RetryPipelineButton({
       {retrying ? <Spinner /> : <RotateCcw />}
       {retrying ? t("retrying") : t("retry")}
     </Button>
+  );
+
+  if (!pipeline.retryUnavailableReason || retrying) return button;
+  const unavailableMessage = t(
+    `retryUnavailable.${pipeline.retryUnavailableReason}`,
+  );
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            aria-label={unavailableMessage}
+            className="inline-flex"
+            tabIndex={0}
+          >
+            {button}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{unavailableMessage}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -175,7 +203,7 @@ export function PipelineMenu({
                     {t(`pipelineStates.${pipeline.status}`)}
                   </Badge>
                 </div>
-                {pipeline.canRetry && pipeline.checkSuiteId && (
+                {pipeline.checkSuiteId && (
                   <RetryPipelineButton
                     onError={setError}
                     onPipelineRetried={onPipelineRetried}

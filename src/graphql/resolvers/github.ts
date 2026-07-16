@@ -1,5 +1,11 @@
+import type { GraphQLResolveInfo, SelectionSetNode } from "graphql";
+
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { GitHubPullRequestScope, GitHubService } from "@/services/github";
+import type {
+  GitHubAuditContext,
+  GitHubPullRequestScope,
+  GitHubService,
+} from "@/services/github";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -7,6 +13,70 @@ function requireControlPlane(context: GraphQLContext): void {
       "Agent credentials cannot perform control-plane operations",
     );
   }
+}
+
+function auditContext(context: GraphQLContext): GitHubAuditContext {
+  return { actor: "control-plane", ipAddress: context.ipAddress };
+}
+
+function selectionIncludesField(
+  selectionSet: SelectionSetNode,
+  fieldName: string,
+  info: GraphQLResolveInfo,
+  visitedFragments = new Set<string>(),
+): boolean {
+  for (const selection of selectionSet.selections) {
+    if (selection.kind === "Field") {
+      if (selection.name.value === fieldName) return true;
+      if (
+        selection.selectionSet &&
+        selectionIncludesField(
+          selection.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    } else if (selection.kind === "InlineFragment") {
+      if (
+        selectionIncludesField(
+          selection.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    } else if (!visitedFragments.has(selection.name.value)) {
+      visitedFragments.add(selection.name.value);
+      const fragment = info.fragments[selection.name.value];
+      if (
+        fragment &&
+        selectionIncludesField(
+          fragment.selectionSet,
+          fieldName,
+          info,
+          visitedFragments,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function requestsPipelineJobs(info?: GraphQLResolveInfo): boolean {
+  return Boolean(
+    info?.fieldNodes.some((fieldNode) =>
+      fieldNode.selectionSet
+        ? selectionIncludesField(fieldNode.selectionSet, "jobs", info)
+        : false,
+    ),
+  );
 }
 
 export const createGitHubResolvers = (gitHubService: GitHubService) => ({
@@ -18,6 +88,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.getSettings();
+    },
+    githubAppSettings: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.getAppSettings();
     },
     githubRepositories: (
       _root: unknown,
@@ -42,9 +120,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
         repositoryId,
       }: { scope: GitHubPullRequestScope; repositoryId?: string | null },
       context: GraphQLContext,
+      info?: GraphQLResolveInfo,
     ) => {
       requireControlPlane(context);
-      return gitHubService.pullRequests(scope, repositoryId);
+      return requestsPipelineJobs(info)
+        ? gitHubService.pullRequests(scope, repositoryId, {
+            includePipelineJobs: true,
+          })
+        : gitHubService.pullRequests(scope, repositoryId);
     },
     githubPullRequest: (
       _root: unknown,
@@ -64,6 +147,22 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.saveSettings(input);
     },
+    saveGitHubAppSettings: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          appId: string;
+          installationId: string;
+          privateKey?: string | null;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.saveAppSettings(input, auditContext(context));
+    },
     testGitHubConnection: (
       _root: unknown,
       _args: unknown,
@@ -72,6 +171,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.testConnection();
     },
+    testGitHubAppConnection: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.testAppConnection(auditContext(context));
+    },
     clearGitHubCredentials: (
       _root: unknown,
       _args: unknown,
@@ -79,6 +186,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.clearCredentials();
+    },
+    clearGitHubAppCredentials: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearAppCredentials(auditContext(context));
     },
     addGitHubRepository: (
       _root: unknown,
@@ -117,7 +232,28 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.retryPipeline(repositoryId, checkSuiteId);
+      return gitHubService.retryPipeline(
+        repositoryId,
+        checkSuiteId,
+        auditContext(context),
+      );
+    },
+    retryGitHubWorkflowJob: (
+      _root: unknown,
+      {
+        repositoryId,
+        checkSuiteId,
+        jobId,
+      }: { repositoryId: string; checkSuiteId: string; jobId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.retryWorkflowJob(
+        repositoryId,
+        checkSuiteId,
+        jobId,
+        auditContext(context),
+      );
     },
   },
 });

@@ -38,9 +38,30 @@ enum GitHubReviewDecision {
   NONE
 }
 
+enum GitHubPipelineRetryUnavailableReason {
+  GITHUB_APP_NOT_CONFIGURED
+  NOT_COMPLETED
+  NOT_GITHUB_ACTIONS
+  WORKFLOW_RUN_UNAVAILABLE
+}
+
 type GitHubSettings {
   tokenConfigured: Boolean!
   updatedAt: String!
+}
+
+type GitHubAppSettings {
+  configured: Boolean!
+  appId: String
+  installationId: String
+  privateKeyConfigured: Boolean!
+  keyFingerprint: String
+  appSlug: String
+  accountLogin: String
+  repositorySelection: String
+  actionsPermission: String
+  verifiedAt: String
+  updatedAt: String
 }
 
 type GitHubViewer {
@@ -98,6 +119,24 @@ type GitHubPipeline {
   url: String
   checkSuiteId: ID
   canRetry: Boolean!
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  jobs: [GitHubWorkflowJob!]!
+}
+
+type GitHubWorkflowJobStep {
+  number: Int!
+  name: String!
+  status: GitHubPipelineState!
+}
+
+type GitHubWorkflowJob {
+  id: ID!
+  name: String!
+  status: GitHubPipelineState!
+  url: String
+  canRetry: Boolean!
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  steps: [GitHubWorkflowJobStep!]!
 }
 
 type GitHubPullRequestActor {
@@ -146,6 +185,12 @@ input SaveGitHubSettingsInput {
   apiToken: String
 }
 
+input SaveGitHubAppSettingsInput {
+  appId: String!
+  installationId: String!
+  privateKey: String
+}
+
 input AddGitHubRepositoryInput {
   nameWithOwner: String!
   jiraKeyRegex: String
@@ -158,6 +203,7 @@ input UpdateGitHubRepositoryInput {
 
 extend type Query {
   githubSettings: GitHubSettings!
+  githubAppSettings: GitHubAppSettings!
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubPullRequests(
@@ -173,12 +219,20 @@ extend type Query {
 
 extend type Mutation {
   saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
+  saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!
   testGitHubConnection: GitHubViewer!
+  testGitHubAppConnection: GitHubAppSettings!
   clearGitHubCredentials: GitHubSettings!
+  clearGitHubAppCredentials: GitHubAppSettings!
   addGitHubRepository(input: AddGitHubRepositoryInput!): [GitHubRepository!]!
   updateGitHubRepository(
     input: UpdateGitHubRepositoryInput!
   ): [GitHubRepository!]!
   removeGitHubRepository(id: ID!): [GitHubRepository!]!
   retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
+  retryGitHubWorkflowJob(
+    repositoryId: ID!
+    checkSuiteId: ID!
+    jobId: ID!
+  ): Boolean!
 }
