@@ -11,6 +11,7 @@ import {
   List,
   MoreHorizontal,
   Paintbrush,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -71,6 +72,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -113,8 +121,8 @@ const PULL_REQUEST_FIELDS =
   "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt";
 const WORKTREE_FIELDS = `
   id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
-  baseBranch baseBranchOverride baseAhead baseBehind highlightColor availability statusError
-  ticketKey ticketTitle lastCheckedAt missingAt createdAt updatedAt
+  baseBranch baseBranchOverride baseAhead baseBehind hasUnstagedChanges highlightColor availability statusError
+  ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
@@ -130,7 +138,6 @@ const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId
     commitsTruncated changesTruncated
   }
 }`;
-const LIVE_INSPECTION_POLL_MS = 5_000;
 const LIVE_INSPECTION_RETRY_MS = 1_000;
 
 export function displayedWorktreePath(
@@ -215,11 +222,7 @@ async function inspectWorktree(worktreeId: string): Promise<WorktreeDetail> {
   return data.inspectWorktree;
 }
 
-function useLiveWorktreeInspection(
-  worktreeId: string,
-  enabled: boolean,
-  inspect: () => Promise<void>,
-) {
+function useQueuedWorktreeInspection(inspect: () => Promise<void>) {
   const running = useRef(false);
   const pending = useRef(false);
 
@@ -233,11 +236,30 @@ function useLiveWorktreeInspection(
       do {
         pending.current = false;
         await inspect();
-      } while (pending.current && enabled);
+      } while (pending.current);
     } finally {
       running.current = false;
     }
-  }, [enabled, inspect]);
+  }, [inspect]);
+
+  return refresh;
+}
+
+type WorktreeActivity = {
+  worktreeId: string;
+  hasUnstagedChanges: boolean | null;
+  observedAt: string;
+};
+
+function useWorktreeActivitySubscription(
+  worktreeId: string,
+  enabled: boolean,
+  onActivity: (activity: WorktreeActivity) => void,
+) {
+  const onActivityRef = useRef(onActivity);
+  useEffect(() => {
+    onActivityRef.current = onActivity;
+  }, [onActivity]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -258,33 +280,34 @@ function useLiveWorktreeInspection(
       unsubscribe = controlPlaneSubscriptions().subscribe(
         {
           query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
-            worktreeInspectionChanged(worktreeId: $worktreeId) { worktreeId observedAt }
+            worktreeInspectionChanged(worktreeId: $worktreeId) {
+              worktreeId hasUnstagedChanges observedAt
+            }
           }`,
           variables: { worktreeId },
         },
         {
-          next: () => void refresh(),
+          next: (result) => {
+            const activity = (
+              result as {
+                data?: { worktreeInspectionChanged?: WorktreeActivity };
+              }
+            ).data?.worktreeInspectionChanged;
+            if (activity) onActivityRef.current(activity);
+          },
           error: () => scheduleRetry(currentGeneration),
           complete: () => scheduleRetry(currentGeneration),
         },
       );
     };
     subscribe();
-    const poll = window.setInterval(
-      () => void refresh(),
-      LIVE_INSPECTION_POLL_MS,
-    );
     return () => {
       stopped = true;
       generation += 1;
-      pending.current = false;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
-      window.clearInterval(poll);
       unsubscribe();
     };
-  }, [enabled, refresh, worktreeId]);
-
-  return refresh;
+  }, [enabled, worktreeId]);
 }
 
 const colorClasses: Record<string, string> = {
@@ -464,6 +487,8 @@ export function WorktreesPage() {
                         ...next,
                         ticketKey: next.ticketKey ?? worktree.ticketKey,
                         ticketTitle: next.ticketTitle ?? worktree.ticketTitle,
+                        ticketStatus:
+                          next.ticketStatus ?? worktree.ticketStatus,
                         pullRequest: next.pullRequest ?? worktree.pullRequest,
                       }
                     : worktree,
@@ -612,6 +637,9 @@ function AgentSection({
   onOpenTicket: (issueKey: string) => void;
 }) {
   const t = useTranslations("worktrees");
+  const liveUpdatesEnabled =
+    agentGroup.agent.connectionStatus === "ONLINE" &&
+    agentGroup.agent.capabilities.includes("worktree.watch");
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2 border-b pb-2">
@@ -646,6 +674,7 @@ function AgentSection({
                   group={group}
                   inspectionRefreshToken={inspectionRefreshToken}
                   key={worktree.id}
+                  liveUpdatesEnabled={liveUpdatesEnabled}
                   onError={onError}
                   onManageTags={onManageTags}
                   onOpenTicket={onOpenTicket}
@@ -662,6 +691,7 @@ function AgentSection({
               editorVariant={editorVariant}
               group={group}
               inspectionRefreshToken={inspectionRefreshToken}
+              liveUpdatesEnabled={liveUpdatesEnabled}
               onError={onError}
               onManageTags={onManageTags}
               onOpenTicket={onOpenTicket}
@@ -723,6 +753,14 @@ function WorktreeCard(props: WorktreeItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [dirtyOverride, setDirtyOverride] = useState<{
+    sourceUpdatedAt: string;
+    value: boolean;
+  } | null>(null);
+  const hasUnstagedChanges =
+    dirtyOverride?.sourceUpdatedAt === worktree.updatedAt
+      ? dirtyOverride.value
+      : worktree.hasUnstagedChanges;
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const t = useTranslations("worktrees");
@@ -733,6 +771,12 @@ function WorktreeCard(props: WorktreeItemProps) {
       const next = await inspectWorktree(worktree.id);
       if (request !== detailRequest.current) return;
       setDetail(next);
+      setDirtyOverride({
+        sourceUpdatedAt: worktree.updatedAt,
+        value: next.changes.some(
+          (change) => change.unstaged || change.untracked || change.conflicted,
+        ),
+      });
       onError(null);
     } catch (value) {
       if (request === detailRequest.current)
@@ -740,11 +784,24 @@ function WorktreeCard(props: WorktreeItemProps) {
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, worktree.id]);
-  const refreshInspection = useLiveWorktreeInspection(
+  }, [onError, worktree.id, worktree.updatedAt]);
+  const refreshInspection = useQueuedWorktreeInspection(inspect);
+  const handleActivity = useCallback(
+    (activity: WorktreeActivity) => {
+      if (activity.hasUnstagedChanges !== null) {
+        setDirtyOverride({
+          sourceUpdatedAt: worktree.updatedAt,
+          value: activity.hasUnstagedChanges,
+        });
+      }
+      if (expanded) void refreshInspection();
+    },
+    [expanded, refreshInspection, worktree.updatedAt],
+  );
+  useWorktreeActivitySubscription(
     worktree.id,
-    expanded && detail !== null,
-    inspect,
+    props.liveUpdatesEnabled && worktree.availability === "AVAILABLE",
+    handleActivity,
   );
   useEffect(() => {
     if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
@@ -768,7 +825,7 @@ function WorktreeCard(props: WorktreeItemProps) {
       <CardHeader className="border-b">
         <CardTitle>
           <Button
-            className="h-auto max-w-full justify-start px-0 text-left"
+            className="h-auto max-w-full justify-start px-2 py-1 text-left"
             onClick={() => void toggle()}
             variant="ghost"
           >
@@ -783,7 +840,11 @@ function WorktreeCard(props: WorktreeItemProps) {
             <WorktreeTicketLink {...props} />
           )}
         </CardTitle>
-        <CardAction>
+        <CardAction className="flex max-w-full flex-wrap items-center justify-end gap-1">
+          <OriginStatusBadges worktree={worktree} />
+          {hasUnstagedChanges && (
+            <Badge variant="destructive">{t("dirty")}</Badge>
+          )}
           <WorktreeMenus {...props} />
         </CardAction>
       </CardHeader>
@@ -816,6 +877,7 @@ type WorktreeItemProps = {
   baseRepoDirectory: string | null;
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
   inspectionRefreshToken: number;
+  liveUpdatesEnabled: boolean;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
   onError: (error: string | null) => void;
@@ -835,31 +897,34 @@ function WorktreeTicketLink({
       ? `${worktree.ticketKey ? " — " : ""}${worktree.ticketTitle}`
       : ""
   }`;
-  if (!worktree.ticketKey) {
-    return (
-      <p
-        className={cn(
-          "truncate text-muted-foreground",
-          compact ? "text-xs" : "mt-1 text-sm font-normal",
-        )}
-        title={label}
-      >
-        {label}
-      </p>
-    );
-  }
   return (
-    <button
+    <div
       className={cn(
-        "block max-w-full truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        compact ? "text-xs" : "mt-1 text-sm font-normal",
+        "flex max-w-full items-center gap-1.5 font-normal",
+        compact ? "mt-0.5 text-xs" : "mt-1 text-sm",
       )}
-      onClick={() => onOpenTicket(worktree.ticketKey!)}
-      title={label}
-      type="button"
     >
-      {label}
-    </button>
+      {!worktree.ticketKey ? (
+        <p
+          className="min-w-0 flex-1 truncate text-muted-foreground"
+          title={label}
+        >
+          {label}
+        </p>
+      ) : (
+        <button
+          className="min-w-0 flex-1 truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onOpenTicket(worktree.ticketKey!)}
+          title={label}
+          type="button"
+        >
+          {label}
+        </button>
+      )}
+      {worktree.ticketStatus && (
+        <Badge variant="secondary">{worktree.ticketStatus}</Badge>
+      )}
+    </div>
   );
 }
 
@@ -867,55 +932,30 @@ function WorktreeMetadata(props: WorktreeItemProps) {
   const { worktree, group, baseRepoDirectory } = props;
   const t = useTranslations("worktrees");
   return (
-    <div className="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
-      <Info
-        label={t("path")}
-        mono
-        value={displayedWorktreePath(worktree.folder, baseRepoDirectory)}
-      />
-      <BaseBranchControl {...props} />
-      <div>
-        <p className="text-xs text-muted-foreground">{t("upstreamStatus")}</p>
-        <Badge>{syncText(worktree, t)}</Badge>
+    <div className="space-y-3 text-sm">
+      <div className="grid gap-3 md:grid-cols-2">
+        <Info
+          label={t("path")}
+          mono
+          value={displayedWorktreePath(worktree.folder, baseRepoDirectory)}
+        />
+        <BaseBranchControl {...props} />
       </div>
-      <div>
-        <p className="text-xs text-muted-foreground">{t("baseStatus")}</p>
-        <Badge
-          className={
-            worktree.baseBehind === 0
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              : worktree.baseBehind
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                : undefined
-          }
-          variant="outline"
-        >
-          {worktree.baseBehind === null
-            ? t("unknown")
-            : worktree.baseBehind === 0
-              ? t("baseCurrent", { count: worktree.baseAhead ?? 0 })
-              : t("baseBehind", { count: worktree.baseBehind })}
-        </Badge>
-      </div>
-      <div className="md:col-span-2 xl:col-span-4 flex flex-wrap items-center gap-2">
+      <MetadataRow label={t("upToDate")}>
+        <BaseFreshnessBadge worktree={worktree} />
+      </MetadataRow>
+      <MetadataRow label={t("tags")}>
         {worktree.tags.map((tag) => (
           <TagBadge key={tag.id} tag={tag} />
         ))}
-        {worktree.pullRequest && (
-          <>
-            <a href={worktree.pullRequest.url} rel="noreferrer" target="_blank">
-              <Badge>PR #{worktree.pullRequest.number}</Badge>
-            </a>
-            <PipelineMenu
-              pipelineStatus={worktree.pullRequest.pipelineStatus}
-              pipelines={worktree.pullRequest.pipelines}
-              repositoryId={worktree.pullRequest.repositoryGithubId}
-            />
-            <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
-              {t(`review.${worktree.pullRequest.reviewDecision}`)}
-            </Badge>
-          </>
+        {!worktree.tags.length && (
+          <span className="text-muted-foreground">—</span>
         )}
+      </MetadataRow>
+      <MetadataRow label={t("pullRequest")}>
+        <PullRequestBadges worktree={worktree} />
+      </MetadataRow>
+      <div className="flex flex-wrap items-center gap-2">
         {worktree.statusError && (
           <span className="text-xs text-destructive">
             {worktree.statusError}
@@ -929,6 +969,111 @@ function WorktreeMetadata(props: WorktreeItemProps) {
       </div>
     </div>
   );
+}
+
+function MetadataRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="w-24 shrink-0 text-xs text-muted-foreground">{label}</p>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
+  const t = useTranslations("worktrees");
+  const current = worktree.baseBehind === 0;
+  return (
+    <Badge
+      className={
+        current
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : worktree.baseBehind === null
+            ? undefined
+            : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      }
+      variant="outline"
+    >
+      {worktree.baseBehind === null
+        ? t("unknown")
+        : current
+          ? t("yes")
+          : t("notUpToDate", { count: worktree.baseBehind })}
+    </Badge>
+  );
+}
+
+function PullRequestBadges({ worktree }: { worktree: Worktree }) {
+  const t = useTranslations("worktrees");
+  return (
+    <>
+      {worktree.pullRequest ? (
+        <>
+          <a href={worktree.pullRequest.url} rel="noreferrer" target="_blank">
+            <Badge>PR #{worktree.pullRequest.number}</Badge>
+          </a>
+          <PipelineMenu
+            pipelineStatus={worktree.pullRequest.pipelineStatus}
+            pipelines={worktree.pullRequest.pipelines}
+            repositoryId={worktree.pullRequest.repositoryGithubId}
+          />
+          <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
+            {t(`review.${worktree.pullRequest.reviewDecision}`)}
+          </Badge>
+        </>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )}
+      <Badge variant="secondary">
+        {t("branchCommits", { count: worktree.baseAhead ?? 0 })}
+      </Badge>
+    </>
+  );
+}
+
+function OriginStatusBadges({ worktree }: { worktree: Worktree }) {
+  const t = useTranslations("worktrees");
+  if (
+    worktree.syncState === "IN_SYNC" ||
+    (worktree.ahead === 0 && worktree.behind === 0)
+  ) {
+    return (
+      <Badge
+        className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+        variant="outline"
+      >
+        {t("inSync")}
+      </Badge>
+    );
+  }
+  if (worktree.ahead !== null || worktree.behind !== null) {
+    return (
+      <>
+        {worktree.ahead !== null && (
+          <Badge variant="outline">
+            {t("ahead", { count: worktree.ahead })}
+          </Badge>
+        )}
+        {worktree.behind !== null && (
+          <Badge
+            className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            variant="outline"
+          >
+            {t("behind", { count: worktree.behind })}
+          </Badge>
+        )}
+      </>
+    );
+  }
+  return <Badge variant="outline">{syncText(worktree, t)}</Badge>;
 }
 
 function syncText(
@@ -946,11 +1091,23 @@ function syncText(
   return t("unknown");
 }
 
-function BaseBranchControl(props: WorktreeItemProps) {
-  const { worktree, group, onUpdate, onError } = props;
+function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
+  const { worktree, group, onUpdate, onError, compact = false } = props;
   const t = useTranslations("worktrees");
-  const [value, setValue] = useState(worktree.baseBranchOverride ?? "");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const inheritValue = "__inherit_remote_default__";
+  const branches = Array.from(
+    new Set(
+      [
+        worktree.baseBranchOverride,
+        group.codebase.defaultBranch,
+        ...group.codebase.remoteBranches,
+      ].filter((branch): branch is string => Boolean(branch)),
+    ),
+  );
   const save = async (next: string) => {
+    setSaving(true);
     try {
       const data = await controlPlaneRequest<{
         updateWorktreeBaseBranch: Worktree;
@@ -962,51 +1119,68 @@ function BaseBranchControl(props: WorktreeItemProps) {
       );
       onUpdate(data.updateWorktreeBaseBranch);
       onError(null);
+      setEditing(false);
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
     }
   };
   return (
     <div className="min-w-0">
-      <Label
-        className="text-xs text-muted-foreground"
-        htmlFor={`base-${worktree.id}`}
+      {!compact && (
+        <p className="text-xs text-muted-foreground">{t("baseBranch")}</p>
+      )}
+      <div
+        className={cn("flex min-w-0 items-center gap-1", !compact && "mt-0.5")}
       >
-        {t("baseBranch")}
-      </Label>
-      <div className="mt-1 flex gap-1">
-        <Input
-          id={`base-${worktree.id}`}
-          list={`branches-${worktree.id}`}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder={group.codebase.defaultBranch ?? t("baseUnavailable")}
-          value={value}
-        />
-        <datalist id={`branches-${worktree.id}`}>
-          {group.codebase.remoteBranches.map((branch) => (
-            <option key={branch} value={branch} />
-          ))}
-        </datalist>
-        <Button
-          aria-label={t("saveBase")}
-          onClick={() => void save(value)}
-          size="icon-sm"
-          variant="outline"
-        >
-          <Save />
-        </Button>
-        {worktree.baseBranchOverride && (
-          <Button
-            aria-label={t("inheritBase")}
-            onClick={() => {
-              setValue("");
-              void save("");
-            }}
-            size="icon-sm"
-            variant="ghost"
+        {editing ? (
+          <Select
+            disabled={saving}
+            onOpenChange={setEditing}
+            onValueChange={(next) =>
+              void save(next === inheritValue ? "" : next)
+            }
+            open={editing}
+            value={
+              worktree.baseBranchOverride ??
+              (group.codebase.defaultBranch ? inheritValue : undefined)
+            }
           >
-            <RotateCcw />
-          </Button>
+            <SelectTrigger
+              aria-label={t("baseBranch")}
+              className="h-7 min-w-40 max-w-full"
+              size="sm"
+            >
+              <SelectValue placeholder={t("baseUnavailable")} />
+            </SelectTrigger>
+            <SelectContent align="start">
+              {group.codebase.defaultBranch && (
+                <SelectItem value={inheritValue}>
+                  {group.codebase.defaultBranch} · {t("inheritBase")}
+                </SelectItem>
+              )}
+              {branches.map((branch) => (
+                <SelectItem key={branch} value={branch}>
+                  {branch}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <>
+            <span className="truncate" title={worktree.baseBranch ?? undefined}>
+              {worktree.baseBranch ?? "—"}
+            </span>
+            <Button
+              aria-label={t("editBase")}
+              onClick={() => setEditing(true)}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <Pencil />
+            </Button>
+          </>
         )}
       </div>
     </div>
@@ -1419,9 +1593,10 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
             <TableHead>{t("branch")}</TableHead>
             <TableHead>{t("path")}</TableHead>
             <TableHead>{t("baseBranch")}</TableHead>
-            <TableHead>{t("status")}</TableHead>
+            <TableHead>{t("upToDate")}</TableHead>
             <TableHead>{t("tags")}</TableHead>
             <TableHead>{t("pullRequest")}</TableHead>
+            <TableHead>{t("origin")}</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
@@ -1446,6 +1621,14 @@ function WorktreeTableRows(props: WorktreeItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [dirtyOverride, setDirtyOverride] = useState<{
+    sourceUpdatedAt: string;
+    value: boolean;
+  } | null>(null);
+  const hasUnstagedChanges =
+    dirtyOverride?.sourceUpdatedAt === worktree.updatedAt
+      ? dirtyOverride.value
+      : worktree.hasUnstagedChanges;
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const inspect = useCallback(async () => {
@@ -1455,6 +1638,12 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       const next = await inspectWorktree(worktree.id);
       if (request !== detailRequest.current) return;
       setDetail(next);
+      setDirtyOverride({
+        sourceUpdatedAt: worktree.updatedAt,
+        value: next.changes.some(
+          (change) => change.unstaged || change.untracked || change.conflicted,
+        ),
+      });
       onError(null);
     } catch (value) {
       if (request === detailRequest.current)
@@ -1462,11 +1651,24 @@ function WorktreeTableRows(props: WorktreeItemProps) {
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, worktree.id]);
-  const refreshInspection = useLiveWorktreeInspection(
+  }, [onError, worktree.id, worktree.updatedAt]);
+  const refreshInspection = useQueuedWorktreeInspection(inspect);
+  const handleActivity = useCallback(
+    (activity: WorktreeActivity) => {
+      if (activity.hasUnstagedChanges !== null) {
+        setDirtyOverride({
+          sourceUpdatedAt: worktree.updatedAt,
+          value: activity.hasUnstagedChanges,
+        });
+      }
+      if (expanded) void refreshInspection();
+    },
+    [expanded, refreshInspection, worktree.updatedAt],
+  );
+  useWorktreeActivitySubscription(
     worktree.id,
-    expanded && detail !== null,
-    inspect,
+    props.liveUpdatesEnabled && worktree.availability === "AVAILABLE",
+    handleActivity,
   );
   useEffect(() => {
     if (lastInspectionRefreshToken.current === inspectionRefreshToken) return;
@@ -1501,9 +1703,11 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         <TableCell className="font-mono text-xs">
           {displayedWorktreePath(worktree.folder, baseRepoDirectory)}
         </TableCell>
-        <TableCell>{worktree.baseBranch ?? "—"}</TableCell>
         <TableCell>
-          <Badge>{syncText(worktree, t)}</Badge>
+          <BaseBranchControl {...props} compact />
+        </TableCell>
+        <TableCell>
+          <BaseFreshnessBadge worktree={worktree} />
         </TableCell>
         <TableCell>
           <div className="flex gap-1">
@@ -1513,20 +1717,24 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           </div>
         </TableCell>
         <TableCell>
-          {worktree.pullRequest ? (
-            <a href={worktree.pullRequest.url} rel="noreferrer" target="_blank">
-              <Badge>PR #{worktree.pullRequest.number}</Badge>
-            </a>
-          ) : (
-            "—"
-          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <PullRequestBadges worktree={worktree} />
+          </div>
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap items-center gap-1">
+            <OriginStatusBadges worktree={worktree} />
+            {hasUnstagedChanges && (
+              <Badge variant="destructive">{t("dirty")}</Badge>
+            )}
+          </div>
         </TableCell>
         <TableCell>
           <WorktreeMenus {...props} />
         </TableCell>
       </TableRow>
       <TableRow className={cn(highlight)}>
-        <TableCell colSpan={7}>
+        <TableCell colSpan={8}>
           <ActionRow
             {...props}
             onCompleted={async () => {
@@ -1538,7 +1746,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       </TableRow>
       {expanded && (
         <TableRow className={cn(highlight)}>
-          <TableCell colSpan={7}>
+          <TableCell colSpan={8}>
             {detailLoading && !detail ? (
               <Spinner />
             ) : detail ? (

@@ -28,6 +28,8 @@ type ActiveWorktreeWatch = {
   watchId: string;
   codebaseId: string;
   gitDirectory: string;
+  folder: string;
+  timeoutMs: number;
   watchers: FSWatcher[];
   reporter: AgentJobHandlerContext["reportWorktreeActivity"];
   timer: ReturnType<typeof setTimeout> | null;
@@ -36,6 +38,18 @@ type ActiveWorktreeWatch = {
 };
 
 const activeWorktreeWatches = new Map<string, ActiveWorktreeWatch>();
+
+function statusHasUnstagedChanges(value: string): boolean {
+  const entries = value.split("\0").filter(Boolean);
+  for (let index = 0; index < entries.length; index += 1) {
+    const code = entries[index]!.slice(0, 2);
+    if (code === "??" || (code[1] !== " " && code[1] !== "!")) return true;
+    if ((code[0] === "R" || code[0] === "C") && entries[index + 1]) {
+      index += 1;
+    }
+  }
+  return false;
+}
 
 function closeWorktreeWatch(entry: ActiveWorktreeWatch): void {
   if (entry.timer) clearTimeout(entry.timer);
@@ -59,12 +73,27 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   }
   entry.reporting = true;
   entry.pending = false;
-  const report: WorktreeActivityReport = {
-    codebaseId: entry.codebaseId,
-    gitDirectory: entry.gitDirectory,
-    observedAt: new Date().toISOString(),
-  };
   try {
+    const status = await git(
+      entry.folder,
+      [
+        "--no-optional-locks",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+      ],
+      entry.timeoutMs,
+      new AbortController().signal,
+    );
+    const report: WorktreeActivityReport = {
+      codebaseId: entry.codebaseId,
+      gitDirectory: entry.gitDirectory,
+      ...(status.exitCode === 0
+        ? { hasUnstagedChanges: statusHasUnstagedChanges(status.stdout) }
+        : {}),
+      observedAt: new Date().toISOString(),
+    };
     await entry.reporter(report);
   } catch (error) {
     console.error(
@@ -239,10 +268,22 @@ export async function inspectWorktreeItem(
   const checkedAt = new Date().toISOString();
   try {
     const folder = await realpath(folderValue);
-    const [gitDir, branchResult, headResult] = await Promise.all([
+    const [gitDir, branchResult, headResult, statusResult] = await Promise.all([
       gitDirectory(folder, timeoutMs, signal),
       git(folder, ["symbolic-ref", "--short", "-q", "HEAD"], timeoutMs, signal),
       git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
+      git(
+        folder,
+        [
+          "--no-optional-locks",
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+        ],
+        timeoutMs,
+        signal,
+      ),
     ]);
     const branch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
@@ -293,6 +334,10 @@ export async function inspectWorktreeItem(
       syncState,
       baseAhead: baseCounts.ahead,
       baseBehind: baseCounts.behind,
+      hasUnstagedChanges:
+        statusResult.exitCode === 0
+          ? statusHasUnstagedChanges(statusResult.stdout)
+          : false,
       availability: "AVAILABLE",
       error: null,
       checkedAt,
@@ -311,6 +356,7 @@ export async function inspectWorktreeItem(
       syncState: "UNKNOWN",
       baseAhead: null,
       baseBehind: null,
+      hasUnstagedChanges: false,
       availability: "ERROR",
       error: cleanError(error),
       checkedAt,
@@ -574,6 +620,8 @@ export const watchWorktree: AgentJobHandler = async (
     watchId: input.watchId,
     codebaseId: input.codebaseId,
     gitDirectory: input.gitDirectory,
+    folder,
+    timeoutMs: Math.min(timeoutMs, 30_000),
     watchers: [],
     reporter: context.reportWorktreeActivity,
     timer: null,

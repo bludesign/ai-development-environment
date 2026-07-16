@@ -44,11 +44,13 @@ type Worktree {
   baseBranchOverride: String
   baseAhead: Int
   baseBehind: Int
+  hasUnstagedChanges: Boolean!
   highlightColor: String
   availability: String!
   statusError: String
   ticketKey: String
   ticketTitle: String
+  ticketStatus: String
   pullRequest: GitHubPullRequest
   tags: [WorktreeTag!]!
   activeJob: AgentJob
@@ -111,6 +113,7 @@ type WorktreeOverviewChange {
 
 type WorktreeActivity {
   worktreeId: ID!
+  hasUnstagedChanges: Boolean
   observedAt: String!
 }
 
@@ -127,6 +130,7 @@ input WorktreeInventoryInput {
   syncState: CodebaseSyncState!
   baseAhead: Int
   baseBehind: Int
+  hasUnstagedChanges: Boolean
   availability: String!
   error: String
   checkedAt: String!
@@ -146,6 +150,7 @@ input CodebaseWorktreeReportInput {
 input WorktreeActivityReportInput {
   codebaseId: ID!
   gitDirectory: String!
+  hasUnstagedChanges: Boolean
   observedAt: String!
 }
 

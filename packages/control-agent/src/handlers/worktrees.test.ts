@@ -193,7 +193,11 @@ describe("worktree inventory and inspection", () => {
     await vi.waitFor(
       () =>
         expect(reportWorktreeActivity).toHaveBeenCalledWith(
-          expect.objectContaining({ codebaseId: "codebase-1", gitDirectory }),
+          expect.objectContaining({
+            codebaseId: "codebase-1",
+            gitDirectory,
+            hasUnstagedChanges: true,
+          }),
         ),
       { timeout: 3_000 },
     );

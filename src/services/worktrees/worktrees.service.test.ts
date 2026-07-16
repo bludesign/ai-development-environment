@@ -173,11 +173,15 @@ describe("WorktreesService", () => {
   });
 
   test("accepts activity only from the agent that owns the worktree", async () => {
-    const findFirst = vi.fn().mockResolvedValueOnce({ id: "worktree-1" });
-    getPrismaClient.mockResolvedValue({ worktree: { findFirst } });
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "worktree-1", codebaseId: "codebase-1" });
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({ worktree: { findFirst, update } });
     const activity = {
       codebaseId: "codebase-1",
       gitDirectory: "/repo/.git",
+      hasUnstagedChanges: true,
       observedAt: new Date(0).toISOString(),
     };
 
@@ -185,7 +189,12 @@ describe("WorktreesService", () => {
       service().reportActivity("agent-1", activity),
     ).resolves.toEqual({
       worktreeId: "worktree-1",
+      hasUnstagedChanges: true,
       observedAt: activity.observedAt,
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "worktree-1" },
+      data: { hasUnstagedChanges: true },
     });
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

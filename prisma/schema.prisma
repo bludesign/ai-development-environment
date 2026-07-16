@@ -146,6 +146,7 @@ model Worktree {
   baseBranchOverride String?
   baseAhead          Int?
   baseBehind         Int?
+  hasUnstagedChanges Boolean                 @default(false)
   highlightColor     String?
   availability       String                  @default("AVAILABLE")
   statusError        String?

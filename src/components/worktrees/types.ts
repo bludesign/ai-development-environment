@@ -30,11 +30,13 @@ export type Worktree = {
   baseBranchOverride: string | null;
   baseAhead: number | null;
   baseBehind: number | null;
+  hasUnstagedChanges: boolean;
   highlightColor: string | null;
   availability: string;
   statusError: string | null;
   ticketKey: string | null;
   ticketTitle: string | null;
+  ticketStatus: string | null;
   pullRequest: GitHubPullRequestView | null;
   tags: WorktreeTag[];
   activeJob: AgentJob | null;

@@ -31,6 +31,7 @@ export type WorktreeWatchAction = "START" | "STOP";
 export type WorktreeActivityReport = {
   codebaseId: string;
   gitDirectory: string;
+  hasUnstagedChanges?: boolean;
   observedAt: string;
 };
 
@@ -47,6 +48,7 @@ export type WorktreeInventoryItem = {
   syncState: CodebaseSyncState;
   baseAhead: number | null;
   baseBehind: number | null;
+  hasUnstagedChanges?: boolean;
   availability: "AVAILABLE" | "MISSING" | "ERROR";
   error: string | null;
   checkedAt: string;
@@ -120,6 +122,12 @@ function nullableCount(value: unknown, name: string): number | null {
   return value;
 }
 
+function optionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
+  return value;
+}
+
 function dateString(value: unknown, name: string): string {
   const result = stringValue(value, name);
   if (Number.isNaN(new Date(result).valueOf())) {
@@ -182,6 +190,10 @@ export function parseWorktreeInventoryItem(
     syncState: syncState(item.syncState, `${name}.syncState`),
     baseAhead: nullableCount(item.baseAhead, `${name}.baseAhead`),
     baseBehind: nullableCount(item.baseBehind, `${name}.baseBehind`),
+    hasUnstagedChanges: optionalBoolean(
+      item.hasUnstagedChanges,
+      `${name}.hasUnstagedChanges`,
+    ),
     availability: availability as WorktreeInventoryItem["availability"],
     error: nullableString(item.error, `${name}.error`),
     checkedAt: dateString(item.checkedAt, `${name}.checkedAt`),
@@ -337,7 +349,12 @@ export function parseWorktreeActivityReport(
   value: unknown,
 ): WorktreeActivityReport {
   const report = objectValue(value, "worktree activity report");
-  const allowed = new Set(["codebaseId", "gitDirectory", "observedAt"]);
+  const allowed = new Set([
+    "codebaseId",
+    "gitDirectory",
+    "hasUnstagedChanges",
+    "observedAt",
+  ]);
   const unexpected = Object.keys(report).find((key) => !allowed.has(key));
   if (unexpected) {
     throw new Error(`Unexpected worktree activity field: ${unexpected}`);
@@ -350,6 +367,10 @@ export function parseWorktreeActivityReport(
     gitDirectory: stringValue(
       report.gitDirectory,
       "worktree activity report.gitDirectory",
+    ),
+    hasUnstagedChanges: optionalBoolean(
+      report.hasUnstagedChanges,
+      "worktree activity report.hasUnstagedChanges",
     ),
     observedAt: dateString(
       report.observedAt,

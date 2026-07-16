@@ -259,6 +259,7 @@ export class WorktreesService {
         worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
       ticketKey: ticketKey(worktree.branch, String(pattern)),
       ticketTitle: null as string | null,
+      ticketStatus: null as string | null,
       pullRequest: null as
         | Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>[number]
         | null,
@@ -320,15 +321,16 @@ export class WorktreesService {
     const keys = [
       ...new Set(views.map((item) => item.ticketKey).filter(Boolean)),
     ] as string[];
-    const titles = new Map<string, string>();
+    const tickets = new Map<string, { title: string; status: string | null }>();
     await Promise.all(
       keys.map(async (key) => {
         try {
           const cached = await this.jiraService.cachedTicket(key);
-          titles.set(
-            key,
-            cached?.summary ?? (await this.jiraService.ticket(key)).summary,
-          );
+          const ticket = cached ?? (await this.jiraService.ticket(key));
+          tickets.set(key, {
+            title: ticket.summary,
+            status: ticket.status,
+          });
         } catch {
           // Jira is optional on this page.
         }
@@ -336,7 +338,10 @@ export class WorktreesService {
     );
     for (const item of views) {
       item.ticketTitle = item.ticketKey
-        ? (titles.get(item.ticketKey) ?? null)
+        ? (tickets.get(item.ticketKey)?.title ?? null)
+        : null;
+      item.ticketStatus = item.ticketKey
+        ? (tickets.get(item.ticketKey)?.status ?? null)
         : null;
       item.pullRequest =
         pullRequestsByOrigin
@@ -482,11 +487,21 @@ export class WorktreesService {
         missingAt: null,
         codebase: { agentId },
       },
-      select: { id: true },
+      select: { id: true, codebaseId: true },
     });
     if (!worktree) throw new Error("Worktree activity source was not found");
+    if (report.hasUnstagedChanges !== undefined) {
+      await prisma.worktree.update({
+        where: { id: worktree.id },
+        data: { hasUnstagedChanges: report.hasUnstagedChanges },
+      });
+      this.publish(worktree.id, worktree.codebaseId);
+    }
     const activity = {
       worktreeId: worktree.id,
+      ...(report.hasUnstagedChanges === undefined
+        ? {}
+        : { hasUnstagedChanges: report.hasUnstagedChanges }),
       observedAt: report.observedAt,
     };
     if (this.watchDemand.has(worktree.id)) {
@@ -510,6 +525,7 @@ export class WorktreesService {
       syncState: item.syncState,
       baseAhead: item.baseAhead,
       baseBehind: item.baseBehind,
+      hasUnstagedChanges: item.hasUnstagedChanges ?? false,
       availability: item.availability,
       statusError: item.error,
       lastCheckedAt: new Date(item.checkedAt),
@@ -743,6 +759,7 @@ export class WorktreesService {
     const events = agentEventBus.iterate<{
       worktreeInspectionChanged: {
         worktreeId: string;
+        hasUnstagedChanges?: boolean;
         observedAt: string;
       };
     }>(worktreeInspectionTopic(worktreeId));
@@ -865,6 +882,7 @@ export class WorktreesService {
         syncState: item.syncState,
         baseAhead: item.baseAhead,
         baseBehind: item.baseBehind,
+        hasUnstagedChanges: item.hasUnstagedChanges ?? false,
         availability: item.availability,
         statusError: item.error,
         lastCheckedAt: new Date(item.checkedAt),

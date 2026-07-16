@@ -43,6 +43,7 @@ describe("WorktreesPage", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/worktrees");
     window.localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockResolvedValue({
       worktreeOverview: {
@@ -69,7 +70,11 @@ describe("WorktreesPage", () => {
               version: "0.1.0",
               osVersion: "macOS",
               architecture: "arm64",
-              capabilities: ["worktree.inspect", "worktree.operation"],
+              capabilities: [
+                "worktree.inspect",
+                "worktree.operation",
+                "worktree.watch",
+              ],
               baseRepoDirectory: null,
               connectionStatus: "ONLINE",
               ipAddress: null,
@@ -128,11 +133,13 @@ describe("WorktreesPage", () => {
                     baseBranchOverride: null,
                     baseAhead: 1,
                     baseBehind: 0,
+                    hasUnstagedChanges: false,
                     highlightColor: "blue",
                     availability: "AVAILABLE",
                     statusError: null,
                     ticketKey: "AIDE-24",
                     ticketTitle: "Add worktrees page",
+                    ticketStatus: "In Progress",
                     pullRequest: null,
                     tags: [
                       {
@@ -168,13 +175,18 @@ describe("WorktreesPage", () => {
     render(<WorktreesPage />);
     expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
     expect(screen.getByText("AIDE-24 — Add worktrees page")).toBeDefined();
+    expect(
+      screen.getByText("In Progress").closest('[data-slot="badge"]'),
+    ).not.toBeNull();
     expect(screen.queryByText("Primary")).toBeNull();
     expect(screen.getByText("Ready")).toBeDefined();
     expect(screen.getByText("/repo")).toBeDefined();
     expect(screen.queryByText(".")).toBeNull();
-    expect(screen.getByText("Current · 1 ahead").className).toContain(
+    expect(screen.getByText("Yes").className).toContain(
       "dark:text-emerald-300",
     );
+    expect(screen.getByText("Commits: 1")).toBeDefined();
+    expect(screen.getByText("In sync")).toBeDefined();
   });
 
   test("opens the Jira ticket drawer from the ticket key and title", async () => {
@@ -197,6 +209,17 @@ describe("WorktreesPage", () => {
         { issueKey: "AIDE-24" },
       ),
     );
+  });
+
+  test("edits the base branch with an inline select", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    expect(screen.queryByRole("combobox", { name: "Base branch" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit base branch" }));
+
+    expect(document.querySelector('[data-slot="select-trigger"]')).toBeTruthy();
+    expect(await screen.findAllByRole("option")).toHaveLength(2);
   });
 
   test("shows commits and changes as stacked compact tables", async () => {
@@ -331,6 +354,7 @@ describe("WorktreesPage", () => {
                 data: {
                   worktreeInspectionChanged: {
                     worktreeId: "worktree-1",
+                    hasUnstagedChanges: true,
                     observedAt: new Date().toISOString(),
                   },
                 },
@@ -390,6 +414,7 @@ describe("WorktreesPage", () => {
     activityCallbacks[0]!();
 
     expect(await screen.findByText("after-save.ts")).toBeDefined();
+    expect(screen.getByText("Dirty")).toBeDefined();
     expect(screen.queryByText("before-save.ts")).toBeNull();
   });
 

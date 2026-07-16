@@ -152,7 +152,7 @@ export function PipelineMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          className={`h-auto rounded-full px-2 py-0.5 text-xs ${pipelineStateClass(pipelineStatus)}`}
+          className={`h-5 rounded-full px-2 py-0.5 text-xs ${pipelineStateClass(pipelineStatus)}`}
           onClick={stopPropagation}
           variant="outline"
         >
