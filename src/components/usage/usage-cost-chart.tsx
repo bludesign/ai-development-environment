@@ -156,6 +156,7 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
               width={72}
             />
             <ChartTooltip
+              wrapperStyle={{ pointerEvents: "none", zIndex: 50 }}
               content={
                 <ChartTooltipContent
                   formatter={(value, name, item, index, row) => {
