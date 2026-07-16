@@ -9,6 +9,12 @@ enum JiraCallSource {
   ERROR
 }
 
+enum JiraTicketAssignmentFilter {
+  ALL
+  UNASSIGNED_OR_SELF
+  SELF_IN_PROGRESS
+}
+
 type JiraSettings {
   siteUrl: String
   email: String
@@ -40,7 +46,16 @@ type JiraProject {
   name: String!
   avatarUrl: String
   position: Int!
+  ticketAssignmentFilter: JiraTicketAssignmentFilter!
+  hideCompletedTickets: Boolean!
+  completedStatusIds: [ID!]!
   sources: [JiraSource!]!
+}
+
+type JiraProjectStatus {
+  id: ID!
+  name: String!
+  category: String!
 }
 
 type JiraAvailableProject {
@@ -60,6 +75,7 @@ type JiraTicketSummary {
   issueType: String
   priority: String
   assignee: String
+  assigneeAccountId: ID
   assigneeAvatarUrl: String
   projectKey: String!
   updatedAt: String
@@ -120,6 +136,7 @@ type JiraTicketDetail {
   issueType: String
   priority: String
   assignee: String
+  assigneeAccountId: ID
   assigneeAvatarUrl: String
   projectKey: String!
   updatedAt: String
@@ -255,10 +272,18 @@ input UpdateJiraSourceInput {
   value: String!
 }
 
+input UpdateJiraProjectDisplaySettingsInput {
+  projectId: ID!
+  ticketAssignmentFilter: JiraTicketAssignmentFilter!
+  hideCompletedTickets: Boolean!
+  completedStatusIds: [ID!]!
+}
+
 extend type Query {
   jiraSettings: JiraSettings!
   jiraAvailableProjects: [JiraAvailableProject!]!
   jiraProjects: [JiraProject!]!
+  jiraProjectStatuses(projectId: ID!): [JiraProjectStatus!]!
   jiraTicketBoard(sourceId: ID!): JiraTicketBoard!
   jiraTicket(issueKey: ID!): JiraTicketDetail!
   jiraCacheMetrics: JiraCacheMetrics!
@@ -276,6 +301,9 @@ extend type Mutation {
   createJiraSource(input: CreateJiraSourceInput!): [JiraProject!]!
   updateJiraSource(input: UpdateJiraSourceInput!): [JiraProject!]!
   deleteJiraSource(id: ID!): [JiraProject!]!
+  updateJiraProjectDisplaySettings(
+    input: UpdateJiraProjectDisplaySettingsInput!
+  ): [JiraProject!]!
   refreshJiraSource(sourceId: ID!): JiraTicketBoard!
   updateJiraCacheTtl(ttlMinutes: Int!): JiraSettings!
   clearJiraCache: Boolean!

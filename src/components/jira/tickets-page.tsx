@@ -2,6 +2,8 @@
 
 import {
   AlertTriangle,
+  Check,
+  ChevronDown,
   Columns3,
   ExternalLink,
   FolderKanban,
@@ -16,6 +18,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
+import { DropdownMenu } from "radix-ui";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdfRenderer } from "@/components/jira/adf-renderer";
@@ -51,18 +54,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   JiraAvailableProject,
+  JiraProjectStatus,
   JiraProjectView,
   JiraSourceKind,
   JiraSourceView,
   JiraTicketBoard,
+  JiraTicketAssignmentFilter,
   JiraTicketDetail,
   JiraTicketSummary,
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
-  "id key summary statusId status statusCategory issueType priority assignee assigneeAvatarUrl projectKey updatedAt";
+  "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
 const BOARD_FIELDS = `source { ${SOURCE_FIELDS} } tickets { ${SUMMARY_FIELDS} } statusOrder cache { ${CACHE_FIELDS} } truncated warnings`;
 const PERSON_FIELDS = "accountId displayName avatarUrl";
@@ -465,6 +470,74 @@ export function JiraTicketsPage() {
   );
 }
 
+function StatusMultiSelect({
+  statuses,
+  value,
+  onChange,
+  label,
+  placeholder,
+  disabled,
+}: {
+  statuses: JiraProjectStatus[];
+  value: string[];
+  onChange: (value: string[]) => void;
+  label: string;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const selected = new Set(value);
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button
+          aria-label={label}
+          className="w-full justify-between font-normal"
+          disabled={disabled}
+          type="button"
+          variant="outline"
+        >
+          <span className="truncate">
+            {value.length > 0 ? `${value.length} ${label}` : placeholder}
+          </span>
+          <ChevronDown className="shrink-0" />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="start"
+          className="z-60 max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {statuses.map((status) => (
+            <DropdownMenu.CheckboxItem
+              checked={selected.has(status.id)}
+              className="relative flex cursor-default items-center rounded-sm py-1.5 pr-2 pl-8 text-sm outline-none select-none focus:bg-accent"
+              key={status.id}
+              onCheckedChange={(checked) =>
+                onChange(
+                  checked
+                    ? [...selected, status.id]
+                    : value.filter((statusId) => statusId !== status.id),
+                )
+              }
+              onSelect={(event) => event.preventDefault()}
+            >
+              <span className="absolute left-2 flex size-4 items-center justify-center">
+                <DropdownMenu.ItemIndicator>
+                  <Check className="size-4" />
+                </DropdownMenu.ItemIndicator>
+              </span>
+              <span className="truncate">{status.name}</span>
+              <span className="ml-auto pl-2 text-xs text-muted-foreground">
+                {status.category}
+              </span>
+            </DropdownMenu.CheckboxItem>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
 function JiraManagerDialog({
   open,
   setOpen,
@@ -481,10 +554,17 @@ function JiraManagerDialog({
   const t = useTranslations("jiraTickets");
   const [available, setAvailable] = useState<JiraAvailableProject[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [managedProjectId, setManagedProjectId] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState("");
   const [sourceKind, setSourceKind] = useState<JiraSourceKind>("JQL");
   const [sourceValue, setSourceValue] = useState("");
   const [editing, setEditing] = useState<JiraSourceView | null>(null);
+  const [statuses, setStatuses] = useState<JiraProjectStatus[]>([]);
+  const [statusesLoading, setStatusesLoading] = useState(false);
+  const [assignmentFilter, setAssignmentFilter] =
+    useState<JiraTicketAssignmentFilter>("ALL");
+  const [hideCompletedTickets, setHideCompletedTickets] = useState(false);
+  const [completedStatusIds, setCompletedStatusIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -504,6 +584,7 @@ function JiraManagerDialog({
   }, [open]);
 
   const selectedProject =
+    projects.find((project) => project.id === managedProjectId) ??
     projects.find((project) => project.id === selectedProjectId) ??
     projects[0] ??
     null;
@@ -511,6 +592,46 @@ function JiraManagerDialog({
     (candidate) =>
       !projects.some((project) => project.jiraId === candidate.jiraId),
   );
+
+  useEffect(() => {
+    if (!open || !selectedProject) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(async () => {
+      setAssignmentFilter(selectedProject.ticketAssignmentFilter);
+      setHideCompletedTickets(selectedProject.hideCompletedTickets);
+      setCompletedStatusIds(selectedProject.completedStatusIds);
+      setStatusesLoading(true);
+      try {
+        const data = await controlPlaneRequest<{
+          jiraProjectStatuses: JiraProjectStatus[];
+        }>(
+          "query JiraProjectStatuses($projectId: ID!) { jiraProjectStatuses(projectId: $projectId) { id name category } }",
+          { projectId: selectedProject.id },
+        );
+        if (cancelled) return;
+        setStatuses(data.jiraProjectStatuses);
+        setError(null);
+      } catch (value) {
+        if (cancelled) return;
+        setError(value instanceof Error ? value.message : String(value));
+        setStatuses([]);
+      } finally {
+        if (!cancelled) setStatusesLoading(false);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [open, selectedProject]);
+
+  const chooseProject = (id: string) => {
+    setManagedProjectId(id);
+    setEditing(null);
+    setSourceName("");
+    setSourceValue("");
+    setSourceKind("JQL");
+  };
 
   const addProject = async () => {
     if (!projectId) return;
@@ -523,6 +644,10 @@ function JiraManagerDialog({
         { jiraId: projectId },
       );
       onProjectsChanged(data.addJiraProject);
+      const addedProject = data.addJiraProject.find(
+        (project) => project.jiraId === projectId,
+      );
+      if (addedProject) setManagedProjectId(addedProject.id);
       setProjectId("");
       setError(null);
     } catch (value) {
@@ -543,6 +668,9 @@ function JiraManagerDialog({
         { projectId: id },
       );
       onProjectsChanged(data.removeJiraProject);
+      if (id === selectedProject?.id) {
+        setManagedProjectId(data.removeJiraProject[0]?.id ?? null);
+      }
       replaceParams({
         project: data.removeJiraProject[0]?.id ?? null,
         source: data.removeJiraProject[0]?.sources[0]?.id ?? null,
@@ -619,9 +747,40 @@ function JiraManagerDialog({
     }
   };
 
+  const saveDisplaySettings = async () => {
+    if (!selectedProject) return;
+    setBusy(true);
+    try {
+      const input = {
+        projectId: selectedProject.id,
+        ticketAssignmentFilter: assignmentFilter,
+        hideCompletedTickets,
+        completedStatusIds,
+      };
+      const data = await controlPlaneRequest<{
+        updateJiraProjectDisplaySettings: JiraProjectView[];
+      }>(
+        `mutation UpdateJiraProjectDisplaySettings($input: UpdateJiraProjectDisplaySettingsInput!) { updateJiraProjectDisplaySettings(input: $input) { ${PROJECT_FIELDS} } }`,
+        { input },
+      );
+      onProjectsChanged(data.updateJiraProjectDisplaySettings);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <DialogContent className="max-w-3xl">
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setManagedProjectId(null);
+        setOpen(nextOpen);
+      }}
+      open={open}
+    >
+      <DialogContent className="max-w-4xl overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{t("manageTitle")}</DialogTitle>
           <DialogDescription>{t("manageDescription")}</DialogDescription>
@@ -631,8 +790,8 @@ function JiraManagerDialog({
             {error}
           </div>
         )}
-        <div className="grid gap-6 md:grid-cols-2">
-          <section className="space-y-3">
+        <div className="grid min-w-0 gap-6 md:grid-cols-2">
+          <section className="min-w-0 space-y-3">
             <h3 className="font-medium">{t("projects")}</h3>
             <div className="flex gap-2">
               <Select
@@ -660,16 +819,25 @@ function JiraManagerDialog({
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border p-3"
+                  className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border p-1 ${
+                    project.id === selectedProject?.id
+                      ? "border-primary bg-primary/5"
+                      : ""
+                  }`}
                 >
-                  <div className="min-w-0">
+                  <button
+                    aria-pressed={project.id === selectedProject?.id}
+                    className="min-w-0 flex-1 rounded-md p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => chooseProject(project.id)}
+                    type="button"
+                  >
                     <p className="truncate text-sm font-medium">
                       {project.key} · {project.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {t("sourceCount", { count: project.sources.length })}
                     </p>
-                  </div>
+                  </button>
                   <Button
                     disabled={busy}
                     onClick={() => void removeProject(project.id)}
@@ -683,22 +851,25 @@ function JiraManagerDialog({
               ))}
             </div>
           </section>
-          <section className="space-y-3">
+          <section className="min-w-0 space-y-3">
             <h3 className="font-medium">
               {t("sourcesFor", { project: selectedProject?.key ?? "—" })}
             </h3>
             {selectedProject?.sources.map((source) => (
               <div
                 key={source.id}
-                className="flex items-start justify-between gap-2 rounded-lg border p-3"
+                className="flex min-w-0 items-start justify-between gap-2 overflow-hidden rounded-lg border p-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{source.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {source.kind} · {source.value}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    <span className="shrink-0">{source.kind} ·</span>
+                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [direction:rtl] md:[direction:ltr]">
+                      <bdi>{source.value}</bdi>
+                    </span>
+                  </div>
                 </div>
-                <div className="flex">
+                <div className="flex shrink-0">
                   <Button
                     onClick={() => {
                       setEditing(source);
@@ -726,7 +897,7 @@ function JiraManagerDialog({
             ))}
             {selectedProject && (
               <form
-                className="space-y-3 rounded-lg border p-3"
+                className="min-w-0 space-y-3 rounded-lg border p-3"
                 onSubmit={(event) => void saveSource(event)}
               >
                 <div>
@@ -795,6 +966,87 @@ function JiraManagerDialog({
                   </Button>
                 </div>
               </form>
+            )}
+            {selectedProject && (
+              <section className="min-w-0 space-y-3 rounded-lg border p-3">
+                <div>
+                  <h4 className="text-sm font-medium">
+                    {t("displaySettings")}
+                  </h4>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("displaySettingsDescription")}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-xs font-medium"
+                    htmlFor="ticket-assignment-filter"
+                  >
+                    {t("ticketsToShow")}
+                  </label>
+                  <Select
+                    id="ticket-assignment-filter"
+                    onChange={(event) =>
+                      setAssignmentFilter(
+                        event.target.value as JiraTicketAssignmentFilter,
+                      )
+                    }
+                    value={assignmentFilter}
+                  >
+                    <option value="ALL">{t("allTickets")}</option>
+                    <option value="UNASSIGNED_OR_SELF">
+                      {t("unassignedOrSelfAssigned")}
+                    </option>
+                    <option value="SELF_IN_PROGRESS">
+                      {t("selfAssignedInProgress")}
+                    </option>
+                  </Select>
+                </div>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    checked={hideCompletedTickets}
+                    className="mt-0.5 size-4 rounded border-input accent-primary"
+                    onChange={(event) =>
+                      setHideCompletedTickets(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    <span className="block font-medium">
+                      {t("hideCompletedTickets")}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t("hideCompletedTicketsDescription")}
+                    </span>
+                  </span>
+                </label>
+                <div>
+                  <p className="mb-1 text-xs font-medium">
+                    {t("completedStatuses")}
+                  </p>
+                  <StatusMultiSelect
+                    disabled={!hideCompletedTickets || statusesLoading}
+                    label={t("completedStatuses")}
+                    onChange={setCompletedStatusIds}
+                    placeholder={
+                      statusesLoading
+                        ? t("loadingStatuses")
+                        : t("selectCompletedStatuses")
+                    }
+                    statuses={statuses}
+                    value={completedStatusIds}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    disabled={busy}
+                    onClick={() => void saveDisplaySettings()}
+                    type="button"
+                  >
+                    {t("saveDisplaySettings")}
+                  </Button>
+                </div>
+              </section>
             )}
           </section>
         </div>

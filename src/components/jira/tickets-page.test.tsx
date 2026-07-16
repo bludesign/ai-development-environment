@@ -50,6 +50,7 @@ describe("JiraTicketsPage", () => {
           issueType: "Story",
           priority: "High",
           assignee: "Ada Lovelace",
+          assigneeAccountId: "ada",
           assigneeAvatarUrl: null,
           projectKey: "APP",
           updatedAt: new Date().toISOString(),
@@ -75,6 +76,9 @@ describe("JiraTicketsPage", () => {
               name: "Application",
               avatarUrl: null,
               position: 0,
+              ticketAssignmentFilter: "ALL",
+              hideCompletedTickets: false,
+              completedStatusIds: [],
               sources: [board.source],
             },
           ],
@@ -108,6 +112,115 @@ describe("JiraTicketsPage", () => {
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RefreshJiraSource"),
         { sourceId: "source-1" },
+      ),
+    );
+  });
+
+  test("adds a source to the project selected in the manager", async () => {
+    const projects = [
+      {
+        id: "project-1",
+        jiraId: "10000",
+        key: "APP",
+        name: "Application",
+        avatarUrl: null,
+        position: 0,
+        ticketAssignmentFilter: "ALL",
+        hideCompletedTickets: false,
+        completedStatusIds: [],
+        sources: [],
+      },
+      {
+        id: "project-2",
+        jiraId: "10001",
+        key: "OPS",
+        name: "Operations",
+        avatarUrl: null,
+        position: 1,
+        ticketAssignmentFilter: "ALL",
+        hideCompletedTickets: false,
+        completedStatusIds: [],
+        sources: [],
+      },
+    ];
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query JiraProjects"))
+        return { jiraProjects: projects } as never;
+      if (query.includes("jiraAvailableProjects"))
+        return { jiraAvailableProjects: [] } as never;
+      if (query.includes("JiraProjectStatuses"))
+        return {
+          jiraProjectStatuses: [
+            { id: "done", name: "Released", category: "done" },
+          ],
+        } as never;
+      if (query.includes("CreateJiraSource"))
+        return { createJiraSource: projects } as never;
+      if (query.includes("UpdateJiraProjectDisplaySettings"))
+        return { updateJiraProjectDisplaySettings: projects } as never;
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<JiraTicketsPage />);
+    await screen.findByRole("tab", { name: "APP · Application" });
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /OPS · Operations/ }),
+    );
+    fireEvent.change(screen.getByLabelText("Source name"), {
+      target: { value: "Operations queue" },
+    });
+    fireEvent.change(screen.getByLabelText("JQL"), {
+      target: { value: "project = OPS" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add source" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("CreateJiraSource"),
+        {
+          input: {
+            projectId: "project-2",
+            name: "Operations queue",
+            kind: "JQL",
+            value: "project = OPS",
+          },
+        },
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Tickets to show"), {
+      target: { value: "SELF_IN_PROGRESS" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Hide completed tickets/ }),
+    );
+    const statusMenu = screen.getByRole("button", {
+      name: "Completed statuses",
+    });
+    await waitFor(() =>
+      expect((statusMenu as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.pointerDown(statusMenu, { button: 0, ctrlKey: false });
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /Released/ }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Save display settings" }),
+    );
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("UpdateJiraProjectDisplaySettings"),
+        {
+          input: {
+            projectId: "project-2",
+            ticketAssignmentFilter: "SELF_IN_PROGRESS",
+            hideCompletedTickets: true,
+            completedStatusIds: ["done"],
+          },
+        },
       ),
     );
   });

@@ -1,6 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { JiraService } from "@/services/jira";
-import type { JiraSourceKind } from "@/services/jira";
+import type {
+  JiraSourceKind,
+  JiraTicketAssignmentFilter,
+} from "@/services/jira";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -27,6 +30,14 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
     jiraProjects: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       requireControlPlane(context);
       return jiraService.listProjects();
+    },
+    jiraProjectStatuses: (
+      _root: unknown,
+      { projectId }: { projectId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.projectStatuses(projectId);
     },
     jiraTicketBoard: (
       _root: unknown,
@@ -168,6 +179,23 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
     ) => {
       requireControlPlane(context);
       return jiraService.deleteSource(id);
+    },
+    updateJiraProjectDisplaySettings: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          projectId: string;
+          ticketAssignmentFilter: JiraTicketAssignmentFilter;
+          hideCompletedTickets: boolean;
+          completedStatusIds: string[];
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.updateProjectDisplaySettings(input);
     },
     refreshJiraSource: (
       _root: unknown,

@@ -1,5 +1,7 @@
 export type JiraSourceKind = "JQL" | "BOARD";
 export type JiraCallSource = "LIVE" | "CACHE" | "ERROR";
+export type JiraTicketAssignmentFilter =
+  "ALL" | "UNASSIGNED_OR_SELF" | "SELF_IN_PROGRESS";
 
 export type JiraSettingsView = {
   siteUrl: string | null;
@@ -26,7 +28,16 @@ export type JiraProjectView = {
   name: string;
   avatarUrl: string | null;
   position: number;
+  ticketAssignmentFilter: JiraTicketAssignmentFilter;
+  hideCompletedTickets: boolean;
+  completedStatusIds: string[];
   sources: JiraSourceView[];
+};
+
+export type JiraProjectStatus = {
+  id: string;
+  name: string;
+  category: string;
 };
 
 export type JiraAvailableProject = {
@@ -52,6 +63,7 @@ export type JiraTicketSummary = {
   issueType: string | null;
   priority: string | null;
   assignee: string | null;
+  assigneeAccountId: string | null;
   assigneeAvatarUrl: string | null;
   projectKey: string;
   updatedAt: string | null;

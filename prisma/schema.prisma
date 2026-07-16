@@ -99,15 +99,18 @@ model JiraSettings {
 }
 
 model JiraProject {
-  id        String       @id
-  jiraId    String       @unique
-  key       String       @unique
-  name      String
-  avatarUrl String?
-  position  Int          @default(0)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  sources   JiraSource[]
+  id                     String       @id
+  jiraId                 String       @unique
+  key                    String       @unique
+  name                   String
+  avatarUrl              String?
+  position               Int          @default(0)
+  ticketAssignmentFilter String       @default("ALL")
+  hideCompletedTickets   Boolean      @default(false)
+  completedStatusIdsJson String       @default("[]")
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  sources                JiraSource[]
 }
 
 model JiraSource {

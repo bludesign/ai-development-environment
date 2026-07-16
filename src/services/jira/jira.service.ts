@@ -19,12 +19,14 @@ import type {
   JiraMetricWindow,
   JiraNamedValue,
   JiraOperationMetric,
+  JiraProjectStatus,
   JiraPerson,
   JiraProjectView,
   JiraSettingsView,
   JiraSourceKind,
   JiraSourceView,
   JiraTicketBoard,
+  JiraTicketAssignmentFilter,
   JiraTicketDetail,
   JiraTicketSummary,
   PaginatedResult,
@@ -115,6 +117,12 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function parseStringArray(value: string | null): string[] {
+  return asArray(parseJson(value)).flatMap((entry) =>
+    typeof entry === "string" && entry.length > 0 ? [entry] : [],
+  );
 }
 
 function canonicalize(value: unknown): unknown {
@@ -284,6 +292,7 @@ function ticketSummary(issue: RawIssue): JiraTicketSummary {
     issueType: asString(asRecord(fields.issuetype).name),
     priority: asString(asRecord(fields.priority).name),
     assignee: asString(assignee.displayName),
+    assigneeAccountId: asString(assignee.accountId),
     assigneeAvatarUrl: asString(avatars["48x48"]) ?? asString(avatars["32x32"]),
     projectKey: asString(project.key) ?? projectKeyForIssue(issue),
     updatedAt: asString(fields.updated),
@@ -297,6 +306,64 @@ function categoryRank(category: string): number {
     return 1;
   if (normalized === "done") return 2;
   return 3;
+}
+
+const TICKET_ASSIGNMENT_FILTERS = new Set<JiraTicketAssignmentFilter>([
+  "ALL",
+  "UNASSIGNED_OR_SELF",
+  "SELF_IN_PROGRESS",
+]);
+
+function ticketAssignmentFilter(value: string): JiraTicketAssignmentFilter {
+  return TICKET_ASSIGNMENT_FILTERS.has(value as JiraTicketAssignmentFilter)
+    ? (value as JiraTicketAssignmentFilter)
+    : "ALL";
+}
+
+function isInProgress(category: string): boolean {
+  const normalized = category.toLowerCase();
+  return normalized === "indeterminate" || normalized.includes("progress");
+}
+
+export function filterJiraTicketBoard(
+  board: JiraTicketBoard,
+  settings: {
+    ticketAssignmentFilter: JiraTicketAssignmentFilter;
+    hideCompletedTickets: boolean;
+    completedStatusIds: string[];
+  },
+  currentAccountId: string | null,
+): JiraTicketBoard {
+  const completedStatusIds = settings.hideCompletedTickets
+    ? new Set(settings.completedStatusIds)
+    : new Set<string>();
+  const hiddenStatusNames = new Set(
+    board.tickets
+      .filter((ticket) => completedStatusIds.has(ticket.statusId))
+      .map((ticket) => ticket.status),
+  );
+  const tickets = board.tickets.filter((ticket) => {
+    if (completedStatusIds.has(ticket.statusId)) return false;
+    if (settings.ticketAssignmentFilter === "ALL") return true;
+    if (settings.ticketAssignmentFilter === "UNASSIGNED_OR_SELF") {
+      return (
+        ticket.assigneeAccountId === null ||
+        ticket.assigneeAccountId === currentAccountId
+      );
+    }
+    return (
+      currentAccountId !== null &&
+      ticket.assigneeAccountId === currentAccountId &&
+      isInProgress(ticket.statusCategory)
+    );
+  });
+  return {
+    ...board,
+    tickets,
+    statusOrder: board.statusOrder.filter(
+      (status) => !hiddenStatusNames.has(status),
+    ),
+  };
 }
 
 export class JiraService {
@@ -437,8 +504,79 @@ export class JiraService {
       name: project.name,
       avatarUrl: project.avatarUrl,
       position: project.position,
+      ticketAssignmentFilter: ticketAssignmentFilter(
+        project.ticketAssignmentFilter,
+      ),
+      hideCompletedTickets: project.hideCompletedTickets,
+      completedStatusIds: parseStringArray(project.completedStatusIdsJson),
       sources: project.sources.map(sourceView),
     }));
+  }
+
+  async projectStatuses(projectId: string): Promise<JiraProjectStatus[]> {
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { id: projectId },
+      select: { jiraId: true, key: true },
+    });
+    if (!project) throw new Error("Jira project not found");
+    const result = await this.cachedCall({
+      operation: "PROJECT_STATUSES",
+      params: { jiraId: project.jiraId },
+      requestSummary: `Statuses for project ${project.key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.projects.getAllStatuses(project.jiraId);
+      },
+    });
+    const statuses = new Map<string, JiraProjectStatus>();
+    for (const issueType of asArray(result.value).map(asRecord)) {
+      for (const rawStatus of asArray(issueType.statuses).map(asRecord)) {
+        const id = asString(rawStatus.id);
+        const name = asString(rawStatus.name);
+        if (!id || !name || statuses.has(id)) continue;
+        const category = asRecord(rawStatus.statusCategory);
+        statuses.set(id, {
+          id,
+          name,
+          category:
+            asString(category.key) ?? asString(category.name) ?? "unknown",
+        });
+      }
+    }
+    return [...statuses.values()].sort(
+      (first, second) =>
+        categoryRank(first.category) - categoryRank(second.category) ||
+        first.name.localeCompare(second.name),
+    );
+  }
+
+  async updateProjectDisplaySettings(input: {
+    projectId: string;
+    ticketAssignmentFilter: JiraTicketAssignmentFilter;
+    hideCompletedTickets: boolean;
+    completedStatusIds: string[];
+  }): Promise<JiraProjectView[]> {
+    if (!TICKET_ASSIGNMENT_FILTERS.has(input.ticketAssignmentFilter)) {
+      throw new Error("Invalid Jira ticket assignment filter");
+    }
+    const completedStatusIds = [
+      ...new Set(
+        input.completedStatusIds
+          .map((statusId) => statusId.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 200);
+    const prisma = await getPrismaClient();
+    await prisma.jiraProject.update({
+      where: { id: input.projectId },
+      data: {
+        ticketAssignmentFilter: input.ticketAssignmentFilter,
+        hideCompletedTickets: input.hideCompletedTickets,
+        completedStatusIdsJson: JSON.stringify(completedStatusIds),
+      },
+    });
+    return this.listProjects();
   }
 
   async availableProjects(): Promise<JiraAvailableProject[]> {
@@ -614,13 +752,31 @@ export class JiraService {
     const prisma = await getPrismaClient();
     const source = await prisma.jiraSource.findUnique({
       where: { id: sourceId },
+      include: { project: true },
     });
     if (!source) throw new Error("Jira source not found");
     const loaded =
       source.kind === "BOARD"
         ? await this.loadBoardSource(sourceView(source), force)
         : await this.loadJqlSource(sourceView(source), force);
-    return { source: sourceView(source), ...loaded };
+    const settings = {
+      ticketAssignmentFilter: ticketAssignmentFilter(
+        source.project.ticketAssignmentFilter,
+      ),
+      hideCompletedTickets: source.project.hideCompletedTickets,
+      completedStatusIds: parseStringArray(
+        source.project.completedStatusIdsJson,
+      ),
+    };
+    const currentAccountId =
+      settings.ticketAssignmentFilter === "ALL"
+        ? null
+        : await this.currentAccountId();
+    return filterJiraTicketBoard(
+      { source: sourceView(source), ...loaded },
+      settings,
+      currentAccountId,
+    );
   }
 
   async ticket(issueKey: string, force = false): Promise<JiraTicketDetail> {
@@ -892,6 +1048,21 @@ export class JiraService {
       agile: new AgileClient(config),
     };
     return this.clients;
+  }
+
+  private async currentAccountId(): Promise<string> {
+    const result = await this.cachedCall({
+      operation: "MYSELF",
+      params: {},
+      requestSummary: "Current Jira user",
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.myself.getCurrentUser();
+      },
+    });
+    const accountId = asString(asRecord(result.value).accountId);
+    if (!accountId) throw new Error("Jira did not return the current user ID");
+    return accountId;
   }
 
   private cacheKey(
