@@ -681,7 +681,11 @@ export class WorktreesService {
     };
   }
 
-  private async requireRunnable(id: string, capability: string) {
+  private async requireRunnable(
+    id: string,
+    capability: string,
+    allowBusy = false,
+  ) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
       where: { id },
@@ -700,14 +704,16 @@ export class WorktreesService {
     if (!capabilities(worktree.codebase.agent).includes(capability)) {
       throw new Error("Agent must be updated to use worktrees");
     }
-    const active = await prisma.agentJob.findFirst({
-      where: {
-        codebaseId: worktree.codebaseId,
-        status: { in: ACTIVE_STATUSES },
-      },
-    });
-    if (active)
-      throw new Error("Another operation is active for this codebase");
+    if (!allowBusy) {
+      const active = await prisma.agentJob.findFirst({
+        where: {
+          codebaseId: worktree.codebaseId,
+          status: { in: ACTIVE_STATUSES },
+        },
+      });
+      if (active)
+        throw new Error("Another operation is active for this codebase");
+    }
     return worktree;
   }
 
@@ -761,6 +767,7 @@ export class WorktreesService {
     const worktree = await this.requireRunnable(
       worktreeId,
       WORKTREE_WATCH_JOB_KIND,
+      true,
     );
     const watchId = randomUUID();
     const payload = this.payload(worktree);

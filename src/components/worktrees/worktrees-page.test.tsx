@@ -393,6 +393,40 @@ describe("WorktreesPage", () => {
     expect(screen.queryByText("before-save.ts")).toBeNull();
   });
 
+  test("retries the live subscription after a transient error", async () => {
+    let liveAttempts = 0;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { error: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeInspectionChanged")) {
+            liveAttempts += 1;
+            if (liveAttempts === 1) {
+              window.setTimeout(() => sink.error(new Error("temporary")), 0);
+            }
+          }
+          return vi.fn();
+        },
+      ),
+    } as never);
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    request.mockResolvedValueOnce({
+      inspectWorktree: {
+        commits: [],
+        changes: [],
+        commitsTruncated: false,
+        changesTruncated: false,
+      },
+    } as never);
+    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    expect(await screen.findByText("The worktree is clean.")).toBeDefined();
+
+    await waitFor(() => expect(liveAttempts).toBe(2), { timeout: 2_500 });
+  });
+
   test("switches to the compact table and remembers the choice", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");

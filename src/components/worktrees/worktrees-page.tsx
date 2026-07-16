@@ -130,7 +130,8 @@ const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId
     commitsTruncated changesTruncated
   }
 }`;
-const LIVE_INSPECTION_POLL_MS = 15_000;
+const LIVE_INSPECTION_POLL_MS = 5_000;
+const LIVE_INSPECTION_RETRY_MS = 1_000;
 
 export function displayedWorktreePath(
   folder: string,
@@ -240,25 +241,44 @@ function useLiveWorktreeInspection(
 
   useEffect(() => {
     if (!enabled) return;
-    const unsubscribe = controlPlaneSubscriptions().subscribe(
-      {
-        query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
-          worktreeInspectionChanged(worktreeId: $worktreeId) { worktreeId observedAt }
-        }`,
-        variables: { worktreeId },
-      },
-      {
-        next: () => void refresh(),
-        error: () => undefined,
-        complete: () => undefined,
-      },
-    );
+    let stopped = false;
+    let generation = 0;
+    let retryTimer: number | null = null;
+    let unsubscribe: () => void = () => undefined;
+    const scheduleRetry = (currentGeneration: number) => {
+      if (stopped || currentGeneration !== generation || retryTimer !== null)
+        return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        subscribe();
+      }, LIVE_INSPECTION_RETRY_MS);
+    };
+    const subscribe = () => {
+      const currentGeneration = ++generation;
+      unsubscribe = controlPlaneSubscriptions().subscribe(
+        {
+          query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
+            worktreeInspectionChanged(worktreeId: $worktreeId) { worktreeId observedAt }
+          }`,
+          variables: { worktreeId },
+        },
+        {
+          next: () => void refresh(),
+          error: () => scheduleRetry(currentGeneration),
+          complete: () => scheduleRetry(currentGeneration),
+        },
+      );
+    };
+    subscribe();
     const poll = window.setInterval(
       () => void refresh(),
       LIVE_INSPECTION_POLL_MS,
     );
     return () => {
+      stopped = true;
+      generation += 1;
       pending.current = false;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
       window.clearInterval(poll);
       unsubscribe();
     };

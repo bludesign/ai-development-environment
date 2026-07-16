@@ -240,7 +240,7 @@ describe("WorktreesService", () => {
         findFirst: vi.fn().mockResolvedValue({ id: "worktree-1" }),
       },
       agentJob: {
-        findFirst: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue({ id: "active-operation" }),
         deleteMany: vi.fn(),
       },
     };
@@ -263,6 +263,7 @@ describe("WorktreesService", () => {
     await iterator.return(undefined);
 
     expect(control.createJob).toHaveBeenCalledTimes(2);
+    expect(prisma.agentJob.findFirst).not.toHaveBeenCalled();
     expect(control.createJob).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
