@@ -207,6 +207,19 @@ function rawPullRequest(
 
 beforeEach(() => {
   state.apiToken = "secret-token";
+  state.repositories = [
+    {
+      id: "local-repository-1",
+      githubId: "repository-1",
+      owner: "acme",
+      name: "widgets",
+      nameWithOwner: "acme/widgets",
+      url: "https://github.com/acme/widgets",
+      jiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+  ];
   state.appSettings = {
     id: "default",
     appId: "123",
@@ -379,7 +392,7 @@ describe("GitHub service", () => {
     );
   });
 
-  test("loads pull request details and reruns a verified GitHub Actions workflow", async () => {
+  test("reruns an installed GitHub Actions workflow without a managed repository", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         query: string;
@@ -428,7 +441,11 @@ describe("GitHub service", () => {
               conclusion: "FAILURE",
               url: "https://github.com/acme/widgets/checks",
               app: { name: "GitHub Actions", slug: "github-actions" },
-              repository: { id: "repository-1" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
               workflowRun: {
                 databaseId: "987",
                 url: "https://github.com/acme/widgets/actions/runs/987",
@@ -454,6 +471,7 @@ describe("GitHub service", () => {
       commitCount: 2,
       pipelines: [{ name: "CI", status: "SUCCESS" }],
     });
+    state.repositories = [];
     await expect(
       new GitHubService().retryPipeline("repository-1", "check-suite-1", {
         actor: "control-plane",
@@ -526,7 +544,11 @@ describe("GitHub service", () => {
               conclusion: "FAILURE",
               url: "https://github.com/checks/1",
               app: { name: "GitHub Actions", slug: "github-actions" },
-              repository: { id: "different-repository" },
+              repository: {
+                id: "different-repository",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
               workflowRun: {
                 databaseId: "987",
                 url: "https://github.com/actions/runs/987",
@@ -565,7 +587,11 @@ describe("GitHub service", () => {
       conclusion: "FAILURE",
       url: "https://github.com/acme/widgets/checks/1",
       app: { name: "GitHub Actions", slug: "github-actions" },
-      repository: { id: "repository-1" },
+      repository: {
+        id: "repository-1",
+        name: "widgets",
+        owner: { login: "acme" },
+      },
       workflowRun: {
         databaseId: "987",
         url: "https://github.com/acme/widgets/actions/runs/987",
@@ -603,7 +629,11 @@ describe("GitHub service", () => {
               conclusion: "FAILURE",
               url: "https://github.com/acme/widgets/checks/1",
               app: { name: "GitHub Actions", slug: "github-actions" },
-              repository: { id: "repository-1" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
               workflowRun: {
                 databaseId: "987",
                 url: "https://github.com/acme/widgets/actions/runs/987",
@@ -642,7 +672,11 @@ describe("GitHub service", () => {
               conclusion: "FAILURE",
               url: "https://github.com/acme/widgets/checks/1",
               app: { name: "GitHub Actions", slug: "github-actions" },
-              repository: { id: "repository-1" },
+              repository: {
+                id: "repository-1",
+                name: "widgets",
+                owner: { login: "acme" },
+              },
               workflowRun: {
                 databaseId: "987",
                 url: "https://github.com/acme/widgets/actions/runs/987",

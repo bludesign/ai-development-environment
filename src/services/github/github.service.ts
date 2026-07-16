@@ -80,7 +80,11 @@ type RawCheckSuite = {
 };
 
 type RawRetryCheckSuite = RawCheckSuite & {
-  repository: { id: string };
+  repository: {
+    id: string;
+    name: string;
+    owner: { login: string };
+  };
 };
 
 type RawPipelineContext =
@@ -1284,17 +1288,6 @@ export class GitHubService {
       throw new Error("Repository and check suite IDs are required");
     }
     try {
-      const prisma = await getPrismaClient();
-      const repository = await prisma.gitHubRepository.findUnique({
-        where: { githubId: repositoryId },
-      });
-      if (!repository) {
-        throw new GitHubAppError(
-          "MANAGED_REPOSITORY_NOT_FOUND",
-          "The managed repository was not found",
-        );
-      }
-
       const token = await this.requireToken();
       const data = await this.request<{ node: RawRetryCheckSuite | null }>(
         `query GitHubRetryPipelineCheckSuite($checkSuiteId: ID!) {
@@ -1305,7 +1298,7 @@ export class GitHubService {
               conclusion
               url
               app { name slug }
-              repository { id }
+              repository { id name owner { login } }
               workflowRun {
                 databaseId
                 url
@@ -1358,7 +1351,10 @@ export class GitHubService {
         `query VerifyGitHubAppRepository($owner: String!, $name: String!) {
           repository(owner: $owner, name: $name) { id }
         }`,
-        { owner: repository.owner, name: repository.name },
+        {
+          owner: checkSuite.repository.owner.login,
+          name: checkSuite.repository.name,
+        },
       );
       if (access.data.repository?.id !== repositoryId) {
         throw new GitHubAppError(
@@ -1369,8 +1365,8 @@ export class GitHubService {
       }
 
       const result = await rerunGitHubActionsWorkflow(credentials, {
-        owner: repository.owner,
-        repository: repository.name,
+        owner: checkSuite.repository.owner.login,
+        repository: checkSuite.repository.name,
         workflowRunId: String(checkSuite.workflowRun.databaseId),
       });
       await this.audit(auditContext, {
