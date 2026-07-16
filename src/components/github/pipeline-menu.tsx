@@ -23,6 +23,62 @@ import type {
 
 const PIPELINE_FIELDS = "id name status url checkSuiteId canRetry";
 
+export function RetryPipelineButton({
+  pipeline,
+  repositoryId,
+  onPipelineRetried,
+  onError,
+}: {
+  pipeline: GitHubPipelineView;
+  repositoryId: string;
+  onPipelineRetried?: (pipeline: GitHubPipelineView) => void;
+  onError?: (error: string | null) => void;
+}) {
+  const t = useTranslations("pullRequests");
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!pipeline.canRetry || !pipeline.checkSuiteId) return;
+
+    setRetrying(true);
+    try {
+      const data = await controlPlaneRequest<{
+        retryGitHubPipeline: GitHubPipelineView;
+      }>(
+        `mutation RetryGitHubPipeline(
+          $repositoryId: ID!
+          $checkSuiteId: ID!
+        ) {
+          retryGitHubPipeline(
+            repositoryId: $repositoryId
+            checkSuiteId: $checkSuiteId
+          ) { ${PIPELINE_FIELDS} }
+        }`,
+        { repositoryId, checkSuiteId: pipeline.checkSuiteId },
+      );
+      onPipelineRetried?.(data.retryGitHubPipeline);
+      onError?.(null);
+    } catch (value) {
+      onError?.(value instanceof Error ? value.message : String(value));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  return (
+    <Button
+      disabled={retrying || !pipeline.canRetry || !pipeline.checkSuiteId}
+      onClick={(event) => void retry(event)}
+      size="sm"
+      variant="outline"
+    >
+      {retrying ? <Spinner /> : <RotateCcw />}
+      {retrying ? t("retrying") : t("retry")}
+    </Button>
+  );
+}
+
 export function pipelineStateClass(
   status: GitHubPipelineState | GitHubPipelineStatus,
 ) {
@@ -60,37 +116,9 @@ export function PipelineMenu({
   onPipelineRetried?: (pipeline: GitHubPipelineView) => void;
 }) {
   const t = useTranslations("pullRequests");
-  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const stopPropagation = (event: MouseEvent) => event.stopPropagation();
-
-  const retry = async (pipeline: GitHubPipelineView) => {
-    if (!pipeline.checkSuiteId) return;
-    setRetryingId(pipeline.id);
-    try {
-      const data = await controlPlaneRequest<{
-        retryGitHubPipeline: GitHubPipelineView;
-      }>(
-        `mutation RetryGitHubPipeline(
-          $repositoryId: ID!
-          $checkSuiteId: ID!
-        ) {
-          retryGitHubPipeline(
-            repositoryId: $repositoryId
-            checkSuiteId: $checkSuiteId
-          ) { ${PIPELINE_FIELDS} }
-        }`,
-        { repositoryId, checkSuiteId: pipeline.checkSuiteId },
-      );
-      onPipelineRetried?.(data.retryGitHubPipeline);
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setRetryingId(null);
-    }
-  };
 
   return (
     <DropdownMenu>
@@ -148,15 +176,12 @@ export function PipelineMenu({
                   </Badge>
                 </div>
                 {pipeline.canRetry && pipeline.checkSuiteId && (
-                  <Button
-                    disabled={retryingId !== null}
-                    onClick={() => void retry(pipeline)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {retryingId === pipeline.id ? <Spinner /> : <RotateCcw />}
-                    {retryingId === pipeline.id ? t("retrying") : t("retry")}
-                  </Button>
+                  <RetryPipelineButton
+                    onError={setError}
+                    onPipelineRetried={onPipelineRetried}
+                    pipeline={pipeline}
+                    repositoryId={repositoryId}
+                  />
                 )}
               </div>
             ))}

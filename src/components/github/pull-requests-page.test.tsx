@@ -174,6 +174,12 @@ describe("PullRequestsPage", () => {
     expect(
       within(row as HTMLTableRowElement).getByText("Approved").className,
     ).toContain("bg-emerald-500/10");
+    const jiraBadge = within(row as HTMLTableRowElement).getByRole("button", {
+      name: "APP-42",
+    });
+    for (const className of ["rounded-full", "px-2", "py-0.5", "text-xs"]) {
+      expect(jiraBadge.className).toContain(className);
+    }
 
     expect(title.getAttribute("href")).toBe("/pull-requests/acme/widgets/17");
 

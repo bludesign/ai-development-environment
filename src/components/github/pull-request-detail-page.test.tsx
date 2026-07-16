@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -111,16 +112,25 @@ describe("PullRequestDetailPage", () => {
     expect(screen.getByText("−5")).toBeDefined();
     expect(screen.getByText("CI")).toBeDefined();
     expect(screen.getByText("Changes requested")).toBeDefined();
+    const jiraBadge = screen.getByRole("button", { name: "APP-42" });
+    for (const className of ["rounded-full", "px-2", "py-0.5", "text-xs"]) {
+      expect(jiraBadge.className).toContain(className);
+    }
     expect(
       screen.getByRole("link", { name: /Open in GitHub/ }).getAttribute("href"),
     ).toBe(detail.url);
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Failed/ }), {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
+    const pipelineRow = screen.getByRole("row", { name: /CI/ });
+    const viewButton = within(pipelineRow).getByRole("link", { name: /View/ });
+    const retryButton = within(pipelineRow).getByRole("button", {
+      name: "Retry",
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+
+    expect(viewButton.getAttribute("data-variant")).toBe("outline");
+    expect(viewButton.getAttribute("data-size")).toBe("sm");
+    expect(retryButton.getAttribute("data-variant")).toBe("outline");
+    expect(retryButton.getAttribute("data-size")).toBe("sm");
+    fireEvent.click(retryButton);
 
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(

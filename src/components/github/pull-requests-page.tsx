@@ -463,16 +463,17 @@ function PullRequestTable({
               </TableCell>
               <TableCell>
                 {pullRequest.jiraKey ? (
-                  <Button
-                    className="h-auto px-2 py-1 font-mono text-xs"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      replaceIssueParam(pullRequest.jiraKey);
-                    }}
-                    variant="outline"
-                  >
-                    {pullRequest.jiraKey}
-                  </Button>
+                  <Badge asChild className="cursor-pointer hover:bg-muted/80">
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        replaceIssueParam(pullRequest.jiraKey);
+                      }}
+                      type="button"
+                    >
+                      {pullRequest.jiraKey}
+                    </button>
+                  </Badge>
                 ) : (
                   "—"
                 )}

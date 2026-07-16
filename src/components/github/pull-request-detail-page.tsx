@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   PipelineMenu,
+  RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
@@ -197,13 +198,14 @@ export function PullRequestDetailPage({
               {tp(`reviewStates.${pullRequest.reviewDecision}`)}
             </Badge>
             {pullRequest.jiraKey && (
-              <Button
-                className="h-auto px-2 py-1 font-mono text-xs"
-                onClick={() => replaceIssueParam(pullRequest.jiraKey)}
-                variant="outline"
-              >
-                {pullRequest.jiraKey}
-              </Button>
+              <Badge asChild className="cursor-pointer hover:bg-muted/80">
+                <button
+                  onClick={() => replaceIssueParam(pullRequest.jiraKey)}
+                  type="button"
+                >
+                  {pullRequest.jiraKey}
+                </button>
+              </Badge>
             )}
           </div>
         </div>
@@ -294,21 +296,32 @@ export function PullRequestDetailPage({
                             {tp(`pipelineStates.${pipeline.status}`)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          {pipeline.url ? (
-                            <Button asChild size="sm" variant="ghost">
-                              <a
-                                href={pipeline.url}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
+                        <TableCell>
+                          <div className="flex justify-end gap-2">
+                            {pipeline.url ? (
+                              <Button asChild size="sm" variant="outline">
+                                <a
+                                  href={pipeline.url}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {t("viewPipeline")}
+                                  <ExternalLink />
+                                </a>
+                              </Button>
+                            ) : (
+                              <Button disabled size="sm" variant="outline">
                                 {t("viewPipeline")}
                                 <ExternalLink />
-                              </a>
-                            </Button>
-                          ) : (
-                            "—"
-                          )}
+                              </Button>
+                            )}
+                            <RetryPipelineButton
+                              onError={setError}
+                              onPipelineRetried={pipelineRetried}
+                              pipeline={pipeline}
+                              repositoryId={pullRequest.repositoryGithubId}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
