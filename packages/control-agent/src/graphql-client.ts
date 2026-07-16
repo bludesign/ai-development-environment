@@ -3,6 +3,7 @@ import { createClient, type Client } from "graphql-ws";
 import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
+import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
 
 export type AgentJob = {
   id: string;
@@ -145,6 +146,28 @@ export class AgentGraphQLClient {
 
   health() {
     return this.request<{ health: string }>(`query Health { health }`);
+  }
+
+  async agentCodebases(): Promise<
+    Array<{ id: string; folder: string; canonicalOrigin: string }>
+  > {
+    const data = await this.request<{
+      agentCodebases: Array<{
+        id: string;
+        folder: string;
+        canonicalOrigin: string;
+      }>;
+    }>(`query AgentCodebases { agentCodebases { id folder canonicalOrigin } }`);
+    return data.agentCodebases;
+  }
+
+  reportCodebaseStatuses(reports: CodebaseStatusReport[]) {
+    return this.request<{ reportCodebaseStatuses: Array<{ id: string }> }>(
+      `mutation ReportCodebaseStatuses($reports: [CodebaseStatusReportInput!]!) {
+        reportCodebaseStatuses(reports: $reports) { id }
+      }`,
+      { reports },
+    );
   }
 }
 

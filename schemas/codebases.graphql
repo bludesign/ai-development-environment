@@ -1,0 +1,187 @@
+enum CodebaseSyncState {
+  IN_SYNC
+  AHEAD
+  BEHIND
+  DIVERGED
+  NO_UPSTREAM
+  DETACHED
+  UNKNOWN
+}
+
+enum CodebaseAvailability {
+  AVAILABLE
+  MISSING
+  NOT_REPOSITORY
+  ORIGIN_MISMATCH
+  ERROR
+}
+
+type CodebaseRepository {
+  id: ID!
+  canonicalOrigin: String!
+  displayOrigin: String!
+  name: String!
+  description: String!
+  codebases: [Codebase!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Codebase {
+  id: ID!
+  folder: String!
+  observedOrigin: String!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState!
+  availability: CodebaseAvailability!
+  statusError: String
+  lastCheckedAt: String
+  lastFetchedAt: String
+  createdAt: String!
+  updatedAt: String!
+  agent: Agent!
+  repository: CodebaseRepository!
+  activeJob: AgentJob
+}
+
+type CodebaseDirectoryEntry {
+  name: String!
+  path: String!
+  hidden: Boolean!
+}
+
+type CodebaseDirectoryListing {
+  path: String!
+  parentPath: String
+  homePath: String!
+  entries: [CodebaseDirectoryEntry!]!
+  truncated: Boolean!
+}
+
+type CodebaseSnapshot {
+  folder: String!
+  observedOrigin: String
+  canonicalOrigin: String
+  displayOrigin: String
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState!
+  availability: CodebaseAvailability!
+  error: String
+  checkedAt: String!
+  fetchedAt: String
+  linkedWorktree: Boolean!
+}
+
+type CodebaseInspection {
+  jobId: ID!
+  snapshot: CodebaseSnapshot!
+  existingRepository: CodebaseRepository
+}
+
+type CodebaseOverview {
+  repositories: [CodebaseRepository!]!
+}
+
+type AgentCodebaseRegistration {
+  id: ID!
+  folder: String!
+  canonicalOrigin: String!
+}
+
+type CodebaseOperationSkip {
+  codebaseId: ID!
+  reason: String!
+}
+
+type CodebaseOperationBatch {
+  jobs: [AgentJob!]!
+  skipped: [CodebaseOperationSkip!]!
+}
+
+type CodebaseOverviewChange {
+  codebaseId: ID
+  repositoryId: ID!
+}
+
+input BrowseAgentDirectoryInput {
+  agentId: ID!
+  path: String
+  requestId: ID!
+}
+
+input InspectAgentCodebaseInput {
+  agentId: ID!
+  folder: String!
+  requestId: ID!
+}
+
+input ConfirmCodebaseInput {
+  inspectionJobId: ID!
+  name: String
+  description: String
+}
+
+input UpdateCodebaseRepositoryInput {
+  id: ID!
+  name: String!
+  description: String!
+}
+
+input RunCodebaseOperationInput {
+  codebaseIds: [ID!]!
+  requestId: ID!
+}
+
+input CodebaseSnapshotInput {
+  folder: String!
+  observedOrigin: String
+  canonicalOrigin: String
+  displayOrigin: String
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState!
+  availability: CodebaseAvailability!
+  error: String
+  checkedAt: String!
+  fetchedAt: String
+  linkedWorktree: Boolean!
+}
+
+input CodebaseStatusReportInput {
+  codebaseId: ID!
+  snapshot: CodebaseSnapshotInput!
+}
+
+extend type Query {
+  codebaseOverview: CodebaseOverview!
+  agentCodebases: [AgentCodebaseRegistration!]!
+}
+
+extend type Mutation {
+  browseAgentDirectory(
+    input: BrowseAgentDirectoryInput!
+  ): CodebaseDirectoryListing!
+  inspectAgentCodebase(input: InspectAgentCodebaseInput!): CodebaseInspection!
+  confirmCodebase(input: ConfirmCodebaseInput!): Codebase!
+  updateCodebaseRepository(
+    input: UpdateCodebaseRepositoryInput!
+  ): CodebaseRepository!
+  refreshCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
+  fetchCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
+  reportCodebaseStatuses(reports: [CodebaseStatusReportInput!]!): [Codebase!]!
+}
+
+extend type Subscription {
+  codebaseOverviewChanged: CodebaseOverviewChange!
+}

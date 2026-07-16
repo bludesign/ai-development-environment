@@ -33,6 +33,7 @@ model Agent {
   jobs             AgentJob[]
   ccusageCollections CcusageCollectionAgent[]
   auditEvents      AgentAuditEvent[]
+  codebases        Codebase[]
 }
 
 model AgentEnrollmentToken {
@@ -58,13 +59,57 @@ model AgentJob {
   finishedAt     DateTime?
   updatedAt      DateTime      @updatedAt
   ccusageCollectionId String?
+  codebaseId       String?
+  visibility       String        @default("USER")
   agent          Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
   ccusageCollection CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  codebase       Codebase?     @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
   logs           AgentJobLog[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
   @@index([ccusageCollectionId, status])
+  @@index([codebaseId, status, createdAt])
+}
+
+model CodebaseRepository {
+  id              String     @id
+  canonicalOrigin String     @unique
+  displayOrigin   String
+  name            String
+  description     String     @default("")
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  codebases       Codebase[]
+
+  @@index([name])
+}
+
+model Codebase {
+  id                String             @id
+  repositoryId      String
+  agentId           String
+  folder            String
+  observedOrigin    String
+  branch            String?
+  headSha           String?
+  upstream          String?
+  ahead             Int?
+  behind            Int?
+  syncState         String             @default("UNKNOWN")
+  availability      String             @default("AVAILABLE")
+  statusError       String?
+  lastCheckedAt     DateTime?
+  lastFetchedAt     DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  repository        CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  agent             Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  jobs              AgentJob[]
+
+  @@unique([agentId, folder])
+  @@index([repositoryId])
+  @@index([agentId, availability])
 }
 
 model CcusageCollection {
