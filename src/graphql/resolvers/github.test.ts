@@ -39,6 +39,8 @@ describe("GitHub resolvers", () => {
     const service = {
       saveSettings: vi.fn().mockResolvedValue(safeSettings),
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
+      pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
+      retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service);
     const input = { apiToken: "secret-token" };
@@ -57,6 +59,21 @@ describe("GitHub resolvers", () => {
     expect(service.pullRequests).toHaveBeenCalledWith(
       "REPOSITORY",
       "repository-1",
+    );
+    await resolvers.Query.githubPullRequest(
+      {},
+      { owner: "acme", name: "widgets", number: 17 },
+      context(null),
+    );
+    await resolvers.Mutation.retryGitHubPipeline(
+      {},
+      { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+      context(null),
+    );
+    expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
+    expect(service.retryPipeline).toHaveBeenCalledWith(
+      "repository-1",
+      "check-suite-1",
     );
     expect(safeSettings).not.toHaveProperty("apiToken");
   });

@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import { FormEvent, MouseEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,10 +47,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
-  GitHubPipelineStatus,
+  GitHubPipelineView,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestView,
@@ -64,7 +65,7 @@ const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus reviewDecision unresolvedReviewThreadCount createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry } reviewDecision unresolvedReviewThreadCount createdAt";
 
 type TabKey = "mine" | "review" | `repo:${string}`;
 
@@ -99,16 +100,6 @@ function relativeAge(value: string, locale: string) {
   return formatter.format(seconds, "second");
 }
 
-function pipelineClass(status: GitHubPipelineStatus) {
-  if (status === "SUCCESS")
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-  if (status === "PENDING" || status === "EXPECTED")
-    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-  if (status === "FAILURE" || status === "ERROR")
-    return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
-  return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
-}
-
 function reviewClass(decision: GitHubReviewDecision) {
   if (decision === "APPROVED")
     return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
@@ -117,6 +108,11 @@ function reviewClass(decision: GitHubReviewDecision) {
   if (decision === "REVIEW_REQUIRED")
     return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
+}
+
+function pullRequestDetailHref(pullRequest: GitHubPullRequestView) {
+  const [owner, name] = pullRequest.repositoryNameWithOwner.split("/");
+  return `/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${pullRequest.number}`;
 }
 
 function validateRegex(pattern: string): string | null {
@@ -236,6 +232,33 @@ export function PullRequestsPage() {
     setPages({});
   };
 
+  const pipelineRetried = (
+    pullRequestId: string,
+    pipeline: GitHubPipelineView,
+  ) => {
+    setPages((current) => {
+      const currentPage = current[activeTab];
+      if (!currentPage) return current;
+      return {
+        ...current,
+        [activeTab]: {
+          ...currentPage,
+          items: currentPage.items.map((pullRequest) =>
+            pullRequest.id === pullRequestId
+              ? {
+                  ...pullRequest,
+                  pipelineStatus: "PENDING",
+                  pipelines: pullRequest.pipelines.map((item) =>
+                    item.id === pipeline.id ? pipeline : item,
+                  ),
+                }
+              : pullRequest,
+          ),
+        },
+      };
+    });
+  };
+
   return (
     <section className="mx-auto flex w-full max-w-[1800px] flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -335,6 +358,7 @@ export function PullRequestsPage() {
             <PullRequestTable
               items={page.items}
               locale={locale}
+              onPipelineRetried={pipelineRetried}
               repositorySpecific={repositorySpecific}
             />
           ) : null}
@@ -359,16 +383,19 @@ export function PullRequestsPage() {
 function PullRequestTable({
   items,
   locale,
+  onPipelineRetried,
   repositorySpecific,
 }: {
   items: GitHubPullRequestView[];
   locale: string;
+  onPipelineRetried: (
+    pullRequestId: string,
+    pipeline: GitHubPipelineView,
+  ) => void;
   repositorySpecific: boolean;
 }) {
   const t = useTranslations("pullRequests");
-  const openPullRequest = (url: string) => {
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
+  const router = useRouter();
   const stopRowClick = (event: MouseEvent) => event.stopPropagation();
 
   return (
@@ -392,7 +419,7 @@ function PullRequestTable({
             <TableRow
               key={pullRequest.id}
               className="cursor-pointer"
-              onClick={() => openPullRequest(pullRequest.url)}
+              onClick={() => router.push(pullRequestDetailHref(pullRequest))}
             >
               {!repositorySpecific && (
                 <TableCell className="whitespace-nowrap">
@@ -408,26 +435,22 @@ function PullRequestTable({
                 </TableCell>
               )}
               <TableCell>
-                <a
+                <Link
                   className="font-semibold text-primary hover:underline"
-                  href={pullRequest.url}
+                  href={pullRequestDetailHref(pullRequest)}
                   onClick={stopRowClick}
-                  rel="noreferrer"
-                  target="_blank"
                 >
                   #{pullRequest.number}
-                </a>
+                </Link>
               </TableCell>
               <TableCell className="min-w-72 whitespace-normal">
-                <a
+                <Link
                   className="font-medium hover:underline"
-                  href={pullRequest.url}
+                  href={pullRequestDetailHref(pullRequest)}
                   onClick={stopRowClick}
-                  rel="noreferrer"
-                  target="_blank"
                 >
                   {pullRequest.title}
-                </a>
+                </Link>
               </TableCell>
               <TableCell className="min-w-40 whitespace-normal">
                 <div className="flex flex-wrap gap-1">
@@ -455,9 +478,14 @@ function PullRequestTable({
                 )}
               </TableCell>
               <TableCell>
-                <Badge className={pipelineClass(pullRequest.pipelineStatus)}>
-                  {t(`pipelineStates.${pullRequest.pipelineStatus}`)}
-                </Badge>
+                <PipelineMenu
+                  onPipelineRetried={(pipeline) =>
+                    onPipelineRetried(pullRequest.id, pipeline)
+                  }
+                  pipelineStatus={pullRequest.pipelineStatus}
+                  pipelines={pullRequest.pipelines}
+                  repositoryId={pullRequest.repositoryGithubId}
+                />
               </TableCell>
               <TableCell>
                 <Badge className={reviewClass(pullRequest.reviewDecision)}>

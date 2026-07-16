@@ -21,7 +21,6 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
-const openMock = vi.fn();
 
 function activateTab(tab: HTMLElement) {
   fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
@@ -49,6 +48,16 @@ const pullRequest = {
   labels: ["backend", "ready"],
   jiraKey: "APP-42",
   pipelineStatus: "SUCCESS",
+  pipelines: [
+    {
+      id: "check-suite-1",
+      name: "CI",
+      status: "SUCCESS",
+      url: "https://github.com/acme/widgets/actions/runs/1",
+      checkSuiteId: "check-suite-1",
+      canRetry: true,
+    },
+  ],
   reviewDecision: "APPROVED",
   unresolvedReviewThreadCount: 2,
   createdAt: "2026-07-01T00:00:00.000Z",
@@ -62,12 +71,7 @@ Object.defineProperties(HTMLElement.prototype, {
 });
 
 beforeEach(() => {
-  Object.defineProperty(window, "open", {
-    configurable: true,
-    value: openMock,
-  });
   window.history.replaceState(null, "", "/pull-requests");
-  openMock.mockReset();
 });
 
 afterEach(() => {
@@ -129,6 +133,15 @@ function configureRequests() {
         ],
       } as never;
     }
+    if (query.includes("RetryGitHubPipeline")) {
+      return {
+        retryGitHubPipeline: {
+          ...pullRequest.pipelines[0],
+          status: "QUEUED",
+          canRetry: false,
+        },
+      } as never;
+    }
     if (query.includes("query JiraTicket")) {
       throw new Error("Jira is not configured in this test");
     }
@@ -154,18 +167,31 @@ describe("PullRequestsPage", () => {
       within(row as HTMLTableRowElement).getByText("backend"),
     ).toBeDefined();
     expect(
-      within(row as HTMLTableRowElement).getByText("Passed").className,
+      within(row as HTMLTableRowElement).getByRole("button", {
+        name: /Passed/,
+      }).className,
     ).toContain("bg-emerald-500/10");
     expect(
       within(row as HTMLTableRowElement).getByText("Approved").className,
     ).toContain("bg-emerald-500/10");
 
-    fireEvent.click(row as HTMLTableRowElement);
-    expect(openMock).toHaveBeenCalledWith(
-      pullRequest.url,
-      "_blank",
-      "noopener,noreferrer",
+    expect(title.getAttribute("href")).toBe("/pull-requests/acme/widgets/17");
+
+    fireEvent.pointerDown(
+      within(row as HTMLTableRowElement).getByRole("button", {
+        name: /Passed/,
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
     );
+    expect(await screen.findByText("CI")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("RetryGitHubPipeline"),
+        { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+      ),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
 
     activateTab(screen.getByRole("tab", { name: "Review requests" }));
     const reviewTitle = await screen.findByText("Review this");
@@ -196,7 +222,6 @@ describe("PullRequestsPage", () => {
     expect(new URLSearchParams(window.location.search).get("issue")).toBe(
       "APP-42",
     );
-    expect(openMock).toHaveBeenCalledTimes(1);
   });
 
   test("browses repositories and supports exact owner/name entry", async () => {

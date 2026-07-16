@@ -71,7 +71,36 @@ function rawPullRequest(
       nodes: [{ name: "backend" }],
       pageInfo: { hasNextPage: false, endCursor: null },
     },
-    statusCheckRollup: options.pipeline ? { state: options.pipeline } : null,
+    statusCheckRollup: options.pipeline
+      ? {
+          state: options.pipeline,
+          contexts: {
+            nodes: [
+              {
+                __typename: "CheckRun",
+                id: "check-run-1",
+                name: "test",
+                status: "COMPLETED",
+                conclusion: options.pipeline,
+                detailsUrl: "https://github.com/acme/widgets/actions/runs/1",
+                checkSuite: {
+                  id: "check-suite-1",
+                  status: "COMPLETED",
+                  conclusion: options.pipeline,
+                  url: "https://github.com/acme/widgets/checks",
+                  app: { name: "GitHub Actions" },
+                  workflowRun: {
+                    url: "https://github.com/acme/widgets/actions/runs/1",
+                    runNumber: 1,
+                    workflow: { name: "CI" },
+                  },
+                },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        }
+      : null,
     reviewDecision: options.reviewDecision ?? null,
     reviewThreads: {
       nodes: [{ isResolved: false }, { isResolved: true }],
@@ -174,6 +203,16 @@ describe("GitHub service", () => {
       jiraKey: "APP-42",
       labels: ["backend"],
       pipelineStatus: "SUCCESS",
+      pipelines: [
+        {
+          id: "check-suite-1",
+          name: "CI",
+          status: "SUCCESS",
+          url: "https://github.com/acme/widgets/actions/runs/1",
+          checkSuiteId: "check-suite-1",
+          canRetry: true,
+        },
+      ],
       reviewDecision: "APPROVED",
       unresolvedReviewThreadCount: 2,
     });
@@ -207,6 +246,97 @@ describe("GitHub service", () => {
     );
     await expect(new GitHubService().testConnection()).rejects.toThrow(
       "bad [REDACTED]",
+    );
+  });
+
+  test("loads pull request details and rerequests a check suite", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      if (body.query.includes("query GitHubPullRequestDetail")) {
+        return response({
+          data: {
+            repository: {
+              pullRequest: {
+                ...rawPullRequest("pull-request-1", "APP-42 Add API", {
+                  pipeline: "SUCCESS",
+                  reviewDecision: "APPROVED",
+                }),
+                body: "Detailed description",
+                author: {
+                  login: "octocat",
+                  avatarUrl: "https://avatars.example/octocat",
+                  url: "https://github.com/octocat",
+                },
+                assignees: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+                baseRefName: "main",
+                headRefName: "feature/app-42",
+                state: "OPEN",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                additions: 20,
+                deletions: 5,
+                changedFiles: 3,
+                commits: { totalCount: 2 },
+                mergedAt: null,
+              },
+            },
+          },
+        });
+      }
+      if (body.query.includes("mutation GitHubRetryPipeline")) {
+        return response({
+          data: {
+            rerequestCheckSuite: {
+              checkSuite: {
+                id: "check-suite-1",
+                status: "QUEUED",
+                conclusion: null,
+                url: "https://github.com/acme/widgets/checks",
+                app: { name: "GitHub Actions" },
+                workflowRun: {
+                  url: "https://github.com/acme/widgets/actions/runs/1",
+                  runNumber: 1,
+                  workflow: { name: "CI" },
+                },
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().pullRequest("acme", "widgets", 17),
+    ).resolves.toMatchObject({
+      body: "Detailed description",
+      author: { login: "octocat" },
+      baseRefName: "main",
+      headRefName: "feature/app-42",
+      changedFiles: 3,
+      commitCount: 2,
+      pipelines: [{ name: "CI", status: "SUCCESS" }],
+    });
+    await expect(
+      new GitHubService().retryPipeline("repository-1", "check-suite-1"),
+    ).resolves.toMatchObject({
+      id: "check-suite-1",
+      name: "CI",
+      status: "QUEUED",
+      canRetry: false,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://api.github.com/graphql",
+      expect.objectContaining({
+        body: expect.stringContaining('"checkSuiteId":"check-suite-1"'),
+      }),
     );
   });
 });

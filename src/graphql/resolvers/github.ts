@@ -46,6 +46,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.pullRequests(scope, repositoryId);
     },
+    githubPullRequest: (
+      _root: unknown,
+      { owner, name, number }: { owner: string; name: string; number: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.pullRequest(owner, name, number);
+    },
   },
   Mutation: {
     saveGitHubSettings: (
@@ -99,6 +107,17 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.removeRepository(id);
+    },
+    retryGitHubPipeline: (
+      _root: unknown,
+      {
+        repositoryId,
+        checkSuiteId,
+      }: { repositoryId: string; checkSuiteId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.retryPipeline(repositoryId, checkSuiteId);
     },
   },
 });

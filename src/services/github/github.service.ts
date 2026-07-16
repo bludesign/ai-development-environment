@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { getPrismaClient } from "@/data/prisma-client";
 
 import type {
+  GitHubPipelineState,
   GitHubPipelineStatus,
+  GitHubPipelineView,
+  GitHubPullRequestDetail,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestView,
@@ -42,15 +45,96 @@ type RawPullRequest = {
     url: string;
   };
   labels: RawConnection<{ name: string }>;
-  statusCheckRollup: { state: string } | null;
+  statusCheckRollup: {
+    state: string;
+    contexts: RawConnection<RawPipelineContext>;
+  } | null;
   reviewDecision: string | null;
   reviewThreads: RawConnection<{ isResolved: boolean }>;
+};
+
+type RawCheckSuite = {
+  id: string;
+  status: string;
+  conclusion: string | null;
+  url: string;
+  app: { name: string } | null;
+  workflowRun: {
+    url: string;
+    runNumber: number;
+    workflow: { name: string };
+  } | null;
+};
+
+type RawPipelineContext =
+  | {
+      __typename: "CheckRun";
+      id: string;
+      name: string;
+      status: string;
+      conclusion: string | null;
+      detailsUrl: string | null;
+      checkSuite: RawCheckSuite;
+    }
+  | {
+      __typename: "StatusContext";
+      id: string;
+      context: string;
+      state: string;
+      description: string | null;
+      targetUrl: string | null;
+    };
+
+type RawPullRequestDetail = RawPullRequest & {
+  body: string;
+  author: { login: string; avatarUrl: string; url: string } | null;
+  assignees: RawConnection<{ login: string; avatarUrl: string; url: string }>;
+  baseRefName: string;
+  headRefName: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  commits: { totalCount: number };
+  mergedAt: string | null;
 };
 
 type GitHubResponse<T> = {
   data?: T;
   errors?: Array<{ message?: string }>;
 };
+
+const PIPELINE_CONTEXT_FIELDS = `
+  __typename
+  ... on CheckRun {
+    id
+    name
+    status
+    conclusion
+    detailsUrl
+    checkSuite {
+      id
+      status
+      conclusion
+      url
+      app { name }
+      workflowRun {
+        url
+        runNumber
+        workflow { name }
+      }
+    }
+  }
+  ... on StatusContext {
+    id
+    context
+    state
+    description
+    targetUrl
+  }
+`;
 
 const PULL_REQUEST_FRAGMENT = `
   fragment PullRequestTableFields on PullRequest {
@@ -65,7 +149,13 @@ const PULL_REQUEST_FRAGMENT = `
       nodes { name }
       pageInfo { hasNextPage endCursor }
     }
-    statusCheckRollup { state }
+    statusCheckRollup {
+      state
+      contexts(first: 100) {
+        nodes { ${PIPELINE_CONTEXT_FIELDS} }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
     reviewDecision
     reviewThreads(first: 100) {
       nodes { isResolved }
@@ -155,6 +245,72 @@ function pipelineStatus(
     return value;
   }
   return "NONE";
+}
+
+function pipelineState(
+  status: string | null | undefined,
+  conclusion?: string | null,
+): GitHubPipelineState {
+  const value = conclusion || status || "NONE";
+  if (
+    value === "ACTION_REQUIRED" ||
+    value === "CANCELLED" ||
+    value === "ERROR" ||
+    value === "EXPECTED" ||
+    value === "FAILURE" ||
+    value === "IN_PROGRESS" ||
+    value === "NEUTRAL" ||
+    value === "PENDING" ||
+    value === "QUEUED" ||
+    value === "SKIPPED" ||
+    value === "STALE" ||
+    value === "STARTUP_FAILURE" ||
+    value === "SUCCESS" ||
+    value === "TIMED_OUT"
+  ) {
+    return value;
+  }
+  if (value === "REQUESTED" || value === "WAITING") return "QUEUED";
+  return "NONE";
+}
+
+function checkSuitePipeline(checkSuite: RawCheckSuite): GitHubPipelineView {
+  const workflowRun = checkSuite.workflowRun;
+  return {
+    id: checkSuite.id,
+    name:
+      workflowRun?.workflow.name ??
+      checkSuite.app?.name ??
+      `Check suite ${checkSuite.id}`,
+    status: pipelineState(checkSuite.status, checkSuite.conclusion),
+    url: workflowRun?.url ?? checkSuite.url ?? null,
+    checkSuiteId: checkSuite.id,
+    canRetry: checkSuite.status === "COMPLETED",
+  };
+}
+
+function normalizePipelines(
+  contexts: RawPipelineContext[],
+): GitHubPipelineView[] {
+  const pipelines = new Map<string, GitHubPipelineView>();
+  for (const context of contexts) {
+    if (context.__typename === "CheckRun") {
+      const pipeline = checkSuitePipeline(context.checkSuite);
+      pipelines.set(pipeline.id, pipeline);
+    } else {
+      pipelines.set(context.id, {
+        id: context.id,
+        name: context.context,
+        status: pipelineState(context.state),
+        url: context.targetUrl,
+        checkSuiteId: null,
+        canRetry: false,
+      });
+    }
+  }
+  return [...pipelines.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 }
 
 function reviewDecision(value: string | null): GitHubReviewDecision {
@@ -566,6 +722,46 @@ export class GitHubService {
     return count;
   }
 
+  private async remainingPipelineContexts(
+    pullRequestId: string,
+    after: string,
+    token: string,
+  ): Promise<RawPipelineContext[]> {
+    const contexts: RawPipelineContext[] = [];
+    let cursor: string | null = after;
+    while (cursor) {
+      const data: {
+        node: {
+          statusCheckRollup: {
+            contexts: RawConnection<RawPipelineContext>;
+          } | null;
+        } | null;
+      } = await this.request(
+        `query GitHubPullRequestPipelineContexts($id: ID!, $after: String) {
+          node(id: $id) {
+            ... on PullRequest {
+              statusCheckRollup {
+                contexts(first: 100, after: $after) {
+                  nodes { ${PIPELINE_CONTEXT_FIELDS} }
+                  pageInfo { hasNextPage endCursor }
+                }
+              }
+            }
+          }
+        }`,
+        { id: pullRequestId, after: cursor },
+        token,
+      );
+      const connection = data.node?.statusCheckRollup?.contexts;
+      if (!connection) break;
+      contexts.push(...connectionNodes(connection));
+      cursor = connection.pageInfo.hasNextPage
+        ? connection.pageInfo.endCursor
+        : null;
+    }
+    return contexts;
+  }
+
   private async normalizePullRequest(
     pullRequest: RawPullRequest,
     jiraKeyRegex: string | null,
@@ -599,6 +795,21 @@ export class GitHubService {
         token,
       );
     }
+    const pipelineContexts = pullRequest.statusCheckRollup
+      ? connectionNodes(pullRequest.statusCheckRollup.contexts)
+      : [];
+    if (
+      pullRequest.statusCheckRollup?.contexts.pageInfo.hasNextPage &&
+      pullRequest.statusCheckRollup.contexts.pageInfo.endCursor
+    ) {
+      pipelineContexts.push(
+        ...(await this.remainingPipelineContexts(
+          pullRequest.id,
+          pullRequest.statusCheckRollup.contexts.pageInfo.endCursor,
+          token,
+        )),
+      );
+    }
     return {
       id: pullRequest.id,
       number: pullRequest.number,
@@ -610,6 +821,7 @@ export class GitHubService {
       labels,
       jiraKey: parseJiraKey(pullRequest.title, jiraKeyRegex),
       pipelineStatus: pipelineStatus(pullRequest.statusCheckRollup?.state),
+      pipelines: normalizePipelines(pipelineContexts),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
       createdAt: pullRequest.createdAt,
@@ -695,5 +907,126 @@ export class GitHubService {
       ),
       truncated,
     };
+  }
+
+  async pullRequest(
+    ownerValue: string,
+    nameValue: string,
+    number: number,
+  ): Promise<GitHubPullRequestDetail | null> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${ownerValue}/${nameValue}`,
+    );
+    if (!Number.isInteger(number) || number < 1) {
+      throw new Error("Pull request number must be a positive integer");
+    }
+    const token = await this.requireToken();
+    const data = await this.request<{
+      repository: { pullRequest: RawPullRequestDetail | null } | null;
+    }>(
+      `query GitHubPullRequestDetail(
+        $owner: String!
+        $name: String!
+        $number: Int!
+      ) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            ...PullRequestTableFields
+            body
+            author { login avatarUrl url }
+            assignees(first: 100) {
+              nodes { login avatarUrl url }
+              pageInfo { hasNextPage endCursor }
+            }
+            baseRefName
+            headRefName
+            state
+            isDraft
+            mergeable
+            additions
+            deletions
+            changedFiles
+            commits { totalCount }
+            mergedAt
+          }
+        }
+      }
+      ${PULL_REQUEST_FRAGMENT}`,
+      { owner, name, number },
+      token,
+    );
+    const pullRequest = data.repository?.pullRequest;
+    if (!pullRequest) return null;
+    const prisma = await getPrismaClient();
+    const managedRepositories = await prisma.gitHubRepository.findMany();
+    const managedRepository = managedRepositories.find(
+      (repository) => repository.githubId === pullRequest.repository.id,
+    );
+    const summary = await this.normalizePullRequest(
+      pullRequest,
+      managedRepository?.jiraKeyRegex ?? null,
+      token,
+    );
+    return {
+      ...summary,
+      body: pullRequest.body,
+      author: pullRequest.author,
+      assignees: connectionNodes(pullRequest.assignees),
+      baseRefName: pullRequest.baseRefName,
+      headRefName: pullRequest.headRefName,
+      state: pullRequest.state,
+      isDraft: pullRequest.isDraft,
+      mergeable: pullRequest.mergeable,
+      additions: pullRequest.additions,
+      deletions: pullRequest.deletions,
+      changedFiles: pullRequest.changedFiles,
+      commitCount: pullRequest.commits.totalCount,
+      updatedAt: pullRequest.updatedAt,
+      mergedAt: pullRequest.mergedAt,
+    };
+  }
+
+  async retryPipeline(
+    repositoryId: string,
+    checkSuiteId: string,
+  ): Promise<GitHubPipelineView> {
+    if (!repositoryId.trim() || !checkSuiteId.trim()) {
+      throw new Error("Repository and check suite IDs are required");
+    }
+    const token = await this.requireToken();
+    const data = await this.request<{
+      rerequestCheckSuite: { checkSuite: RawCheckSuite | null } | null;
+    }>(
+      `mutation GitHubRetryPipeline(
+        $repositoryId: ID!
+        $checkSuiteId: ID!
+      ) {
+        rerequestCheckSuite(
+          input: {
+            repositoryId: $repositoryId
+            checkSuiteId: $checkSuiteId
+          }
+        ) {
+          checkSuite {
+            id
+            status
+            conclusion
+            url
+            app { name }
+            workflowRun {
+              url
+              runNumber
+              workflow { name }
+            }
+          }
+        }
+      }`,
+      { repositoryId, checkSuiteId },
+      token,
+    );
+    const checkSuite = data.rerequestCheckSuite?.checkSuite;
+    if (!checkSuite)
+      throw new Error("GitHub did not return the retried pipeline");
+    return checkSuitePipeline(checkSuite);
   }
 }

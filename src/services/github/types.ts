@@ -3,6 +3,23 @@ export type GitHubPullRequestScope = "MINE" | "REVIEW_REQUESTED" | "REPOSITORY";
 export type GitHubPipelineStatus =
   "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS" | "NONE";
 
+export type GitHubPipelineState =
+  | "ACTION_REQUIRED"
+  | "CANCELLED"
+  | "ERROR"
+  | "EXPECTED"
+  | "FAILURE"
+  | "IN_PROGRESS"
+  | "NEUTRAL"
+  | "PENDING"
+  | "QUEUED"
+  | "SKIPPED"
+  | "STALE"
+  | "STARTUP_FAILURE"
+  | "SUCCESS"
+  | "TIMED_OUT"
+  | "NONE";
+
 export type GitHubReviewDecision =
   "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | "NONE";
 
@@ -42,6 +59,15 @@ export type GitHubRepositoryCandidatePage = {
   endCursor: string | null;
 };
 
+export type GitHubPipelineView = {
+  id: string;
+  name: string;
+  status: GitHubPipelineState;
+  url: string | null;
+  checkSuiteId: string | null;
+  canRetry: boolean;
+};
+
 export type GitHubPullRequestView = {
   id: string;
   number: number;
@@ -53,9 +79,33 @@ export type GitHubPullRequestView = {
   labels: string[];
   jiraKey: string | null;
   pipelineStatus: GitHubPipelineStatus;
+  pipelines: GitHubPipelineView[];
   reviewDecision: GitHubReviewDecision;
   unresolvedReviewThreadCount: number;
   createdAt: string;
+};
+
+export type GitHubPullRequestActor = {
+  login: string;
+  avatarUrl: string;
+  url: string;
+};
+
+export type GitHubPullRequestDetail = GitHubPullRequestView & {
+  body: string;
+  author: GitHubPullRequestActor | null;
+  assignees: GitHubPullRequestActor[];
+  baseRefName: string;
+  headRefName: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  additions: number;
+  deletions: number;
+  changedFiles: number | null;
+  commitCount: number;
+  updatedAt: string;
+  mergedAt: string | null;
 };
 
 export type GitHubPullRequestPage = {
