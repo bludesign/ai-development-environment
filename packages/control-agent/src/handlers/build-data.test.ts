@@ -11,11 +11,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { captureCommand } from "../capture-command.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
 
+vi.mock("../capture-command.js", () => ({ captureCommand: vi.fn() }));
+
 const temporaryDirectories: string[] = [];
+const capture = vi.mocked(captureCommand);
 
 async function temporaryDirectory() {
   const directory = await mkdtemp(join(tmpdir(), "build-data-agent-"));
@@ -23,7 +27,19 @@ async function temporaryDirectory() {
   return directory;
 }
 
+beforeEach(() => {
+  capture.mockResolvedValue({
+    exitCode: 1,
+    signal: null,
+    timedOut: false,
+    cancelled: false,
+    stdout: "",
+    stderr: "Missing WorkspacePath",
+  });
+});
+
 afterEach(async () => {
+  vi.resetAllMocks();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -48,6 +64,17 @@ describe("Build Data agent handlers", () => {
     await mkdir(join(root, "Starting-abcdef"));
     await mkdir(join(root, "CompilationCache.noindex"));
     await symlink(project, join(root, "Linked-project"));
+    capture.mockImplementation(async ({ args }) => {
+      const isProject = args.at(-1)?.endsWith(join("App-abcdef", "info.plist"));
+      return {
+        exitCode: isProject ? 0 : 1,
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        stdout: isProject ? "/Repos/App/App.xcodeproj\n" : "",
+        stderr: isProject ? "" : "Missing WorkspacePath",
+      };
+    });
 
     const result = (await scanBuildData(
       { mode: "ABSOLUTE", path: root, worktrees: [] },
