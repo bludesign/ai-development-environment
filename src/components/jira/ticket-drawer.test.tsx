@@ -127,11 +127,11 @@ describe("JiraTicketDrawer", () => {
       screen.getByText("Ticket details").closest('[data-slot="card"]'),
     ).not.toBeNull();
     const descriptionTitle = screen.getByText("Description");
-    const descriptionRaw = screen.getAllByRole("button", {
-      name: "Raw",
+    const descriptionViewMenu = screen.getAllByRole("button", {
+      name: "Rendered",
     })[0];
     expect(descriptionTitle.parentElement?.parentElement).toBe(
-      descriptionRaw?.parentElement?.parentElement,
+      descriptionViewMenu?.parentElement?.parentElement,
     );
     expect(
       screen

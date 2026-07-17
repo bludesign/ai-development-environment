@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Eye, FileText } from "lucide-react";
+import { Braces, Check, Copy, Eye, FileCode2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -9,6 +9,13 @@ import remarkGfm from "remark-gfm";
 import { AdfRenderer } from "@/components/jira/adf-renderer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -32,6 +39,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 type CopyState = "IDLE" | "COPIED" | "FAILED";
+type ViewMode = "RENDERED" | "MARKDOWN" | "RAW";
 
 function normalizedContent(
   content: JiraRichText | null | undefined,
@@ -108,7 +116,7 @@ export function JiraRichTextBlock({
     () => normalizedContent(content, value),
     [content, value],
   );
-  const [raw, setRaw] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("RENDERED");
   const [copyState, setCopyState] = useState<CopyState>("IDLE");
   const [formatOverride, setFormatOverride] = useState<Exclude<
     JiraTextFormat,
@@ -145,10 +153,17 @@ export function JiraRichTextBlock({
       : selectedFormat === "JIRA_WIKI"
         ? jiraWikiToMarkdown(normalized.rawText)
         : normalized.rawText;
+  const viewModes = [
+    { value: "RENDERED", label: t("rendered"), icon: Eye },
+    { value: "MARKDOWN", label: t("markdown"), icon: FileCode2 },
+    { value: "RAW", label: t("raw"), icon: Braces },
+  ] as const;
+  const activeViewMode = viewModes.find((mode) => mode.value === viewMode)!;
+  const ActiveViewIcon = activeViewMode.icon;
 
   const copy = async () => {
     try {
-      await copyText(normalized.rawText);
+      await copyText(viewMode === "MARKDOWN" ? markdown : normalized.rawText);
       setCopyState("COPIED");
     } catch {
       setCopyState("FAILED");
@@ -186,17 +201,30 @@ export function JiraRichTextBlock({
               </SelectContent>
             </Select>
           )}
-          <Button
-            aria-label={raw ? t("rendered") : t("raw")}
-            onClick={() => setRaw((current) => !current)}
-            size="xs"
-            title={raw ? t("viewRendered") : t("viewRaw")}
-            type="button"
-            variant="outline"
-          >
-            {raw ? <Eye /> : <FileText />}
-            {raw ? t("rendered") : t("raw")}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="xs"
+                title={t("renderFormat")}
+                type="button"
+                variant="outline"
+              >
+                <ActiveViewIcon /> {activeViewMode.label}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup
+                onValueChange={(mode) => setViewMode(mode as ViewMode)}
+                value={viewMode}
+              >
+                {viewModes.map(({ icon: ViewIcon, label, value }) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    <ViewIcon /> {label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             aria-label={t("copy")}
             onClick={() => void copy()}
@@ -214,9 +242,13 @@ export function JiraRichTextBlock({
         <p className="text-xs text-destructive">{t("copyFailed")}</p>
       )}
       <div className={bodyClassName}>
-        {raw ? (
+        {viewMode === "RAW" ? (
           <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
             {normalized.rawText}
+          </pre>
+        ) : viewMode === "MARKDOWN" ? (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+            {markdown}
           </pre>
         ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (
           <AdfRenderer value={normalized.raw} />
