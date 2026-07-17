@@ -34,6 +34,12 @@ const state = vi.hoisted(() => ({
     updatedAt: Date;
   } | null,
   auditEvents: [] as Array<Record<string, unknown>>,
+  linkedCodebaseRepository: null as {
+    id: string;
+    canonicalOrigin: string;
+  } | null,
+  linkedWorktree: null as { id: string; branch: string } | null,
+  codebaseRepositoryOrigins: [] as string[],
   repositories: [
     {
       id: "local-repository-1",
@@ -86,10 +92,19 @@ vi.mock("@/data/prisma-client", () => ({
         ) ?? null,
     },
     codebaseRepository: {
-      findFirst: async () => null,
+      findFirst: async ({ where }: { where: { canonicalOrigin: string } }) => {
+        state.codebaseRepositoryOrigins.push(where.canonicalOrigin);
+        return state.linkedCodebaseRepository?.canonicalOrigin ===
+          where.canonicalOrigin
+          ? { id: state.linkedCodebaseRepository.id }
+          : null;
+      },
     },
     worktree: {
-      findFirst: async () => null,
+      findFirst: async ({ where }: { where: { branch: string } }) =>
+        state.linkedWorktree?.branch === where.branch
+          ? { id: state.linkedWorktree.id }
+          : null,
     },
     gitHubAppSettings: {
       findUnique: async () => state.appSettings,
@@ -165,6 +180,7 @@ function rawPullRequest(
         ? "2026-07-15T00:00:00.000Z"
         : "2026-07-14T00:00:00.000Z",
     headRefName: "feature/app-42",
+    headRepository: { nameWithOwner: "acme/widgets" },
     repository: {
       id: "repository-1",
       nameWithOwner: "acme/widgets",
@@ -308,6 +324,9 @@ beforeEach(() => {
     updatedAt: new Date(0),
   };
   state.auditEvents = [];
+  state.linkedCodebaseRepository = null;
+  state.linkedWorktree = null;
+  state.codebaseRepositoryOrigins = [];
   appClient.clearTokenCache.mockReset();
   appClient.graphql.mockReset();
   appClient.graphql.mockResolvedValue({
@@ -1000,6 +1019,74 @@ describe("GitHub service", () => {
     );
   });
 
+  test("links pull requests to worktrees in the normalized head repository", async () => {
+    let headRepository: { nameWithOwner: string } | null = {
+      nameWithOwner: "ForkOwner/MixedRepo",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (!body.query.includes("query GitHubPullRequestDetail")) {
+          throw new Error(`Unexpected query: ${body.query}`);
+        }
+        return response({
+          data: {
+            repository: {
+              pullRequest: {
+                ...rawPullRequest("pull-request-1", "APP-42 Add API"),
+                headRepository,
+                body: "",
+                bodyHTML: "",
+                author: null,
+                assignees: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+                reviewThreadsFull: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+                baseRefName: "main",
+                state: "OPEN",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                additions: 1,
+                deletions: 0,
+                changedFiles: 1,
+                commits: { totalCount: 1 },
+                mergedAt: null,
+              },
+            },
+          },
+        });
+      }),
+    );
+    state.linkedCodebaseRepository = {
+      id: "fork-repository",
+      canonicalOrigin: "github.com/forkowner/mixedrepo",
+    };
+    state.linkedWorktree = {
+      id: "fork-worktree",
+      branch: "feature/app-42",
+    };
+    const service = new GitHubService();
+
+    await expect(
+      service.pullRequest("acme", "widgets", 17),
+    ).resolves.toMatchObject({ worktreeId: "fork-worktree" });
+    expect(state.codebaseRepositoryOrigins).toEqual([
+      "github.com/forkowner/mixedrepo",
+    ]);
+
+    state.codebaseRepositoryOrigins = [];
+    headRepository = null;
+    await expect(
+      service.pullRequest("acme", "widgets", 17),
+    ).resolves.toMatchObject({ worktreeId: null });
+    expect(state.codebaseRepositoryOrigins).toEqual([]);
+  });
+
   test("keeps the App private key write-only and verifies before replacing settings", async () => {
     const service = new GitHubService();
     await expect(
@@ -1201,8 +1288,12 @@ describe("GitHub service", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/user/emails")) {
         return response([
-          { email: "octocat@example.com", verified: true },
-          { email: "unverified@example.com", verified: false },
+          { email: "octocat@example.com", verified: true, primary: true },
+          {
+            email: "unverified@example.com",
+            verified: false,
+            primary: false,
+          },
         ]);
       }
       const body = JSON.parse(String(init?.body)) as {
@@ -1217,6 +1308,7 @@ describe("GitHub service", () => {
               mergeCommitAllowed: true,
               rebaseMergeAllowed: false,
               squashMergeAllowed: true,
+              viewerPermission: "WRITE",
               pullRequest: {
                 id: "pull-request-1",
                 title: "APP-42 Add API",
@@ -1297,6 +1389,7 @@ describe("GitHub service", () => {
                 mergeCommitAllowed: true,
                 rebaseMergeAllowed: true,
                 squashMergeAllowed: true,
+                viewerPermission: "WRITE",
                 pullRequest: {
                   id: "pull-request-1",
                   title: "APP-42 Add API",
@@ -1333,6 +1426,113 @@ describe("GitHub service", () => {
         commitBody: "",
       }),
     ).rejects.toThrow("Required reviews");
+  });
+
+  test("blocks merge options and mutations for viewers without write access", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/user/emails")) return response([]);
+      const body = JSON.parse(String(init?.body)) as { query: string };
+      if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+        return response({
+          data: {
+            viewer: { email: "" },
+            repository: {
+              mergeCommitAllowed: true,
+              rebaseMergeAllowed: true,
+              squashMergeAllowed: true,
+              viewerPermission: "READ",
+              pullRequest: {
+                id: "pull-request-1",
+                title: "APP-42 Add API",
+                body: "",
+                url: "https://github.com/acme/widgets/pull/17",
+                state: "OPEN",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                headRefOid: "head-oid-1",
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+
+    await expect(
+      service.pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toMatchObject({
+      canMerge: false,
+      blockedReason: expect.stringContaining("permission"),
+    });
+    await expect(
+      service.mergePullRequest({
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+        method: "SQUASH",
+        commitHeadline: "APP-42 Add API",
+        commitBody: "",
+      }),
+    ).rejects.toThrow("permission");
+    expect(
+      fetchMock.mock.calls.some(([, init]) =>
+        String(init?.body).includes("mutation MergeGitHubPullRequest"),
+      ),
+    ).toBe(false);
+  });
+
+  test("selects the verified primary email instead of the first sorted email", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/user/emails")) {
+          return response([
+            { email: "z-primary@example.com", verified: true, primary: true },
+            {
+              email: "a-secondary@example.com",
+              verified: true,
+              primary: false,
+            },
+          ]);
+        }
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+          return response({
+            data: {
+              viewer: { email: "" },
+              repository: {
+                mergeCommitAllowed: false,
+                rebaseMergeAllowed: false,
+                squashMergeAllowed: true,
+                viewerPermission: "WRITE",
+                pullRequest: {
+                  id: "pull-request-1",
+                  title: "APP-42 Add API",
+                  body: "",
+                  url: "https://github.com/acme/widgets/pull/17",
+                  state: "OPEN",
+                  isDraft: false,
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus: "CLEAN",
+                  headRefOid: "head-oid-1",
+                },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+
+    await expect(
+      new GitHubService().pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toMatchObject({
+      commitEmails: ["a-secondary@example.com", "z-primary@example.com"],
+      defaultCommitEmail: "z-primary@example.com",
+    });
   });
 
   test("preserves verified settings when replacement verification fails", async () => {

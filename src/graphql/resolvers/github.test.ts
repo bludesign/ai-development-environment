@@ -7,11 +7,18 @@ import {
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { GitHubService } from "@/services/github";
+import type { WorktreesService } from "@/services/worktrees";
 
 import { createGitHubResolvers } from "./github";
 
 function context(agentId: string | null): GraphQLContext {
   return { agentId, ipAddress: "127.0.0.1" } as GraphQLContext;
+}
+
+function worktreesService() {
+  return {
+    invalidatePullRequestsForOrigin: vi.fn(),
+  } as unknown as WorktreesService;
 }
 
 function resolveInfo(source: string): GraphQLResolveInfo {
@@ -43,7 +50,7 @@ describe("GitHub resolvers", () => {
       getSettings: vi.fn(),
       pullRequests: vi.fn(),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const resolvers = createGitHubResolvers(service, worktreesService());
 
     expect(() =>
       resolvers.Query.githubSettings({}, {}, context("agent-1")),
@@ -82,7 +89,8 @@ describe("GitHub resolvers", () => {
         .fn()
         .mockResolvedValue({ id: "thread-1", isResolved: true }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const worktrees = worktreesService();
+    const resolvers = createGitHubResolvers(service, worktrees);
     const input = { apiToken: "secret-token" };
     const appInput = {
       appId: "123",
@@ -170,6 +178,9 @@ describe("GitHub resolvers", () => {
       17,
     );
     expect(service.mergePullRequest).toHaveBeenCalledWith(mergeInput);
+    expect(worktrees.invalidatePullRequestsForOrigin).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+    );
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
@@ -197,7 +208,7 @@ describe("GitHub resolvers", () => {
     const service = {
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const resolvers = createGitHubResolvers(service, worktreesService());
     const info = resolveInfo(`
       query PullRequests($scope: GitHubPullRequestScope!) {
         githubPullRequests(scope: $scope) {

@@ -150,6 +150,8 @@ type RawPullRequestMergeState = {
   headRefOid: string;
 };
 
+type RepositoryPermission = "ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE" | "READ";
+
 type RawActor = {
   login: string;
   avatarUrl: string;
@@ -1919,11 +1921,15 @@ export class GitHubService {
       pullRequest.reviewThreadsFull,
       token,
     );
-    const canonicalOrigin = `github.com/${pullRequest.repository.nameWithOwner}`;
-    const matchingRepository = await prisma.codebaseRepository.findFirst({
-      where: { canonicalOrigin },
-      select: { id: true },
-    });
+    const canonicalOrigin = pullRequest.headRepository
+      ? `github.com/${pullRequest.headRepository.nameWithOwner.toLowerCase()}`
+      : null;
+    const matchingRepository = canonicalOrigin
+      ? await prisma.codebaseRepository.findFirst({
+          where: { canonicalOrigin },
+          select: { id: true },
+        })
+      : null;
     const worktree = matchingRepository
       ? await prisma.worktree.findFirst({
           where: {
@@ -1960,9 +1966,16 @@ export class GitHubService {
 
   private mergeBlockedReason(
     pullRequest: RawPullRequestMergeState,
+    viewerPermission: RepositoryPermission | null,
   ): string | null {
     if (pullRequest.state !== "OPEN") return "The pull request is not open.";
     if (pullRequest.isDraft) return "Draft pull requests cannot be merged.";
+    if (
+      !viewerPermission ||
+      !["ADMIN", "MAINTAIN", "WRITE"].includes(viewerPermission)
+    ) {
+      return "You do not have permission to merge pull requests in this repository.";
+    }
     if (pullRequest.mergeable === "CONFLICTING")
       return "The pull request has merge conflicts.";
     if (pullRequest.mergeable === "UNKNOWN")
@@ -1989,6 +2002,7 @@ export class GitHubService {
     pullRequest: RawPullRequestMergeState;
     availableMethods: GitHubMergeMethod[];
     viewerEmail: string | null;
+    viewerPermission: RepositoryPermission | null;
   }> {
     const data = await this.request<{
       viewer: { email: string };
@@ -1996,6 +2010,7 @@ export class GitHubService {
         mergeCommitAllowed: boolean;
         rebaseMergeAllowed: boolean;
         squashMergeAllowed: boolean;
+        viewerPermission: RepositoryPermission | null;
         pullRequest: RawPullRequestMergeState | null;
       } | null;
     }>(
@@ -2009,6 +2024,7 @@ export class GitHubService {
           mergeCommitAllowed
           rebaseMergeAllowed
           squashMergeAllowed
+          viewerPermission
           pullRequest(number: $number) {
             id title body url state isDraft mergeable mergeStateStatus headRefOid
           }
@@ -2027,28 +2043,35 @@ export class GitHubService {
       pullRequest,
       availableMethods,
       viewerEmail: data.viewer.email.trim() || null,
+      viewerPermission: data.repository?.viewerPermission ?? null,
     };
   }
 
-  private async commitEmails(
+  private async commitEmailOptions(
     token: string,
     viewerEmail: string | null,
-  ): Promise<string[]> {
+  ): Promise<{ emails: string[]; primaryEmail: string | null }> {
     const emails = new Set<string>();
+    let primaryEmail: string | null = null;
     if (viewerEmail) emails.add(viewerEmail);
     try {
       const values = await this.restRequest<
-        Array<{ email: string; verified: boolean }>
+        Array<{ email: string; verified: boolean; primary: boolean }>
       >(`${GITHUB_API_BASE_URL}/user/emails?per_page=100`, token);
       for (const value of values) {
-        if (value.verified && value.email.trim())
-          emails.add(value.email.trim());
+        const email = value.email.trim();
+        if (!value.verified || !email) continue;
+        emails.add(email);
+        if (value.primary) primaryEmail = email;
       }
     } catch {
       // The token may not include user:email. The public viewer email and
       // GitHub's account-default option remain available in that case.
     }
-    return [...emails].sort((left, right) => left.localeCompare(right));
+    return {
+      emails: [...emails].sort((left, right) => left.localeCompare(right)),
+      primaryEmail,
+    };
   }
 
   async pullRequestMergeOptions(
@@ -2064,19 +2087,19 @@ export class GitHubService {
     }
     const token = await this.requireToken();
     const state = await this.mergeState(owner, name, number, token);
-    const commitEmails = await this.commitEmails(token, state.viewerEmail);
+    const commitEmailOptions = await this.commitEmailOptions(
+      token,
+      state.viewerEmail,
+    );
     const blockedReason =
-      this.mergeBlockedReason(state.pullRequest) ??
+      this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
       (state.availableMethods.length === 0
         ? "This repository does not have an available merge method."
         : null);
     return {
       availableMethods: state.availableMethods,
-      commitEmails,
-      defaultCommitEmail:
-        state.viewerEmail && commitEmails.includes(state.viewerEmail)
-          ? state.viewerEmail
-          : (commitEmails[0] ?? null),
+      commitEmails: commitEmailOptions.emails,
+      defaultCommitEmail: commitEmailOptions.primaryEmail,
       defaultCommitHeadline: state.pullRequest.title,
       defaultCommitBody: state.pullRequest.body,
       canMerge: blockedReason === null,
@@ -2103,7 +2126,10 @@ export class GitHubService {
     if (!commitHeadline) throw new Error("A commit message is required");
     const token = await this.requireToken();
     const state = await this.mergeState(owner, name, input.number, token);
-    const blockedReason = this.mergeBlockedReason(state.pullRequest);
+    const blockedReason = this.mergeBlockedReason(
+      state.pullRequest,
+      state.viewerPermission,
+    );
     if (blockedReason) throw new Error(blockedReason);
     if (!state.availableMethods.includes(input.method)) {
       throw new Error(
@@ -2112,8 +2138,11 @@ export class GitHubService {
     }
     const authorEmail = input.authorEmail?.trim() || null;
     if (authorEmail) {
-      const availableEmails = await this.commitEmails(token, state.viewerEmail);
-      if (!availableEmails.includes(authorEmail)) {
+      const availableEmails = await this.commitEmailOptions(
+        token,
+        state.viewerEmail,
+      );
+      if (!availableEmails.emails.includes(authorEmail)) {
         throw new Error(
           "The selected commit email is not available for this GitHub account.",
         );

@@ -7,6 +7,8 @@ import type {
   GitHubPullRequestScope,
   GitHubService,
 } from "@/services/github";
+import { normalizeGitHubRepositoryName } from "@/services/github";
+import type { WorktreesService } from "@/services/worktrees";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -80,7 +82,10 @@ function requestsPipelineJobs(info?: GraphQLResolveInfo): boolean {
   );
 }
 
-export const createGitHubResolvers = (gitHubService: GitHubService) => ({
+export const createGitHubResolvers = (
+  gitHubService: GitHubService,
+  worktreesService: WorktreesService,
+) => ({
   Query: {
     githubSettings: (
       _root: unknown,
@@ -247,7 +252,7 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.removeRepository(id);
     },
-    mergeGitHubPullRequest: (
+    mergeGitHubPullRequest: async (
       _root: unknown,
       {
         input,
@@ -265,7 +270,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.mergePullRequest(input);
+      const result = await gitHubService.mergePullRequest(input);
+      const { owner, name } = normalizeGitHubRepositoryName(
+        `${input.owner}/${input.name}`,
+      );
+      worktreesService.invalidatePullRequestsForOrigin(
+        `github.com/${owner}/${name}`,
+      );
+      return result;
     },
     retryGitHubPipeline: (
       _root: unknown,

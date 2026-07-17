@@ -42,7 +42,7 @@ export const createSchema = (
     createHealthResolvers(prismaService),
     createAgentResolvers(agentControlService),
     createJiraResolvers(jiraService),
-    createGitHubResolvers(gitHubService),
+    createGitHubResolvers(gitHubService, worktreesService),
     createCcusageResolvers(ccusageService),
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
