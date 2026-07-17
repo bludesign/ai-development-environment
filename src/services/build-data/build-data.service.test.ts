@@ -346,9 +346,7 @@ describe("BuildDataService", () => {
       buildDataCollectionId: "collection-1",
       kind: "buildData.delete",
       payloadJson: JSON.stringify({
-        targets: [
-          { path: "/DerivedData/App-hash", rootPath: "/DerivedData" },
-        ],
+        targets: [{ path: "/DerivedData/App-hash", rootPath: "/DerivedData" }],
       }),
       status: "SUCCEEDED",
       resultJson: JSON.stringify({ deleted: "invalid" }),
