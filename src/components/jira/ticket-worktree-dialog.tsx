@@ -203,8 +203,9 @@ export function TicketWorktreeDialog({
         }))
       : existingDestinations.map(({ agentGroup, group, worktree }) => ({
           value: worktree.id,
-          label: `${worktree.branch ?? t("detachedBranch")} · ${group.repository.name} · ${agentGroup.agent.name}`,
-          description: worktree.folder,
+          label: worktree.branch ?? t("detachedBranch"),
+          description: `${group.repository.name} · ${agentGroup.agent.name}`,
+          secondaryDescription: worktree.folder,
           keywords: `${group.repository.displayOrigin} ${agentGroup.agent.hostname}`,
         }));
 
@@ -261,7 +262,7 @@ export function TicketWorktreeDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("ticketWorktreeTitle", { issueKey })}</DialogTitle>
           <DialogDescription>
@@ -315,6 +316,7 @@ export function TicketWorktreeDialog({
                 options={options}
                 placeholder={t("selectWorktreeDestination")}
                 searchPlaceholder={t("searchWorktreeDestinations")}
+                showSelectedDetails={mode === "EXISTING_WORKTREE"}
                 value={effectiveDestinationId}
               />
             </div>

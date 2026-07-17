@@ -1799,7 +1799,7 @@ function WorktreeMenus(
         <div className="mb-4">
           <h3 className="font-semibold">{t("changeBranch")}</h3>
           <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-            {worktree.folder}
+            {displayedWorktreePath(worktree.folder, props.baseRepoDirectory)}
           </p>
         </div>
         <WorktreeBranchForm

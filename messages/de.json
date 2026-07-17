@@ -197,7 +197,7 @@
     "ticket": "Vorgang",
     "staleTicket": "Einige Vorgangsdaten sind veraltet, weil Jira nicht erreichbar war.",
     "openInJira": "In Jira öffnen",
-    "worktreeAction": "Branch oder Worktree erstellen",
+    "worktreeAction": "Worktree erstellen",
     "ticketWorktreeTitle": "Aus {issueKey} erstellen",
     "ticketWorktreeDescription": "Erstelle einen neuen Worktree auf einem Agent oder erstelle den Ticket-Branch und wechsle einen vorhandenen Worktree dorthin.",
     "newWorktree": "Neuer Worktree",

@@ -103,7 +103,7 @@ describe("WorktreesPage", () => {
                 "worktree.operation",
                 "worktree.watch",
               ],
-              baseRepoDirectory: null,
+              baseRepoDirectory: "/workspaces",
               connectionStatus: "ONLINE",
               ipAddress: null,
               lastSeenAt: new Date().toISOString(),
@@ -125,7 +125,7 @@ describe("WorktreesPage", () => {
                 },
                 codebase: {
                   id: "codebase-1",
-                  folder: "/repo",
+                  folder: "/workspaces/repo",
                   observedOrigin: "git@github.com:openai/codex.git",
                   branch: "main",
                   headSha: "abc",
@@ -148,8 +148,8 @@ describe("WorktreesPage", () => {
                   {
                     id: "worktree-1",
                     codebaseId: "codebase-1",
-                    gitDirectory: "/repo/.git",
-                    folder: "/repo",
+                    gitDirectory: "/workspaces/repo/.git",
+                    folder: "/workspaces/repo",
                     relativePath: ".",
                     primary: true,
                     branch: "feature/AIDE-24",
@@ -228,7 +228,7 @@ describe("WorktreesPage", () => {
     expect(
       screen.getByText("Ready").closest('[data-slot="badge"]')?.className,
     ).toContain("dark:text-green-300");
-    expect(screen.getByText("/repo")).toBeDefined();
+    expect(screen.getByText("repo")).toBeDefined();
     expect(screen.queryByText(".")).toBeNull();
     expect(screen.getByText("Yes").className).toContain(
       "dark:text-emerald-300",
@@ -280,7 +280,7 @@ describe("WorktreesPage", () => {
     ).toContain("bg-fuchsia-500");
   });
 
-  test("keeps the change branch popover open after its menu closes", async () => {
+  test("keeps the change branch popover open with an agent-relative path", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
 
@@ -296,9 +296,9 @@ describe("WorktreesPage", () => {
       expect(
         document.querySelector('[data-slot="dropdown-menu-content"]'),
       ).toBeNull();
-      expect(
-        document.querySelector('[data-slot="popover-content"]'),
-      ).toBeTruthy();
+      const popover = document.querySelector('[data-slot="popover-content"]');
+      expect(popover).toBeTruthy();
+      expect(popover?.querySelector("p")?.textContent).toBe("repo");
     });
     expect(
       screen.getByRole("heading", { name: "Change branch" }),

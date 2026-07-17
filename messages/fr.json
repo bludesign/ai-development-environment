@@ -197,7 +197,7 @@
     "ticket": "Ticket",
     "staleTicket": "Certaines données sont expirées car Jira n’a pas répondu.",
     "openInJira": "Ouvrir dans Jira",
-    "worktreeAction": "Créer une branche ou un worktree",
+    "worktreeAction": "Créer un worktree",
     "ticketWorktreeTitle": "Créer depuis {issueKey}",
     "ticketWorktreeDescription": "Créez un nouveau worktree sur un agent, ou créez la branche du ticket et basculez-y un worktree existant.",
     "newWorktree": "Nouveau worktree",

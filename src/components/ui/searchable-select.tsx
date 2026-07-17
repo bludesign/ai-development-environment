@@ -16,6 +16,7 @@ export type SearchableSelectOption = {
   value: string;
   label: string;
   description?: string;
+  secondaryDescription?: string;
   keywords?: string;
   disabled?: boolean;
 };
@@ -30,6 +31,7 @@ export function SearchableSelect({
   ariaLabel,
   disabled,
   className,
+  showSelectedDetails = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -40,6 +42,7 @@ export function SearchableSelect({
   ariaLabel: string;
   disabled?: boolean;
   className?: string;
+  showSelectedDetails?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -48,7 +51,7 @@ export function SearchableSelect({
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return options;
     return options.filter((option) =>
-      `${option.label} ${option.description ?? ""} ${option.keywords ?? ""}`
+      `${option.label} ${option.description ?? ""} ${option.secondaryDescription ?? ""} ${option.keywords ?? ""}`
         .toLocaleLowerCase()
         .includes(needle),
     );
@@ -65,15 +68,35 @@ export function SearchableSelect({
         <Button
           aria-expanded={open}
           aria-label={ariaLabel}
-          className={cn("w-full justify-between font-normal", className)}
+          className={cn(
+            "min-w-0 w-full justify-between font-normal",
+            showSelectedDetails && selected && "h-auto min-h-8 py-2",
+            className,
+          )}
           disabled={disabled}
           role="combobox"
           type="button"
           variant="outline"
         >
-          <span className="min-w-0 truncate">
-            {selected?.label ?? placeholder}
-          </span>
+          {showSelectedDetails && selected ? (
+            <span className="min-w-0 text-left">
+              <span className="block truncate">{selected.label}</span>
+              {selected.description && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  {selected.description}
+                </span>
+              )}
+              {selected.secondaryDescription && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  {selected.secondaryDescription}
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate">
+              {selected?.label ?? placeholder}
+            </span>
+          )}
           <ChevronsUpDown className="shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -97,9 +120,16 @@ export function SearchableSelect({
             <p className="p-2 text-sm text-muted-foreground">{emptyMessage}</p>
           ) : (
             filtered.map((option) => (
-              <button
+              <Button
+                aria-label={[
+                  option.label,
+                  option.description,
+                  option.secondaryDescription,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
                 aria-selected={option.value === value}
-                className="flex w-full items-start gap-2 rounded-md p-2 text-left text-sm hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                className="h-auto w-full items-start justify-start gap-2 rounded-md p-2 text-left text-sm font-normal whitespace-normal hover:bg-accent"
                 disabled={option.disabled}
                 key={option.value}
                 onClick={() => {
@@ -108,6 +138,7 @@ export function SearchableSelect({
                 }}
                 role="option"
                 type="button"
+                variant="ghost"
               >
                 <Check
                   className={cn(
@@ -122,8 +153,13 @@ export function SearchableSelect({
                       {option.description}
                     </span>
                   )}
+                  {option.secondaryDescription && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {option.secondaryDescription}
+                    </span>
+                  )}
                 </span>
-              </button>
+              </Button>
             ))
           )}
         </div>

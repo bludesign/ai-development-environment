@@ -77,15 +77,20 @@ describe("JiraTicketDrawer", () => {
 
     render(<JiraTicketDrawer issueKey="APP-123" onClose={vi.fn()} />);
 
-    expect(
-      await screen.findByRole("button", {
-        name: "Create branch or worktree",
-      }),
-    ).toBeDefined();
-    expect(screen.queryByText(/Ticket worktree popup/)).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Create branch or worktree" }),
+    const createWorktree = await screen.findByRole("button", {
+      name: "Create worktree",
+    });
+    const openInJira = screen.getByRole("link", { name: "Open in Jira" });
+    expect(createWorktree.parentElement).toBe(openInJira.parentElement);
+    expect(createWorktree.parentElement).not.toBe(
+      screen.getByText("In Progress").parentElement,
     );
+    expect(createWorktree.getAttribute("data-variant")).toBe("outline");
+    expect(openInJira.getAttribute("data-variant")).toBe("outline");
+    expect(createWorktree.getAttribute("data-size")).toBe("sm");
+    expect(openInJira.getAttribute("data-size")).toBe("sm");
+    expect(screen.queryByText(/Ticket worktree popup/)).toBeNull();
+    fireEvent.click(createWorktree);
     expect(
       await screen.findByText("Ticket worktree popup for APP-123"),
     ).toBeDefined();

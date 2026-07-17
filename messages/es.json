@@ -197,7 +197,7 @@
     "ticket": "Incidencia",
     "staleTicket": "Algunos datos están caducados porque Jira no respondió.",
     "openInJira": "Abrir en Jira",
-    "worktreeAction": "Crear rama o worktree",
+    "worktreeAction": "Crear worktree",
     "ticketWorktreeTitle": "Crear desde {issueKey}",
     "ticketWorktreeDescription": "Crea un worktree nuevo en un agente o crea la rama del ticket y cambia un worktree existente a ella.",
     "newWorktree": "Worktree nuevo",

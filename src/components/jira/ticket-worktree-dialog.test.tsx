@@ -191,20 +191,37 @@ describe("TicketWorktreeDialog", () => {
       <TicketWorktreeDialog issueKey="APP-123" onOpenChange={vi.fn()} open />,
     );
 
+    expect(screen.getByRole("dialog").className).toContain("sm:max-w-2xl");
     fireEvent.click(
       await screen.findByRole("tab", { name: "Existing worktree" }),
     );
     await openDestinationSelect();
+    const worktreeOption = await screen.findByRole("option", {
+      name: /feature\/old, Codex · Studio Mac, \/repos\/codex-feature-old/,
+    });
+    expect(worktreeOption.getAttribute("data-variant")).toBe("ghost");
     expect(
-      await screen.findByRole("option", {
-        name: /feature\/old · Codex · Studio Mac/,
-      }),
-    ).toBeDefined();
-    fireEvent.click(
-      screen.getByRole("option", {
-        name: /feature\/old · Codex · Studio Mac/,
-      }),
-    );
+      Array.from(worktreeOption.querySelectorAll("span.block"), (line) =>
+        line.textContent?.trim(),
+      ),
+    ).toEqual([
+      "feature/old",
+      "Codex · Studio Mac",
+      "/repos/codex-feature-old",
+    ]);
+    fireEvent.click(worktreeOption);
+    expect(
+      Array.from(
+        screen
+          .getByRole("combobox", { name: "Select a destination" })
+          .querySelectorAll("span.block"),
+        (line) => line.textContent?.trim(),
+      ),
+    ).toEqual([
+      "feature/old",
+      "Codex · Studio Mac",
+      "/repos/codex-feature-old",
+    ]);
     expect(await screen.findByText("Add searchable worktrees")).toBeDefined();
 
     fireEvent.click(

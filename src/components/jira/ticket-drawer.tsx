@@ -118,31 +118,30 @@ export function JiraTicketDrawer({
                     <AlertDescription>{t("staleTicket")}</AlertDescription>
                   </Alert>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  <Badge>{ticket.status}</Badge>
-                  {ticket.issueType && <Badge>{ticket.issueType}</Badge>}
-                  {ticket.priority && (
-                    <Badge className={priorityClass(ticket.priority)}>
-                      {ticket.priority}
-                    </Badge>
-                  )}
-                  <Button
-                    className="ml-auto"
-                    onClick={() => setWorktreeDialogOpen(true)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <GitBranch /> {t("worktreeAction")}
-                  </Button>
-                  <a
-                    className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                    href={ticket.jiraUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {t("openInJira")}
-                    <ExternalLink className="size-3" />
-                  </a>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge>{ticket.status}</Badge>
+                    {ticket.issueType && <Badge>{ticket.issueType}</Badge>}
+                    {ticket.priority && (
+                      <Badge className={priorityClass(ticket.priority)}>
+                        {ticket.priority}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => setWorktreeDialogOpen(true)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <GitBranch /> {t("worktreeAction")}
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <a href={ticket.jiraUrl} rel="noreferrer" target="_blank">
+                        <ExternalLink /> {t("openInJira")}
+                      </a>
+                    </Button>
+                  </div>
                 </div>
                 <DetailGrid ticket={ticket} />
                 <section>

@@ -220,7 +220,7 @@ const mockTranslations = {
     ticket: "Ticket",
     staleTicket: "Some ticket data is stale because Jira could not be reached.",
     openInJira: "Open in Jira",
-    worktreeAction: "Create branch or worktree",
+    worktreeAction: "Create worktree",
     ticketWorktreeTitle: "Create from {issueKey}",
     ticketWorktreeDescription:
       "Create a new worktree on an agent, or create the ticket branch and switch an existing worktree.",
