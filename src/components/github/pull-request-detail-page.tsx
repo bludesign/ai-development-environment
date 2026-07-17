@@ -333,7 +333,7 @@ export function PullRequestDetailPage({
             </CardContent>
           </Card>
 
-          <div className="order-3 space-y-4 lg:col-span-2">
+          <div className="order-4 space-y-4 lg:col-span-2">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold">{t("comments")}</h2>
               <Badge variant="secondary">
@@ -364,7 +364,7 @@ export function PullRequestDetailPage({
             )}
           </div>
 
-          <Card className="order-4 gap-0 py-0 lg:col-span-2">
+          <Card className="order-3 gap-0 py-0 lg:col-span-2">
             <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b py-3">
               <div>
                 <CardTitle>{t("pipelines")}</CardTitle>
