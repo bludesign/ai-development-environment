@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -27,6 +28,23 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({
+    href,
+    children,
+    ...props
+  }: AnchorHTMLAttributes<HTMLAnchorElement> & {
+    href: string;
+    children: ReactNode;
+  }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+  useRouter: () => ({ push: navigation.push }),
+}));
 
 class ResizeObserverMock {
   observe() {}
@@ -79,6 +97,7 @@ describe("WorktreesPage", () => {
     global.ResizeObserver = ResizeObserverMock;
     window.history.replaceState(null, "", "/worktrees");
     window.localStorage.clear();
+    navigation.push.mockReset();
     Element.prototype.scrollIntoView = vi.fn();
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockResolvedValue({
@@ -260,6 +279,51 @@ describe("WorktreesPage", () => {
     ).toBe(true);
   });
 
+  test("opens details from summary surfaces while the branch keeps inline expansion", async () => {
+    render(<WorktreesPage />);
+    const branchButton = await screen.findByRole("button", {
+      name: "feature/AIDE-24",
+    });
+    const cardDetailsLink = screen.getByRole("link", {
+      name: "Open details for feature/AIDE-24",
+    });
+    const card = branchButton.closest('[data-slot="card"]');
+    expect(card?.className).toContain("hover:bg-blue-500/20");
+    expect(card?.className).toContain("hover:border-blue-500/50");
+    expect(branchButton.getAttribute("aria-expanded")).toBe("false");
+    expect(cardDetailsLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+    cardDetailsLink.focus();
+    expect(document.activeElement).toBe(cardDetailsLink);
+
+    fireEvent.click(branchButton);
+    expect(branchButton.getAttribute("aria-expanded")).toBe("true");
+    expect(navigation.push).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Path"));
+    expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+
+    navigation.push.mockClear();
+    fireEvent.click(screen.getByRole("radio", { name: "Table layout" }));
+    const tableBranch = screen.getByRole("button", {
+      name: "feature/AIDE-24",
+    });
+    const row = tableBranch.closest("tr");
+    const tableDetailsLink = screen.getByRole("link", {
+      name: "Open details for feature/AIDE-24",
+    });
+    expect(row).not.toBeNull();
+    expect(row?.className).toContain("hover:bg-blue-500/20");
+    expect(tableDetailsLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+    tableDetailsLink.focus();
+    expect(document.activeElement).toBe(tableDetailsLink);
+    fireEvent.click(row!);
+    expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+
+    navigation.push.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Customize worktree" }));
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
   test("uses compact menu labels and the expanded bright color palette", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
@@ -321,6 +385,9 @@ describe("WorktreesPage", () => {
     expect(
       screen.getByRole("heading", { name: "Change branch" }),
     ).toBeDefined();
+    navigation.push.mockClear();
+    fireEvent.click(screen.getByRole("heading", { name: "Change branch" }));
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
   test("offers matching agents and warns about dirty existing destinations", async () => {
@@ -513,6 +580,24 @@ describe("WorktreesPage", () => {
     );
   });
 
+  test("opens the Jira ticket drawer from the ticket status badge", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.click(screen.getByRole("button", { name: "In Progress" }));
+
+    expect(await screen.findByRole("dialog")).toBeDefined();
+    expect(new URLSearchParams(window.location.search).get("issue")).toBe(
+      "AIDE-24",
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query JiraTicket"),
+        { issueKey: "AIDE-24" },
+      ),
+    );
+  });
+
   test("edits the base branch with an inline select", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
@@ -617,7 +702,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("old-file.ts")).toBeDefined();
 
     request.mockResolvedValueOnce({ refreshWorktrees: 1 } as never);
@@ -707,7 +792,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("before-save.ts")).toBeDefined();
     await waitFor(() => expect(activityCallbacks).toHaveLength(1));
 
@@ -768,7 +853,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("The worktree is clean.")).toBeDefined();
 
     await waitFor(() => expect(liveAttempts).toBe(2), { timeout: 2_500 });

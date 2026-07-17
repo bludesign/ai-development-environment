@@ -3,6 +3,7 @@
 import {
   Archive,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   Check,
   ChevronDown,
@@ -117,14 +118,27 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 
 import {
   WorktreeBranchForm,
   type WorktreeBranchSelection,
   type WorktreeBranchTarget,
 } from "./worktree-branch-form";
+import { WorktreeDetailPanel } from "./worktree-detail-panel";
+import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
+import {
+  inspectWorktree,
+  useLiveWorktree,
+  useQueuedWorktreeInspection,
+  useWorktreeActivitySubscription,
+  type WorktreeActivity,
+} from "./worktree-inspection";
 import { waitForWorktreeJob, waitForWorktreeMove } from "./worktree-jobs";
+import {
+  shouldNavigateWorktreeSurface,
+  worktreeDetailHref,
+} from "./worktree-navigation";
 
 import type {
   Worktree,
@@ -158,30 +172,6 @@ const COLORS = [
   "pink",
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
-const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt";
-const WORKTREE_FIELDS = `
-  id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
-  baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges highlightColor availability statusError
-  pushStatus
-  ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
-  tags { id name color createdAt updatedAt }
-  activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
-  pullRequest { ${PULL_REQUEST_FIELDS} }
-`;
-const CODEBASE_FIELDS = `
-  id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError
-  defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
-`;
-const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
-  inspectWorktree(id: $id, requestId: $requestId) {
-    commits { sha subject authorName authoredAt additions deletions }
-    changes { path staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
-    commitsTruncated changesTruncated
-  }
-}`;
-const LIVE_INSPECTION_RETRY_MS = 1_000;
-
 export function displayedWorktreePath(
   folder: string,
   baseRepoDirectory: string | null | undefined,
@@ -246,209 +236,36 @@ export function worktreeChangeActionState(
   };
 }
 
-async function inspectWorktree(worktreeId: string): Promise<WorktreeDetail> {
-  const data = await controlPlaneRequest<{
-    inspectWorktree: WorktreeDetail;
-  }>(INSPECT_WORKTREE_MUTATION, {
-    id: worktreeId,
-    requestId: createClientId(),
-  });
-  return data.inspectWorktree;
-}
-
-function useQueuedWorktreeInspection(inspect: () => Promise<void>) {
-  const running = useRef(false);
-  const pending = useRef(false);
-
-  const refresh = useCallback(async () => {
-    if (running.current) {
-      pending.current = true;
-      return;
-    }
-    running.current = true;
-    try {
-      do {
-        pending.current = false;
-        await inspect();
-      } while (pending.current);
-    } finally {
-      running.current = false;
-    }
-  }, [inspect]);
-
-  return refresh;
-}
-
-type WorktreeActivity = {
-  worktreeId: string;
-  branch: string | null;
-  headSha: string | null;
-  upstream: string | null;
-  ahead: number | null;
-  behind: number | null;
-  syncState: Worktree["syncState"] | null;
-  baseAhead: number | null;
-  baseBehind: number | null;
-  hasStagedChanges: boolean | null;
-  hasUnstagedChanges: boolean | null;
-  pushStatus: Worktree["pushStatus"] | null;
-  observedAt: string;
-};
-
-type LiveWorktreeFields = Pick<
-  Worktree,
-  | "branch"
-  | "headSha"
-  | "upstream"
-  | "ahead"
-  | "behind"
-  | "syncState"
-  | "baseAhead"
-  | "baseBehind"
-  | "hasStagedChanges"
-  | "hasUnstagedChanges"
-  | "pushStatus"
->;
-
-function useLiveWorktree(source: Worktree) {
-  const [override, setOverride] = useState<{
-    sourceUpdatedAt: string;
-    value: Partial<LiveWorktreeFields>;
-  } | null>(null);
-  const applyOverride = useCallback(
-    (value: Partial<LiveWorktreeFields>) => {
-      setOverride((current) => ({
-        sourceUpdatedAt: source.updatedAt,
-        value:
-          current?.sourceUpdatedAt === source.updatedAt
-            ? { ...current.value, ...value }
-            : value,
-      }));
-    },
-    [source.updatedAt],
-  );
-  const applyActivity = useCallback(
-    (activity: WorktreeActivity) => {
-      const value: Partial<LiveWorktreeFields> = {};
-      if (activity.hasStagedChanges !== null) {
-        value.hasStagedChanges = activity.hasStagedChanges;
-      }
-      if (activity.hasUnstagedChanges !== null) {
-        value.hasUnstagedChanges = activity.hasUnstagedChanges;
-      }
-      if (activity.pushStatus !== null) {
-        value.pushStatus = activity.pushStatus;
-      }
-      if (typeof activity.headSha === "string") {
-        Object.assign(value, {
-          branch: activity.branch,
-          headSha: activity.headSha,
-          upstream: activity.upstream,
-          ahead: activity.ahead,
-          behind: activity.behind,
-          syncState: activity.syncState ?? "UNKNOWN",
-          baseAhead: activity.baseAhead,
-          baseBehind: activity.baseBehind,
-        } satisfies Partial<LiveWorktreeFields>);
-      }
-      if (Object.keys(value).length) applyOverride(value);
-    },
-    [applyOverride],
-  );
-  const setUnstagedChanges = useCallback(
-    (value: boolean) => applyOverride({ hasUnstagedChanges: value }),
-    [applyOverride],
-  );
-  return {
-    worktree:
-      override?.sourceUpdatedAt === source.updatedAt
-        ? { ...source, ...override.value }
-        : source,
-    applyActivity,
-    setUnstagedChanges,
-  };
-}
-
-function useWorktreeActivitySubscription(
-  worktreeId: string,
-  enabled: boolean,
-  onActivity: (activity: WorktreeActivity) => void,
-) {
-  const onActivityRef = useRef(onActivity);
-  useEffect(() => {
-    onActivityRef.current = onActivity;
-  }, [onActivity]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let stopped = false;
-    let generation = 0;
-    let retryTimer: number | null = null;
-    let unsubscribe: () => void = () => undefined;
-    const scheduleRetry = (currentGeneration: number) => {
-      if (stopped || currentGeneration !== generation || retryTimer !== null)
-        return;
-      retryTimer = window.setTimeout(() => {
-        retryTimer = null;
-        subscribe();
-      }, LIVE_INSPECTION_RETRY_MS);
-    };
-    const subscribe = () => {
-      const currentGeneration = ++generation;
-      unsubscribe = controlPlaneSubscriptions().subscribe(
-        {
-          query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
-            worktreeInspectionChanged(worktreeId: $worktreeId) {
-              worktreeId branch headSha upstream ahead behind syncState baseAhead baseBehind
-              hasStagedChanges hasUnstagedChanges pushStatus observedAt
-            }
-          }`,
-          variables: { worktreeId },
-        },
-        {
-          next: (result) => {
-            const activity = (
-              result as {
-                data?: { worktreeInspectionChanged?: WorktreeActivity };
-              }
-            ).data?.worktreeInspectionChanged;
-            if (activity) onActivityRef.current(activity);
-          },
-          error: () => scheduleRetry(currentGeneration),
-          complete: () => scheduleRetry(currentGeneration),
-        },
-      );
-    };
-    subscribe();
-    return () => {
-      stopped = true;
-      generation += 1;
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
-      unsubscribe();
-    };
-  }, [enabled, worktreeId]);
-}
-
 const highlightColorClasses: Record<string, string> = {
-  gray: "border-slate-500/30 bg-slate-500/10",
-  stone: "border-stone-500/30 bg-stone-500/10",
-  red: "border-red-500/30 bg-red-500/10",
-  rose: "border-rose-500/30 bg-rose-500/10",
-  orange: "border-orange-500/30 bg-orange-500/10",
-  amber: "border-amber-500/30 bg-amber-500/10",
-  yellow: "border-yellow-500/30 bg-yellow-500/10",
-  lime: "border-lime-500/30 bg-lime-500/10",
-  green: "border-green-500/30 bg-green-500/10",
-  emerald: "border-emerald-500/30 bg-emerald-500/10",
-  teal: "border-teal-500/30 bg-teal-500/10",
-  cyan: "border-cyan-500/30 bg-cyan-500/10",
-  sky: "border-sky-500/30 bg-sky-500/10",
-  blue: "border-blue-500/30 bg-blue-500/10",
-  indigo: "border-indigo-500/30 bg-indigo-500/10",
-  violet: "border-violet-500/30 bg-violet-500/10",
-  purple: "border-purple-500/30 bg-purple-500/10",
-  fuchsia: "border-fuchsia-500/30 bg-fuchsia-500/10",
-  pink: "border-pink-500/30 bg-pink-500/10",
+  gray: "border-slate-500/30 bg-slate-500/10 hover:border-slate-500/50 hover:bg-slate-500/20",
+  stone:
+    "border-stone-500/30 bg-stone-500/10 hover:border-stone-500/50 hover:bg-stone-500/20",
+  red: "border-red-500/30 bg-red-500/10 hover:border-red-500/50 hover:bg-red-500/20",
+  rose: "border-rose-500/30 bg-rose-500/10 hover:border-rose-500/50 hover:bg-rose-500/20",
+  orange:
+    "border-orange-500/30 bg-orange-500/10 hover:border-orange-500/50 hover:bg-orange-500/20",
+  amber:
+    "border-amber-500/30 bg-amber-500/10 hover:border-amber-500/50 hover:bg-amber-500/20",
+  yellow:
+    "border-yellow-500/30 bg-yellow-500/10 hover:border-yellow-500/50 hover:bg-yellow-500/20",
+  lime: "border-lime-500/30 bg-lime-500/10 hover:border-lime-500/50 hover:bg-lime-500/20",
+  green:
+    "border-green-500/30 bg-green-500/10 hover:border-green-500/50 hover:bg-green-500/20",
+  emerald:
+    "border-emerald-500/30 bg-emerald-500/10 hover:border-emerald-500/50 hover:bg-emerald-500/20",
+  teal: "border-teal-500/30 bg-teal-500/10 hover:border-teal-500/50 hover:bg-teal-500/20",
+  cyan: "border-cyan-500/30 bg-cyan-500/10 hover:border-cyan-500/50 hover:bg-cyan-500/20",
+  sky: "border-sky-500/30 bg-sky-500/10 hover:border-sky-500/50 hover:bg-sky-500/20",
+  blue: "border-blue-500/30 bg-blue-500/10 hover:border-blue-500/50 hover:bg-blue-500/20",
+  indigo:
+    "border-indigo-500/30 bg-indigo-500/10 hover:border-indigo-500/50 hover:bg-indigo-500/20",
+  violet:
+    "border-violet-500/30 bg-violet-500/10 hover:border-violet-500/50 hover:bg-violet-500/20",
+  purple:
+    "border-purple-500/30 bg-purple-500/10 hover:border-purple-500/50 hover:bg-purple-500/20",
+  fuchsia:
+    "border-fuchsia-500/30 bg-fuchsia-500/10 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/20",
+  pink: "border-pink-500/30 bg-pink-500/10 hover:border-pink-500/50 hover:bg-pink-500/20",
 };
 
 const tagColorClasses: Record<string, string> = {
@@ -1210,6 +1027,7 @@ function WorktreeCard(props: WorktreeItemProps) {
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const t = useTranslations("worktrees");
+  const router = useRouter();
   const inspect = useCallback(async () => {
     const request = ++detailRequest.current;
     setDetailLoading(true);
@@ -1259,13 +1077,20 @@ function WorktreeCard(props: WorktreeItemProps) {
   return (
     <Card
       className={cn(
+        "cursor-pointer transition-colors hover:bg-muted/30",
         worktree.highlightColor &&
           highlightColorClasses[worktree.highlightColor],
       )}
+      onClick={(event) => {
+        if (shouldNavigateWorktreeSurface(event)) {
+          router.push(worktreeDetailHref(worktree.id));
+        }
+      }}
     >
       <CardHeader className="border-b">
         <CardTitle>
           <Button
+            aria-expanded={expanded}
             className="h-auto max-w-full justify-start gap-1 p-1 text-left"
             onClick={() => void toggle()}
             variant="ghost"
@@ -1286,6 +1111,7 @@ function WorktreeCard(props: WorktreeItemProps) {
           {worktree.hasUnstagedChanges && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
+          <WorktreeDetailsLink worktree={worktree} />
           <WorktreeMenus {...liveProps} />
         </CardAction>
       </CardHeader>
@@ -1300,9 +1126,9 @@ function WorktreeCard(props: WorktreeItemProps) {
             <Spinner /> {t("loadingDetails")}
           </p>
         )}
-        {expanded && detail && <DetailPanel detail={detail} />}
+        {expanded && detail && <WorktreeDetailPanel detail={detail} inline />}
       </CardContent>
-      <CardFooter className="flex-wrap gap-2">
+      <CardFooter className="flex-wrap gap-2" data-worktree-navigation-ignore>
         <ActionRow
           {...liveProps}
           onCompleted={async () => {
@@ -1315,7 +1141,7 @@ function WorktreeCard(props: WorktreeItemProps) {
   );
 }
 
-type WorktreeItemProps = {
+export type WorktreeItemProps = {
   worktree: Worktree;
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
@@ -1329,10 +1155,30 @@ type WorktreeItemProps = {
   onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
+  onDeleted?: () => void;
+  onMoved?: (move: WorktreeMove) => void;
   overview: WorktreeOverview;
 };
 
-function WorktreeTicketLink({
+function WorktreeDetailsLink({ worktree }: { worktree: Worktree }) {
+  const t = useTranslations("worktrees");
+  const branch =
+    worktree.branch ?? worktree.headSha?.slice(0, 10) ?? t("detached");
+  const label = t("openWorktreeDetails", { branch });
+  return (
+    <Button asChild size="icon-sm" variant="ghost">
+      <Link
+        aria-label={label}
+        href={worktreeDetailHref(worktree.id)}
+        title={label}
+      >
+        <ArrowRight />
+      </Link>
+    </Button>
+  );
+}
+
+export function WorktreeTicketLink({
   worktree,
   onOpenTicket,
   compact = false,
@@ -1347,7 +1193,7 @@ function WorktreeTicketLink({
   return (
     <div
       className={cn(
-        "flex max-w-full items-center gap-1.5 font-normal",
+        "flex max-w-full flex-wrap items-center gap-1.5 font-normal",
         compact ? "mt-0.5 text-xs" : "mt-1 text-sm",
       )}
     >
@@ -1366,14 +1212,24 @@ function WorktreeTicketLink({
           {label}
         </Button>
       )}
-      {worktree.ticketStatus && (
-        <Badge variant="secondary">{worktree.ticketStatus}</Badge>
-      )}
+      {worktree.ticketStatus &&
+        (worktree.ticketKey ? (
+          <Badge asChild variant="secondary">
+            <button
+              onClick={() => onOpenTicket(worktree.ticketKey!)}
+              type="button"
+            >
+              {worktree.ticketStatus}
+            </button>
+          </Badge>
+        ) : (
+          <Badge variant="secondary">{worktree.ticketStatus}</Badge>
+        ))}
     </div>
   );
 }
 
-function WorktreeMetadata(
+export function WorktreeMetadata(
   props: WorktreeItemProps & {
     detailsExpanded?: boolean;
     onToggleDetails?: () => void;
@@ -1441,7 +1297,7 @@ function MetadataRow({
   );
 }
 
-function WorktreeTagsMenu({
+export function WorktreeTagsMenu({
   compact = false,
   ...props
 }: WorktreeItemProps & { compact?: boolean }) {
@@ -1483,7 +1339,7 @@ function WorktreeTagsMenu({
   );
 }
 
-function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
+export function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
   const t = useTranslations("worktrees");
   const current = worktree.baseBehind === 0;
   return (
@@ -1506,7 +1362,7 @@ function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
   );
 }
 
-function PullRequestBadges({
+export function PullRequestBadges({
   worktree,
   detailsExpanded,
   onToggleDetails,
@@ -1585,7 +1441,7 @@ function PullRequestMenu({
   );
 }
 
-function OriginStatusBadges({ worktree }: { worktree: Worktree }) {
+export function OriginStatusBadges({ worktree }: { worktree: Worktree }) {
   const t = useTranslations("worktrees");
   if (
     worktree.syncState === "IN_SYNC" ||
@@ -1642,7 +1498,9 @@ function syncText(
   return t("unknown");
 }
 
-function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
+export function BaseBranchControl(
+  props: WorktreeItemProps & { compact?: boolean },
+) {
   const { worktree, group, onUpdate, onError, compact = false } = props;
   const t = useTranslations("worktrees");
   const [editing, setEditing] = useState(false);
@@ -1835,7 +1693,7 @@ function moveDisabledReason(
   return null;
 }
 
-function WorktreeMenus(
+export function WorktreeMenus(
   props: WorktreeItemProps & {
     contentAlign?: "start" | "end";
     contentAlignOffset?: number;
@@ -2219,6 +2077,7 @@ function MoveWorktreeDialog({
       move.status === "SUCCEEDED_WITH_WARNING" ? move.warning : null,
     );
     await props.onReload();
+    props.onMoved?.(move);
     onOpenChange(false);
   };
   const start = async () => {
@@ -2461,6 +2320,7 @@ function DeleteWorktreeDialog({
       await waitForWorktreeJob(data.deleteWorktree.id);
       await props.onReload();
       props.onError(null);
+      props.onDeleted?.();
       onOpenChange(false);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -2534,7 +2394,7 @@ function DeleteWorktreeDialog({
   );
 }
 
-function ActionRow(
+export function ActionRow(
   props: WorktreeItemProps & { onCompleted: () => Promise<void> },
 ) {
   const { worktree, editorVariant } = props;
@@ -2688,161 +2548,6 @@ function OperationButton({
   );
 }
 
-function DetailPanel({ detail }: { detail: WorktreeDetail }) {
-  const t = useTranslations("worktrees");
-  const locale = useLocale();
-  return (
-    <div
-      className="w-full space-y-4 border-t pt-4"
-      data-testid="worktree-detail"
-    >
-      <section className="w-full">
-        <h4 className="mb-2 font-medium">
-          {t("changes", { count: detail.changes.length })}
-        </h4>
-        <div className="max-h-80 overflow-auto rounded-md border">
-          {detail.changes.length ? (
-            <Table
-              aria-label={t("changes", { count: detail.changes.length })}
-              className="table-fixed text-xs"
-            >
-              <TableBody>
-                {detail.changes.map((change) => (
-                  <TableRow key={change.path}>
-                    <TableCell className="max-w-0 px-2 py-1.5 font-mono">
-                      <span className="block truncate" title={change.path}>
-                        {change.path}
-                      </span>
-                    </TableCell>
-                    <TableCell className="w-px px-2 py-1.5">
-                      <div className="flex items-center justify-end gap-2">
-                        {change.conflicted && (
-                          <Badge className="px-1.5" variant="destructive">
-                            {t("conflicted")}
-                          </Badge>
-                        )}
-                        {change.staged && (
-                          <ChangeState
-                            additions={change.stagedAdditions}
-                            deletions={change.stagedDeletions}
-                            label={t("staged")}
-                          />
-                        )}
-                        {change.unstaged && (
-                          <ChangeState
-                            additions={change.unstagedAdditions}
-                            deletions={change.unstagedDeletions}
-                            label={t("unstaged")}
-                          />
-                        )}
-                        {change.untracked && (
-                          <ChangeState
-                            additions={change.unstagedAdditions}
-                            deletions={change.unstagedDeletions}
-                            label={t("untracked")}
-                          />
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="p-3 text-sm text-muted-foreground">
-              {t("noChanges")}
-            </p>
-          )}
-        </div>
-      </section>
-      <section className="w-full">
-        <h4 className="mb-2 font-medium">
-          {t("commits", { count: detail.commits.length })}
-        </h4>
-        <div className="max-h-80 overflow-auto rounded-md border">
-          {detail.commits.length ? (
-            <Table
-              aria-label={t("commits", { count: detail.commits.length })}
-              className="table-fixed text-xs"
-            >
-              <TableBody>
-                {detail.commits.map((commit) => (
-                  <TableRow key={commit.sha}>
-                    <TableCell className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
-                      {commit.sha.slice(0, 8)}
-                    </TableCell>
-                    <TableCell className="max-w-0 px-2 py-1.5">
-                      <div className="flex min-w-0 items-baseline gap-2">
-                        <span className="truncate font-medium">
-                          {commit.subject}
-                        </span>
-                        <span className="shrink-0 text-muted-foreground">
-                          {commit.authorName} ·{" "}
-                          {new Date(commit.authoredAt).toLocaleString(locale)}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="w-24 px-2 py-1.5 text-right">
-                      <LineCounts
-                        additions={commit.additions}
-                        deletions={commit.deletions}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="p-3 text-sm text-muted-foreground">
-              {t("noCommits")}
-            </p>
-          )}
-        </div>
-      </section>
-      {(detail.commitsTruncated || detail.changesTruncated) && (
-        <p className="text-xs text-muted-foreground">{t("truncated")}</p>
-      )}
-    </div>
-  );
-}
-
-function ChangeState({
-  label,
-  additions,
-  deletions,
-}: {
-  label: string;
-  additions: number | null;
-  deletions: number | null;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
-      <span>{label}</span>
-      <LineCounts additions={additions} deletions={deletions} />
-    </span>
-  );
-}
-
-function LineCounts({
-  additions,
-  deletions,
-}: {
-  additions: number | null;
-  deletions: number | null;
-}) {
-  if (additions === null && deletions === null) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-  return (
-    <span className="inline-flex gap-1 tabular-nums">
-      <span className="text-emerald-700 dark:text-emerald-400">
-        +{additions ?? 0}
-      </span>
-      <span className="text-red-700 dark:text-red-400">−{deletions ?? 0}</span>
-    </span>
-  );
-}
-
 function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
   const t = useTranslations("worktrees");
   return (
@@ -2881,6 +2586,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
   );
   const liveProps = { ...props, worktree };
   const t = useTranslations("worktrees");
+  const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -2935,15 +2641,26 @@ function WorktreeTableRows(props: WorktreeItemProps) {
     worktree.highlightColor && highlightColorClasses[worktree.highlightColor];
   return (
     <Fragment>
-      <TableRow className={cn(highlight)}>
+      <TableRow
+        className={cn(
+          "cursor-pointer transition-colors hover:bg-muted/50",
+          highlight,
+        )}
+        onClick={(event) => {
+          if (shouldNavigateWorktreeSurface(event)) {
+            router.push(worktreeDetailHref(worktree.id));
+          }
+        }}
+      >
         <TableCell>
           <Button
-            className="px-0 font-mono"
+            aria-expanded={expanded}
+            className="max-w-full px-0 font-mono"
             onClick={() => void expand()}
             variant="ghost"
           >
             {expanded ? <ChevronDown /> : <ChevronRight />}
-            {worktree.branch ?? t("detached")}
+            <span className="truncate">{worktree.branch ?? t("detached")}</span>
           </Button>
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} compact />
@@ -2979,7 +2696,10 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           </div>
         </TableCell>
         <TableCell>
-          <WorktreeMenus {...liveProps} />
+          <div className="flex items-center justify-end gap-1">
+            <WorktreeDetailsLink worktree={worktree} />
+            <WorktreeMenus {...liveProps} />
+          </div>
         </TableCell>
       </TableRow>
       <TableRow className={cn(highlight)}>
@@ -2999,7 +2719,7 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             {detailLoading && !detail ? (
               <Spinner />
             ) : detail ? (
-              <DetailPanel detail={detail} />
+              <WorktreeDetailPanel detail={detail} inline />
             ) : null}
           </TableCell>
         </TableRow>
@@ -3037,7 +2757,7 @@ function Info({
   );
 }
 
-function TagManagerDialog({
+export function TagManagerDialog({
   open,
   onOpenChange,
   tags,
