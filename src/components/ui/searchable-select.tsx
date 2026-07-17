@@ -1,10 +1,23 @@
 "use client";
 
-import { Check, ChevronsUpDown, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronsUpDown } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Popover,
   PopoverContent,
@@ -45,25 +58,10 @@ export function SearchableSelect({
   showSelectedDetails?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const selected = options.find((option) => option.value === value);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return options;
-    return options.filter((option) =>
-      `${option.label} ${option.description ?? ""} ${option.secondaryDescription ?? ""} ${option.keywords ?? ""}`
-        .toLocaleLowerCase()
-        .includes(needle),
-    );
-  }, [options, query]);
+
   return (
-    <Popover
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setQuery("");
-      }}
-      open={open}
-    >
+    <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
         <Button
           aria-expanded={open}
@@ -102,67 +100,65 @@ export function SearchableSelect({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="z-70 w-(--radix-popover-trigger-width) p-1"
+        className="z-70 w-(--radix-popover-trigger-width) p-0"
       >
-        <div className="relative mb-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <Command label={searchPlaceholder}>
+          <CommandInput
             aria-label={searchPlaceholder}
             autoFocus
-            className="pl-8"
-            onChange={(event) => setQuery(event.target.value)}
             placeholder={searchPlaceholder}
-            value={query}
           />
-        </div>
-        <div className="max-h-64 overflow-y-auto" role="listbox">
-          {filtered.length === 0 ? (
-            <p className="p-2 text-sm text-muted-foreground">{emptyMessage}</p>
-          ) : (
-            filtered.map((option) => (
-              <Button
-                aria-label={[
-                  option.label,
-                  option.description,
-                  option.secondaryDescription,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-                aria-selected={option.value === value}
-                className="h-auto w-full items-start justify-start gap-2 rounded-md p-2 text-left text-sm font-normal whitespace-normal hover:bg-accent"
-                disabled={option.disabled}
-                key={option.value}
-                onClick={() => {
-                  onValueChange(option.value);
-                  setOpen(false);
-                }}
-                role="option"
-                type="button"
-                variant="ghost"
-              >
-                <Check
-                  className={cn(
-                    "mt-0.5 size-4 shrink-0",
-                    option.value === value ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate">{option.label}</span>
-                  {option.description && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {option.description}
-                    </span>
-                  )}
-                  {option.secondaryDescription && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {option.secondaryDescription}
-                    </span>
-                  )}
-                </span>
-              </Button>
-            ))
-          )}
-        </div>
+          <CommandList>
+            <CommandEmpty>{emptyMessage}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  aria-label={[
+                    option.label,
+                    option.description,
+                    option.secondaryDescription,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                  aria-selected={option.value === value}
+                  className="items-start py-2"
+                  data-checked={option.value === value}
+                  disabled={option.disabled}
+                  key={option.value}
+                  keywords={[
+                    option.label,
+                    option.description ?? "",
+                    option.secondaryDescription ?? "",
+                    option.keywords ?? "",
+                  ]}
+                  onSelect={() => {
+                    onValueChange(option.value);
+                    setOpen(false);
+                  }}
+                  value={option.value}
+                >
+                  <Item className="min-w-0 flex-1 border-0 p-0" size="xs">
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="block truncate">
+                        {option.label}
+                      </ItemTitle>
+                      {option.description && (
+                        <ItemDescription className="block truncate">
+                          {option.description}
+                        </ItemDescription>
+                      )}
+                      {option.secondaryDescription && (
+                        <ItemDescription className="block truncate">
+                          {option.secondaryDescription}
+                        </ItemDescription>
+                      )}
+                    </ItemContent>
+                  </Item>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </PopoverContent>
     </Popover>
   );

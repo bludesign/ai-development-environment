@@ -21,6 +21,31 @@ enum WorktreeBranchMode {
   TICKET
 }
 
+enum WorktreePushStatus {
+  READY
+  DIRTY
+  DETACHED
+  BEHIND
+  DIVERGED
+  UNKNOWN
+}
+
+enum WorktreeMoveDestinationMode {
+  NEW
+  EXISTING
+}
+
+enum WorktreeMoveStatus {
+  PUSHING
+  CHECKING_OUT
+  AWAITING_STASH
+  CLEANING_UP
+  SUCCEEDED
+  SUCCEEDED_WITH_WARNING
+  FAILED
+  CANCELLED
+}
+
 type WorktreeTag {
   id: ID!
   name: String!
@@ -53,6 +78,7 @@ type Worktree {
   baseBehind: Int
   hasStagedChanges: Boolean!
   hasUnstagedChanges: Boolean!
+  pushStatus: WorktreePushStatus!
   highlightColor: String
   availability: String!
   statusError: String
@@ -84,6 +110,28 @@ type WorktreeOverview {
   tags: [WorktreeTag!]!
   settings: WorktreeSettings!
   hiddenCount: Int!
+  activeMoves: [WorktreeMove!]!
+}
+
+type WorktreeMove {
+  id: ID!
+  sourceWorktreeId: ID!
+  sourceCodebaseId: ID!
+  targetCodebaseId: ID!
+  targetWorktreeId: ID
+  destinationMode: WorktreeMoveDestinationMode!
+  branch: String!
+  headSha: String!
+  deleteSource: Boolean!
+  status: WorktreeMoveStatus!
+  sourceJobId: ID
+  targetJobId: ID
+  cleanupJobId: ID
+  error: String
+  warning: String
+  createdAt: String!
+  updatedAt: String!
+  finishedAt: String
 }
 
 type WorktreeCommit {
@@ -157,6 +205,7 @@ input WorktreeInventoryInput {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  pushStatus: WorktreePushStatus
   availability: String!
   error: String
   checkedAt: String!
@@ -187,6 +236,7 @@ input WorktreeActivityReportInput {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  pushStatus: WorktreePushStatus
   observedAt: String!
 }
 
@@ -228,6 +278,20 @@ input ChangeWorktreeBranchInput {
   stashOnFailure: Boolean = false
 }
 
+input MoveWorktreeInput {
+  sourceWorktreeId: ID!
+  targetCodebaseId: ID!
+  targetWorktreeId: ID
+  deleteSource: Boolean! = false
+  requestId: ID!
+}
+
+input DeleteWorktreeInput {
+  worktreeId: ID!
+  deleteRemoteBranch: Boolean! = false
+  requestId: ID!
+}
+
 extend type Query {
   worktreeOverview: WorktreeOverview!
   hiddenWorktrees: [Worktree!]!
@@ -235,6 +299,7 @@ extend type Query {
   previewWorktreeTicketBranch(
     input: PreviewWorktreeTicketBranchInput!
   ): WorktreeTicketBranchPreview!
+  worktreeMove(id: ID!): WorktreeMove
 }
 
 extend type Mutation {
@@ -245,6 +310,10 @@ extend type Mutation {
   runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
   createWorktree(input: CreateWorktreeInput!): AgentJob!
   changeWorktreeBranch(input: ChangeWorktreeBranchInput!): AgentJob!
+  moveWorktree(input: MoveWorktreeInput!): WorktreeMove!
+  retryWorktreeMoveWithStash(id: ID!): WorktreeMove!
+  cancelWorktreeMove(id: ID!): WorktreeMove!
+  deleteWorktree(input: DeleteWorktreeInput!): AgentJob!
   updateWorktreeBaseBranch(id: ID!, baseBranch: String): Worktree!
   updateWorktreeHighlight(id: ID!, color: String): Worktree!
   setWorktreeTags(id: ID!, tagIds: [ID!]!): Worktree!

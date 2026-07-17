@@ -45,7 +45,7 @@ describe("JiraTicketDrawer", () => {
         projectKey: "APP",
         updatedAt: "2026-07-16T12:00:00.000Z",
         jiraUrl: "https://example.atlassian.net/browse/APP-123",
-        description: null,
+        description: "Ticket details",
         reporter: null,
         creator: null,
         labels: [],
@@ -55,9 +55,38 @@ describe("JiraTicketDrawer", () => {
         sprintNames: [],
         parent: null,
         subtasks: [],
-        issueLinks: [],
-        attachments: [],
-        comments: [],
+        issueLinks: [
+          {
+            relationship: "blocks",
+            key: "APP-122",
+            summary: "Prepare the repository",
+            status: "Done",
+          },
+        ],
+        attachments: [
+          {
+            id: "attachment-1",
+            filename: "notes.txt",
+            contentUrl: "https://example.atlassian.net/notes.txt",
+            mimeType: "text/plain",
+            size: 2048,
+            author: null,
+            createdAt: "2026-07-16T12:00:00.000Z",
+          },
+        ],
+        comments: [
+          {
+            id: "comment-1",
+            author: {
+              accountId: "reviewer-1",
+              displayName: "Reviewer",
+              avatarUrl: null,
+            },
+            body: "Looks good",
+            createdAt: "2026-07-16T12:00:00.000Z",
+            updatedAt: "2026-07-16T12:00:00.000Z",
+          },
+        ],
         createdAt: "2026-07-15T12:00:00.000Z",
         dueAt: null,
         resolvedAt: null,
@@ -89,6 +118,23 @@ describe("JiraTicketDrawer", () => {
     expect(openInJira.getAttribute("data-variant")).toBe("outline");
     expect(createWorktree.getAttribute("data-size")).toBe("sm");
     expect(openInJira.getAttribute("data-size")).toBe("sm");
+    expect(
+      screen.getByText("Ticket details").closest('[data-slot="card"]'),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByText("APP-122 · Prepare the repository")
+        .closest('[data-slot="item"]'),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: /notes\.txt/ })
+        .closest('[data-slot="item"]'),
+    ).not.toBeNull();
+    expect(
+      screen.getByText("Reviewer").closest('[data-slot="item"]'),
+    ).not.toBeNull();
+    expect(screen.getByText("Looks good")).toBeDefined();
     expect(screen.queryByText(/Ticket worktree popup/)).toBeNull();
     fireEvent.click(createWorktree);
     expect(

@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { waitForWorktreeJob } from "@/components/worktrees/worktree-jobs";
@@ -23,11 +23,21 @@ vi.mock("@/components/worktrees/worktree-jobs", () => ({
 const request = vi.mocked(controlPlaneRequest);
 const waitForJob = vi.mocked(waitForWorktreeJob);
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 Object.defineProperties(HTMLElement.prototype, {
   hasPointerCapture: { configurable: true, value: () => false },
   releasePointerCapture: { configurable: true, value: () => undefined },
   scrollIntoView: { configurable: true, value: () => undefined },
   setPointerCapture: { configurable: true, value: () => undefined },
+});
+
+beforeEach(() => {
+  global.ResizeObserver = ResizeObserverMock;
 });
 
 const overview = {
@@ -147,11 +157,13 @@ describe("TicketWorktreeDialog", () => {
     );
 
     await openDestinationSelect();
-    expect(
-      await screen.findByRole("option", { name: /Codex · Studio Mac/ }),
-    ).toBeDefined();
+    const destination = await screen.findByRole("option", {
+      name: /Codex · Studio Mac/,
+    });
+    expect(destination.getAttribute("data-slot")).toBe("command-item");
+    expect(destination.querySelector('[data-slot="item"]')).not.toBeNull();
     expect(screen.queryByRole("option", { name: /Offline Mac/ })).toBeNull();
-    fireEvent.click(screen.getByRole("option", { name: /Codex · Studio Mac/ }));
+    fireEvent.click(destination);
 
     const ticketInput = await screen.findByDisplayValue("APP-123");
     expect((ticketInput as HTMLInputElement).readOnly).toBe(true);
@@ -199,10 +211,14 @@ describe("TicketWorktreeDialog", () => {
     const worktreeOption = await screen.findByRole("option", {
       name: /feature\/old, Codex · Studio Mac, \/repos\/codex-feature-old/,
     });
-    expect(worktreeOption.getAttribute("data-variant")).toBe("ghost");
+    expect(worktreeOption.getAttribute("data-slot")).toBe("command-item");
+    expect(worktreeOption.querySelector('[data-slot="item"]')).not.toBeNull();
     expect(
-      Array.from(worktreeOption.querySelectorAll("span.block"), (line) =>
-        line.textContent?.trim(),
+      Array.from(
+        worktreeOption.querySelectorAll(
+          '[data-slot="item-title"], [data-slot="item-description"]',
+        ),
+        (line) => line.textContent?.trim(),
       ),
     ).toEqual([
       "feature/old",

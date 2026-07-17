@@ -7,8 +7,12 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  inspectCodebaseGit,
+  inspectCodebaseGitState,
   inspectCodebase,
   inspectCodebaseFolder,
+  operateCodebaseGit,
+  pullCodebaseBranch,
   updateBaseBranchAfterFetch,
 } from "./codebases.js";
 
@@ -36,6 +40,20 @@ async function repository() {
     "git@github.com:OpenAI/Codex.git",
   );
   return folder;
+}
+
+async function repositoryWithLocalOrigin() {
+  const remote = await mkdtemp(join(tmpdir(), "codebase-agent-origin-"));
+  temporaryDirectories.push(remote);
+  await execute("git", ["init", "--bare", "--initial-branch=main", remote], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+  });
+  const folder = await repository();
+  const origin = "ssh://example.test/team/repo.git";
+  await git(folder, "remote", "set-url", "origin", origin);
+  await git(folder, "config", `url.${remote}.insteadOf`, origin);
+  await git(folder, "push", "--set-upstream", "origin", "main");
+  return { folder, remote };
 }
 
 async function advanceRemoteMain(folder: string) {
@@ -238,5 +256,240 @@ describe("codebase Git inspection", () => {
     expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
       localHead,
     );
+  });
+
+  test("lists, previews, applies, and deletes stashes by stable object ID", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "tracked.txt"), "before\n");
+    await git(folder, "add", "tracked.txt");
+    await git(folder, "commit", "-m", "Add tracked file");
+    await writeFile(join(folder, "tracked.txt"), "after\n");
+    await writeFile(join(folder, "untracked.txt"), "new\n");
+    await git(
+      folder,
+      "stash",
+      "push",
+      "--include-untracked",
+      "-m",
+      "Detail screen stash",
+    );
+
+    const state = await inspectCodebaseGitState(
+      folder,
+      10_000,
+      new AbortController().signal,
+    );
+    expect(state.stashes).toHaveLength(1);
+    expect(state.stashes[0]).toMatchObject({
+      selector: "stash@{0}",
+      message: "On main: Detail screen stash",
+    });
+    const oid = state.stashes[0]!.oid;
+    const preview = await inspectCodebaseGit(
+      {
+        action: "STASH_DIFF",
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        stashOid: oid,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    expect(preview).toMatchObject({
+      exitCode: 0,
+      diff: { oid, truncated: false },
+    });
+    expect(
+      String((preview as unknown as { diff: { patch: string } }).diff.patch),
+    ).toContain("tracked.txt");
+
+    await operateCodebaseGit(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        defaultBranch: "main",
+        operation: "APPLY_STASH",
+        stashOid: oid,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    expect((await git(folder, "stash", "list")).stdout).toContain(
+      "Detail screen stash",
+    );
+
+    await operateCodebaseGit(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        defaultBranch: "main",
+        operation: "DELETE_STASH",
+        stashOid: oid,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    expect((await git(folder, "stash", "list")).stdout).toBe("");
+  });
+
+  test("auto-stashes dirty changes when switching and safely deletes branches", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "tracked.txt"), "before\n");
+    await git(folder, "add", "tracked.txt");
+    await git(folder, "commit", "-m", "Add tracked file");
+    await git(folder, "branch", "feature/detail");
+    await git(folder, "branch", "old-branch");
+    await writeFile(join(folder, "tracked.txt"), "dirty\n");
+
+    await operateCodebaseGit(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        defaultBranch: "main",
+        operation: "SWITCH_BRANCH",
+        branch: "feature/detail",
+        stashChanges: true,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "feature/detail",
+    );
+    expect((await git(folder, "stash", "list")).stdout).toContain(
+      "Automatic stash before switching",
+    );
+
+    await operateCodebaseGit(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        defaultBranch: "main",
+        operation: "DELETE_BRANCH",
+        branch: "old-branch",
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+    await expect(
+      git(folder, "show-ref", "--verify", "refs/heads/old-branch"),
+    ).rejects.toThrow();
+    await expect(
+      operateCodebaseGit(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          expectedOrigin: "github.com/openai/codex",
+          defaultBranch: "main",
+          operation: "DELETE_BRANCH",
+          branch: "main",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("default branch");
+  });
+
+  test("checks out origin-only branches as tracking local branches", async () => {
+    const folder = await repository();
+    const head = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    await git(folder, "update-ref", "refs/remotes/origin/remote-only", head);
+
+    await operateCodebaseGit(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        expectedOrigin: "github.com/openai/codex",
+        defaultBranch: "main",
+        operation: "SWITCH_BRANCH",
+        branch: "remote-only",
+        stashChanges: false,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "remote-only",
+    );
+    expect(
+      (await git(folder, "rev-parse", "--abbrev-ref", "@{upstream}")).stdout,
+    ).toContain("origin/remote-only");
+  });
+
+  test("blocks branches checked out in another worktree", async () => {
+    const folder = await repository();
+    await git(folder, "branch", "linked-branch");
+    const linked = `${folder}-branch-linked`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", linked, "linked-branch");
+
+    const state = await inspectCodebaseGitState(
+      folder,
+      10_000,
+      new AbortController().signal,
+    );
+    expect(
+      state.branches.find((branch) => branch.name === "linked-branch"),
+    ).toMatchObject({ checkedOutPath: await realpath(linked), current: false });
+    await expect(
+      operateCodebaseGit(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          expectedOrigin: "github.com/openai/codex",
+          defaultBranch: "main",
+          operation: "DELETE_BRANCH",
+          branch: "linked-branch",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("another worktree");
+  });
+
+  test("pulls by fast-forward only and rejects divergence", async () => {
+    const { folder } = await repositoryWithLocalOrigin();
+    const initialHead = (await git(folder, "rev-parse", "main")).stdout.trim();
+    await git(folder, "checkout", "-b", "remote-advance");
+    await git(folder, "commit", "--allow-empty", "-m", "Remote advance");
+    const remoteHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    await git(folder, "push", "origin", "HEAD:main");
+    await git(folder, "checkout", "main");
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+
+    await pullCodebaseBranch(
+      folder,
+      "main",
+      10_000,
+      new AbortController().signal,
+    );
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      remoteHead,
+    );
+
+    await git(folder, "commit", "--allow-empty", "-m", "Local divergence");
+    await git(folder, "checkout", "remote-advance");
+    await git(folder, "commit", "--allow-empty", "-m", "More remote work");
+    await git(folder, "push", "origin", "HEAD:main");
+    await git(folder, "checkout", "main");
+    await expect(
+      pullCodebaseBranch(folder, "main", 10_000, new AbortController().signal),
+    ).rejects.toThrow("cannot be fast-forwarded");
   });
 });

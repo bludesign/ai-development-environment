@@ -62,9 +62,12 @@ describe("WorktreeBranchForm", () => {
     fireEvent.change(screen.getByLabelText("Ticket key"), {
       target: { value: "app-123" },
     });
-    expect(
-      await screen.findByText("Add search", {}, { timeout: 2_000 }),
-    ).toBeDefined();
+    const previewTitle = await screen.findByText(
+      "Add search",
+      {},
+      { timeout: 2_000 },
+    );
+    expect(previewTitle.closest('[data-slot="item"]')).not.toBeNull();
     expect(screen.getByText("feature/APP-123-add-search")).toBeDefined();
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("PreviewWorktreeTicketBranch"),

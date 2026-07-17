@@ -4,7 +4,10 @@ import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
   worktreeBranchJobPayload,
+  worktreeDeleteJobPayload,
   worktreeJobPayload,
+  worktreeMoveCheckoutJobPayload,
+  worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -36,6 +39,7 @@ describe("worktree agent contract", () => {
             baseBehind: 0,
             hasStagedChanges: false,
             hasUnstagedChanges: false,
+            pushStatus: "READY",
             availability: "AVAILABLE",
             error: null,
             checkedAt: new Date(0).toISOString(),
@@ -46,6 +50,7 @@ describe("worktree agent contract", () => {
       codebaseId: "codebase-1",
       complete: true,
       defaultBranch: "main",
+      worktrees: [expect.objectContaining({ pushStatus: "READY" })],
     });
   });
 
@@ -93,6 +98,7 @@ describe("worktree agent contract", () => {
         baseBehind: 0,
         hasStagedChanges: false,
         hasUnstagedChanges: true,
+        pushStatus: "DIRTY",
         observedAt: new Date(0).toISOString(),
       }),
     ).toMatchObject({
@@ -102,6 +108,7 @@ describe("worktree agent contract", () => {
       baseAhead: 2,
       hasStagedChanges: false,
       hasUnstagedChanges: true,
+      pushStatus: "DIRTY",
     });
     expect(() =>
       parseWorktreeActivityReport({
@@ -134,5 +141,65 @@ describe("worktree agent contract", () => {
         candidates: ["invalid..branch"],
       }),
     ).toThrow("Invalid Git branch name");
+  });
+
+  test("strictly validates move and delete job payloads", () => {
+    const push = worktreeMovePushJobPayload({
+      moveId: "move-1",
+      codebaseId: "codebase-1",
+      folder: "/repo-linked",
+      gitDirectory: "/repo/.git/worktrees/repo-linked",
+      expectedOrigin: "github.com/openai/codex",
+      branch: "feature/move",
+      expectedHeadSha: "abc",
+    });
+    expect(push.branch).toBe("feature/move");
+    expect(() => worktreeMovePushJobPayload({ ...push, force: true })).toThrow(
+      "Unexpected worktree move push payload field",
+    );
+
+    const checkout = worktreeMoveCheckoutJobPayload({
+      moveId: "move-1",
+      codebaseId: "codebase-2",
+      rootFolder: "/destination",
+      folder: null,
+      gitDirectory: null,
+      expectedOrigin: "github.com/openai/codex",
+      branch: "feature/move",
+      expectedHeadSha: "abc",
+      baseBranch: "main",
+      mode: "NEW",
+      stashOnFailure: false,
+    });
+    expect(checkout.mode).toBe("NEW");
+    expect(() =>
+      worktreeMoveCheckoutJobPayload({
+        ...checkout,
+        mode: "EXISTING",
+        folder: null,
+      }),
+    ).toThrow("existing destination");
+
+    const deletion = worktreeDeleteJobPayload({
+      moveId: null,
+      codebaseId: "codebase-1",
+      rootFolder: "/repo",
+      folder: "/repo-linked",
+      gitDirectory: "/repo/.git/worktrees/repo-linked",
+      expectedOrigin: "github.com/openai/codex",
+      branch: "feature/move",
+      defaultBranch: "main",
+      deleteRemoteBranch: true,
+      requireClean: false,
+      expectedHeadSha: null,
+    });
+    expect(deletion.deleteRemoteBranch).toBe(true);
+    expect(() =>
+      worktreeDeleteJobPayload({
+        ...deletion,
+        requireClean: true,
+        expectedHeadSha: null,
+      }),
+    ).toThrow("requires an expected HEAD");
   });
 });

@@ -8,6 +8,16 @@ import { AdfRenderer } from "@/components/jira/adf-renderer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemHeader,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Sheet,
   SheetContent,
@@ -148,9 +158,11 @@ export function JiraTicketDrawer({
                   <h3 className="mb-2 font-semibold">
                     {t("descriptionTitle")}
                   </h3>
-                  <div className="rounded-lg border p-4">
-                    <AdfRenderer value={ticket.description} />
-                  </div>
+                  <Card size="sm">
+                    <CardContent>
+                      <AdfRenderer value={ticket.description} />
+                    </CardContent>
+                  </Card>
                 </section>
                 {(ticket.labels.length > 0 ||
                   ticket.components.length > 0 ||
@@ -199,51 +211,52 @@ export function JiraTicketDrawer({
                   ticket.issueLinks.length > 0) && (
                   <section>
                     <h3 className="mb-2 font-semibold">{t("relatedIssues")}</h3>
-                    <div className="space-y-2">
+                    <ItemGroup className="gap-2">
                       {[
                         ...(ticket.parent ? [ticket.parent] : []),
                         ...ticket.subtasks,
                         ...ticket.issueLinks,
                       ].map((link, index) => (
-                        <div
-                          key={`${link.key}-${index}`}
-                          className="rounded-lg border p-3 text-sm"
-                        >
-                          <div className="flex justify-between gap-2">
-                            <span className="font-medium">
+                        <Item key={`${link.key}-${index}`} variant="outline">
+                          <ItemContent>
+                            <ItemTitle>
                               {link.key} · {link.summary}
-                            </span>
+                            </ItemTitle>
+                            <ItemDescription>
+                              {link.relationship}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
                             {link.status && <Badge>{link.status}</Badge>}
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {link.relationship}
-                          </p>
-                        </div>
+                          </ItemActions>
+                        </Item>
                       ))}
-                    </div>
+                    </ItemGroup>
                   </section>
                 )}
                 {ticket.attachments.length > 0 && (
                   <section>
                     <h3 className="mb-2 font-semibold">{t("attachments")}</h3>
-                    <div className="space-y-2">
+                    <ItemGroup className="gap-2">
                       {ticket.attachments.map((attachment) => (
-                        <a
-                          key={attachment.id}
-                          className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted"
-                          href={attachment.contentUrl ?? "#"}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <span>{attachment.filename}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {attachment.size
-                              ? `${Math.round(attachment.size / 1024)} KB`
-                              : ""}
-                          </span>
-                        </a>
+                        <Item asChild key={attachment.id} variant="outline">
+                          <a
+                            href={attachment.contentUrl ?? "#"}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <ItemContent>
+                              <ItemTitle>{attachment.filename}</ItemTitle>
+                            </ItemContent>
+                            <ItemActions className="text-xs text-muted-foreground">
+                              {attachment.size
+                                ? `${Math.round(attachment.size / 1024)} KB`
+                                : ""}
+                            </ItemActions>
+                          </a>
+                        </Item>
                       ))}
-                    </div>
+                    </ItemGroup>
                   </section>
                 )}
                 <section>
@@ -255,24 +268,26 @@ export function JiraTicketDrawer({
                       {t("noComments")}
                     </p>
                   ) : (
-                    <div className="space-y-3">
+                    <ItemGroup className="gap-3">
                       {ticket.comments.map((comment) => (
-                        <article
-                          key={comment.id}
-                          className="rounded-lg border p-4"
-                        >
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">
-                              {comment.author?.displayName ?? t("unknownUser")}
-                            </span>
-                            <time className="text-xs text-muted-foreground">
-                              {displayDate(comment.createdAt)}
-                            </time>
-                          </div>
-                          <AdfRenderer value={comment.body} />
-                        </article>
+                        <Item asChild key={comment.id} variant="outline">
+                          <article>
+                            <ItemHeader>
+                              <ItemTitle>
+                                {comment.author?.displayName ??
+                                  t("unknownUser")}
+                              </ItemTitle>
+                              <time className="text-xs text-muted-foreground">
+                                {displayDate(comment.createdAt)}
+                              </time>
+                            </ItemHeader>
+                            <ItemContent className="basis-full">
+                              <AdfRenderer value={comment.body} />
+                            </ItemContent>
+                          </article>
+                        </Item>
                       ))}
-                    </div>
+                    </ItemGroup>
                   )}
                 </section>
               </>

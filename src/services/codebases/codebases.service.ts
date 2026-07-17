@@ -4,12 +4,17 @@ import {
   CODEBASE_BROWSE_JOB_KIND,
   DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_GIT_INSPECT_JOB_KIND,
+  CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_REFRESH_JOB_KIND,
   parseCodebaseDirectoryListing,
+  parseCodebaseGitState,
   parseCodebaseSnapshot,
+  parseCodebaseStashDiff,
+  type CodebaseGitOperation,
   type CodebaseSnapshot,
   type CodebaseStatusReport,
 } from "@ai-development-environment/agent-contract/codebases";
@@ -84,6 +89,10 @@ export class CodebasesService {
         this.projectJob(job),
       );
     }
+    this.agentControl.registerCompletionHandler(
+      CODEBASE_GIT_OPERATION_JOB_KIND,
+      (job) => this.projectGitOperation(job),
+    );
   }
 
   async overview() {
@@ -103,6 +112,23 @@ export class CodebasesService {
               take: 1,
             },
           },
+        },
+      },
+    });
+  }
+
+  async detail(id: string) {
+    await this.cleanupInternalJobs();
+    const prisma = await getPrismaClient();
+    return prisma.codebase.findUnique({
+      where: { id },
+      include: {
+        agent: true,
+        repository: true,
+        jobs: {
+          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          orderBy: { createdAt: "desc" },
+          take: 1,
         },
       },
     });
@@ -539,6 +565,103 @@ export class CodebasesService {
     return { jobs, skipped };
   }
 
+  async inspectGitState(codebaseId: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const codebase = await this.requireRunnableCodebase(
+      codebaseId,
+      CODEBASE_GIT_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: codebase.agentId,
+      codebaseId: codebase.id,
+      kind: CODEBASE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "STATE",
+        codebaseId: codebase.id,
+        folder: codebase.folder,
+        expectedOrigin: codebase.repository.canonicalOrigin,
+      },
+      idempotencyKey: `codebase:git:state:${requestId}:${codebase.id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    const prisma = await getPrismaClient();
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseCodebaseGitState(resultObject(completed).state);
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async inspectStash(codebaseId: string, stashOid: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const codebase = await this.requireRunnableCodebase(
+      codebaseId,
+      CODEBASE_GIT_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: codebase.agentId,
+      codebaseId: codebase.id,
+      kind: CODEBASE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "STASH_DIFF",
+        codebaseId: codebase.id,
+        folder: codebase.folder,
+        expectedOrigin: codebase.repository.canonicalOrigin,
+        stashOid,
+      },
+      idempotencyKey: `codebase:git:stash:${requestId}:${codebase.id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    const prisma = await getPrismaClient();
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseCodebaseStashDiff(resultObject(completed).diff);
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async runGitOperation(input: {
+    codebaseId: string;
+    operation: CodebaseGitOperation;
+    branch?: string | null;
+    stashOid?: string | null;
+    stashChanges?: boolean | null;
+    requestId: string;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    const codebase = await this.requireRunnableCodebase(
+      input.codebaseId,
+      CODEBASE_GIT_OPERATION_JOB_KIND,
+    );
+    return this.agentControl.createJob({
+      agentId: codebase.agentId,
+      codebaseId: codebase.id,
+      kind: CODEBASE_GIT_OPERATION_JOB_KIND,
+      payload: {
+        codebaseId: codebase.id,
+        folder: codebase.folder,
+        expectedOrigin: codebase.repository.canonicalOrigin,
+        defaultBranch: codebase.defaultBranch,
+        operation: input.operation,
+        ...(input.branch ? { branch: input.branch } : {}),
+        ...(input.stashOid ? { stashOid: input.stashOid } : {}),
+        ...(input.operation === "SWITCH_BRANCH"
+          ? { stashChanges: Boolean(input.stashChanges) }
+          : {}),
+      },
+      idempotencyKey: `codebase:git:${input.operation}:${input.requestId}:${codebase.id}`,
+      timeoutSeconds: input.operation === "PULL_BRANCH" ? 300 : 60,
+    });
+  }
+
   subscribe() {
     return agentEventBus.iterate(CODEBASE_CHANGED_TOPIC);
   }
@@ -556,6 +679,27 @@ export class CodebasesService {
     );
     if (applied.changed) {
       this.publish(applied.codebase.id, applied.codebase.repositoryId);
+    }
+  }
+
+  private async projectGitOperation(job: CompletedJob) {
+    if (job.status === "SUCCEEDED") {
+      try {
+        await this.projectJob(job);
+      } catch (error) {
+        console.error(
+          "Could not project codebase Git operation:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    try {
+      await this.agentControl.requestCodebaseReconcile([job.agentId]);
+    } catch (error) {
+      console.error(
+        "Could not request codebase reconciliation:",
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 
@@ -650,6 +794,37 @@ export class CodebasesService {
     if (!capabilities(agent).includes(capability)) {
       throw new Error("Agent must be updated to use codebases");
     }
+  }
+
+  private async requireRunnableCodebase(id: string, capability: string) {
+    await this.cleanupInternalJobs();
+    const prisma = await getPrismaClient();
+    const codebase = await prisma.codebase.findUnique({
+      where: { id },
+      include: {
+        agent: true,
+        repository: true,
+        jobs: {
+          where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!codebase) throw new Error("Codebase not found");
+    if (!online(codebase.agent)) throw new Error("Agent is offline");
+    if (!capabilities(codebase.agent).includes(capability)) {
+      throw new Error(
+        "Agent must be updated to manage Git branches and stashes",
+      );
+    }
+    if (codebase.availability !== "AVAILABLE") {
+      throw new Error(codebase.statusError || "Codebase is unavailable");
+    }
+    if (codebase.jobs.length) {
+      throw new Error("Another codebase operation is already running");
+    }
+    return codebase;
   }
 
   private async waitForJob(jobId: string): Promise<CompletedJob> {

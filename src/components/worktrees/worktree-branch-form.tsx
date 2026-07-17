@@ -15,6 +15,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import {
   SearchableSelect,
@@ -288,20 +294,20 @@ export function WorktreeBranchForm({
             </p>
           )}
           {preview && (
-            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{preview.ticketKey}</span>
-                {preview.ticketType && (
-                  <Badge variant="secondary">{preview.ticketType}</Badge>
-                )}
-              </div>
-              <p className="mt-1 text-muted-foreground">
-                {preview.ticketTitle}
-              </p>
-              <p className="mt-2 break-all font-mono text-xs">
-                {preview.branchName}
-              </p>
-            </div>
+            <Item variant="muted">
+              <ItemContent>
+                <ItemTitle className="w-full flex-wrap">
+                  <span>{preview.ticketKey}</span>
+                  {preview.ticketType && (
+                    <Badge variant="secondary">{preview.ticketType}</Badge>
+                  )}
+                </ItemTitle>
+                <ItemDescription>{preview.ticketTitle}</ItemDescription>
+                <ItemDescription className="break-all font-mono text-xs text-foreground">
+                  {preview.branchName}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
           )}
         </div>
       )}

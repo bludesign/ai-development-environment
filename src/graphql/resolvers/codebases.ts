@@ -1,6 +1,7 @@
 import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
+  type CodebaseGitOperation,
   type CodebaseStatusReport,
 } from "@ai-development-environment/agent-contract/codebases";
 
@@ -85,6 +86,14 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     ) => {
       requireControlPlane(context);
       return service.overview();
+    },
+    codebase: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.detail(id);
     },
     codebaseSettings: (
       _root: unknown,
@@ -212,6 +221,49 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.codebaseIds,
         input.requestId,
       );
+    },
+    inspectCodebaseGitState: (
+      _root: unknown,
+      { input }: { input: { codebaseId: string; requestId: string } },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.inspectGitState(input.codebaseId, input.requestId);
+    },
+    inspectCodebaseStash: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: { codebaseId: string; stashOid: string; requestId: string };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.inspectStash(
+        input.codebaseId,
+        input.stashOid,
+        input.requestId,
+      );
+    },
+    runCodebaseGitOperation: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          codebaseId: string;
+          operation: CodebaseGitOperation;
+          branch?: string | null;
+          stashOid?: string | null;
+          stashChanges?: boolean | null;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.runGitOperation(input);
     },
     reportCodebaseStatuses: (
       _root: unknown,

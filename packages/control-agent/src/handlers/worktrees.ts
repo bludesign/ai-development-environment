@@ -5,13 +5,17 @@ import { basename, dirname, join, relative } from "node:path";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
   worktreeBranchJobPayload,
+  worktreeDeleteJobPayload,
   worktreeJobPayload,
+  worktreeMoveCheckoutJobPayload,
+  worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
   type WorktreeActivityReport,
   type WorktreeChange,
   type WorktreeCommit,
   type WorktreeDetail,
   type WorktreeInventoryItem,
+  type WorktreePushStatus,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
@@ -114,10 +118,21 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
     const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
     const headIdentity = headSha ? `${branch ?? ""}\0${headSha}` : null;
+    const changes =
+      status.exitCode === 0
+        ? statusChangeState(status.stdout)
+        : { hasStagedChanges: false, hasUnstagedChanges: false };
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
-      ...(status.exitCode === 0 ? statusChangeState(status.stdout) : {}),
+      ...changes,
+      pushStatus: await worktreePushStatus(
+        entry.folder,
+        branch,
+        changes,
+        entry.timeoutMs,
+        signal,
+      ),
       observedAt: new Date().toISOString(),
     };
     if (headIdentity && headIdentity !== entry.headIdentity) {
@@ -347,6 +362,31 @@ function worktreeSyncState(
               : ("IN_SYNC" as const);
 }
 
+async function worktreePushStatus(
+  folder: string,
+  branch: string | null,
+  changes: { hasStagedChanges: boolean; hasUnstagedChanges: boolean },
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<WorktreePushStatus> {
+  if (changes.hasStagedChanges || changes.hasUnstagedChanges) return "DIRTY";
+  if (!branch) return "DETACHED";
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  if (!(await refExists(folder, remoteRef, timeoutMs, signal))) return "READY";
+  const remoteCounts = await counts(
+    folder,
+    `HEAD...${remoteRef}`,
+    timeoutMs,
+    signal,
+  );
+  if (remoteCounts.ahead === null || remoteCounts.behind === null) {
+    return "UNKNOWN";
+  }
+  if (remoteCounts.behind > 0 && remoteCounts.ahead > 0) return "DIVERGED";
+  if (remoteCounts.behind > 0) return "BEHIND";
+  return "READY";
+}
+
 export async function inspectWorktreeItem(
   folderValue: string,
   rootFolder: string,
@@ -399,6 +439,10 @@ export async function inspectWorktreeItem(
         )
       : { ahead: null, behind: null };
     const syncState = worktreeSyncState(branch, upstream, upstreamCounts);
+    const changes =
+      statusResult.exitCode === 0
+        ? statusChangeState(statusResult.stdout)
+        : { hasStagedChanges: false, hasUnstagedChanges: false };
     return {
       gitDirectory: gitDir,
       folder,
@@ -412,9 +456,14 @@ export async function inspectWorktreeItem(
       syncState,
       baseAhead: baseCounts.ahead,
       baseBehind: baseCounts.behind,
-      ...(statusResult.exitCode === 0
-        ? statusChangeState(statusResult.stdout)
-        : { hasStagedChanges: false, hasUnstagedChanges: false }),
+      ...changes,
+      pushStatus: await worktreePushStatus(
+        folder,
+        branch,
+        changes,
+        timeoutMs,
+        signal,
+      ),
       availability: "AVAILABLE",
       error: null,
       checkedAt,
@@ -435,6 +484,7 @@ export async function inspectWorktreeItem(
       baseBehind: null,
       hasStagedChanges: false,
       hasUnstagedChanges: false,
+      pushStatus: "UNKNOWN",
       availability: "ERROR",
       error: cleanError(error),
       checkedAt,
@@ -793,6 +843,61 @@ async function refExists(
   return result.exitCode === 0;
 }
 
+async function resolveHead(
+  folder: string,
+  ref: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  return requireSuccess(
+    await git(folder, ["rev-parse", ref], timeoutMs, signal),
+    `Could not resolve ${ref}`,
+  ).stdout.trim();
+}
+
+async function isAncestor(
+  folder: string,
+  ancestor: string,
+  descendant: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const result = await git(
+    folder,
+    ["merge-base", "--is-ancestor", ancestor, descendant],
+    timeoutMs,
+    signal,
+  );
+  if (result.exitCode === 0) return true;
+  if (result.exitCode === 1) return false;
+  requireSuccess(result, "Could not compare Git history");
+  return false;
+}
+
+async function statusState(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const result = requireSuccess(
+    await git(
+      folder,
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not inspect worktree changes",
+  );
+  return statusChangeState(result.stdout);
+}
+
+function hasChanges(changes: {
+  hasStagedChanges: boolean;
+  hasUnstagedChanges: boolean;
+}) {
+  return changes.hasStagedChanges || changes.hasUnstagedChanges;
+}
+
 async function currentBranch(
   folder: string,
   timeoutMs: number,
@@ -826,7 +931,7 @@ async function chooseNewBranch(
 }
 
 async function validateBranchRoot(
-  input: ReturnType<typeof worktreeBranchJobPayload>,
+  input: { rootFolder: string; expectedOrigin: string; baseBranch: string },
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<string> {
@@ -1038,6 +1143,459 @@ export const branchWorktree: AgentJobHandler = async (
     branch,
     baseBranch: input.baseBranch,
     stashed,
+  };
+};
+
+export const pushMovedWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeMovePushJobPayload(payload);
+  const folder = await validateWorktree(
+    {
+      codebaseId: input.codebaseId,
+      folder: input.folder,
+      gitDirectory: input.gitDirectory,
+      expectedOrigin: input.expectedOrigin,
+      baseBranch: null,
+    },
+    timeoutMs,
+    signal,
+  );
+  const [branch, headSha, changes] = await Promise.all([
+    currentBranch(folder, timeoutMs, signal),
+    resolveHead(folder, "HEAD", timeoutMs, signal),
+    statusState(folder, timeoutMs, signal),
+  ]);
+  if (branch !== input.branch || headSha !== input.expectedHeadSha) {
+    throw new Error("The source branch changed; refresh and try again");
+  }
+  if (hasChanges(changes)) {
+    throw new Error("Commit or discard source changes before moving");
+  }
+  requireSuccess(
+    await git(folder, ["fetch", "origin"], timeoutMs, signal),
+    "Could not fetch origin before moving",
+  );
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  if (
+    (await refExists(folder, remoteRef, timeoutMs, signal)) &&
+    !(await isAncestor(folder, remoteRef, "HEAD", timeoutMs, signal))
+  ) {
+    throw new Error(
+      "The origin branch contains commits that must be pulled before moving",
+    );
+  }
+  requireSuccess(
+    await git(
+      folder,
+      ["push", "--set-upstream", "origin", `HEAD:refs/heads/${branch}`],
+      timeoutMs,
+      signal,
+    ),
+    "Could not push the source branch",
+  );
+  const pushedHeadSha = await resolveHead(folder, "HEAD", timeoutMs, signal);
+  if (pushedHeadSha !== input.expectedHeadSha) {
+    throw new Error("The source branch changed while it was being pushed");
+  }
+  return {
+    ...successfulProcess,
+    moveId: input.moveId,
+    branch,
+    headSha: pushedHeadSha,
+  };
+};
+
+async function updateLocalBranchForMove(
+  rootFolder: string,
+  branch: string,
+  expectedHeadSha: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const localRef = `refs/heads/${branch}`;
+  if (!(await refExists(rootFolder, localRef, timeoutMs, signal))) return false;
+  const localHead = await resolveHead(rootFolder, localRef, timeoutMs, signal);
+  if (localHead === expectedHeadSha) return true;
+  if (
+    !(await isAncestor(
+      rootFolder,
+      localHead,
+      expectedHeadSha,
+      timeoutMs,
+      signal,
+    ))
+  ) {
+    throw new Error(
+      `Local branch ${branch} has commits that are not on origin; move them before retrying`,
+    );
+  }
+  requireSuccess(
+    await git(
+      rootFolder,
+      ["branch", "-f", branch, expectedHeadSha],
+      timeoutMs,
+      signal,
+    ),
+    `Could not fast-forward local branch ${branch}`,
+  );
+  return true;
+}
+
+async function checkedOutBranchFolder(
+  rootFolder: string,
+  branch: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const result = requireSuccess(
+    await git(
+      rootFolder,
+      ["worktree", "list", "--porcelain"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not list destination worktrees",
+  );
+  return parseWorktreeList(result.stdout).find(
+    (entry) => entry.branch === branch,
+  )?.folder;
+}
+
+export const checkoutMovedWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeMoveCheckoutJobPayload(payload);
+  const rootFolder = await validateBranchRoot(input, timeoutMs, signal);
+  const remoteRef = `refs/remotes/origin/${input.branch}`;
+  requireSuccess(
+    await git(
+      rootFolder,
+      [
+        "fetch",
+        "--no-tags",
+        "origin",
+        `+refs/heads/${input.branch}:${remoteRef}`,
+      ],
+      timeoutMs,
+      signal,
+    ),
+    `Could not fetch origin/${input.branch}`,
+  );
+  const remoteHead = await resolveHead(
+    rootFolder,
+    remoteRef,
+    timeoutMs,
+    signal,
+  );
+  if (remoteHead !== input.expectedHeadSha) {
+    throw new Error(
+      "The origin branch changed after the source push; refresh and retry",
+    );
+  }
+
+  let targetFolder: string;
+  let stashed = false;
+  const occupiedFolder = await checkedOutBranchFolder(
+    rootFolder,
+    input.branch,
+    timeoutMs,
+    signal,
+  );
+  if (input.mode === "NEW") {
+    if (occupiedFolder) {
+      throw new Error(
+        `Branch ${input.branch} is already checked out in ${occupiedFolder}`,
+      );
+    }
+    targetFolder = join(
+      dirname(rootFolder),
+      `${basename(rootFolder)}-${input.branch.replaceAll("/", "-")}`,
+    );
+    try {
+      await stat(targetFolder);
+      throw new Error(`Worktree folder already exists: ${targetFolder}`);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
+    const local = await updateLocalBranchForMove(
+      rootFolder,
+      input.branch,
+      input.expectedHeadSha,
+      timeoutMs,
+      signal,
+    );
+    requireSuccess(
+      await git(
+        rootFolder,
+        local
+          ? ["worktree", "add", targetFolder, input.branch]
+          : [
+              "worktree",
+              "add",
+              "--track",
+              "-b",
+              input.branch,
+              targetFolder,
+              remoteRef,
+            ],
+        timeoutMs,
+        signal,
+      ),
+      "Could not create the destination worktree",
+    );
+  } else {
+    targetFolder = await validateWorktree(
+      {
+        codebaseId: input.codebaseId,
+        folder: input.folder!,
+        gitDirectory: input.gitDirectory!,
+        expectedOrigin: input.expectedOrigin,
+        baseBranch: input.baseBranch,
+      },
+      timeoutMs,
+      signal,
+    );
+    const targetBranch = await currentBranch(targetFolder, timeoutMs, signal);
+    const targetChanges = await statusState(targetFolder, timeoutMs, signal);
+    if (occupiedFolder) {
+      const occupied = await realpath(occupiedFolder);
+      if (occupied !== targetFolder) {
+        throw new Error(
+          `Branch ${input.branch} is checked out in another destination worktree`,
+        );
+      }
+    }
+    let switchArgs: string[];
+    if (targetBranch === input.branch) {
+      const localHead = await resolveHead(
+        targetFolder,
+        "HEAD",
+        timeoutMs,
+        signal,
+      );
+      if (
+        localHead !== input.expectedHeadSha &&
+        !(await isAncestor(
+          targetFolder,
+          localHead,
+          input.expectedHeadSha,
+          timeoutMs,
+          signal,
+        ))
+      ) {
+        throw new Error(
+          `Local branch ${input.branch} has commits that are not on origin`,
+        );
+      }
+      switchArgs = ["merge", "--ff-only", remoteRef];
+    } else {
+      const local = await updateLocalBranchForMove(
+        rootFolder,
+        input.branch,
+        input.expectedHeadSha,
+        timeoutMs,
+        signal,
+      );
+      switchArgs = local
+        ? ["switch", input.branch]
+        : ["switch", "--track", "-c", input.branch, remoteRef];
+    }
+
+    if (input.stashOnFailure && hasChanges(targetChanges)) {
+      const stash = requireSuccess(
+        await git(
+          targetFolder,
+          [
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            `Automatic stash before moving to ${input.branch}`,
+          ],
+          timeoutMs,
+          signal,
+        ),
+        "Could not stash destination changes",
+      );
+      stashed = !stash.stdout.toLowerCase().includes("no local changes");
+    }
+    const switched = await git(targetFolder, switchArgs, timeoutMs, signal);
+    if (switched.exitCode !== 0) {
+      if (!input.stashOnFailure && hasChanges(targetChanges)) {
+        return {
+          ...successfulProcess,
+          moveId: input.moveId,
+          outcome: "NEEDS_STASH",
+          message: cleanError(
+            switched.stderr || "Destination changes block the branch switch",
+          ),
+        };
+      }
+      throw new Error(
+        `${cleanError(switched.stderr || "Could not check out the moved branch")}${
+          stashed ? ". The destination stash was preserved." : ""
+        }`,
+      );
+    }
+  }
+
+  requireSuccess(
+    await git(
+      targetFolder,
+      ["branch", "--set-upstream-to", `origin/${input.branch}`, input.branch],
+      timeoutMs,
+      signal,
+    ),
+    "Could not configure the destination upstream",
+  );
+  const checkedOutHead = await resolveHead(
+    targetFolder,
+    "HEAD",
+    timeoutMs,
+    signal,
+  );
+  if (checkedOutHead !== input.expectedHeadSha) {
+    throw new Error("The destination did not check out the pushed commit");
+  }
+  const worktree = await inspectWorktreeItem(
+    targetFolder,
+    rootFolder,
+    input.baseBranch,
+    targetFolder === rootFolder,
+    Math.min(timeoutMs, 30_000),
+    signal,
+  );
+  if (worktree.availability !== "AVAILABLE") {
+    throw new Error(
+      worktree.error || "Could not inspect the destination worktree",
+    );
+  }
+  return {
+    ...successfulProcess,
+    moveId: input.moveId,
+    outcome: "CHECKED_OUT",
+    worktree,
+    baseBranch: input.baseBranch,
+    stashed,
+  };
+};
+
+export const deleteWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeDeleteJobPayload(payload);
+  const rootFolder = await realpath(input.rootFolder);
+  if (!(await stat(rootFolder)).isDirectory()) {
+    throw new Error("Base repository is missing");
+  }
+  if ((await origin(rootFolder, timeoutMs, signal)) !== input.expectedOrigin) {
+    throw new Error("Repository origin changed; refresh the codebase");
+  }
+  const folder = await validateWorktree(
+    {
+      codebaseId: input.codebaseId,
+      folder: input.folder,
+      gitDirectory: input.gitDirectory,
+      expectedOrigin: input.expectedOrigin,
+      baseBranch: null,
+    },
+    timeoutMs,
+    signal,
+  );
+  if (folder === rootFolder)
+    throw new Error("The primary worktree cannot be deleted");
+  const listed = parseWorktreeList(
+    requireSuccess(
+      await git(
+        rootFolder,
+        ["worktree", "list", "--porcelain"],
+        timeoutMs,
+        signal,
+      ),
+      "Could not list worktrees",
+    ).stdout,
+  );
+  const listedIndex = listed.findIndex((entry) => entry.folder === folder);
+  if (listedIndex <= 0)
+    throw new Error("The primary worktree cannot be deleted");
+  const [branch, headSha, changes] = await Promise.all([
+    currentBranch(folder, timeoutMs, signal),
+    resolveHead(folder, "HEAD", timeoutMs, signal),
+    statusState(folder, timeoutMs, signal),
+  ]);
+  if (branch !== input.branch) {
+    throw new Error("The worktree branch changed; refresh and try again");
+  }
+  if (
+    input.requireClean &&
+    (hasChanges(changes) || headSha !== input.expectedHeadSha)
+  ) {
+    throw new Error(
+      "The source worktree changed after moving; it was kept for review",
+    );
+  }
+  if (input.deleteRemoteBranch) {
+    if (!branch) throw new Error("A detached worktree has no remote branch");
+    if (branch === input.defaultBranch) {
+      throw new Error("The default remote branch cannot be deleted");
+    }
+    const remote = await git(
+      rootFolder,
+      ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`],
+      timeoutMs,
+      signal,
+    );
+    if (remote.exitCode === 0) {
+      requireSuccess(
+        await git(
+          rootFolder,
+          ["push", "origin", "--delete", branch],
+          timeoutMs,
+          signal,
+        ),
+        `Could not delete origin/${branch}`,
+      );
+    } else if (remote.exitCode !== 2) {
+      requireSuccess(remote, `Could not inspect origin/${branch}`);
+    }
+  }
+  requireSuccess(
+    await git(
+      rootFolder,
+      ["worktree", "remove", "--force", folder],
+      timeoutMs,
+      signal,
+    ),
+    "Could not remove the worktree",
+  );
+  if (
+    branch &&
+    (await refExists(rootFolder, `refs/heads/${branch}`, timeoutMs, signal))
+  ) {
+    requireSuccess(
+      await git(rootFolder, ["branch", "-D", branch], timeoutMs, signal),
+      `Worktree removed, but local branch ${branch} could not be deleted`,
+    );
+  }
+  return {
+    ...successfulProcess,
+    moveId: input.moveId,
+    deleted: true,
+    branch,
+    remoteBranchDeleted: input.deleteRemoteBranch,
   };
 };
 

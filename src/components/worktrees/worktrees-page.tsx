@@ -14,6 +14,7 @@ import {
   Grid2X2,
   List,
   MoreHorizontal,
+  MoveRight,
   Paintbrush,
   Pencil,
   Plus,
@@ -48,6 +49,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +75,15 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import {
   Popover,
@@ -99,6 +110,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
@@ -112,13 +124,14 @@ import {
   type WorktreeBranchSelection,
   type WorktreeBranchTarget,
 } from "./worktree-branch-form";
-import { waitForWorktreeJob } from "./worktree-jobs";
+import { waitForWorktreeJob, waitForWorktreeMove } from "./worktree-jobs";
 
 import type {
   Worktree,
   WorktreeAgentGroup,
   WorktreeCodebaseGroup,
   WorktreeDetail,
+  WorktreeMove,
   WorktreeOverview,
   WorktreeTag,
 } from "./types";
@@ -150,6 +163,7 @@ const PULL_REQUEST_FIELDS =
 const WORKTREE_FIELDS = `
   id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
   baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges highlightColor availability statusError
+  pushStatus
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
@@ -277,6 +291,7 @@ type WorktreeActivity = {
   baseBehind: number | null;
   hasStagedChanges: boolean | null;
   hasUnstagedChanges: boolean | null;
+  pushStatus: Worktree["pushStatus"] | null;
   observedAt: string;
 };
 
@@ -292,6 +307,7 @@ type LiveWorktreeFields = Pick<
   | "baseBehind"
   | "hasStagedChanges"
   | "hasUnstagedChanges"
+  | "pushStatus"
 >;
 
 function useLiveWorktree(source: Worktree) {
@@ -319,6 +335,9 @@ function useLiveWorktree(source: Worktree) {
       }
       if (activity.hasUnstagedChanges !== null) {
         value.hasUnstagedChanges = activity.hasUnstagedChanges;
+      }
+      if (activity.pushStatus !== null) {
+        value.pushStatus = activity.pushStatus;
       }
       if (typeof activity.headSha === "string") {
         Object.assign(value, {
@@ -381,7 +400,7 @@ function useWorktreeActivitySubscription(
           query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
             worktreeInspectionChanged(worktreeId: $worktreeId) {
               worktreeId branch headSha upstream ahead behind syncState baseAhead baseBehind
-              hasStagedChanges hasUnstagedChanges observedAt
+              hasStagedChanges hasUnstagedChanges pushStatus observedAt
             }
           }`,
           variables: { worktreeId },
@@ -526,6 +545,11 @@ export function WorktreesPage() {
             hiddenCount
             settings { editorVariant updatedAt }
             tags { id name color createdAt updatedAt }
+            activeMoves {
+              id sourceWorktreeId sourceCodebaseId targetCodebaseId targetWorktreeId destinationMode
+              branch headSha deleteSource status sourceJobId targetJobId cleanupJobId error warning
+              createdAt updatedAt finishedAt
+            }
             agents {
               agent { ${AGENT_FIELDS} }
               codebases {
@@ -691,24 +715,34 @@ export function WorktreesPage() {
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
             <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
           </Button>
-          <div className="flex rounded-lg border p-0.5">
-            <Button
+          <ToggleGroup
+            aria-label={`${t("cards")} / ${t("table")}`}
+            onValueChange={(value) => {
+              if (value === "cards" || value === "table") {
+                setLayoutAndRemember(value);
+              }
+            }}
+            size="sm"
+            spacing={0}
+            type="single"
+            value={layout}
+            variant="outline"
+          >
+            <ToggleGroupItem
               aria-label={t("cards")}
-              onClick={() => setLayoutAndRemember("cards")}
-              size="icon-sm"
-              variant={layout === "cards" ? "secondary" : "ghost"}
+              className="px-2"
+              value="cards"
             >
               <Grid2X2 />
-            </Button>
-            <Button
+            </ToggleGroupItem>
+            <ToggleGroupItem
               aria-label={t("table")}
-              onClick={() => setLayoutAndRemember("table")}
-              size="icon-sm"
-              variant={layout === "table" ? "secondary" : "ghost"}
+              className="px-2"
+              value="table"
             >
               <List />
-            </Button>
-          </div>
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
       </div>
 
@@ -721,6 +755,15 @@ export function WorktreesPage() {
         <Alert>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
+      )}
+
+      {overview && overview.activeMoves.length > 0 && (
+        <ActiveWorktreeMoves
+          moves={overview.activeMoves}
+          onError={setError}
+          onNotice={setNotice}
+          onReload={load}
+        />
       )}
 
       {overview && (
@@ -761,6 +804,7 @@ export function WorktreesPage() {
             onOpenTicket={(issueKey) => selectJiraIssue(issueKey)}
             onReload={load}
             onUpdate={updateLocalWorktree}
+            overview={overview}
           />
         ))
       )}
@@ -781,6 +825,107 @@ export function WorktreesPage() {
         onClose={() => selectJiraIssue(null)}
       />
     </section>
+  );
+}
+
+function ActiveWorktreeMoves({
+  moves,
+  onReload,
+  onError,
+  onNotice,
+}: {
+  moves: WorktreeMove[];
+  onReload: () => Promise<void>;
+  onError: (value: string | null) => void;
+  onNotice: (value: string | null) => void;
+}) {
+  const t = useTranslations("worktrees");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const retry = async (move: WorktreeMove) => {
+    setBusyId(move.id);
+    try {
+      await controlPlaneRequest(
+        `mutation RetryWorktreeMove($id: ID!) {
+          retryWorktreeMoveWithStash(id: $id) { id status }
+        }`,
+        { id: move.id },
+      );
+      const completed = await waitForWorktreeMove(move.id);
+      if (completed.status === "FAILED") {
+        throw new Error(completed.error || t("moveFailed"));
+      }
+      onNotice(
+        completed.status === "SUCCEEDED_WITH_WARNING"
+          ? completed.warning || t("moveCompletedWithWarning")
+          : t("moveCompleted"),
+      );
+      onError(null);
+      await onReload();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const cancel = async (move: WorktreeMove) => {
+    setBusyId(move.id);
+    try {
+      await controlPlaneRequest(
+        `mutation CancelWorktreeMove($id: ID!) {
+          cancelWorktreeMove(id: $id) { id status }
+        }`,
+        { id: move.id },
+      );
+      onNotice(t("moveCancelled"));
+      onError(null);
+      await onReload();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyId(null);
+    }
+  };
+  return (
+    <div className="space-y-2">
+      {moves.map((move) => (
+        <Alert key={move.id}>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-medium">
+                {t("moveProgress", { branch: move.branch })}
+              </p>
+              <p className="text-muted-foreground">
+                {move.status === "AWAITING_STASH"
+                  ? move.error || t("moveNeedsStash")
+                  : t(`moveStatus.${move.status}`)}
+              </p>
+            </div>
+            {move.status === "AWAITING_STASH" ? (
+              <div className="flex gap-2">
+                <Button
+                  disabled={busyId === move.id}
+                  onClick={() => void cancel(move)}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t("cancelMove")}
+                </Button>
+                <Button
+                  disabled={busyId === move.id}
+                  onClick={() => void retry(move)}
+                  size="sm"
+                >
+                  {busyId === move.id && <Spinner />}
+                  {t("stashAndContinue")}
+                </Button>
+              </div>
+            ) : (
+              <Spinner />
+            )}
+          </AlertDescription>
+        </Alert>
+      ))}
+    </div>
   );
 }
 
@@ -920,6 +1065,7 @@ function AgentSection({
   onError,
   onManageTags,
   onOpenTicket,
+  overview,
 }: {
   agentGroup: WorktreeAgentGroup;
   layout: Layout;
@@ -931,6 +1077,7 @@ function AgentSection({
   onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
+  overview: WorktreeOverview;
 }) {
   const t = useTranslations("worktrees");
   const liveUpdatesEnabled =
@@ -980,6 +1127,7 @@ function AgentSection({
                   onOpenTicket={onOpenTicket}
                   onReload={onReload}
                   onUpdate={onUpdate}
+                  overview={overview}
                   worktree={worktree}
                 />
               ))}
@@ -998,6 +1146,7 @@ function AgentSection({
               onOpenTicket={onOpenTicket}
               onReload={onReload}
               onUpdate={onUpdate}
+              overview={overview}
             />
           )}
         </section>
@@ -1180,6 +1329,7 @@ type WorktreeItemProps = {
   onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
+  overview: WorktreeOverview;
 };
 
 function WorktreeTicketLink({
@@ -1206,14 +1356,15 @@ function WorktreeTicketLink({
           {label}
         </p>
       ) : (
-        <button
-          className="min-w-0 truncate text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        <Button
+          className="h-auto min-w-0 justify-start truncate p-0 text-left font-normal"
           onClick={() => onOpenTicket(worktree.ticketKey!)}
           title={label}
           type="button"
+          variant="link"
         >
           {label}
-        </button>
+        </Button>
       )}
       {worktree.ticketStatus && (
         <Badge variant="secondary">{worktree.ticketStatus}</Badge>
@@ -1308,13 +1459,14 @@ function WorktreeTagsMenu({
         contentAlign={compact ? "end" : "start"}
         contentAlignOffset={compact ? 0 : -100}
         trigger={
-          <button
+          <Button
             aria-label={`${t("tags")}: ${worktree.branch ?? t("detached")}`}
             className={cn(
-              "flex min-h-7 max-w-full items-center rounded-md px-1 py-1 text-left hover:bg-muted focus-visible:outline-none",
+              "h-auto min-h-7 max-w-full justify-start px-1 py-1 text-left font-normal",
               !compact && "-mx-1",
             )}
             type="button"
+            variant="ghost"
           >
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {worktree.tags.map((tag) => (
@@ -1324,7 +1476,7 @@ function WorktreeTagsMenu({
                 <span className="text-muted-foreground">—</span>
               )}
             </span>
-          </button>
+          </Button>
         }
       />
     </div>
@@ -1592,6 +1744,97 @@ function BaseBranchControl(props: WorktreeItemProps & { compact?: boolean }) {
   );
 }
 
+type MoveTargetEntry = {
+  agentGroup: WorktreeAgentGroup;
+  group: WorktreeCodebaseGroup;
+};
+
+function moveTargets(props: WorktreeItemProps): MoveTargetEntry[] {
+  const sourceAgent = props.overview.agents.find((agentGroup) =>
+    agentGroup.codebases.some(
+      (group) => group.codebase.id === props.group.codebase.id,
+    ),
+  );
+  if (!sourceAgent) return [];
+  return props.overview.agents.flatMap((agentGroup) =>
+    agentGroup.agent.id === sourceAgent.agent.id
+      ? []
+      : agentGroup.codebases.flatMap((group) =>
+          group.repository.id === props.group.repository.id
+            ? [{ agentGroup, group }]
+            : [],
+        ),
+  );
+}
+
+function targetAvailable(entry: MoveTargetEntry, overview: WorktreeOverview) {
+  const busyMove = overview.activeMoves.some(
+    (move) =>
+      move.sourceCodebaseId === entry.group.codebase.id ||
+      move.targetCodebaseId === entry.group.codebase.id,
+  );
+  return (
+    entry.agentGroup.agent.connectionStatus === "ONLINE" &&
+    entry.agentGroup.agent.capabilities.includes("worktree.move.checkout") &&
+    entry.group.codebase.availability === "AVAILABLE" &&
+    !entry.group.worktrees.some((worktree) => worktree.activeJob) &&
+    !busyMove
+  );
+}
+
+function moveDisabledReason(
+  props: WorktreeItemProps,
+  targets: MoveTargetEntry[],
+  t: ReturnType<typeof useTranslations<"worktrees">>,
+) {
+  const sourceAgent = props.overview.agents.find((agentGroup) =>
+    agentGroup.codebases.some(
+      (group) => group.codebase.id === props.group.codebase.id,
+    ),
+  );
+  if (
+    !sourceAgent ||
+    sourceAgent.agent.connectionStatus !== "ONLINE" ||
+    !sourceAgent.agent.capabilities.includes("worktree.move.push")
+  ) {
+    return t("moveBlocked.agent");
+  }
+  if (
+    props.worktree.availability !== "AVAILABLE" ||
+    props.worktree.activeJob ||
+    props.overview.activeMoves.some(
+      (move) =>
+        move.sourceCodebaseId === props.group.codebase.id ||
+        move.targetCodebaseId === props.group.codebase.id,
+    )
+  ) {
+    return t("moveBlocked.busy");
+  }
+  if (!props.worktree.branch || !props.worktree.headSha) {
+    return t("moveBlocked.detached");
+  }
+  if (
+    props.worktree.hasStagedChanges ||
+    props.worktree.hasUnstagedChanges ||
+    props.worktree.pushStatus === "DIRTY"
+  ) {
+    return t("moveBlocked.dirty");
+  }
+  if (props.worktree.pushStatus === "BEHIND") {
+    return t("moveBlocked.behind");
+  }
+  if (props.worktree.pushStatus === "DIVERGED") {
+    return t("moveBlocked.diverged");
+  }
+  if (props.worktree.pushStatus !== "READY") {
+    return t("moveBlocked.unknown");
+  }
+  if (!targets.some((entry) => targetAvailable(entry, props.overview))) {
+    return t("moveBlocked.destination");
+  }
+  return null;
+}
+
 function WorktreeMenus(
   props: WorktreeItemProps & {
     contentAlign?: "start" | "end";
@@ -1611,11 +1854,31 @@ function WorktreeMenus(
   } = props;
   const t = useTranslations("worktrees");
   const [changeOpen, setChangeOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [changeBusy, setChangeBusy] = useState(false);
   const [failedSelection, setFailedSelection] =
     useState<WorktreeBranchSelection | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const openChangeBranchOnMenuClose = useRef(false);
+  const targets = moveTargets(props);
+  const moveReason = moveDisabledReason(props, targets, t);
+  const sourceAgent = props.overview.agents.find((agentGroup) =>
+    agentGroup.codebases.some(
+      (group) => group.codebase.id === props.group.codebase.id,
+    ),
+  );
+  const deleteDisabled =
+    !sourceAgent ||
+    sourceAgent.agent.connectionStatus !== "ONLINE" ||
+    !sourceAgent.agent.capabilities.includes("worktree.delete") ||
+    worktree.availability !== "AVAILABLE" ||
+    Boolean(worktree.activeJob) ||
+    props.overview.activeMoves.some(
+      (move) =>
+        move.sourceCodebaseId === props.group.codebase.id ||
+        move.targetCodebaseId === props.group.codebase.id,
+    );
   const assigned = new Set(worktree.tags.map((tag) => tag.id));
   const assign = async (tagId: string, checked: boolean) => {
     const tagIds = checked
@@ -1687,158 +1950,587 @@ function WorktreeMenus(
     }
   };
   return (
-    <Popover
-      onOpenChange={(open) => {
-        setChangeOpen(open);
-        if (!open) {
-          setFailedSelection(null);
-          setRetryError(null);
-        }
-      }}
-      open={changeOpen}
-    >
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <PopoverAnchor asChild>
-            {trigger ?? (
-              <Button
-                aria-label={t("customize")}
-                size="icon-sm"
-                variant="ghost"
-              >
-                <MoreHorizontal />
-              </Button>
-            )}
-          </PopoverAnchor>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align={contentAlign}
-          alignOffset={contentAlignOffset}
-          className="w-72"
-          onCloseAutoFocus={(event) => {
-            if (!openChangeBranchOnMenuClose.current) return;
-            openChangeBranchOnMenuClose.current = false;
-            event.preventDefault();
-            setChangeOpen(true);
-          }}
-        >
-          <DropdownMenuItem
-            disabled={
-              !props.branchManagementEnabled ||
-              worktree.availability !== "AVAILABLE" ||
-              Boolean(worktree.activeJob)
-            }
-            onSelect={() => {
-              openChangeBranchOnMenuClose.current = true;
+    <>
+      <Popover
+        onOpenChange={(open) => {
+          setChangeOpen(open);
+          if (!open) {
+            setFailedSelection(null);
+            setRetryError(null);
+          }
+        }}
+        open={changeOpen}
+      >
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <PopoverAnchor asChild>
+              {trigger ?? (
+                <Button
+                  aria-label={t("customize")}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <MoreHorizontal />
+                </Button>
+              )}
+            </PopoverAnchor>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align={contentAlign}
+            alignOffset={contentAlignOffset}
+            className="w-72"
+            onCloseAutoFocus={(event) => {
+              if (!openChangeBranchOnMenuClose.current) return;
+              openChangeBranchOnMenuClose.current = false;
+              event.preventDefault();
+              setChangeOpen(true);
             }}
           >
-            <GitBranch /> {t("changeBranch")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-            <Tags className="size-3" />
-            <span>{t("tags")}</span>
-          </DropdownMenuLabel>
-          {allTags.map((tag) => (
-            <DropdownMenuCheckboxItem
-              checked={assigned.has(tag.id)}
-              key={tag.id}
-              onCheckedChange={(checked) =>
-                void assign(tag.id, Boolean(checked))
+            {targets.length > 0 && (
+              <DropdownMenuItem
+                disabled={Boolean(moveReason)}
+                onSelect={() => setMoveOpen(true)}
+                title={moveReason ?? undefined}
+              >
+                <MoveRight /> {t("moveToAgent")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              disabled={
+                !props.branchManagementEnabled ||
+                worktree.availability !== "AVAILABLE" ||
+                Boolean(worktree.activeJob)
               }
+              onSelect={() => {
+                openChangeBranchOnMenuClose.current = true;
+              }}
             >
-              <span
-                className={cn(
-                  "size-3 rounded-full border",
-                  colorSwatchClasses[tag.color],
-                )}
-              />{" "}
-              {tag.name}
-            </DropdownMenuCheckboxItem>
-          ))}
-          <DropdownMenuItem onSelect={onManageTags}>
-            <Plus /> {t("manageTags")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-            <Paintbrush className="size-3" />
-            <span>{t("highlight")}</span>
-          </DropdownMenuLabel>
-          <div
-            className="grid grid-cols-7 gap-1 p-2"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              aria-label={t("clearHighlight")}
-              className="flex size-7 items-center justify-center rounded border"
-              onClick={() => void highlight(null)}
-              type="button"
-            >
-              <Trash2 className="size-3" />
-            </button>
-            {COLORS.map((color) => (
-              <button
-                aria-label={color}
-                className={cn(
-                  "size-7 rounded border",
-                  colorSwatchClasses[color],
-                  worktree.highlightColor === color && "ring-2 ring-foreground",
-                )}
-                key={color}
-                onClick={() => void highlight(color)}
-                type="button"
-              />
-            ))}
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <PopoverContent
-        align={contentAlign}
-        className="z-60 w-[min(28rem,calc(100vw-2rem))]"
-      >
-        <div className="mb-4">
-          <h3 className="font-semibold">{t("changeBranch")}</h3>
-          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-            {displayedWorktreePath(worktree.folder, props.baseRepoDirectory)}
-          </p>
-        </div>
-        <WorktreeBranchForm
-          busy={changeBusy}
-          onSubmit={(selection) => changeBranch(selection)}
-          onSubmitError={(selection) => {
-            setFailedSelection(
-              worktree.hasStagedChanges || worktree.hasUnstagedChanges
-                ? selection
-                : null,
-            );
-          }}
-          recovery={
-            failedSelection ? (
-              <Alert>
-                <AlertDescription className="space-y-2">
-                  <p>{t("stashRetryHelp")}</p>
-                  {retryError && (
-                    <p className="text-destructive">{retryError}</p>
+              <GitBranch /> {t("changeBranch")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+              <Tags className="size-3" />
+              <span>{t("tags")}</span>
+            </DropdownMenuLabel>
+            {allTags.map((tag) => (
+              <DropdownMenuCheckboxItem
+                checked={assigned.has(tag.id)}
+                key={tag.id}
+                onCheckedChange={(checked) =>
+                  void assign(tag.id, Boolean(checked))
+                }
+              >
+                <span
+                  className={cn(
+                    "size-3 rounded-full border",
+                    colorSwatchClasses[tag.color],
                   )}
-                  <Button
-                    disabled={changeBusy}
-                    onClick={() => void recover()}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {changeBusy && <Spinner />}
-                    {t("stashAndRetry")}
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            ) : null
-          }
-          submitLabel={t("changeBranch")}
-          target={branchTarget(props.group, worktree)}
+                />{" "}
+                {tag.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+            <DropdownMenuItem onSelect={onManageTags}>
+              <Plus /> {t("manageTags")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+              <Paintbrush className="size-3" />
+              <span>{t("highlight")}</span>
+            </DropdownMenuLabel>
+            <ToggleGroup
+              aria-label={t("highlight")}
+              className="grid grid-cols-7 gap-1 p-2"
+              onClick={(event) => event.stopPropagation()}
+              onValueChange={(value) => {
+                if (value) void highlight(value === "__none__" ? null : value);
+              }}
+              size="sm"
+              spacing={1}
+              type="single"
+              value={worktree.highlightColor ?? "__none__"}
+              variant="outline"
+            >
+              <ToggleGroupItem
+                aria-label={t("clearHighlight")}
+                className="size-7 min-w-0 p-0"
+                value="__none__"
+              >
+                <Trash2 className="size-3" />
+              </ToggleGroupItem>
+              {COLORS.map((color) => (
+                <ToggleGroupItem
+                  aria-label={color}
+                  className={cn(
+                    "size-7 min-w-0 p-0",
+                    colorSwatchClasses[color],
+                    "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
+                  )}
+                  key={color}
+                  value={color}
+                />
+              ))}
+            </ToggleGroup>
+            {!worktree.primary && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  disabled={deleteDisabled}
+                  onSelect={() => setDeleteOpen(true)}
+                >
+                  <Trash2 /> {t("deleteWorktree")}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <PopoverContent
+          align={contentAlign}
+          className="z-60 w-[min(28rem,calc(100vw-2rem))]"
+        >
+          <div className="mb-4">
+            <h3 className="font-semibold">{t("changeBranch")}</h3>
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+              {displayedWorktreePath(worktree.folder, props.baseRepoDirectory)}
+            </p>
+          </div>
+          <WorktreeBranchForm
+            busy={changeBusy}
+            onSubmit={(selection) => changeBranch(selection)}
+            onSubmitError={(selection) => {
+              setFailedSelection(
+                worktree.hasStagedChanges || worktree.hasUnstagedChanges
+                  ? selection
+                  : null,
+              );
+            }}
+            recovery={
+              failedSelection ? (
+                <Alert>
+                  <AlertDescription className="space-y-2">
+                    <p>{t("stashRetryHelp")}</p>
+                    {retryError && (
+                      <p className="text-destructive">{retryError}</p>
+                    )}
+                    <Button
+                      disabled={changeBusy}
+                      onClick={() => void recover()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {changeBusy && <Spinner />}
+                      {t("stashAndRetry")}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null
+            }
+            submitLabel={t("changeBranch")}
+            target={branchTarget(props.group, worktree)}
+          />
+        </PopoverContent>
+      </Popover>
+      {moveOpen && (
+        <MoveWorktreeDialog
+          onOpenChange={setMoveOpen}
+          open={moveOpen}
+          props={props}
+          targets={targets.filter((entry) =>
+            targetAvailable(entry, props.overview),
+          )}
         />
-      </PopoverContent>
-    </Popover>
+      )}
+      {!worktree.primary && deleteOpen && (
+        <DeleteWorktreeDialog
+          onOpenChange={setDeleteOpen}
+          open={deleteOpen}
+          props={props}
+        />
+      )}
+    </>
+  );
+}
+
+function MoveWorktreeDialog({
+  props,
+  targets,
+  open,
+  onOpenChange,
+}: {
+  props: WorktreeItemProps;
+  targets: MoveTargetEntry[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations("worktrees");
+  const initialTargetId =
+    targets.length === 1 ? targets[0]!.group.codebase.id : "";
+  const [targetCodebaseId, setTargetCodebaseId] = useState(initialTargetId);
+  const [destination, setDestination] = useState("__new__");
+  const [deleteSource, setDeleteSource] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [awaitingMove, setAwaitingMove] = useState<WorktreeMove | null>(null);
+  const effectiveTargetId = targets.some(
+    (entry) => entry.group.codebase.id === targetCodebaseId,
+  )
+    ? targetCodebaseId
+    : targets.length === 1
+      ? targets[0]!.group.codebase.id
+      : "";
+  const selected = targets.find(
+    (entry) => entry.group.codebase.id === effectiveTargetId,
+  );
+  const options: SearchableSelectOption[] = targets.map((entry) => ({
+    value: entry.group.codebase.id,
+    label: `${entry.agentGroup.agent.name} · ${entry.group.repository.name}`,
+    description: entry.group.codebase.folder,
+    keywords: `${entry.agentGroup.agent.hostname} ${entry.group.repository.displayOrigin}`,
+  }));
+  const selectedWorktree = selected?.group.worktrees.find(
+    (worktree) => worktree.id === destination,
+  );
+  const branchHolder = selected?.group.worktrees.find(
+    (worktree) => worktree.branch === props.worktree.branch,
+  );
+  const canDeleteSource =
+    !props.worktree.primary &&
+    props.overview.agents.some(
+      (agentGroup) =>
+        agentGroup.codebases.some(
+          (group) => group.codebase.id === props.group.codebase.id,
+        ) && agentGroup.agent.capabilities.includes("worktree.delete"),
+    );
+
+  const finish = async (move: WorktreeMove) => {
+    if (move.status === "AWAITING_STASH") {
+      setAwaitingMove(move);
+      await props.onReload();
+      return;
+    }
+    if (move.status === "FAILED") {
+      throw new Error(move.error || t("moveFailed"));
+    }
+    if (move.status === "CANCELLED") {
+      throw new Error(t("moveCancelled"));
+    }
+    props.onError(
+      move.status === "SUCCEEDED_WITH_WARNING" ? move.warning : null,
+    );
+    await props.onReload();
+    onOpenChange(false);
+  };
+  const start = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        moveWorktree: WorktreeMove;
+      }>(
+        `mutation MoveWorktree($input: MoveWorktreeInput!) {
+          moveWorktree(input: $input) {
+            id sourceWorktreeId sourceCodebaseId targetCodebaseId targetWorktreeId destinationMode
+            branch headSha deleteSource status sourceJobId targetJobId cleanupJobId error warning
+            createdAt updatedAt finishedAt
+          }
+        }`,
+        {
+          input: {
+            sourceWorktreeId: props.worktree.id,
+            targetCodebaseId: selected.group.codebase.id,
+            targetWorktreeId: destination === "__new__" ? null : destination,
+            deleteSource,
+            requestId: createClientId(),
+          },
+        },
+      );
+      await finish(await waitForWorktreeMove(data.moveWorktree.id));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const retry = async () => {
+    if (!awaitingMove) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation RetryMove($id: ID!) {
+          retryWorktreeMoveWithStash(id: $id) { id status }
+        }`,
+        { id: awaitingMove.id },
+      );
+      await finish(await waitForWorktreeMove(awaitingMove.id));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cancel = async () => {
+    if (!awaitingMove) return;
+    setBusy(true);
+    try {
+      await controlPlaneRequest(
+        `mutation CancelMove($id: ID!) {
+          cancelWorktreeMove(id: $id) { id status }
+        }`,
+        { id: awaitingMove.id },
+      );
+      await props.onReload();
+      onOpenChange(false);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog onOpenChange={(next) => !busy && onOpenChange(next)} open={open}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("moveToAgent")}</DialogTitle>
+          <DialogDescription>
+            {t("moveDescription", { branch: props.worktree.branch ?? "" })}
+          </DialogDescription>
+        </DialogHeader>
+        {awaitingMove ? (
+          <Alert>
+            <AlertDescription className="space-y-3">
+              <p>{awaitingMove.error || t("moveNeedsStash")}</p>
+              <p className="text-muted-foreground">{t("moveStashHelp")}</p>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <Label className="mb-1.5 block">{t("destinationAgent")}</Label>
+              <SearchableSelect
+                ariaLabel={t("destinationAgent")}
+                disabled={busy}
+                emptyMessage={t("noMoveDestinations")}
+                onValueChange={(value) => {
+                  setTargetCodebaseId(value);
+                  setDestination("__new__");
+                }}
+                options={options}
+                placeholder={t("selectDestinationAgent")}
+                searchPlaceholder={t("searchDestinationAgents")}
+                value={effectiveTargetId}
+              />
+            </div>
+            {selected && (
+              <div>
+                <Label className="mb-1.5 block">
+                  {t("destinationWorktree")}
+                </Label>
+                <Select
+                  disabled={busy}
+                  onValueChange={setDestination}
+                  value={destination}
+                >
+                  <SelectTrigger aria-label={t("destinationWorktree")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      disabled={Boolean(branchHolder)}
+                      value="__new__"
+                    >
+                      {t("createDestinationWorktree")}
+                    </SelectItem>
+                    {selected.group.worktrees
+                      .filter(
+                        (worktree) => worktree.availability === "AVAILABLE",
+                      )
+                      .map((worktree) => (
+                        <SelectItem
+                          disabled={
+                            Boolean(branchHolder) &&
+                            branchHolder!.id !== worktree.id
+                          }
+                          key={worktree.id}
+                          value={worktree.id}
+                        >
+                          {worktree.branch ?? t("detached")} ·{" "}
+                          {worktree.relativePath}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {selectedWorktree &&
+              (selectedWorktree.hasStagedChanges ||
+                selectedWorktree.hasUnstagedChanges) && (
+                <Alert>
+                  <AlertDescription>
+                    {t("dirtyDestinationWarning")}
+                  </AlertDescription>
+                </Alert>
+              )}
+            <div className="flex items-start gap-2">
+              <Checkbox
+                checked={deleteSource}
+                disabled={!canDeleteSource || busy}
+                id={`delete-source-${props.worktree.id}`}
+                onCheckedChange={(checked) => setDeleteSource(Boolean(checked))}
+              />
+              <div>
+                <Label htmlFor={`delete-source-${props.worktree.id}`}>
+                  {t("deleteOldWorktree")}
+                </Label>
+                {!canDeleteSource && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("deleteOldWorktreeDisabled")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button
+            disabled={busy}
+            onClick={() => (awaitingMove ? void cancel() : onOpenChange(false))}
+            variant="outline"
+          >
+            {awaitingMove ? t("cancelMove") : t("cancel")}
+          </Button>
+          <Button
+            disabled={busy || (!awaitingMove && !selected)}
+            onClick={() => (awaitingMove ? void retry() : void start())}
+          >
+            {busy && <Spinner />}
+            {awaitingMove ? t("stashAndContinue") : t("moveWorktree")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteWorktreeDialog({
+  props,
+  open,
+  onOpenChange,
+}: {
+  props: WorktreeItemProps;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations("worktrees");
+  const [deleteRemote, setDeleteRemote] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remoteExists = Boolean(
+    props.worktree.branch &&
+    (props.group.codebase.remoteBranches.includes(props.worktree.branch) ||
+      props.worktree.upstream === `origin/${props.worktree.branch}`),
+  );
+  const defaultRemote =
+    props.worktree.branch === props.group.codebase.defaultBranch;
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        deleteWorktree: { id: string };
+      }>(
+        `mutation DeleteWorktree($input: DeleteWorktreeInput!) {
+          deleteWorktree(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId: props.worktree.id,
+            deleteRemoteBranch: deleteRemote,
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.deleteWorktree.id);
+      await props.onReload();
+      props.onError(null);
+      onOpenChange(false);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog onOpenChange={(next) => !busy && onOpenChange(next)} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("deleteWorktree")}</DialogTitle>
+          <DialogDescription>
+            {t("deleteWorktreeDescription", {
+              path: displayedWorktreePath(
+                props.worktree.folder,
+                props.baseRepoDirectory,
+              ),
+            })}
+          </DialogDescription>
+        </DialogHeader>
+        <Alert variant="destructive">
+          <AlertDescription>{t("deleteWorktreeWarning")}</AlertDescription>
+        </Alert>
+        {remoteExists && (
+          <div className="flex items-start gap-2">
+            <Checkbox
+              checked={deleteRemote}
+              disabled={busy || defaultRemote}
+              id={`delete-remote-${props.worktree.id}`}
+              onCheckedChange={(checked) => setDeleteRemote(Boolean(checked))}
+            />
+            <div>
+              <Label htmlFor={`delete-remote-${props.worktree.id}`}>
+                {t("deleteRemoteBranch", {
+                  branch: props.worktree.branch ?? "",
+                })}
+              </Label>
+              {defaultRemote && (
+                <p className="text-xs text-muted-foreground">
+                  {t("defaultRemoteProtected")}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+            variant="outline"
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => void remove()}
+            variant="destructive"
+          >
+            {busy && <Spinner />}
+            {t("deleteWorktree")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2400,35 +3092,37 @@ function TagManagerDialog({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <div className="space-y-2">
+        <ItemGroup className="gap-2">
           {tags.map((tag) => (
-            <div
-              className="flex items-center gap-2 rounded border p-2"
-              key={tag.id}
-            >
-              <TagBadge tag={tag} />
-              <span className="flex-1" />
-              <Button
-                onClick={() => {
-                  setEditing(tag);
-                  setName(tag.name);
-                  setColor(tag.color);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                {t("edit")}
-              </Button>
-              <Button
-                onClick={() => void remove(tag.id)}
-                size="icon-sm"
-                variant="destructive"
-              >
-                <Trash2 />
-              </Button>
-            </div>
+            <Item key={tag.id} size="sm" variant="outline">
+              <ItemContent>
+                <ItemTitle>
+                  <TagBadge tag={tag} />
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  onClick={() => {
+                    setEditing(tag);
+                    setName(tag.name);
+                    setColor(tag.color);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t("edit")}
+                </Button>
+                <Button
+                  onClick={() => void remove(tag.id)}
+                  size="icon-sm"
+                  variant="destructive"
+                >
+                  <Trash2 />
+                </Button>
+              </ItemActions>
+            </Item>
           ))}
-        </div>
+        </ItemGroup>
         <form className="space-y-3 border-t pt-3" onSubmit={save}>
           <Label htmlFor="tag-name">
             {editing ? t("editTag") : t("createTag")}
@@ -2440,21 +3134,31 @@ function TagManagerDialog({
             required
             value={name}
           />
-          <div className="grid grid-cols-12 gap-1">
+          <ToggleGroup
+            aria-label={t("highlight")}
+            className="grid grid-cols-12 gap-1"
+            onValueChange={(value) => {
+              if (value) setColor(value);
+            }}
+            size="sm"
+            spacing={1}
+            type="single"
+            value={color}
+            variant="outline"
+          >
             {COLORS.map((item) => (
-              <button
+              <ToggleGroupItem
                 aria-label={item}
                 className={cn(
-                  "size-7 rounded border",
+                  "size-7 min-w-0 p-0",
                   colorSwatchClasses[item],
-                  color === item && "ring-2 ring-foreground",
+                  "data-[state=on]:ring-2 data-[state=on]:ring-foreground",
                 )}
                 key={item}
-                onClick={() => setColor(item)}
-                type="button"
+                value={item}
               />
             ))}
-          </div>
+          </ToggleGroup>
           <DialogFooter>
             <Button type="submit">
               <Save /> {t("saveTag")}
@@ -2520,35 +3224,43 @@ function HiddenWorktreesDialog({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <div className="max-h-96 space-y-2 overflow-y-auto">
+        <div className="max-h-96 overflow-y-auto">
           {items.length ? (
-            items.map((item) => (
-              <div
-                className="flex items-center gap-3 rounded border p-3"
-                key={item.id}
-              >
-                <GitBranch />
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm">
-                    {item.branch ?? t("detached")}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {item.folder}
-                  </p>
-                </div>
-                <Button
-                  onClick={() => void purge(item.id)}
-                  size="sm"
-                  variant="destructive"
-                >
-                  <Trash2 /> {t("purge")}
-                </Button>
-              </div>
-            ))
+            <ItemGroup className="gap-2">
+              {items.map((item) => (
+                <Item key={item.id} variant="outline">
+                  <ItemMedia variant="icon">
+                    <GitBranch />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="font-mono">
+                      {item.branch ?? t("detached")}
+                    </ItemTitle>
+                    <ItemDescription className="truncate" title={item.folder}>
+                      {item.folder}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      onClick={() => void purge(item.id)}
+                      size="sm"
+                      variant="destructive"
+                    >
+                      <Trash2 /> {t("purge")}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              ))}
+            </ItemGroup>
           ) : (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("noHidden")}
-            </p>
+            <Empty className="border-0 py-8">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Archive />
+                </EmptyMedia>
+                <EmptyTitle>{t("noHidden")}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
         <DialogFooter>

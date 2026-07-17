@@ -15,6 +15,7 @@ import {
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
+  ArrowRight,
   Download,
   FolderGit2,
   Pencil,
@@ -70,6 +71,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
+import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -732,6 +734,11 @@ function CodebaseCard({
                 : ""}
           </p>
           <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/codebases/${codebase.id}`}>
+                {t("view")} <ArrowRight />
+              </Link>
+            </Button>
             <ConfirmationDialog
               actionLabel={t("remove")}
               cancelLabel={t("cancel")}

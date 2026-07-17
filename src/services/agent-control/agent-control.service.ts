@@ -8,21 +8,31 @@ import {
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_GIT_INSPECT_JOB_KIND,
+  CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   CODEBASE_REFRESH_JOB_KIND,
   codebaseBrowsePayload,
+  codebaseGitInspectPayload,
+  codebaseGitOperationPayload,
   codebaseJobPayload,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_DELETE_JOB_KIND,
   WORKTREE_JOB_KINDS,
+  WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+  WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
   worktreeBranchJobPayload,
+  worktreeDeleteJobPayload,
+  worktreeMoveCheckoutJobPayload,
+  worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -59,6 +69,7 @@ type CompletionHandler = (job: {
   codebaseId: string | null;
   worktreeId: string | null;
   kind: string;
+  payloadJson: string;
   status: string;
   resultJson: string | null;
   error: string | null;
@@ -105,8 +116,28 @@ export function validateJob(kind: string, payload: unknown): void {
     codebaseJobPayload(value);
     return;
   }
+  if (kind === CODEBASE_GIT_INSPECT_JOB_KIND) {
+    codebaseGitInspectPayload(value);
+    return;
+  }
+  if (kind === CODEBASE_GIT_OPERATION_JOB_KIND) {
+    codebaseGitOperationPayload(value);
+    return;
+  }
   if (kind === WORKTREE_BRANCH_JOB_KIND) {
     worktreeBranchJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_MOVE_PUSH_JOB_KIND) {
+    worktreeMovePushJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_MOVE_CHECKOUT_JOB_KIND) {
+    worktreeMoveCheckoutJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_DELETE_JOB_KIND) {
+    worktreeDeleteJobPayload(value);
     return;
   }
   if (
