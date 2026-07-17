@@ -5,6 +5,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import {
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_INSPECT_JOB_KIND,
   type CodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
@@ -81,6 +82,56 @@ describe("CodebasesService", () => {
         data: { lastFetchedAt: new Date(1) },
       }),
     );
+  });
+
+  test("requests an immediate reconcile after confirming a codebase", async () => {
+    const repository = {
+      id: "repository-1",
+      canonicalOrigin: snapshot.canonicalOrigin,
+    };
+    const confirmed = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      repositoryId: repository.id,
+      repository,
+      agent: {},
+      jobs: [],
+    };
+    const transaction = {
+      codebaseRepository: {
+        findUnique: vi.fn().mockResolvedValue(repository),
+      },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue(confirmed),
+      },
+    };
+    const prisma = {
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "inspection-1",
+          agentId: "agent-1",
+          kind: CODEBASE_INSPECT_JOB_KIND,
+          status: "SUCCEEDED",
+          resultJson: JSON.stringify({ snapshot }),
+          error: null,
+          finishedAt: new Date(),
+        }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = control();
+    const requestCodebaseReconcile = vi.fn().mockReturnValue(1);
+    Object.assign(agentControl, { requestCodebaseReconcile });
+    const service = new CodebasesService(agentControl);
+
+    await expect(
+      service.confirm({ inspectionJobId: "inspection-1" }),
+    ).resolves.toBe(confirmed);
+
+    expect(requestCodebaseReconcile).toHaveBeenCalledWith(["agent-1"]);
   });
 
   test("atomically ignores snapshots older than the stored status", async () => {
@@ -178,9 +229,13 @@ describe("CodebasesService", () => {
             id: "ready",
             agentId: "agent-1",
             folder: "/ready",
+            defaultBranch: "main",
             availability: "AVAILABLE",
             agent: capable,
-            repository: { canonicalOrigin: "example.com/ready" },
+            repository: {
+              canonicalOrigin: "example.com/ready",
+              keepBaseBranchUpToDate: true,
+            },
             jobs: [],
           },
           {
@@ -224,6 +279,17 @@ describe("CodebasesService", () => {
     );
 
     expect(agentControl.createJob).toHaveBeenCalledTimes(1);
+    expect(agentControl.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: {
+          codebaseId: "ready",
+          folder: "/ready",
+          expectedOrigin: "example.com/ready",
+          baseBranch: "main",
+          keepBaseBranchUpToDate: true,
+        },
+      }),
+    );
     expect(result.jobs).toEqual([{ id: "job-ready" }]);
     expect(result.skipped).toEqual([
       { codebaseId: "offline", reason: "OFFLINE" },
@@ -341,6 +407,7 @@ describe("CodebasesService", () => {
         findUnique: vi.fn().mockResolvedValue({
           id: "default",
           refreshIntervalSeconds: 120,
+          fetchIntervalSeconds: 300,
           updatedAt,
         }),
       },
@@ -349,7 +416,10 @@ describe("CodebasesService", () => {
           {
             id: "codebase-1",
             folder: "/repo",
-            repository: { canonicalOrigin: "example.com/repo" },
+            repository: {
+              canonicalOrigin: "example.com/repo",
+              keepBaseBranchUpToDate: true,
+            },
           },
         ]),
       },
@@ -359,17 +429,57 @@ describe("CodebasesService", () => {
 
     await expect(service.agentConfiguration("agent-1")).resolves.toEqual({
       refreshIntervalSeconds: 120,
+      fetchIntervalSeconds: 300,
       codebases: [
         {
           id: "codebase-1",
           folder: "/repo",
-          repository: { canonicalOrigin: "example.com/repo" },
+          repository: {
+            canonicalOrigin: "example.com/repo",
+            keepBaseBranchUpToDate: true,
+          },
         },
       ],
     });
     expect(prisma.codebase.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { agentId: "agent-1" } }),
     );
+  });
+
+  test("updates the repository-wide base branch setting", async () => {
+    const repository = {
+      id: "repository-1",
+      name: "Codex",
+      description: "Developer tooling",
+      jiraBranchRegex: null,
+      keepBaseBranchUpToDate: false,
+    };
+    const prisma = {
+      codebaseRepository: {
+        update: vi.fn().mockResolvedValue(repository),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await expect(
+      service.updateRepository(
+        "repository-1",
+        " Codex ",
+        " Developer tooling ",
+        null,
+        false,
+      ),
+    ).resolves.toBe(repository);
+    expect(prisma.codebaseRepository.update).toHaveBeenCalledWith({
+      where: { id: "repository-1" },
+      data: {
+        name: "Codex",
+        description: "Developer tooling",
+        jiraBranchRegex: null,
+        keepBaseBranchUpToDate: false,
+      },
+    });
   });
 
   test("validates and persists the agent refresh interval", async () => {

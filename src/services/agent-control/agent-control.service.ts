@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { posix, win32 } from "node:path";
 
 import {
   CCUSAGE_REPORT_JOB_KIND,
@@ -9,10 +10,19 @@ import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_JOB_KINDS,
+  CODEBASE_RECONCILE_EVENT_CAPABILITY,
   CODEBASE_REFRESH_JOB_KIND,
   codebaseBrowsePayload,
   codebaseJobPayload,
 } from "@ai-development-environment/agent-contract/codebases";
+import {
+  WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_JOB_KINDS,
+  WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_WATCH_JOB_KIND,
+  worktreeJobPayload,
+  worktreeWatchJobPayload,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -38,12 +48,14 @@ export const SUPPORTED_AGENT_JOBS = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
   ...CODEBASE_JOB_KINDS,
+  ...WORKTREE_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
   id: string;
   agentId: string;
   codebaseId: string | null;
+  worktreeId: string | null;
   kind: string;
   status: string;
   resultJson: string | null;
@@ -66,6 +78,17 @@ function parsePayload(payload: unknown): Record<string, unknown> {
   return payload as Record<string, unknown>;
 }
 
+function agentCapabilities(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
   if (kind === CODEBASE_BROWSE_JOB_KIND) {
@@ -78,6 +101,17 @@ export function validateJob(kind: string, payload: unknown): void {
     kind === CODEBASE_FETCH_JOB_KIND
   ) {
     codebaseJobPayload(value);
+    return;
+  }
+  if (
+    kind === WORKTREE_INSPECT_JOB_KIND ||
+    kind === WORKTREE_OPERATION_JOB_KIND
+  ) {
+    worktreeJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_WATCH_JOB_KIND) {
+    worktreeWatchJobPayload(value);
     return;
   }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
@@ -128,6 +162,27 @@ export class AgentControlService {
 
   registerCompletionHandler(kind: string, handler: CompletionHandler): void {
     this.completionHandlers.set(kind, handler);
+  }
+
+  async requestCodebaseReconcile(agentIds: string[]): Promise<number> {
+    const uniqueAgentIds = [...new Set(agentIds.filter(Boolean))];
+    if (!uniqueAgentIds.length) return 0;
+    const prisma = await getPrismaClient();
+    const agents = await prisma.agent.findMany({
+      where: { id: { in: uniqueAgentIds } },
+      select: { id: true, capabilitiesJson: true },
+    });
+    const supportedAgents = agents.filter((agent) =>
+      agentCapabilities(agent.capabilitiesJson).includes(
+        CODEBASE_RECONCILE_EVENT_CAPABILITY,
+      ),
+    );
+    for (const agent of supportedAgents) {
+      agentEventBus.publish(agentEventsTopic(agent.id), {
+        agentEvents: { type: "CODEBASE_RECONCILE_REQUESTED", job: null },
+      });
+    }
+    return supportedAgents.length;
   }
 
   private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
@@ -247,6 +302,29 @@ export class AgentControlService {
     return prisma.agent.findUnique({ where: { id } });
   }
 
+  async updateBaseRepoDirectory(
+    agentId: string,
+    baseRepoDirectory: string | null,
+  ) {
+    if (
+      baseRepoDirectory !== null &&
+      (!baseRepoDirectory ||
+        baseRepoDirectory.length > 4_096 ||
+        baseRepoDirectory.includes("\0") ||
+        (!posix.isAbsolute(baseRepoDirectory) &&
+          !win32.isAbsolute(baseRepoDirectory)))
+    ) {
+      throw new Error("Base repository directory must be an absolute path");
+    }
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { baseRepoDirectory },
+    });
+    publishAgent(agent);
+    return agent;
+  }
+
   async listJobs(agentId: string, limit = 50, includeSystem = false) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findMany({
@@ -269,6 +347,7 @@ export class AgentControlService {
     timeoutSeconds?: number | null;
     ccusageCollectionId?: string | null;
     codebaseId?: string | null;
+    worktreeId?: string | null;
     visibility?: "USER" | "SYSTEM";
   }) {
     validateJob(input.kind, input.payload);
@@ -314,6 +393,7 @@ export class AgentControlService {
           timeoutSeconds,
           ccusageCollectionId: input.ccusageCollectionId ?? null,
           codebaseId: input.codebaseId ?? null,
+          worktreeId: input.worktreeId ?? null,
           visibility: input.visibility ?? "USER",
         },
       });

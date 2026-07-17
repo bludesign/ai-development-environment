@@ -143,4 +143,55 @@ describe("runAgent startup reconciliation", () => {
     controller.abort();
     await expect(running).resolves.toBeUndefined();
   });
+
+  test("reconciles immediately when the control plane requests it", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+
+    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: {
+      type: string;
+      job: null;
+    }) => void;
+    onEvent({ type: "CODEBASE_RECONCILE_REQUESTED", job: null });
+    await vi.waitFor(() =>
+      expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(2),
+    );
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  test("runs a requested reconcile after an in-progress scan finishes", async () => {
+    let finishScan: (() => void) | undefined;
+    mocks.codebaseReconcile
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishScan = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+
+    await vi.waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce());
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: {
+      type: string;
+      job: null;
+    }) => void;
+    onEvent({ type: "CODEBASE_RECONCILE_REQUESTED", job: null });
+    expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(1);
+
+    finishScan!();
+    await vi.waitFor(() =>
+      expect(mocks.codebaseReconcile).toHaveBeenCalledTimes(2),
+    );
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
 });

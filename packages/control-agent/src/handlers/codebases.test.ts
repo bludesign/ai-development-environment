@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { inspectCodebase, inspectCodebaseFolder } from "./codebases.js";
+import {
+  inspectCodebase,
+  inspectCodebaseFolder,
+  updateBaseBranchAfterFetch,
+} from "./codebases.js";
 
 const execute = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -32,6 +36,16 @@ async function repository() {
     "git@github.com:OpenAI/Codex.git",
   );
   return folder;
+}
+
+async function advanceRemoteMain(folder: string) {
+  const initialHead = (await git(folder, "rev-parse", "main")).stdout.trim();
+  await git(folder, "checkout", "-b", "remote-change");
+  await git(folder, "commit", "--allow-empty", "-m", "Remote change");
+  const remoteHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+  await git(folder, "checkout", "main");
+  await git(folder, "update-ref", "refs/remotes/origin/main", remoteHead);
+  return { initialHead, remoteHead };
 }
 
 afterEach(async () => {
@@ -143,5 +157,86 @@ describe("codebase Git inspection", () => {
 
     expect(result).toMatchObject({ cancelled: false, timedOut: true });
     expect("snapshot" in result).toBe(false);
+  });
+
+  test("fast-forwards the checked-out base branch after a fetch", async () => {
+    const folder = await repository();
+    const { remoteHead } = await advanceRemoteMain(folder);
+
+    await expect(
+      updateBaseBranchAfterFetch(
+        folder,
+        "main",
+        10_000,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe(true);
+
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      remoteHead,
+    );
+  });
+
+  test("updates an inactive base branch without switching branches", async () => {
+    const folder = await repository();
+    const { initialHead, remoteHead } = await advanceRemoteMain(folder);
+    await git(folder, "checkout", "-b", "feature");
+
+    await expect(
+      updateBaseBranchAfterFetch(
+        folder,
+        "main",
+        10_000,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe(true);
+
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "feature",
+    );
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      remoteHead,
+    );
+  });
+
+  test("does not update the base branch when changes are staged", async () => {
+    const folder = await repository();
+    const { initialHead } = await advanceRemoteMain(folder);
+    await writeFile(join(folder, "staged.txt"), "staged\n");
+    await git(folder, "add", "staged.txt");
+
+    await expect(
+      updateBaseBranchAfterFetch(
+        folder,
+        "main",
+        10_000,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe(false);
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      initialHead,
+    );
+  });
+
+  test("does not overwrite a divergent base branch", async () => {
+    const folder = await repository();
+    await advanceRemoteMain(folder);
+    await git(folder, "commit", "--allow-empty", "-m", "Local change");
+    const localHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+
+    await expect(
+      updateBaseBranchAfterFetch(
+        folder,
+        "main",
+        10_000,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe(false);
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      localHead,
+    );
   });
 });

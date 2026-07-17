@@ -2,6 +2,7 @@
 
 import {
   CheckCircle2,
+  Code2,
   ExternalLink,
   GitPullRequest,
   KeyRound,
@@ -24,6 +25,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
@@ -44,10 +52,110 @@ export function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
+      <EditorSettingsCard />
       <JiraSettingsPage embedded />
       <GitHubSettingsCard />
       <GitHubAppSettingsCard />
     </section>
+  );
+}
+
+function EditorSettingsCard() {
+  const t = useTranslations("editorSettings");
+  const [editorVariant, setEditorVariant] = useState<
+    "CODE" | "CODE_INSIDERS" | "NONE"
+  >("CODE");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void controlPlaneRequest<{
+        worktreeSettings: {
+          editorVariant: "CODE" | "CODE_INSIDERS" | "NONE";
+        };
+      }>("query EditorSettings { worktreeSettings { editorVariant } }")
+        .then((data) => setEditorVariant(data.worktreeSettings.editorVariant))
+        .catch((value) =>
+          setError(value instanceof Error ? value.message : String(value)),
+        )
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await controlPlaneRequest(
+        `mutation SaveEditorSettings($editorVariant: WorktreeEditorVariant!) {
+          saveWorktreeSettings(editorVariant: $editorVariant) { editorVariant }
+        }`,
+        { editorVariant },
+      );
+      setNotice(t("saved"));
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Code2 className="size-5" />
+          <div>
+            <h2 className="font-semibold">{t("title")}</h2>
+            <p className="text-xs text-muted-foreground">{t("description")}</p>
+          </div>
+        </div>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {notice && (
+          <Alert>
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        )}
+        {loading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner /> {t("loading")}
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-64 flex-1 space-y-2">
+              <Label htmlFor="editor-variant">{t("label")}</Label>
+              <Select
+                onValueChange={(value) =>
+                  setEditorVariant(value as "CODE" | "CODE_INSIDERS" | "NONE")
+                }
+                value={editorVariant}
+              >
+                <SelectTrigger className="w-full" id="editor-variant">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CODE">{t("code")}</SelectItem>
+                  <SelectItem value="CODE_INSIDERS">{t("insiders")}</SelectItem>
+                  <SelectItem value="NONE">{t("none")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button disabled={busy} onClick={() => void save()}>
+              {busy ? <Spinner /> : <Save />} {t("save")}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

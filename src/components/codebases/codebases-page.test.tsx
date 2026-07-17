@@ -57,6 +57,7 @@ const agent = {
     "codebase.refresh",
     "codebase.fetch",
   ],
+  baseRepoDirectory: null,
   connectionStatus: "ONLINE",
   ipAddress: null,
   lastSeenAt: new Date().toISOString(),
@@ -76,8 +77,12 @@ const codebase = {
   syncState: "IN_SYNC",
   availability: "AVAILABLE",
   statusError: null,
+  defaultBranch: "main",
+  remoteBranches: ["main"],
   lastCheckedAt: new Date(0).toISOString(),
   lastFetchedAt: null,
+  lastFetchAttemptAt: null,
+  lastFetchError: null,
   agent,
   activeJob: null,
 };
@@ -88,6 +93,8 @@ const repository = {
   displayOrigin: "github.com/openai/codex",
   name: "Codex",
   description: "Developer tooling",
+  jiraBranchRegex: null,
+  keepBaseBranchUpToDate: true,
   createdAt: new Date(0).toISOString(),
   updatedAt: new Date(0).toISOString(),
   codebases: [codebase],
@@ -136,6 +143,9 @@ describe("CodebasesPage", () => {
             updatedAt: new Date().toISOString(),
           },
         } as never;
+      }
+      if (String(query).includes("mutation UpdateCodebaseRepository")) {
+        return { updateCodebaseRepository: { id: "repository-1" } } as never;
       }
       throw new Error(`Unexpected operation: ${query}`);
     });
@@ -186,7 +196,39 @@ describe("CodebasesPage", () => {
     await waitFor(() => expect(overviewCalls()).toBe(before + 1));
   });
 
+  test("edits the repository-wide base branch update setting", async () => {
+    render(<CodebasesPage />);
+    await screen.findByText("Studio Mac");
+    fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Keep base branch up to date",
+    });
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("mutation UpdateCodebaseRepository") &&
+            (
+              variables as {
+                input?: { keepBaseBranchUpToDate?: boolean };
+              }
+            )?.input?.keepBaseBranchUpToDate === false,
+        ),
+      ).toBe(true);
+    });
+  });
+
   test("browses, inspects, and confirms a new codebase", async () => {
+    const configuredAgent = {
+      ...agent,
+      baseRepoDirectory: "/Users/test/Repositories",
+    };
     request.mockImplementation(async (query) => {
       const operation = String(query);
       if (operation.includes("query CodebaseOverview")) {
@@ -196,7 +238,7 @@ describe("CodebasesPage", () => {
             refreshIntervalSeconds: 30,
             updatedAt: new Date(0).toISOString(),
           },
-          agents: [agent],
+          agents: [configuredAgent],
         } as never;
       }
       if (operation.includes("mutation BrowseAgentDirectory")) {
@@ -247,11 +289,22 @@ describe("CodebasesPage", () => {
       agentOptions.find((element) => element.tagName === "SPAN") ??
         agentOptions[0],
     );
-    fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
-    expect(await screen.findByText("Inspect this folder")).toBeDefined();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Inspect this folder" }),
+    const addFolder = await screen.findByRole("button", {
+      name: "Add this folder",
+    });
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation BrowseAgentDirectory"),
+      expect.objectContaining({
+        input: expect.objectContaining({
+          agentId: "agent-1",
+          path: "/Users/test/Repositories",
+        }),
+      }),
     );
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(addFolder.parentElement?.dataset.slot).toBe("dialog-footer");
+    expect(addFolder.parentElement?.contains(cancel)).toBe(true);
+    fireEvent.click(addFolder);
     expect(await screen.findByDisplayValue("codex")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Confirm codebase" }));
     await waitFor(() =>
@@ -322,10 +375,8 @@ describe("CodebasesPage", () => {
         agentOptions[0],
     );
     fireEvent.click(screen.getByRole("button", { name: "Browse home folder" }));
-    await screen.findByText("Inspect this folder");
-    fireEvent.click(
-      screen.getByRole("button", { name: "Inspect this folder" }),
-    );
+    await screen.findByText("Add this folder");
+    fireEvent.click(screen.getByRole("button", { name: "Add this folder" }));
     await screen.findByDisplayValue("codex");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

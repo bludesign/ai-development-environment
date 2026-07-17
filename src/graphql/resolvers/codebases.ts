@@ -39,6 +39,18 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       iso(value.lastCheckedAt),
     lastFetchedAt: (value: { lastFetchedAt: Date | null }) =>
       iso(value.lastFetchedAt),
+    lastFetchAttemptAt: (value: { lastFetchAttemptAt: Date | null }) =>
+      iso(value.lastFetchAttemptAt),
+    remoteBranches: (value: { remoteBranchesJson: string }) => {
+      try {
+        const parsed: unknown = JSON.parse(value.remoteBranchesJson);
+        return Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === "string")
+          : [];
+      } catch {
+        return [];
+      }
+    },
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
     activeJob: (value: { jobs?: unknown[] }) => value.jobs?.[0] ?? null,
@@ -46,6 +58,14 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
   AgentCodebaseRegistration: {
     canonicalOrigin: (value: { repository: { canonicalOrigin: string } }) =>
       value.repository.canonicalOrigin,
+    keepBaseBranchUpToDate: (value: {
+      repository: { keepBaseBranchUpToDate: boolean };
+    }) => value.repository.keepBaseBranchUpToDate,
+    worktrees: (value: { worktrees?: unknown[] }) => value.worktrees ?? [],
+    lastFetchedAt: (value: { lastFetchedAt: Date | null }) =>
+      iso(value.lastFetchedAt),
+    lastFetchAttemptAt: (value: { lastFetchAttemptAt: Date | null }) =>
+      iso(value.lastFetchAttemptAt),
   },
   Query: {
     codebaseOverview: async (
@@ -113,19 +133,43 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
     },
     updateCodebaseRepository: (
       _root: unknown,
-      { input }: { input: { id: string; name: string; description: string } },
+      {
+        input,
+      }: {
+        input: {
+          id: string;
+          name: string;
+          description: string;
+          jiraBranchRegex?: string | null;
+          keepBaseBranchUpToDate: boolean;
+        };
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.updateRepository(input.id, input.name, input.description);
+      return service.updateRepository(
+        input.id,
+        input.name,
+        input.description,
+        input.jiraBranchRegex,
+        input.keepBaseBranchUpToDate,
+      );
     },
     updateCodebaseSettings: (
       _root: unknown,
-      { input }: { input: { refreshIntervalSeconds: number } },
+      {
+        input,
+      }: {
+        input: {
+          refreshIntervalSeconds: number;
+          fetchIntervalSeconds: number;
+          defaultJiraBranchRegex: string;
+        };
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.updateSettings(input.refreshIntervalSeconds);
+      return service.updateSettings(input);
     },
     removeCodebase: (
       _root: unknown,

@@ -348,6 +348,88 @@ export const inspectCodebaseFolder: AgentJobHandler = async (
 
 export const refreshCodebase: AgentJobHandler = inspectCodebaseFolder;
 
+export async function updateBaseBranchAfterFetch(
+  folder: string,
+  baseBranch: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const localRef = `refs/heads/${baseBranch}`;
+  const remoteRef = `refs/remotes/origin/${baseBranch}`;
+  try {
+    const validRef = await git(
+      folder,
+      ["check-ref-format", localRef],
+      timeoutMs,
+      signal,
+    );
+    if (validRef.exitCode !== 0) return false;
+
+    const staged = await git(
+      folder,
+      ["diff", "--cached", "--quiet"],
+      timeoutMs,
+      signal,
+    );
+    if (staged.exitCode !== 0) return false;
+
+    const remoteExists = await git(
+      folder,
+      ["show-ref", "--verify", "--quiet", remoteRef],
+      timeoutMs,
+      signal,
+    );
+    if (remoteExists.exitCode !== 0) return false;
+
+    const currentBranch = await git(
+      folder,
+      ["symbolic-ref", "--short", "-q", "HEAD"],
+      timeoutMs,
+      signal,
+    );
+    if (
+      currentBranch.exitCode === 0 &&
+      currentBranch.stdout.trim() === baseBranch
+    ) {
+      const merged = await git(
+        folder,
+        ["merge", "--ff-only", remoteRef],
+        timeoutMs,
+        signal,
+      );
+      return merged.exitCode === 0;
+    }
+
+    const localExists = await git(
+      folder,
+      ["show-ref", "--verify", "--quiet", localRef],
+      timeoutMs,
+      signal,
+    );
+    if (localExists.exitCode === 0) {
+      const fastForward = await git(
+        folder,
+        ["merge-base", "--is-ancestor", localRef, remoteRef],
+        timeoutMs,
+        signal,
+      );
+      if (fastForward.exitCode !== 0) return false;
+    } else if (localExists.exitCode !== 1) {
+      return false;
+    }
+
+    const updated = await git(
+      folder,
+      ["branch", "--force", baseBranch, remoteRef],
+      timeoutMs,
+      signal,
+    );
+    return updated.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
 export const fetchCodebase: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -371,6 +453,18 @@ export const fetchCodebase: AgentJobHandler = async (
   } catch (error) {
     if (error instanceof InterruptedGitInspection) return error.result;
     throw error;
+  }
+  if (
+    result.exitCode === 0 &&
+    input.keepBaseBranchUpToDate &&
+    input.baseBranch
+  ) {
+    await updateBaseBranchAfterFetch(
+      input.folder,
+      input.baseBranch,
+      timeoutMs,
+      signal,
+    );
   }
   const afterResult = await inspectCodebaseProcess(
     input.folder,

@@ -245,6 +245,20 @@ export const createAgentResolvers = (
       requireControlPlane(context);
       return agentControlService.cancelJob(jobId);
     },
+    updateAgentBaseRepoDirectory: (
+      _root: unknown,
+      {
+        agentId,
+        baseRepoDirectory,
+      }: { agentId: string; baseRepoDirectory?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.updateBaseRepoDirectory(
+        agentId,
+        baseRepoDirectory ?? null,
+      );
+    },
   },
   Subscription: {
     agentEvents: {

@@ -20,8 +20,12 @@ export type Codebase = {
   availability:
     "AVAILABLE" | "MISSING" | "NOT_REPOSITORY" | "ORIGIN_MISMATCH" | "ERROR";
   statusError: string | null;
+  defaultBranch: string | null;
+  remoteBranches: string[];
   lastCheckedAt: string | null;
   lastFetchedAt: string | null;
+  lastFetchAttemptAt: string | null;
+  lastFetchError: string | null;
   agent: Agent;
   activeJob: AgentJob | null;
 };
@@ -32,6 +36,8 @@ export type CodebaseRepository = {
   displayOrigin: string;
   name: string;
   description: string;
+  jiraBranchRegex: string | null;
+  keepBaseBranchUpToDate: boolean;
   codebases: Codebase[];
   createdAt: string;
   updatedAt: string;
@@ -39,6 +45,8 @@ export type CodebaseRepository = {
 
 export type CodebaseSettings = {
   refreshIntervalSeconds: number;
+  fetchIntervalSeconds: number;
+  defaultJiraBranchRegex: string;
   updatedAt: string;
 };
 

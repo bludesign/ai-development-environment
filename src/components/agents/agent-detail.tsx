@@ -1,10 +1,12 @@
 "use client";
 
 import { TUNNEL_NAME_PATTERN } from "@ai-development-environment/agent-contract";
-import { ArrowLeft, Play } from "lucide-react";
+import { CODEBASE_BROWSE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
+import { ArrowLeft, Play, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
 import type { Agent, AgentJob } from "@/components/agents/types";
@@ -35,6 +37,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [directoryBusy, setDirectoryBusy] = useState(false);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -113,6 +117,28 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [activeJobIds]);
 
+  const saveBaseRepoDirectory = async (baseRepoDirectory: string | null) => {
+    setDirectoryBusy(true);
+    setDirectoryError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        updateAgentBaseRepoDirectory: Agent;
+      }>(
+        `mutation UpdateAgentBaseRepoDirectory($agentId: ID!, $baseRepoDirectory: String) {
+          updateAgentBaseRepoDirectory(agentId: $agentId, baseRepoDirectory: $baseRepoDirectory) {
+            ${AGENT_FIELDS}
+          }
+        }`,
+        { agentId, baseRepoDirectory },
+      );
+      setAgent(data.updateAgentBaseRepoDirectory);
+    } catch (value) {
+      setDirectoryError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setDirectoryBusy(false);
+    }
+  };
+
   const startTunnel = async (event: FormEvent) => {
     event.preventDefault();
     const resolvedTunnelName = tunnelName || t("tunnelPlaceholder");
@@ -160,6 +186,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         {t("notFound")}
       </p>
     );
+
+  const canBrowseDirectories =
+    agent.connectionStatus === "ONLINE" &&
+    agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -212,6 +242,55 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               <dd>{agent.capabilities.join(", ")}</dd>
             </div>
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <h2 className="font-medium">{t("baseRepoDirectory")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("baseRepoDirectoryDescription")}
+          </p>
+          <div className="mt-4 rounded-lg bg-muted p-3">
+            <p className="text-xs text-muted-foreground">
+              {t("currentDirectory")}
+            </p>
+            <p className="mt-1 break-all font-mono text-xs">
+              {agent.baseRepoDirectory ?? t("notConfigured")}
+            </p>
+          </div>
+          {directoryError && (
+            <Alert className="mt-4" variant="destructive">
+              <AlertDescription>{directoryError}</AlertDescription>
+            </Alert>
+          )}
+          <div className="mt-4 flex flex-wrap items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {canBrowseDirectories ? (
+                <AgentDirectoryBrowser
+                  agentId={agent.id}
+                  disabled={directoryBusy}
+                  key={`${agent.id}:${agent.baseRepoDirectory ?? ""}`}
+                  onSelect={(path) => saveBaseRepoDirectory(path)}
+                  selectLabel={t("useDirectory")}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("directoryBrowsingUnavailable")}
+                </p>
+              )}
+            </div>
+            {agent.baseRepoDirectory && (
+              <Button
+                disabled={directoryBusy}
+                onClick={() => void saveBaseRepoDirectory(null)}
+                type="button"
+                variant="outline"
+              >
+                <Trash2 /> {t("clearDirectory")}
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 

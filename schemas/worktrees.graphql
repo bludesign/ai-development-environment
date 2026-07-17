@@ -1,0 +1,215 @@
+enum WorktreeEditorVariant {
+  CODE
+  CODE_INSIDERS
+  NONE
+}
+
+enum WorktreeOperation {
+  OPEN_EDITOR
+  FORCE_PUSH
+  SYNC
+  PUSH
+  RESET
+  STASH_ALL
+  STAGE_ALL
+  UNSTAGE_ALL
+}
+
+type WorktreeTag {
+  id: ID!
+  name: String!
+  color: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type WorktreeSettings {
+  editorVariant: WorktreeEditorVariant!
+  updatedAt: String!
+}
+
+type Worktree {
+  id: ID!
+  codebaseId: ID!
+  gitDirectory: String!
+  folder: String!
+  relativePath: String!
+  primary: Boolean!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState!
+  baseBranch: String
+  baseBranchOverride: String
+  baseAhead: Int
+  baseBehind: Int
+  hasStagedChanges: Boolean!
+  hasUnstagedChanges: Boolean!
+  highlightColor: String
+  availability: String!
+  statusError: String
+  ticketKey: String
+  ticketTitle: String
+  ticketStatus: String
+  pullRequest: GitHubPullRequest
+  tags: [WorktreeTag!]!
+  activeJob: AgentJob
+  lastCheckedAt: String
+  missingAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type WorktreeCodebaseGroup {
+  codebase: Codebase!
+  repository: CodebaseRepository!
+  worktrees: [Worktree!]!
+}
+
+type WorktreeAgentGroup {
+  agent: Agent!
+  codebases: [WorktreeCodebaseGroup!]!
+}
+
+type WorktreeOverview {
+  agents: [WorktreeAgentGroup!]!
+  tags: [WorktreeTag!]!
+  settings: WorktreeSettings!
+  hiddenCount: Int!
+}
+
+type WorktreeCommit {
+  sha: String!
+  subject: String!
+  authorName: String!
+  authoredAt: String!
+  additions: Int!
+  deletions: Int!
+}
+
+type WorktreeChange {
+  path: String!
+  staged: Boolean!
+  unstaged: Boolean!
+  untracked: Boolean!
+  conflicted: Boolean!
+  stagedAdditions: Int
+  stagedDeletions: Int
+  unstagedAdditions: Int
+  unstagedDeletions: Int
+}
+
+type WorktreeDetail {
+  commits: [WorktreeCommit!]!
+  changes: [WorktreeChange!]!
+  commitsTruncated: Boolean!
+  changesTruncated: Boolean!
+}
+
+type WorktreeOverviewChange {
+  worktreeId: ID
+  codebaseId: ID
+}
+
+type WorktreeActivity {
+  worktreeId: ID!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState
+  baseAhead: Int
+  baseBehind: Int
+  hasStagedChanges: Boolean
+  hasUnstagedChanges: Boolean
+  observedAt: String!
+}
+
+input WorktreeInventoryInput {
+  gitDirectory: String!
+  folder: String!
+  relativePath: String!
+  primary: Boolean!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState!
+  baseAhead: Int
+  baseBehind: Int
+  hasStagedChanges: Boolean
+  hasUnstagedChanges: Boolean
+  availability: String!
+  error: String
+  checkedAt: String!
+}
+
+input CodebaseWorktreeReportInput {
+  codebaseId: ID!
+  complete: Boolean!
+  defaultBranch: String
+  remoteBranches: [String!]!
+  fetchedAt: String
+  fetchAttemptedAt: String
+  fetchError: String
+  worktrees: [WorktreeInventoryInput!]!
+}
+
+input WorktreeActivityReportInput {
+  codebaseId: ID!
+  gitDirectory: String!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState
+  baseAhead: Int
+  baseBehind: Int
+  hasStagedChanges: Boolean
+  hasUnstagedChanges: Boolean
+  observedAt: String!
+}
+
+input SaveWorktreeTagInput {
+  id: ID
+  name: String!
+  color: String!
+}
+
+input RunWorktreeOperationInput {
+  worktreeId: ID!
+  operation: WorktreeOperation!
+  requestId: ID!
+}
+
+extend type Query {
+  worktreeOverview: WorktreeOverview!
+  hiddenWorktrees: [Worktree!]!
+  worktreeSettings: WorktreeSettings!
+}
+
+extend type Mutation {
+  refreshWorktrees: Int!
+  reportWorktrees(reports: [CodebaseWorktreeReportInput!]!): [Worktree!]!
+  reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
+  inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!
+  runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
+  updateWorktreeBaseBranch(id: ID!, baseBranch: String): Worktree!
+  updateWorktreeHighlight(id: ID!, color: String): Worktree!
+  setWorktreeTags(id: ID!, tagIds: [ID!]!): Worktree!
+  saveWorktreeTag(input: SaveWorktreeTagInput!): WorktreeTag!
+  deleteWorktreeTag(id: ID!): Boolean!
+  saveWorktreeSettings(editorVariant: WorktreeEditorVariant!): WorktreeSettings!
+  purgeHiddenWorktree(id: ID!): Boolean!
+  purgeAllHiddenWorktrees: Int!
+}
+
+extend type Subscription {
+  worktreeOverviewChanged: WorktreeOverviewChange!
+  worktreeInspectionChanged(worktreeId: ID!): WorktreeActivity!
+}

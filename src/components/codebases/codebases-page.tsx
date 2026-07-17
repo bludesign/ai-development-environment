@@ -9,11 +9,14 @@ import {
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
-  ChevronRight,
+  DEFAULT_JIRA_BRANCH_REGEX,
+  DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract/worktrees";
+import {
   Download,
-  Folder,
   FolderGit2,
-  Home,
   Pencil,
   Plus,
   RefreshCw,
@@ -31,6 +34,7 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -76,7 +80,6 @@ import type {
   Codebase,
   CodebaseRepository,
   CodebaseSettings,
-  DirectoryListing,
   Inspection,
 } from "./types";
 
@@ -84,12 +87,12 @@ const RECONCILE_INTERVAL_MS = 30_000;
 const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
-  statusError lastCheckedAt lastFetchedAt
+  statusError defaultBranch remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
   agent { ${AGENT_FIELDS} }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
 `;
 const REPOSITORY_FIELDS = `
-  id canonicalOrigin displayOrigin name description createdAt updatedAt
+  id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
   codebases { ${CODEBASE_FIELDS} }
 `;
 
@@ -119,7 +122,7 @@ export function CodebasesPage() {
         agents: Agent[];
       }>(`query CodebaseOverview {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
-        codebaseSettings { refreshIntervalSeconds updatedAt }
+        codebaseSettings { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
         agents { ${AGENT_FIELDS} }
       }`);
       if (loadId !== latestLoad.current) return;
@@ -381,6 +384,14 @@ function CodebaseSettingsDialog({
         DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
     ),
   );
+  const [fetchValue, setFetchValue] = useState(
+    String(
+      settings?.fetchIntervalSeconds ?? DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+    ),
+  );
+  const [jiraRegex, setJiraRegex] = useState(
+    settings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_BRANCH_REGEX,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshIntervalSeconds = Number(value);
@@ -388,10 +399,21 @@ function CodebaseSettingsDialog({
     Number.isInteger(refreshIntervalSeconds) &&
     refreshIntervalSeconds >= MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS &&
     refreshIntervalSeconds <= MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS;
+  const fetchIntervalSeconds = Number(fetchValue);
+  const fetchValid =
+    Number.isInteger(fetchIntervalSeconds) &&
+    fetchIntervalSeconds >= MIN_WORKTREE_FETCH_INTERVAL_SECONDS &&
+    fetchIntervalSeconds <= MAX_WORKTREE_FETCH_INTERVAL_SECONDS;
+  let regexValid = true;
+  try {
+    if (jiraRegex) void new RegExp(jiraRegex, "i");
+  } catch {
+    regexValid = false;
+  }
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || !fetchValid || !regexValid) return;
     setBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -399,10 +421,16 @@ function CodebaseSettingsDialog({
       }>(
         `mutation UpdateCodebaseSettings($input: UpdateCodebaseSettingsInput!) {
           updateCodebaseSettings(input: $input) {
-            refreshIntervalSeconds updatedAt
+            refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt
           }
         }`,
-        { input: { refreshIntervalSeconds } },
+        {
+          input: {
+            refreshIntervalSeconds,
+            fetchIntervalSeconds,
+            defaultJiraBranchRegex: jiraRegex,
+          },
+        },
       );
       onSaved(data.updateCodebaseSettings);
     } catch (value) {
@@ -447,6 +475,41 @@ function CodebaseSettingsDialog({
               })}
             </p>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="codebase-fetch-interval">
+              {t("fetchInterval")}
+            </Label>
+            <Input
+              id="codebase-fetch-interval"
+              inputMode="numeric"
+              max={MAX_WORKTREE_FETCH_INTERVAL_SECONDS}
+              min={MIN_WORKTREE_FETCH_INTERVAL_SECONDS}
+              onChange={(event) => setFetchValue(event.target.value)}
+              required
+              step={1}
+              type="number"
+              value={fetchValue}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("fetchIntervalHelp", {
+                min: MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+                max: MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+              })}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="default-jira-branch-regex">
+              {t("defaultJiraBranchRegex")}
+            </Label>
+            <Input
+              id="default-jira-branch-regex"
+              onChange={(event) => setJiraRegex(event.target.value)}
+              value={jiraRegex}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("jiraBranchRegexHelp")}
+            </p>
+          </div>
           <DialogFooter>
             <Button
               onClick={() => onOpenChange(false)}
@@ -455,7 +518,10 @@ function CodebaseSettingsDialog({
             >
               {t("cancel")}
             </Button>
-            <Button disabled={busy || !valid} type="submit">
+            <Button
+              disabled={busy || !valid || !fetchValid || !regexValid}
+              type="submit"
+            >
               {busy && <Spinner />} {t("save")}
             </Button>
           </DialogFooter>
@@ -731,9 +797,8 @@ function AddCodebaseDialog({
 }) {
   const t = useTranslations("codebases");
   const [agentId, setAgentId] = useState("");
-  const [listing, setListing] = useState<DirectoryListing | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -745,16 +810,16 @@ function AddCodebaseDialog({
       agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND) &&
       agent.capabilities.includes(CODEBASE_INSPECT_JOB_KIND),
   );
+  const selectedAgent = compatible.find((agent) => agent.id === agentId);
 
   const reset = () => {
     requestSequence.current += 1;
     setAgentId("");
-    setListing(null);
+    setSelectedFolder(null);
     setInspection(null);
     setName("");
     setDescription("");
     setError(null);
-    setShowHidden(false);
     setBusy(false);
   };
 
@@ -763,35 +828,7 @@ function AddCodebaseDialog({
     onOpenChange(nextOpen);
   };
 
-  const browse = async (path: string | null) => {
-    if (!agentId) return;
-    const requestId = ++requestSequence.current;
-    setBusy(true);
-    try {
-      const data = await controlPlaneRequest<{
-        browseAgentDirectory: DirectoryListing;
-      }>(
-        `mutation BrowseAgentDirectory($input: BrowseAgentDirectoryInput!) {
-          browseAgentDirectory(input: $input) {
-            path parentPath homePath truncated entries { name path hidden }
-          }
-        }`,
-        { input: { agentId, path, requestId: createClientId() } },
-      );
-      if (requestId !== requestSequence.current) return;
-      setListing(data.browseAgentDirectory);
-      setInspection(null);
-      setError(null);
-    } catch (value) {
-      if (requestId !== requestSequence.current) return;
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (requestId === requestSequence.current) setBusy(false);
-    }
-  };
-
-  const inspect = async () => {
-    if (!listing) return;
+  const inspect = async (folder: string) => {
     const requestId = ++requestSequence.current;
     setBusy(true);
     try {
@@ -806,7 +843,7 @@ function AddCodebaseDialog({
           }
         }`,
         {
-          input: { agentId, folder: listing.path, requestId: createClientId() },
+          input: { agentId, folder, requestId: createClientId() },
         },
       );
       if (requestId !== requestSequence.current) return;
@@ -844,21 +881,6 @@ function AddCodebaseDialog({
     }
   };
 
-  const breadcrumbs = listing
-    ? listing.path === "/"
-      ? [{ label: "/", path: "/" }]
-      : [
-          { label: "/", path: "/" },
-          ...listing.path
-            .split("/")
-            .filter(Boolean)
-            .map((label, index, parts) => ({
-              label,
-              path: `/${parts.slice(0, index + 1).join("/")}`,
-            })),
-        ]
-    : [];
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -878,7 +900,7 @@ function AddCodebaseDialog({
               onValueChange={(value) => {
                 requestSequence.current += 1;
                 setAgentId(value);
-                setListing(null);
+                setSelectedFolder(null);
                 setInspection(null);
                 setBusy(false);
                 setError(null);
@@ -897,81 +919,14 @@ function AddCodebaseDialog({
               </SelectContent>
             </Select>
           </div>
-          {agentId && !listing && (
-            <Button
+          {agentId && !inspection && (
+            <AgentDirectoryBrowser
+              agentId={agentId}
               disabled={busy}
-              onClick={() => void browse(null)}
-              type="button"
-              variant="outline"
-            >
-              {busy ? <Spinner /> : <Folder />} {t("browseHome")}
-            </Button>
-          )}
-          {listing && !inspection && (
-            <div className="space-y-3 rounded-lg border p-3">
-              <div className="flex flex-wrap items-center gap-1">
-                <Button
-                  aria-label={t("home")}
-                  onClick={() => void browse(listing.homePath)}
-                  size="icon-sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Home />
-                </Button>
-                {breadcrumbs.map((crumb, index) => (
-                  <span className="flex items-center" key={crumb.path}>
-                    {index > 0 && (
-                      <ChevronRight className="size-3 text-muted-foreground" />
-                    )}
-                    <Button
-                      onClick={() => void browse(crumb.path)}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {crumb.label}
-                    </Button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={showHidden}
-                  id="show-hidden"
-                  onCheckedChange={(value) => setShowHidden(Boolean(value))}
-                />
-                <Label htmlFor="show-hidden">{t("showHidden")}</Label>
-              </div>
-              <div className="max-h-64 overflow-y-auto rounded-md border">
-                {listing.entries
-                  .filter((entry) => showHidden || !entry.hidden)
-                  .map((entry) => (
-                    <Button
-                      className="h-auto w-full justify-start rounded-none border-b px-3 py-2 last:border-0"
-                      key={entry.path}
-                      onClick={() => void browse(entry.path)}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Folder className="size-4" /> {entry.name}
-                    </Button>
-                  ))}
-              </div>
-              {listing.truncated && (
-                <p className="text-xs text-muted-foreground">
-                  {t("truncated")}
-                </p>
-              )}
-              <Button
-                disabled={busy}
-                onClick={() => void inspect()}
-                type="button"
-              >
-                {busy ? <Spinner /> : <FolderGit2 />} {t("selectFolder")}
-              </Button>
-            </div>
+              initialPath={selectedAgent?.baseRepoDirectory}
+              key={agentId}
+              onPathChange={setSelectedFolder}
+            />
           )}
           {inspection && (
             <div className="space-y-4 rounded-lg border p-4">
@@ -1025,24 +980,35 @@ function AddCodebaseDialog({
               )}
             </div>
           )}
-          <DialogFooter>
-            <Button
-              onClick={() => handleOpenChange(false)}
-              type="button"
-              variant="outline"
-            >
-              {t("cancel")}
-            </Button>
-            {inspection && (
+          <DialogFooter className="flex-row items-center justify-between sm:justify-between">
+            {selectedFolder && !inspection && (
               <Button
-                disabled={
-                  busy || (!inspection.existingRepository && !name.trim())
-                }
-                type="submit"
+                disabled={busy}
+                onClick={() => void inspect(selectedFolder)}
+                type="button"
               >
-                {busy && <Spinner />} {t("confirm")}
+                {busy ? <Spinner /> : <FolderGit2 />} {t("addFolder")}
               </Button>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                onClick={() => handleOpenChange(false)}
+                type="button"
+                variant="outline"
+              >
+                {t("cancel")}
+              </Button>
+              {inspection && (
+                <Button
+                  disabled={
+                    busy || (!inspection.existingRepository && !name.trim())
+                  }
+                  type="submit"
+                >
+                  {busy && <Spinner />} {t("confirm")}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -1062,6 +1028,12 @@ function EditRepositoryDialog({
   const t = useTranslations("codebases");
   const [name, setName] = useState(repository?.name ?? "");
   const [description, setDescription] = useState(repository?.description ?? "");
+  const [jiraBranchRegex, setJiraBranchRegex] = useState(
+    repository?.jiraBranchRegex ?? "",
+  );
+  const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(
+    repository?.keepBaseBranchUpToDate ?? true,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (event: FormEvent) => {
@@ -1073,7 +1045,15 @@ function EditRepositoryDialog({
         `mutation UpdateCodebaseRepository($input: UpdateCodebaseRepositoryInput!) {
           updateCodebaseRepository(input: $input) { id }
         }`,
-        { input: { id: repository.id, name, description } },
+        {
+          input: {
+            id: repository.id,
+            name,
+            description,
+            jiraBranchRegex: jiraBranchRegex || null,
+            keepBaseBranchUpToDate,
+          },
+        },
       );
       await onSaved();
     } catch (value) {
@@ -1106,6 +1086,20 @@ function EditRepositoryDialog({
             />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="edit-codebase-jira-regex">
+              {t("jiraBranchRegex")}
+            </Label>
+            <Input
+              id="edit-codebase-jira-regex"
+              onChange={(event) => setJiraBranchRegex(event.target.value)}
+              placeholder={t("inheritDefaultRegex")}
+              value={jiraBranchRegex}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("jiraBranchRegexHelp")}
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="edit-codebase-description">
               {t("repositoryDescription")}
             </Label>
@@ -1115,6 +1109,24 @@ function EditRepositoryDialog({
               onChange={(event) => setDescription(event.target.value)}
               value={description}
             />
+          </div>
+          <div className="flex items-start gap-3 rounded-lg border p-3">
+            <Checkbox
+              checked={keepBaseBranchUpToDate}
+              className="mt-0.5"
+              id="edit-codebase-keep-base-branch-up-to-date"
+              onCheckedChange={(checked) =>
+                setKeepBaseBranchUpToDate(checked === true)
+              }
+            />
+            <div className="space-y-1">
+              <Label htmlFor="edit-codebase-keep-base-branch-up-to-date">
+                {t("keepBaseBranchUpToDate")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t("keepBaseBranchUpToDateHelp")}
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button disabled={busy} type="submit">

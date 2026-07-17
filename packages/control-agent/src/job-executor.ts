@@ -1,6 +1,8 @@
 import { AgentGraphQLClient, type AgentJob } from "./graphql-client.js";
 import { handlers } from "./handlers/index.js";
+import { closeAllWorktreeWatches } from "./handlers/worktrees.js";
 import type { ProcessResult } from "./process-runner.js";
+import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 export class JobExecutor {
   private readonly running = new Map<
@@ -9,7 +11,10 @@ export class JobExecutor {
   >();
   private stopping = false;
 
-  constructor(private readonly client: AgentGraphQLClient) {}
+  constructor(
+    private readonly client: AgentGraphQLClient,
+    private readonly repositoryCoordinator = new RepositoryCoordinator(),
+  ) {}
 
   execute(job: AgentJob): void {
     if (this.stopping || this.running.has(job.id)) return;
@@ -26,6 +31,7 @@ export class JobExecutor {
 
   async cancelAll(): Promise<void> {
     this.stopping = true;
+    closeAllWorktreeWatches();
     const jobs = [...this.running.values()];
     for (const { controller } of jobs) controller.abort();
     await Promise.allSettled(jobs.map(({ task }) => task));
@@ -50,12 +56,28 @@ export class JobExecutor {
       const handler = handlers[claimed.kind];
       if (!handler)
         throw new Error(`No local handler is registered for ${claimed.kind}`);
-      result = await handler(
-        claimed.payload,
-        claimed.timeoutSeconds * 1_000,
-        controller.signal,
-        (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
-      );
+      const runHandler = () =>
+        handler(
+          claimed.payload,
+          claimed.timeoutSeconds * 1_000,
+          controller.signal,
+          (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
+          {
+            reportWorktreeActivity: (input) =>
+              this.client.reportWorktreeActivity(input),
+          },
+        );
+      const codebaseId =
+        claimed.payload &&
+        typeof claimed.payload === "object" &&
+        !Array.isArray(claimed.payload) &&
+        typeof (claimed.payload as Record<string, unknown>).codebaseId ===
+          "string"
+          ? String((claimed.payload as Record<string, unknown>).codebaseId)
+          : null;
+      result = codebaseId
+        ? await this.repositoryCoordinator.run(codebaseId, runHandler)
+        : await runHandler();
       status = result.cancelled
         ? "CANCELLED"
         : result.timedOut

@@ -6,6 +6,7 @@ export type Agent = {
   osVersion: string;
   architecture: string;
   capabilities: string[];
+  baseRepoDirectory: string | null;
   connectionStatus: "ONLINE" | "OFFLINE";
   ipAddress: string | null;
   lastSeenAt: string | null;

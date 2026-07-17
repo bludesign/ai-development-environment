@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  codebaseJobPayload,
   normalizeGitOrigin,
   parseCodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
@@ -57,5 +58,26 @@ describe("codebase snapshot contract", () => {
     expect(() => parseCodebaseSnapshot({ ...snapshot, ahead: -1 })).toThrow(
       "non-negative integer",
     );
+  });
+});
+
+describe("codebase job payload contract", () => {
+  test("accepts base branch update settings and validates the toggle", () => {
+    expect(
+      codebaseJobPayload({
+        folder: "/Users/test/repository",
+        baseBranch: "main",
+        keepBaseBranchUpToDate: true,
+      }),
+    ).toMatchObject({
+      baseBranch: "main",
+      keepBaseBranchUpToDate: true,
+    });
+    expect(() =>
+      codebaseJobPayload({
+        folder: "/Users/test/repository",
+        keepBaseBranchUpToDate: "yes",
+      }),
+    ).toThrow("must be a boolean");
   });
 });

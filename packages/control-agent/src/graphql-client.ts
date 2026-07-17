@@ -4,6 +4,10 @@ import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
 import type { ProcessLog } from "./process-runner.js";
 import type { CodebaseStatusReport } from "@ai-development-environment/agent-contract/codebases";
+import type {
+  CodebaseWorktreeReport,
+  WorktreeActivityReport,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 export type AgentJob = {
   id: string;
@@ -15,14 +19,33 @@ export type AgentJob = {
   timeoutSeconds: number;
 };
 
+export type AgentEvent =
+  | {
+      type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
+      job: AgentJob;
+    }
+  | {
+      type: "CODEBASE_RECONCILE_REQUESTED";
+      job: null;
+    };
+
 export type AgentCodebaseRegistration = {
   id: string;
   folder: string;
   canonicalOrigin: string;
+  defaultBranch: string | null;
+  keepBaseBranchUpToDate: boolean;
+  lastFetchedAt: string | null;
+  lastFetchAttemptAt: string | null;
+  worktrees: Array<{
+    gitDirectory: string;
+    baseBranchOverride: string | null;
+  }>;
 };
 
 export type AgentCodebaseConfiguration = {
   refreshIntervalSeconds: number;
+  fetchIntervalSeconds: number;
   codebases: AgentCodebaseRegistration[];
 };
 
@@ -165,8 +188,21 @@ export class AgentGraphQLClient {
         id: string;
         folder: string;
         canonicalOrigin: string;
+        defaultBranch: string | null;
+        keepBaseBranchUpToDate: boolean;
+        lastFetchedAt: string | null;
+        lastFetchAttemptAt: string | null;
+        worktrees: Array<{
+          gitDirectory: string;
+          baseBranchOverride: string | null;
+        }>;
       }>;
-    }>(`query AgentCodebases { agentCodebases { id folder canonicalOrigin } }`);
+    }>(`query AgentCodebases {
+      agentCodebases {
+        id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
+        worktrees { gitDirectory baseBranchOverride }
+      }
+    }`);
     return data.agentCodebases;
   }
 
@@ -176,7 +212,11 @@ export class AgentGraphQLClient {
     }>(`query AgentCodebaseConfiguration {
       agentCodebaseConfiguration {
         refreshIntervalSeconds
-        codebases { id folder canonicalOrigin }
+        fetchIntervalSeconds
+        codebases {
+          id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
+          worktrees { gitDirectory baseBranchOverride }
+        }
       }
     }`);
     return data.agentCodebaseConfiguration;
@@ -188,6 +228,26 @@ export class AgentGraphQLClient {
         reportCodebaseStatuses(reports: $reports) { id }
       }`,
       { reports },
+    );
+  }
+
+  reportWorktrees(reports: CodebaseWorktreeReport[]) {
+    return this.request<{ reportWorktrees: Array<{ id: string }> }>(
+      `mutation ReportWorktrees($reports: [CodebaseWorktreeReportInput!]!) {
+        reportWorktrees(reports: $reports) { id }
+      }`,
+      { reports },
+    );
+  }
+
+  reportWorktreeActivity(input: WorktreeActivityReport) {
+    return this.request<{
+      reportWorktreeActivity: { worktreeId: string; observedAt: string };
+    }>(
+      `mutation ReportWorktreeActivity($input: WorktreeActivityReportInput!) {
+        reportWorktreeActivity(input: $input) { worktreeId observedAt }
+      }`,
+      { input },
     );
   }
 }
@@ -214,10 +274,7 @@ export function createAgentSubscriptionClient(config: AgentConfig): Client {
 export function subscribeToAgentEvents(
   client: Client,
   agentId: string,
-  onEvent: (event: {
-    type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
-    job: AgentJob;
-  }) => void,
+  onEvent: (event: AgentEvent) => void,
 ): () => void {
   let stopped = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -235,10 +292,7 @@ export function subscribeToAgentEvents(
   const subscribe = () => {
     if (stopped) return;
     disposeSubscription = client.subscribe<{
-      agentEvents: {
-        type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
-        job: AgentJob;
-      };
+      agentEvents: AgentEvent;
     }>(
       {
         query: `subscription AgentEvents($agentId: ID!) {

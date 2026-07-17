@@ -7,6 +7,7 @@ import {
 import { collectInventory } from "./inventory.js";
 import { JobExecutor } from "./job-executor.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
+import { RepositoryCoordinator } from "./repository-coordinator.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -15,8 +16,9 @@ export async function runAgent(
   signal: AbortSignal,
 ): Promise<void> {
   const client = new AgentGraphQLClient(config.server, config.credential);
-  const executor = new JobExecutor(client);
-  const codebaseMonitor = new CodebaseMonitor(client);
+  const repositoryCoordinator = new RepositoryCoordinator();
+  const executor = new JobExecutor(client, repositoryCoordinator);
+  const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);
   const inventory = collectInventory();
   let reconciling = false;
   let codebaseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,14 +89,42 @@ export async function runAgent(
     }
   };
 
+  let codebaseReconciling = false;
+  let codebaseReconcilePending = false;
   const reconcileCodebases = async () => {
-    await codebaseMonitor.reconcile(signal);
-    if (!signal.aborted) {
-      codebaseTimer = setTimeout(
-        () => void reconcileCodebases(),
-        codebaseMonitor.reconcileIntervalMs,
-      );
+    if (codebaseReconciling) {
+      codebaseReconcilePending = true;
+      return;
     }
+    codebaseReconciling = true;
+    if (codebaseTimer) clearTimeout(codebaseTimer);
+    codebaseTimer = undefined;
+    try {
+      await codebaseMonitor.reconcile(signal);
+    } finally {
+      codebaseReconciling = false;
+      if (!signal.aborted) {
+        if (codebaseReconcilePending) {
+          codebaseReconcilePending = false;
+          void reconcileCodebases();
+        } else {
+          codebaseTimer = setTimeout(
+            () => void reconcileCodebases(),
+            codebaseMonitor.reconcileIntervalMs,
+          );
+        }
+      }
+    }
+  };
+  const requestCodebaseReconcile = () => {
+    if (signal.aborted) return;
+    if (codebaseReconciling) {
+      codebaseReconcilePending = true;
+      return;
+    }
+    if (codebaseTimer) clearTimeout(codebaseTimer);
+    codebaseTimer = undefined;
+    void reconcileCodebases();
   };
 
   await heartbeat();
@@ -106,7 +136,11 @@ export async function runAgent(
     config.agentId,
     (event) => {
       if (event.type === "JOB_AVAILABLE") executor.execute(event.job);
-      else executor.cancel(event.job.id);
+      else if (event.type === "JOB_CANCEL_REQUESTED") {
+        executor.cancel(event.job.id);
+      } else {
+        requestCodebaseReconcile();
+      }
     },
   );
   const heartbeatTimer = setInterval(

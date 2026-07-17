@@ -38,6 +38,7 @@ function agent(
     osVersion: "macOS",
     architecture: "arm64",
     capabilities,
+    baseRepoDirectory: null,
     connectionStatus,
     ipAddress: null,
     lastSeenAt: new Date(0).toISOString(),
