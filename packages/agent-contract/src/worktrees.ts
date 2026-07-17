@@ -32,6 +32,14 @@ export type WorktreeWatchAction = "START" | "STOP";
 export type WorktreeActivityReport = {
   codebaseId: string;
   gitDirectory: string;
+  branch?: string | null;
+  headSha?: string | null;
+  upstream?: string | null;
+  ahead?: number | null;
+  behind?: number | null;
+  syncState?: CodebaseSyncState;
+  baseAhead?: number | null;
+  baseBehind?: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
   observedAt: string;
@@ -129,6 +137,31 @@ function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
+}
+
+function optionalNullableString(
+  value: unknown,
+  name: string,
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return stringValue(value, name);
+}
+
+function optionalNullableCount(
+  value: unknown,
+  name: string,
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  return nullableCount(value, name);
+}
+
+function optionalSyncState(
+  value: unknown,
+  name: string,
+): CodebaseSyncState | undefined {
+  if (value === undefined) return undefined;
+  return syncState(value, name);
 }
 
 function dateString(value: unknown, name: string): string {
@@ -359,6 +392,14 @@ export function parseWorktreeActivityReport(
   const allowed = new Set([
     "codebaseId",
     "gitDirectory",
+    "branch",
+    "headSha",
+    "upstream",
+    "ahead",
+    "behind",
+    "syncState",
+    "baseAhead",
+    "baseBehind",
     "hasStagedChanges",
     "hasUnstagedChanges",
     "observedAt",
@@ -375,6 +416,38 @@ export function parseWorktreeActivityReport(
     gitDirectory: stringValue(
       report.gitDirectory,
       "worktree activity report.gitDirectory",
+    ),
+    branch: optionalNullableString(
+      report.branch,
+      "worktree activity report.branch",
+    ),
+    headSha: optionalNullableString(
+      report.headSha,
+      "worktree activity report.headSha",
+    ),
+    upstream: optionalNullableString(
+      report.upstream,
+      "worktree activity report.upstream",
+    ),
+    ahead: optionalNullableCount(
+      report.ahead,
+      "worktree activity report.ahead",
+    ),
+    behind: optionalNullableCount(
+      report.behind,
+      "worktree activity report.behind",
+    ),
+    syncState: optionalSyncState(
+      report.syncState,
+      "worktree activity report.syncState",
+    ),
+    baseAhead: optionalNullableCount(
+      report.baseAhead,
+      "worktree activity report.baseAhead",
+    ),
+    baseBehind: optionalNullableCount(
+      report.baseBehind,
+      "worktree activity report.baseBehind",
     ),
     hasStagedChanges: optionalBoolean(
       report.hasStagedChanges,

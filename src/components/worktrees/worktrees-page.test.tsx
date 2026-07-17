@@ -471,6 +471,14 @@ describe("WorktreesPage", () => {
                 data: {
                   worktreeInspectionChanged: {
                     worktreeId: "worktree-1",
+                    branch: "feature/AIDE-24",
+                    headSha: "def456",
+                    upstream: "origin/feature/AIDE-24",
+                    ahead: 1,
+                    behind: 0,
+                    syncState: "AHEAD",
+                    baseAhead: 2,
+                    baseBehind: 0,
                     hasStagedChanges: false,
                     hasUnstagedChanges: true,
                     observedAt: new Date().toISOString(),
@@ -533,6 +541,8 @@ describe("WorktreesPage", () => {
 
     expect(await screen.findByText("after-save.ts")).toBeDefined();
     expect(screen.getByText("Dirty")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Commits: 2" })).toBeDefined();
+    expect(screen.getByText("1 ahead")).toBeDefined();
     expect(screen.queryByText("before-save.ts")).toBeNull();
   });
 

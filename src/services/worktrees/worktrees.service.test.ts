@@ -181,6 +181,14 @@ describe("WorktreesService", () => {
     const activity = {
       codebaseId: "codebase-1",
       gitDirectory: "/repo/.git",
+      branch: "feature/AIDE-24",
+      headSha: "def",
+      upstream: "origin/feature/AIDE-24",
+      ahead: 1,
+      behind: 0,
+      syncState: "AHEAD" as const,
+      baseAhead: 2,
+      baseBehind: 0,
       hasStagedChanges: false,
       hasUnstagedChanges: true,
       observedAt: new Date(0).toISOString(),
@@ -190,13 +198,33 @@ describe("WorktreesService", () => {
       service().reportActivity("agent-1", activity),
     ).resolves.toEqual({
       worktreeId: "worktree-1",
+      branch: "feature/AIDE-24",
+      headSha: "def",
+      upstream: "origin/feature/AIDE-24",
+      ahead: 1,
+      behind: 0,
+      syncState: "AHEAD",
+      baseAhead: 2,
+      baseBehind: 0,
       hasStagedChanges: false,
       hasUnstagedChanges: true,
       observedAt: activity.observedAt,
     });
     expect(update).toHaveBeenCalledWith({
       where: { id: "worktree-1" },
-      data: { hasStagedChanges: false, hasUnstagedChanges: true },
+      data: {
+        branch: "feature/AIDE-24",
+        headSha: "def",
+        upstream: "origin/feature/AIDE-24",
+        ahead: 1,
+        behind: 0,
+        syncState: "AHEAD",
+        baseAhead: 2,
+        baseBehind: 0,
+        lastCheckedAt: new Date(0),
+        hasStagedChanges: false,
+        hasUnstagedChanges: true,
+      },
     });
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

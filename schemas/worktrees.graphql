@@ -115,6 +115,14 @@ type WorktreeOverviewChange {
 
 type WorktreeActivity {
   worktreeId: ID!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState
+  baseAhead: Int
+  baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
   observedAt: String!
@@ -154,6 +162,14 @@ input CodebaseWorktreeReportInput {
 input WorktreeActivityReportInput {
   codebaseId: ID!
   gitDirectory: String!
+  branch: String
+  headSha: String
+  upstream: String
+  ahead: Int
+  behind: Int
+  syncState: CodebaseSyncState
+  baseAhead: Int
+  baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
   observedAt: String!

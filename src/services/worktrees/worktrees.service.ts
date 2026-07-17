@@ -497,13 +497,42 @@ export class WorktreesService {
       select: { id: true, codebaseId: true },
     });
     if (!worktree) throw new Error("Worktree activity source was not found");
+    const hasCommitStatus =
+      report.branch !== undefined ||
+      report.headSha !== undefined ||
+      report.upstream !== undefined ||
+      report.ahead !== undefined ||
+      report.behind !== undefined ||
+      report.syncState !== undefined ||
+      report.baseAhead !== undefined ||
+      report.baseBehind !== undefined;
     if (
+      hasCommitStatus ||
       report.hasStagedChanges !== undefined ||
       report.hasUnstagedChanges !== undefined
     ) {
       await prisma.worktree.update({
         where: { id: worktree.id },
         data: {
+          ...(report.branch === undefined ? {} : { branch: report.branch }),
+          ...(report.headSha === undefined ? {} : { headSha: report.headSha }),
+          ...(report.upstream === undefined
+            ? {}
+            : { upstream: report.upstream }),
+          ...(report.ahead === undefined ? {} : { ahead: report.ahead }),
+          ...(report.behind === undefined ? {} : { behind: report.behind }),
+          ...(report.syncState === undefined
+            ? {}
+            : { syncState: report.syncState }),
+          ...(report.baseAhead === undefined
+            ? {}
+            : { baseAhead: report.baseAhead }),
+          ...(report.baseBehind === undefined
+            ? {}
+            : { baseBehind: report.baseBehind }),
+          ...(hasCommitStatus
+            ? { lastCheckedAt: new Date(report.observedAt) }
+            : {}),
           ...(report.hasStagedChanges === undefined
             ? {}
             : { hasStagedChanges: report.hasStagedChanges }),
@@ -516,6 +545,20 @@ export class WorktreesService {
     }
     const activity = {
       worktreeId: worktree.id,
+      ...(report.branch === undefined ? {} : { branch: report.branch }),
+      ...(report.headSha === undefined ? {} : { headSha: report.headSha }),
+      ...(report.upstream === undefined ? {} : { upstream: report.upstream }),
+      ...(report.ahead === undefined ? {} : { ahead: report.ahead }),
+      ...(report.behind === undefined ? {} : { behind: report.behind }),
+      ...(report.syncState === undefined
+        ? {}
+        : { syncState: report.syncState }),
+      ...(report.baseAhead === undefined
+        ? {}
+        : { baseAhead: report.baseAhead }),
+      ...(report.baseBehind === undefined
+        ? {}
+        : { baseBehind: report.baseBehind }),
       ...(report.hasStagedChanges === undefined
         ? {}
         : { hasStagedChanges: report.hasStagedChanges }),

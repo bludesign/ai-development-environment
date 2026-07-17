@@ -29,12 +29,14 @@ type ActiveWorktreeWatch = {
   codebaseId: string;
   gitDirectory: string;
   folder: string;
+  baseBranch: string | null;
   timeoutMs: number;
   watchers: FSWatcher[];
   reporter: AgentJobHandlerContext["reportWorktreeActivity"];
   timer: ReturnType<typeof setTimeout> | null;
   reporting: boolean;
   pending: boolean;
+  headIdentity: string | null;
 };
 
 const activeWorktreeWatches = new Map<string, ActiveWorktreeWatch>();
@@ -85,25 +87,83 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   entry.reporting = true;
   entry.pending = false;
   try {
-    const status = await git(
-      entry.folder,
-      [
-        "--no-optional-locks",
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-      ],
-      entry.timeoutMs,
-      new AbortController().signal,
-    );
+    const signal = new AbortController().signal;
+    const [status, branchResult, headResult] = await Promise.all([
+      git(
+        entry.folder,
+        [
+          "--no-optional-locks",
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+        ],
+        entry.timeoutMs,
+        signal,
+      ),
+      git(
+        entry.folder,
+        ["symbolic-ref", "--short", "-q", "HEAD"],
+        entry.timeoutMs,
+        signal,
+      ),
+      git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
+    ]);
+    const branch =
+      branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+    const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
+    const headIdentity = headSha ? `${branch ?? ""}\0${headSha}` : null;
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
       ...(status.exitCode === 0 ? statusChangeState(status.stdout) : {}),
       observedAt: new Date().toISOString(),
     };
+    if (headIdentity && headIdentity !== entry.headIdentity) {
+      const upstreamResult = branch
+        ? await git(
+            entry.folder,
+            [
+              "rev-parse",
+              "--abbrev-ref",
+              "--symbolic-full-name",
+              "@{upstream}",
+            ],
+            entry.timeoutMs,
+            signal,
+          )
+        : null;
+      const upstream =
+        upstreamResult?.exitCode === 0 ? upstreamResult.stdout.trim() : null;
+      const upstreamCounts = upstream
+        ? await counts(
+            entry.folder,
+            "HEAD...@{upstream}",
+            entry.timeoutMs,
+            signal,
+          )
+        : { ahead: null, behind: null };
+      const baseCounts = entry.baseBranch
+        ? await counts(
+            entry.folder,
+            `HEAD...refs/remotes/origin/${entry.baseBranch}`,
+            entry.timeoutMs,
+            signal,
+          )
+        : { ahead: null, behind: null };
+      Object.assign(report, {
+        branch,
+        headSha,
+        upstream,
+        ahead: upstreamCounts.ahead,
+        behind: upstreamCounts.behind,
+        syncState: worktreeSyncState(branch, upstream, upstreamCounts),
+        baseAhead: baseCounts.ahead,
+        baseBehind: baseCounts.behind,
+      } satisfies Partial<WorktreeActivityReport>);
+    }
     await entry.reporter(report);
+    if (headIdentity) entry.headIdentity = headIdentity;
   } catch (error) {
     console.error(
       "Could not report worktree activity:",
@@ -266,6 +326,26 @@ async function counts(
     : { ahead: null, behind: null };
 }
 
+function worktreeSyncState(
+  branch: string | null,
+  upstream: string | null,
+  upstreamCounts: { ahead: number | null; behind: number | null },
+) {
+  return !branch
+    ? ("DETACHED" as const)
+    : !upstream
+      ? ("NO_UPSTREAM" as const)
+      : upstreamCounts.ahead === null || upstreamCounts.behind === null
+        ? ("UNKNOWN" as const)
+        : upstreamCounts.ahead > 0 && upstreamCounts.behind > 0
+          ? ("DIVERGED" as const)
+          : upstreamCounts.ahead > 0
+            ? ("AHEAD" as const)
+            : upstreamCounts.behind > 0
+              ? ("BEHIND" as const)
+              : ("IN_SYNC" as const);
+}
+
 export async function inspectWorktreeItem(
   folderValue: string,
   rootFolder: string,
@@ -317,19 +397,7 @@ export async function inspectWorktreeItem(
           signal,
         )
       : { ahead: null, behind: null };
-    const syncState = !branch
-      ? "DETACHED"
-      : !upstream
-        ? "NO_UPSTREAM"
-        : upstreamCounts.ahead === null || upstreamCounts.behind === null
-          ? "UNKNOWN"
-          : upstreamCounts.ahead > 0 && upstreamCounts.behind > 0
-            ? "DIVERGED"
-            : upstreamCounts.ahead > 0
-              ? "AHEAD"
-              : upstreamCounts.behind > 0
-                ? "BEHIND"
-                : "IN_SYNC";
+    const syncState = worktreeSyncState(branch, upstream, upstreamCounts);
     return {
       gitDirectory: gitDir,
       folder,
@@ -630,12 +698,14 @@ export const watchWorktree: AgentJobHandler = async (
     codebaseId: input.codebaseId,
     gitDirectory: input.gitDirectory,
     folder,
+    baseBranch: input.baseBranch,
     timeoutMs: Math.min(timeoutMs, 30_000),
     watchers: [],
     reporter: context.reportWorktreeActivity,
     timer: null,
     reporting: false,
     pending: false,
+    headIdentity: null,
   };
   activeWorktreeWatches.set(input.gitDirectory, entry);
   try {

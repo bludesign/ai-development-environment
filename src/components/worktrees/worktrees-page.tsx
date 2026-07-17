@@ -274,10 +274,88 @@ function useQueuedWorktreeInspection(inspect: () => Promise<void>) {
 
 type WorktreeActivity = {
   worktreeId: string;
+  branch: string | null;
+  headSha: string | null;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  syncState: Worktree["syncState"] | null;
+  baseAhead: number | null;
+  baseBehind: number | null;
   hasStagedChanges: boolean | null;
   hasUnstagedChanges: boolean | null;
   observedAt: string;
 };
+
+type LiveWorktreeFields = Pick<
+  Worktree,
+  | "branch"
+  | "headSha"
+  | "upstream"
+  | "ahead"
+  | "behind"
+  | "syncState"
+  | "baseAhead"
+  | "baseBehind"
+  | "hasStagedChanges"
+  | "hasUnstagedChanges"
+>;
+
+function useLiveWorktree(source: Worktree) {
+  const [override, setOverride] = useState<{
+    sourceUpdatedAt: string;
+    value: Partial<LiveWorktreeFields>;
+  } | null>(null);
+  const applyOverride = useCallback(
+    (value: Partial<LiveWorktreeFields>) => {
+      setOverride((current) => ({
+        sourceUpdatedAt: source.updatedAt,
+        value:
+          current?.sourceUpdatedAt === source.updatedAt
+            ? { ...current.value, ...value }
+            : value,
+      }));
+    },
+    [source.updatedAt],
+  );
+  const applyActivity = useCallback(
+    (activity: WorktreeActivity) => {
+      const value: Partial<LiveWorktreeFields> = {};
+      if (activity.hasStagedChanges !== null) {
+        value.hasStagedChanges = activity.hasStagedChanges;
+      }
+      if (activity.hasUnstagedChanges !== null) {
+        value.hasUnstagedChanges = activity.hasUnstagedChanges;
+      }
+      if (typeof activity.headSha === "string") {
+        Object.assign(value, {
+          branch: activity.branch,
+          headSha: activity.headSha,
+          upstream: activity.upstream,
+          ahead: activity.ahead,
+          behind: activity.behind,
+          syncState: activity.syncState ?? "UNKNOWN",
+          baseAhead: activity.baseAhead,
+          baseBehind: activity.baseBehind,
+        } satisfies Partial<LiveWorktreeFields>);
+      }
+      if (Object.keys(value).length) applyOverride(value);
+    },
+    [applyOverride],
+  );
+  const setUnstagedChanges = useCallback(
+    (value: boolean) => applyOverride({ hasUnstagedChanges: value }),
+    [applyOverride],
+  );
+  return {
+    worktree:
+      override?.sourceUpdatedAt === source.updatedAt
+        ? { ...source, ...override.value }
+        : source,
+    applyActivity,
+    setUnstagedChanges,
+  };
+}
 
 function useWorktreeActivitySubscription(
   worktreeId: string,
@@ -309,7 +387,8 @@ function useWorktreeActivitySubscription(
         {
           query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
             worktreeInspectionChanged(worktreeId: $worktreeId) {
-              worktreeId hasStagedChanges hasUnstagedChanges observedAt
+              worktreeId branch headSha upstream ahead behind syncState baseAhead baseBehind
+              hasStagedChanges hasUnstagedChanges observedAt
             }
           }`,
           variables: { worktreeId },
@@ -838,18 +917,14 @@ function FetchAge({
 }
 
 function WorktreeCard(props: WorktreeItemProps) {
-  const { inspectionRefreshToken, onError, worktree } = props;
+  const { inspectionRefreshToken, onError } = props;
+  const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
+    props.worktree,
+  );
+  const liveProps = { ...props, worktree };
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [dirtyOverride, setDirtyOverride] = useState<{
-    sourceUpdatedAt: string;
-    value: boolean;
-  } | null>(null);
-  const hasUnstagedChanges =
-    dirtyOverride?.sourceUpdatedAt === worktree.updatedAt
-      ? dirtyOverride.value
-      : worktree.hasUnstagedChanges;
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const t = useTranslations("worktrees");
@@ -860,12 +935,11 @@ function WorktreeCard(props: WorktreeItemProps) {
       const next = await inspectWorktree(worktree.id);
       if (request !== detailRequest.current) return;
       setDetail(next);
-      setDirtyOverride({
-        sourceUpdatedAt: worktree.updatedAt,
-        value: next.changes.some(
+      setUnstagedChanges(
+        next.changes.some(
           (change) => change.unstaged || change.untracked || change.conflicted,
         ),
-      });
+      );
       onError(null);
     } catch (value) {
       if (request === detailRequest.current)
@@ -873,19 +947,14 @@ function WorktreeCard(props: WorktreeItemProps) {
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, worktree.id, worktree.updatedAt]);
+  }, [onError, setUnstagedChanges, worktree.id]);
   const refreshInspection = useQueuedWorktreeInspection(inspect);
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
-      if (activity.hasUnstagedChanges !== null) {
-        setDirtyOverride({
-          sourceUpdatedAt: worktree.updatedAt,
-          value: activity.hasUnstagedChanges,
-        });
-      }
+      applyActivity(activity);
       if (expanded) void refreshInspection();
     },
-    [expanded, refreshInspection, worktree.updatedAt],
+    [applyActivity, expanded, refreshInspection],
   );
   useWorktreeActivitySubscription(
     worktree.id,
@@ -927,20 +996,20 @@ function WorktreeCard(props: WorktreeItemProps) {
             </span>
           </Button>
           {(worktree.ticketKey || worktree.ticketTitle) && (
-            <WorktreeTicketLink {...props} />
+            <WorktreeTicketLink {...liveProps} />
           )}
         </CardTitle>
         <CardAction className="flex max-w-full flex-wrap items-center justify-end gap-1">
           <OriginStatusBadges worktree={worktree} />
-          {hasUnstagedChanges && (
+          {worktree.hasUnstagedChanges && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
-          <WorktreeMenus {...props} />
+          <WorktreeMenus {...liveProps} />
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <WorktreeMetadata
-          {...props}
+          {...liveProps}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
         />
@@ -953,7 +1022,7 @@ function WorktreeCard(props: WorktreeItemProps) {
       </CardContent>
       <CardFooter className="flex-wrap gap-2">
         <ActionRow
-          {...props}
+          {...liveProps}
           onCompleted={async () => {
             await props.onReload();
             if (expanded) await refreshInspection();
@@ -1850,20 +1919,15 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree">) {
 }
 
 function WorktreeTableRows(props: WorktreeItemProps) {
-  const { baseRepoDirectory, inspectionRefreshToken, onError, worktree } =
-    props;
+  const { baseRepoDirectory, inspectionRefreshToken, onError } = props;
+  const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
+    props.worktree,
+  );
+  const liveProps = { ...props, worktree };
   const t = useTranslations("worktrees");
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<WorktreeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [dirtyOverride, setDirtyOverride] = useState<{
-    sourceUpdatedAt: string;
-    value: boolean;
-  } | null>(null);
-  const hasUnstagedChanges =
-    dirtyOverride?.sourceUpdatedAt === worktree.updatedAt
-      ? dirtyOverride.value
-      : worktree.hasUnstagedChanges;
   const detailRequest = useRef(0);
   const lastInspectionRefreshToken = useRef(inspectionRefreshToken);
   const inspect = useCallback(async () => {
@@ -1873,12 +1937,11 @@ function WorktreeTableRows(props: WorktreeItemProps) {
       const next = await inspectWorktree(worktree.id);
       if (request !== detailRequest.current) return;
       setDetail(next);
-      setDirtyOverride({
-        sourceUpdatedAt: worktree.updatedAt,
-        value: next.changes.some(
+      setUnstagedChanges(
+        next.changes.some(
           (change) => change.unstaged || change.untracked || change.conflicted,
         ),
-      });
+      );
       onError(null);
     } catch (value) {
       if (request === detailRequest.current)
@@ -1886,19 +1949,14 @@ function WorktreeTableRows(props: WorktreeItemProps) {
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
     }
-  }, [onError, worktree.id, worktree.updatedAt]);
+  }, [onError, setUnstagedChanges, worktree.id]);
   const refreshInspection = useQueuedWorktreeInspection(inspect);
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
-      if (activity.hasUnstagedChanges !== null) {
-        setDirtyOverride({
-          sourceUpdatedAt: worktree.updatedAt,
-          value: activity.hasUnstagedChanges,
-        });
-      }
+      applyActivity(activity);
       if (expanded) void refreshInspection();
     },
-    [expanded, refreshInspection, worktree.updatedAt],
+    [applyActivity, expanded, refreshInspection],
   );
   useWorktreeActivitySubscription(
     worktree.id,
@@ -1932,20 +1990,20 @@ function WorktreeTableRows(props: WorktreeItemProps) {
             {worktree.branch ?? t("detached")}
           </Button>
           {(worktree.ticketKey || worktree.ticketTitle) && (
-            <WorktreeTicketLink {...props} compact />
+            <WorktreeTicketLink {...liveProps} compact />
           )}
         </TableCell>
         <TableCell className="font-mono text-xs">
           {displayedWorktreePath(worktree.folder, baseRepoDirectory)}
         </TableCell>
         <TableCell>
-          <BaseBranchControl {...props} compact />
+          <BaseBranchControl {...liveProps} compact />
         </TableCell>
         <TableCell>
           <BaseFreshnessBadge worktree={worktree} />
         </TableCell>
         <TableCell>
-          <WorktreeTagsMenu {...props} compact />
+          <WorktreeTagsMenu {...liveProps} compact />
         </TableCell>
         <TableCell>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1959,19 +2017,19 @@ function WorktreeTableRows(props: WorktreeItemProps) {
         <TableCell>
           <div className="flex flex-wrap items-center gap-1">
             <OriginStatusBadges worktree={worktree} />
-            {hasUnstagedChanges && (
+            {worktree.hasUnstagedChanges && (
               <Badge variant="destructive">{t("dirty")}</Badge>
             )}
           </div>
         </TableCell>
         <TableCell>
-          <WorktreeMenus {...props} />
+          <WorktreeMenus {...liveProps} />
         </TableCell>
       </TableRow>
       <TableRow className={cn(highlight)}>
         <TableCell colSpan={8}>
           <ActionRow
-            {...props}
+            {...liveProps}
             onCompleted={async () => {
               await props.onReload();
               if (expanded) await refreshInspection();

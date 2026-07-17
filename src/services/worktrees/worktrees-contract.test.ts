@@ -81,14 +81,34 @@ describe("worktree agent contract", () => {
       parseWorktreeActivityReport({
         codebaseId: "codebase-1",
         gitDirectory: "/repo/.git",
+        branch: "feature/AIDE-24",
+        headSha: "def",
+        upstream: "origin/feature/AIDE-24",
+        ahead: 1,
+        behind: 0,
+        syncState: "AHEAD",
+        baseAhead: 2,
+        baseBehind: 0,
         hasStagedChanges: false,
         hasUnstagedChanges: true,
         observedAt: new Date(0).toISOString(),
       }),
     ).toMatchObject({
       codebaseId: "codebase-1",
+      headSha: "def",
+      syncState: "AHEAD",
+      baseAhead: 2,
       hasStagedChanges: false,
       hasUnstagedChanges: true,
     });
+    expect(() =>
+      parseWorktreeActivityReport({
+        codebaseId: "codebase-1",
+        gitDirectory: "/repo/.git",
+        headSha: "def",
+        ahead: -1,
+        observedAt: new Date(0).toISOString(),
+      }),
+    ).toThrow("non-negative integer");
   });
 });

@@ -185,6 +185,7 @@ describe("worktree inventory and inspection", () => {
 
   test("debounces live worktree activity and stops watching on demand", async () => {
     const folder = await repository();
+    const initialHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
     const gitDirectory = await realpath(
       (
         await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
@@ -215,8 +216,37 @@ describe("worktree inventory and inspection", () => {
           expect.objectContaining({
             codebaseId: "codebase-1",
             gitDirectory,
+            headSha: initialHead,
+            syncState: "IN_SYNC",
+            baseAhead: 0,
+            baseBehind: 0,
             hasStagedChanges: false,
             hasUnstagedChanges: true,
+          }),
+        ),
+      { timeout: 3_000 },
+    );
+
+    reportWorktreeActivity.mockClear();
+    await git(folder, "add", "watched.txt");
+    await git(folder, "commit", "-m", "Add watched file");
+    const committedHead = (
+      await git(folder, "rev-parse", "HEAD")
+    ).stdout.trim();
+    await vi.waitFor(
+      () =>
+        expect(reportWorktreeActivity).toHaveBeenCalledWith(
+          expect.objectContaining({
+            branch: "main",
+            headSha: committedHead,
+            upstream: "origin/main",
+            ahead: 1,
+            behind: 0,
+            syncState: "AHEAD",
+            baseAhead: 1,
+            baseBehind: 0,
+            hasStagedChanges: false,
+            hasUnstagedChanges: false,
           }),
         ),
       { timeout: 3_000 },
