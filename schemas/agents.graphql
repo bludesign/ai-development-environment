@@ -20,6 +20,12 @@ enum AgentLogStream {
   SYSTEM
 }
 
+enum DerivedDataLocationMode {
+  DEFAULT
+  ABSOLUTE
+  RELATIVE
+}
+
 enum AgentEventType {
   JOB_AVAILABLE
   JOB_CANCEL_REQUESTED
@@ -40,6 +46,8 @@ type Agent {
   diskFreeBytes: Float
   capabilities: [String!]!
   baseRepoDirectory: String
+  derivedDataLocationMode: DerivedDataLocationMode!
+  derivedDataPath: String
   connectionStatus: AgentConnectionStatus!
   ipAddress: String
   lastSeenAt: String
@@ -116,6 +124,11 @@ input AgentHeartbeatInput {
   capabilities: [String!]!
 }
 
+input UpdateAgentDerivedDataSettingsInput {
+  mode: DerivedDataLocationMode!
+  path: String
+}
+
 input CreateAgentJobInput {
   agentId: ID!
   kind: String!
@@ -156,6 +169,10 @@ type Mutation {
   cancelAgentJob(jobId: ID!): AgentJob!
   requestAgentCodebaseReconcile(agentId: ID!): Boolean!
   updateAgentBaseRepoDirectory(agentId: ID!, baseRepoDirectory: String): Agent!
+  updateAgentDerivedDataSettings(
+    agentId: ID!
+    input: UpdateAgentDerivedDataSettingsInput!
+  ): Agent!
 }
 
 type Subscription {

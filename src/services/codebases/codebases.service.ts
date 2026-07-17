@@ -7,6 +7,7 @@ import {
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
+  CODEBASE_JOB_KINDS,
   MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_REFRESH_JOB_KIND,
@@ -864,6 +865,7 @@ export class CodebasesService {
     await prisma.agentJob.deleteMany({
       where: {
         visibility: "SYSTEM",
+        kind: { in: [...CODEBASE_JOB_KINDS] },
         finishedAt: { lt: new Date(Date.now() - INSPECTION_MAX_AGE_MS) },
       },
     });

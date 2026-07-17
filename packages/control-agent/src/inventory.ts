@@ -2,6 +2,7 @@ import { statfsSync } from "node:fs";
 import { arch, cpus, freemem, hostname, release, totalmem } from "node:os";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
+import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
 import {
   CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
@@ -12,6 +13,7 @@ export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
+  ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,

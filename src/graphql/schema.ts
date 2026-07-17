@@ -11,11 +11,13 @@ import { AgentControlService } from "@/services/agent-control";
 import { createAgentResolvers } from "./resolvers/agents";
 import { createHealthResolvers } from "./resolvers/health";
 import { createCcusageResolvers } from "./resolvers/ccusage";
+import { createBuildDataResolvers } from "./resolvers/build-data";
 import { createJiraResolvers } from "./resolvers/jira";
 import { createGitHubResolvers } from "./resolvers/github";
 import { GitHubService } from "@/services/github";
 import { JiraService } from "@/services/jira";
 import { CcusageService } from "@/services/ccusage";
+import { BuildDataService } from "@/services/build-data";
 import { CodebasesService } from "@/services/codebases";
 import { createCodebaseResolvers } from "./resolvers/codebases";
 import { createToolsResolvers } from "./resolvers/tools";
@@ -37,6 +39,7 @@ export const createSchema = (
   codebasesService: CodebasesService,
   toolsService: ToolsService,
   worktreesService: WorktreesService,
+  buildDataService: BuildDataService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -44,6 +47,7 @@ export const createSchema = (
     createJiraResolvers(jiraService),
     createGitHubResolvers(gitHubService, worktreesService),
     createCcusageResolvers(ccusageService),
+    createBuildDataResolvers(buildDataService),
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
     createWorktreeResolvers(worktreesService),

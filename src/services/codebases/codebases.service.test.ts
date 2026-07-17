@@ -8,6 +8,7 @@ import {
   CODEBASE_GIT_INSPECT_JOB_KIND,
   CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
+  CODEBASE_JOB_KINDS,
   type CodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
@@ -45,6 +46,27 @@ const snapshot: CodebaseSnapshot = {
 
 describe("CodebasesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("cleans up only ephemeral codebase system jobs", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      agentJob: { deleteMany },
+      codebaseRepository: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+
+    await new CodebasesService(control()).overview();
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        visibility: "SYSTEM",
+        kind: { in: [...CODEBASE_JOB_KINDS] },
+        finishedAt: { lt: expect.any(Date) },
+      },
+    });
+    expect(deleteMany.mock.calls[0]![0].where.kind.in).not.toContain(
+      "buildData.scan",
+    );
+  });
 
   test("keeps fetch time monotonic and marks an unconfirmed origin change", async () => {
     const current = {

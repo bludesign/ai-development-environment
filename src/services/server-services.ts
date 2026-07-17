@@ -2,6 +2,7 @@ import "server-only";
 
 import { AgentControlService } from "@/services/agent-control";
 import { CcusageService } from "@/services/ccusage";
+import { BuildDataService } from "@/services/build-data";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import { GitHubService } from "@/services/github";
 import { JiraService } from "@/services/jira";
@@ -13,6 +14,7 @@ export type ServerServices = {
   prismaService: PrismaService;
   agentControlService: AgentControlService;
   ccusageService: CcusageService;
+  buildDataService: BuildDataService;
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
   jiraService: JiraService;
@@ -25,6 +27,7 @@ function createServerServices(): ServerServices {
   const prismaService = new PrismaService();
   const agentControlService = new AgentControlService();
   const ccusageService = new CcusageService(agentControlService);
+  const buildDataService = new BuildDataService(agentControlService);
   const codebasesService = new CodebasesService(agentControlService);
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService();
@@ -38,6 +41,7 @@ function createServerServices(): ServerServices {
     prismaService,
     agentControlService,
     ccusageService,
+    buildDataService,
     codebasesService,
     codebaseToolsService,
     jiraService,

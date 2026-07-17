@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./build-data": "./src/build-data.ts",
     "./codebases": "./src/codebases.ts",
     "./worktrees": "./src/worktrees.ts"
   },
