@@ -211,7 +211,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             description,
             syncGlobally,
             groupIds,
-            files,
+            files: files.map(({ path, contentsBase64, executable }) => ({
+              path,
+              contentsBase64,
+              executable,
+            })),
           },
         },
       );
