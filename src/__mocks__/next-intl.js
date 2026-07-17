@@ -49,6 +49,7 @@ const mockTranslations = {
     enrollmentTitle: "One-time enrollment command",
     enrollmentDescription:
       "Run this on the Mac after installing control-agent. The Mac connects outbound; it does not open a listening port.",
+    serverAddress: "Server address",
     copy: "Copy command",
     copyFailed: "Could not copy the command. Select and copy it manually.",
     expires: "Token expires {date}",
@@ -749,6 +750,9 @@ const mockTranslations = {
     hidePreview: "Hide preview",
     loadingPreview: "Loading stash patch…",
     emptyPatch: "This stash has no text patch to display.",
+    copyPatch: "Copy patch",
+    patchCopied: "Patch copied",
+    copyPatchFailed: "Could not copy the patch.",
     patchTruncated: "This patch was truncated at 256 KiB.",
     stashesTruncated: "Only the first 200 stashes are shown.",
     apply: "Apply",

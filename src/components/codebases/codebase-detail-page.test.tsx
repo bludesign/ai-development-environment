@@ -13,6 +13,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { copyText } from "@/lib/browser-utils";
 import type { AgentJob } from "@/components/agents/types";
 
 import { CodebaseDetailPage } from "./codebase-detail-page";
@@ -21,9 +22,14 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
 }));
+vi.mock("@/lib/browser-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/browser-utils")>()),
+  copyText: vi.fn(),
+}));
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+const copyTextMock = vi.mocked(copyText);
 let jobNext: ((job: typeof queuedJob) => void) | null = null;
 
 class ResizeObserverMock {
@@ -184,6 +190,7 @@ describe("CodebaseDetailPage", () => {
     cleanup();
     request.mockReset();
     subscriptions.mockReset();
+    copyTextMock.mockReset();
   });
 
   test("shows local and remote branch actions and queues a switch", async () => {
@@ -244,6 +251,17 @@ describe("CodebaseDetailPage", () => {
         input: expect.objectContaining({ stashOid: "a".repeat(40) }),
       }),
     );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy patch stash@{0}" }),
+    );
+    await waitFor(() =>
+      expect(copyTextMock).toHaveBeenCalledWith(
+        "diff --git a/file.ts b/file.ts\n+next\n",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Patch copied stash@{0}" }),
+    ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete stash@{0}" }));
     const dialog = await screen.findByRole("alertdialog");

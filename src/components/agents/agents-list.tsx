@@ -15,6 +15,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Link } from "@/i18n/navigation";
 import { copyText } from "@/lib/browser-utils";
 import {
@@ -28,7 +35,11 @@ import type { Agent } from "./types";
 
 const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
 
-export function AgentsList() {
+export function AgentsList({
+  localServerOrigins = [],
+}: {
+  localServerOrigins?: string[];
+}) {
   const t = useTranslations("agents");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +48,9 @@ export function AgentsList() {
     token: string;
     expiresAt: string;
   } | null>(null);
+  const [selectedServerOrigin, setSelectedServerOrigin] = useState<
+    string | null
+  >(null);
 
   const load = useCallback(async () => {
     try {
@@ -99,9 +113,18 @@ export function AgentsList() {
     }
   };
 
+  const browserOrigin =
+    typeof window === "undefined" ? null : window.location.origin;
   const command = enrollment
-    ? `control-agent enroll --server ${typeof window === "undefined" ? "http://127.0.0.1:3090" : window.location.origin} --enrollment-token ${enrollment.token}`
+    ? `control-agent enroll --server ${selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090"} --enrollment-token ${enrollment.token}`
     : "";
+  const serverOrigins = [
+    ...new Set(
+      [browserOrigin, ...localServerOrigins].filter(
+        (origin): origin is string => Boolean(origin),
+      ),
+    ),
+  ];
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -133,6 +156,24 @@ export function AgentsList() {
             <p className="mt-1 text-sm text-muted-foreground">
               {t("enrollmentDescription")}
             </p>
+            <Select
+              onValueChange={setSelectedServerOrigin}
+              value={selectedServerOrigin ?? browserOrigin ?? undefined}
+            >
+              <SelectTrigger
+                aria-label={t("serverAddress")}
+                className="mt-3 w-full sm:w-auto sm:min-w-72"
+              >
+                <SelectValue placeholder={t("serverAddress")} />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {serverOrigins.map((origin) => (
+                  <SelectItem key={origin} value={origin}>
+                    {origin}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-muted p-3">
               <code className="min-w-0 flex-1 break-all text-xs">
                 {command}

@@ -10,8 +10,10 @@ import {
 import {
   ArchiveRestore,
   ArrowLeft,
+  Check,
   ChevronDown,
   ChevronUp,
+  Copy,
   Download,
   GitBranch,
   RefreshCw,
@@ -45,7 +47,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from "@/i18n/navigation";
-import { createClientId } from "@/lib/browser-utils";
+import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -79,6 +81,8 @@ type DiffEntry = {
   diff?: CodebaseStashDiff;
   error?: string;
 };
+
+type CopyState = "IDLE" | "COPIED" | "FAILED";
 
 function liveInspectionAvailable(codebase: CodebaseDetail) {
   return (
@@ -897,6 +901,17 @@ function StashList({
 }) {
   const t = useTranslations("codebaseDetail");
   const locale = useLocale();
+  const [copyStates, setCopyStates] = useState<Record<string, CopyState>>({});
+
+  const copyPatch = async (stashOid: string, patch: string) => {
+    try {
+      await copyText(patch);
+      setCopyStates((current) => ({ ...current, [stashOid]: "COPIED" }));
+    } catch {
+      setCopyStates((current) => ({ ...current, [stashOid]: "FAILED" }));
+    }
+  };
+
   if (stashes.length === 0) {
     return (
       <Empty className="border py-12">
@@ -914,18 +929,19 @@ function StashList({
     <div className="space-y-3">
       {stashes.map((stash) => {
         const entry = diffs[stash.oid];
+        const copyState = copyStates[stash.oid] ?? "IDLE";
         return (
           <Card key={stash.oid}>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium">{stash.message}</p>
+                <div className="min-w-0 flex-[1_1_24rem]">
+                  <p className="break-words font-medium">{stash.message}</p>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
                     {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
                     {new Date(stash.createdAt).toLocaleString(locale)}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <Button
                     aria-label={`${t("preview")} ${stash.selector}`}
                     disabled={busy}
@@ -988,6 +1004,33 @@ function StashList({
                     </p>
                   ) : (
                     <>
+                      {entry.diff?.patch && (
+                        <div className="flex justify-end">
+                          <Button
+                            aria-label={`${
+                              copyState === "COPIED"
+                                ? t("patchCopied")
+                                : t("copyPatch")
+                            } ${stash.selector}`}
+                            onClick={() =>
+                              void copyPatch(stash.oid, entry.diff?.patch ?? "")
+                            }
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {copyState === "COPIED" ? <Check /> : <Copy />}
+                            {copyState === "COPIED"
+                              ? t("patchCopied")
+                              : t("copyPatch")}
+                          </Button>
+                        </div>
+                      )}
+                      {copyState === "FAILED" && (
+                        <p className="text-xs text-destructive">
+                          {t("copyPatchFailed")}
+                        </p>
+                      )}
                       <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre">
                         {entry.diff?.patch || t("emptyPatch")}
                       </pre>
