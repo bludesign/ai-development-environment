@@ -262,6 +262,37 @@ describe("CodebaseDetailPage", () => {
     );
   });
 
+  test("deletes non-main remote branches with confirmation", async () => {
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+    await screen.findByRole("heading", { name: "Codex" });
+
+    expect(
+      screen
+        .getByRole("button", { name: "Delete remote main" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete remote feature/detail" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Delete remote branch?")).toBeDefined();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete remote" }),
+    );
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunCodebaseGitOperation"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            operation: "DELETE_REMOTE_BRANCH",
+            branch: "feature/detail",
+          }),
+        }),
+      ),
+    );
+  });
+
   test("shows persisted branches read-only for an older agent", async () => {
     request.mockImplementation(async (query) => {
       if (String(query).includes("query CodebaseDetail")) {

@@ -642,7 +642,9 @@ function BranchTable({
                 const elsewhere = Boolean(
                   branch.checkedOutPath && !branch.current,
                 );
-                const protectedBranch = branch.name === defaultBranch;
+                const defaultBranchProtected = branch.name === defaultBranch;
+                const remoteMainProtected =
+                  kind === "remote" && branch.name === "main";
                 return (
                   <TableRow key={branch.name}>
                     <TableCell className="font-mono text-xs">
@@ -651,8 +653,11 @@ function BranchTable({
                     <TableCell>
                       <div className="flex flex-wrap gap-1.5">
                         {branch.current && <Badge>{t("current")}</Badge>}
-                        {protectedBranch && (
+                        {defaultBranchProtected && (
                           <Badge variant="outline">{t("default")}</Badge>
+                        )}
+                        {remoteMainProtected && !defaultBranchProtected && (
+                          <Badge variant="outline">{t("protected")}</Badge>
                         )}
                         {elsewhere && (
                           <Badge
@@ -742,7 +747,7 @@ function BranchTable({
                                     busy ||
                                     !canOperate ||
                                     branch.current ||
-                                    protectedBranch ||
+                                    defaultBranchProtected ||
                                     elsewhere
                                   }
                                   size="sm"
@@ -826,6 +831,35 @@ function BranchTable({
                             >
                               <Download /> {t("pull")}
                             </Button>
+                            <ConfirmationDialog
+                              actionLabel={t("deleteRemote")}
+                              cancelLabel={t("cancel")}
+                              description={t(
+                                "confirmDeleteRemoteBranchDescription",
+                                { branch: branch.name },
+                              )}
+                              onConfirm={() =>
+                                onOperation("DELETE_REMOTE_BRANCH", {
+                                  branch: branch.name,
+                                })
+                              }
+                              title={t("confirmDeleteRemoteBranchTitle")}
+                              trigger={
+                                <Button
+                                  aria-label={`${t("deleteRemote")} ${branch.name}`}
+                                  disabled={
+                                    busy ||
+                                    !canOperate ||
+                                    defaultBranchProtected ||
+                                    remoteMainProtected
+                                  }
+                                  size="sm"
+                                  variant="destructive"
+                                >
+                                  <Trash2 /> {t("deleteRemote")}
+                                </Button>
+                              }
+                            />
                           </>
                         )}
                       </div>

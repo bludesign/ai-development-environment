@@ -14,6 +14,7 @@ export const MAX_CODEBASE_STASH_PATCH_BYTES = 256 * 1024;
 export const CODEBASE_GIT_OPERATIONS = [
   "SWITCH_BRANCH",
   "DELETE_BRANCH",
+  "DELETE_REMOTE_BRANCH",
   "PULL_BRANCH",
   "APPLY_STASH",
   "DELETE_STASH",
@@ -536,6 +537,7 @@ export function codebaseGitOperationPayload(value: unknown): {
   const branchOperation = [
     "SWITCH_BRANCH",
     "DELETE_BRANCH",
+    "DELETE_REMOTE_BRANCH",
     "PULL_BRANCH",
   ].includes(operation);
   if (branchOperation) {

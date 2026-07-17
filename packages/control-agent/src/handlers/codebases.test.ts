@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  deleteCodebaseRemoteBranch,
   inspectCodebaseGit,
   inspectCodebaseGitState,
   inspectCodebase,
@@ -491,5 +492,65 @@ describe("codebase Git inspection", () => {
     await expect(
       pullCodebaseBranch(folder, "main", 10_000, new AbortController().signal),
     ).rejects.toThrow("cannot be fast-forwarded");
+  });
+
+  test("deletes remote branches while protecting main and the configured default", async () => {
+    const { folder } = await repositoryWithLocalOrigin();
+    await git(folder, "checkout", "-b", "feature/delete-remote");
+    await git(
+      folder,
+      "push",
+      "--set-upstream",
+      "origin",
+      "feature/delete-remote",
+    );
+    await git(folder, "checkout", "main");
+
+    await deleteCodebaseRemoteBranch(
+      folder,
+      "feature/delete-remote",
+      "main",
+      10_000,
+      new AbortController().signal,
+    );
+
+    await expect(
+      git(
+        folder,
+        "ls-remote",
+        "--exit-code",
+        "--heads",
+        "origin",
+        "refs/heads/feature/delete-remote",
+      ),
+    ).rejects.toThrow();
+    expect(
+      (
+        await git(
+          folder,
+          "show-ref",
+          "--verify",
+          "refs/heads/feature/delete-remote",
+        )
+      ).stdout,
+    ).toBeTruthy();
+    await expect(
+      deleteCodebaseRemoteBranch(
+        folder,
+        "main",
+        null,
+        10_000,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("origin/main cannot be deleted");
+    await expect(
+      deleteCodebaseRemoteBranch(
+        folder,
+        "release",
+        "release",
+        10_000,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("default remote branch");
   });
 });

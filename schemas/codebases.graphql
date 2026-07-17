@@ -19,6 +19,7 @@ enum CodebaseAvailability {
 enum CodebaseGitOperation {
   SWITCH_BRANCH
   DELETE_BRANCH
+  DELETE_REMOTE_BRANCH
   PULL_BRANCH
   APPLY_STASH
   DELETE_STASH

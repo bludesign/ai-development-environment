@@ -898,6 +898,44 @@ export async function pullCodebaseBranch(
   );
 }
 
+export async function deleteCodebaseRemoteBranch(
+  folder: string,
+  branch: string,
+  defaultBranch: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  if (branch === "main") {
+    throw new Error("origin/main cannot be deleted");
+  }
+  if (branch === defaultBranch) {
+    throw new Error("The default remote branch cannot be deleted");
+  }
+  const state = await inspectCodebaseGitState(folder, timeoutMs, signal);
+  if (!branchFromState(state, branch)?.remote) {
+    throw new Error(`Remote branch origin/${branch} was not found`);
+  }
+  const remote = await git(
+    folder,
+    ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`],
+    timeoutMs,
+    signal,
+  );
+  if (remote.exitCode === 2) {
+    throw new Error(`Remote branch origin/${branch} no longer exists`);
+  }
+  requireSuccess(remote, `Could not inspect origin/${branch}`);
+  requireSuccess(
+    await mutatingGit(
+      folder,
+      ["push", "origin", "--delete", branch],
+      timeoutMs,
+      signal,
+    ),
+    `Could not delete origin/${branch}`,
+  );
+}
+
 export const operateCodebaseGit: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -922,6 +960,15 @@ export const operateCodebaseGit: AgentJobHandler = async (
       break;
     case "DELETE_BRANCH":
       await runDeleteBranch(
+        folder,
+        input.branch!,
+        input.defaultBranch,
+        timeoutMs,
+        signal,
+      );
+      break;
+    case "DELETE_REMOTE_BRANCH":
+      await deleteCodebaseRemoteBranch(
         folder,
         input.branch!,
         input.defaultBranch,

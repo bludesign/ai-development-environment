@@ -111,6 +111,17 @@ describe("codebase Git management contract", () => {
     expect(
       codebaseGitOperationPayload({
         ...base,
+        defaultBranch: "main",
+        operation: "DELETE_REMOTE_BRANCH",
+        branch: "feature/detail",
+      }),
+    ).toMatchObject({
+      operation: "DELETE_REMOTE_BRANCH",
+      branch: "feature/detail",
+    });
+    expect(
+      codebaseGitOperationPayload({
+        ...base,
         operation: "APPLY_STASH",
         stashOid: oid,
       }),

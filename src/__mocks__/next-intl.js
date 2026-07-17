@@ -719,6 +719,7 @@ const mockTranslations = {
     actions: "Actions",
     current: "Current",
     default: "Default",
+    protected: "Protected",
     otherWorktree: "Other worktree",
     localAvailable: "Local branch exists",
     switch: "Switch",
@@ -732,6 +733,10 @@ const mockTranslations = {
     confirmDirtyCheckoutDescription:
       "Staged, unstaged, and untracked changes will be saved in a new stash before checking out {branch}. The stash will be preserved.",
     pull: "Pull",
+    deleteRemote: "Delete remote",
+    confirmDeleteRemoteBranchTitle: "Delete remote branch?",
+    confirmDeleteRemoteBranchDescription:
+      "origin/{branch} will be permanently deleted. Any same-named local branch and worktrees will remain untouched.",
     delete: "Delete",
     cancel: "Cancel",
     confirmDeleteBranchTitle: "Delete local branch?",
