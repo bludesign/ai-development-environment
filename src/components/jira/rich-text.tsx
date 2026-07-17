@@ -340,6 +340,7 @@ export function JiraRichTextBlock({
 }
 
 export function JiraTextComposer({
+  allowEmpty = false,
   busy,
   error,
   initialFormat = "MARKDOWN",
@@ -348,6 +349,7 @@ export function JiraTextComposer({
   onSubmit,
   submitLabel,
 }: {
+  allowEmpty?: boolean;
   busy: boolean;
   error?: string | null;
   initialFormat?: JiraTextInput["format"];
@@ -371,7 +373,7 @@ export function JiraTextComposer({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!value.trim() || busy) return;
+    if ((!allowEmpty && !value.trim()) || busy) return;
     try {
       await onSubmit({ format, value });
       if (!initialValue) {
@@ -456,7 +458,7 @@ export function JiraTextComposer({
             {t("cancel")}
           </Button>
         )}
-        <Button disabled={busy || !value.trim()} type="submit">
+        <Button disabled={busy || (!allowEmpty && !value.trim())} type="submit">
           {busy ? t("saving") : submitLabel}
         </Button>
       </div>

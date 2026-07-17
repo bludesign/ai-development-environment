@@ -119,6 +119,8 @@ export function JiraDescriptionHistory({
   );
   const [fromId, setFromId] = useState("");
   const [toId, setToId] = useState("current");
+  const hasMore =
+    history.total !== null && history.changes.length < history.total;
   const effectiveFromId = versions.some((version) => version.id === fromId)
     ? fromId
     : (versions[1]?.id ?? "");
@@ -180,31 +182,33 @@ export function JiraDescriptionHistory({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner /> {t("loadingHistory")}
             </div>
-          ) : versions.length < 2 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("noDescriptionHistory")}
-            </p>
           ) : (
             <>
-              <div className="space-y-3">
-                <VersionSelect
-                  label={t("compareFrom")}
-                  onChange={setFromId}
-                  value={effectiveFromId}
-                  versionLabel={versionLabel}
-                  versions={versions}
-                />
-                <VersionSelect
-                  label={t("compareTo")}
-                  onChange={setToId}
-                  value={effectiveToId}
-                  versionLabel={versionLabel}
-                  versions={versions}
-                />
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                {history.total !== null &&
-                  history.changes.length < history.total && (
+              {versions.length < 2 ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("noDescriptionHistory")}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <VersionSelect
+                    label={t("compareFrom")}
+                    onChange={setFromId}
+                    value={effectiveFromId}
+                    versionLabel={versionLabel}
+                    versions={versions}
+                  />
+                  <VersionSelect
+                    label={t("compareTo")}
+                    onChange={setToId}
+                    value={effectiveToId}
+                    versionLabel={versionLabel}
+                    versions={versions}
+                  />
+                </div>
+              )}
+              {(hasMore || versions.length >= 2) && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {hasMore && (
                     <Button
                       disabled={history.loading}
                       onClick={() => void history.load()}
@@ -215,22 +219,25 @@ export function JiraDescriptionHistory({
                       {history.loading ? t("loadingHistory") : t("loadMore")}
                     </Button>
                   )}
-                <Button
-                  disabled={
-                    !fromVersion ||
-                    !toVersion ||
-                    effectiveFromId === effectiveToId
-                  }
-                  onClick={() => {
-                    setOpen(false);
-                    setCompareOpen(true);
-                  }}
-                  size="sm"
-                  type="button"
-                >
-                  <GitCompareArrows /> {t("compareVersions")}
-                </Button>
-              </div>
+                  {versions.length >= 2 && (
+                    <Button
+                      disabled={
+                        !fromVersion ||
+                        !toVersion ||
+                        effectiveFromId === effectiveToId
+                      }
+                      onClick={() => {
+                        setOpen(false);
+                        setCompareOpen(true);
+                      }}
+                      size="sm"
+                      type="button"
+                    >
+                      <GitCompareArrows /> {t("compareVersions")}
+                    </Button>
+                  )}
+                </div>
+              )}
             </>
           )}
         </PopoverContent>

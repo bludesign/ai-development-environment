@@ -82,7 +82,6 @@ import type {
   JiraSourceView,
   JiraTicketBoard,
   JiraTicketAssignmentFilter,
-  JiraTicketDetail,
   JiraTicketSummary,
 } from "@/services/jira/types";
 
@@ -205,21 +204,9 @@ export function JiraTicketsPage() {
     }
   }, []);
 
-  const updateBoardTicket = useCallback((ticket: JiraTicketDetail) => {
-    setBoard((current) =>
-      current
-        ? {
-            ...current,
-            tickets: current.tickets.map((item) =>
-              item.key === ticket.key ? { ...item, ...ticket } : item,
-            ),
-            statusOrder: current.statusOrder.includes(ticket.status)
-              ? current.statusOrder
-              : [...current.statusOrder, ticket.status],
-          }
-        : current,
-    );
-  }, []);
+  const reloadBoardAfterTicketChange = useCallback(() => {
+    if (selectedSource) void loadBoard(selectedSource.id);
+  }, [loadBoard, selectedSource]);
 
   useEffect(() => {
     if (!selectedSource) {
@@ -544,7 +531,7 @@ export function JiraTicketsPage() {
       <JiraTicketDrawer
         issueKey={issueKey}
         onClose={() => replaceParams({ issue: null })}
-        onTicketChange={updateBoardTicket}
+        onTicketChange={reloadBoardAfterTicketChange}
       />
     </section>
   );

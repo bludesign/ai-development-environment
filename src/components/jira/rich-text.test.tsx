@@ -148,4 +148,26 @@ describe("JiraTextComposer", () => {
         .querySelector(".lucide-chevron-down"),
     ).not.toBeNull();
   });
+
+  test("submits an empty value when the composer allows it", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <JiraTextComposer
+        allowEmpty
+        busy={false}
+        initialValue="Existing description"
+        onSubmit={onSubmit}
+        submitLabel="Save description"
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "" },
+    });
+    const submit = screen.getByRole("button", { name: "Save description" });
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => fireEvent.click(submit));
+    expect(onSubmit).toHaveBeenCalledWith({ format: "MARKDOWN", value: "" });
+  });
 });

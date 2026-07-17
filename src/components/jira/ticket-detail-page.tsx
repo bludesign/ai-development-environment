@@ -243,6 +243,9 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   }
 
   const editable = new Set(editFields.map((field) => field.id));
+  const descriptionField = editFields.find(
+    (field) => field.id === "description",
+  );
   const filteredFields = ticket.allFields.filter((field) =>
     `${field.name} ${field.id}`
       .toLowerCase()
@@ -261,7 +264,9 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   };
 
   const saveDescription = async (description: JiraTextInput) => {
-    await update({ description });
+    await update({
+      description: description.value.trim() ? description : null,
+    });
     setDescriptionEditing(false);
   };
 
@@ -400,6 +405,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                 <CardTitle>{tt("descriptionTitle")}</CardTitle>
               </div>
               <JiraTextComposer
+                allowEmpty={descriptionField?.required === false}
                 busy={busy}
                 initialFormat={
                   ticket.descriptionContent?.format === "JIRA_WIKI"

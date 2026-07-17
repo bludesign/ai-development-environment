@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -310,5 +311,63 @@ describe("JiraTicketDetailPage", () => {
     expect(dueDatePicker.getAttribute("data-variant")).toBe("outline");
     expect(dueDatePicker.querySelector(".lucide-calendar-days")).not.toBeNull();
     expect(document.querySelector('input[type="date"]')).toBeNull();
+  });
+
+  test("clears an optional description with a null update", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("query JiraTicketDetail"))
+        return { jiraTicket: ticket } as never;
+      if (query.includes("query JiraTicketEditFields"))
+        return {
+          jiraTicketEditFields: [
+            {
+              id: "description",
+              name: "Description",
+              required: false,
+              schemaType: "doc",
+              allowedValues: [],
+            },
+          ],
+        } as never;
+      if (query.includes("query JiraTicketTransitions"))
+        return { jiraTicketTransitions: [] } as never;
+      if (query.includes("query JiraAssignableUsers"))
+        return { jiraAssignableUsers: [] } as never;
+      if (query.includes("mutation UpdateJiraTicket"))
+        return {
+          updateJiraTicket: {
+            ...ticket,
+            description: null,
+            descriptionContent: null,
+          },
+        } as never;
+      return {} as never;
+    });
+
+    render(<JiraTicketDetailPage issueKey="APP-42" />);
+    const descriptionCard = (await screen.findByText("Description")).closest(
+      '[data-slot="card"]',
+    ) as HTMLElement;
+    fireEvent.click(
+      within(descriptionCard).getByRole("button", { name: "Edit" }),
+    );
+    fireEvent.change(
+      within(descriptionCard).getByRole("textbox", { name: "Comment" }),
+      { target: { value: "" } },
+    );
+    const save = within(descriptionCard).getByRole("button", {
+      name: "Save description",
+    });
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation UpdateJiraTicket"),
+        {
+          input: { issueKey: "APP-42", description: null },
+        },
+      ),
+    );
   });
 });

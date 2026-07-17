@@ -1335,6 +1335,7 @@ export class JiraService {
         });
       },
     });
+    await this.linkCacheEntryToIssue(key, result.entryId);
     const fields = asRecord(result.value.fields);
     const returnedKey =
       asString(asRecord(fields.project).key) ??
@@ -1577,10 +1578,20 @@ export class JiraService {
 
   private async linkCacheEntryToIssue(issueKey: string, cacheEntryId: string) {
     const prisma = await getPrismaClient();
-    await prisma.jiraCacheEntryIssue.upsert({
-      where: { cacheEntryId_issueKey: { cacheEntryId, issueKey } },
-      create: { cacheEntryId, issueKey },
-      update: {},
+    await prisma.$transaction(async (transaction) => {
+      await transaction.jiraCachedTicket.upsert({
+        where: { issueKey },
+        create: {
+          issueKey,
+          projectKey: issueKey.replace(/-\d+$/, ""),
+        },
+        update: {},
+      });
+      await transaction.jiraCacheEntryIssue.upsert({
+        where: { cacheEntryId_issueKey: { cacheEntryId, issueKey } },
+        create: { cacheEntryId, issueKey },
+        update: {},
+      });
     });
   }
 
