@@ -139,6 +139,11 @@ async function openDestinationSelect() {
   fireEvent.click(
     await screen.findByRole("combobox", { name: "Select a destination" }),
   );
+  await screen.findByRole(
+    "combobox",
+    { name: "Search worktrees, agents, and codebases" },
+    { timeout: 3_000 },
+  );
 }
 
 afterEach(async () => {
