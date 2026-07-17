@@ -11,13 +11,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   JiraActivityPage,
-  JiraChange,
   JiraTicketDetail,
   JiraWorklog,
 } from "@/services/jira/types";
 
 import { JiraRichTextBlock } from "./rich-text";
 import { JiraTicketComments } from "./ticket-comments";
+import type { JiraTicketHistoryState } from "./ticket-history";
 import { JiraUser } from "./jira-user";
 import {
   JIRA_CACHE_FIELDS,
@@ -32,51 +32,21 @@ function date(value: string | null) {
 }
 
 export function JiraTicketActivity({
+  history,
   onTicketChange,
   ticket,
   title,
 }: {
+  history: JiraTicketHistoryState;
   onTicketChange: (ticket: JiraTicketDetail) => void;
   ticket: JiraTicketDetail;
   title: string;
 }) {
   const t = useTranslations("jiraTicketDetail");
-  const [changes, setChanges] = useState<JiraChange[]>([]);
-  const [changeTotal, setChangeTotal] = useState<number | null>(null);
-  const [changeLoading, setChangeLoading] = useState(false);
-  const [changeError, setChangeError] = useState<string | null>(null);
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
   const [worklogTotal, setWorklogTotal] = useState<number | null>(null);
   const [worklogLoading, setWorklogLoading] = useState(false);
   const [worklogError, setWorklogError] = useState<string | null>(null);
-
-  const loadChanges = async () => {
-    if (changeLoading) return;
-    setChangeLoading(true);
-    setChangeError(null);
-    try {
-      const data = await controlPlaneRequest<{
-        jiraTicketChanges: JiraActivityPage<JiraChange>;
-      }>(
-        `query JiraTicketChanges($issueKey: ID!, $limit: Int!, $offset: Int!) {
-          jiraTicketChanges(issueKey: $issueKey, limit: $limit, offset: $offset) {
-            items {
-              id author { ${JIRA_PERSON_FIELDS} } createdAt
-              items { field fieldId from to }
-            }
-            total limit offset cache { ${JIRA_CACHE_FIELDS} }
-          }
-        }`,
-        { issueKey: ticket.key, limit: PAGE_SIZE, offset: changes.length },
-      );
-      setChanges((current) => [...current, ...data.jiraTicketChanges.items]);
-      setChangeTotal(data.jiraTicketChanges.total);
-    } catch (value) {
-      setChangeError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setChangeLoading(false);
-    }
-  };
 
   const loadWorklogs = async () => {
     if (worklogLoading) return;
@@ -111,7 +81,7 @@ export function JiraTicketActivity({
     <Tabs
       defaultValue="comments"
       onValueChange={(value) => {
-        if (value === "history" && changeTotal === null) void loadChanges();
+        if (value === "history" && history.total === null) void history.load();
         if (value === "worklogs" && worklogTotal === null) void loadWorklogs();
       }}
     >
@@ -132,12 +102,12 @@ export function JiraTicketActivity({
             />
           </TabsContent>
           <TabsContent className="space-y-3" value="history">
-            {changeError && (
+            {history.error && (
               <Alert variant="destructive">
-                <AlertDescription>{changeError}</AlertDescription>
+                <AlertDescription>{history.error}</AlertDescription>
               </Alert>
             )}
-            {changes.map((change) => (
+            {history.changes.map((change) => (
               <Card key={change.id} size="sm">
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
@@ -160,19 +130,20 @@ export function JiraTicketActivity({
                 </CardContent>
               </Card>
             ))}
-            {changeLoading && <Spinner />}
-            {changeTotal === 0 && (
+            {history.loading && <Spinner />}
+            {history.total === 0 && (
               <p className="text-sm text-muted-foreground">{t("noHistory")}</p>
             )}
-            {changeTotal !== null && changes.length < changeTotal && (
-              <Button
-                disabled={changeLoading}
-                onClick={() => void loadChanges()}
-                variant="outline"
-              >
-                {t("loadMore")}
-              </Button>
-            )}
+            {history.total !== null &&
+              history.changes.length < history.total && (
+                <Button
+                  disabled={history.loading}
+                  onClick={() => void history.load()}
+                  variant="outline"
+                >
+                  {t("loadMore")}
+                </Button>
+              )}
           </TabsContent>
           <TabsContent className="space-y-3" value="worklogs">
             {worklogError && (

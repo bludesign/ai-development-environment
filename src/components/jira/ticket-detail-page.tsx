@@ -21,6 +21,7 @@ import {
 } from "react";
 
 import { JiraUser } from "@/components/jira/jira-user";
+import { JiraDescriptionHistory } from "@/components/jira/description-history";
 import {
   JiraRichTextBlock,
   JiraTextComposer,
@@ -83,6 +84,7 @@ import type {
 } from "@/services/jira/types";
 
 import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
+import { useJiraTicketHistory } from "./ticket-history";
 
 function date(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -104,6 +106,7 @@ function toDateOnly(value: Date): string {
 export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   const t = useTranslations("jiraTicketDetail");
   const tt = useTranslations("jiraTickets");
+  const ticketHistory = useJiraTicketHistory(issueKey);
   const [ticket, setTicket] = useState<JiraTicketDetail | null>(null);
   const [editFields, setEditFields] = useState<JiraEditField[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,6 +167,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
     setTicket(next);
     setSummary(next.summary);
     setError(null);
+    ticketHistory.reset();
   };
 
   const refresh = async () => {
@@ -417,15 +421,21 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               content={ticket.descriptionContent}
               header={<CardTitle>{tt("descriptionTitle")}</CardTitle>}
               headerActions={
-                editable.has("description") ? (
-                  <Button
-                    onClick={() => setDescriptionEditing(true)}
-                    size="xs"
-                    variant="outline"
-                  >
-                    <Pencil /> {t("edit")}
-                  </Button>
-                ) : null
+                <>
+                  <JiraDescriptionHistory
+                    history={ticketHistory}
+                    ticket={ticket}
+                  />
+                  {editable.has("description") && (
+                    <Button
+                      onClick={() => setDescriptionEditing(true)}
+                      size="xs"
+                      variant="outline"
+                    >
+                      <Pencil /> {t("edit")}
+                    </Button>
+                  )}
+                </>
               }
               headerClassName="border-b pb-4"
               sourceClassName="max-h-none overflow-visible break-words [overflow-wrap:anywhere]"
@@ -480,6 +490,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
       )}
 
       <JiraTicketActivity
+        history={ticketHistory}
         key={ticket.key}
         onTicketChange={ticketChanged}
         ticket={ticket}

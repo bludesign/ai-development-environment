@@ -160,6 +160,12 @@ describe("JiraTicketDetailPage", () => {
                     from: "To Do",
                     to: "In Progress",
                   },
+                  {
+                    field: "Description",
+                    fieldId: "description",
+                    from: "## Earlier deployment",
+                    to: "## Deployment",
+                  },
                 ],
               },
             ],
@@ -239,6 +245,11 @@ describe("JiraTicketDetailPage", () => {
     expect(descriptionTitle.parentElement?.parentElement).toBe(
       descriptionViewMenu?.parentElement?.parentElement?.parentElement,
     );
+    expect(
+      within(descriptionCard as HTMLElement).getByRole("button", {
+        name: "Description history",
+      }),
+    ).toBeDefined();
     fireEvent.pointerDown(descriptionViewMenu!, {
       button: 0,
       ctrlKey: false,
