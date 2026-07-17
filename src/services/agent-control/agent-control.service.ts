@@ -6,6 +6,16 @@ import {
   TUNNEL_NAME_REGEX,
 } from "@ai-development-environment/agent-contract";
 import {
+  BUILD_DATA_DELETE_JOB_KIND,
+  BUILD_DATA_JOB_KINDS,
+  BUILD_DATA_SCAN_JOB_KIND,
+  BUILD_DATA_SIZE_JOB_KIND,
+  buildDataScanPayload,
+  buildDataTargetsPayload,
+  parseDerivedDataLocationMode,
+  type DerivedDataLocationMode,
+} from "@ai-development-environment/agent-contract/build-data";
+import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
@@ -44,6 +54,7 @@ import {
   agentEventsTopic,
   agentJobChangedTopic,
   agentJobLogTopic,
+  buildDataCollectionChangedTopic,
   ccusageCollectionChangedTopic,
 } from "./event-bus";
 
@@ -59,6 +70,7 @@ export const AGENT_ONLINE_WINDOW_MS = 45_000;
 export const SUPPORTED_AGENT_JOBS = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
+  ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
 ] as const;
@@ -68,6 +80,7 @@ type CompletionHandler = (job: {
   agentId: string;
   codebaseId: string | null;
   worktreeId: string | null;
+  buildDataCollectionId: string | null;
   kind: string;
   payloadJson: string;
   status: string;
@@ -104,6 +117,17 @@ function agentCapabilities(value: string): string[] {
 
 export function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
+  if (kind === BUILD_DATA_SCAN_JOB_KIND) {
+    buildDataScanPayload(value);
+    return;
+  }
+  if (
+    kind === BUILD_DATA_SIZE_JOB_KIND ||
+    kind === BUILD_DATA_DELETE_JOB_KIND
+  ) {
+    buildDataTargetsPayload(value);
+    return;
+  }
   if (kind === CODEBASE_BROWSE_JOB_KIND) {
     codebaseBrowsePayload(value);
     return;
@@ -184,12 +208,19 @@ function publishAgent(agent: unknown): void {
 function publishJob(job: {
   id: string;
   ccusageCollectionId?: string | null;
+  buildDataCollectionId?: string | null;
 }): void {
   agentEventBus.publish(agentJobChangedTopic(job.id), { agentJobChanged: job });
   if (job.ccusageCollectionId) {
     agentEventBus.publish(
       ccusageCollectionChangedTopic(job.ccusageCollectionId),
       { ccusageCollectionChanged: { id: job.ccusageCollectionId } },
+    );
+  }
+  if (job.buildDataCollectionId) {
+    agentEventBus.publish(
+      buildDataCollectionChangedTopic(job.buildDataCollectionId),
+      { buildDataCollectionChanged: { id: job.buildDataCollectionId } },
     );
   }
 }
@@ -382,6 +413,53 @@ export class AgentControlService {
     return agent;
   }
 
+  async updateDerivedDataSettings(
+    agentId: string,
+    modeValue: string,
+    pathValue: string | null,
+  ) {
+    const mode = parseDerivedDataLocationMode(modeValue);
+    const path = pathValue?.trim() || null;
+    if (path?.includes("\0") || (path?.length ?? 0) > 4_096) {
+      throw new Error("Derived Data path is invalid");
+    }
+    if (mode === "DEFAULT" && path !== null) {
+      throw new Error("Default Derived Data mode does not accept a path");
+    }
+    if (
+      mode === "ABSOLUTE" &&
+      (!path || (!posix.isAbsolute(path) && !win32.isAbsolute(path)))
+    ) {
+      throw new Error("Custom Derived Data directory must be an absolute path");
+    }
+    if (mode === "RELATIVE") {
+      const normalized = path?.replaceAll("\\", "/") ?? "";
+      if (
+        !normalized ||
+        posix.isAbsolute(normalized) ||
+        win32.isAbsolute(normalized) ||
+        normalized === "." ||
+        normalized
+          .split("/")
+          .some((part) => !part || part === "." || part === "..")
+      ) {
+        throw new Error(
+          "Relative Derived Data path must stay within each worktree",
+        );
+      }
+    }
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: {
+        derivedDataLocationMode: mode satisfies DerivedDataLocationMode,
+        derivedDataPath: path,
+      },
+    });
+    publishAgent(agent);
+    return agent;
+  }
+
   async listJobs(agentId: string, limit = 50, includeSystem = false) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findMany({
@@ -403,6 +481,7 @@ export class AgentControlService {
     idempotencyKey: string;
     timeoutSeconds?: number | null;
     ccusageCollectionId?: string | null;
+    buildDataCollectionId?: string | null;
     codebaseId?: string | null;
     worktreeId?: string | null;
     visibility?: "USER" | "SYSTEM";
@@ -449,6 +528,7 @@ export class AgentControlService {
           idempotencyKey: input.idempotencyKey,
           timeoutSeconds,
           ccusageCollectionId: input.ccusageCollectionId ?? null,
+          buildDataCollectionId: input.buildDataCollectionId ?? null,
           codebaseId: input.codebaseId ?? null,
           worktreeId: input.worktreeId ?? null,
           visibility: input.visibility ?? "USER",
@@ -616,6 +696,35 @@ export class AgentControlService {
     const jobs = await prisma.agentJob.findMany({
       where: {
         ccusageCollectionId: collectionId,
+        status: { in: ACTIVE_JOB_STATUSES },
+      },
+    });
+    const timedOut = [];
+    for (const job of jobs) {
+      const changed = await prisma.agentJob.updateMany({
+        where: { id: job.id, status: { in: ACTIVE_JOB_STATUSES } },
+        data: { status: "TIMED_OUT", finishedAt: new Date() },
+      });
+      if (changed.count !== 1) continue;
+      const updated = await prisma.agentJob.findUnique({
+        where: { id: job.id },
+      });
+      if (!updated) continue;
+      timedOut.push(updated);
+      publishJob(updated);
+      agentEventBus.publish(agentEventsTopic(updated.agentId), {
+        agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
+      });
+    }
+    return timedOut;
+  }
+
+  async timeoutBuildDataCollectionJobs(collectionId: string) {
+    const prisma = await getPrismaClient();
+    const jobs = await prisma.agentJob.findMany({
+      where: {
+        buildDataCollectionId: collectionId,
+        kind: BUILD_DATA_SCAN_JOB_KIND,
         status: { in: ACTIVE_JOB_STATUSES },
       },
     });

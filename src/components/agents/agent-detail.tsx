@@ -44,6 +44,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -478,6 +485,13 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
+      <DerivedDataSettingsCard
+        agent={agent}
+        canBrowseDirectories={canBrowseDirectories}
+        key={`${agent.id}:${agent.derivedDataLocationMode ?? "DEFAULT"}:${agent.derivedDataPath ?? ""}`}
+        onSaved={setAgent}
+      />
+
       {selectedJobId && (
         <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
       )}
@@ -543,6 +557,135 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         )}
       </section>
     </div>
+  );
+}
+
+function DerivedDataSettingsCard({
+  agent,
+  canBrowseDirectories,
+  onSaved,
+}: {
+  agent: Agent;
+  canBrowseDirectories: boolean;
+  onSaved: (agent: Agent) => void;
+}) {
+  const t = useTranslations("agentDetail");
+  const [mode, setMode] = useState<"DEFAULT" | "ABSOLUTE" | "RELATIVE">(
+    agent.derivedDataLocationMode ?? "DEFAULT",
+  );
+  const [path, setPath] = useState(agent.derivedDataPath ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        updateAgentDerivedDataSettings: Agent;
+      }>(
+        `mutation UpdateAgentDerivedDataSettings($agentId: ID!, $input: UpdateAgentDerivedDataSettingsInput!) {
+          updateAgentDerivedDataSettings(agentId: $agentId, input: $input) { ${AGENT_FIELDS} }
+        }`,
+        {
+          agentId: agent.id,
+          input: { mode, path: mode === "DEFAULT" ? null : path },
+        },
+      );
+      onSaved(data.updateAgentDerivedDataSettings);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("derivedDataLocation")}</CardTitle>
+        <CardDescription>{t("derivedDataLocationDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form className="space-y-4" onSubmit={(event) => void save(event)}>
+          <div className="grid gap-2">
+            <Label htmlFor="derived-data-mode">{t("derivedDataMode")}</Label>
+            <Select
+              disabled={busy}
+              onValueChange={(value) =>
+                setMode(value as "DEFAULT" | "ABSOLUTE" | "RELATIVE")
+              }
+              value={mode}
+            >
+              <SelectTrigger id="derived-data-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DEFAULT">
+                  {t("derivedDataDefault")}
+                </SelectItem>
+                <SelectItem value="ABSOLUTE">
+                  {t("derivedDataAbsolute")}
+                </SelectItem>
+                <SelectItem value="RELATIVE">
+                  {t("derivedDataRelative")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {mode === "DEFAULT" ? (
+            <div className="rounded-lg bg-muted p-3 font-mono text-xs">
+              ~/Library/Developer/Xcode/DerivedData
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="derived-data-path">
+                {mode === "ABSOLUTE"
+                  ? t("derivedDataAbsolutePath")
+                  : t("derivedDataRelativePath")}
+              </Label>
+              <Input
+                disabled={busy}
+                id="derived-data-path"
+                onChange={(event) => setPath(event.target.value)}
+                placeholder={
+                  mode === "ABSOLUTE"
+                    ? "/Users/example/DerivedData"
+                    : "DerivedData"
+                }
+                value={path}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  mode === "ABSOLUTE"
+                    ? "derivedDataAbsoluteHelp"
+                    : "derivedDataRelativeHelp",
+                )}
+              </p>
+            </div>
+          )}
+          {mode === "ABSOLUTE" && canBrowseDirectories && (
+            <AgentDirectoryBrowser
+              agentId={agent.id}
+              disabled={busy}
+              onSelect={setPath}
+              selectLabel={t("useDirectory")}
+            />
+          )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <Button
+            disabled={busy || (mode !== "DEFAULT" && !path.trim())}
+            type="submit"
+          >
+            {busy && <Spinner />}
+            {t("saveDerivedDataSettings")}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 

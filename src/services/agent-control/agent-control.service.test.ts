@@ -82,6 +82,31 @@ describe("agent job validation", () => {
       "payload must be an object",
     );
   });
+
+  test("validates all Build Data job payloads", () => {
+    expect(SUPPORTED_AGENT_JOBS).toEqual(
+      expect.arrayContaining([
+        "buildData.scan",
+        "buildData.size",
+        "buildData.delete",
+      ]),
+    );
+    expect(() =>
+      validateJob("buildData.scan", {
+        mode: "DEFAULT",
+        path: null,
+        worktrees: [],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateJob("buildData.size", {
+        targets: [{ rootPath: "/DerivedData", path: "/DerivedData/App" }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateJob("buildData.delete", { targets: [{ path: "/tmp/App" }] }),
+    ).toThrow("rootPath");
+  });
 });
 
 describe("AgentControlService.requestCodebaseReconcile", () => {
@@ -152,5 +177,45 @@ describe("AgentControlService.updateBaseRepoDirectory", () => {
         "Repositories",
       ),
     ).rejects.toThrow("must be an absolute path");
+  });
+});
+
+describe("AgentControlService.updateDerivedDataSettings", () => {
+  test("stores default, absolute, and relative settings with strict path validation", async () => {
+    const update = vi
+      .fn()
+      .mockImplementation(({ data }) => ({ id: "agent-1", ...data }));
+    getPrismaClient.mockResolvedValue({ agent: { update } });
+    const service = new AgentControlService();
+
+    await service.updateDerivedDataSettings("agent-1", "DEFAULT", null);
+    await service.updateDerivedDataSettings(
+      "agent-1",
+      "ABSOLUTE",
+      "/Users/test/DerivedData",
+    );
+    await service.updateDerivedDataSettings(
+      "agent-1",
+      "RELATIVE",
+      "DerivedData",
+    );
+
+    expect(update).toHaveBeenNthCalledWith(3, {
+      where: { id: "agent-1" },
+      data: {
+        derivedDataLocationMode: "RELATIVE",
+        derivedDataPath: "DerivedData",
+      },
+    });
+    await expect(
+      service.updateDerivedDataSettings(
+        "agent-1",
+        "RELATIVE",
+        "../DerivedData",
+      ),
+    ).rejects.toThrow("stay within each worktree");
+    await expect(
+      service.updateDerivedDataSettings("agent-1", "ABSOLUTE", "DerivedData"),
+    ).rejects.toThrow("absolute path");
   });
 });

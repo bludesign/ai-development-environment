@@ -279,6 +279,24 @@ export const createAgentResolvers = (
         baseRepoDirectory ?? null,
       );
     },
+    updateAgentDerivedDataSettings: (
+      _root: unknown,
+      {
+        agentId,
+        input,
+      }: {
+        agentId: string;
+        input: { mode: string; path?: string | null };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.updateDerivedDataSettings(
+        agentId,
+        input.mode,
+        input.path ?? null,
+      );
+    },
   },
   Subscription: {
     agentEvents: {

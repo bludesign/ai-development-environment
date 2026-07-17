@@ -8,6 +8,7 @@ import {
   Database,
   GitPullRequest,
   GitBranch,
+  HardDrive,
   FolderGit2,
   House,
   MessageSquareText,
@@ -248,6 +249,22 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/build-data")}
+                >
+                  <Link
+                    href="/build-data"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <HardDrive />
+                    <span>{t("buildData")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

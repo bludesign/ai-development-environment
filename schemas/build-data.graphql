@@ -1,0 +1,116 @@
+enum BuildDataCollectionStatus {
+  COLLECTING
+  COMPLETED
+}
+
+enum BuildDataAgentStatus {
+  QUEUING
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMED_OUT
+  OFFLINE
+  UNSUPPORTED
+  INVALID
+}
+
+enum DerivedDataEntryStatus {
+  READY
+  UNLINKED
+  PENDING
+  SHARED_CACHE
+}
+
+enum DerivedDataEntryOperation {
+  IDLE
+  SIZING
+  DELETING
+}
+
+enum DerivedDataDeleteSource {
+  USER
+  AUTOMATIC
+}
+
+type BuildDataAgentProgress {
+  agent: Agent!
+  status: BuildDataAgentStatus!
+  jobId: ID
+  error: String
+  warnings: [String!]!
+}
+
+type BuildDataProgress {
+  eligibleCount: Int!
+  finishedCount: Int!
+  successfulCount: Int!
+  agents: [BuildDataAgentProgress!]!
+}
+
+type DerivedDataEntry {
+  id: ID!
+  name: String!
+  status: DerivedDataEntryStatus!
+  workspacePath: String
+  worktreeId: ID
+  worktreePath: String
+  sizeBytes: Float
+  operation: DerivedDataEntryOperation!
+  error: String
+  agent: Agent!
+}
+
+type DerivedDataCollection {
+  id: ID!
+  status: BuildDataCollectionStatus!
+  createdAt: String!
+  deadlineAt: String!
+  finishedAt: String
+  progress: BuildDataProgress!
+  entries: [DerivedDataEntry!]!
+}
+
+type DerivedDataDeletionHistory {
+  id: ID!
+  agentId: ID
+  agentName: String!
+  folderName: String!
+  worktreeId: ID
+  worktreePath: String
+  source: DerivedDataDeleteSource!
+  deletedAt: String!
+}
+
+type DerivedDataDeletionHistoryPage {
+  items: [DerivedDataDeletionHistory!]!
+  nextCursor: ID
+}
+
+extend type Query {
+  derivedDataCollection(id: ID!): DerivedDataCollection
+  derivedDataDeletionHistory(
+    first: Int = 100
+    after: ID
+  ): DerivedDataDeletionHistoryPage!
+}
+
+extend type Mutation {
+  refreshDerivedData(requestId: ID!): DerivedDataCollection!
+  calculateDerivedDataSizes(
+    collectionId: ID!
+    entryIds: [ID!]!
+    requestId: ID!
+  ): DerivedDataCollection!
+  deleteDerivedDataEntries(
+    collectionId: ID!
+    entryIds: [ID!]!
+    requestId: ID!
+  ): DerivedDataCollection!
+  clearDerivedDataDeletionHistory: Int!
+}
+
+extend type Subscription {
+  derivedDataCollectionChanged(id: ID!): DerivedDataCollection!
+}

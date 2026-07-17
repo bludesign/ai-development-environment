@@ -1,5 +1,10 @@
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import {
+  BUILD_DATA_DELETE_JOB_KIND,
+  BUILD_DATA_SCAN_JOB_KIND,
+  BUILD_DATA_SIZE_JOB_KIND,
+} from "@ai-development-environment/agent-contract/build-data";
+import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_GIT_INSPECT_JOB_KIND,
@@ -10,6 +15,7 @@ import {
 
 import { runCloudflared } from "./cloudflared.js";
 import { runCcusage } from "./ccusage.js";
+import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
 import type { ProcessLog, ProcessResult } from "../process-runner.js";
 import {
   browseCodebaseDirectories,
@@ -54,6 +60,9 @@ export type AgentJobHandler = (
 export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   "cloudflared.runTunnel": runCloudflared,
   [CCUSAGE_REPORT_JOB_KIND]: runCcusage,
+  [BUILD_DATA_SCAN_JOB_KIND]: scanBuildData,
+  [BUILD_DATA_SIZE_JOB_KIND]: sizeBuildData,
+  [BUILD_DATA_DELETE_JOB_KIND]: deleteBuildData,
   [CODEBASE_BROWSE_JOB_KIND]: browseCodebaseDirectories,
   [CODEBASE_INSPECT_JOB_KIND]: inspectCodebaseFolder,
   [CODEBASE_REFRESH_JOB_KIND]: refreshCodebase,

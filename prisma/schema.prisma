@@ -17,29 +17,33 @@ datasource db {
 }
 
 model Agent {
-  id                 String                   @id
-  name               String
-  hostname           String
-  version            String
-  osVersion          String
-  architecture       String
-  cpuModel           String?
-  memoryTotalBytes   Float?
-  memoryFreeBytes    Float?
-  diskTotalBytes     Float?
-  diskFreeBytes      Float?
-  capabilitiesJson   String
-  secretHash         String                   @unique
-  baseRepoDirectory  String?
-  ipAddress          String?
-  lastSeenAt         DateTime?
-  disconnectedAt     DateTime?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  jobs               AgentJob[]
-  ccusageCollections CcusageCollectionAgent[]
-  auditEvents        AgentAuditEvent[]
-  codebases          Codebase[]
+  id                       String                     @id
+  name                     String
+  hostname                 String
+  version                  String
+  osVersion                String
+  architecture             String
+  cpuModel                 String?
+  memoryTotalBytes         Float?
+  memoryFreeBytes          Float?
+  diskTotalBytes           Float?
+  diskFreeBytes            Float?
+  capabilitiesJson         String
+  secretHash               String                     @unique
+  baseRepoDirectory        String?
+  derivedDataLocationMode  String                     @default("DEFAULT")
+  derivedDataPath          String?
+  ipAddress                String?
+  lastSeenAt               DateTime?
+  disconnectedAt           DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  jobs                     AgentJob[]
+  ccusageCollections       CcusageCollectionAgent[]
+  auditEvents              AgentAuditEvent[]
+  codebases                Codebase[]
+  buildDataCollections     BuildDataCollectionAgent[]
+  buildDataDeletionHistory BuildDataDeletionHistory[]
 }
 
 model AgentEnrollmentToken {
@@ -51,46 +55,49 @@ model AgentEnrollmentToken {
 }
 
 model AgentJob {
-  id                  String             @id
-  agentId             String
-  kind                String
-  payloadJson         String
-  status              String
-  idempotencyKey      String
-  resultJson          String?
-  error               String?
-  timeoutSeconds      Int
-  createdAt           DateTime           @default(now())
-  startedAt           DateTime?
-  finishedAt          DateTime?
-  updatedAt           DateTime           @updatedAt
-  ccusageCollectionId String?
-  codebaseId          String?
-  worktreeId          String?
-  visibility          String             @default("USER")
-  agent               Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  ccusageCollection   CcusageCollection? @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
-  codebase            Codebase?          @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
-  logs                AgentJobLog[]
+  id                    String               @id
+  agentId               String
+  kind                  String
+  payloadJson           String
+  status                String
+  idempotencyKey        String
+  resultJson            String?
+  error                 String?
+  timeoutSeconds        Int
+  createdAt             DateTime             @default(now())
+  startedAt             DateTime?
+  finishedAt            DateTime?
+  updatedAt             DateTime             @updatedAt
+  ccusageCollectionId   String?
+  buildDataCollectionId String?
+  codebaseId            String?
+  worktreeId            String?
+  visibility            String               @default("USER")
+  agent                 Agent                @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection     CcusageCollection?   @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  buildDataCollection   BuildDataCollection? @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
+  codebase              Codebase?            @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  logs                  AgentJobLog[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
   @@index([ccusageCollectionId, status])
+  @@index([buildDataCollectionId, status])
   @@index([codebaseId, status, createdAt])
   @@index([worktreeId, status, createdAt])
 }
 
 model CodebaseRepository {
-  id                       String     @id
-  canonicalOrigin          String     @unique
-  displayOrigin            String
-  name                     String
-  description              String     @default("")
-  jiraBranchRegex          String?
-  keepBaseBranchUpToDate   Boolean    @default(true)
-  createdAt                DateTime   @default(now())
-  updatedAt                DateTime   @updatedAt
-  codebases                Codebase[]
+  id                     String     @id
+  canonicalOrigin        String     @unique
+  displayOrigin          String
+  name                   String
+  description            String     @default("")
+  jiraBranchRegex        String?
+  keepBaseBranchUpToDate Boolean    @default(true)
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+  codebases              Codebase[]
 
   @@index([name])
 }
@@ -138,60 +145,109 @@ model CodebaseSettings {
 }
 
 model Worktree {
-  id                 String                  @id
-  codebaseId         String
-  gitDirectory       String
-  folder             String
-  relativePath       String
-  primary            Boolean                 @default(false)
-  branch             String?
-  headSha            String?
-  upstream           String?
-  ahead              Int?
-  behind             Int?
-  syncState          String                  @default("UNKNOWN")
-  baseBranchOverride String?
-  baseAhead          Int?
-  baseBehind         Int?
-  hasStagedChanges   Boolean                 @default(false)
-  hasUnstagedChanges Boolean                 @default(false)
-  pushStatus         String                  @default("UNKNOWN")
-  highlightColor     String?
-  availability       String                  @default("AVAILABLE")
-  statusError        String?
-  lastCheckedAt      DateTime?
-  missingAt          DateTime?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  codebase           Codebase                @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
-  tags               WorktreeTagAssignment[]
+  id                       String                     @id
+  codebaseId               String
+  gitDirectory             String
+  folder                   String
+  relativePath             String
+  primary                  Boolean                    @default(false)
+  branch                   String?
+  headSha                  String?
+  upstream                 String?
+  ahead                    Int?
+  behind                   Int?
+  syncState                String                     @default("UNKNOWN")
+  baseBranchOverride       String?
+  baseAhead                Int?
+  baseBehind               Int?
+  hasStagedChanges         Boolean                    @default(false)
+  hasUnstagedChanges       Boolean                    @default(false)
+  pushStatus               String                     @default("UNKNOWN")
+  highlightColor           String?
+  availability             String                     @default("AVAILABLE")
+  statusError              String?
+  lastCheckedAt            DateTime?
+  missingAt                DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  codebase                 Codebase                   @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
+  tags                     WorktreeTagAssignment[]
+  buildDataDeletionHistory BuildDataDeletionHistory[]
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
 }
 
+model BuildDataCollection {
+  id         String                     @id
+  deadlineAt DateTime
+  finishedAt DateTime?
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+  agents     BuildDataCollectionAgent[]
+  jobs       AgentJob[]
+
+  @@index([finishedAt, deadlineAt])
+}
+
+model BuildDataCollectionAgent {
+  collectionId  String
+  agentId       String
+  initialStatus String
+  error         String?
+  collection    BuildDataCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  agent         Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, agentId])
+  @@index([agentId])
+}
+
+model BuildDataDeletionHistory {
+  id           String    @id
+  agentId      String?
+  agentName    String
+  folderName   String
+  worktreeId   String?
+  worktreePath String?
+  source       String
+  jobId        String
+  targetKey    String
+  deletedAt    DateTime  @default(now())
+  agent        Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  worktree     Worktree? @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+
+  @@unique([jobId, targetKey])
+  @@index([deletedAt])
+  @@index([agentId, deletedAt])
+}
+
+model BuildDataDeleteProjection {
+  jobId       String   @id
+  projectedAt DateTime @default(now())
+}
+
 model WorktreeMove {
-  id                  String    @id
-  requestId           String
-  sourceWorktreeId    String
-  sourceCodebaseId    String
-  targetCodebaseId    String
-  targetWorktreeId    String?
-  destinationMode     String
-  branch              String
-  headSha             String
-  baseBranch          String
-  deleteSource        Boolean   @default(false)
-  status              String
-  sourceJobId         String?
-  targetJobId         String?
-  cleanupJobId        String?
-  error               String?
-  warning             String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  finishedAt          DateTime?
+  id               String    @id
+  requestId        String
+  sourceWorktreeId String
+  sourceCodebaseId String
+  targetCodebaseId String
+  targetWorktreeId String?
+  destinationMode  String
+  branch           String
+  headSha          String
+  baseBranch       String
+  deleteSource     Boolean   @default(false)
+  status           String
+  sourceJobId      String?
+  targetJobId      String?
+  cleanupJobId     String?
+  error            String?
+  warning          String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  finishedAt       DateTime?
 
   @@unique([sourceWorktreeId, requestId])
   @@index([status, updatedAt])
@@ -411,11 +467,11 @@ model JiraApiCallLog {
 }
 
 model GitHubSettings {
-  id                      String   @id
-  apiToken                String?
-  defaultJiraKeyRegex     String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  id                  String   @id
+  apiToken            String?
+  defaultJiraKeyRegex String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model GitHubAppSettings {

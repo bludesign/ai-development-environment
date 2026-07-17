@@ -12,6 +12,8 @@ export type Agent = {
   diskFreeBytes?: number | null;
   capabilities: string[];
   baseRepoDirectory: string | null;
+  derivedDataLocationMode?: "DEFAULT" | "ABSOLUTE" | "RELATIVE";
+  derivedDataPath?: string | null;
   connectionStatus: "ONLINE" | "OFFLINE";
   ipAddress: string | null;
   lastSeenAt: string | null;
