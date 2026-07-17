@@ -34,6 +34,72 @@ function agent() {
   };
 }
 
+function collectionWithOperation(operation?: {
+  id: string;
+  kind: "buildData.size" | "buildData.delete";
+  resultJson: string;
+}) {
+  const persistedAgent = agent();
+  return {
+    id: "collection-1",
+    deadlineAt: new Date(Date.now() + 60_000),
+    finishedAt: new Date(),
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    agents: [
+      {
+        collectionId: "collection-1",
+        agentId: persistedAgent.id,
+        initialStatus: "QUEUING",
+        error: null,
+        agent: persistedAgent,
+      },
+    ],
+    jobs: [
+      {
+        id: "scan-1",
+        agentId: persistedAgent.id,
+        kind: "buildData.scan",
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({
+          entries: [
+            {
+              path: "/DerivedData/App-hash",
+              rootPath: "/DerivedData",
+              name: "App-hash",
+              kind: "PROJECT",
+              workspacePath: null,
+            },
+          ],
+          warnings: [],
+        }),
+        error: null,
+        payloadJson: "{}",
+        createdAt: new Date(0),
+      },
+      ...(operation
+        ? [
+            {
+              ...operation,
+              agentId: persistedAgent.id,
+              status: "SUCCEEDED",
+              error: null,
+              payloadJson: JSON.stringify({
+                targets: [
+                  {
+                    path: "/DerivedData/App-hash",
+                    rootPath: "/DerivedData",
+                  },
+                ],
+              }),
+              createdAt: new Date(1),
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
 describe("BuildDataService", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -169,5 +235,129 @@ describe("BuildDataService", () => {
     });
     expect(page.items).toEqual([items[0]]);
     expect(page.nextCursor).toBe("new");
+  });
+
+  test("rejects operations when an agent went offline after its scan", async () => {
+    const collection = collectionWithOperation();
+    const prisma = {
+      buildDataDeletionHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      buildDataCollection: {
+        findUnique: vi.fn().mockResolvedValue(collection),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...collection.agents[0]!.agent,
+          disconnectedAt: new Date(),
+        }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const createJob = vi.fn();
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService);
+    const snapshot = await service.getCollection(collection.id);
+
+    await expect(
+      service.deleteEntries(
+        collection.id,
+        [snapshot!.entries[0]!.id],
+        "request-1",
+      ),
+    ).rejects.toThrow("Builder is offline");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    {
+      kind: "buildData.size" as const,
+      resultJson: JSON.stringify({ sizes: "invalid" }),
+      expectedError:
+        "Invalid Build Data size result: build data size result.sizes must be an array",
+    },
+    {
+      kind: "buildData.delete" as const,
+      resultJson: JSON.stringify({ deleted: "invalid" }),
+      expectedError:
+        "Invalid Build Data delete result: build data delete result.deleted must be an array",
+    },
+  ])("surfaces an invalid $kind result on its target entry", async (input) => {
+    const collection = collectionWithOperation({ id: "operation-1", ...input });
+    getPrismaClient.mockResolvedValue({
+      buildDataDeletionHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      buildDataCollection: {
+        findUnique: vi.fn().mockResolvedValue(collection),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+    } as unknown as AgentControlService);
+
+    const snapshot = await service.getCollection(collection.id);
+
+    expect(snapshot!.entries[0]).toMatchObject({
+      operation: "IDLE",
+      error: input.expectedError,
+    });
+  });
+
+  test("records malformed delete results as invalid projections without retrying", async () => {
+    let completionHandler:
+      | Parameters<AgentControlService["registerCompletionHandler"]>[1]
+      | undefined;
+    const registerCompletionHandler = vi.fn((kind, handler) => {
+      if (kind === "buildData.delete") completionHandler = handler;
+    });
+    const projection = {
+      jobId: "delete-1",
+      error:
+        "Invalid Build Data delete result: build data delete result.deleted must be an array",
+    };
+    const create = vi.fn().mockResolvedValue(projection);
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(projection);
+    getPrismaClient.mockResolvedValue({
+      buildDataDeletionHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      buildDataDeleteProjection: { findUnique, create },
+    });
+    new BuildDataService({
+      registerCompletionHandler,
+    } as unknown as AgentControlService);
+    const job = {
+      id: "delete-1",
+      agentId: "agent-1",
+      codebaseId: null,
+      worktreeId: null,
+      buildDataCollectionId: "collection-1",
+      kind: "buildData.delete",
+      payloadJson: JSON.stringify({
+        targets: [
+          { path: "/DerivedData/App-hash", rootPath: "/DerivedData" },
+        ],
+      }),
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({ deleted: "invalid" }),
+      error: null,
+    };
+
+    await expect(completionHandler!(job)).resolves.toBeUndefined();
+    await expect(completionHandler!(job)).resolves.toBeUndefined();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith({ data: projection });
   });
 });

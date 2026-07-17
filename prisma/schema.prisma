@@ -224,6 +224,7 @@ model BuildDataDeletionHistory {
 
 model BuildDataDeleteProjection {
   jobId       String   @id
+  error       String?
   projectedAt DateTime @default(now())
 }
 

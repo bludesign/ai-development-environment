@@ -4,6 +4,7 @@ import {
   BUILD_DATA_DELETE_JOB_KIND,
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
+  buildDataTargetsPayload,
   parseBuildDataDeleteResult,
   parseBuildDataScanResult,
   parseBuildDataSizeResult,
@@ -119,6 +120,39 @@ function initialStatus(agent: PersistedAgent): BuildDataAgentStatus {
 
 function parseResult(value: string | null): unknown {
   return value === null ? null : JSON.parse(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function operationTargetPaths(job: { payloadJson: string }): string[] {
+  return buildDataTargetsPayload(parseResult(job.payloadJson)).targets.map(
+    (target) => target.path,
+  );
+}
+
+function invalidOperationResultError(
+  kind: typeof BUILD_DATA_SIZE_JOB_KIND | typeof BUILD_DATA_DELETE_JOB_KIND,
+  error: unknown,
+): string {
+  const operation = kind === BUILD_DATA_DELETE_JOB_KIND ? "delete" : "size";
+  return `Invalid Build Data ${operation} result: ${errorMessage(error)}`;
+}
+
+function applyOperationError(
+  views: Map<string, BuildDataEntryView>,
+  job: { agentId: string; payloadJson: string },
+  error: string,
+): void {
+  try {
+    for (const path of operationTargetPaths(job)) {
+      const view = views.get(entryId(job.agentId, path));
+      if (view) view.error = error;
+    }
+  } catch {
+    // Operation payloads are validated before the jobs are created.
+  }
 }
 
 function entryId(agentId: string, path: string): string {
@@ -389,12 +423,29 @@ export class BuildDataService {
       group.push(entry);
       groups.set(entry.agent.id, group);
     }
+    const prisma = await getPrismaClient();
+    const readyGroups: Array<{
+      agentId: string;
+      entries: BuildDataEntryView[];
+    }> = [];
     for (const [agentId, group] of groups) {
-      if (!capabilities(group[0]!.agent).includes(kind)) {
+      const selectedAgent = group[0]!.agent;
+      const currentAgent = await prisma.agent.findUnique({
+        where: { id: agentId },
+      });
+      if (!currentAgent || !online(currentAgent)) {
         throw new Error(
-          `${group[0]!.agent.name} must be updated before this operation can run`,
+          `${selectedAgent.name} is offline; reconnect it before running this operation`,
         );
       }
+      if (!capabilities(currentAgent).includes(kind)) {
+        throw new Error(
+          `${selectedAgent.name} must be updated before this operation can run`,
+        );
+      }
+      readyGroups.push({ agentId, entries: group });
+    }
+    for (const { agentId, entries: group } of readyGroups) {
       await this.agentControlService.createJob({
         agentId,
         kind,
@@ -581,8 +632,12 @@ export class BuildDataService {
             view.sizeBytes = size.sizeBytes;
             view.error = size.error;
           }
-        } catch {
-          // Invalid operation results are surfaced through the job progress state.
+        } catch (error) {
+          applyOperationError(
+            views,
+            job,
+            invalidOperationResultError(BUILD_DATA_SIZE_JOB_KIND, error),
+          );
         }
       }
       if (
@@ -599,8 +654,12 @@ export class BuildDataService {
             if (deletion.deleted && !includeDeleted) views.delete(id);
             else view.error = deletion.error;
           }
-        } catch {
-          // Invalid operation results are surfaced through the job progress state.
+        } catch (error) {
+          applyOperationError(
+            views,
+            job,
+            invalidOperationResultError(BUILD_DATA_DELETE_JOB_KIND, error),
+          );
         }
       }
       if (job.status === "QUEUED" || job.status === "RUNNING") {
@@ -611,12 +670,8 @@ export class BuildDataService {
           continue;
         }
         try {
-          const payload = parseResult(job.payloadJson) as {
-            targets?: Array<{ path?: unknown }>;
-          };
-          for (const target of payload.targets ?? []) {
-            if (typeof target.path !== "string") continue;
-            const view = views.get(entryId(job.agentId, target.path));
+          for (const path of operationTargetPaths(job)) {
+            const view = views.get(entryId(job.agentId, path));
             if (view) {
               view.operation =
                 job.kind === BUILD_DATA_DELETE_JOB_KIND ? "DELETING" : "SIZING";
@@ -633,12 +688,8 @@ export class BuildDataService {
           job.kind === BUILD_DATA_DELETE_JOB_KIND)
       ) {
         try {
-          const payload = parseResult(job.payloadJson) as {
-            targets?: Array<{ path?: unknown }>;
-          };
-          for (const target of payload.targets ?? []) {
-            if (typeof target.path !== "string") continue;
-            const view = views.get(entryId(job.agentId, target.path));
+          for (const path of operationTargetPaths(job)) {
+            const view = views.get(entryId(job.agentId, path));
             if (view) view.error = job.error || "Build Data operation failed";
           }
         } catch {
@@ -698,17 +749,36 @@ export class BuildDataService {
     ) {
       return;
     }
-    const collection = await this.loadCollection(job.buildDataCollectionId);
-    if (!collection) return;
-    const deleted = parseBuildDataDeleteResult(
-      parseResult(job.resultJson),
-    ).deleted.filter((item) => item.deleted);
+    let deleted: ReturnType<typeof parseBuildDataDeleteResult>["deleted"];
+    try {
+      deleted = parseBuildDataDeleteResult(
+        parseResult(job.resultJson),
+      ).deleted.filter((item) => item.deleted);
+    } catch (error) {
+      const projectionError = invalidOperationResultError(
+        BUILD_DATA_DELETE_JOB_KIND,
+        error,
+      );
+      try {
+        await prisma.buildDataDeleteProjection.create({
+          data: { jobId: job.id, error: projectionError },
+        });
+      } catch (createError) {
+        const projected = await prisma.buildDataDeleteProjection.findUnique({
+          where: { jobId: job.id },
+        });
+        if (!projected) throw createError;
+      }
+      return;
+    }
     if (!deleted.length) {
       await prisma.buildDataDeleteProjection.create({
         data: { jobId: job.id },
       });
       return;
     }
+    const collection = await this.loadCollection(job.buildDataCollectionId);
+    if (!collection) return;
     const views = await this.entries(collection, true);
     const byPath = new Map(
       views
