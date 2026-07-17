@@ -650,7 +650,7 @@ function ActionsTable({
     >();
     const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const run of runs) {
-      const date = new Date(run.startedAt);
+      const date = new Date(run.createdAt);
       const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
       const group = groups.get(key) ?? {
         label: formatter.format(date),

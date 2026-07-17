@@ -253,6 +253,62 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("preserves updated ordering when creation dates interleave", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitHubPullRequestConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+          githubRepositories: [repository],
+        } as never;
+      }
+      if (query.includes("query GitHubPullRequests")) {
+        return {
+          githubPullRequests: {
+            items: [
+              { ...pullRequest, title: "First by update" },
+              {
+                ...pullRequest,
+                id: "pull-request-2",
+                number: 16,
+                title: "Second by update",
+                createdAt: "2026-07-16T12:00:00.000Z",
+              },
+              {
+                ...pullRequest,
+                id: "pull-request-3",
+                number: 15,
+                title: "Third by update",
+              },
+            ],
+            truncated: false,
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<PullRequestsPage />);
+
+    const firstRow = (await screen.findByRole("row", {
+      name: /First by update/,
+    })) as HTMLTableRowElement;
+    const secondRow = screen.getByRole("row", {
+      name: /Second by update/,
+    }) as HTMLTableRowElement;
+    const thirdRow = screen.getByRole("row", {
+      name: /Third by update/,
+    }) as HTMLTableRowElement;
+    expect(firstRow.rowIndex).toBeLessThan(secondRow.rowIndex);
+    expect(secondRow.rowIndex).toBeLessThan(thirdRow.rowIndex);
+    expect(screen.getAllByText("Friday, July 17, 2026")).toHaveLength(2);
+  });
+
   test("renders pull request fields, loads tabs lazily, refreshes, and routes clicks correctly", async () => {
     configureRequests();
     render(<PullRequestsPage />);

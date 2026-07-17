@@ -700,22 +700,29 @@ function PullRequestTable({
   const router = useRouter();
   const stopRowClick = (event: MouseEvent) => event.stopPropagation();
   const groupedPullRequests = useMemo(() => {
-    const groups = new Map<
-      string,
-      { label: string; items: GitHubPullRequestView[] }
-    >();
+    const groups: Array<{
+      key: string;
+      dateKey: string;
+      label: string;
+      items: GitHubPullRequestView[];
+    }> = [];
     const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const pullRequest of items) {
       const date = new Date(pullRequest.createdAt);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-      const group = groups.get(key) ?? {
-        label: formatter.format(date),
-        items: [],
-      };
-      group.items.push(pullRequest);
-      groups.set(key, group);
+      const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = groups.at(-1);
+      if (group?.dateKey === dateKey) {
+        group.items.push(pullRequest);
+      } else {
+        groups.push({
+          key: `${dateKey}-${pullRequest.id}`,
+          dateKey,
+          label: formatter.format(date),
+          items: [pullRequest],
+        });
+      }
     }
-    return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
+    return groups;
   }, [items, locale]);
 
   return (

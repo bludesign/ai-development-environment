@@ -215,6 +215,83 @@ afterEach(() => {
 });
 
 describe("ActionsPage", () => {
+  test("keeps paginated runs in creation order when an older run starts later", async () => {
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("GitHubActionsConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubActionsWorkflowRuns")) {
+        const after = variables?.after;
+        return {
+          githubActionsWorkflowRuns: {
+            items: after
+              ? [
+                  {
+                    ...run,
+                    id: "42",
+                    runNumber: 42,
+                    displayTitle: "Older rerun",
+                    startedAt: "2026-07-18T14:00:00.000Z",
+                    createdAt: "2026-07-15T12:00:00.000Z",
+                  },
+                ]
+              : [
+                  {
+                    ...run,
+                    id: "44",
+                    displayTitle: "Newest run",
+                    startedAt: "2026-07-18T12:00:00.000Z",
+                    createdAt: "2026-07-18T12:00:00.000Z",
+                  },
+                  {
+                    ...run,
+                    id: "43",
+                    runNumber: 43,
+                    displayTitle: "Middle run",
+                    startedAt: "2026-07-17T12:00:00.000Z",
+                    createdAt: "2026-07-17T12:00:00.000Z",
+                  },
+                ],
+            repositories: [
+              {
+                id: "codebase-repository-1",
+                nameWithOwner: "acme/widgets",
+                url: "https://github.com/acme/widgets",
+              },
+            ],
+            repositoryErrors: [],
+            hasNextPage: !after,
+            endCursor: after ? null : "cursor-1",
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<ActionsPage />);
+    const newestRow = (await screen.findByRole("row", {
+      name: /Newest run/,
+    })) as HTMLTableRowElement;
+    const middleRow = screen.getByRole("row", {
+      name: /Middle run/,
+    }) as HTMLTableRowElement;
+
+    act(() => intersectPaginationTrigger());
+
+    const olderRow = (await screen.findByRole("row", {
+      name: /Older rerun/,
+    })) as HTMLTableRowElement;
+    expect(newestRow.rowIndex).toBeLessThan(middleRow.rowIndex);
+    expect(middleRow.rowIndex).toBeLessThan(olderRow.rowIndex);
+    expect(screen.getByText("Wednesday, July 15, 2026")).toBeDefined();
+  });
+
   test("shows credential and codebase empty states", async () => {
     requestMock.mockResolvedValueOnce({
       githubSettings: {
