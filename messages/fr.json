@@ -244,6 +244,7 @@
     "raw": "Source",
     "copied": "Copié",
     "copy": "Copier",
+    "commentActions": "Actions du commentaire",
     "copyRaw": "Copier le contenu source",
     "copyFailed": "Impossible de copier le contenu.",
     "authoringFormat": "Format de rédaction",

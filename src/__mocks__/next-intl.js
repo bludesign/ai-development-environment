@@ -271,6 +271,7 @@ const mockTranslations = {
     raw: "Raw",
     copied: "Copied",
     copy: "Copy",
+    commentActions: "Comment actions",
     copyRaw: "Copy raw content",
     copyFailed: "Could not copy the content.",
     authoringFormat: "Authoring format",

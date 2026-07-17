@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Ellipsis,
   Eye,
   FileCode,
 } from "lucide-react";
@@ -20,8 +21,10 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -107,6 +110,7 @@ export function RichTextPreview({ markdown }: { markdown: string }) {
 
 export function JiraRichTextBlock({
   bodyClassName,
+  compactActionsMenu = false,
   content,
   controlsClassName,
   header,
@@ -118,6 +122,7 @@ export function JiraRichTextBlock({
   viewActionsClassName,
 }: {
   bodyClassName?: string;
+  compactActionsMenu?: boolean;
   content?: JiraRichText | null;
   controlsClassName?: string;
   header?: ReactNode;
@@ -227,41 +232,78 @@ export function JiraRichTextBlock({
             </Select>
           )}
           <div className={cn("flex items-center gap-1", viewActionsClassName)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            {compactActionsMenu ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={t("commentActions")}
+                    size="icon-xs"
+                    title={
+                      copyState === "COPIED" ? t("copied") : t("commentActions")
+                    }
+                    type="button"
+                    variant="outline"
+                  >
+                    {copyState === "COPIED" ? <Check /> : <Ellipsis />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup
+                    onValueChange={(mode) => setViewMode(mode as ViewMode)}
+                    value={viewMode}
+                  >
+                    {viewModes.map(({ icon: ViewIcon, label, value }) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
+                        <ViewIcon /> {label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void copy()}>
+                    {copyState === "COPIED" ? <Check /> : <Copy />}
+                    {copyState === "COPIED" ? t("copied") : t("copy")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="xs"
+                      title={t("renderFormat")}
+                      type="button"
+                      variant="outline"
+                    >
+                      <ActiveViewIcon /> {activeViewMode.label}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuRadioGroup
+                      onValueChange={(mode) => setViewMode(mode as ViewMode)}
+                      value={viewMode}
+                    >
+                      {viewModes.map(({ icon: ViewIcon, label, value }) => (
+                        <DropdownMenuRadioItem key={value} value={value}>
+                          <ViewIcon /> {label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
+                  aria-label={t("copy")}
+                  onClick={() => void copy()}
                   size="xs"
-                  title={t("renderFormat")}
+                  title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
                   type="button"
                   variant="outline"
                 >
-                  <ActiveViewIcon /> {activeViewMode.label}
+                  {copyState === "COPIED" ? <Check /> : <Copy />}
+                  {t("copy")}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup
-                  onValueChange={(mode) => setViewMode(mode as ViewMode)}
-                  value={viewMode}
-                >
-                  {viewModes.map(({ icon: ViewIcon, label, value }) => (
-                    <DropdownMenuRadioItem key={value} value={value}>
-                      <ViewIcon /> {label}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              aria-label={t("copy")}
-              onClick={() => void copy()}
-              size="xs"
-              title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
-              type="button"
-              variant="outline"
-            >
-              {copyState === "COPIED" ? <Check /> : <Copy />}
-              {t("copy")}
-            </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

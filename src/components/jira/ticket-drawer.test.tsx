@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -157,23 +163,36 @@ describe("JiraTicketDrawer", () => {
       .getByText("Reviewer")
       .closest('[data-slot="item"]') as HTMLElement;
     const commentDate = commentItem.querySelector("time");
-    const commentViewMenu = commentItem.querySelector(
-      '[data-slot="dropdown-menu-trigger"]',
-    );
-    const commentViewActions = commentViewMenu?.parentElement;
+    const commentActions = within(commentItem).getByRole("button", {
+      name: "Comment actions",
+    });
+    const commentViewActions = commentActions.parentElement;
     const commentControls = commentViewActions?.parentElement;
     expect(commentDate?.parentElement).toBe(commentControls);
-    expect(commentViewActions?.querySelectorAll("button")).toHaveLength(2);
+    expect(commentViewActions?.querySelectorAll("button")).toHaveLength(1);
     expect(commentViewActions?.className).toContain("ml-auto");
-    expect(commentViewActions?.className).toContain("flex-col");
-    expect(commentViewActions?.className).toContain("items-end");
-    expect(commentViewActions?.className).toContain("row-span-2");
-    expect(commentViewActions?.className).toContain("@md/comment:flex-row");
-    expect(commentControls?.className).toContain("contents");
-    expect(commentControls?.parentElement?.className).toContain("grid");
+    expect(commentControls?.parentElement?.className).toContain("flex-col");
     expect(commentControls?.parentElement?.className).toContain(
-      "@md/comment:flex",
+      "@md/comment:flex-row",
     );
+    expect(
+      within(commentItem).queryByRole("button", { name: "Rendered" }),
+    ).toBeNull();
+    expect(
+      within(commentItem).queryByRole("button", { name: "Copy" }),
+    ).toBeNull();
+    fireEvent.pointerDown(commentActions, { button: 0, ctrlKey: false });
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Rendered" })
+        .querySelector(".lucide-eye"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Copy" })
+        .querySelector(".lucide-copy"),
+    ).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("Looks good")).toBeDefined();
     expect(
       commentItem.compareDocumentPosition(

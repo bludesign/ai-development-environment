@@ -244,6 +244,7 @@
     "raw": "Rohtext",
     "copied": "Kopiert",
     "copy": "Kopieren",
+    "commentActions": "Kommentaraktionen",
     "copyRaw": "Rohinhalt kopieren",
     "copyFailed": "Der Inhalt konnte nicht kopiert werden.",
     "authoringFormat": "Eingabeformat",

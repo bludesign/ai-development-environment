@@ -62,21 +62,23 @@ export function JiraTicketComments({
               <article>
                 <ItemContent className="@container/comment basis-full">
                   <JiraRichTextBlock
+                    compactActionsMenu
                     content={comment.content}
-                    controlsClassName="contents @md/comment:flex @md/comment:flex-wrap @md/comment:items-center @md/comment:justify-end @md/comment:gap-1"
+                    controlsClassName="items-center"
                     header={
                       <ItemTitle>
                         {comment.author?.displayName ?? t("unknownUser")}
                       </ItemTitle>
                     }
                     headerActions={
-                      <time className="col-start-1 row-start-2 mr-auto shrink-0 text-xs text-muted-foreground">
+                      <time className="mr-auto shrink-0 text-xs text-muted-foreground">
                         {displayDate(comment.createdAt)}
                       </time>
                     }
-                    headerClassName="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-1 border-b pb-2 @md/comment:flex @md/comment:flex-row @md/comment:items-center @md/comment:gap-2"
+                    headerClassName="flex-col items-stretch border-b pb-2 @md/comment:flex-row @md/comment:items-center"
+                    showFormatOverride={false}
                     value={comment.body}
-                    viewActionsClassName="col-start-2 row-span-2 row-start-1 ml-auto flex-col items-end gap-0.5 @md/comment:ml-0 @md/comment:flex-row @md/comment:items-center @md/comment:gap-1"
+                    viewActionsClassName="ml-auto"
                   />
                 </ItemContent>
               </article>
