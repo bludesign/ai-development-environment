@@ -42,12 +42,14 @@ export function GitHubMarkdownBlock({
   bodyHtml,
   emptyLabel,
   header,
+  headerActions,
   headerClassName,
 }: {
   body: string;
   bodyHtml: string;
   emptyLabel: string;
   header?: ReactNode;
+  headerActions?: ReactNode;
   headerClassName?: string;
 }) {
   const t = useTranslations("githubComments");
@@ -85,37 +87,42 @@ export function GitHubMarkdownBlock({
         )}
       >
         <div>{header}</div>
-        {body && (
+        {(body || headerActions) && (
           <div className="flex items-center gap-1">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="xs" type="button" variant="outline">
-                  <ActiveIcon /> {active.label}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup
-                  onValueChange={(value) => setViewMode(value as ViewMode)}
-                  value={viewMode}
+            {headerActions}
+            {body && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="xs" type="button" variant="outline">
+                      <ActiveIcon /> {active.label}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuRadioGroup
+                      onValueChange={(value) => setViewMode(value as ViewMode)}
+                      value={viewMode}
+                    >
+                      {modes.map(({ value, label, icon: Icon }) => (
+                        <DropdownMenuRadioItem key={value} value={value}>
+                          <Icon /> {label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  aria-label={t("copy")}
+                  onClick={() => void copy()}
+                  size="xs"
+                  type="button"
+                  variant="outline"
                 >
-                  {modes.map(({ value, label, icon: Icon }) => (
-                    <DropdownMenuRadioItem key={value} value={value}>
-                      <Icon /> {label}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              aria-label={t("copy")}
-              onClick={() => void copy()}
-              size="xs"
-              type="button"
-              variant="outline"
-            >
-              {copyState === "COPIED" ? <Check /> : <Copy />}
-              {copyState === "COPIED" ? t("copied") : t("copy")}
-            </Button>
+                  {copyState === "COPIED" ? <Check /> : <Copy />}
+                  {copyState === "COPIED" ? t("copied") : t("copy")}
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

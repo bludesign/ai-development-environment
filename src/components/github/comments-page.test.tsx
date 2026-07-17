@@ -168,6 +168,26 @@ describe("CommentsPage", () => {
     expect(screen.getByText("Root other")).toBeDefined();
     expect(screen.queryByText("Root resolved")).toBeNull();
     expect(screen.getByText("Reply from current user")).toBeDefined();
+    const otherCard = screen
+      .getByText("Root other")
+      .closest('[data-slot="card"]') as HTMLElement;
+    expect(otherCard.querySelectorAll('[data-slot="card"]')).toHaveLength(1);
+    expect(
+      within(otherCard)
+        .getByRole("link", { name: "Open in GitHub" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(
+      within(otherCard)
+        .getByRole("link", { name: "Open reply in GitHub" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(
+      within(otherCard).getAllByRole("button", { name: "Rendered" }),
+    ).toHaveLength(2);
+    expect(
+      within(otherCard).getAllByRole("button", { name: "Copy" }),
+    ).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Current User" }));
     expect(screen.queryByText("Root mine")).toBeNull();

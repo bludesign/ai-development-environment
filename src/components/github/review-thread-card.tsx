@@ -4,13 +4,13 @@ import { ExternalLink, Send } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useState } from "react";
 
-import { GitHubMarkdownContent } from "@/components/github/github-markdown";
+import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
@@ -159,75 +159,87 @@ export function ReviewThreadCard({
     : thread.viewerCanResolve;
 
   return (
-    <Card className="gap-0 py-0">
-      <CardHeader className="flex grid-cols-none flex-row flex-wrap items-start justify-between gap-3 border-b py-4">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <ReviewAuthor actor={thread.rootComment.author} />
-            <span className="text-muted-foreground">·</span>
-            <time
-              className="text-muted-foreground"
-              dateTime={thread.rootComment.createdAt}
-              title={new Date(thread.rootComment.createdAt).toLocaleString(
-                locale,
-              )}
-            >
-              {relativeAge(thread.rootComment.createdAt, locale)}
-            </time>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="outline">
-              {threadLocation(thread, t("fileComment"))}
-            </Badge>
-            {thread.isOutdated && (
-              <Badge variant="secondary">{t("outdated")}</Badge>
-            )}
-            <Badge variant={thread.isResolved ? "secondary" : "outline"}>
-              {thread.isResolved ? t("resolved") : t("unresolved")}
-            </Badge>
-            <Link
-              className="font-medium text-primary hover:underline"
-              href={pullRequestDetailHref(thread.pullRequest)}
-            >
-              {thread.pullRequest.repositoryNameWithOwner} #
-              {thread.pullRequest.number}
-            </Link>
-          </div>
-        </div>
-        <Button asChild size="sm" variant="outline">
-          <a href={thread.rootComment.url} rel="noreferrer" target="_blank">
-            {t("openInGitHub")} <ExternalLink />
-          </a>
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-5 py-5">
-        <GitHubMarkdownContent bodyHtml={thread.rootComment.bodyHtml} />
+    <Card>
+      <CardContent className="space-y-5">
+        <GitHubMarkdownBlock
+          body={thread.rootComment.body}
+          bodyHtml={thread.rootComment.bodyHtml}
+          emptyLabel="—"
+          header={
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <ReviewAuthor actor={thread.rootComment.author} />
+                <span className="text-muted-foreground">·</span>
+                <time
+                  className="text-muted-foreground"
+                  dateTime={thread.rootComment.createdAt}
+                  title={new Date(thread.rootComment.createdAt).toLocaleString(
+                    locale,
+                  )}
+                >
+                  {relativeAge(thread.rootComment.createdAt, locale)}
+                </time>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline">
+                  {threadLocation(thread, t("fileComment"))}
+                </Badge>
+                {thread.isOutdated && (
+                  <Badge variant="secondary">{t("outdated")}</Badge>
+                )}
+                <Badge variant={thread.isResolved ? "secondary" : "outline"}>
+                  {thread.isResolved ? t("resolved") : t("unresolved")}
+                </Badge>
+                <Link
+                  className="font-medium text-primary hover:underline"
+                  href={pullRequestDetailHref(thread.pullRequest)}
+                >
+                  {thread.pullRequest.repositoryNameWithOwner} #
+                  {thread.pullRequest.number}
+                </Link>
+              </div>
+            </div>
+          }
+          headerActions={
+            <GitHubCommentLink
+              label={t("openInGitHub")}
+              url={thread.rootComment.url}
+            />
+          }
+          headerClassName="border-b pb-4"
+        />
 
         {thread.replies.length > 0 && (
-          <div className="space-y-4 border-l-2 border-muted pl-4">
+          <div className="space-y-3">
             {thread.replies.map((comment) => (
-              <div className="space-y-2" key={comment.id}>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <ReviewAuthor actor={comment.author} compact />
-                  <span className="text-muted-foreground">·</span>
-                  <time
-                    className="text-muted-foreground"
-                    dateTime={comment.createdAt}
-                  >
-                    {relativeAge(comment.createdAt, locale)}
-                  </time>
-                  <a
-                    aria-label={t("openReplyInGitHub")}
-                    className="text-primary hover:underline"
-                    href={comment.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </div>
-                <GitHubMarkdownContent bodyHtml={comment.bodyHtml} />
-              </div>
+              <Card key={comment.id} size="sm">
+                <CardContent>
+                  <GitHubMarkdownBlock
+                    body={comment.body}
+                    bodyHtml={comment.bodyHtml}
+                    emptyLabel="—"
+                    header={
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <ReviewAuthor actor={comment.author} compact />
+                        <span className="text-muted-foreground">·</span>
+                        <time
+                          className="text-muted-foreground"
+                          dateTime={comment.createdAt}
+                        >
+                          {relativeAge(comment.createdAt, locale)}
+                        </time>
+                      </div>
+                    }
+                    headerActions={
+                      <GitHubCommentLink
+                        label={t("openReplyInGitHub")}
+                        url={comment.url}
+                      />
+                    }
+                    headerClassName="border-b pb-3"
+                  />
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
@@ -271,5 +283,15 @@ export function ReviewThreadCard({
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function GitHubCommentLink({ label, url }: { label: string; url: string }) {
+  return (
+    <Button asChild size="icon-xs" title={label} variant="outline">
+      <a aria-label={label} href={url} rel="noreferrer" target="_blank">
+        <ExternalLink />
+      </a>
+    </Button>
   );
 }

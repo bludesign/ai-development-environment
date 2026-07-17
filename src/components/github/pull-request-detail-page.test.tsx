@@ -176,15 +176,23 @@ describe("PullRequestDetailPage", () => {
     ).not.toBeNull();
     expect(screen.getByText("Formatted prompt").tagName).toBe("STRONG");
     expect(screen.getByText("Review this line")).toBeDefined();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Rendered" }), {
-      button: 0,
-      ctrlKey: false,
-    });
+    const descriptionCard = screen
+      .getByText("Description")
+      .closest('[data-slot="card"]') as HTMLElement;
+    fireEvent.pointerDown(
+      within(descriptionCard).getByRole("button", { name: "Rendered" }),
+      {
+        button: 0,
+        ctrlKey: false,
+      },
+    );
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Markdown" }));
     expect(screen.getByText("Detailed pull request description").tagName).toBe(
       "PRE",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.click(
+      within(descriptionCard).getByRole("button", { name: "Copy" }),
+    );
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(detail.body));
     expect(screen.getByText("feature/app-42 → main")).toBeDefined();
     expect(screen.getByText("+20")).toBeDefined();
