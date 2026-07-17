@@ -33,6 +33,7 @@ type CodebaseRepository {
   description: String!
   jiraBranchRegex: String
   keepBaseBranchUpToDate: Boolean!
+  skillGroups: [SkillGroup!]!
   codebases: [Codebase!]!
   createdAt: String!
   updatedAt: String!
@@ -209,6 +210,7 @@ input UpdateCodebaseRepositoryInput {
   description: String!
   jiraBranchRegex: String
   keepBaseBranchUpToDate: Boolean!
+  skillGroupIds: [ID!]
 }
 
 input UpdateCodebaseSettingsInput {

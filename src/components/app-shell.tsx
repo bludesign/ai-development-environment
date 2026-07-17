@@ -16,6 +16,7 @@ import {
   PanelRight,
   PlayCircle,
   Settings,
+  Sparkles,
   TicketCheck,
   Wrench,
   X,
@@ -437,6 +438,22 @@ function NavigationSidebar() {
           <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/skills")}
+                >
+                  <Link
+                    href="/skills"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Sparkles />
+                    <span>{t("skills")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild

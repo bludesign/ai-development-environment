@@ -161,6 +161,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
           description: string;
           jiraBranchRegex?: string | null;
           keepBaseBranchUpToDate: boolean;
+          skillGroupIds?: string[] | null;
         };
       },
       context: GraphQLContext,
@@ -172,6 +173,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.description,
         input.jiraBranchRegex,
         input.keepBaseBranchUpToDate,
+        input.skillGroupIds,
       );
     },
     updateCodebaseSettings: (

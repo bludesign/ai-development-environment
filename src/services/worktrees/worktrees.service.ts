@@ -33,6 +33,7 @@ import {
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
+import type { SkillsService } from "@/services/skills";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -219,6 +220,7 @@ export class WorktreesService {
     private readonly agentControl: AgentControlService,
     private readonly jiraService: JiraService,
     private readonly gitHubService: GitHubService,
+    private readonly skillsService?: SkillsService,
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
@@ -477,6 +479,7 @@ export class WorktreesService {
   async report(agentId: string, values: CodebaseWorktreeReport[]) {
     const prisma = await getPrismaClient();
     const updatedIds: string[] = [];
+    let deploymentTargetsChanged = false;
     for (const value of values.slice(0, 100)) {
       const report = parseCodebaseWorktreeReport(value);
       const codebase = await prisma.codebase.findUnique({
@@ -485,6 +488,32 @@ export class WorktreesService {
       if (!codebase || codebase.agentId !== agentId) {
         throw new Error("Codebase not found for this agent");
       }
+      const inventory = report.worktrees
+        .slice(0, 1_000)
+        .map((item) => parseWorktreeInventoryItem(item));
+      const previous = await prisma.worktree.findMany({
+        where: { codebaseId: codebase.id },
+        select: { gitDirectory: true, folder: true, missingAt: true },
+      });
+      const previousByGitDirectory = new Map(
+        previous.map((item) => [item.gitDirectory, item]),
+      );
+      const reportedGitDirectories = new Set(
+        inventory.map((item) => item.gitDirectory),
+      );
+      deploymentTargetsChanged ||=
+        inventory.some((item) => {
+          const known = previousByGitDirectory.get(item.gitDirectory);
+          return (
+            !known || known.folder !== item.folder || known.missingAt !== null
+          );
+        }) ||
+        (report.complete &&
+          previous.some(
+            (item) =>
+              item.missingAt === null &&
+              !reportedGitDirectories.has(item.gitDirectory),
+          ));
       await prisma.$transaction(async (transaction) => {
         await transaction.codebase.update({
           where: { id: codebase.id },
@@ -506,8 +535,7 @@ export class WorktreesService {
           },
         });
         const identities: string[] = [];
-        for (const rawItem of report.worktrees.slice(0, 1_000)) {
-          const item = parseWorktreeInventoryItem(rawItem);
+        for (const item of inventory) {
           identities.push(item.gitDirectory);
           const worktree = await transaction.worktree.upsert({
             where: {
@@ -552,6 +580,9 @@ export class WorktreesService {
       this.publish(null, codebase.id);
     }
     await this.cleanupExpired();
+    if (deploymentTargetsChanged) {
+      await this.skillsService?.requestAutoReconcile();
+    }
     return prisma.worktree.findMany({
       where: { id: { in: updatedIds } },
       include: worktreeInclude,
@@ -1758,6 +1789,7 @@ export class WorktreesService {
       });
     });
     this.publish(targetWorktreeId ?? null, move.targetCodebaseId);
+    await this.skillsService?.requestAutoReconcile();
     return targetWorktreeId!;
   }
 
@@ -2066,6 +2098,7 @@ export class WorktreesService {
       worktreeId = projected.id;
     });
     this.publish(worktreeId ?? null, job.codebaseId);
+    await this.skillsService?.requestAutoReconcile();
     if (job.worktreeId) await this.restartWatch(job.worktreeId);
   }
 

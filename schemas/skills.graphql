@@ -1,0 +1,205 @@
+enum SkillAiTool {
+  CURSOR
+  GITHUB_COPILOT
+  CODEX
+  CLAUDE
+  OPENCODE
+}
+
+enum SkillScope {
+  GLOBAL
+  PROJECT
+}
+
+enum SkillRootKind {
+  CURSOR
+  GITHUB_COPILOT
+  AGENTS
+  CLAUDE
+  CODEX_LEGACY
+  OPENCODE
+}
+
+enum SkillSyncKind {
+  ALL
+  GROUP
+}
+
+enum SkillConflictResolution {
+  DATABASE
+  TARGET
+  MANUAL
+  SKIP
+}
+
+type SkillFile {
+  id: ID!
+  path: String!
+  contentsBase64: String!
+  executable: Boolean!
+  contentHash: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Skill {
+  id: ID!
+  name: String!
+  description: String!
+  syncGlobally: Boolean!
+  packageHash: String!
+  files: [SkillFile!]!
+  groups: [SkillGroup!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SkillGroup {
+  id: ID!
+  name: String!
+  skills: [Skill!]!
+  repositories: [CodebaseRepository!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SkillSettings {
+  autoSyncProjectGroups: Boolean!
+  cursorEnabled: Boolean!
+  githubCopilotEnabled: Boolean!
+  codexEnabled: Boolean!
+  claudeEnabled: Boolean!
+  openCodeEnabled: Boolean!
+  updatedAt: String!
+}
+
+type SkillToolObservation {
+  tool: SkillAiTool!
+  configured: Boolean!
+  homePath: String!
+  checkedAt: String!
+  agent: Agent!
+}
+
+type SkillInstallation {
+  id: ID!
+  scope: SkillScope!
+  rootKind: SkillRootKind!
+  rootPath: String!
+  skillName: String!
+  description: String!
+  packageHash: String!
+  fileCount: Int!
+  totalBytes: Int!
+  tracked: Boolean!
+  consumers: [SkillAiTool!]!
+  lastSeenAt: String!
+  agent: Agent!
+  codebase: Codebase
+  worktree: Worktree
+  skill: Skill
+}
+
+type SkillsOverview {
+  skills: [Skill!]!
+  groups: [SkillGroup!]!
+  observations: [SkillToolObservation!]!
+  installations: [SkillInstallation!]!
+  settings: SkillSettings!
+  repositories: [CodebaseRepository!]!
+}
+
+type SkillSyncItem {
+  id: ID!
+  direction: String!
+  status: String!
+  sourceHash: String
+  targetHash: String
+  resolution: String
+  candidatePackage: JSON
+  error: String
+  skill: Skill
+  installation: SkillInstallation
+  agent: Agent
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SkillSyncRun {
+  id: ID!
+  kind: SkillSyncKind!
+  status: String!
+  error: String
+  group: SkillGroup
+  items: [SkillSyncItem!]!
+  createdAt: String!
+  updatedAt: String!
+  finishedAt: String
+}
+
+input SkillFileInput {
+  path: String!
+  contentsBase64: String!
+  executable: Boolean! = false
+}
+
+input SaveSkillInput {
+  id: ID
+  name: String!
+  description: String!
+  syncGlobally: Boolean! = true
+  groupIds: [ID!]! = []
+  files: [SkillFileInput!]!
+}
+
+input SaveSkillGroupInput {
+  id: ID
+  name: String!
+  skillIds: [ID!]! = []
+  repositoryIds: [ID!]! = []
+}
+
+input SaveSkillSettingsInput {
+  autoSyncProjectGroups: Boolean!
+  cursorEnabled: Boolean!
+  githubCopilotEnabled: Boolean!
+  codexEnabled: Boolean!
+  claudeEnabled: Boolean!
+  openCodeEnabled: Boolean!
+}
+
+input SkillPackageInput {
+  name: String!
+  description: String!
+  packageHash: String
+  files: [SkillFileInput!]!
+}
+
+input ResolveSkillSyncItemInput {
+  itemId: ID!
+  resolution: SkillConflictResolution!
+  groupId: ID
+  package: SkillPackageInput
+}
+
+extend type Query {
+  skillsOverview(search: String = ""): SkillsOverview!
+  skill(id: ID!): Skill
+  skillSyncRun(id: ID!): SkillSyncRun
+}
+
+extend type Mutation {
+  saveSkill(input: SaveSkillInput!): Skill!
+  deleteSkill(id: ID!): Boolean!
+  saveSkillGroup(input: SaveSkillGroupInput!): SkillGroup!
+  deleteSkillGroup(id: ID!): Boolean!
+  saveSkillSettings(input: SaveSkillSettingsInput!): SkillSettings!
+  prepareSkillSync(kind: SkillSyncKind! = ALL, groupId: ID): SkillSyncRun!
+  resolveSkillSyncItem(input: ResolveSkillSyncItemInput!): SkillSyncRun!
+  applySkillSync(runId: ID!): SkillSyncRun!
+}
+
+extend type Subscription {
+  skillsChanged: SkillsOverview!
+  skillSyncRunChanged(runId: ID!): SkillSyncRun!
+}

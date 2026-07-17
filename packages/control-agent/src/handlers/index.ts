@@ -36,6 +36,12 @@ import {
   type WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
+  SKILL_APPLY_JOB_KIND,
+  SKILL_READ_JOB_KIND,
+  SKILL_SCAN_JOB_KIND,
+} from "@ai-development-environment/agent-contract/skills";
+import { applySkills, readSkills, scanSkills } from "./skills.js";
+import {
   inspectWorktree,
   branchWorktree,
   deleteWorktree,
@@ -76,4 +82,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [WORKTREE_DELETE_JOB_KIND]: deleteWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
   [WORKTREE_WATCH_JOB_KIND]: watchWorktree,
+  [SKILL_SCAN_JOB_KIND]: scanSkills,
+  [SKILL_READ_JOB_KIND]: readSkills,
+  [SKILL_APPLY_JOB_KIND]: applySkills,
 };
