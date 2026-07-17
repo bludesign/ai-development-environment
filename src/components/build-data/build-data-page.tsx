@@ -569,10 +569,7 @@ export function BuildDataPage() {
                   <TableCell className="w-12 text-right">
                     <DropdownMenu
                       onOpenChange={(open) => {
-                        if (
-                          !open &&
-                          armedDeleteKey === `row:${entry.id}`
-                        ) {
+                        if (!open && armedDeleteKey === `row:${entry.id}`) {
                           if (armedDeleteTimer.current) {
                             window.clearTimeout(armedDeleteTimer.current);
                             armedDeleteTimer.current = null;
