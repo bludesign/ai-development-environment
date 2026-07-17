@@ -16,10 +16,11 @@ import {
 
 import {
   displayedWorktreePath,
+  filterWorktreeAgentGroups,
   WorktreesPage,
   worktreeChangeActionState,
 } from "./worktrees-page";
-import type { WorktreeOverview } from "./types";
+import type { WorktreeAgentGroup, WorktreeOverview } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -51,6 +52,12 @@ class ResizeObserverMock {
   unobserve() {}
   disconnect() {}
 }
+
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
 
 describe("displayedWorktreePath", () => {
   test("uses the full path without a base and outside a configured base", () => {
@@ -89,6 +96,111 @@ describe("worktreeChangeActionState", () => {
         hasUnstagedChanges: true,
       }),
     ).toEqual({ hasChanges: true, stageOperation: "STAGE_ALL" });
+  });
+});
+
+describe("filterWorktreeAgentGroups", () => {
+  const groups = [
+    {
+      agent: { id: "agent-1", name: "Studio Mac", hostname: "studio.local" },
+      codebases: [
+        {
+          repository: {
+            id: "repository-1",
+            name: "Codex",
+            description: "Agent development environment",
+            canonicalOrigin: "github.com/openai/codex",
+            displayOrigin: "github.com/openai/codex",
+          },
+          codebase: {
+            id: "codebase-1",
+            folder: "/workspaces/codex",
+            observedOrigin: "git@github.com:openai/codex.git",
+            branch: "main",
+            defaultBranch: "main",
+          },
+          worktrees: [
+            {
+              id: "worktree-1",
+              branch: "feature/AIDE-24",
+              folder: "/workspaces/codex-aide-24",
+              relativePath: "codex-aide-24",
+              ticketKey: "AIDE-24",
+              ticketTitle: "Add worktrees page",
+              ticketStatus: "In Progress",
+              pullRequest: null,
+              tags: [],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      agent: { id: "agent-2", name: "Laptop", hostname: "laptop.local" },
+      codebases: [
+        {
+          repository: {
+            id: "repository-2",
+            name: "Payments",
+            description: "Billing application",
+            canonicalOrigin: "github.com/openai/payments",
+            displayOrigin: "github.com/openai/payments",
+          },
+          codebase: {
+            id: "codebase-2",
+            folder: "/workspaces/payments",
+            observedOrigin: "git@github.com:openai/payments.git",
+            branch: "main",
+            defaultBranch: "main",
+          },
+          worktrees: [
+            {
+              id: "worktree-2",
+              branch: "feature/PAY-9",
+              folder: "/workspaces/payments-pay-9",
+              relativePath: "payments-pay-9",
+              ticketKey: "PAY-9",
+              ticketTitle: "Retry failed payment",
+              ticketStatus: "Selected",
+              pullRequest: null,
+              tags: [],
+            },
+          ],
+        },
+      ],
+    },
+  ] as unknown as WorktreeAgentGroup[];
+
+  test.each([
+    ["AIDE-24", "agent-1"],
+    ["studio.local", "agent-1"],
+    ["Codex", "agent-1"],
+    ["In Progress", "agent-1"],
+    ["/workspaces/payments", "agent-2"],
+  ])("searches all worktree metadata for %s", (query, agentId) => {
+    const result = filterWorktreeAgentGroups(groups, {
+      query,
+      agentId: null,
+      repositoryId: null,
+    });
+    expect(result.map((group) => group.agent.id)).toEqual([agentId]);
+  });
+
+  test("combines agent and repository filters", () => {
+    expect(
+      filterWorktreeAgentGroups(groups, {
+        query: "",
+        agentId: "agent-2",
+        repositoryId: "repository-2",
+      }).map((group) => group.agent.id),
+    ).toEqual(["agent-2"]);
+    expect(
+      filterWorktreeAgentGroups(groups, {
+        query: "",
+        agentId: "agent-1",
+        repositoryId: "repository-2",
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -277,6 +389,54 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    const card = screen
+      .getByRole("button", { name: "feature/AIDE-24" })
+      .closest('[data-slot="card"]');
+    expect(
+      card?.querySelector('[data-slot="card-header"]')?.className,
+    ).toContain("@md/card-header:grid-cols-[minmax(0,1fr)_auto]!");
+    expect(
+      card?.querySelector('[data-slot="card-action"]')?.className,
+    ).toContain("@md/card-header:col-start-2");
+  });
+
+  test("searches worktrees and provides shadcn agent and repository filters", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    const search = screen.getByRole("searchbox", {
+      name: "Search worktrees",
+    });
+    const agentFilter = screen.getByRole("combobox", {
+      name: "Filter by agent",
+    });
+    const repositoryFilter = screen.getByRole("combobox", {
+      name: "Filter by repository",
+    });
+    expect(agentFilter.getAttribute("data-slot")).toBe("select-trigger");
+    expect(repositoryFilter.getAttribute("data-slot")).toBe("select-trigger");
+
+    fireEvent.change(search, { target: { value: "Add worktrees page" } });
+    expect(screen.getByText("feature/AIDE-24")).toBeDefined();
+    fireEvent.change(search, { target: { value: "missing branch" } });
+    expect(await screen.findByText("No matching worktrees")).toBeDefined();
+    fireEvent.change(search, { target: { value: "" } });
+
+    fireEvent.pointerDown(agentFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Studio Mac" }));
+    expect(screen.getByText("feature/AIDE-24")).toBeDefined();
+
+    fireEvent.pointerDown(repositoryFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    expect(screen.getByText("feature/AIDE-24")).toBeDefined();
   });
 
   test("opens details from summary surfaces while the branch keeps inline expansion", async () => {

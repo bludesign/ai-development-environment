@@ -23,6 +23,11 @@ model Agent {
   version            String
   osVersion          String
   architecture       String
+  cpuModel           String?
+  memoryTotalBytes   Float?
+  memoryFreeBytes    Float?
+  diskTotalBytes     Float?
+  diskFreeBytes      Float?
   capabilitiesJson   String
   secretHash         String                   @unique
   baseRepoDirectory  String?

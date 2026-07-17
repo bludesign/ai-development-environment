@@ -1,55 +1,168 @@
 "use client";
 
-import { TUNNEL_NAME_PATTERN } from "@ai-development-environment/agent-contract";
-import { CODEBASE_BROWSE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
-import { ArrowLeft, Play, Trash2 } from "lucide-react";
+import {
+  CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_RECONCILE_EVENT_CAPABILITY,
+} from "@ai-development-environment/agent-contract/codebases";
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Search,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
 import type { Agent, AgentJob } from "@/components/agents/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Item } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
-import { createClientId } from "@/lib/browser-utils";
+import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "./graphql-fields";
+import { samplePayloadForCapability } from "./capability-payloads";
+
+type AgentCodebase = {
+  id: string;
+  folder: string;
+  branch: string | null;
+  headSha: string | null;
+  syncState:
+    | "IN_SYNC"
+    | "AHEAD"
+    | "BEHIND"
+    | "DIVERGED"
+    | "NO_UPSTREAM"
+    | "DETACHED"
+    | "UNKNOWN";
+  availability:
+    "AVAILABLE" | "MISSING" | "NOT_REPOSITORY" | "ORIGIN_MISMATCH" | "ERROR";
+  lastCheckedAt: string | null;
+  repository: {
+    id: string;
+    name: string;
+    description: string;
+    displayOrigin: string;
+  };
+};
+
+type CodebaseOverviewRepository = AgentCodebase["repository"] & {
+  codebases: Array<
+    Omit<AgentCodebase, "repository"> & { agent: { id: string } }
+  >;
+};
+
+const isActiveJob = (job: AgentJob) =>
+  job.status === "QUEUED" || job.status === "RUNNING";
+
+function upsertJob(jobs: AgentJob[], changed: AgentJob): AgentJob[] {
+  const existing = jobs.some((job) => job.id === changed.id);
+  return existing
+    ? jobs.map((job) => (job.id === changed.id ? changed : job))
+    : [changed, ...jobs];
+}
 
 export function AgentDetail({ agentId }: { agentId: string }) {
   const t = useTranslations("agentDetail");
   const locale = useLocale();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
-  const [tunnelName, setTunnelName] = useState("");
+  const [codebases, setCodebases] = useState<AgentCodebase[]>([]);
+  const [capabilityQuery, setCapabilityQuery] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
+    const loadId = ++latestLoad.current;
     try {
       const data = await controlPlaneRequest<{
         agent: Agent | null;
         agentJobs: AgentJob[];
+        codebaseOverview: { repositories: CodebaseOverviewRepository[] };
       }>(
-        `query AgentDetail($id: ID!) { agent(id: $id) { ${AGENT_FIELDS} } agentJobs(agentId: $id) { ${JOB_FIELDS} } }`,
+        `query AgentDetail($id: ID!) {
+          agent(id: $id) { ${AGENT_FIELDS} }
+          agentJobs(agentId: $id) { ${JOB_FIELDS} }
+          codebaseOverview {
+            repositories {
+              id name description displayOrigin
+              codebases {
+                id folder branch headSha syncState availability lastCheckedAt
+                agent { id }
+              }
+            }
+          }
+        }`,
         { id: agentId },
       );
+      if (loadId !== latestLoad.current) return;
       setAgent(data.agent);
       setJobs(data.agentJobs);
+      setCodebases(
+        (data.codebaseOverview?.repositories ?? []).flatMap((repository) =>
+          repository.codebases
+            .filter((codebase) => codebase.agent.id === agentId)
+            .map((codebase) => ({
+              id: codebase.id,
+              folder: codebase.folder,
+              branch: codebase.branch,
+              headSha: codebase.headSha,
+              syncState: codebase.syncState,
+              availability: codebase.availability,
+              lastCheckedAt: codebase.lastCheckedAt,
+              repository: {
+                id: repository.id,
+                name: repository.name,
+                description: repository.description,
+                displayOrigin: repository.displayOrigin,
+              },
+            })),
+        ),
+      );
       setSelectedJobId((current) =>
         current && data.agentJobs.some((job) => job.id === current)
           ? current
@@ -57,17 +170,17 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       );
       setLoadError(null);
     } catch (value) {
+      if (loadId !== latestLoad.current) return;
       setLoadError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (loadId === latestLoad.current) setLoading(false);
     }
   }, [agentId]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void load(), 0);
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
-      agentChanged: Agent;
-    }>(
+    const client = controlPlaneSubscriptions();
+    const unsubscribeAgent = client.subscribe<{ agentChanged: Agent }>(
       {
         query: `subscription AgentChanged($agentId: ID!) { agentChanged(agentId: $agentId) { ${AGENT_FIELDS} } }`,
         variables: { agentId },
@@ -79,17 +192,30 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeCodebases = client.subscribe<{
+      codebaseOverviewChanged: { codebaseId: string | null };
+    }>(
+      {
+        query: `subscription CodebaseOverviewChanged {
+          codebaseOverviewChanged { codebaseId repositoryId }
+        }`,
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initialLoad);
-      unsubscribe();
+      latestLoad.current += 1;
+      unsubscribeAgent();
+      unsubscribeCodebases();
     };
   }, [agentId, load]);
 
   const activeJobIds = useMemo(
-    () =>
-      jobs
-        .filter((job) => job.status === "QUEUED" || job.status === "RUNNING")
-        .map((job) => job.id),
+    () => jobs.filter(isActiveJob).map((job) => job.id),
     [jobs],
   );
 
@@ -104,10 +230,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         {
           next: (value) => {
             const changed = value.data?.agentJobChanged;
-            if (!changed) return;
-            setJobs((current) =>
-              current.map((job) => (job.id === changed.id ? changed : job)),
-            );
+            if (changed) setJobs((current) => upsertJob(current, changed));
           },
           error: () => undefined,
           complete: () => undefined,
@@ -139,35 +262,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     }
   };
 
-  const startTunnel = async (event: FormEvent) => {
-    event.preventDefault();
-    const resolvedTunnelName = tunnelName || t("tunnelPlaceholder");
-    setCreating(true);
-    setSubmitError(null);
-    try {
-      const data = await controlPlaneRequest<{ createAgentJob: AgentJob }>(
-        `mutation RunTunnel($input: CreateAgentJobInput!) { createAgentJob(input: $input) { ${JOB_FIELDS} } }`,
-        {
-          input: {
-            agentId,
-            kind: "cloudflared.runTunnel",
-            payload: { tunnelName: resolvedTunnelName },
-            idempotencyKey: `cloudflared:${resolvedTunnelName}:${createClientId()}`,
-            timeoutSeconds: 86400,
-          },
-        },
-      );
-      setJobs((current) => [
-        data.createAgentJob,
-        ...current.filter((job) => job.id !== data.createAgentJob.id),
-      ]);
-      setSelectedJobId(data.createAgentJob.id);
-    } catch (value) {
-      setSubmitError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleJobChanged = useCallback((changed: AgentJob, select = false) => {
+    setJobs((current) => upsertJob(current, changed));
+    if (select) setSelectedJobId(changed.id);
+  }, []);
 
   if (loading)
     return (
@@ -190,9 +288,14 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const canBrowseDirectories =
     agent.connectionStatus === "ONLINE" &&
     agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND);
+  const visibleCapabilities = agent.capabilities.filter((capability) =>
+    capability
+      .toLocaleLowerCase()
+      .includes(capabilityQuery.toLocaleLowerCase()),
+  );
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
         <Button asChild size="sm" variant="ghost">
           <Link href="/agents">
@@ -206,52 +309,133 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           <AlertDescription>{loadError}</AlertDescription>
         </Alert>
       )}
+
       <Card>
-        <CardContent>
+        <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-semibold tracking-tight">
+                <CardTitle className="text-2xl font-semibold tracking-tight">
                   {agent.name}
-                </h1>
+                </CardTitle>
                 <StatusBadge status={agent.connectionStatus} />
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <CardDescription className="mt-1">
                 {agent.hostname} · {agent.osVersion} · {agent.architecture}
-              </p>
+              </CardDescription>
             </div>
             <p className="font-mono text-xs text-muted-foreground">
               {agent.id}
             </p>
           </div>
-          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="text-muted-foreground">{t("version")}</dt>
-              <dd>{agent.version}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t("lastSeen")}</dt>
-              <dd>
-                {agent.lastSeenAt
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div>
+            <h2 className="font-medium">{t("generalInformation")}</h2>
+            <p className="text-xs text-muted-foreground">
+              {t("generalInformationDescription")}
+            </p>
+          </div>
+          <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <Info label={t("version")} value={agent.version} />
+            <Info
+              label={t("cpuModel")}
+              value={agent.cpuModel ?? t("unavailable")}
+            />
+            <Info label={t("operatingSystem")} value={agent.osVersion} />
+            <Info label={t("architecture")} value={agent.architecture} />
+            <Info
+              label={t("lastSeen")}
+              value={
+                agent.lastSeenAt
                   ? new Date(agent.lastSeenAt).toLocaleString(locale)
-                  : t("never")}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t("capabilities")}</dt>
-              <dd>{agent.capabilities.join(", ")}</dd>
-            </div>
+                  : t("never")
+              }
+            />
+            <Info
+              label={t("ipAddress")}
+              value={agent.ipAddress ?? t("unavailable")}
+              mono
+            />
           </dl>
+          <div className="grid gap-3 md:grid-cols-2">
+            <ResourceUsage
+              free={agent.memoryFreeBytes}
+              label={t("memory")}
+              locale={locale}
+              total={agent.memoryTotalBytes}
+              unavailable={t("unavailable")}
+              usedLabel={t("used")}
+              freeLabel={t("free")}
+            />
+            <ResourceUsage
+              free={agent.diskFreeBytes}
+              label={t("disk")}
+              locale={locale}
+              total={agent.diskTotalBytes}
+              unavailable={t("unavailable")}
+              usedLabel={t("used")}
+              freeLabel={t("free")}
+            />
+          </div>
         </CardContent>
       </Card>
 
       <Card>
+        <CardHeader>
+          <CardTitle>{t("capabilities")}</CardTitle>
+          <CardDescription>{t("capabilitiesDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label={t("searchCapabilities")}
+              className="pl-9"
+              onChange={(event) => setCapabilityQuery(event.target.value)}
+              placeholder={t("searchCapabilitiesPlaceholder")}
+              type="search"
+              value={capabilityQuery}
+            />
+          </div>
+          {visibleCapabilities.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("noMatchingCapabilities")}
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>{t("capability")}</TableHead>
+                  <TableHead>{t("kind")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleCapabilities.map((capability) => (
+                  <CapabilityRow
+                    agentId={agent.id}
+                    capability={capability}
+                    key={capability}
+                    offline={agent.connectionStatus !== "ONLINE"}
+                    onJobChanged={handleJobChanged}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <AgentCodebasesCard codebases={codebases} locale={locale} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("baseRepoDirectory")}</CardTitle>
+          <CardDescription>{t("baseRepoDirectoryDescription")}</CardDescription>
+        </CardHeader>
         <CardContent>
-          <h2 className="font-medium">{t("baseRepoDirectory")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("baseRepoDirectoryDescription")}
-          </p>
-          <div className="mt-4 rounded-lg bg-muted p-3">
+          <div className="rounded-lg bg-muted p-3">
             <p className="text-xs text-muted-foreground">
               {t("currentDirectory")}
             </p>
@@ -294,36 +478,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent>
-          <h2 className="font-medium">{t("runTitle")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("runDescription")}
-          </p>
-          <form
-            className="mt-4 flex max-w-xl gap-2"
-            onSubmit={(event) => void startTunnel(event)}
-          >
-            <Input
-              aria-label={t("tunnelName")}
-              onChange={(event) => setTunnelName(event.target.value)}
-              pattern={TUNNEL_NAME_PATTERN}
-              placeholder={t("tunnelPlaceholder")}
-              value={tunnelName}
-            />
-            <Button disabled={creating} type="submit">
-              <Play />
-              {creating ? t("queuing") : t("run")}
-            </Button>
-          </form>
-          {submitError && (
-            <Alert className="mt-3" variant="destructive">
-              <AlertDescription>{submitError}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-
       {selectedJobId && (
         <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
       )}
@@ -338,31 +492,475 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           </Empty>
         ) : (
           <div className="overflow-hidden rounded-xl border">
-            {jobs.map((job) => (
-              <Item
-                key={job.id}
-                asChild
-                className="rounded-none border-0 border-b p-0 last:border-b-0"
-              >
-                <Button
-                  className="h-auto w-full justify-between gap-4 rounded-none p-3 text-left whitespace-normal"
-                  onClick={() => setSelectedJobId(job.id)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{job.kind}</p>
-                    <p className="text-xs text-muted-foreground">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("job")}</TableHead>
+                  <TableHead>{t("status")}</TableHead>
+                  <TableHead>{t("created")}</TableHead>
+                  <TableHead>{t("finished")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {jobs.map((job) => (
+                  <TableRow
+                    aria-current={selectedJobId === job.id ? "true" : undefined}
+                    aria-label={t("selectJob", { kind: job.kind })}
+                    className={cn(
+                      "cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      selectedJobId === job.id && "bg-muted/50",
+                    )}
+                    key={job.id}
+                    onClick={() => setSelectedJobId(job.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedJobId(job.id);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <TableCell className="font-mono text-xs font-medium">
+                      {job.kind}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={job.status} />
+                    </TableCell>
+                    <TableCell>
                       {new Date(job.createdAt).toLocaleString(locale)}
-                    </p>
-                  </div>
-                  <StatusBadge status={job.status} />
-                </Button>
-              </Item>
-            ))}
+                    </TableCell>
+                    <TableCell>
+                      {job.finishedAt
+                        ? new Date(job.finishedAt).toLocaleString(locale)
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         )}
       </section>
     </div>
+  );
+}
+
+function Info({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("truncate", mono && "font-mono text-xs")} title={value}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function formatBytes(value: number, locale: string): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const unitIndex = Math.min(
+    Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
+    value / 1024 ** unitIndex,
+  )} ${units[unitIndex]}`;
+}
+
+function ResourceUsage({
+  label,
+  total,
+  free,
+  locale,
+  unavailable,
+  usedLabel,
+  freeLabel,
+}: {
+  label: string;
+  total?: number | null;
+  free?: number | null;
+  locale: string;
+  unavailable: string;
+  usedLabel: string;
+  freeLabel: string;
+}) {
+  if (total == null || free == null || total <= 0) {
+    return (
+      <div className="rounded-lg border p-4">
+        <p className="font-medium">{label}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{unavailable}</p>
+      </div>
+    );
+  }
+  const safeFree = Math.max(0, Math.min(free, total));
+  const used = total - safeFree;
+  const percentage = (used / total) * 100;
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">
+          {Math.round(percentage)}%
+        </p>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          aria-label={`${label}: ${Math.round(percentage)}%`}
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={Math.round(percentage)}
+          className="h-full rounded-full bg-primary transition-[width]"
+          role="progressbar"
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <dt className="text-muted-foreground">{usedLabel}</dt>
+          <dd>{formatBytes(used, locale)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{freeLabel}</dt>
+          <dd>{formatBytes(safeFree, locale)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function CapabilityRow({
+  agentId,
+  capability,
+  offline,
+  onJobChanged,
+}: {
+  agentId: string;
+  capability: string;
+  offline: boolean;
+  onJobChanged: (job: AgentJob, select?: boolean) => void;
+}) {
+  const t = useTranslations("agentDetail");
+  const [expanded, setExpanded] = useState(false);
+  const eventCapability = capability === CODEBASE_RECONCILE_EVENT_CAPABILITY;
+  const toggle = () => setExpanded((value) => !value);
+  return (
+    <Fragment>
+      <TableRow
+        aria-expanded={expanded}
+        aria-label={
+          expanded
+            ? t("collapseCapability", { capability })
+            : t("expandCapability", { capability })
+        }
+        className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
+        <TableCell>
+          {expanded ? (
+            <ChevronDown className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+        </TableCell>
+        <TableCell className="font-mono text-xs font-medium">
+          {capability}
+        </TableCell>
+        <TableCell>
+          <Badge variant="outline">
+            {eventCapability ? t("event") : t("job")}
+          </Badge>
+        </TableCell>
+      </TableRow>
+      <TableRow
+        className={expanded ? "bg-muted/20 hover:bg-muted/20" : "hidden"}
+      >
+        <TableCell className="whitespace-normal p-4" colSpan={3}>
+          <CapabilityRunner
+            agentId={agentId}
+            capability={capability}
+            eventCapability={eventCapability}
+            offline={offline}
+            onJobChanged={onJobChanged}
+          />
+        </TableCell>
+      </TableRow>
+    </Fragment>
+  );
+}
+
+function CapabilityRunner({
+  agentId,
+  capability,
+  eventCapability,
+  offline,
+  onJobChanged,
+}: {
+  agentId: string;
+  capability: string;
+  eventCapability: boolean;
+  offline: boolean;
+  onJobChanged: (job: AgentJob, select?: boolean) => void;
+}) {
+  const t = useTranslations("agentDetail");
+  const toolsT = useTranslations("tools");
+  const [payloadText, setPayloadText] = useState(() =>
+    JSON.stringify(samplePayloadForCapability(capability), null, 2),
+  );
+  const [job, setJob] = useState<AgentJob | null>(null);
+  const [eventResponse, setEventResponse] = useState<unknown>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!job || !isActiveJob(job)) return;
+    return controlPlaneSubscriptions().subscribe<{ agentJobChanged: AgentJob }>(
+      {
+        query: `subscription CapabilityJobChanged($jobId: ID!) {
+          agentJobChanged(jobId: $jobId) { ${JOB_FIELDS} }
+        }`,
+        variables: { jobId: job.id },
+      },
+      {
+        next: (value) => {
+          const changed = value.data?.agentJobChanged;
+          if (!changed) return;
+          setJob(changed);
+          onJobChanged(changed);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+  }, [job, onJobChanged]);
+
+  const run = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      if (eventCapability) {
+        const data = await controlPlaneRequest<{
+          requestAgentCodebaseReconcile: boolean;
+        }>(
+          `mutation RequestAgentCodebaseReconcile($agentId: ID!) {
+            requestAgentCodebaseReconcile(agentId: $agentId)
+          }`,
+          { agentId },
+        );
+        setEventResponse({ accepted: data.requestAgentCodebaseReconcile });
+        setJob(null);
+        return;
+      }
+      const payload: unknown = JSON.parse(payloadText);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error(toolsT("invalidJsonObject"));
+      }
+      const data = await controlPlaneRequest<{ createAgentJob: AgentJob }>(
+        `mutation InvokeAgentCapability($input: CreateAgentJobInput!) {
+          createAgentJob(input: $input) { ${JOB_FIELDS} }
+        }`,
+        {
+          input: {
+            agentId,
+            kind: capability,
+            payload,
+            idempotencyKey: `manual:${capability}:${createClientId()}`,
+            timeoutSeconds: 86400,
+          },
+        },
+      );
+      setJob(data.createAgentJob);
+      setEventResponse(undefined);
+      onJobChanged(data.createAgentJob, true);
+    } catch (value) {
+      setError(
+        value instanceof SyntaxError
+          ? toolsT("invalidJsonObject")
+          : value instanceof Error
+            ? value.message
+            : String(value),
+      );
+      setJob(null);
+      setEventResponse(undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const response = job
+    ? { status: job.status, result: job.result, error: job.error }
+    : eventResponse;
+  const responseText =
+    response === undefined ? "" : JSON.stringify(response, null, 2);
+  const copyResponse = async () => {
+    try {
+      await copyText(responseText);
+      setCopied(true);
+    } catch {
+      setError(toolsT("copyFailed"));
+    }
+  };
+
+  return (
+    <form className="grid gap-4 lg:grid-cols-2" onSubmit={run}>
+      <div className="space-y-4">
+        <h4 className="text-sm font-medium">{toolsT("parameters")}</h4>
+        {eventCapability ? (
+          <p className="text-sm text-muted-foreground">
+            {t("eventCapabilityDescription")}
+          </p>
+        ) : (
+          <div>
+            <Label className="mb-1.5 block" htmlFor={`${capability}-payload`}>
+              {t("payload")}
+            </Label>
+            <Textarea
+              className="min-h-36 font-mono text-xs"
+              id={`${capability}-payload`}
+              onChange={(event) => setPayloadText(event.target.value)}
+              spellCheck={false}
+              value={payloadText}
+            />
+          </div>
+        )}
+        <Button disabled={busy || offline} type="submit">
+          {busy ? <Spinner /> : <Wrench />}
+          {busy ? toolsT("running") : t("invoke")}
+        </Button>
+        {offline && (
+          <p className="text-xs text-muted-foreground">{t("invokeOffline")}</p>
+        )}
+      </div>
+      <div className="min-w-0 space-y-2">
+        <div className="flex min-h-7 items-center justify-between gap-2">
+          <h4 className="text-sm font-medium">{toolsT("response")}</h4>
+          {response !== undefined && (
+            <Button
+              aria-label={copied ? toolsT("copied") : toolsT("copyResponse")}
+              onClick={() => void copyResponse()}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              {copied ? <Check /> : <Copy />}
+            </Button>
+          )}
+        </div>
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : response === undefined ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            {t("noCapabilityResponse")}
+          </div>
+        ) : (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
+            {responseText}
+          </pre>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function AgentCodebasesCard({
+  codebases,
+  locale,
+}: {
+  codebases: AgentCodebase[];
+  locale: string;
+}) {
+  const t = useTranslations("agentDetail");
+  const codebaseT = useTranslations("codebases");
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("codebases")}</CardTitle>
+        <CardDescription>{t("codebasesDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {codebases.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("noCodebases")}</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("repository")}</TableHead>
+                <TableHead>{codebaseT("folder")}</TableHead>
+                <TableHead>{codebaseT("branch")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
+                <TableHead>{codebaseT("lastChecked")}</TableHead>
+                <TableHead className="w-20" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {codebases.map((codebase) => (
+                <TableRow key={codebase.id}>
+                  <TableCell>
+                    <p className="font-medium">{codebase.repository.name}</p>
+                    <p className="max-w-sm truncate font-mono text-xs text-muted-foreground">
+                      {codebase.repository.displayOrigin}
+                    </p>
+                  </TableCell>
+                  <TableCell className="max-w-sm truncate font-mono text-xs">
+                    {codebase.folder}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {codebase.branch ??
+                      codebase.headSha?.slice(0, 10) ??
+                      codebaseT("unknown")}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      className={cn(
+                        codebase.syncState === "IN_SYNC" &&
+                          "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                      )}
+                      variant="outline"
+                    >
+                      {codebase.availability === "AVAILABLE"
+                        ? codebaseT(`sync.${codebase.syncState}`)
+                        : codebaseT(`availability.${codebase.availability}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {codebase.lastCheckedAt
+                      ? new Date(codebase.lastCheckedAt).toLocaleString(locale)
+                      : codebaseT("never")}
+                  </TableCell>
+                  <TableCell>
+                    <Button asChild size="sm" variant="ghost">
+                      <Link href={`/codebases/${codebase.id}`}>
+                        {codebaseT("view")}
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

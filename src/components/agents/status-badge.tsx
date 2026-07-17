@@ -1,5 +1,6 @@
 import { useTranslations } from "next-intl";
 
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export function StatusBadge({ status }: { status: string }) {
@@ -8,15 +9,15 @@ export function StatusBadge({ status }: { status: string }) {
     status === "ONLINE" || status === "RUNNING" || status === "SUCCEEDED";
   const failed = status === "FAILED" || status === "TIMED_OUT";
   return (
-    <span
+    <Badge
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        active && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-        failed && "bg-destructive/15 text-destructive",
-        !active && !failed && "bg-muted text-muted-foreground",
+        active &&
+          "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        failed && "border-destructive/30 bg-destructive/10 text-destructive",
       )}
+      variant={!active && !failed ? "secondary" : "outline"}
     >
       {t(status.toLowerCase())}
-    </span>
+    </Badge>
   );
 }

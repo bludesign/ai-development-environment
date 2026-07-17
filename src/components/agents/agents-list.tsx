@@ -242,7 +242,9 @@ export function AgentsList({
                     </div>
                     <div>
                       <dt>{t("platform")}</dt>
-                      <dd className="text-foreground">{agent.architecture}</dd>
+                      <dd className="text-foreground">
+                        {agent.cpuModel ?? agent.architecture}
+                      </dd>
                     </div>
                     <div className="col-span-2">
                       <dt>{t("lastSeen")}</dt>

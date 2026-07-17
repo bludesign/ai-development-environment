@@ -33,6 +33,11 @@ type Agent {
   version: String!
   osVersion: String!
   architecture: String!
+  cpuModel: String
+  memoryTotalBytes: Float
+  memoryFreeBytes: Float
+  diskTotalBytes: Float
+  diskFreeBytes: Float
   capabilities: [String!]!
   baseRepoDirectory: String
   connectionStatus: AgentConnectionStatus!
@@ -91,6 +96,11 @@ input EnrollAgentInput {
   version: String!
   osVersion: String!
   architecture: String!
+  cpuModel: String
+  memoryTotalBytes: Float
+  memoryFreeBytes: Float
+  diskTotalBytes: Float
+  diskFreeBytes: Float
   capabilities: [String!]!
 }
 
@@ -98,6 +108,11 @@ input AgentHeartbeatInput {
   version: String!
   osVersion: String!
   architecture: String!
+  cpuModel: String
+  memoryTotalBytes: Float
+  memoryFreeBytes: Float
+  diskTotalBytes: Float
+  diskFreeBytes: Float
   capabilities: [String!]!
 }
 
@@ -139,6 +154,7 @@ type Mutation {
     error: String
   ): AgentJob!
   cancelAgentJob(jobId: ID!): AgentJob!
+  requestAgentCodebaseReconcile(agentId: ID!): Boolean!
   updateAgentBaseRepoDirectory(agentId: ID!, baseRepoDirectory: String): Agent!
 }
 

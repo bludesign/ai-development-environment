@@ -254,6 +254,11 @@ export class AgentControlService {
     version: string;
     osVersion: string;
     architecture: string;
+    cpuModel?: string | null;
+    memoryTotalBytes?: number | null;
+    memoryFreeBytes?: number | null;
+    diskTotalBytes?: number | null;
+    diskFreeBytes?: number | null;
     capabilities: string[];
     ipAddress: string | null;
   }) {
@@ -282,6 +287,11 @@ export class AgentControlService {
           version: input.version,
           osVersion: input.osVersion,
           architecture: input.architecture,
+          cpuModel: input.cpuModel,
+          memoryTotalBytes: input.memoryTotalBytes,
+          memoryFreeBytes: input.memoryFreeBytes,
+          diskTotalBytes: input.diskTotalBytes,
+          diskFreeBytes: input.diskFreeBytes,
           capabilitiesJson: JSON.stringify(input.capabilities),
           secretHash: digest(credential),
           ipAddress: input.ipAddress,
@@ -308,6 +318,11 @@ export class AgentControlService {
       version: string;
       osVersion: string;
       architecture: string;
+      cpuModel?: string | null;
+      memoryTotalBytes?: number | null;
+      memoryFreeBytes?: number | null;
+      diskTotalBytes?: number | null;
+      diskFreeBytes?: number | null;
       capabilities: string[];
       ipAddress: string | null;
     },
@@ -319,6 +334,11 @@ export class AgentControlService {
         version: input.version,
         osVersion: input.osVersion,
         architecture: input.architecture,
+        cpuModel: input.cpuModel ?? undefined,
+        memoryTotalBytes: input.memoryTotalBytes ?? undefined,
+        memoryFreeBytes: input.memoryFreeBytes ?? undefined,
+        diskTotalBytes: input.diskTotalBytes ?? undefined,
+        diskFreeBytes: input.diskFreeBytes ?? undefined,
         capabilitiesJson: JSON.stringify(input.capabilities),
         ipAddress: input.ipAddress ?? undefined,
         lastSeenAt: new Date(),
