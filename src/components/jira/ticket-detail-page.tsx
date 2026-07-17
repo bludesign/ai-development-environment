@@ -341,13 +341,13 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
             {relatedIssues.length > 0 ? (
               relatedIssues.map((link, index) => (
                 <Link
-                  className="block rounded border p-2 text-sm hover:bg-muted"
+                  className="block rounded border p-2 text-sm leading-tight hover:bg-muted"
                   href={`/jira/tickets/${encodeURIComponent(link.key)}`}
                   key={`${link.key}-${index}`}
                 >
                   <span className="font-medium">{link.key}</span> ·{" "}
                   {link.summary}
-                  <span className="block text-xs text-muted-foreground">
+                  <span className="block text-xs leading-tight text-muted-foreground">
                     {link.relationship}
                     {link.status ? ` · ${link.status}` : ""}
                   </span>

@@ -139,11 +139,14 @@ describe("JiraTicketDrawer", () => {
     expect(descriptionTitle.parentElement?.parentElement).toBe(
       descriptionViewMenu?.parentElement?.parentElement?.parentElement,
     );
+    const relatedItem = screen
+      .getByText("APP-122 · Prepare the repository")
+      .closest('[data-slot="item"]');
+    expect(relatedItem).not.toBeNull();
+    expect(relatedItem?.getAttribute("data-size")).toBe("xs");
     expect(
-      screen
-        .getByText("APP-122 · Prepare the repository")
-        .closest('[data-slot="item"]'),
-    ).not.toBeNull();
+      screen.getByText("APP-122 · Prepare the repository").className,
+    ).toContain("leading-tight");
     expect(
       screen
         .getByRole("link", {
@@ -171,9 +174,14 @@ describe("JiraTicketDrawer", () => {
     expect(commentDate?.parentElement).toBe(commentControls);
     expect(commentViewActions?.querySelectorAll("button")).toHaveLength(1);
     expect(commentViewActions?.className).toContain("ml-auto");
-    expect(commentControls?.parentElement?.className).toContain("flex-col");
+    expect(commentViewActions?.className).toContain("row-start-1");
+    expect(commentDate?.className).toContain("row-start-2");
+    expect(commentDate?.className).toContain("-mt-1");
+    expect(commentControls?.className).toContain("contents");
+    expect(commentControls?.parentElement?.className).toContain("grid");
+    expect(commentControls?.parentElement?.className).toContain("gap-y-0.5");
     expect(commentControls?.parentElement?.className).toContain(
-      "@md/comment:flex-row",
+      "@md/comment:flex",
     );
     expect(
       within(commentItem).queryByRole("button", { name: "Rendered" }),

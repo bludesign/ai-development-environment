@@ -169,9 +169,9 @@ describe("JiraTicketDetailPage", () => {
     expect(
       detailsCard?.parentElement?.compareDocumentPosition(descriptionCard!),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(
-      screen.getByRole("link", { name: /APP-41/ }).getAttribute("href"),
-    ).toBe("/jira/tickets/APP-41");
+    const relatedIssueLink = screen.getByRole("link", { name: /APP-41/ });
+    expect(relatedIssueLink.getAttribute("href")).toBe("/jira/tickets/APP-41");
+    expect(relatedIssueLink.className).toContain("leading-tight");
     expect(screen.queryByText("Customer impact")).toBeNull();
     const fieldsTitle = screen.getByRole("button", {
       name: "All Jira fields",

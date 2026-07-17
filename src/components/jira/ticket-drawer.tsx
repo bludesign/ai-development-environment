@@ -245,16 +245,17 @@ export function JiraTicketDrawer({
                         <Item
                           asChild
                           key={`${link.key}-${index}`}
+                          size="xs"
                           variant="outline"
                         >
                           <Link
                             href={`/jira/tickets/${encodeURIComponent(link.key)}`}
                           >
                             <ItemContent>
-                              <ItemTitle>
+                              <ItemTitle className="leading-tight">
                                 {link.key} · {link.summary}
                               </ItemTitle>
-                              <ItemDescription>
+                              <ItemDescription className="leading-tight">
                                 {link.relationship}
                               </ItemDescription>
                             </ItemContent>
