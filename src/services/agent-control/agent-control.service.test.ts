@@ -85,22 +85,34 @@ describe("agent job validation", () => {
 });
 
 describe("AgentControlService.requestCodebaseReconcile", () => {
-  test("publishes one reconcile request per unique agent", () => {
+  test("publishes reconcile requests only to upgraded agents", async () => {
+    getPrismaClient.mockResolvedValue({
+      agent: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "agent-1",
+            capabilitiesJson: '["codebase.reconcile.requested"]',
+          },
+          { id: "agent-2", capabilitiesJson: '["codebase.refresh"]' },
+        ]),
+      },
+    });
     const publish = vi.spyOn(agentEventBus, "publish");
 
-    const requested = new AgentControlService().requestCodebaseReconcile([
+    const requested = await new AgentControlService().requestCodebaseReconcile([
       "agent-1",
       "agent-1",
       "agent-2",
     ]);
 
-    expect(requested).toBe(2);
+    expect(requested).toBe(1);
     expect(publish).toHaveBeenCalledWith(agentEventsTopic("agent-1"), {
       agentEvents: { type: "CODEBASE_RECONCILE_REQUESTED", job: null },
     });
-    expect(publish).toHaveBeenCalledWith(agentEventsTopic("agent-2"), {
-      agentEvents: { type: "CODEBASE_RECONCILE_REQUESTED", job: null },
-    });
+    expect(publish).not.toHaveBeenCalledWith(
+      agentEventsTopic("agent-2"),
+      expect.anything(),
+    );
     publish.mockRestore();
   });
 });

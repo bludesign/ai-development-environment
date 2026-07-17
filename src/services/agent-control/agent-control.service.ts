@@ -10,6 +10,7 @@ import {
   CODEBASE_FETCH_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_JOB_KINDS,
+  CODEBASE_RECONCILE_EVENT_CAPABILITY,
   CODEBASE_REFRESH_JOB_KIND,
   codebaseBrowsePayload,
   codebaseJobPayload,
@@ -75,6 +76,17 @@ function parsePayload(payload: unknown): Record<string, unknown> {
     throw new Error("Job payload must be an object");
   }
   return payload as Record<string, unknown>;
+}
+
+function agentCapabilities(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function validateJob(kind: string, payload: unknown): void {
@@ -152,14 +164,25 @@ export class AgentControlService {
     this.completionHandlers.set(kind, handler);
   }
 
-  requestCodebaseReconcile(agentIds: string[]): number {
+  async requestCodebaseReconcile(agentIds: string[]): Promise<number> {
     const uniqueAgentIds = [...new Set(agentIds.filter(Boolean))];
-    for (const agentId of uniqueAgentIds) {
-      agentEventBus.publish(agentEventsTopic(agentId), {
+    if (!uniqueAgentIds.length) return 0;
+    const prisma = await getPrismaClient();
+    const agents = await prisma.agent.findMany({
+      where: { id: { in: uniqueAgentIds } },
+      select: { id: true, capabilitiesJson: true },
+    });
+    const supportedAgents = agents.filter((agent) =>
+      agentCapabilities(agent.capabilitiesJson).includes(
+        CODEBASE_RECONCILE_EVENT_CAPABILITY,
+      ),
+    );
+    for (const agent of supportedAgents) {
+      agentEventBus.publish(agentEventsTopic(agent.id), {
         agentEvents: { type: "CODEBASE_RECONCILE_REQUESTED", job: null },
       });
     }
-    return uniqueAgentIds.length;
+    return supportedAgents.length;
   }
 
   private async projectCompletion(job: Parameters<CompletionHandler>[0]) {

@@ -7,4 +7,11 @@ describe("agent inventory", () => {
     expect(AGENT_CAPABILITIES).toContain("ccusage.report");
     expect(collectInventory().capabilities).toContain("ccusage.report");
   });
+
+  test("advertises support for immediate codebase reconcile events", () => {
+    expect(AGENT_CAPABILITIES).toContain("codebase.reconcile.requested");
+    expect(collectInventory().capabilities).toContain(
+      "codebase.reconcile.requested",
+    );
+  });
 });

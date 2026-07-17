@@ -51,6 +51,15 @@ async function repository() {
   return folder;
 }
 
+async function localRemote() {
+  const folder = await mkdtemp(join(tmpdir(), "worktree-remote-"));
+  temporaryDirectories.push(folder);
+  await execute("git", ["init", "--bare", "-b", "main", folder], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+  });
+  return folder;
+}
+
 afterEach(async () => {
   closeAllWorktreeWatches();
   await Promise.all(
@@ -63,6 +72,9 @@ afterEach(async () => {
 describe("worktree inventory and inspection", () => {
   test("discovers the primary checkout and linked worktrees", async () => {
     const folder = await repository();
+    const remote = await localRemote();
+    await git(folder, "remote", "set-url", "origin", remote);
+    await git(folder, "push", "-u", "origin", "main");
     const linked = `${folder}-linked tree`;
     temporaryDirectories.push(linked);
     await git(folder, "worktree", "add", "-b", "feature/AIDE-24", linked);
@@ -100,6 +112,33 @@ describe("worktree inventory and inspection", () => {
     });
   });
 
+  test("refreshes the remote default branch when origin HEAD changes", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    await git(folder, "remote", "set-url", "origin", remote);
+    await git(folder, "push", "-u", "origin", "main");
+    await git(folder, "checkout", "-b", "release");
+    await git(folder, "push", "origin", "release");
+    await git(folder, "checkout", "main");
+    await git(remote, "symbolic-ref", "HEAD", "refs/heads/release");
+
+    expect(
+      (
+        await git(folder, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+      ).stdout.trim(),
+    ).toBe("origin/main");
+
+    const inventory = await discoverWorktrees(
+      folder,
+      new Map(),
+      "main",
+      10_000,
+      new AbortController().signal,
+    );
+
+    expect(inventory.defaultBranch).toBe("release");
+  });
+
   test("reports base-relative commits and staged, unstaged, and untracked files", async () => {
     const folder = await repository();
     await writeFile(join(folder, "committed.txt"), "committed\n");
@@ -132,6 +171,35 @@ describe("worktree inventory and inspection", () => {
           unstagedAdditions: 2,
         }),
       ]),
+    );
+  });
+
+  test("associates rename numstat counts with the destination path", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "rename-me.txt"), "one\ntwo\nthree\nfour\n");
+    await git(folder, "add", "rename-me.txt");
+    await git(folder, "commit", "-m", "Add rename source");
+    await git(folder, "mv", "rename-me.txt", "renamed.txt");
+    await writeFile(
+      join(folder, "renamed.txt"),
+      "one\ntwo\nthree\nfour\nfive\n",
+    );
+    await git(folder, "add", "renamed.txt");
+
+    const detail = await inspectWorktreeDetail(
+      folder,
+      "main",
+      10_000,
+      new AbortController().signal,
+    );
+
+    expect(detail.changes).toContainEqual(
+      expect.objectContaining({
+        path: "renamed.txt",
+        staged: true,
+        stagedAdditions: 1,
+        stagedDeletions: 0,
+      }),
     );
   });
 

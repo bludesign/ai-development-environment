@@ -463,26 +463,27 @@ export async function discoverWorktrees(
     ),
     "Could not list Git worktrees",
   );
+  const remoteHead = await git(
+    rootFolder,
+    ["ls-remote", "--symref", "origin", "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  let defaultBranch =
+    remoteHead.stdout.match(/^ref:\s+refs\/heads\/([^\s]+)\s+HEAD/m)?.[1] ??
+    null;
   const defaultResult = await git(
     rootFolder,
     ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
     timeoutMs,
     signal,
   );
-  let defaultBranch =
-    defaultResult.exitCode === 0
-      ? defaultResult.stdout.trim().replace(/^origin\//, "")
-      : knownDefaultBranch;
   if (!defaultBranch) {
-    const remoteHead = await git(
-      rootFolder,
-      ["ls-remote", "--symref", "origin", "HEAD"],
-      timeoutMs,
-      signal,
-    );
-    defaultBranch =
-      remoteHead.stdout.match(/^ref:\s+refs\/heads\/([^\s]+)\s+HEAD/m)?.[1] ??
-      null;
+    const localDefaultBranch =
+      defaultResult.exitCode === 0
+        ? defaultResult.stdout.trim().replace(/^origin\//, "")
+        : null;
+    defaultBranch = localDefaultBranch || knownDefaultBranch;
   }
   const branchesResult = await git(
     rootFolder,
@@ -525,10 +526,16 @@ function parseNumstat(
   value: string,
 ): Map<string, [number | null, number | null]> {
   const result = new Map<string, [number | null, number | null]>();
-  for (const entry of value.split("\0")) {
+  const entries = value.split("\0");
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
     if (!entry) continue;
     const [added, deleted, ...pathParts] = entry.split("\t");
-    const path = pathParts.join("\t");
+    let path = pathParts.join("\t");
+    if (!path && entries[index + 1] && entries[index + 2]) {
+      path = entries[index + 2]!;
+      index += 2;
+    }
     if (!path) continue;
     result.set(path, [
       added === "-" ? null : Number(added),

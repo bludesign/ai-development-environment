@@ -2,6 +2,8 @@ export const CODEBASE_BROWSE_JOB_KIND = "codebase.browse";
 export const CODEBASE_INSPECT_JOB_KIND = "codebase.inspect";
 export const CODEBASE_REFRESH_JOB_KIND = "codebase.refresh";
 export const CODEBASE_FETCH_JOB_KIND = "codebase.fetch";
+export const CODEBASE_RECONCILE_EVENT_CAPABILITY =
+  "codebase.reconcile.requested";
 
 export const DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS = 30;
 export const MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS = 10;

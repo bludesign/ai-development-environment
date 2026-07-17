@@ -436,9 +436,13 @@ export class WorktreesService {
               ? { lastFetchedAt: new Date(report.fetchedAt) }
               : {}),
             ...(report.fetchAttemptedAt
-              ? { lastFetchAttemptAt: new Date(report.fetchAttemptedAt) }
-              : {}),
-            lastFetchError: report.fetchError,
+              ? {
+                  lastFetchAttemptAt: new Date(report.fetchAttemptedAt),
+                  lastFetchError: report.fetchError,
+                }
+              : report.fetchError
+                ? { lastFetchError: report.fetchError }
+                : {}),
           },
         });
         const identities: string[] = [];
@@ -458,7 +462,17 @@ export class WorktreesService {
               gitDirectory: item.gitDirectory,
               ...this.inventoryData(item),
             },
-            update: { ...this.inventoryData(item), missingAt: null },
+            update: {},
+          });
+          await transaction.worktree.updateMany({
+            where: {
+              id: worktree.id,
+              OR: [
+                { lastCheckedAt: null },
+                { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+              ],
+            },
+            data: { ...this.inventoryData(item), missingAt: null },
           });
           updatedIds.push(worktree.id);
         }
@@ -506,13 +520,20 @@ export class WorktreesService {
       report.syncState !== undefined ||
       report.baseAhead !== undefined ||
       report.baseBehind !== undefined;
-    if (
+    let observationAccepted = true;
+    const hasState =
       hasCommitStatus ||
       report.hasStagedChanges !== undefined ||
-      report.hasUnstagedChanges !== undefined
-    ) {
-      await prisma.worktree.update({
-        where: { id: worktree.id },
+      report.hasUnstagedChanges !== undefined;
+    if (hasState) {
+      const updated = await prisma.worktree.updateMany({
+        where: {
+          id: worktree.id,
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(report.observedAt) } },
+          ],
+        },
         data: {
           ...(report.branch === undefined ? {} : { branch: report.branch }),
           ...(report.headSha === undefined ? {} : { headSha: report.headSha }),
@@ -530,9 +551,7 @@ export class WorktreesService {
           ...(report.baseBehind === undefined
             ? {}
             : { baseBehind: report.baseBehind }),
-          ...(hasCommitStatus
-            ? { lastCheckedAt: new Date(report.observedAt) }
-            : {}),
+          lastCheckedAt: new Date(report.observedAt),
           ...(report.hasStagedChanges === undefined
             ? {}
             : { hasStagedChanges: report.hasStagedChanges }),
@@ -541,7 +560,10 @@ export class WorktreesService {
             : { hasUnstagedChanges: report.hasUnstagedChanges }),
         },
       });
-      this.publish(worktree.id, worktree.codebaseId);
+      observationAccepted = updated.count > 0;
+      if (observationAccepted) {
+        this.publish(worktree.id, worktree.codebaseId);
+      }
     }
     const activity = {
       worktreeId: worktree.id,
@@ -567,7 +589,7 @@ export class WorktreesService {
         : { hasUnstagedChanges: report.hasUnstagedChanges }),
       observedAt: report.observedAt,
     };
-    if (this.watchDemand.has(worktree.id)) {
+    if (this.watchDemand.has(worktree.id) && observationAccepted) {
       agentEventBus.publish(worktreeInspectionTopic(worktree.id), {
         worktreeInspectionChanged: activity,
       });
@@ -710,15 +732,19 @@ export class WorktreesService {
       timeoutSeconds: 30,
       visibility: "SYSTEM",
     });
-    const completed = await this.waitForJob(job.id);
-    const detail = resultObject(completed).detail;
-    if (!detail || typeof detail !== "object")
-      throw new Error("Invalid worktree detail");
-    const prisma = await getPrismaClient();
-    await prisma.agentJob.deleteMany({
-      where: { id: job.id, visibility: "SYSTEM" },
-    });
-    return detail;
+    try {
+      const completed = await this.waitForJob(job.id);
+      const detail = resultObject(completed).detail;
+      if (!detail || typeof detail !== "object") {
+        throw new Error("Invalid worktree detail");
+      }
+      return detail;
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
   }
 
   async runOperation(
@@ -897,7 +923,6 @@ export class WorktreesService {
   ) {
     const job = await this.agentControl.createJob({
       agentId: demand.agentId,
-      codebaseId: demand.codebaseId,
       worktreeId: demand.worktreeId,
       kind: WORKTREE_WATCH_JOB_KIND,
       payload: { ...demand.payload, action, watchId: demand.watchId },
@@ -936,8 +961,12 @@ export class WorktreesService {
       where: { id: job.worktreeId },
     });
     if (!current) return;
-    await prisma.worktree.update({
-      where: { id: current.id },
+    const checkedAt = new Date(item.checkedAt);
+    const updated = await prisma.worktree.updateMany({
+      where: {
+        id: current.id,
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: checkedAt } }],
+      },
       data: {
         branch: item.branch,
         headSha: item.headSha,
@@ -951,10 +980,12 @@ export class WorktreesService {
         hasUnstagedChanges: item.hasUnstagedChanges ?? false,
         availability: item.availability,
         statusError: item.error,
-        lastCheckedAt: new Date(item.checkedAt),
+        lastCheckedAt: checkedAt,
       },
     });
-    this.publish(current.id, current.codebaseId);
+    if (updated.count > 0) {
+      this.publish(current.id, current.codebaseId);
+    }
   }
 
   private async waitForJob(jobId: string) {

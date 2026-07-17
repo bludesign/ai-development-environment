@@ -4,6 +4,10 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
+import {
+  agentEventBus,
+  WORKTREE_CHANGED_TOPIC,
+} from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 
@@ -119,8 +123,21 @@ describe("WorktreesService", () => {
             gitDirectory: "/repo/.git",
           },
         },
+        update: {},
       }),
     );
+    expect(transaction.worktree.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "worktree-1",
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: new Date(3) } }],
+      },
+      data: expect.objectContaining({
+        branch: "feature/AIDE-24",
+        headSha: "abc",
+        lastCheckedAt: new Date(3),
+        missingAt: null,
+      }),
+    });
     expect(transaction.worktree.updateMany).toHaveBeenCalledWith({
       where: {
         codebaseId: "codebase-1",
@@ -156,7 +173,50 @@ describe("WorktreesService", () => {
 
     await service().report("agent-1", [report(false)]);
 
-    expect(transaction.worktree.updateMany).not.toHaveBeenCalled();
+    expect(transaction.worktree.updateMany).toHaveBeenCalledTimes(1);
+    expect(transaction.worktree.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { missingAt: expect.any(Date) } }),
+    );
+  });
+
+  test("preserves fetch failures until another attempt and records new errors", async () => {
+    const transaction = {
+      codebase: { update: vi.fn() },
+      worktree: { upsert: vi.fn(), updateMany: vi.fn() },
+    };
+    const prisma = {
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "codebase-1",
+          agentId: "agent-1",
+        }),
+      },
+      worktree: {
+        deleteMany: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const withoutFetch = {
+      ...report(false),
+      fetchedAt: null,
+      fetchAttemptedAt: null,
+      fetchError: null,
+      worktrees: [],
+    };
+
+    await service().report("agent-1", [
+      withoutFetch,
+      { ...withoutFetch, fetchError: "Inventory failed" },
+    ]);
+
+    expect(
+      transaction.codebase.update.mock.calls[0]?.[0].data,
+    ).not.toHaveProperty("lastFetchError");
+    expect(transaction.codebase.update.mock.calls[1]?.[0].data).toMatchObject({
+      lastFetchError: "Inventory failed",
+    });
   });
 
   test("rejects global tag names that differ only by case", async () => {
@@ -176,8 +236,10 @@ describe("WorktreesService", () => {
     const findFirst = vi
       .fn()
       .mockResolvedValueOnce({ id: "worktree-1", codebaseId: "codebase-1" });
-    const update = vi.fn();
-    getPrismaClient.mockResolvedValue({ worktree: { findFirst, update } });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findFirst, updateMany },
+    });
     const activity = {
       codebaseId: "codebase-1",
       gitDirectory: "/repo/.git",
@@ -210,8 +272,11 @@ describe("WorktreesService", () => {
       hasUnstagedChanges: true,
       observedAt: activity.observedAt,
     });
-    expect(update).toHaveBeenCalledWith({
-      where: { id: "worktree-1" },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "worktree-1",
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: new Date(0) } }],
+      },
       data: {
         branch: "feature/AIDE-24",
         headSha: "def",
@@ -238,13 +303,93 @@ describe("WorktreesService", () => {
     );
   });
 
-  test("starts a demand-scoped watcher and stops it after unsubscribe", async () => {
+  test("atomically ignores activity older than the stored observation", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "worktree-1", codebaseId: "codebase-1" }),
+        updateMany,
+      },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    await service().reportActivity("agent-1", {
+      codebaseId: "codebase-1",
+      gitDirectory: "/repo/.git",
+      branch: "stale-branch",
+      observedAt: new Date(5).toISOString(),
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "worktree-1",
+          OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: new Date(5) } }],
+        },
+      }),
+    );
+    expect(publish).not.toHaveBeenCalledWith(
+      WORKTREE_CHANGED_TOPIC,
+      expect.anything(),
+    );
+    publish.mockRestore();
+  });
+
+  test("deletes a hidden inspection job when inspection fails", async () => {
     const control = {
       registerCompletionHandler: vi.fn(),
-      createJob: vi
-        .fn()
-        .mockResolvedValueOnce({ id: "watch-start" })
-        .mockResolvedValueOnce({ id: "watch-stop" }),
+      createJob: vi.fn().mockResolvedValue({ id: "inspect-1" }),
+      getJob: vi.fn().mockResolvedValue({
+        id: "inspect-1",
+        status: "FAILED",
+        resultJson: null,
+        error: "Inspection failed",
+      }),
+    } as unknown as AgentControlService;
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          codebaseId: "codebase-1",
+          folder: "/repo",
+          gitDirectory: "/repo/.git",
+          baseBranchOverride: null,
+          missingAt: null,
+          availability: "AVAILABLE",
+          codebase: {
+            agentId: "agent-1",
+            defaultBranch: "main",
+            agent: {
+              lastSeenAt: new Date(),
+              disconnectedAt: null,
+              capabilitiesJson: JSON.stringify(["worktree.inspect"]),
+            },
+            repository: { canonicalOrigin: "github.com/openai/codex" },
+          },
+        }),
+      },
+      agentJob: { findFirst: vi.fn().mockResolvedValue(null), deleteMany },
+    });
+
+    await expect(
+      service(control).inspect("worktree-1", "request-1"),
+    ).rejects.toThrow("Inspection failed");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: "inspect-1", visibility: "SYSTEM" },
+    });
+  });
+
+  test("starts a demand-scoped watcher and stops it after unsubscribe", async () => {
+    const createJob = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "watch-start" })
+      .mockResolvedValueOnce({ id: "watch-stop" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
       getJob: vi.fn((id: string) =>
         Promise.resolve({
           id,
@@ -317,6 +462,8 @@ describe("WorktreesService", () => {
         payload: expect.objectContaining({ action: "STOP" }),
       }),
     );
+    expect(createJob.mock.calls[0]?.[0]).not.toHaveProperty("codebaseId");
+    expect(createJob.mock.calls[1]?.[0]).not.toHaveProperty("codebaseId");
   });
 });
 
