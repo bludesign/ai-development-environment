@@ -128,7 +128,7 @@ describe("JiraTicketDrawer", () => {
     ).not.toBeNull();
     const descriptionTitle = screen.getByText("Description");
     const descriptionRaw = screen.getAllByRole("button", {
-      name: "View raw",
+      name: "Raw",
     })[0];
     expect(descriptionTitle.parentElement?.parentElement).toBe(
       descriptionRaw?.parentElement?.parentElement,

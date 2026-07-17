@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -95,7 +101,17 @@ describe("JiraTicketDetailPage", () => {
       if (query.includes("query JiraTicketDetail"))
         return { jiraTicket: ticket } as never;
       if (query.includes("query JiraTicketEditFields"))
-        return { jiraTicketEditFields: [] } as never;
+        return {
+          jiraTicketEditFields: [
+            {
+              id: "description",
+              name: "Description",
+              required: false,
+              schemaType: "doc",
+              allowedValues: [],
+            },
+          ],
+        } as never;
       if (query.includes("query JiraTicketTransitions"))
         return { jiraTicketTransitions: [] } as never;
       if (query.includes("query JiraTicketChanges")) {
@@ -154,11 +170,17 @@ describe("JiraTicketDetailPage", () => {
     expect(screen.getByText("High impact")).toBeDefined();
     const descriptionTitle = screen.getByText("Description");
     const descriptionRaw = screen.getAllByRole("button", {
-      name: "View raw",
+      name: "Raw",
     })[0];
     expect(descriptionTitle.parentElement?.parentElement).toBe(
       descriptionRaw?.parentElement?.parentElement,
     );
+    const descriptionEdit = within(descriptionCard as HTMLElement).getByRole(
+      "button",
+      { name: "Edit" },
+    );
+    expect(descriptionEdit.getAttribute("data-size")).toBe("xs");
+    expect(descriptionEdit.getAttribute("data-variant")).toBe("outline");
     const fieldsTable = screen.getByText("Customer impact").closest("table");
     expect(fieldsTable?.className).toContain("table-fixed");
     expect(fieldsTable?.parentElement?.className).toContain(

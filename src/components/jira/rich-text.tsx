@@ -2,7 +2,7 @@
 
 import { Check, Copy, Eye, FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, type ReactNode, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -115,6 +115,12 @@ export function JiraRichTextBlock({
     "ADF"
   > | null>(null);
 
+  useEffect(() => {
+    if (copyState !== "COPIED") return;
+    const timeout = window.setTimeout(() => setCopyState("IDLE"), 2_000);
+    return () => window.clearTimeout(timeout);
+  }, [copyState]);
+
   if (!normalized)
     return (
       <div className="space-y-2">
@@ -181,24 +187,26 @@ export function JiraRichTextBlock({
             </Select>
           )}
           <Button
-            aria-label={raw ? t("viewRendered") : t("viewRaw")}
+            aria-label={raw ? t("rendered") : t("raw")}
             onClick={() => setRaw((current) => !current)}
-            size="icon-sm"
+            size="xs"
             title={raw ? t("viewRendered") : t("viewRaw")}
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             {raw ? <Eye /> : <FileText />}
+            {raw ? t("rendered") : t("raw")}
           </Button>
           <Button
-            aria-label={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+            aria-label={t("copy")}
             onClick={() => void copy()}
-            size="icon-sm"
+            size="xs"
             title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             {copyState === "COPIED" ? <Check /> : <Copy />}
+            {t("copy")}
           </Button>
         </div>
       </div>
@@ -273,9 +281,9 @@ export function JiraTextComposer({
         </Select>
         <Button
           onClick={() => setPreview((current) => !current)}
-          size="sm"
+          size="xs"
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           <Eye /> {preview ? t("hidePreview") : t("preview")}
         </Button>

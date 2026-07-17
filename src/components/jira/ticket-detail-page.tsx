@@ -269,8 +269,8 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                 <Button
                   aria-label={t("editSummary")}
                   onClick={() => setSummaryEditing(true)}
-                  size="icon-sm"
-                  variant="ghost"
+                  size="icon-xs"
+                  variant="outline"
                 >
                   <Pencil />
                 </Button>
@@ -318,8 +318,8 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
             {editFields.length > 0 && (
               <Button
                 onClick={() => setDetailsOpen(true)}
-                size="sm"
-                variant="ghost"
+                size="xs"
+                variant="outline"
               >
                 <Pencil /> {t("edit")}
               </Button>
@@ -389,8 +389,8 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                 editable.has("description") ? (
                   <Button
                     onClick={() => setDescriptionEditing(true)}
-                    size="sm"
-                    variant="ghost"
+                    size="xs"
+                    variant="outline"
                   >
                     <Pencil /> {t("edit")}
                   </Button>
