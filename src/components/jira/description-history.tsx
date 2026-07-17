@@ -139,9 +139,7 @@ export function JiraDescriptionHistory({
 
   const versionLabel = (version: JiraDescriptionVersion) => {
     if (version.kind === "CURRENT") return t("currentVersion");
-    return version.kind === "BEFORE"
-      ? t("beforeChange", { date: date(version.createdAt) })
-      : t("afterChange", { date: date(version.createdAt) });
+    return date(version.createdAt);
   };
 
   return (
@@ -188,7 +186,7 @@ export function JiraDescriptionHistory({
             </p>
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-3">
                 <VersionSelect
                   label={t("compareFrom")}
                   onChange={setFromId}
