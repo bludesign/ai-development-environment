@@ -21,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -114,7 +115,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
+    const loadId = ++latestLoad.current;
     try {
       const data = await controlPlaneRequest<{
         agent: Agent | null;
@@ -136,6 +139,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         }`,
         { id: agentId },
       );
+      if (loadId !== latestLoad.current) return;
       setAgent(data.agent);
       setJobs(data.agentJobs);
       setCodebases(
@@ -166,9 +170,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       );
       setLoadError(null);
     } catch (value) {
+      if (loadId !== latestLoad.current) return;
       setLoadError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoading(false);
+      if (loadId === latestLoad.current) setLoading(false);
     }
   }, [agentId]);
 
@@ -203,6 +208,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     );
     return () => {
       window.clearTimeout(initialLoad);
+      latestLoad.current += 1;
       unsubscribeAgent();
       unsubscribeCodebases();
     };
