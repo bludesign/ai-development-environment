@@ -818,8 +818,6 @@
     "unstageAll": "Alle Vormerkungen aufheben",
     "confirmAction": "Bestätigen",
     "operationRunning": "Vorgang läuft…",
-    "expandDetails": "Commits und Änderungen erweitern",
-    "collapseDetails": "Commits und Änderungen einklappen",
     "loadingDetails": "Commits und Änderungen werden geladen…",
     "commits": "Übernahmen ({count})",
     "changes": "Änderungen ({count})",

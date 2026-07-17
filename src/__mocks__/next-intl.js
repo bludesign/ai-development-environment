@@ -908,8 +908,6 @@ const mockTranslations = {
     unstageAll: "Unstage all",
     confirmAction: "Confirm",
     operationRunning: "Operation in progress…",
-    expandDetails: "Expand commits and changes",
-    collapseDetails: "Collapse commits and changes",
     loadingDetails: "Loading commits and changes…",
     commits: "Commits ({count})",
     changes: "Changes ({count})",

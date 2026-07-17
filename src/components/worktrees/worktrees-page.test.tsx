@@ -279,29 +279,31 @@ describe("WorktreesPage", () => {
     ).toBe(true);
   });
 
-  test("opens details from card and table summary surfaces without hijacking controls", async () => {
+  test("opens details from summary surfaces while the branch keeps inline expansion", async () => {
     render(<WorktreesPage />);
-    const branchLink = await screen.findByRole("link", {
+    const branchButton = await screen.findByRole("button", {
       name: "feature/AIDE-24",
     });
-    expect(branchLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+    const card = branchButton.closest('[data-slot="card"]');
+    expect(card?.className).toContain("hover:bg-blue-500/20");
+    expect(card?.className).toContain("hover:border-blue-500/50");
+    expect(branchButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(branchButton);
+    expect(branchButton.getAttribute("aria-expanded")).toBe("true");
+    expect(navigation.push).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("Path"));
     expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
 
     navigation.push.mockClear();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand commits and changes" }),
-    );
-    expect(navigation.push).not.toHaveBeenCalled();
-
     fireEvent.click(screen.getByRole("radio", { name: "Table layout" }));
-    const tableBranch = screen.getByRole("link", {
+    const tableBranch = screen.getByRole("button", {
       name: "feature/AIDE-24",
     });
-    expect(tableBranch.getAttribute("href")).toBe("/worktrees/worktree-1");
     const row = tableBranch.closest("tr");
     expect(row).not.toBeNull();
+    expect(row?.className).toContain("hover:bg-blue-500/20");
     fireEvent.click(row!);
     expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
 
@@ -563,6 +565,24 @@ describe("WorktreesPage", () => {
     );
   });
 
+  test("opens the Jira ticket drawer from the ticket status badge", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.click(screen.getByRole("button", { name: "In Progress" }));
+
+    expect(await screen.findByRole("dialog")).toBeDefined();
+    expect(new URLSearchParams(window.location.search).get("issue")).toBe(
+      "AIDE-24",
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query JiraTicket"),
+        { issueKey: "AIDE-24" },
+      ),
+    );
+  });
+
   test("edits the base branch with an inline select", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
@@ -667,9 +687,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand commits and changes" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("old-file.ts")).toBeDefined();
 
     request.mockResolvedValueOnce({ refreshWorktrees: 1 } as never);
@@ -759,9 +777,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand commits and changes" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("before-save.ts")).toBeDefined();
     await waitFor(() => expect(activityCallbacks).toHaveLength(1));
 
@@ -822,9 +838,7 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand commits and changes" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "feature/AIDE-24" }));
     expect(await screen.findByText("The worktree is clean.")).toBeDefined();
 
     await waitFor(() => expect(liveAttempts).toBe(2), { timeout: 2_500 });

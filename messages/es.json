@@ -818,8 +818,6 @@
     "unstageAll": "Quitar todo del área de preparación",
     "confirmAction": "Confirmar",
     "operationRunning": "Operación en curso…",
-    "expandDetails": "Expandir commits y cambios",
-    "collapseDetails": "Contraer commits y cambios",
     "loadingDetails": "Cargando commits y cambios…",
     "commits": "Confirmaciones ({count})",
     "changes": "Cambios ({count})",

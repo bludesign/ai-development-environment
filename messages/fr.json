@@ -818,8 +818,6 @@
     "unstageAll": "Désindexer tout",
     "confirmAction": "Confirmer",
     "operationRunning": "Opération en cours…",
-    "expandDetails": "Développer les commits et modifications",
-    "collapseDetails": "Réduire les commits et modifications",
     "loadingDetails": "Chargement des commits et modifications…",
     "commits": "Validations ({count})",
     "changes": "Modifications ({count})",
