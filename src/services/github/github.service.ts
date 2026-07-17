@@ -30,6 +30,7 @@ import type {
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestState,
+  GitHubPullRequestStateFilter,
   GitHubPullRequestView,
   GitHubReviewComment,
   GitHubRepositoryCandidatePage,
@@ -50,6 +51,7 @@ const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const SEARCH_RESULT_LIMIT = 1000;
 const ACTIONS_PAGE_SIZE = 25;
+const PULL_REQUEST_PAGE_SIZE = 25;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 
 type PageInfo = {
@@ -143,6 +145,22 @@ type ActionsCursor = {
   version: 1;
   codebaseRepositoryId: string | null;
   consumed: Record<string, number>;
+};
+
+type PullRequestCursorStream = {
+  after: string | null;
+  offset: number;
+  consumed: number;
+  exhausted: boolean;
+  limitReached: boolean;
+};
+
+type PullRequestCursor = {
+  version: 1;
+  scope: GitHubPullRequestScope;
+  repositoryId: string | null;
+  state: GitHubPullRequestStateFilter;
+  streams: Record<string, PullRequestCursorStream>;
 };
 
 type RawPipelineContext =
@@ -474,6 +492,95 @@ function encodeActionsCursor(cursor: ActionsCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
+function pullRequestCursorStreamKeys(scope: GitHubPullRequestScope): string[] {
+  if (scope === "MINE") return ["assigned", "authored"];
+  if (scope === "REVIEW_REQUESTED") return ["review"];
+  return ["repository"];
+}
+
+function emptyPullRequestCursorStream(): PullRequestCursorStream {
+  return {
+    after: null,
+    offset: 0,
+    consumed: 0,
+    exhausted: false,
+    limitReached: false,
+  };
+}
+
+function decodePullRequestCursor(
+  value: string | null | undefined,
+  scope: GitHubPullRequestScope,
+  repositoryId: string | null,
+  state: GitHubPullRequestStateFilter,
+): PullRequestCursor {
+  const expectedKeys = pullRequestCursorStreamKeys(scope);
+  if (!value) {
+    return {
+      version: 1,
+      scope,
+      repositoryId,
+      state,
+      streams: Object.fromEntries(
+        expectedKeys.map((key) => [key, emptyPullRequestCursorStream()]),
+      ),
+    };
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<PullRequestCursor>;
+    if (
+      parsed.version !== 1 ||
+      parsed.scope !== scope ||
+      parsed.repositoryId !== repositoryId ||
+      parsed.state !== state ||
+      !parsed.streams ||
+      typeof parsed.streams !== "object" ||
+      Object.keys(parsed.streams).sort().join("\0") !==
+        [...expectedKeys].sort().join("\0")
+    ) {
+      throw new Error("invalid");
+    }
+    for (const stream of Object.values(parsed.streams)) {
+      if (
+        !stream ||
+        (stream.after !== null && typeof stream.after !== "string") ||
+        !Number.isInteger(stream.offset) ||
+        stream.offset < 0 ||
+        stream.offset > PULL_REQUEST_PAGE_SIZE ||
+        !Number.isInteger(stream.consumed) ||
+        stream.consumed < 0 ||
+        typeof stream.exhausted !== "boolean" ||
+        typeof stream.limitReached !== "boolean"
+      ) {
+        throw new Error("invalid");
+      }
+    }
+    return parsed as PullRequestCursor;
+  } catch {
+    throw new Error("GitHub pull request pagination cursor is invalid");
+  }
+}
+
+function encodePullRequestCursor(cursor: PullRequestCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function comparePullRequests(
+  left: RawPullRequest,
+  right: RawPullRequest,
+): number {
+  const updatedDifference =
+    Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  if (updatedDifference !== 0) return updatedDifference;
+  const repositoryDifference = left.repository.nameWithOwner.localeCompare(
+    right.repository.nameWithOwner,
+  );
+  if (repositoryDifference !== 0) return repositoryDifference;
+  return right.number - left.number || right.id.localeCompare(left.id);
+}
+
 function compareWorkflowRuns(
   left: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
   right: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
@@ -503,10 +610,15 @@ function pipelineStatus(
   return "NONE";
 }
 
-function pullRequestSearchState(state: GitHubPullRequestState): string {
+function pullRequestSearchState(state: GitHubPullRequestStateFilter): string {
+  if (state === "ALL") return "";
   if (state === "MERGED") return "is:merged";
   if (state === "CLOSED") return "is:closed is:unmerged";
   return "is:open";
+}
+
+function pullRequestSearchQuery(...parts: Array<string | null>): string {
+  return parts.filter((part) => part?.trim()).join(" ");
 }
 
 function pipelineState(
@@ -1777,88 +1889,95 @@ export class GitHubService {
     return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
   }
 
-  private async searchPullRequests(
+  private async searchPullRequestPage(
     query: string,
     token: string,
-  ): Promise<{ items: RawPullRequest[]; truncated: boolean }> {
-    const items: RawPullRequest[] = [];
-    let after: string | null = null;
-    let truncated = false;
-    while (true) {
-      const data: {
-        search: RawConnection<RawPullRequest>;
-      } = await this.request(
-        `query GitHubPullRequestSearch($query: String!, $after: String) {
-          search(query: $query, type: ISSUE, first: 50, after: $after) {
+    after: string | null,
+  ): Promise<RawConnection<RawPullRequest>> {
+    const data: {
+      search: RawConnection<RawPullRequest>;
+    } = await this.request(
+      `query GitHubPullRequestSearch($query: String!, $after: String) {
+        search(
+          query: $query
+          type: ISSUE
+          first: ${PULL_REQUEST_PAGE_SIZE}
+          after: $after
+        ) {
+          nodes { ...PullRequestTableFields }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+      ${PULL_REQUEST_FRAGMENT}`,
+      { query, after },
+      token,
+    );
+    return data.search;
+  }
+
+  private async repositoryPullRequestPage(
+    repository: GitHubRepositoryView,
+    token: string,
+    state: GitHubPullRequestStateFilter,
+    after: string | null,
+  ): Promise<RawConnection<RawPullRequest>> {
+    const data: {
+      repository: {
+        pullRequests: RawConnection<RawPullRequest>;
+      } | null;
+    } = await this.request(
+      `query GitHubRepositoryPullRequests(
+        $owner: String!
+        $name: String!
+        $states: [PullRequestState!]!
+        $after: String
+      ) {
+        repository(owner: $owner, name: $name) {
+          pullRequests(
+            states: $states
+            first: ${PULL_REQUEST_PAGE_SIZE}
+            after: $after
+            orderBy: { field: UPDATED_AT, direction: DESC }
+          ) {
             nodes { ...PullRequestTableFields }
             pageInfo { hasNextPage endCursor }
           }
         }
-        ${PULL_REQUEST_FRAGMENT}`,
-        { query, after },
-        token,
-      );
-      items.push(...connectionNodes(data.search));
-      if (items.length >= SEARCH_RESULT_LIMIT) {
-        truncated = data.search.pageInfo.hasNextPage;
-        break;
       }
-      if (!data.search.pageInfo.hasNextPage) break;
-      after = data.search.pageInfo.endCursor;
+      ${PULL_REQUEST_FRAGMENT}`,
+      {
+        owner: repository.owner,
+        name: repository.name,
+        states: state === "ALL" ? ["OPEN", "CLOSED", "MERGED"] : [state],
+        after,
+      },
+      token,
+    );
+    if (!data.repository) {
+      throw new Error("Managed repository was not found or is not accessible");
     }
-    return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
+    return data.repository.pullRequests;
   }
 
   private async repositoryPullRequests(
     repository: GitHubRepositoryView,
     token: string,
-    state: GitHubPullRequestState = "OPEN",
   ): Promise<RawPullRequest[]> {
     const items: RawPullRequest[] = [];
     let after: string | null = null;
     while (true) {
-      const data: {
-        repository: {
-          pullRequests: RawConnection<RawPullRequest>;
-        } | null;
-      } = await this.request(
-        `query GitHubRepositoryPullRequests(
-          $owner: String!
-          $name: String!
-          $states: [PullRequestState!]!
-          $after: String
-        ) {
-          repository(owner: $owner, name: $name) {
-            pullRequests(
-              states: $states
-              first: 50
-              after: $after
-              orderBy: { field: UPDATED_AT, direction: DESC }
-            ) {
-              nodes { ...PullRequestTableFields }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-        }
-        ${PULL_REQUEST_FRAGMENT}`,
-        {
-          owner: repository.owner,
-          name: repository.name,
-          states: [state],
-          after,
-        },
+      const connection = await this.repositoryPullRequestPage(
+        repository,
         token,
+        "OPEN",
+        after,
       );
-      if (!data.repository) {
-        throw new Error(
-          "Managed repository was not found or is not accessible",
-        );
+      items.push(...connectionNodes(connection));
+      if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
+        return items;
       }
-      items.push(...connectionNodes(data.repository.pullRequests));
-      if (!data.repository.pullRequests.pageInfo.hasNextPage) break;
-      after = data.repository.pullRequests.pageInfo.endCursor;
+      after = connection.pageInfo.endCursor;
     }
-    return items;
   }
 
   private async remainingLabels(
@@ -2047,9 +2166,21 @@ export class GitHubService {
     repositoryId?: string | null,
     options: {
       includePipelineJobs?: boolean;
-      state?: GitHubPullRequestState;
+      state?: GitHubPullRequestStateFilter;
+      first?: number;
+      after?: string | null;
     } = {},
   ): Promise<GitHubPullRequestPage> {
+    const first = options.first ?? PULL_REQUEST_PAGE_SIZE;
+    if (
+      !Number.isInteger(first) ||
+      first < 1 ||
+      first > PULL_REQUEST_PAGE_SIZE
+    ) {
+      throw new Error(
+        `first must be an integer from 1 to ${PULL_REQUEST_PAGE_SIZE}`,
+      );
+    }
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
     const repositories = await prisma.gitHubRepository.findMany();
@@ -2067,14 +2198,23 @@ export class GitHubService {
       : null;
     const state = options.state ?? "OPEN";
     const searchState = pullRequestSearchState(state);
+    const scopedRepositoryId = repositoryId ?? null;
+    const cursor = decodePullRequestCursor(
+      options.after,
+      scope,
+      scopedRepositoryId,
+      state,
+    );
     const regexByGitHubId = new Map(
       repositories.map((repository) => [
         repository.githubId,
         repository.jiraKeyRegex,
       ]),
     );
-    let rawItems: RawPullRequest[];
-    let truncated = false;
+    const loaders = new Map<
+      string,
+      (after: string | null) => Promise<RawConnection<RawPullRequest>>
+    >();
 
     if (scope === "REPOSITORY") {
       if (!repositoryId) {
@@ -2084,10 +2224,13 @@ export class GitHubService {
       }
       const repository = repositories.find((item) => item.id === repositoryId);
       if (!repository) throw new Error("Managed repository was not found");
-      rawItems = await this.repositoryPullRequests(
-        repositoryView(repository),
-        token,
-        state,
+      loaders.set("repository", (after) =>
+        this.repositoryPullRequestPage(
+          repositoryView(repository),
+          token,
+          state,
+          after,
+        ),
       );
     } else {
       if (repositoryId) {
@@ -2097,36 +2240,149 @@ export class GitHubService {
       }
       const viewer = await this.viewer(token);
       if (scope === "REVIEW_REQUESTED") {
-        const result = await this.searchPullRequests(
-          `is:pr ${searchState} review-requested:${viewer.login} sort:updated-desc`,
-          token,
+        const query = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `review-requested:${viewer.login}`,
+          "sort:updated-desc",
         );
-        rawItems = result.items;
-        truncated = result.truncated;
+        loaders.set("review", (after) =>
+          this.searchPullRequestPage(query, token, after),
+        );
       } else if (scope === "MINE") {
-        const [authored, assigned] = await Promise.all([
-          this.searchPullRequests(
-            `is:pr ${searchState} author:${viewer.login} sort:updated-desc`,
-            token,
-          ),
-          this.searchPullRequests(
-            `is:pr ${searchState} assignee:${viewer.login} sort:updated-desc`,
-            token,
-          ),
-        ]);
-        const unique = new Map<string, RawPullRequest>();
-        for (const pullRequest of [...authored.items, ...assigned.items]) {
-          unique.set(pullRequest.id, pullRequest);
-        }
-        rawItems = [...unique.values()].sort(
-          (left, right) =>
-            Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+        const authoredQuery = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `author:${viewer.login}`,
+          "sort:updated-desc",
         );
-        truncated = authored.truncated || assigned.truncated;
+        const assignedQuery = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `assignee:${viewer.login}`,
+          `-author:${viewer.login}`,
+          "sort:updated-desc",
+        );
+        loaders.set("authored", (after) =>
+          this.searchPullRequestPage(authoredQuery, token, after),
+        );
+        loaders.set("assigned", (after) =>
+          this.searchPullRequestPage(assignedQuery, token, after),
+        );
       } else {
         throw new Error("Unknown GitHub pull request scope");
       }
     }
+
+    type RuntimePullRequestStream = {
+      cursor: PullRequestCursorStream;
+      loader: (after: string | null) => Promise<RawConnection<RawPullRequest>>;
+      searchLimited: boolean;
+      items: RawPullRequest[] | null;
+      pageInfo: PageInfo | null;
+      current: RawPullRequest | null;
+    };
+    const streams: RuntimePullRequestStream[] = Object.entries(
+      cursor.streams,
+    ).map(([key, stream]) => {
+      const loader = loaders.get(key);
+      if (!loader) {
+        throw new Error("GitHub pull request pagination cursor is invalid");
+      }
+      return {
+        cursor: stream,
+        loader,
+        searchLimited: scope !== "REPOSITORY",
+        items: null,
+        pageInfo: null,
+        current: null,
+      };
+    });
+
+    const ensureCurrent = async (stream: RuntimePullRequestStream) => {
+      while (!stream.cursor.exhausted && !stream.current) {
+        if (
+          stream.searchLimited &&
+          stream.cursor.consumed >= SEARCH_RESULT_LIMIT
+        ) {
+          stream.cursor.exhausted = true;
+          return;
+        }
+        if (!stream.items || !stream.pageInfo) {
+          const connection = await stream.loader(stream.cursor.after);
+          stream.items = connectionNodes(connection);
+          stream.pageInfo = connection.pageInfo;
+        }
+        if (stream.cursor.offset < stream.items.length) {
+          stream.current = stream.items[stream.cursor.offset] ?? null;
+          return;
+        }
+        if (stream.cursor.offset > stream.items.length) {
+          throw new Error("GitHub pull request pagination cursor is invalid");
+        }
+        if (stream.pageInfo.hasNextPage && stream.pageInfo.endCursor) {
+          stream.cursor.after = stream.pageInfo.endCursor;
+          stream.cursor.offset = 0;
+          stream.items = null;
+          stream.pageInfo = null;
+        } else {
+          stream.cursor.exhausted = true;
+        }
+      }
+    };
+
+    const consumeCurrent = (stream: RuntimePullRequestStream) => {
+      stream.current = null;
+      stream.cursor.offset += 1;
+      stream.cursor.consumed += 1;
+      const hasMoreInPage = Boolean(
+        stream.items && stream.cursor.offset < stream.items.length,
+      );
+      const hasMorePages = Boolean(stream.pageInfo?.hasNextPage);
+      if (
+        stream.searchLimited &&
+        stream.cursor.consumed >= SEARCH_RESULT_LIMIT
+      ) {
+        stream.cursor.limitReached = hasMoreInPage || hasMorePages;
+        stream.cursor.exhausted = true;
+      } else if (hasMoreInPage) {
+        stream.current = stream.items?.[stream.cursor.offset] ?? null;
+      } else if (hasMorePages && stream.pageInfo?.endCursor) {
+        stream.cursor.after = stream.pageInfo.endCursor;
+        stream.cursor.offset = 0;
+        stream.items = null;
+        stream.pageInfo = null;
+      } else {
+        stream.cursor.exhausted = true;
+      }
+    };
+
+    const rawItems: RawPullRequest[] = [];
+    const selectedIds = new Set<string>();
+    while (rawItems.length < first) {
+      await Promise.all(streams.map(ensureCurrent));
+      const next = streams
+        .filter(
+          (
+            stream,
+          ): stream is RuntimePullRequestStream & {
+            current: RawPullRequest;
+          } => stream.current !== null,
+        )
+        .sort((left, right) =>
+          comparePullRequests(left.current, right.current),
+        )[0];
+      if (!next) break;
+      if (!selectedIds.has(next.current.id)) {
+        selectedIds.add(next.current.id);
+        rawItems.push(next.current);
+      }
+      consumeCurrent(next);
+    }
+
+    const hasNextPage = streams.some((stream) => !stream.cursor.exhausted);
+    const truncated = streams.some((stream) => stream.cursor.limitReached);
+    const endCursor = hasNextPage ? encodePullRequestCursor(cursor) : null;
 
     const items = await Promise.all(
       rawItems.map((pullRequest) =>
@@ -2138,7 +2394,9 @@ export class GitHubService {
         ),
       ),
     );
-    if (!options.includePipelineJobs) return { items, truncated };
+    if (!options.includePipelineJobs) {
+      return { items, truncated, hasNextPage, endCursor };
+    }
 
     return {
       items: await Promise.all(
@@ -2167,6 +2425,8 @@ export class GitHubService {
         }),
       ),
       truncated,
+      hasNextPage,
+      endCursor,
     };
   }
 

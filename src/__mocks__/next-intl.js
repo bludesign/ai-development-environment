@@ -672,6 +672,8 @@ const mockTranslations = {
     truncated:
       "GitHub search returns at most 1,000 results. Refine your workload on GitHub to see anything beyond this limit.",
     loadingPullRequests: "Loading pull requests…",
+    loadingMore: "Loading more pull requests…",
+    retryLoad: "Try again",
     empty: "No pull requests",
     emptyDescription: "No pull requests currently match this view.",
     repository: "Repository",
@@ -679,13 +681,15 @@ const mockTranslations = {
     pullRequest: "Pull request",
     pullRequestAndRepository: "Pull request / Repository",
     labels: "Labels",
-    jira: "Jira",
+    ticket: "Ticket",
     pipeline: "Pipeline",
     approval: "Approval",
     openComments: "Open comments",
     viewOpenComments: "View {count} open comments",
     age: "Age",
     actions: "Actions",
+    details: "Details",
+    openInGitHub: "Open in GitHub",
     merge: "Merge",
     mergePullRequest: "Merge pull request",
     mergePullRequestDescription:
@@ -740,6 +744,7 @@ const mockTranslations = {
       NONE: "No decision",
     },
     pullRequestStates: {
+      ALL: "All",
       OPEN: "Open",
       CLOSED: "Closed",
       MERGED: "Merged",

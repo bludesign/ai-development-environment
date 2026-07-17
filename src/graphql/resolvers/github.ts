@@ -5,7 +5,7 @@ import type {
   GitHubAuditContext,
   GitHubMergeMethod,
   GitHubPullRequestScope,
-  GitHubPullRequestState,
+  GitHubPullRequestStateFilter,
   GitHubService,
 } from "@/services/github";
 import { normalizeGitHubRepositoryName } from "@/services/github";
@@ -160,10 +160,14 @@ export const createGitHubResolvers = (
         scope,
         repositoryId,
         state,
+        first,
+        after,
       }: {
         scope: GitHubPullRequestScope;
         repositoryId?: string | null;
-        state?: GitHubPullRequestState | null;
+        state?: GitHubPullRequestStateFilter | null;
+        first?: number | null;
+        after?: string | null;
       },
       context: GraphQLContext,
       info?: GraphQLResolveInfo,
@@ -172,6 +176,8 @@ export const createGitHubResolvers = (
       return gitHubService.pullRequests(scope, repositoryId, {
         includePipelineJobs: requestsPipelineJobs(info),
         state: state ?? "OPEN",
+        first: first ?? 25,
+        after,
       });
     },
     githubPullRequest: (

@@ -40,6 +40,9 @@ export function MergePullRequestButton({
   onMerged,
   size = "sm",
   variant = "outline",
+  open: controlledOpen,
+  onOpenChange,
+  showTrigger = true,
 }: {
   pullRequest: Pick<
     GitHubPullRequestView,
@@ -49,9 +52,12 @@ export function MergePullRequestButton({
   size?: "default" | "sm" | "xs" | "icon" | "icon-sm" | "icon-xs";
   variant?:
     "default" | "outline" | "secondary" | "ghost" | "destructive" | "link";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }) {
   const t = useTranslations("pullRequests");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [options, setOptions] = useState<GitHubPullRequestMergeOptions | null>(
     null,
   );
@@ -66,52 +72,68 @@ export function MergePullRequestButton({
     "/",
     2,
   );
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setLoading(false);
+      setOptions(null);
+      setError(null);
+    }
+    if (controlledOpen === undefined) setInternalOpen(next);
+    onOpenChange?.(next);
+  };
 
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void controlPlaneRequest<{
-      githubPullRequestMergeOptions: GitHubPullRequestMergeOptions;
-    }>(
-      `query GitHubPullRequestMergeOptions(
-        $owner: String!
-        $name: String!
-        $number: Int!
-      ) {
-        githubPullRequestMergeOptions(
-          owner: $owner
-          name: $name
-          number: $number
+    const timeout = window.setTimeout(() => {
+      setLoading(true);
+      setOptions(null);
+      setError(null);
+      void controlPlaneRequest<{
+        githubPullRequestMergeOptions: GitHubPullRequestMergeOptions;
+      }>(
+        `query GitHubPullRequestMergeOptions(
+          $owner: String!
+          $name: String!
+          $number: Int!
         ) {
-          availableMethods
-          commitEmails
-          defaultCommitEmail
-          defaultCommitHeadline
-          defaultCommitBody
-          canMerge
-          blockedReason
-        }
-      }`,
-      { owner, name, number: pullRequest.number },
-    )
-      .then((data) => {
-        if (!active) return;
-        const next = data.githubPullRequestMergeOptions;
-        setOptions(next);
-        setMethod(next.availableMethods[0] ?? "");
-        setCommitHeadline(next.defaultCommitHeadline);
-        setCommitBody(next.defaultCommitBody);
-        setAuthorEmail(next.defaultCommitEmail ?? DEFAULT_EMAIL);
-      })
-      .catch((value) => {
-        if (active)
-          setError(value instanceof Error ? value.message : String(value));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+          githubPullRequestMergeOptions(
+            owner: $owner
+            name: $name
+            number: $number
+          ) {
+            availableMethods
+            commitEmails
+            defaultCommitEmail
+            defaultCommitHeadline
+            defaultCommitBody
+            canMerge
+            blockedReason
+          }
+        }`,
+        { owner, name, number: pullRequest.number },
+      )
+        .then((data) => {
+          if (!active) return;
+          const next = data.githubPullRequestMergeOptions;
+          setOptions(next);
+          setMethod(next.availableMethods[0] ?? "");
+          setCommitHeadline(next.defaultCommitHeadline);
+          setCommitBody(next.defaultCommitBody);
+          setAuthorEmail(next.defaultCommitEmail ?? DEFAULT_EMAIL);
+        })
+        .catch((value) => {
+          if (active)
+            setError(value instanceof Error ? value.message : String(value));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timeout);
     };
   }, [name, open, owner, pullRequest.number]);
 
@@ -154,21 +176,20 @@ export function MergePullRequestButton({
   const blockedReason = options?.blockedReason ?? null;
   return (
     <>
-      <Button
-        onClick={(event) => {
-          event.stopPropagation();
-          setLoading(true);
-          setOptions(null);
-          setError(null);
-          setOpen(true);
-        }}
-        size={size}
-        type="button"
-        variant={variant}
-      >
-        <GitMerge />
-        {t("merge")}
-      </Button>
+      {showTrigger && (
+        <Button
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen(true);
+          }}
+          size={size}
+          type="button"
+          variant={variant}
+        >
+          <GitMerge />
+          {t("merge")}
+        </Button>
+      )}
       <Dialog
         onOpenChange={(next) => {
           if (!merging) setOpen(next);
@@ -186,7 +207,7 @@ export function MergePullRequestButton({
             </DialogDescription>
           </DialogHeader>
 
-          {loading ? (
+          {loading || (!options && !error) ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Spinner /> {t("loadingMergeOptions")}
             </div>

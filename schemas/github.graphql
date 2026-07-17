@@ -10,6 +10,13 @@ enum GitHubPullRequestState {
   MERGED
 }
 
+enum GitHubPullRequestStateFilter {
+  ALL
+  OPEN
+  CLOSED
+  MERGED
+}
+
 enum GitHubPipelineStatus {
   ERROR
   EXPECTED
@@ -318,6 +325,8 @@ type GitHubPullRequestMergeResult {
 type GitHubPullRequestPage {
   items: [GitHubPullRequest!]!
   truncated: Boolean!
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 input SaveGitHubSettingsInput {
@@ -368,7 +377,9 @@ extend type Query {
   githubPullRequests(
     scope: GitHubPullRequestScope!
     repositoryId: ID
-    state: GitHubPullRequestState = OPEN
+    state: GitHubPullRequestStateFilter = OPEN
+    first: Int = 25
+    after: String
   ): GitHubPullRequestPage!
   githubPullRequest(
     owner: String!

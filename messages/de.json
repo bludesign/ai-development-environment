@@ -605,6 +605,8 @@
     "noRepositoryMatches": "Keine Repositories entsprechen der Suche.",
     "truncated": "Die GitHub-Suche liefert höchstens 1.000 Ergebnisse. Grenze deine Arbeitslast auf GitHub ein, um Ergebnisse über diesem Limit zu sehen.",
     "loadingPullRequests": "Pull Requests werden geladen…",
+    "loadingMore": "Weitere Pull Requests werden geladen…",
+    "retryLoad": "Erneut versuchen",
     "empty": "Keine Pull Requests",
     "emptyDescription": "Derzeit entsprechen keine Pull Requests dieser Ansicht.",
     "repository": "Repository",
@@ -612,13 +614,15 @@
     "pullRequest": "Pull Request",
     "pullRequestAndRepository": "Pull Request / Repository",
     "labels": "Labels",
-    "jira": "Jira",
+    "ticket": "Vorgang",
     "pipeline": "Pipeline",
     "approval": "Freigabe",
     "openComments": "Offene Kommentare",
     "viewOpenComments": "{count} offene Kommentare anzeigen",
     "age": "Alter",
     "actions": "Aktionen",
+    "details": "Details",
+    "openInGitHub": "In GitHub öffnen",
     "merge": "Zusammenführen",
     "mergePullRequest": "Pull Request zusammenführen",
     "mergePullRequestDescription": "{repository} #{number} nach Prüfung der Commit-Details zusammenführen.",
@@ -670,6 +674,7 @@
       "NONE": "Keine Entscheidung"
     },
     "pullRequestStates": {
+      "ALL": "Alle",
       "OPEN": "Offen",
       "CLOSED": "Geschlossen",
       "MERGED": "Zusammengeführt"

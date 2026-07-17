@@ -2,6 +2,8 @@ export type GitHubPullRequestScope = "MINE" | "REVIEW_REQUESTED" | "REPOSITORY";
 
 export type GitHubPullRequestState = "OPEN" | "CLOSED" | "MERGED";
 
+export type GitHubPullRequestStateFilter = GitHubPullRequestState | "ALL";
+
 export type GitHubPipelineStatus =
   "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS" | "NONE";
 
@@ -286,4 +288,6 @@ export type GitHubPullRequestMergeResult = {
 export type GitHubPullRequestPage = {
   items: GitHubPullRequestView[];
   truncated: boolean;
+  hasNextPage: boolean;
+  endCursor: string | null;
 };

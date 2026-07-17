@@ -605,6 +605,8 @@
     "noRepositoryMatches": "Ningún repositorio coincide con la búsqueda.",
     "truncated": "La búsqueda de GitHub devuelve como máximo 1000 resultados. Ajusta tu carga de trabajo en GitHub para ver los resultados que superen este límite.",
     "loadingPullRequests": "Cargando solicitudes de extracción…",
+    "loadingMore": "Cargando más solicitudes de extracción…",
+    "retryLoad": "Intentar de nuevo",
     "empty": "No hay solicitudes de extracción",
     "emptyDescription": "Actualmente no hay solicitudes de extracción que coincidan con esta vista.",
     "repository": "Repositorio",
@@ -612,13 +614,15 @@
     "pullRequest": "Solicitud de extracción",
     "pullRequestAndRepository": "Solicitud de extracción / Repositorio",
     "labels": "Etiquetas",
-    "jira": "Jira",
+    "ticket": "Incidencia",
     "pipeline": "Canalización",
     "approval": "Aprobación",
     "openComments": "Comentarios abiertos",
     "viewOpenComments": "Ver {count} comentarios abiertos",
     "age": "Antigüedad",
     "actions": "Acciones",
+    "details": "Detalles",
+    "openInGitHub": "Abrir en GitHub",
     "merge": "Fusionar",
     "mergePullRequest": "Fusionar pull request",
     "mergePullRequestDescription": "Fusiona {repository} #{number} después de revisar los detalles del commit.",
@@ -670,6 +674,7 @@
       "NONE": "Sin decisión"
     },
     "pullRequestStates": {
+      "ALL": "Todas",
       "OPEN": "Abierta",
       "CLOSED": "Cerrada",
       "MERGED": "Fusionada"

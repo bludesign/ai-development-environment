@@ -732,7 +732,9 @@ describe("GitHub service", () => {
         });
       }
       if (body.query.includes("GitHubPullRequestSearch")) {
-        const authored = String(body.variables.query).includes("author:");
+        const searchQuery = String(body.variables.query);
+        const authored =
+          searchQuery.includes("author:") && !searchQuery.includes("-author:");
         return response({
           data: {
             search: {
@@ -796,7 +798,7 @@ describe("GitHub service", () => {
     ).toBe(true);
   });
 
-  test("loads closed and merged pull requests for search and repository views", async () => {
+  test("loads all, closed, and merged pull requests for search and repository views", async () => {
     const searchQueries: string[] = [];
     const repositoryStates: unknown[] = [];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -873,6 +875,9 @@ describe("GitHub service", () => {
     const mergedSearch = await service.pullRequests("REVIEW_REQUESTED", null, {
       state: "MERGED",
     });
+    const allSearch = await service.pullRequests("REVIEW_REQUESTED", null, {
+      state: "ALL",
+    });
     const closedRepository = await service.pullRequests(
       "REPOSITORY",
       "local-repository-1",
@@ -883,16 +888,155 @@ describe("GitHub service", () => {
       "local-repository-1",
       { state: "MERGED" },
     );
+    const allRepository = await service.pullRequests(
+      "REPOSITORY",
+      "local-repository-1",
+      { state: "ALL" },
+    );
 
     expect(searchQueries).toEqual([
       "is:pr is:closed is:unmerged review-requested:octocat sort:updated-desc",
       "is:pr is:merged review-requested:octocat sort:updated-desc",
+      "is:pr review-requested:octocat sort:updated-desc",
     ]);
-    expect(repositoryStates).toEqual([["CLOSED"], ["MERGED"]]);
+    expect(repositoryStates).toEqual([
+      ["CLOSED"],
+      ["MERGED"],
+      ["OPEN", "CLOSED", "MERGED"],
+    ]);
     expect(closedSearch.items[0]?.state).toBe("CLOSED");
     expect(mergedSearch.items[0]?.state).toBe("MERGED");
+    expect(allSearch.items[0]?.state).toBe("CLOSED");
     expect(closedRepository.items[0]?.state).toBe("CLOSED");
     expect(mergedRepository.items[0]?.state).toBe("MERGED");
+    expect(allRepository.items[0]?.state).toBe("CLOSED");
+  });
+
+  test("paginates repository pull requests with a filter-specific cursor", async () => {
+    const repositoryQueries: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
+        if (!body.query.includes("GitHubRepositoryPullRequests")) {
+          throw new Error(`Unexpected query: ${body.query}`);
+        }
+        repositoryQueries.push(body.variables);
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  rawPullRequest("pull-request-1", "Newest merged change", {
+                    state: "MERGED",
+                    mergedAt: "2026-07-15T00:00:00.000Z",
+                  }),
+                  rawPullRequest("pull-request-2", "Older merged change", {
+                    state: "MERGED",
+                    mergedAt: "2026-07-14T00:00:00.000Z",
+                  }),
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+      }),
+    );
+
+    const service = new GitHubService();
+    const firstPage = await service.pullRequests(
+      "REPOSITORY",
+      "local-repository-1",
+      { state: "MERGED", first: 1 },
+    );
+    expect(firstPage.items.map((item) => item.id)).toEqual(["pull-request-1"]);
+    expect(firstPage.hasNextPage).toBe(true);
+    expect(firstPage.endCursor).toBeTruthy();
+
+    const secondPage = await service.pullRequests(
+      "REPOSITORY",
+      "local-repository-1",
+      { state: "MERGED", first: 1, after: firstPage.endCursor },
+    );
+    expect(secondPage.items.map((item) => item.id)).toEqual(["pull-request-2"]);
+    expect(secondPage.hasNextPage).toBe(false);
+    expect(secondPage.endCursor).toBeNull();
+    expect(repositoryQueries).toEqual([
+      expect.objectContaining({ states: ["MERGED"], after: null }),
+      expect.objectContaining({ states: ["MERGED"], after: null }),
+    ]);
+    await expect(
+      service.pullRequests("REPOSITORY", "local-repository-1", {
+        state: "CLOSED",
+        first: 1,
+        after: firstPage.endCursor,
+      }),
+    ).rejects.toThrow("cursor");
+  });
+
+  test("merges and paginates Mine search streams newest-first", async () => {
+    const searchQueries: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubPullRequestSearch")) {
+          const query = String(body.variables.query);
+          searchQueries.push(query);
+          const authored = !query.includes("-author:");
+          return response({
+            data: {
+              search: {
+                nodes: [
+                  rawPullRequest(
+                    authored ? "pull-request-1" : "pull-request-2",
+                    authored ? "Authored change" : "Assigned change",
+                  ),
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+
+    const service = new GitHubService();
+    const firstPage = await service.pullRequests("MINE", null, { first: 1 });
+    const secondPage = await service.pullRequests("MINE", null, {
+      first: 1,
+      after: firstPage.endCursor,
+    });
+
+    expect(firstPage.items.map((item) => item.id)).toEqual(["pull-request-1"]);
+    expect(firstPage.hasNextPage).toBe(true);
+    expect(secondPage.items.map((item) => item.id)).toEqual(["pull-request-2"]);
+    expect(secondPage.hasNextPage).toBe(false);
+    expect(searchQueries).toEqual([
+      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
+      "is:pr is:open author:octocat sort:updated-desc",
+      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
+    ]);
   });
 
   test("loads every linked PR scope, deduplicates, paginates, and normalizes review threads", async () => {
