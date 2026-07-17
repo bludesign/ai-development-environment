@@ -23,9 +23,14 @@ import type {
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestView,
+  GitHubReviewComment,
   GitHubRepositoryCandidatePage,
   GitHubRepositoryView,
   GitHubReviewDecision,
+  GitHubReviewThread,
+  GitHubReviewThreadPage,
+  GitHubReviewThreadPullRequest,
+  GitHubReviewThreadState,
   GitHubSettingsView,
   GitHubViewer,
   GitHubWorkflowJobView,
@@ -114,8 +119,10 @@ type RawPipelineContext =
 
 type RawPullRequestDetail = RawPullRequest & {
   body: string;
+  bodyHTML: string;
   author: { login: string; avatarUrl: string; url: string } | null;
   assignees: RawConnection<{ login: string; avatarUrl: string; url: string }>;
+  reviewThreadsFull: RawConnection<RawReviewThread>;
   baseRefName: string;
   headRefName: string;
   state: "OPEN" | "CLOSED" | "MERGED";
@@ -126,6 +133,55 @@ type RawPullRequestDetail = RawPullRequest & {
   changedFiles: number;
   commits: { totalCount: number };
   mergedAt: string | null;
+};
+
+type RawActor = {
+  login: string;
+  avatarUrl: string;
+  url: string;
+};
+
+type RawReviewComment = {
+  id: string;
+  body: string;
+  bodyText: string;
+  bodyHTML: string;
+  url: string;
+  author: RawActor | null;
+  createdAt: string;
+  updatedAt: string;
+  replyTo: { id: string } | null;
+};
+
+type RawReviewThreadPullRequest = {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  repository: { nameWithOwner: string };
+};
+
+type RawReviewThread = {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  subjectType: "FILE" | "LINE";
+  path: string;
+  line: number | null;
+  startLine: number | null;
+  originalLine: number | null;
+  originalStartLine: number | null;
+  viewerCanReply: boolean;
+  viewerCanResolve: boolean;
+  viewerCanUnresolve: boolean;
+  resolvedBy: RawActor | null;
+  pullRequest: RawReviewThreadPullRequest;
+  comments: RawConnection<RawReviewComment>;
+};
+
+type RawReviewPullRequest = RawReviewThreadPullRequest & {
+  updatedAt: string;
+  reviewThreads: RawConnection<RawReviewThread>;
 };
 
 type GitHubResponse<T> = {
@@ -191,6 +247,45 @@ const PULL_REQUEST_FRAGMENT = `
       nodes { isResolved }
       pageInfo { hasNextPage endCursor }
     }
+  }
+`;
+
+const REVIEW_COMMENT_FIELDS = `
+  id
+  body
+  bodyText
+  bodyHTML
+  url
+  author { login avatarUrl url }
+  createdAt
+  updatedAt
+  replyTo { id }
+`;
+
+const REVIEW_THREAD_FIELDS = `
+  id
+  isResolved
+  isOutdated
+  subjectType
+  path
+  line
+  startLine
+  originalLine
+  originalStartLine
+  viewerCanReply
+  viewerCanResolve
+  viewerCanUnresolve
+  resolvedBy { login avatarUrl url }
+  pullRequest {
+    id
+    number
+    title
+    url
+    repository { nameWithOwner }
+  }
+  comments(first: 100) {
+    nodes { ${REVIEW_COMMENT_FIELDS} }
+    pageInfo { hasNextPage endCursor }
   }
 `;
 
@@ -376,6 +471,81 @@ function reviewDecision(value: string | null): GitHubReviewDecision {
     return value;
   }
   return "NONE";
+}
+
+function reviewThreadPullRequest(
+  pullRequest: RawReviewThreadPullRequest,
+): GitHubReviewThreadPullRequest {
+  return {
+    id: pullRequest.id,
+    number: pullRequest.number,
+    title: pullRequest.title,
+    url: pullRequest.url,
+    repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
+  };
+}
+
+function normalizeReviewComment(
+  comment: RawReviewComment,
+): GitHubReviewComment {
+  return {
+    id: comment.id,
+    body: comment.body,
+    bodyText: comment.bodyText,
+    bodyHtml: comment.bodyHTML,
+    url: comment.url,
+    author: comment.author,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+  };
+}
+
+function normalizeReviewThread(
+  thread: RawReviewThread,
+): GitHubReviewThread | null {
+  const comments = connectionNodes(thread.comments);
+  const root = comments.find((comment) => !comment.replyTo) ?? comments[0];
+  if (!root) return null;
+  return {
+    id: thread.id,
+    isResolved: thread.isResolved,
+    isOutdated: thread.isOutdated,
+    subjectType: thread.subjectType,
+    path: thread.path,
+    line: thread.line,
+    startLine: thread.startLine,
+    originalLine: thread.originalLine,
+    originalStartLine: thread.originalStartLine,
+    viewerCanReply: thread.viewerCanReply,
+    viewerCanResolve: thread.viewerCanResolve,
+    viewerCanUnresolve: thread.viewerCanUnresolve,
+    resolvedBy: thread.resolvedBy,
+    pullRequest: reviewThreadPullRequest(thread.pullRequest),
+    rootComment: normalizeReviewComment(root),
+    replies: comments
+      .filter((comment) => comment.id !== root.id)
+      .sort(
+        (left, right) =>
+          Date.parse(left.createdAt) - Date.parse(right.createdAt),
+      )
+      .map(normalizeReviewComment),
+  };
+}
+
+function normalizeReviewThreadState(thread: {
+  id: string;
+  isResolved: boolean;
+  viewerCanResolve: boolean;
+  viewerCanUnresolve: boolean;
+  resolvedBy: RawActor | null;
+}): GitHubReviewThreadState {
+  return {
+    id: thread.id,
+    isResolved: thread.isResolved,
+    viewerCanResolve: thread.viewerCanResolve,
+    viewerCanUnresolve: thread.viewerCanUnresolve,
+    resolvedBy: thread.resolvedBy,
+  };
 }
 
 export class GitHubService {
@@ -982,6 +1152,160 @@ export class GitHubService {
     return this.listRepositories();
   }
 
+  private async remainingReviewComments(
+    threadId: string,
+    after: string,
+    token: string,
+  ): Promise<RawReviewComment[]> {
+    const comments: RawReviewComment[] = [];
+    let cursor: string | null = after;
+    while (cursor) {
+      const data: {
+        node: { comments: RawConnection<RawReviewComment> } | null;
+      } = await this.request(
+        `query GitHubReviewThreadComments($id: ID!, $after: String) {
+          node(id: $id) {
+            ... on PullRequestReviewThread {
+              comments(first: 100, after: $after) {
+                nodes { ${REVIEW_COMMENT_FIELDS} }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }`,
+        { id: threadId, after: cursor },
+        token,
+      );
+      if (!data.node) break;
+      comments.push(...connectionNodes(data.node.comments));
+      cursor = data.node.comments.pageInfo.hasNextPage
+        ? data.node.comments.pageInfo.endCursor
+        : null;
+    }
+    return comments;
+  }
+
+  private async completeReviewThread(
+    thread: RawReviewThread,
+    token: string,
+  ): Promise<RawReviewThread> {
+    const comments = connectionNodes(thread.comments);
+    if (
+      thread.comments.pageInfo.hasNextPage &&
+      thread.comments.pageInfo.endCursor
+    ) {
+      comments.push(
+        ...(await this.remainingReviewComments(
+          thread.id,
+          thread.comments.pageInfo.endCursor,
+          token,
+        )),
+      );
+    }
+    return {
+      ...thread,
+      comments: {
+        nodes: comments,
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+  }
+
+  private async completeReviewThreads(
+    pullRequestId: string,
+    initial: RawConnection<RawReviewThread>,
+    token: string,
+  ): Promise<GitHubReviewThread[]> {
+    const threads = connectionNodes(initial);
+    let cursor = initial.pageInfo.hasNextPage
+      ? initial.pageInfo.endCursor
+      : null;
+    while (cursor) {
+      const data: {
+        node: { reviewThreads: RawConnection<RawReviewThread> } | null;
+      } = await this.request(
+        `query GitHubPullRequestReviewThreadDetails(
+          $id: ID!
+          $after: String
+        ) {
+          node(id: $id) {
+            ... on PullRequest {
+              reviewThreads(first: 100, after: $after) {
+                nodes { ${REVIEW_THREAD_FIELDS} }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }`,
+        { id: pullRequestId, after: cursor },
+        token,
+      );
+      if (!data.node) break;
+      threads.push(...connectionNodes(data.node.reviewThreads));
+      cursor = data.node.reviewThreads.pageInfo.hasNextPage
+        ? data.node.reviewThreads.pageInfo.endCursor
+        : null;
+    }
+    const normalized = await Promise.all(
+      threads.map(async (thread) =>
+        normalizeReviewThread(await this.completeReviewThread(thread, token)),
+      ),
+    );
+    return normalized
+      .filter((thread): thread is GitHubReviewThread => thread !== null)
+      .sort(
+        (left, right) =>
+          Date.parse(right.rootComment.createdAt) -
+          Date.parse(left.rootComment.createdAt),
+      );
+  }
+
+  private async searchReviewPullRequests(
+    query: string,
+    token: string,
+  ): Promise<{ items: RawReviewPullRequest[]; truncated: boolean }> {
+    const items: RawReviewPullRequest[] = [];
+    let after: string | null = null;
+    let truncated = false;
+    while (true) {
+      const data: { search: RawConnection<RawReviewPullRequest> } =
+        await this.request(
+          `query GitHubReviewThreadPullRequestSearch(
+            $query: String!
+            $after: String
+          ) {
+            search(query: $query, type: ISSUE, first: 50, after: $after) {
+              nodes {
+                ... on PullRequest {
+                  id
+                  number
+                  title
+                  url
+                  updatedAt
+                  repository { nameWithOwner }
+                  reviewThreads(first: 50) {
+                    nodes { ${REVIEW_THREAD_FIELDS} }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { query, after },
+          token,
+        );
+      items.push(...connectionNodes(data.search));
+      if (items.length >= SEARCH_RESULT_LIMIT) {
+        truncated = data.search.pageInfo.hasNextPage;
+        break;
+      }
+      if (!data.search.pageInfo.hasNextPage) break;
+      after = data.search.pageInfo.endCursor;
+    }
+    return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
+  }
+
   private async searchPullRequests(
     query: string,
     token: string,
@@ -1355,6 +1679,50 @@ export class GitHubService {
     };
   }
 
+  async reviewThreads(): Promise<GitHubReviewThreadPage> {
+    const token = await this.requireToken();
+    const viewer = await this.viewer(token);
+    const [authored, assigned] = await Promise.all([
+      this.searchReviewPullRequests(
+        `is:pr is:open author:${viewer.login} sort:updated-desc`,
+        token,
+      ),
+      this.searchReviewPullRequests(
+        `is:pr is:open assignee:${viewer.login} sort:updated-desc`,
+        token,
+      ),
+    ]);
+    const unique = new Map<string, RawReviewPullRequest>();
+    for (const pullRequest of [...authored.items, ...assigned.items]) {
+      unique.set(pullRequest.id, pullRequest);
+    }
+    const pullRequests = [...unique.values()].sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    );
+    const threads = (
+      await Promise.all(
+        pullRequests.map((pullRequest) =>
+          this.completeReviewThreads(
+            pullRequest.id,
+            pullRequest.reviewThreads,
+            token,
+          ),
+        ),
+      )
+    ).flat();
+    threads.sort(
+      (left, right) =>
+        Date.parse(right.rootComment.createdAt) -
+        Date.parse(left.rootComment.createdAt),
+    );
+    return {
+      viewerLogin: viewer.login,
+      pullRequests: pullRequests.map(reviewThreadPullRequest),
+      threads,
+      truncated: authored.truncated || assigned.truncated,
+    };
+  }
+
   async pullRequestForBranch(
     canonicalOrigin: string,
     branch: string,
@@ -1433,9 +1801,14 @@ export class GitHubService {
           pullRequest(number: $number) {
             ...PullRequestTableFields
             body
+            bodyHTML
             author { login avatarUrl url }
             assignees(first: 100) {
               nodes { login avatarUrl url }
+              pageInfo { hasNextPage endCursor }
+            }
+            reviewThreadsFull: reviewThreads(first: 100) {
+              nodes { ${REVIEW_THREAD_FIELDS} }
               pageInfo { hasNextPage endCursor }
             }
             baseRefName
@@ -1489,12 +1862,19 @@ export class GitHubService {
         };
       }),
     );
+    const reviewThreads = await this.completeReviewThreads(
+      pullRequest.id,
+      pullRequest.reviewThreadsFull,
+      token,
+    );
     return {
       ...summary,
       pipelines,
       body: pullRequest.body,
+      bodyHtml: pullRequest.bodyHTML,
       author: pullRequest.author,
       assignees: connectionNodes(pullRequest.assignees),
+      reviewThreads,
       baseRefName: pullRequest.baseRefName,
       headRefName: pullRequest.headRefName,
       state: pullRequest.state,
@@ -1507,6 +1887,95 @@ export class GitHubService {
       updatedAt: pullRequest.updatedAt,
       mergedAt: pullRequest.mergedAt,
     };
+  }
+
+  async replyToReviewThread(
+    threadId: string,
+    body: string,
+  ): Promise<GitHubReviewComment> {
+    if (!threadId.trim()) throw new Error("Review thread ID is required");
+    if (!body.trim()) throw new Error("A reply is required");
+    const token = await this.requireToken();
+    const data = await this.request<{
+      addPullRequestReviewThreadReply: { comment: RawReviewComment | null };
+    }>(
+      `mutation ReplyToGitHubReviewThread($threadId: ID!, $body: String!) {
+        addPullRequestReviewThreadReply(
+          input: {
+            pullRequestReviewThreadId: $threadId
+            body: $body
+          }
+        ) {
+          comment { ${REVIEW_COMMENT_FIELDS} }
+        }
+      }`,
+      { threadId, body },
+      token,
+    );
+    const comment = data.addPullRequestReviewThreadReply.comment;
+    if (!comment) throw new Error("GitHub did not return the new reply");
+    return normalizeReviewComment(comment);
+  }
+
+  async setReviewThreadResolved(
+    threadId: string,
+    resolved: boolean,
+  ): Promise<GitHubReviewThreadState> {
+    if (!threadId.trim()) throw new Error("Review thread ID is required");
+    const token = await this.requireToken();
+    const stateFields = `
+      id
+      isResolved
+      viewerCanResolve
+      viewerCanUnresolve
+      resolvedBy { login avatarUrl url }
+    `;
+    if (resolved) {
+      const data = await this.request<{
+        resolveReviewThread: {
+          thread: {
+            id: string;
+            isResolved: boolean;
+            viewerCanResolve: boolean;
+            viewerCanUnresolve: boolean;
+            resolvedBy: RawActor | null;
+          } | null;
+        };
+      }>(
+        `mutation ResolveGitHubReviewThread($threadId: ID!) {
+          resolveReviewThread(input: { threadId: $threadId }) {
+            thread { ${stateFields} }
+          }
+        }`,
+        { threadId },
+        token,
+      );
+      const thread = data.resolveReviewThread.thread;
+      if (!thread) throw new Error("GitHub did not return the resolved thread");
+      return normalizeReviewThreadState(thread);
+    }
+    const data = await this.request<{
+      unresolveReviewThread: {
+        thread: {
+          id: string;
+          isResolved: boolean;
+          viewerCanResolve: boolean;
+          viewerCanUnresolve: boolean;
+          resolvedBy: RawActor | null;
+        } | null;
+      };
+    }>(
+      `mutation ReopenGitHubReviewThread($threadId: ID!) {
+        unresolveReviewThread(input: { threadId: $threadId }) {
+          thread { ${stateFields} }
+        }
+      }`,
+      { threadId },
+      token,
+    );
+    const thread = data.unresolveReviewThread.thread;
+    if (!thread) throw new Error("GitHub did not return the reopened thread");
+    return normalizeReviewThreadState(thread);
   }
 
   async retryPipeline(

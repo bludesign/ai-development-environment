@@ -137,6 +137,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.pullRequest(owner, name, number);
     },
+    githubReviewThreads: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.reviewThreads();
+    },
   },
   Mutation: {
     saveGitHubSettings: (
@@ -254,6 +262,22 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
         jobId,
         auditContext(context),
       );
+    },
+    replyToGitHubReviewThread: (
+      _root: unknown,
+      { threadId, body }: { threadId: string; body: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.replyToReviewThread(threadId, body);
+    },
+    setGitHubReviewThreadResolved: (
+      _root: unknown,
+      { threadId, resolved }: { threadId: string; resolved: boolean },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.setReviewThreadResolved(threadId, resolved);
     },
   },
 });

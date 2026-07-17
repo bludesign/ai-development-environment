@@ -1,0 +1,275 @@
+"use client";
+
+import { ExternalLink, Send } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { FormEvent, useState } from "react";
+
+import { GitHubMarkdownContent } from "@/components/github/github-markdown";
+import { pullRequestDetailHref } from "@/components/github/pull-request-links";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import { Link } from "@/i18n/navigation";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
+import type {
+  GitHubPullRequestActor,
+  GitHubReviewComment,
+  GitHubReviewThread,
+  GitHubReviewThreadState,
+} from "@/services/github/types";
+
+const COMMENT_FIELDS =
+  "id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt";
+const STATE_FIELDS =
+  "id isResolved viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url }";
+
+export function relativeAge(value: string, locale: string) {
+  const seconds = Math.round((Date.parse(value) - Date.now()) / 1000);
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ["year", 60 * 60 * 24 * 365],
+    ["month", 60 * 60 * 24 * 30],
+    ["week", 60 * 60 * 24 * 7],
+    ["day", 60 * 60 * 24],
+    ["hour", 60 * 60],
+    ["minute", 60],
+  ];
+  for (const [unit, size] of units) {
+    if (Math.abs(seconds) >= size) {
+      return formatter.format(Math.round(seconds / size), unit);
+    }
+  }
+  return formatter.format(seconds, "second");
+}
+
+export function ReviewAuthor({
+  actor,
+  compact = false,
+}: {
+  actor: GitHubPullRequestActor | null;
+  compact?: boolean;
+}) {
+  const t = useTranslations("githubComments");
+  if (!actor) return <span>{t("unknownAuthor")}</span>;
+  return (
+    <a
+      className="inline-flex min-w-0 items-center gap-2 hover:underline"
+      href={actor.url}
+      rel="noreferrer"
+      target="_blank"
+    >
+      <Avatar className={compact ? "size-5" : "size-7"}>
+        <AvatarImage alt="" src={actor.avatarUrl} />
+        <AvatarFallback>{actor.login.slice(0, 1).toUpperCase()}</AvatarFallback>
+      </Avatar>
+      <span className="truncate">@{actor.login}</span>
+    </a>
+  );
+}
+
+export function threadLocation(thread: GitHubReviewThread, fileLabel: string) {
+  if (thread.subjectType === "FILE") return `${thread.path} · ${fileLabel}`;
+  const end = thread.line ?? thread.originalLine;
+  const start = thread.startLine ?? thread.originalStartLine;
+  if (end === null) return thread.path;
+  return `${thread.path} · L${start && start !== end ? `${start}–` : ""}${end}`;
+}
+
+export function ReviewThreadCard({
+  locale,
+  onReplyAdded,
+  onStateChanged,
+  thread,
+}: {
+  locale: string;
+  onReplyAdded: (threadId: string, comment: GitHubReviewComment) => void;
+  onStateChanged: (state: GitHubReviewThreadState) => void;
+  thread: GitHubReviewThread;
+}) {
+  const t = useTranslations("githubComments");
+  const [reply, setReply] = useState("");
+  const [replying, setReplying] = useState(false);
+  const [changingState, setChangingState] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submitReply = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!reply.trim() || !thread.viewerCanReply) return;
+    setReplying(true);
+    try {
+      const data = await controlPlaneRequest<{
+        replyToGitHubReviewThread: GitHubReviewComment;
+      }>(
+        `mutation ReplyToGitHubReviewThread($threadId: ID!, $body: String!) {
+          replyToGitHubReviewThread(threadId: $threadId, body: $body) {
+            ${COMMENT_FIELDS}
+          }
+        }`,
+        { threadId: thread.id, body: reply },
+      );
+      onReplyAdded(thread.id, data.replyToGitHubReviewThread);
+      setReply("");
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setReplying(false);
+    }
+  };
+
+  const changeState = async () => {
+    const resolved = !thread.isResolved;
+    if (
+      (resolved && !thread.viewerCanResolve) ||
+      (!resolved && !thread.viewerCanUnresolve)
+    ) {
+      return;
+    }
+    setChangingState(true);
+    try {
+      const data = await controlPlaneRequest<{
+        setGitHubReviewThreadResolved: GitHubReviewThreadState;
+      }>(
+        `mutation SetGitHubReviewThreadResolved(
+          $threadId: ID!
+          $resolved: Boolean!
+        ) {
+          setGitHubReviewThreadResolved(
+            threadId: $threadId
+            resolved: $resolved
+          ) { ${STATE_FIELDS} }
+        }`,
+        { threadId: thread.id, resolved },
+      );
+      onStateChanged(data.setGitHubReviewThreadResolved);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setChangingState(false);
+    }
+  };
+
+  const canChangeState = thread.isResolved
+    ? thread.viewerCanUnresolve
+    : thread.viewerCanResolve;
+
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader className="flex grid-cols-none flex-row flex-wrap items-start justify-between gap-3 border-b py-4">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <ReviewAuthor actor={thread.rootComment.author} />
+            <span className="text-muted-foreground">·</span>
+            <time
+              className="text-muted-foreground"
+              dateTime={thread.rootComment.createdAt}
+              title={new Date(thread.rootComment.createdAt).toLocaleString(
+                locale,
+              )}
+            >
+              {relativeAge(thread.rootComment.createdAt, locale)}
+            </time>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline">
+              {threadLocation(thread, t("fileComment"))}
+            </Badge>
+            {thread.isOutdated && (
+              <Badge variant="secondary">{t("outdated")}</Badge>
+            )}
+            <Badge variant={thread.isResolved ? "secondary" : "outline"}>
+              {thread.isResolved ? t("resolved") : t("unresolved")}
+            </Badge>
+            <Link
+              className="font-medium text-primary hover:underline"
+              href={pullRequestDetailHref(thread.pullRequest)}
+            >
+              {thread.pullRequest.repositoryNameWithOwner} #
+              {thread.pullRequest.number}
+            </Link>
+          </div>
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <a href={thread.rootComment.url} rel="noreferrer" target="_blank">
+            {t("openInGitHub")} <ExternalLink />
+          </a>
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-5 py-5">
+        <GitHubMarkdownContent bodyHtml={thread.rootComment.bodyHtml} />
+
+        {thread.replies.length > 0 && (
+          <div className="space-y-4 border-l-2 border-muted pl-4">
+            {thread.replies.map((comment) => (
+              <div className="space-y-2" key={comment.id}>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <ReviewAuthor actor={comment.author} compact />
+                  <span className="text-muted-foreground">·</span>
+                  <time
+                    className="text-muted-foreground"
+                    dateTime={comment.createdAt}
+                  >
+                    {relativeAge(comment.createdAt, locale)}
+                  </time>
+                  <a
+                    aria-label={t("openReplyInGitHub")}
+                    className="text-primary hover:underline"
+                    href={comment.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </div>
+                <GitHubMarkdownContent bodyHtml={comment.bodyHtml} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <form className="space-y-3" onSubmit={submitReply}>
+          <Textarea
+            aria-label={t("reply")}
+            disabled={!thread.viewerCanReply || replying}
+            onChange={(event) => setReply(event.target.value)}
+            placeholder={
+              thread.viewerCanReply
+                ? t("replyPlaceholder")
+                : t("replyUnavailable")
+            }
+            value={reply}
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              disabled={!canChangeState || changingState}
+              onClick={() => void changeState()}
+              type="button"
+              variant="outline"
+            >
+              {changingState && <Spinner />}
+              {thread.isResolved ? t("reopen") : t("resolve")}
+            </Button>
+            <Button
+              disabled={!thread.viewerCanReply || replying || !reply.trim()}
+              type="submit"
+            >
+              {replying ? <Spinner /> : <Send />}
+              {replying ? t("replying") : t("sendReply")}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

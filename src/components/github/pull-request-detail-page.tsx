@@ -19,12 +19,14 @@ import {
   RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
+import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
+import { ReviewThreadCard } from "@/components/github/review-thread-card";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Empty,
   EmptyDescription,
@@ -46,12 +48,14 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubPipelineView,
   GitHubPullRequestDetail,
+  GitHubReviewComment,
   GitHubReviewDecision,
+  GitHubReviewThreadState,
   GitHubWorkflowJobView,
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt body author { login avatarUrl url } assignees { login avatarUrl url } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -177,6 +181,46 @@ export function PullRequestDetailPage({
     );
   };
 
+  const replyAdded = (threadId: string, comment: GitHubReviewComment) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            reviewThreads: current.reviewThreads.map((thread) =>
+              thread.id === threadId
+                ? { ...thread, replies: [...thread.replies, comment] }
+                : thread,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const threadStateChanged = (state: GitHubReviewThreadState) => {
+    setPullRequest((current) => {
+      if (!current) return current;
+      const previous = current.reviewThreads.find(
+        (thread) => thread.id === state.id,
+      );
+      const countDelta =
+        previous && previous.isResolved !== state.isResolved
+          ? state.isResolved
+            ? -1
+            : 1
+          : 0;
+      return {
+        ...current,
+        unresolvedReviewThreadCount: Math.max(
+          0,
+          current.unresolvedReviewThreadCount + countDelta,
+        ),
+        reviewThreads: current.reviewThreads.map((thread) =>
+          thread.id === state.id ? { ...thread, ...state } : thread,
+        ),
+      };
+    });
+  };
+
   if (loading && !pullRequest) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -275,29 +319,55 @@ export function PullRequestDetailPage({
         </Alert>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <div className="space-y-5">
-          <Card>
-            <CardHeader className="border-b">
-              <h2 className="font-semibold">{t("description")}</h2>
-            </CardHeader>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="contents">
+          <Card className="order-2 lg:col-span-2">
             <CardContent>
-              {pullRequest.body ? (
-                <div className="whitespace-pre-wrap text-sm leading-6">
-                  {pullRequest.body}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("noDescription")}
-                </p>
-              )}
+              <GitHubMarkdownBlock
+                body={pullRequest.body}
+                bodyHtml={pullRequest.bodyHtml}
+                emptyLabel={t("noDescription")}
+                header={<CardTitle>{t("description")}</CardTitle>}
+                headerClassName="border-b pb-4"
+              />
             </CardContent>
           </Card>
 
-          <Card className="gap-0 py-0">
+          <div className="order-3 space-y-4 lg:col-span-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold">{t("comments")}</h2>
+              <Badge variant="secondary">
+                {pullRequest.reviewThreads.length}
+              </Badge>
+            </div>
+            {pullRequest.reviewThreads.length === 0 ? (
+              <Empty className="border py-8">
+                <EmptyHeader>
+                  <EmptyTitle>{t("noComments")}</EmptyTitle>
+                  <EmptyDescription>
+                    {t("noCommentsDescription")}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <div className="space-y-5">
+                {pullRequest.reviewThreads.map((thread) => (
+                  <ReviewThreadCard
+                    key={thread.id}
+                    locale={locale}
+                    onReplyAdded={replyAdded}
+                    onStateChanged={threadStateChanged}
+                    thread={thread}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Card className="order-4 gap-0 py-0 lg:col-span-2">
             <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b py-3">
               <div>
-                <h2 className="font-semibold">{t("pipelines")}</h2>
+                <CardTitle>{t("pipelines")}</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {t("pipelineCount", { count: pullRequest.pipelines.length })}
                 </p>
@@ -409,10 +479,10 @@ export function PullRequestDetailPage({
           </Card>
         </div>
 
-        <div className="space-y-5">
-          <Card>
+        <div className="contents">
+          <Card className="order-1">
             <CardHeader className="border-b">
-              <h2 className="font-semibold">{t("details")}</h2>
+              <CardTitle>{t("details")}</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="grid gap-4 text-sm">
@@ -457,9 +527,9 @@ export function PullRequestDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="order-1">
             <CardHeader className="border-b">
-              <h2 className="font-semibold">{t("people")}</h2>
+              <CardTitle>{t("people")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <Person

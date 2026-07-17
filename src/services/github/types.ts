@@ -135,10 +135,65 @@ export type GitHubPullRequestActor = {
   url: string;
 };
 
+export type GitHubReviewComment = {
+  id: string;
+  body: string;
+  bodyText: string;
+  bodyHtml: string;
+  url: string;
+  author: GitHubPullRequestActor | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GitHubReviewThreadPullRequest = {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  repositoryNameWithOwner: string;
+};
+
+export type GitHubReviewThread = {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  subjectType: "FILE" | "LINE";
+  path: string;
+  line: number | null;
+  startLine: number | null;
+  originalLine: number | null;
+  originalStartLine: number | null;
+  viewerCanReply: boolean;
+  viewerCanResolve: boolean;
+  viewerCanUnresolve: boolean;
+  resolvedBy: GitHubPullRequestActor | null;
+  pullRequest: GitHubReviewThreadPullRequest;
+  rootComment: GitHubReviewComment;
+  replies: GitHubReviewComment[];
+};
+
+export type GitHubReviewThreadPage = {
+  viewerLogin: string;
+  pullRequests: GitHubReviewThreadPullRequest[];
+  threads: GitHubReviewThread[];
+  truncated: boolean;
+};
+
+export type GitHubReviewThreadState = {
+  id: string;
+  isResolved: boolean;
+  viewerCanResolve: boolean;
+  viewerCanUnresolve: boolean;
+  resolvedBy: GitHubPullRequestActor | null;
+};
+
 export type GitHubPullRequestDetail = GitHubPullRequestView & {
   body: string;
+  bodyHtml: string;
   author: GitHubPullRequestActor | null;
   assignees: GitHubPullRequestActor[];
+  reviewThreads: GitHubReviewThread[];
   baseRefName: string;
   headRefName: string;
   state: "OPEN" | "CLOSED" | "MERGED";

@@ -55,6 +55,9 @@ describe("GitHub resolvers", () => {
         context("agent-1"),
       ),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubReviewThreads({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.pullRequests).not.toHaveBeenCalled();
   });
@@ -71,6 +74,11 @@ describe("GitHub resolvers", () => {
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
+      reviewThreads: vi.fn().mockResolvedValue({ threads: [] }),
+      replyToReviewThread: vi.fn().mockResolvedValue({ id: "comment-1" }),
+      setReviewThreadResolved: vi
+        .fn()
+        .mockResolvedValue({ id: "thread-1", isResolved: true }),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service);
     const input = { apiToken: "secret-token" };
@@ -123,6 +131,17 @@ describe("GitHub resolvers", () => {
       },
       context(null),
     );
+    await resolvers.Query.githubReviewThreads({}, {}, context(null));
+    await resolvers.Mutation.replyToGitHubReviewThread(
+      {},
+      { threadId: "thread-1", body: "Reply" },
+      context(null),
+    );
+    await resolvers.Mutation.setGitHubReviewThreadResolved(
+      {},
+      { threadId: "thread-1", resolved: true },
+      context(null),
+    );
     expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
@@ -134,6 +153,15 @@ describe("GitHub resolvers", () => {
       "check-suite-1",
       "job-11",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
+    );
+    expect(service.reviewThreads).toHaveBeenCalledOnce();
+    expect(service.replyToReviewThread).toHaveBeenCalledWith(
+      "thread-1",
+      "Reply",
+    );
+    expect(service.setReviewThreadResolved).toHaveBeenCalledWith(
+      "thread-1",
+      true,
     );
     expect(safeSettings).not.toHaveProperty("apiToken");
   });
