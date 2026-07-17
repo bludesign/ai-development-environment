@@ -181,7 +181,11 @@ export function ReviewThreadCard({
                 </time>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="outline">
+                <Badge
+                  className="max-w-full"
+                  title={threadLocation(thread, t("fileComment"))}
+                  variant="outline"
+                >
                   {threadLocation(thread, t("fileComment"))}
                 </Badge>
                 {thread.isOutdated && (

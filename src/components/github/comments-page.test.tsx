@@ -183,7 +183,7 @@ describe("CommentsPage", () => {
         .getAttribute("data-size"),
     ).toBe("icon-xs");
     expect(
-      within(otherCard).getAllByRole("button", { name: "Rendered" }),
+      within(otherCard).getAllByRole("button", { name: "Raw" }),
     ).toHaveLength(2);
     expect(
       within(otherCard).getAllByRole("button", { name: "Copy" }),

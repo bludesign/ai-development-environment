@@ -72,6 +72,8 @@ describe("GitHub resolvers", () => {
       saveAppSettings: vi.fn().mockResolvedValue({ configured: true }),
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
+      pullRequestMergeOptions: vi.fn().mockResolvedValue({ canMerge: true }),
+      mergePullRequest: vi.fn().mockResolvedValue({ state: "MERGED" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
       reviewThreads: vi.fn().mockResolvedValue({ threads: [] }),
@@ -117,6 +119,25 @@ describe("GitHub resolvers", () => {
       { owner: "acme", name: "widgets", number: 17 },
       context(null),
     );
+    await resolvers.Query.githubPullRequestMergeOptions(
+      {},
+      { owner: "acme", name: "widgets", number: 17 },
+      context(null),
+    );
+    const mergeInput = {
+      owner: "acme",
+      name: "widgets",
+      number: 17,
+      method: "SQUASH" as const,
+      commitHeadline: "Ship widgets",
+      commitBody: "Release notes",
+      authorEmail: "octocat@example.com",
+    };
+    await resolvers.Mutation.mergeGitHubPullRequest(
+      {},
+      { input: mergeInput },
+      context(null),
+    );
     await resolvers.Mutation.retryGitHubPipeline(
       {},
       { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
@@ -143,6 +164,12 @@ describe("GitHub resolvers", () => {
       context(null),
     );
     expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
+    expect(service.pullRequestMergeOptions).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      17,
+    );
+    expect(service.mergePullRequest).toHaveBeenCalledWith(mergeInput);
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",

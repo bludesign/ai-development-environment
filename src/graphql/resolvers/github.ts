@@ -3,6 +3,7 @@ import type { GraphQLResolveInfo, SelectionSetNode } from "graphql";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   GitHubAuditContext,
+  GitHubMergeMethod,
   GitHubPullRequestScope,
   GitHubService,
 } from "@/services/github";
@@ -137,6 +138,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
       requireControlPlane(context);
       return gitHubService.pullRequest(owner, name, number);
     },
+    githubPullRequestMergeOptions: (
+      _root: unknown,
+      { owner, name, number }: { owner: string; name: string; number: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.pullRequestMergeOptions(owner, name, number);
+    },
     githubReviewThreads: (
       _root: unknown,
       _args: unknown,
@@ -149,7 +158,14 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
   Mutation: {
     saveGitHubSettings: (
       _root: unknown,
-      { input }: { input: { apiToken?: string | null } },
+      {
+        input,
+      }: {
+        input: {
+          apiToken?: string | null;
+          defaultJiraKeyRegex?: string | null;
+        };
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
@@ -230,6 +246,26 @@ export const createGitHubResolvers = (gitHubService: GitHubService) => ({
     ) => {
       requireControlPlane(context);
       return gitHubService.removeRepository(id);
+    },
+    mergeGitHubPullRequest: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          owner: string;
+          name: string;
+          number: number;
+          method: GitHubMergeMethod;
+          commitHeadline: string;
+          commitBody: string;
+          authorEmail?: string | null;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.mergePullRequest(input);
     },
     retryGitHubPipeline: (
       _root: unknown,

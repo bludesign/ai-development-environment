@@ -7,6 +7,7 @@ import {
   ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
+  GitBranch,
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import {
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
+import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { ReviewThreadCard } from "@/components/github/review-thread-card";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -45,6 +47,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import type {
   GitHubPipelineView,
   GitHubPullRequestDetail,
@@ -55,7 +58,7 @@ import type {
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName headRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -262,7 +265,7 @@ export function PullRequestDetailPage({
     value ? dateFormatter.format(new Date(value)) : "—";
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+    <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Button asChild className="mb-3 -ml-2" variant="ghost">
@@ -274,7 +277,7 @@ export function PullRequestDetailPage({
           <p className="text-sm text-muted-foreground">
             {pullRequest.repositoryNameWithOwner} #{pullRequest.number}
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+          <h1 className="mt-1 text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
             {pullRequest.title}
           </h1>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -295,7 +298,22 @@ export function PullRequestDetailPage({
             )}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {pullRequest.worktreeId && (
+            <Button asChild variant="outline">
+              <Link href={worktreeDetailHref(pullRequest.worktreeId)}>
+                <GitBranch />
+                {t("viewWorktree")}
+              </Link>
+            </Button>
+          )}
+          {pullRequest.state === "OPEN" && (
+            <MergePullRequestButton
+              onMerged={load}
+              pullRequest={pullRequest}
+              size="default"
+            />
+          )}
           <Button
             disabled={loading}
             onClick={() => void load()}
@@ -319,9 +337,9 @@ export function PullRequestDetailPage({
         </Alert>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-2">
         <div className="contents">
-          <Card className="order-2 lg:col-span-2">
+          <Card className="min-w-0 order-2 lg:col-span-2">
             <CardContent>
               <GitHubMarkdownBlock
                 body={pullRequest.body}
@@ -333,7 +351,7 @@ export function PullRequestDetailPage({
             </CardContent>
           </Card>
 
-          <div className="order-3 space-y-4 lg:col-span-2">
+          <div className="min-w-0 order-3 space-y-4 lg:col-span-2">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold">{t("comments")}</h2>
               <Badge variant="secondary">
@@ -364,7 +382,7 @@ export function PullRequestDetailPage({
             )}
           </div>
 
-          <Card className="order-4 gap-0 py-0 lg:col-span-2">
+          <Card className="min-w-0 order-4 gap-0 py-0 lg:col-span-2">
             <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b py-3">
               <div>
                 <CardTitle>{t("pipelines")}</CardTitle>
@@ -480,14 +498,14 @@ export function PullRequestDetailPage({
         </div>
 
         <div className="contents">
-          <Card className="order-1">
+          <Card className="min-w-0 order-1">
             <CardHeader className="border-b">
               <CardTitle>{t("details")}</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="grid gap-4 text-sm">
                 <DetailRow label={t("branches")}>
-                  <span className="font-mono text-xs">
+                  <span className="font-mono text-xs break-all">
                     {pullRequest.headRefName} → {pullRequest.baseRefName}
                   </span>
                 </DetailRow>
@@ -527,7 +545,7 @@ export function PullRequestDetailPage({
             </CardContent>
           </Card>
 
-          <Card className="order-1">
+          <Card className="min-w-0 order-1">
             <CardHeader className="border-b">
               <CardTitle>{t("people")}</CardTitle>
             </CardHeader>
@@ -732,9 +750,11 @@ function DetailRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-4">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right font-medium">{children}</dd>
+      <dd className="min-w-0 text-right font-medium break-words [overflow-wrap:anywhere]">
+        {children}
+      </dd>
     </div>
   );
 }

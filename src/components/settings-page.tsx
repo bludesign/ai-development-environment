@@ -40,7 +40,7 @@ import type {
   GitHubViewer,
 } from "@/services/github/types";
 
-const SETTINGS_FIELDS = "tokenConfigured updatedAt";
+const SETTINGS_FIELDS = "tokenConfigured defaultJiraKeyRegex updatedAt";
 const APP_SETTINGS_FIELDS =
   "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt updatedAt";
 

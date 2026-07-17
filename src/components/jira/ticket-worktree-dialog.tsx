@@ -241,9 +241,11 @@ export function TicketWorktreeDialog({
       await waitForWorktreeJob(job!.id);
       setFailedSelection(null);
       setError(null);
-      setNotice(
-        isCreate ? t("ticketWorktreeCreated") : t("ticketBranchChanged"),
-      );
+      if (isCreate) {
+        onOpenChange(false);
+        return;
+      }
+      setNotice(t("ticketBranchChanged"));
       await load();
     } finally {
       setBusy(false);

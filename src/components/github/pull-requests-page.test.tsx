@@ -22,6 +22,12 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 function activateTab(tab: HTMLElement) {
   fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
   fireEvent.click(tab);
@@ -60,6 +66,7 @@ const pullRequest = {
   ],
   reviewDecision: "APPROVED",
   unresolvedReviewThreadCount: 2,
+  headRefName: "feature/app-42",
   createdAt: "2026-07-01T00:00:00.000Z",
 };
 
@@ -71,6 +78,7 @@ Object.defineProperties(HTMLElement.prototype, {
 });
 
 beforeEach(() => {
+  global.ResizeObserver = ResizeObserverMock;
   window.history.replaceState(null, "", "/pull-requests");
 });
 
@@ -85,6 +93,7 @@ function configureRequests() {
       return {
         githubSettings: {
           tokenConfigured: true,
+          defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
           updatedAt: new Date(0).toISOString(),
         },
         githubRepositories: [repository],
@@ -133,6 +142,18 @@ function configureRequests() {
         ],
       } as never;
     }
+    if (query.includes("SaveDefaultGitHubJiraKeyRegex")) {
+      return {
+        saveGitHubSettings: {
+          tokenConfigured: true,
+          defaultJiraKeyRegex: String(
+            (variables?.input as { defaultJiraKeyRegex?: string })
+              ?.defaultJiraKeyRegex,
+          ),
+          updatedAt: new Date().toISOString(),
+        },
+      } as never;
+    }
     if (query.includes("RetryGitHubPipeline")) {
       return {
         retryGitHubPipeline: {
@@ -156,7 +177,7 @@ describe("PullRequestsPage", () => {
 
     expect(await screen.findByRole("tab", { name: "Mine" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Review requests" })).toBeDefined();
-    expect(screen.getByRole("tab", { name: "acme/widgets" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Repositories" })).toBeDefined();
 
     const title = await screen.findByRole("link", {
       name: "APP-42 Add the API",
@@ -187,6 +208,9 @@ describe("PullRequestsPage", () => {
     }
 
     expect(title.getAttribute("href")).toBe("/pull-requests/acme/widgets/17");
+    expect(
+      within(row as HTMLTableRowElement).getByText("feature/app-42"),
+    ).toBeDefined();
 
     fireEvent.pointerDown(
       within(row as HTMLTableRowElement).getByRole("button", {
@@ -205,7 +229,7 @@ describe("PullRequestsPage", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     activateTab(screen.getByRole("tab", { name: "Review requests" }));
-    const reviewTitle = await screen.findByText("Review this");
+    await screen.findByText("Review this");
     expect(requestMock).toHaveBeenCalledWith(
       expect.stringContaining("query GitHubPullRequests"),
       { scope: "REVIEW_REQUESTED", repositoryId: null },
@@ -223,7 +247,19 @@ describe("PullRequestsPage", () => {
       ).toBeGreaterThan(callsBeforeRefresh),
     );
 
-    const reviewRow = reviewTitle.closest("tr");
+    activateTab(screen.getByRole("tab", { name: "Repositories" }));
+    expect(
+      (await screen.findByRole("combobox", { name: "Repository" })).textContent,
+    ).toContain("acme/widgets");
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        { scope: "REPOSITORY", repositoryId: "local-repository-1" },
+      ),
+    );
+    activateTab(screen.getByRole("tab", { name: "Review requests" }));
+
+    const reviewRow = (await screen.findByText("Review this")).closest("tr");
     expect(reviewRow).not.toBeNull();
     fireEvent.click(
       within(reviewRow as HTMLTableRowElement).getByRole("button", {
@@ -243,6 +279,31 @@ describe("PullRequestsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     expect(await screen.findByText("acme/platform")).toBeDefined();
     expect(screen.getByText("Private repository")).toBeDefined();
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Search available repositories" }),
+      { target: { value: "missing" } },
+    );
+    expect(screen.queryByText("acme/platform")).toBeNull();
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Search available repositories" }),
+      { target: { value: "platform" } },
+    );
+    expect(screen.getByText("acme/platform")).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Default ticket key regex"), {
+      target: { value: String.raw`\b([A-Z]+-\d+)\b` },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save default ticket key regex",
+      }),
+    );
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("SaveDefaultGitHubJiraKeyRegex"),
+        { input: { defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b` } },
+      ),
+    );
 
     activateTab(screen.getByRole("tab", { name: "Enter manually" }));
     fireEvent.change(screen.getByLabelText("Repository owner/name"), {
@@ -259,8 +320,13 @@ describe("PullRequestsPage", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    activateTab(await screen.findByRole("tab", { name: "Repositories" }));
+    const repositoryPicker = await screen.findByRole("combobox", {
+      name: "Repository",
+    });
+    fireEvent.click(repositoryPicker);
     expect(
-      await screen.findByRole("tab", { name: "acme/platform" }),
+      await screen.findByRole("option", { name: "acme/platform" }),
     ).toBeDefined();
   });
 });

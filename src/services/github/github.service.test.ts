@@ -85,6 +85,12 @@ vi.mock("@/data/prisma-client", () => ({
           (repository) => repository.githubId === where.githubId,
         ) ?? null,
     },
+    codebaseRepository: {
+      findFirst: async () => null,
+    },
+    worktree: {
+      findFirst: async () => null,
+    },
     gitHubAppSettings: {
       findUnique: async () => state.appSettings,
       upsert: async ({
@@ -158,6 +164,7 @@ function rawPullRequest(
       id === "pull-request-1"
         ? "2026-07-15T00:00:00.000Z"
         : "2026-07-14T00:00:00.000Z",
+    headRefName: "feature/app-42",
     repository: {
       id: "repository-1",
       nameWithOwner: "acme/widgets",
@@ -1188,6 +1195,144 @@ describe("GitHub service", () => {
       }),
     ).rejects.toMatchObject({ code: "GITHUB_APP_NOT_CONFIGURED" });
     expect(appClient.rerun).not.toHaveBeenCalled();
+  });
+
+  test("loads enabled merge methods and merges with verified commit details", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/user/emails")) {
+        return response([
+          { email: "octocat@example.com", verified: true },
+          { email: "unverified@example.com", verified: false },
+        ]);
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+        return response({
+          data: {
+            viewer: { email: "octocat@example.com" },
+            repository: {
+              mergeCommitAllowed: true,
+              rebaseMergeAllowed: false,
+              squashMergeAllowed: true,
+              pullRequest: {
+                id: "pull-request-1",
+                title: "APP-42 Add API",
+                body: "Detailed description",
+                url: "https://github.com/acme/widgets/pull/17",
+                state: "OPEN",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                headRefOid: "head-oid-1",
+              },
+            },
+          },
+        });
+      }
+      if (body.query.includes("mutation MergeGitHubPullRequest")) {
+        expect(body.variables).toEqual({
+          pullRequestId: "pull-request-1",
+          method: "SQUASH",
+          commitHeadline: "APP-42 Ship API",
+          commitBody: "Release notes",
+          authorEmail: "octocat@example.com",
+          expectedHeadOid: "head-oid-1",
+        });
+        return response({
+          data: {
+            mergePullRequest: {
+              pullRequest: {
+                id: "pull-request-1",
+                state: "MERGED",
+                url: "https://github.com/acme/widgets/pull/17",
+                mergedAt: "2026-07-17T00:00:00.000Z",
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+
+    await expect(
+      service.pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toEqual({
+      availableMethods: ["SQUASH", "MERGE"],
+      commitEmails: ["octocat@example.com"],
+      defaultCommitEmail: "octocat@example.com",
+      defaultCommitHeadline: "APP-42 Add API",
+      defaultCommitBody: "Detailed description",
+      canMerge: true,
+      blockedReason: null,
+    });
+    await expect(
+      service.mergePullRequest({
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+        method: "SQUASH",
+        commitHeadline: "APP-42 Ship API",
+        commitBody: "Release notes",
+        authorEmail: "octocat@example.com",
+      }),
+    ).resolves.toMatchObject({ state: "MERGED" });
+  });
+
+  test("reports unmet GitHub merge requirements before mutation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/user/emails")) return response([]);
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+          return response({
+            data: {
+              viewer: { email: "" },
+              repository: {
+                mergeCommitAllowed: true,
+                rebaseMergeAllowed: true,
+                squashMergeAllowed: true,
+                pullRequest: {
+                  id: "pull-request-1",
+                  title: "APP-42 Add API",
+                  body: "",
+                  url: "https://github.com/acme/widgets/pull/17",
+                  state: "OPEN",
+                  isDraft: false,
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus: "BLOCKED",
+                  headRefOid: "head-oid-1",
+                },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    const service = new GitHubService();
+
+    await expect(
+      service.pullRequestMergeOptions("acme", "widgets", 17),
+    ).resolves.toMatchObject({
+      canMerge: false,
+      blockedReason: expect.stringContaining("Required reviews"),
+    });
+    await expect(
+      service.mergePullRequest({
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+        method: "SQUASH",
+        commitHeadline: "APP-42 Add API",
+        commitBody: "",
+      }),
+    ).rejects.toThrow("Required reviews");
   });
 
   test("preserves verified settings when replacement verification fails", async () => {

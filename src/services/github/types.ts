@@ -23,6 +23,8 @@ export type GitHubPipelineState =
 export type GitHubReviewDecision =
   "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | "NONE";
 
+export type GitHubMergeMethod = "MERGE" | "REBASE" | "SQUASH";
+
 export type GitHubPipelineRetryUnavailableReason =
   | "GITHUB_APP_NOT_CONFIGURED"
   | "NOT_COMPLETED"
@@ -31,6 +33,7 @@ export type GitHubPipelineRetryUnavailableReason =
 
 export type GitHubSettingsView = {
   tokenConfigured: boolean;
+  defaultJiraKeyRegex: string;
   updatedAt: string;
 };
 
@@ -126,6 +129,7 @@ export type GitHubPullRequestView = {
   pipelines: GitHubPipelineView[];
   reviewDecision: GitHubReviewDecision;
   unresolvedReviewThreadCount: number;
+  headRefName: string;
   createdAt: string;
 };
 
@@ -204,6 +208,24 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
   changedFiles: number | null;
   commitCount: number;
   updatedAt: string;
+  mergedAt: string | null;
+  worktreeId: string | null;
+};
+
+export type GitHubPullRequestMergeOptions = {
+  availableMethods: GitHubMergeMethod[];
+  commitEmails: string[];
+  defaultCommitEmail: string | null;
+  defaultCommitHeadline: string;
+  defaultCommitBody: string;
+  canMerge: boolean;
+  blockedReason: string | null;
+};
+
+export type GitHubPullRequestMergeResult = {
+  id: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  url: string;
   mergedAt: string | null;
 };
 

@@ -125,6 +125,21 @@ describe("JiraTicketsPage", () => {
     expect(screen.getByText("High").className).toContain("bg-orange-500/10");
     expect(screen.getAllByRole("table")).toHaveLength(2);
 
+    const collapseStatusButton = screen.getByRole("button", {
+      name: "Collapse In Progress",
+    });
+    expect(collapseStatusButton.className).toContain(
+      "aria-expanded:bg-transparent",
+    );
+    expect(collapseStatusButton.className).toContain("-ml-2");
+    expect(collapseStatusButton.className).toContain("px-2");
+    fireEvent.click(collapseStatusButton);
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    expect(screen.queryByText("Open login screen")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand In Progress" }));
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByText("Open login screen")).toBeDefined();
+
     fireEvent.click(screen.getByRole("button", { name: "Board layout" }));
     expect(screen.queryAllByRole("table")).toHaveLength(0);
 

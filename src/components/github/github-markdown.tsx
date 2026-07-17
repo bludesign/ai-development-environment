@@ -1,17 +1,10 @@
 "use client";
 
-import { Check, Copy, Eye, FileCode } from "lucide-react";
+import { Braces, Check, Copy, Eye } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { copyText } from "@/lib/browser-utils";
 import { cn } from "@/lib/utils";
 
@@ -71,13 +64,6 @@ export function GitHubMarkdownBlock({
     }
   };
 
-  const modes = [
-    { value: "RENDERED", label: t("rendered"), icon: Eye },
-    { value: "MARKDOWN", label: t("markdown"), icon: FileCode },
-  ] as const;
-  const active = modes.find((mode) => mode.value === viewMode)!;
-  const ActiveIcon = active.icon;
-
   return (
     <div className="space-y-4">
       <div
@@ -86,31 +72,25 @@ export function GitHubMarkdownBlock({
           headerClassName,
         )}
       >
-        <div>{header}</div>
+        <div className="min-w-0">{header}</div>
         {(body || headerActions) && (
           <div className="flex items-center gap-1">
             {headerActions}
             {body && (
               <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="xs" type="button" variant="outline">
-                      <ActiveIcon /> {active.label}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuRadioGroup
-                      onValueChange={(value) => setViewMode(value as ViewMode)}
-                      value={viewMode}
-                    >
-                      {modes.map(({ value, label, icon: Icon }) => (
-                        <DropdownMenuRadioItem key={value} value={value}>
-                          <Icon /> {label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  onClick={() =>
+                    setViewMode((current) =>
+                      current === "RENDERED" ? "MARKDOWN" : "RENDERED",
+                    )
+                  }
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  {viewMode === "RENDERED" ? <Braces /> : <Eye />}
+                  {viewMode === "RENDERED" ? t("viewRaw") : t("viewRendered")}
+                </Button>
                 <Button
                   aria-label={t("copy")}
                   onClick={() => void copy()}

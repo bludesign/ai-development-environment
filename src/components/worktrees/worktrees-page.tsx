@@ -37,6 +37,7 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -2420,6 +2421,12 @@ export function ActionRow(
   const changeActions = worktreeChangeActionState(worktree);
   return (
     <div className="flex flex-wrap gap-2">
+      {worktree.pullRequest && (
+        <MergePullRequestButton
+          onMerged={props.onCompleted}
+          pullRequest={worktree.pullRequest}
+        />
+      )}
       {editorVariant !== "NONE" && (
         <OperationButton
           icon={<Code2 />}
