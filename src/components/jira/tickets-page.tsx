@@ -243,6 +243,15 @@ export function JiraTicketsPage() {
     return [...groups.entries()];
   }, [displayedBoard]);
 
+  const toggleStatus = (status: string) => {
+    setCollapsedStatuses((current) => {
+      const next = new Set(current);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
   return (
     <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -397,35 +406,53 @@ export function JiraTicketsPage() {
               <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (
                   <Card key={status} className="gap-0 py-0">
-                    <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-2 border-b bg-muted/40 py-3">
-                      <Button
-                        aria-expanded={!collapsedStatuses.has(status)}
-                        aria-label={t(
-                          collapsedStatuses.has(status)
-                            ? "expandStatus"
-                            : "collapseStatus",
-                          { status },
-                        )}
-                        className="-ml-2 h-auto min-w-0 justify-start px-2 font-medium aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
-                        onClick={() =>
-                          setCollapsedStatuses((current) => {
-                            const next = new Set(current);
-                            if (next.has(status)) next.delete(status);
-                            else next.add(status);
-                            return next;
-                          })
-                        }
-                        type="button"
-                        variant="ghost"
-                      >
-                        {collapsedStatuses.has(status) ? (
-                          <ChevronRight />
-                        ) : (
-                          <ChevronDown />
-                        )}
-                        <span className="truncate">{status}</span>
-                      </Button>
-                      <Badge>{tickets.length}</Badge>
+                    <CardHeader
+                      className={
+                        collapsedStatuses.has(status)
+                          ? "bg-muted/40 py-3"
+                          : "border-b bg-muted/40 py-3"
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <Button
+                          aria-expanded={!collapsedStatuses.has(status)}
+                          className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+                          onClick={() => toggleStatus(status)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <span className="truncate font-medium">{status}</span>
+                        </Button>
+                        <div className="ml-auto flex items-center justify-end gap-2">
+                          <Badge>{tickets.length}</Badge>
+                          <Button
+                            aria-expanded={!collapsedStatuses.has(status)}
+                            aria-label={t(
+                              collapsedStatuses.has(status)
+                                ? "expandStatus"
+                                : "collapseStatus",
+                              { status },
+                            )}
+                            className="aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+                            onClick={() => toggleStatus(status)}
+                            size="icon-sm"
+                            title={t(
+                              collapsedStatuses.has(status)
+                                ? "expandStatus"
+                                : "collapseStatus",
+                              { status },
+                            )}
+                            type="button"
+                            variant="ghost"
+                          >
+                            {collapsedStatuses.has(status) ? (
+                              <ChevronRight className="size-5" />
+                            ) : (
+                              <ChevronDown className="size-5" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
                     </CardHeader>
                     {!collapsedStatuses.has(status) && (
                       <CardContent className="px-0">
