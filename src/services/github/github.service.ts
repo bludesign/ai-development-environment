@@ -1682,7 +1682,9 @@ export class GitHubService {
   async reviewThreads(): Promise<GitHubReviewThreadPage> {
     const token = await this.requireToken();
     const viewer = await this.viewer(token);
-    const [authored, assigned] = await Promise.all([
+    const prisma = await getPrismaClient();
+    const repositories = await prisma.gitHubRepository.findMany();
+    const searches = await Promise.all([
       this.searchReviewPullRequests(
         `is:pr is:open author:${viewer.login} sort:updated-desc`,
         token,
@@ -1691,10 +1693,22 @@ export class GitHubService {
         `is:pr is:open assignee:${viewer.login} sort:updated-desc`,
         token,
       ),
+      this.searchReviewPullRequests(
+        `is:pr is:open review-requested:${viewer.login} sort:updated-desc`,
+        token,
+      ),
+      ...repositories.map((repository) =>
+        this.searchReviewPullRequests(
+          `is:pr is:open repo:${repository.nameWithOwner} sort:updated-desc`,
+          token,
+        ),
+      ),
     ]);
     const unique = new Map<string, RawReviewPullRequest>();
-    for (const pullRequest of [...authored.items, ...assigned.items]) {
-      unique.set(pullRequest.id, pullRequest);
+    for (const search of searches) {
+      for (const pullRequest of search.items) {
+        unique.set(pullRequest.id, pullRequest);
+      }
     }
     const pullRequests = [...unique.values()].sort(
       (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
@@ -1719,7 +1733,7 @@ export class GitHubService {
       viewerLogin: viewer.login,
       pullRequests: pullRequests.map(reviewThreadPullRequest),
       threads,
-      truncated: authored.truncated || assigned.truncated,
+      truncated: searches.some((search) => search.truncated),
     };
   }
 

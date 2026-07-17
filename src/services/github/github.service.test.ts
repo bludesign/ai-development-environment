@@ -462,7 +462,7 @@ describe("GitHub service", () => {
     ).toBe(true);
   });
 
-  test("loads, deduplicates, paginates, and normalizes review threads", async () => {
+  test("loads every linked PR scope, deduplicates, paginates, and normalizes review threads", async () => {
     const firstThread = rawReviewThread("thread-1", { author: "octocat" });
     const secondThread = rawReviewThread("thread-2", {
       createdAt: "2026-07-16T00:00:00.000Z",
@@ -587,6 +587,24 @@ describe("GitHub service", () => {
         number: 21,
       },
     });
+    const searchQueries = fetchMock.mock.calls.flatMap(([, init]) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      return body.query.includes("GitHubReviewThreadPullRequestSearch")
+        ? [String(body.variables.query)]
+        : [];
+    });
+    expect(searchQueries).toHaveLength(4);
+    expect(searchQueries).toEqual(
+      expect.arrayContaining([
+        "is:pr is:open author:octocat sort:updated-desc",
+        "is:pr is:open assignee:octocat sort:updated-desc",
+        "is:pr is:open review-requested:octocat sort:updated-desc",
+        "is:pr is:open repo:acme/widgets sort:updated-desc",
+      ]),
+    );
   });
 
   test("replies with exact Markdown and resolves or reopens review threads", async () => {

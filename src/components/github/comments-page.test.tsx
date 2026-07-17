@@ -203,6 +203,22 @@ describe("CommentsPage", () => {
     expect(window.localStorage.getItem("github-comments-layout")).toBe("table");
   });
 
+  test("restores the saved layout after mounting", async () => {
+    window.localStorage.setItem("github-comments-layout", "table");
+
+    render(<CommentsPage />);
+
+    const tableLayout = await screen.findByRole("radio", {
+      name: "Table layout",
+    });
+    await waitFor(() =>
+      expect(tableLayout.getAttribute("aria-checked")).toBe("true"),
+    );
+    expect(
+      await screen.findByRole("columnheader", { name: "Comment" }),
+    ).toBeDefined();
+  });
+
   test("uses the deep-linked pull request filter and clears stale values", async () => {
     window.history.replaceState(
       null,

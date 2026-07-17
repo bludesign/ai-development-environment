@@ -93,12 +93,7 @@ export function CommentsPage({
   const [currentUser, setCurrentUser] = useState(true);
   const [otherUsers, setOtherUsers] = useState(true);
   const [unresolved, setUnresolved] = useState(true);
-  const [layout, setLayout] = useState<"cards" | "table">(() => {
-    if (typeof window === "undefined") return "cards";
-    return window.localStorage.getItem(LAYOUT_KEY) === "table"
-      ? "table"
-      : "cards";
-  });
+  const [layout, setLayout] = useState<"cards" | "table">("cards");
 
   const loadConfiguration = useCallback(async () => {
     try {
@@ -142,6 +137,13 @@ export function CommentsPage({
     const timeout = window.setTimeout(() => void loadConfiguration(), 0);
     return () => window.clearTimeout(timeout);
   }, [loadConfiguration]);
+
+  useEffect(() => {
+    const savedLayout = window.localStorage.getItem(LAYOUT_KEY);
+    if (savedLayout !== "cards" && savedLayout !== "table") return;
+    const timeout = window.setTimeout(() => setLayout(savedLayout), 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   useEffect(() => {
     if (!settings?.tokenConfigured || page || loading) return;
