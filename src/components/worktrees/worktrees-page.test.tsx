@@ -540,6 +540,10 @@ describe("WorktreesPage", () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
 
+    expect(
+      screen.getByRole("link", { name: "Comments: 0" }).getAttribute("href"),
+    ).toBe("/comments?pullRequest=openai%2Fcodex%2317");
+
     fireEvent.pointerDown(screen.getByRole("button", { name: "PR #17" }), {
       button: 0,
       ctrlKey: false,

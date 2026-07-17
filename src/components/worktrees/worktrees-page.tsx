@@ -38,6 +38,10 @@ import {
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import {
+  pullRequestCommentsHref,
+  pullRequestDetailHref,
+} from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -1385,6 +1389,20 @@ export function PullRequestBadges({
           <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
             {t(`review.${worktree.pullRequest.reviewDecision}`)}
           </Badge>
+          <Badge
+            asChild
+            className={
+              worktree.pullRequest.unresolvedReviewThreadCount === 0
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            }
+          >
+            <Link href={pullRequestCommentsHref(worktree.pullRequest)}>
+              {t("comments", {
+                count: worktree.pullRequest.unresolvedReviewThreadCount,
+              })}
+            </Link>
+          </Badge>
         </>
       ) : (
         <span className="text-muted-foreground">—</span>
@@ -1414,8 +1432,6 @@ function PullRequestMenu({
   pullRequest: NonNullable<Worktree["pullRequest"]>;
 }) {
   const t = useTranslations("worktrees");
-  const [owner, repository] = pullRequest.repositoryNameWithOwner.split("/");
-  const detailsHref = `/pull-requests/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repository ?? "")}/${pullRequest.number}`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -1431,7 +1447,7 @@ function PullRequestMenu({
           </a>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href={detailsHref}>
+          <Link href={pullRequestDetailHref(pullRequest)}>
             <GitPullRequest />
             {t("openDetails")}
           </Link>

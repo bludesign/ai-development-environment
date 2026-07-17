@@ -209,6 +209,66 @@ function rawPullRequest(
   };
 }
 
+function rawReviewThread(
+  id: string,
+  options: {
+    resolved?: boolean;
+    author?: string;
+    createdAt?: string;
+    hasMoreComments?: boolean;
+    pullRequestId?: string;
+    pullRequestNumber?: number;
+  } = {},
+) {
+  const pullRequestId = options.pullRequestId ?? "review-pull-request-1";
+  const pullRequestNumber = options.pullRequestNumber ?? 21;
+  return {
+    id,
+    isResolved: options.resolved ?? false,
+    isOutdated: false,
+    subjectType: "LINE",
+    path: "src/index.ts",
+    line: 12,
+    startLine: 10,
+    originalLine: 11,
+    originalStartLine: 9,
+    viewerCanReply: true,
+    viewerCanResolve: true,
+    viewerCanUnresolve: true,
+    resolvedBy: null,
+    pullRequest: {
+      id: pullRequestId,
+      number: pullRequestNumber,
+      title: `Review pull request ${pullRequestNumber}`,
+      url: `https://github.com/acme/widgets/pull/${pullRequestNumber}`,
+      repository: { nameWithOwner: "acme/widgets" },
+    },
+    comments: {
+      nodes: [
+        {
+          id: `${id}-root`,
+          body: `Root ${id}`,
+          bodyText: `Root ${id}`,
+          bodyHTML: `<p>Root ${id}</p>`,
+          url: `https://github.com/acme/widgets/pull/${pullRequestNumber}#discussion_r1`,
+          author: {
+            login: options.author ?? "reviewer",
+            avatarUrl: "https://avatars.example/reviewer",
+            url: "https://github.com/reviewer",
+          },
+          createdAt: options.createdAt ?? "2026-07-15T00:00:00.000Z",
+          updatedAt: options.createdAt ?? "2026-07-15T00:00:00.000Z",
+          replyTo: null,
+        },
+      ],
+      pageInfo: {
+        hasNextPage: options.hasMoreComments ?? false,
+        endCursor: options.hasMoreComments ? "comment-cursor" : null,
+      },
+    },
+  };
+}
+
 beforeEach(() => {
   state.apiToken = "secret-token";
   state.repositories = [
@@ -402,6 +462,222 @@ describe("GitHub service", () => {
     ).toBe(true);
   });
 
+  test("loads every linked PR scope, deduplicates, paginates, and normalizes review threads", async () => {
+    const firstThread = rawReviewThread("thread-1", { author: "octocat" });
+    const secondThread = rawReviewThread("thread-2", {
+      createdAt: "2026-07-16T00:00:00.000Z",
+      hasMoreComments: true,
+    });
+    const reviewPullRequest = {
+      id: "review-pull-request-1",
+      number: 21,
+      title: "Review pull request 21",
+      url: "https://github.com/acme/widgets/pull/21",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      repository: { nameWithOwner: "acme/widgets" },
+      reviewThreads: {
+        nodes: [firstThread],
+        pageInfo: { hasNextPage: true, endCursor: "thread-cursor" },
+      },
+    };
+    const emptyPullRequest = {
+      id: "review-pull-request-2",
+      number: 22,
+      title: "Review pull request 22",
+      url: "https://github.com/acme/widgets/pull/22",
+      updatedAt: "2026-07-15T00:00:00.000Z",
+      repository: { nameWithOwner: "acme/widgets" },
+      reviewThreads: {
+        nodes: [],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      if (body.query.includes("query GitHubViewer")) {
+        return response({
+          data: {
+            viewer: {
+              login: "octocat",
+              name: "Octo Cat",
+              avatarUrl: "https://avatars.example/octocat",
+              url: "https://github.com/octocat",
+            },
+          },
+        });
+      }
+      if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
+        const authored = String(body.variables.query).includes("author:");
+        return response({
+          data: {
+            search: {
+              nodes: authored
+                ? [reviewPullRequest]
+                : [reviewPullRequest, emptyPullRequest],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        });
+      }
+      if (body.query.includes("GitHubPullRequestReviewThreadDetails")) {
+        return response({
+          data: {
+            node: {
+              reviewThreads: {
+                nodes: [secondThread],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+      }
+      if (body.query.includes("GitHubReviewThreadComments")) {
+        return response({
+          data: {
+            node: {
+              comments: {
+                nodes: [
+                  {
+                    id: "thread-2-reply",
+                    body: "Reply",
+                    bodyText: "Reply",
+                    bodyHTML: "<p>Reply</p>",
+                    url: "https://github.com/acme/widgets/pull/21#discussion_r2",
+                    author: null,
+                    createdAt: "2026-07-16T01:00:00.000Z",
+                    updatedAt: "2026-07-16T01:00:00.000Z",
+                    replyTo: { id: "thread-2-root" },
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().reviewThreads();
+
+    expect(result).toMatchObject({
+      viewerLogin: "octocat",
+      truncated: false,
+      pullRequests: [
+        { id: "review-pull-request-1", number: 21 },
+        { id: "review-pull-request-2", number: 22 },
+      ],
+    });
+    expect(result.threads.map((thread) => thread.id)).toEqual([
+      "thread-2",
+      "thread-1",
+    ]);
+    expect(result.threads[0]).toMatchObject({
+      path: "src/index.ts",
+      line: 12,
+      startLine: 10,
+      rootComment: { bodyHtml: "<p>Root thread-2</p>" },
+      replies: [{ id: "thread-2-reply", author: null }],
+      pullRequest: {
+        repositoryNameWithOwner: "acme/widgets",
+        number: 21,
+      },
+    });
+    const searchQueries = fetchMock.mock.calls.flatMap(([, init]) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      return body.query.includes("GitHubReviewThreadPullRequestSearch")
+        ? [String(body.variables.query)]
+        : [];
+    });
+    expect(searchQueries).toHaveLength(4);
+    expect(searchQueries).toEqual(
+      expect.arrayContaining([
+        "is:pr is:open author:octocat sort:updated-desc",
+        "is:pr is:open assignee:octocat sort:updated-desc",
+        "is:pr is:open review-requested:octocat sort:updated-desc",
+        "is:pr is:open repo:acme/widgets sort:updated-desc",
+      ]),
+    );
+  });
+
+  test("replies with exact Markdown and resolves or reopens review threads", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      if (body.query.includes("ReplyToGitHubReviewThread")) {
+        return response({
+          data: {
+            addPullRequestReviewThreadReply: {
+              comment: {
+                ...rawReviewThread("thread-1").comments.nodes[0],
+                id: "reply-1",
+                body: String(body.variables.body),
+                bodyText: "Indented reply",
+                bodyHTML: "<p>Indented reply</p>",
+                replyTo: { id: "thread-1-root" },
+              },
+            },
+          },
+        });
+      }
+      const resolved = body.query.includes("ResolveGitHubReviewThread");
+      if (resolved || body.query.includes("ReopenGitHubReviewThread")) {
+        const field = resolved
+          ? "resolveReviewThread"
+          : "unresolveReviewThread";
+        return response({
+          data: {
+            [field]: {
+              thread: {
+                id: "thread-1",
+                isResolved: resolved,
+                viewerCanResolve: !resolved,
+                viewerCanUnresolve: resolved,
+                resolvedBy: resolved
+                  ? {
+                      login: "octocat",
+                      avatarUrl: "https://avatars.example/octocat",
+                      url: "https://github.com/octocat",
+                    }
+                  : null,
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new GitHubService();
+
+    await expect(
+      service.replyToReviewThread("thread-1", "  Indented reply  "),
+    ).resolves.toMatchObject({ id: "reply-1", body: "  Indented reply  " });
+    await expect(
+      service.replyToReviewThread("thread-1", "   "),
+    ).rejects.toThrow("reply");
+    await expect(
+      service.setReviewThreadResolved("thread-1", true),
+    ).resolves.toMatchObject({ id: "thread-1", isResolved: true });
+    await expect(
+      service.setReviewThreadResolved("thread-1", false),
+    ).resolves.toMatchObject({ id: "thread-1", isResolved: false });
+    expect(
+      fetchMock.mock.calls.some(([, init]) =>
+        String(init?.body).includes('"body":"  Indented reply  "'),
+      ),
+    ).toBe(true);
+  });
+
   test("hydrates workflow jobs for pull request list queries that request them", async () => {
     state.appSettings = null;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -546,12 +822,17 @@ describe("GitHub service", () => {
                   reviewDecision: "APPROVED",
                 }),
                 body: "Detailed description",
+                bodyHTML: "<p>Detailed description</p>",
                 author: {
                   login: "octocat",
                   avatarUrl: "https://avatars.example/octocat",
                   url: "https://github.com/octocat",
                 },
                 assignees: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+                reviewThreadsFull: {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -605,6 +886,8 @@ describe("GitHub service", () => {
       new GitHubService().pullRequest("acme", "widgets", 17),
     ).resolves.toMatchObject({
       body: "Detailed description",
+      bodyHtml: "<p>Detailed description</p>",
+      reviewThreads: [],
       author: { login: "octocat" },
       baseRefName: "main",
       headRefName: "feature/app-42",

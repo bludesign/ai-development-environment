@@ -10,6 +10,7 @@ import {
   GitBranch,
   FolderGit2,
   House,
+  MessageSquareText,
   PanelLeft,
   PanelRight,
   Settings,
@@ -337,6 +338,22 @@ function NavigationSidebar() {
                   >
                     <GitPullRequest />
                     <span>{t("pullRequests")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/comments")}
+                >
+                  <Link
+                    href="/comments"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <MessageSquareText />
+                    <span>{t("comments")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

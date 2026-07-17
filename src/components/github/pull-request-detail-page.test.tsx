@@ -69,12 +69,53 @@ const detail = {
   unresolvedReviewThreadCount: 2,
   createdAt: "2026-07-01T00:00:00.000Z",
   body: "Detailed pull request description",
+  bodyHtml:
+    "<p>Detailed pull request description</p><details><summary>Original prompt</summary><strong>Formatted prompt</strong></details>",
   author: {
     login: "octocat",
     avatarUrl: "https://avatars.example/octocat",
     url: "https://github.com/octocat",
   },
   assignees: [],
+  reviewThreads: [
+    {
+      id: "thread-1",
+      isResolved: true,
+      isOutdated: false,
+      subjectType: "LINE",
+      path: "src/index.ts",
+      line: 12,
+      startLine: null,
+      originalLine: 12,
+      originalStartLine: null,
+      viewerCanReply: true,
+      viewerCanResolve: false,
+      viewerCanUnresolve: true,
+      resolvedBy: null,
+      pullRequest: {
+        id: "pull-request-1",
+        number: 17,
+        title: "APP-42 Add the API",
+        url: "https://github.com/acme/widgets/pull/17",
+        repositoryNameWithOwner: "acme/widgets",
+      },
+      rootComment: {
+        id: "comment-1",
+        body: "Review this line",
+        bodyText: "Review this line",
+        bodyHtml: "<p>Review this line</p>",
+        url: "https://github.com/acme/widgets/pull/17#discussion_r1",
+        author: {
+          login: "reviewer",
+          avatarUrl: "https://avatars.example/reviewer",
+          url: "https://github.com/reviewer",
+        },
+        createdAt: "2026-07-15T00:00:00.000Z",
+        updatedAt: "2026-07-15T00:00:00.000Z",
+      },
+      replies: [],
+    },
+  ],
   baseRefName: "main",
   headRefName: "feature/app-42",
   state: "OPEN",
@@ -117,6 +158,11 @@ afterEach(() => {
 
 describe("PullRequestDetailPage", () => {
   test("shows description, metadata, pipelines, and retries a check suite", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     render(
       <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
     );
@@ -125,6 +171,29 @@ describe("PullRequestDetailPage", () => {
       await screen.findByRole("heading", { name: "APP-42 Add the API" }),
     ).toBeDefined();
     expect(screen.getByText("Detailed pull request description")).toBeDefined();
+    expect(
+      screen.getByText("Original prompt").closest("summary"),
+    ).not.toBeNull();
+    expect(screen.getByText("Formatted prompt").tagName).toBe("STRONG");
+    expect(screen.getByText("Review this line")).toBeDefined();
+    const descriptionCard = screen
+      .getByText("Description")
+      .closest('[data-slot="card"]') as HTMLElement;
+    fireEvent.pointerDown(
+      within(descriptionCard).getByRole("button", { name: "Rendered" }),
+      {
+        button: 0,
+        ctrlKey: false,
+      },
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Markdown" }));
+    expect(screen.getByText("Detailed pull request description").tagName).toBe(
+      "PRE",
+    );
+    fireEvent.click(
+      within(descriptionCard).getByRole("button", { name: "Copy" }),
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(detail.body));
     expect(screen.getByText("feature/app-42 → main")).toBeDefined();
     expect(screen.getByText("+20")).toBeDefined();
     expect(screen.getByText("−5")).toBeDefined();
@@ -158,7 +227,9 @@ describe("PullRequestDetailPage", () => {
       expect(jiraBadge.className).toContain(className);
     }
     expect(
-      screen.getByRole("link", { name: /Open in GitHub/ }).getAttribute("href"),
+      screen
+        .getAllByRole("link", { name: /Open in GitHub/ })[0]
+        ?.getAttribute("href"),
     ).toBe(detail.url);
 
     const pipelineRow = screen.getByRole("row", { name: /CI/ });

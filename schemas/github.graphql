@@ -145,6 +145,59 @@ type GitHubPullRequestActor {
   url: String!
 }
 
+type GitHubReviewComment {
+  id: ID!
+  body: String!
+  bodyText: String!
+  bodyHtml: String!
+  url: String!
+  author: GitHubPullRequestActor
+  createdAt: String!
+  updatedAt: String!
+}
+
+type GitHubReviewThreadPullRequest {
+  id: ID!
+  number: Int!
+  title: String!
+  url: String!
+  repositoryNameWithOwner: String!
+}
+
+type GitHubReviewThread {
+  id: ID!
+  isResolved: Boolean!
+  isOutdated: Boolean!
+  subjectType: String!
+  path: String!
+  line: Int
+  startLine: Int
+  originalLine: Int
+  originalStartLine: Int
+  viewerCanReply: Boolean!
+  viewerCanResolve: Boolean!
+  viewerCanUnresolve: Boolean!
+  resolvedBy: GitHubPullRequestActor
+  pullRequest: GitHubReviewThreadPullRequest!
+  rootComment: GitHubReviewComment!
+  replies: [GitHubReviewComment!]!
+}
+
+type GitHubReviewThreadPage {
+  viewerLogin: String!
+  pullRequests: [GitHubReviewThreadPullRequest!]!
+  threads: [GitHubReviewThread!]!
+  truncated: Boolean!
+}
+
+type GitHubReviewThreadState {
+  id: ID!
+  isResolved: Boolean!
+  viewerCanResolve: Boolean!
+  viewerCanUnresolve: Boolean!
+  resolvedBy: GitHubPullRequestActor
+}
+
 type GitHubPullRequestDetail {
   id: ID!
   number: Int!
@@ -161,8 +214,10 @@ type GitHubPullRequestDetail {
   unresolvedReviewThreadCount: Int!
   createdAt: String!
   body: String!
+  bodyHtml: String!
   author: GitHubPullRequestActor
   assignees: [GitHubPullRequestActor!]!
+  reviewThreads: [GitHubReviewThread!]!
   baseRefName: String!
   headRefName: String!
   state: String!
@@ -215,6 +270,7 @@ extend type Query {
     name: String!
     number: Int!
   ): GitHubPullRequestDetail
+  githubReviewThreads: GitHubReviewThreadPage!
 }
 
 extend type Mutation {
@@ -235,4 +291,9 @@ extend type Mutation {
     checkSuiteId: ID!
     jobId: ID!
   ): Boolean!
+  replyToGitHubReviewThread(threadId: ID!, body: String!): GitHubReviewComment!
+  setGitHubReviewThreadResolved(
+    threadId: ID!
+    resolved: Boolean!
+  ): GitHubReviewThreadState!
 }

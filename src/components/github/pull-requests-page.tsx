@@ -15,6 +15,10 @@ import { FormEvent, MouseEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
+import {
+  pullRequestCommentsHref,
+  pullRequestDetailHref,
+} from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -108,11 +112,6 @@ function reviewClass(decision: GitHubReviewDecision) {
   if (decision === "REVIEW_REQUIRED")
     return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
-}
-
-function pullRequestDetailHref(pullRequest: GitHubPullRequestView) {
-  const [owner, name] = pullRequest.repositoryNameWithOwner.split("/");
-  return `/pull-requests/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${pullRequest.number}`;
 }
 
 function validateRegex(pattern: string): string | null {
@@ -495,13 +494,22 @@ function PullRequestTable({
               </TableCell>
               <TableCell>
                 <Badge
+                  asChild
                   className={
                     pullRequest.unresolvedReviewThreadCount === 0
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                       : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
                   }
                 >
-                  {pullRequest.unresolvedReviewThreadCount}
+                  <Link
+                    aria-label={t("viewOpenComments", {
+                      count: pullRequest.unresolvedReviewThreadCount,
+                    })}
+                    href={pullRequestCommentsHref(pullRequest)}
+                    onClick={stopRowClick}
+                  >
+                    {pullRequest.unresolvedReviewThreadCount}
+                  </Link>
                 </Badge>
               </TableCell>
               <TableCell className="whitespace-nowrap text-muted-foreground">
