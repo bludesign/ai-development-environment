@@ -1,8 +1,12 @@
 "use client";
 
 import {
+  ExternalLink,
+  FileText,
+  GitMerge,
   GitPullRequest,
   LockKeyhole,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Save,
@@ -12,7 +16,16 @@ import {
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, MouseEvent, useCallback, useEffect, useState } from "react";
+import {
+  Fragment,
+  FormEvent,
+  MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
@@ -34,6 +47,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -49,6 +69,13 @@ import {
   type SearchableSelectOption,
 } from "@/components/ui/searchable-select";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -63,6 +90,7 @@ import type {
   GitHubPipelineView,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
+  GitHubPullRequestStateFilter,
   GitHubPullRequestView,
   GitHubRepositoryCandidate,
   GitHubRepositoryCandidatePage,
@@ -74,9 +102,19 @@ import type {
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount headRefName createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount state headRefName createdAt";
 
 type TabKey = "mine" | "review" | "repositories";
+
+function pullRequestPageKey(
+  tab: TabKey,
+  repositoryId: string,
+  state: GitHubPullRequestStateFilter,
+) {
+  return tab === "repositories"
+    ? `${state}:repository:${repositoryId}`
+    : `${state}:${tab}`;
+}
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -137,12 +175,23 @@ export function PullRequestsPage() {
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [repositories, setRepositories] = useState<GitHubRepositoryView[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("mine");
+  const [pullRequestState, setPullRequestState] =
+    useState<GitHubPullRequestStateFilter>("OPEN");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [pages, setPages] = useState<Record<string, GitHubPullRequestPage>>({});
   const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
+  const [loadingMoreTabs, setLoadingMoreTabs] = useState<
+    Record<string, boolean>
+  >({});
+  const [paginationErrors, setPaginationErrors] = useState<
+    Record<string, string | null>
+  >({});
   const [configurationLoading, setConfigurationLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+  const requestGenerationsRef = useRef<Record<string, number>>({});
+  const appendInFlightGenerationsRef = useRef<Record<string, number>>({});
 
   const loadConfiguration = useCallback(async () => {
     try {
@@ -173,47 +222,137 @@ export function PullRequestsPage() {
     return () => window.clearTimeout(timeout);
   }, [loadConfiguration]);
 
-  const loadTab = useCallback(async (tab: TabKey, repositoryId: string) => {
-    const pageKey = tab === "repositories" ? `repository:${repositoryId}` : tab;
-    if (tab === "repositories" && !repositoryId) return;
-    setLoadingTabs((current) => ({ ...current, [pageKey]: true }));
-    try {
-      const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
-      const scope: GitHubPullRequestScope = scopedRepositoryId
-        ? "REPOSITORY"
-        : tab === "review"
-          ? "REVIEW_REQUESTED"
-          : "MINE";
-      const data = await controlPlaneRequest<{
-        githubPullRequests: GitHubPullRequestPage;
-      }>(
-        `query GitHubPullRequests(
-          $scope: GitHubPullRequestScope!
-          $repositoryId: ID
+  const loadTab = useCallback(
+    async (
+      tab: TabKey,
+      repositoryId: string,
+      state: GitHubPullRequestStateFilter,
+      options: { append: boolean; cursor?: string | null } = {
+        append: false,
+      },
+    ) => {
+      const pageKey = pullRequestPageKey(tab, repositoryId, state);
+      if (tab === "repositories" && !repositoryId) return;
+      const currentGeneration = requestGenerationsRef.current[pageKey] ?? 0;
+      const generation = options.append
+        ? currentGeneration
+        : currentGeneration + 1;
+      if (options.append) {
+        if (
+          !options.cursor ||
+          appendInFlightGenerationsRef.current[pageKey] === generation
         ) {
-          githubPullRequests(scope: $scope, repositoryId: $repositoryId) {
-            items { ${PULL_REQUEST_FIELDS} }
-            truncated
-          }
-        }`,
-        { scope, repositoryId: scopedRepositoryId },
-      );
-      setPages((current) => ({
+          return;
+        }
+        appendInFlightGenerationsRef.current[pageKey] = generation;
+        setLoadingMoreTabs((current) => ({
+          ...current,
+          [pageKey]: true,
+        }));
+      } else {
+        requestGenerationsRef.current[pageKey] = generation;
+        delete appendInFlightGenerationsRef.current[pageKey];
+        setLoadingTabs((current) => ({ ...current, [pageKey]: true }));
+        setLoadingMoreTabs((current) => ({
+          ...current,
+          [pageKey]: false,
+        }));
+      }
+      setPaginationErrors((current) => ({
         ...current,
-        [pageKey]: data.githubPullRequests,
+        [pageKey]: null,
       }));
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoadingTabs((current) => ({ ...current, [pageKey]: false }));
-    }
-  }, []);
+      try {
+        const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
+        const scope: GitHubPullRequestScope = scopedRepositoryId
+          ? "REPOSITORY"
+          : tab === "review"
+            ? "REVIEW_REQUESTED"
+            : "MINE";
+        const data = await controlPlaneRequest<{
+          githubPullRequests: GitHubPullRequestPage;
+        }>(
+          `query GitHubPullRequests(
+            $scope: GitHubPullRequestScope!
+            $repositoryId: ID
+            $state: GitHubPullRequestStateFilter!
+            $first: Int!
+            $after: String
+          ) {
+            githubPullRequests(
+              scope: $scope
+              repositoryId: $repositoryId
+              state: $state
+              first: $first
+              after: $after
+            ) {
+              items { ${PULL_REQUEST_FIELDS} }
+              truncated
+              hasNextPage
+              endCursor
+            }
+          }`,
+          {
+            scope,
+            repositoryId: scopedRepositoryId,
+            state,
+            first: 25,
+            after: options.cursor ?? null,
+          },
+        );
+        if (requestGenerationsRef.current[pageKey] !== generation) return;
+        setPages((current) => ({
+          ...current,
+          [pageKey]:
+            options.append && current[pageKey]
+              ? {
+                  ...data.githubPullRequests,
+                  items: [
+                    ...current[pageKey].items,
+                    ...data.githubPullRequests.items.filter(
+                      (item) =>
+                        !current[pageKey].items.some(
+                          (existing) => existing.id === item.id,
+                        ),
+                    ),
+                  ],
+                }
+              : data.githubPullRequests,
+        }));
+        setError(null);
+      } catch (value) {
+        if (requestGenerationsRef.current[pageKey] !== generation) return;
+        const message = value instanceof Error ? value.message : String(value);
+        if (options.append) {
+          setPaginationErrors((current) => ({
+            ...current,
+            [pageKey]: message,
+          }));
+        } else {
+          setError(message);
+        }
+      } finally {
+        if (options.append) {
+          if (appendInFlightGenerationsRef.current[pageKey] === generation) {
+            delete appendInFlightGenerationsRef.current[pageKey];
+            setLoadingMoreTabs((current) => ({
+              ...current,
+              [pageKey]: false,
+            }));
+          }
+        } else if (requestGenerationsRef.current[pageKey] === generation) {
+          setLoadingTabs((current) => ({ ...current, [pageKey]: false }));
+        }
+      }
+    },
+    [],
+  );
 
-  const pageKey =
-    activeTab === "repositories"
-      ? `repository:${selectedRepositoryId}`
-      : activeTab;
+  const pageKey = pullRequestPageKey(
+    activeTab,
+    selectedRepositoryId,
+    pullRequestState,
+  );
 
   useEffect(() => {
     if (
@@ -223,7 +362,7 @@ export function PullRequestsPage() {
       !loadingTabs[pageKey]
     ) {
       const timeout = window.setTimeout(
-        () => void loadTab(activeTab, selectedRepositoryId),
+        () => void loadTab(activeTab, selectedRepositoryId, pullRequestState),
         0,
       );
       return () => window.clearTimeout(timeout);
@@ -234,6 +373,7 @@ export function PullRequestsPage() {
     loadingTabs,
     pageKey,
     pages,
+    pullRequestState,
     selectedRepositoryId,
     settings?.tokenConfigured,
   ]);
@@ -252,7 +392,46 @@ export function PullRequestsPage() {
 
   const page = pages[pageKey];
   const loading = Boolean(loadingTabs[pageKey]);
-  const repositorySpecific = activeTab === "repositories";
+  const loadingMore = Boolean(loadingMoreTabs[pageKey]);
+  const paginationError = paginationErrors[pageKey] ?? null;
+
+  useEffect(() => {
+    if (
+      !settings?.tokenConfigured ||
+      !page?.hasNextPage ||
+      !page.endCursor ||
+      loading ||
+      loadingMore ||
+      paginationError
+    ) {
+      return;
+    }
+    const trigger = loadMoreTriggerRef.current;
+    if (!trigger) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        void loadTab(activeTab, selectedRepositoryId, pullRequestState, {
+          append: true,
+          cursor: page.endCursor,
+        });
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [
+    activeTab,
+    loadTab,
+    loading,
+    loadingMore,
+    page?.endCursor,
+    page?.hasNextPage,
+    paginationError,
+    pullRequestState,
+    selectedRepositoryId,
+    settings?.tokenConfigured,
+  ]);
 
   const repositoriesChanged = (next: GitHubRepositoryView[]) => {
     setRepositories(next);
@@ -310,7 +489,9 @@ export function PullRequestsPage() {
         <div className="flex gap-2">
           <Button
             disabled={!settings?.tokenConfigured || loading}
-            onClick={() => void loadTab(activeTab, selectedRepositoryId)}
+            onClick={() =>
+              void loadTab(activeTab, selectedRepositoryId, pullRequestState)
+            }
             variant="outline"
           >
             <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -366,25 +547,44 @@ export function PullRequestsPage() {
             </Tabs>
           </div>
 
-          {activeTab === "repositories" && repositories.length > 0 && (
-            <div className="max-w-lg">
-              <SearchableSelect
-                ariaLabel={t("repositoryFilter")}
-                emptyMessage={t("noRepositoryMatches")}
-                onValueChange={setSelectedRepositoryId}
-                options={repositories.map<SearchableSelectOption>(
-                  (repository) => ({
-                    value: repository.id,
-                    label: repository.nameWithOwner,
-                    keywords: `${repository.owner} ${repository.name}`,
-                  }),
-                )}
-                placeholder={t("selectRepository")}
-                searchPlaceholder={t("searchRepositories")}
-                value={selectedRepositoryId}
-              />
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Select
+              onValueChange={(value) =>
+                setPullRequestState(value as GitHubPullRequestStateFilter)
+              }
+              value={pullRequestState}
+            >
+              <SelectTrigger aria-label={t("stateFilter")} className="min-w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {(["ALL", "OPEN", "CLOSED", "MERGED"] as const).map((state) => (
+                  <SelectItem key={state} value={state}>
+                    {t(`pullRequestStates.${state}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {activeTab === "repositories" && repositories.length > 0 && (
+              <div className="min-w-64 max-w-lg flex-1">
+                <SearchableSelect
+                  ariaLabel={t("repositoryFilter")}
+                  emptyMessage={t("noRepositoryMatches")}
+                  onValueChange={setSelectedRepositoryId}
+                  options={repositories.map<SearchableSelectOption>(
+                    (repository) => ({
+                      value: repository.id,
+                      label: repository.nameWithOwner,
+                      keywords: `${repository.owner} ${repository.name}`,
+                    }),
+                  )}
+                  placeholder={t("selectRepository")}
+                  searchPlaceholder={t("searchRepositories")}
+                  value={selectedRepositoryId}
+                />
+              </div>
+            )}
+          </div>
 
           {page?.truncated && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
@@ -420,10 +620,46 @@ export function PullRequestsPage() {
             <PullRequestTable
               items={page.items}
               locale={locale}
-              onMerged={() => loadTab(activeTab, selectedRepositoryId)}
+              onMerged={() =>
+                loadTab(activeTab, selectedRepositoryId, pullRequestState)
+              }
               onPipelineRetried={pipelineRetried}
-              repositorySpecific={repositorySpecific}
             />
+          ) : null}
+
+          {page && page.items.length > 0 && paginationError ? (
+            <Alert variant="destructive">
+              <AlertDescription className="flex items-center justify-between gap-3">
+                <span>{paginationError}</span>
+                <Button
+                  disabled={loadingMore || !page.endCursor}
+                  onClick={() =>
+                    void loadTab(
+                      activeTab,
+                      selectedRepositoryId,
+                      pullRequestState,
+                      { append: true, cursor: page.endCursor },
+                    )
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw /> {t("retryLoad")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : page?.hasNextPage && page.items.length > 0 ? (
+            <div
+              className="flex min-h-10 items-center justify-center gap-2 text-sm text-muted-foreground"
+              ref={loadMoreTriggerRef}
+              role="status"
+            >
+              {loadingMore && (
+                <>
+                  <Spinner /> {t("loadingMore")}
+                </>
+              )}
+            </div>
           ) : null}
         </>
       )}
@@ -451,7 +687,6 @@ function PullRequestTable({
   locale,
   onMerged,
   onPipelineRetried,
-  repositorySpecific,
 }: {
   items: GitHubPullRequestView[];
   locale: string;
@@ -460,22 +695,45 @@ function PullRequestTable({
     pullRequestId: string,
     pipeline: GitHubPipelineView,
   ) => void;
-  repositorySpecific: boolean;
 }) {
   const t = useTranslations("pullRequests");
   const router = useRouter();
   const stopRowClick = (event: MouseEvent) => event.stopPropagation();
+  const groupedPullRequests = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      dateKey: string;
+      label: string;
+      items: GitHubPullRequestView[];
+    }> = [];
+    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
+    for (const pullRequest of items) {
+      const date = new Date(pullRequest.createdAt);
+      const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = groups.at(-1);
+      if (group?.dateKey === dateKey) {
+        group.items.push(pullRequest);
+      } else {
+        groups.push({
+          key: `${dateKey}-${pullRequest.id}`,
+          dateKey,
+          label: formatter.format(date),
+          items: [pullRequest],
+        });
+      }
+    }
+    return groups;
+  }, [items, locale]);
 
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {!repositorySpecific && <TableHead>{t("repository")}</TableHead>}
             <TableHead>{t("number")}</TableHead>
-            <TableHead>{t("pullRequest")}</TableHead>
+            <TableHead>{t("pullRequestAndRepository")}</TableHead>
             <TableHead>{t("labels")}</TableHead>
-            <TableHead>{t("jira")}</TableHead>
+            <TableHead>{t("ticket")}</TableHead>
             <TableHead>{t("pipeline")}</TableHead>
             <TableHead>{t("approval")}</TableHead>
             <TableHead>{t("openComments")}</TableHead>
@@ -484,125 +742,210 @@ function PullRequestTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((pullRequest) => (
-            <TableRow
-              key={pullRequest.id}
-              className="cursor-pointer"
-              onClick={() => router.push(pullRequestDetailHref(pullRequest))}
-            >
-              {!repositorySpecific && (
-                <TableCell className="whitespace-nowrap">
-                  <a
-                    className="text-primary hover:underline"
-                    href={pullRequest.repositoryUrl}
-                    onClick={stopRowClick}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {pullRequest.repositoryNameWithOwner}
-                  </a>
+          {groupedPullRequests.map((group) => (
+            <Fragment key={group.key}>
+              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                <TableCell
+                  className="py-1.5 text-xs font-normal text-muted-foreground"
+                  colSpan={9}
+                >
+                  {group.label}
                 </TableCell>
-              )}
-              <TableCell>
-                <Link
-                  className="font-semibold text-primary hover:underline"
-                  href={pullRequestDetailHref(pullRequest)}
-                  onClick={stopRowClick}
+              </TableRow>
+              {group.items.map((pullRequest) => (
+                <TableRow
+                  key={pullRequest.id}
+                  className="cursor-pointer"
+                  onClick={() =>
+                    router.push(pullRequestDetailHref(pullRequest))
+                  }
                 >
-                  #{pullRequest.number}
-                </Link>
-              </TableCell>
-              <TableCell className="min-w-72 whitespace-normal">
-                <div className="space-y-1">
-                  <Link
-                    className="font-medium hover:underline"
-                    href={pullRequestDetailHref(pullRequest)}
-                    onClick={stopRowClick}
-                  >
-                    {pullRequest.title}
-                  </Link>
-                  <p className="font-mono text-xs break-all text-muted-foreground">
-                    {pullRequest.headRefName}
-                  </p>
-                </div>
-              </TableCell>
-              <TableCell className="min-w-40 whitespace-normal">
-                <div className="flex flex-wrap gap-1">
-                  {pullRequest.labels.length > 0
-                    ? pullRequest.labels.map((label) => (
-                        <Badge key={label}>{label}</Badge>
-                      ))
-                    : "—"}
-                </div>
-              </TableCell>
-              <TableCell>
-                {pullRequest.jiraKey ? (
-                  <Badge asChild className="cursor-pointer hover:bg-muted/80">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        replaceIssueParam(pullRequest.jiraKey);
-                      }}
-                      type="button"
+                  <TableCell>
+                    <Badge
+                      asChild
+                      className="cursor-pointer hover:bg-muted/80"
+                      variant="outline"
                     >
-                      {pullRequest.jiraKey}
-                    </button>
-                  </Badge>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell>
-                <PipelineMenu
-                  onPipelineRetried={(pipeline) =>
-                    onPipelineRetried(pullRequest.id, pipeline)
-                  }
-                  pipelineStatus={pullRequest.pipelineStatus}
-                  pipelines={pullRequest.pipelines}
-                  repositoryId={pullRequest.repositoryGithubId}
-                />
-              </TableCell>
-              <TableCell>
-                <Badge className={reviewClass(pullRequest.reviewDecision)}>
-                  {t(`reviewStates.${pullRequest.reviewDecision}`)}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Badge
-                  asChild
-                  className={
-                    pullRequest.unresolvedReviewThreadCount === 0
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                      : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                  }
-                >
-                  <Link
-                    aria-label={t("viewOpenComments", {
-                      count: pullRequest.unresolvedReviewThreadCount,
-                    })}
-                    href={pullRequestCommentsHref(pullRequest)}
-                    onClick={stopRowClick}
-                  >
-                    {pullRequest.unresolvedReviewThreadCount}
-                  </Link>
-                </Badge>
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">
-                <time dateTime={pullRequest.createdAt}>
-                  {relativeAge(pullRequest.createdAt, locale)}
-                </time>
-              </TableCell>
-              <TableCell className="text-right">
-                <MergePullRequestButton
-                  onMerged={onMerged}
-                  pullRequest={pullRequest}
-                />
-              </TableCell>
-            </TableRow>
+                      <Link
+                        href={pullRequestDetailHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        #{pullRequest.number}
+                      </Link>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="min-w-72 whitespace-normal">
+                    <div className="space-y-1">
+                      <Link
+                        className="font-medium hover:underline"
+                        href={pullRequestDetailHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        {pullRequest.title}
+                      </Link>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <a
+                          className="text-muted-foreground hover:text-foreground"
+                          href={pullRequest.repositoryUrl}
+                          onClick={stopRowClick}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {pullRequest.repositoryNameWithOwner}
+                        </a>
+                      </div>
+                      <p className="font-mono text-xs break-all text-muted-foreground">
+                        {pullRequest.headRefName}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="min-w-40 whitespace-normal">
+                    <div className="flex flex-wrap gap-1">
+                      {pullRequest.labels.length > 0
+                        ? pullRequest.labels.map((label) => (
+                            <Badge key={label}>{label}</Badge>
+                          ))
+                        : "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {pullRequest.jiraKey ? (
+                      <Badge
+                        asChild
+                        className="cursor-pointer hover:bg-primary/80"
+                      >
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            replaceIssueParam(pullRequest.jiraKey);
+                          }}
+                          type="button"
+                        >
+                          {pullRequest.jiraKey}
+                        </button>
+                      </Badge>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <PipelineMenu
+                      onPipelineRetried={(pipeline) =>
+                        onPipelineRetried(pullRequest.id, pipeline)
+                      }
+                      pipelineStatus={pullRequest.pipelineStatus}
+                      pipelines={pullRequest.pipelines}
+                      repositoryId={pullRequest.repositoryGithubId}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={reviewClass(pullRequest.reviewDecision)}>
+                      {t(`reviewStates.${pullRequest.reviewDecision}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      asChild
+                      className={
+                        pullRequest.unresolvedReviewThreadCount === 0
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      }
+                    >
+                      <Link
+                        aria-label={t("viewOpenComments", {
+                          count: pullRequest.unresolvedReviewThreadCount,
+                        })}
+                        href={pullRequestCommentsHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        {pullRequest.unresolvedReviewThreadCount}
+                      </Link>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    <div className="flex flex-col items-start gap-1.5">
+                      <Badge variant="outline">
+                        {t(`pullRequestStates.${pullRequest.state}`)}
+                      </Badge>
+                      <time dateTime={pullRequest.createdAt}>
+                        {relativeAge(pullRequest.createdAt, locale)}
+                      </time>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <PullRequestActionsMenu
+                      onMerged={onMerged}
+                      pullRequest={pullRequest}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </Fragment>
           ))}
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function PullRequestActionsMenu({
+  pullRequest,
+  onMerged,
+}: {
+  pullRequest: GitHubPullRequestView;
+  onMerged: () => void | Promise<void>;
+}) {
+  const t = useTranslations("pullRequests");
+  const [mergeOpen, setMergeOpen] = useState(false);
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label={`${t("actions")}: #${pullRequest.number}`}
+            onClick={(event) => event.stopPropagation()}
+            size="icon-sm"
+            variant="outline"
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem asChild>
+            <Link href={pullRequestDetailHref(pullRequest)}>
+              <FileText />
+              {t("details")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={pullRequest.url} rel="noreferrer" target="_blank">
+              <ExternalLink />
+              {t("openInGitHub")}
+            </a>
+          </DropdownMenuItem>
+          {pullRequest.state === "OPEN" && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
+                <GitMerge />
+                {t("merge")}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {pullRequest.state === "OPEN" && (
+        <MergePullRequestButton
+          onMerged={onMerged}
+          onOpenChange={setMergeOpen}
+          open={mergeOpen}
+          pullRequest={pullRequest}
+          showTrigger={false}
+        />
+      )}
+    </>
   );
 }
 

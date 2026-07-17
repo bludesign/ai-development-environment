@@ -4,6 +4,19 @@ enum GitHubPullRequestScope {
   REPOSITORY
 }
 
+enum GitHubPullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum GitHubPullRequestStateFilter {
+  ALL
+  OPEN
+  CLOSED
+  MERGED
+}
+
 enum GitHubPipelineStatus {
   ERROR
   EXPECTED
@@ -116,6 +129,7 @@ type GitHubPullRequest {
   pipelines: [GitHubPipeline!]!
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
+  state: GitHubPullRequestState!
   headRefName: String!
   createdAt: String!
 }
@@ -145,6 +159,57 @@ type GitHubWorkflowJob {
   canRetry: Boolean!
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
   steps: [GitHubWorkflowJobStep!]!
+}
+
+type GitHubActionsRepository {
+  id: ID!
+  nameWithOwner: String!
+  url: String!
+}
+
+type GitHubActionsRepositoryError {
+  codebaseRepositoryId: ID!
+  nameWithOwner: String!
+  message: String!
+}
+
+type GitHubActionsPullRequest {
+  number: Int!
+  url: String!
+}
+
+type GitHubActionsWorkflowRun {
+  id: ID!
+  repositoryGithubId: ID!
+  codebaseRepositoryId: ID!
+  repositoryNameWithOwner: String!
+  repositoryUrl: String!
+  name: String!
+  displayTitle: String!
+  runNumber: Int!
+  runAttempt: Int!
+  event: String!
+  status: GitHubPipelineState!
+  url: String!
+  headBranch: String
+  headSha: String!
+  checkSuiteId: ID
+  canRetry: Boolean!
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  pullRequests: [GitHubActionsPullRequest!]!
+  jiraKey: String
+  worktreeId: ID
+  startedAt: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type GitHubActionsWorkflowRunPage {
+  items: [GitHubActionsWorkflowRun!]!
+  repositories: [GitHubActionsRepository!]!
+  repositoryErrors: [GitHubActionsRepositoryError!]!
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 type GitHubPullRequestActor {
@@ -260,6 +325,8 @@ type GitHubPullRequestMergeResult {
 type GitHubPullRequestPage {
   items: [GitHubPullRequest!]!
   truncated: Boolean!
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 input SaveGitHubSettingsInput {
@@ -298,9 +365,21 @@ extend type Query {
   githubAppSettings: GitHubAppSettings!
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
+  githubActionsWorkflowRuns(
+    codebaseRepositoryId: ID
+    first: Int = 25
+    after: String
+  ): GitHubActionsWorkflowRunPage!
+  githubActionsWorkflowJobs(
+    codebaseRepositoryId: ID!
+    workflowRunId: ID!
+  ): [GitHubWorkflowJob!]!
   githubPullRequests(
     scope: GitHubPullRequestScope!
     repositoryId: ID
+    state: GitHubPullRequestStateFilter = OPEN
+    first: Int = 25
+    after: String
   ): GitHubPullRequestPage!
   githubPullRequest(
     owner: String!

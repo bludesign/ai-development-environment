@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -26,6 +27,52 @@ class ResizeObserverMock {
   observe() {}
   unobserve() {}
   disconnect() {}
+}
+
+let intersectionCallback: IntersectionObserverCallback | null = null;
+let intersectionTarget: Element | null = null;
+let intersectionObserver: IntersectionObserver | null = null;
+
+class IntersectionObserverMock {
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds = [0];
+
+  constructor(callback: IntersectionObserverCallback) {
+    intersectionCallback = callback;
+    intersectionObserver = this as unknown as IntersectionObserver;
+  }
+
+  observe(target: Element) {
+    intersectionTarget = target;
+  }
+
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+
+function intersectPaginationTrigger() {
+  if (!intersectionCallback || !intersectionTarget || !intersectionObserver) {
+    throw new Error("Pagination trigger is not being observed");
+  }
+  const bounds = intersectionTarget.getBoundingClientRect();
+  intersectionCallback(
+    [
+      {
+        boundingClientRect: bounds,
+        intersectionRatio: 1,
+        intersectionRect: bounds,
+        isIntersecting: true,
+        rootBounds: null,
+        target: intersectionTarget,
+        time: 0,
+      },
+    ],
+    intersectionObserver,
+  );
 }
 
 function activateTab(tab: HTMLElement) {
@@ -66,8 +113,9 @@ const pullRequest = {
   ],
   reviewDecision: "APPROVED",
   unresolvedReviewThreadCount: 2,
+  state: "OPEN",
   headRefName: "feature/app-42",
-  createdAt: "2026-07-01T00:00:00.000Z",
+  createdAt: "2026-07-17T12:00:00.000Z",
 };
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -79,6 +127,11 @@ Object.defineProperties(HTMLElement.prototype, {
 
 beforeEach(() => {
   global.ResizeObserver = ResizeObserverMock;
+  global.IntersectionObserver =
+    IntersectionObserverMock as unknown as typeof IntersectionObserver;
+  intersectionCallback = null;
+  intersectionTarget = null;
+  intersectionObserver = null;
   window.history.replaceState(null, "", "/pull-requests");
 });
 
@@ -100,13 +153,29 @@ function configureRequests() {
       } as never;
     }
     if (query.includes("query GitHubPullRequests")) {
+      const filter = String(variables?.state ?? "OPEN") as
+        "ALL" | "OPEN" | "CLOSED" | "MERGED";
+      const state = filter === "ALL" ? "OPEN" : filter;
+      const item = { ...pullRequest, state };
+      const after = variables?.after;
       return {
         githubPullRequests: {
-          items:
-            variables?.scope === "REVIEW_REQUESTED"
-              ? [{ ...pullRequest, id: "review-1", title: "Review this" }]
-              : [pullRequest],
+          items: after
+            ? [
+                {
+                  ...item,
+                  id: "pull-request-older",
+                  number: 16,
+                  title: "Older merged pull request",
+                  createdAt: "2026-07-16T12:00:00.000Z",
+                },
+              ]
+            : variables?.scope === "REVIEW_REQUESTED"
+              ? [{ ...item, id: "review-1", title: "Review this" }]
+              : [item],
           truncated: false,
+          hasNextPage: !after,
+          endCursor: after ? null : "cursor-1",
         },
       } as never;
     }
@@ -154,6 +223,19 @@ function configureRequests() {
         },
       } as never;
     }
+    if (query.includes("GitHubPullRequestMergeOptions")) {
+      return {
+        githubPullRequestMergeOptions: {
+          availableMethods: ["SQUASH"],
+          commitEmails: [],
+          defaultCommitEmail: null,
+          defaultCommitHeadline: pullRequest.title,
+          defaultCommitBody: "",
+          canMerge: true,
+          blockedReason: null,
+        },
+      } as never;
+    }
     if (query.includes("RetryGitHubPipeline")) {
       return {
         retryGitHubPipeline: {
@@ -171,6 +253,62 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("preserves updated ordering when creation dates interleave", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitHubPullRequestConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+          githubRepositories: [repository],
+        } as never;
+      }
+      if (query.includes("query GitHubPullRequests")) {
+        return {
+          githubPullRequests: {
+            items: [
+              { ...pullRequest, title: "First by update" },
+              {
+                ...pullRequest,
+                id: "pull-request-2",
+                number: 16,
+                title: "Second by update",
+                createdAt: "2026-07-16T12:00:00.000Z",
+              },
+              {
+                ...pullRequest,
+                id: "pull-request-3",
+                number: 15,
+                title: "Third by update",
+              },
+            ],
+            truncated: false,
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<PullRequestsPage />);
+
+    const firstRow = (await screen.findByRole("row", {
+      name: /First by update/,
+    })) as HTMLTableRowElement;
+    const secondRow = screen.getByRole("row", {
+      name: /Second by update/,
+    }) as HTMLTableRowElement;
+    const thirdRow = screen.getByRole("row", {
+      name: /Third by update/,
+    }) as HTMLTableRowElement;
+    expect(firstRow.rowIndex).toBeLessThan(secondRow.rowIndex);
+    expect(secondRow.rowIndex).toBeLessThan(thirdRow.rowIndex);
+    expect(screen.getAllByText("Friday, July 17, 2026")).toHaveLength(2);
+  });
+
   test("renders pull request fields, loads tabs lazily, refreshes, and routes clicks correctly", async () => {
     configureRequests();
     render(<PullRequestsPage />);
@@ -178,12 +316,32 @@ describe("PullRequestsPage", () => {
     expect(await screen.findByRole("tab", { name: "Mine" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Review requests" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Repositories" })).toBeDefined();
+    expect(screen.getByRole("columnheader", { name: "Ticket" })).toBeDefined();
 
     const title = await screen.findByRole("link", {
       name: "APP-42 Add the API",
     });
     const row = title.closest("tr");
     expect(row).not.toBeNull();
+    const cells = within(row as HTMLTableRowElement).getAllByRole("cell");
+    expect(cells[0]?.textContent).toBe("#17");
+    const numberBadge = within(cells[0] as HTMLTableCellElement).getByRole(
+      "link",
+      { name: "#17" },
+    );
+    expect(numberBadge.className).toContain("rounded-4xl");
+    expect(
+      within(cells[1] as HTMLTableCellElement).getByText("APP-42 Add the API"),
+    ).toBeDefined();
+    expect(
+      within(cells[1] as HTMLTableCellElement).getByText("acme/widgets"),
+    ).toBeDefined();
+    expect(
+      within(cells[1] as HTMLTableCellElement).queryByText("Open"),
+    ).toBeNull();
+    expect(
+      within(cells[7] as HTMLTableCellElement).getByText("Open"),
+    ).toBeDefined();
     expect(
       within(row as HTMLTableRowElement).getByText("backend"),
     ).toBeDefined();
@@ -206,6 +364,27 @@ describe("PullRequestsPage", () => {
     for (const className of ["rounded-4xl", "px-2", "py-0.5", "text-xs"]) {
       expect(jiraBadge.className).toContain(className);
     }
+    expect(jiraBadge.className).toContain("hover:bg-primary/80");
+
+    fireEvent.pointerDown(
+      within(row as HTMLTableRowElement).getByRole("button", {
+        name: "Actions: #17",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "Details" }).getAttribute("href"),
+    ).toBe("/pull-requests/acme/widgets/17");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Open in GitHub" })
+        .getAttribute("href"),
+    ).toBe(pullRequest.url);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    expect(
+      await screen.findByRole("heading", { name: "Merge pull request" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(title.getAttribute("href")).toBe("/pull-requests/acme/widgets/17");
     expect(
@@ -232,7 +411,13 @@ describe("PullRequestsPage", () => {
     await screen.findByText("Review this");
     expect(requestMock).toHaveBeenCalledWith(
       expect.stringContaining("query GitHubPullRequests"),
-      { scope: "REVIEW_REQUESTED", repositoryId: null },
+      {
+        scope: "REVIEW_REQUESTED",
+        repositoryId: null,
+        state: "OPEN",
+        first: 25,
+        after: null,
+      },
     );
 
     const callsBeforeRefresh = requestMock.mock.calls.filter(([query]) =>
@@ -254,7 +439,13 @@ describe("PullRequestsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("query GitHubPullRequests"),
-        { scope: "REPOSITORY", repositoryId: "local-repository-1" },
+        {
+          scope: "REPOSITORY",
+          repositoryId: "local-repository-1",
+          state: "OPEN",
+          first: 25,
+          after: null,
+        },
       ),
     );
     activateTab(screen.getByRole("tab", { name: "Review requests" }));
@@ -269,6 +460,125 @@ describe("PullRequestsPage", () => {
     expect(new URLSearchParams(window.location.search).get("issue")).toBe(
       "APP-42",
     );
+  });
+
+  test("switches all states and infinitely paginates merged pull requests", async () => {
+    configureRequests();
+    render(<PullRequestsPage />);
+
+    const stateFilter = await screen.findByRole("combobox", {
+      name: "Pull request state",
+    });
+    expect(stateFilter.textContent).toContain("Open");
+    let pullRequestRow = await screen.findByRole("row", {
+      name: /APP-42 Add the API/,
+    });
+    fireEvent.pointerDown(
+      within(pullRequestRow).getByRole("button", { name: "Actions: #17" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.getByRole("menuitem", { name: "Merge" })).toBeDefined();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.pointerDown(stateFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Closed" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        {
+          scope: "MINE",
+          repositoryId: null,
+          state: "CLOSED",
+          first: 25,
+          after: null,
+        },
+      ),
+    );
+    expect((await screen.findAllByText("Closed")).length).toBeGreaterThan(0);
+    pullRequestRow = screen.getByRole("row", { name: /APP-42 Add the API/ });
+    fireEvent.pointerDown(
+      within(pullRequestRow).getByRole("button", { name: "Actions: #17" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.queryByRole("menuitem", { name: "Merge" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.pointerDown(stateFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Merged" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        {
+          scope: "MINE",
+          repositoryId: null,
+          state: "MERGED",
+          first: 25,
+          after: null,
+        },
+      ),
+    );
+    expect((await screen.findAllByText("Merged")).length).toBeGreaterThan(0);
+    pullRequestRow = screen.getByRole("row", { name: /APP-42 Add the API/ });
+    fireEvent.pointerDown(
+      within(pullRequestRow).getByRole("button", { name: "Actions: #17" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.queryByRole("menuitem", { name: "Merge" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    act(() => {
+      intersectPaginationTrigger();
+      intersectPaginationTrigger();
+    });
+    expect(await screen.findByText("Older merged pull request")).toBeDefined();
+    const newestDaySeparator = screen.getByText("Friday, July 17, 2026");
+    const olderDaySeparator = screen.getByText("Thursday, July 16, 2026");
+    expect(newestDaySeparator.closest("td")?.colSpan).toBe(9);
+    expect(olderDaySeparator.closest("td")?.colSpan).toBe(9);
+    expect(
+      requestMock.mock.calls.filter(
+        ([query, variables]) =>
+          String(query).includes("query GitHubPullRequests") &&
+          variables?.state === "MERGED" &&
+          variables.after === "cursor-1",
+      ),
+    ).toHaveLength(1);
+
+    fireEvent.pointerDown(stateFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "All" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        {
+          scope: "MINE",
+          repositoryId: null,
+          state: "ALL",
+          first: 25,
+          after: null,
+        },
+      ),
+    );
+    expect(stateFilter.textContent).toContain("All");
+    pullRequestRow = await screen.findByRole("row", {
+      name: /APP-42 Add the API/,
+    });
+    fireEvent.pointerDown(
+      within(pullRequestRow).getByRole("button", { name: "Actions: #17" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.getByRole("menuitem", { name: "Merge" })).toBeDefined();
   });
 
   test("browses repositories and supports exact owner/name entry", async () => {

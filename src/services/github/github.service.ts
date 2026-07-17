@@ -14,6 +14,10 @@ import {
 } from "@/server/github/github-app";
 
 import type {
+  GitHubActionsRepositoryErrorView,
+  GitHubActionsRepositoryView,
+  GitHubActionsWorkflowRunPage,
+  GitHubActionsWorkflowRunView,
   GitHubAppSettingsView,
   GitHubAuditContext,
   GitHubPipelineState,
@@ -25,6 +29,8 @@ import type {
   GitHubPullRequestMergeResult,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
+  GitHubPullRequestState,
+  GitHubPullRequestStateFilter,
   GitHubPullRequestView,
   GitHubReviewComment,
   GitHubRepositoryCandidatePage,
@@ -44,6 +50,8 @@ const GITHUB_APP_SETTINGS_ID = "default";
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const SEARCH_RESULT_LIMIT = 1000;
+const ACTIONS_PAGE_SIZE = 25;
+const PULL_REQUEST_PAGE_SIZE = 25;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 
 type PageInfo = {
@@ -63,6 +71,8 @@ type RawPullRequest = {
   url: string;
   createdAt: string;
   updatedAt: string;
+  state: GitHubPullRequestState;
+  mergedAt: string | null;
   headRefName: string;
   headRepository: { nameWithOwner: string } | null;
   repository: {
@@ -99,6 +109,58 @@ type RawRetryCheckSuite = RawCheckSuite & {
     name: string;
     owner: { login: string };
   };
+};
+
+type RawActionsWorkflowRun = {
+  id: string | number;
+  name: string | null;
+  display_title: string;
+  run_number: number;
+  run_attempt: number | null;
+  event: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+  head_branch: string | null;
+  head_sha: string;
+  check_suite_node_id: string | null;
+  repository: {
+    node_id: string;
+    full_name: string;
+    html_url: string;
+  };
+  pull_requests: Array<{ number: number }>;
+  run_started_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
+  owner: string;
+  name: string;
+  jiraBranchRegex: string | null;
+};
+
+type ActionsCursor = {
+  version: 1;
+  codebaseRepositoryId: string | null;
+  consumed: Record<string, number>;
+};
+
+type PullRequestCursorStream = {
+  after: string | null;
+  offset: number;
+  consumed: number;
+  exhausted: boolean;
+  limitReached: boolean;
+};
+
+type PullRequestCursor = {
+  version: 1;
+  scope: GitHubPullRequestScope;
+  repositoryId: string | null;
+  state: GitHubPullRequestStateFilter;
+  streams: Record<string, PullRequestCursorStream>;
 };
 
 type RawPipelineContext =
@@ -245,6 +307,8 @@ const PULL_REQUEST_FRAGMENT = `
     url
     createdAt
     updatedAt
+    state
+    mergedAt
     headRefName
     headRepository { nameWithOwner }
     repository { id nameWithOwner url }
@@ -374,6 +438,163 @@ export function parseJiraKey(
   return value ? value.toUpperCase() : null;
 }
 
+function actionsRepositoryTarget(repository: {
+  id: string;
+  canonicalOrigin: string;
+  jiraBranchRegex: string | null;
+}): ActionsRepositoryTarget | null {
+  const match = /^github\.com\/([^/]+)\/([^/]+)$/i.exec(
+    repository.canonicalOrigin.trim(),
+  );
+  if (!match?.[1] || !match[2]) return null;
+  const owner = match[1];
+  const name = match[2];
+  const nameWithOwner = `${owner}/${name}`;
+  return {
+    id: repository.id,
+    owner,
+    name,
+    nameWithOwner,
+    url: `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    jiraBranchRegex: repository.jiraBranchRegex,
+  };
+}
+
+function decodeActionsCursor(
+  value: string | null | undefined,
+  codebaseRepositoryId: string | null,
+): ActionsCursor {
+  if (!value) {
+    return { version: 1, codebaseRepositoryId, consumed: {} };
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<ActionsCursor>;
+    if (
+      parsed.version !== 1 ||
+      parsed.codebaseRepositoryId !== codebaseRepositoryId ||
+      !parsed.consumed ||
+      typeof parsed.consumed !== "object" ||
+      Object.values(parsed.consumed).some(
+        (item) => !Number.isInteger(item) || Number(item) < 0,
+      )
+    ) {
+      throw new Error("invalid");
+    }
+    return parsed as ActionsCursor;
+  } catch {
+    throw new Error("GitHub Actions pagination cursor is invalid");
+  }
+}
+
+function encodeActionsCursor(cursor: ActionsCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function pullRequestCursorStreamKeys(scope: GitHubPullRequestScope): string[] {
+  if (scope === "MINE") return ["assigned", "authored"];
+  if (scope === "REVIEW_REQUESTED") return ["review"];
+  return ["repository"];
+}
+
+function emptyPullRequestCursorStream(): PullRequestCursorStream {
+  return {
+    after: null,
+    offset: 0,
+    consumed: 0,
+    exhausted: false,
+    limitReached: false,
+  };
+}
+
+function decodePullRequestCursor(
+  value: string | null | undefined,
+  scope: GitHubPullRequestScope,
+  repositoryId: string | null,
+  state: GitHubPullRequestStateFilter,
+): PullRequestCursor {
+  const expectedKeys = pullRequestCursorStreamKeys(scope);
+  if (!value) {
+    return {
+      version: 1,
+      scope,
+      repositoryId,
+      state,
+      streams: Object.fromEntries(
+        expectedKeys.map((key) => [key, emptyPullRequestCursorStream()]),
+      ),
+    };
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<PullRequestCursor>;
+    if (
+      parsed.version !== 1 ||
+      parsed.scope !== scope ||
+      parsed.repositoryId !== repositoryId ||
+      parsed.state !== state ||
+      !parsed.streams ||
+      typeof parsed.streams !== "object" ||
+      Object.keys(parsed.streams).sort().join("\0") !==
+        [...expectedKeys].sort().join("\0")
+    ) {
+      throw new Error("invalid");
+    }
+    for (const stream of Object.values(parsed.streams)) {
+      if (
+        !stream ||
+        (stream.after !== null && typeof stream.after !== "string") ||
+        !Number.isInteger(stream.offset) ||
+        stream.offset < 0 ||
+        stream.offset > PULL_REQUEST_PAGE_SIZE ||
+        !Number.isInteger(stream.consumed) ||
+        stream.consumed < 0 ||
+        typeof stream.exhausted !== "boolean" ||
+        typeof stream.limitReached !== "boolean"
+      ) {
+        throw new Error("invalid");
+      }
+    }
+    return parsed as PullRequestCursor;
+  } catch {
+    throw new Error("GitHub pull request pagination cursor is invalid");
+  }
+}
+
+function encodePullRequestCursor(cursor: PullRequestCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function comparePullRequests(
+  left: RawPullRequest,
+  right: RawPullRequest,
+): number {
+  const updatedDifference =
+    Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  if (updatedDifference !== 0) return updatedDifference;
+  const repositoryDifference = left.repository.nameWithOwner.localeCompare(
+    right.repository.nameWithOwner,
+  );
+  if (repositoryDifference !== 0) return repositoryDifference;
+  return right.number - left.number || right.id.localeCompare(left.id);
+}
+
+function compareWorkflowRuns(
+  left: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
+  right: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
+): number {
+  const createdDifference =
+    Date.parse(right.run.created_at) - Date.parse(left.run.created_at);
+  if (createdDifference !== 0) return createdDifference;
+  const repositoryDifference = left.target.nameWithOwner.localeCompare(
+    right.target.nameWithOwner,
+  );
+  if (repositoryDifference !== 0) return repositoryDifference;
+  return String(right.run.id).localeCompare(String(left.run.id));
+}
+
 function pipelineStatus(
   value: string | null | undefined,
 ): GitHubPipelineStatus {
@@ -387,6 +608,17 @@ function pipelineStatus(
     return value;
   }
   return "NONE";
+}
+
+function pullRequestSearchState(state: GitHubPullRequestStateFilter): string {
+  if (state === "ALL") return "";
+  if (state === "MERGED") return "is:merged";
+  if (state === "CLOSED") return "is:closed is:unmerged";
+  return "is:open";
+}
+
+function pullRequestSearchQuery(...parts: Array<string | null>): string {
+  return parts.filter((part) => part?.trim()).join(" ");
 }
 
 function pipelineState(
@@ -666,8 +898,13 @@ export class GitHubService {
           workflowRunId,
         })
       : await this.patWorkflowJobs(owner, repository, workflowRunId, token);
-    const appConfigured = appCredentials !== null;
+    return this.workflowJobViews(jobs, appCredentials !== null);
+  }
 
+  private workflowJobViews(
+    jobs: GitHubActionsWorkflowJob[],
+    appConfigured: boolean,
+  ): GitHubWorkflowJobView[] {
     return jobs.map((job) => {
       const completed = job.status.toLowerCase() === "completed";
       return {
@@ -714,6 +951,41 @@ export class GitHubService {
       page += 1;
     } while (jobs.length < totalCount);
     return jobs;
+  }
+
+  private async actionsPullRequestNumbers(
+    run: RawActionsWorkflowRun,
+    target: ActionsRepositoryTarget,
+    token: string,
+  ): Promise<number[]> {
+    const reported = [
+      ...new Set(
+        (run.pull_requests ?? [])
+          .map((pullRequest) => pullRequest.number)
+          .filter((number) => Number.isInteger(number) && number > 0),
+      ),
+    ];
+    if (reported.length > 0 || !run.head_sha) return reported;
+    try {
+      const associated = await this.restRequest<Array<{ number: number }>>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+          target.owner,
+        )}/${encodeURIComponent(target.name)}/commits/${encodeURIComponent(
+          run.head_sha,
+        )}/pulls?per_page=100`,
+        token,
+      );
+      return [
+        ...new Set(
+          associated
+            .map((pullRequest) => pullRequest.number)
+            .filter((number) => Number.isInteger(number) && number > 0),
+        ),
+      ];
+    } catch {
+      // Pull request association is supplementary; keep the workflow run visible.
+      return [];
+    }
   }
 
   private async requireToken(): Promise<string> {
@@ -1104,6 +1376,291 @@ export class GitHubService {
     };
   }
 
+  async actionsWorkflowRuns(
+    codebaseRepositoryId?: string | null,
+    first = ACTIONS_PAGE_SIZE,
+    after?: string | null,
+  ): Promise<GitHubActionsWorkflowRunPage> {
+    if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
+      throw new Error(
+        `first must be an integer from 1 to ${ACTIONS_PAGE_SIZE}`,
+      );
+    }
+    const selectedRepositoryId = codebaseRepositoryId?.trim() || null;
+    const cursor = decodeActionsCursor(after, selectedRepositoryId);
+    const token = await this.requireToken();
+    const prisma = await getPrismaClient();
+    const codebaseRepositories = await prisma.codebaseRepository.findMany({
+      orderBy: [{ name: "asc" }, { canonicalOrigin: "asc" }],
+      select: {
+        id: true,
+        canonicalOrigin: true,
+        jiraBranchRegex: true,
+      },
+    });
+    const repositories = codebaseRepositories
+      .map(actionsRepositoryTarget)
+      .filter((item): item is ActionsRepositoryTarget => item !== null)
+      .sort((left, right) =>
+        left.nameWithOwner.localeCompare(right.nameWithOwner),
+      );
+    const targets = selectedRepositoryId
+      ? repositories.filter((item) => item.id === selectedRepositoryId)
+      : repositories;
+    if (selectedRepositoryId && targets.length === 0) {
+      throw new Error("GitHub codebase repository was not found");
+    }
+
+    type WorkflowRunStream = {
+      target: ActionsRepositoryTarget;
+      consumed: number;
+      loadedPage: number | null;
+      runs: RawActionsWorkflowRun[];
+      totalCount: number;
+      current: RawActionsWorkflowRun | null;
+      failed: boolean;
+    };
+    const streams: WorkflowRunStream[] = targets.map((target) => ({
+      target,
+      consumed: cursor.consumed[target.id] ?? 0,
+      loadedPage: null,
+      runs: [],
+      totalCount: Number.POSITIVE_INFINITY,
+      current: null,
+      failed: false,
+    }));
+    const repositoryErrors: GitHubActionsRepositoryErrorView[] = [];
+
+    const ensureCurrent = async (stream: WorkflowRunStream) => {
+      if (stream.failed || stream.consumed >= stream.totalCount) {
+        stream.current = null;
+        return;
+      }
+      const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
+      const offset = stream.consumed % ACTIONS_PAGE_SIZE;
+      try {
+        if (stream.loadedPage !== page) {
+          const result = await this.restRequest<{
+            total_count: number;
+            workflow_runs: RawActionsWorkflowRun[];
+          }>(
+            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+              stream.target.owner,
+            )}/${encodeURIComponent(
+              stream.target.name,
+            )}/actions/runs?per_page=${ACTIONS_PAGE_SIZE}&page=${page}`,
+            token,
+          );
+          if (
+            !Number.isInteger(result.total_count) ||
+            !Array.isArray(result.workflow_runs)
+          ) {
+            throw new Error(
+              "GitHub returned an invalid workflow runs response",
+            );
+          }
+          stream.loadedPage = page;
+          stream.runs = result.workflow_runs;
+          stream.totalCount = result.total_count;
+        }
+        stream.current = stream.runs[offset] ?? null;
+      } catch (error) {
+        stream.failed = true;
+        stream.current = null;
+        repositoryErrors.push({
+          codebaseRepositoryId: stream.target.id,
+          nameWithOwner: stream.target.nameWithOwner,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    await Promise.all(streams.map(ensureCurrent));
+    const selectedRuns: Array<{
+      run: RawActionsWorkflowRun;
+      target: ActionsRepositoryTarget;
+    }> = [];
+    while (selectedRuns.length < first) {
+      const next = streams
+        .filter(
+          (
+            stream,
+          ): stream is WorkflowRunStream & {
+            current: RawActionsWorkflowRun;
+          } => stream.current !== null,
+        )
+        .map((stream) => ({
+          stream,
+          run: stream.current,
+          target: stream.target,
+        }))
+        .sort(compareWorkflowRuns)[0];
+      if (!next) break;
+      selectedRuns.push({ run: next.run, target: next.target });
+      next.stream.consumed += 1;
+      await ensureCurrent(next.stream);
+    }
+
+    const [settings, codebaseSettings, appSettings, managedRepositories] =
+      await Promise.all([
+        prisma.gitHubSettings.findUnique({ where: { id: SETTINGS_ID } }),
+        prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
+        prisma.gitHubAppSettings.findUnique({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+        }),
+        prisma.gitHubRepository.findMany(),
+      ]);
+    const targetIds = [...new Set(selectedRuns.map(({ target }) => target.id))];
+    const worktrees = targetIds.length
+      ? await prisma.worktree.findMany({
+          where: {
+            missingAt: null,
+            codebase: { repositoryId: { in: targetIds } },
+          },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            branch: true,
+            codebase: { select: { repositoryId: true } },
+          },
+        })
+      : [];
+    const worktreeByRepositoryAndBranch = new Map<string, string>();
+    for (const worktree of worktrees) {
+      if (!worktree.branch) continue;
+      const key = `${worktree.codebase.repositoryId}\u0000${worktree.branch}`;
+      if (!worktreeByRepositoryAndBranch.has(key)) {
+        worktreeByRepositoryAndBranch.set(key, worktree.id);
+      }
+    }
+    const managedByName = new Map(
+      managedRepositories.map((repository) => [
+        repository.nameWithOwner.toLowerCase(),
+        repository,
+      ]),
+    );
+    const defaultGitHubRegex =
+      settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX;
+    const defaultBranchRegex =
+      codebaseSettings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_KEY_REGEX;
+    const appConfigured = appSettings !== null;
+    const pullRequestNumbersByRun = await Promise.all(
+      selectedRuns.map(({ run, target }) =>
+        this.actionsPullRequestNumbers(run, target, token),
+      ),
+    );
+    const items: GitHubActionsWorkflowRunView[] = selectedRuns.map(
+      ({ run, target }, index) => {
+        const completed = run.status.toLowerCase() === "completed";
+        const checkSuiteId = run.check_suite_node_id || null;
+        const retryUnavailableReason = !completed
+          ? "NOT_COMPLETED"
+          : !checkSuiteId
+            ? "WORKFLOW_RUN_UNAVAILABLE"
+            : appConfigured
+              ? null
+              : "GITHUB_APP_NOT_CONFIGURED";
+        const titleRegex =
+          managedByName.get(target.nameWithOwner.toLowerCase())?.jiraKeyRegex ??
+          defaultGitHubRegex;
+        const branchRegex = target.jiraBranchRegex ?? defaultBranchRegex;
+        const pullRequestNumbers = pullRequestNumbersByRun[index] ?? [];
+        return {
+          id: String(run.id),
+          repositoryGithubId: run.repository.node_id,
+          codebaseRepositoryId: target.id,
+          repositoryNameWithOwner: target.nameWithOwner,
+          repositoryUrl: target.url,
+          name: run.name?.trim() || "GitHub Actions",
+          displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+          runNumber: run.run_number,
+          runAttempt: run.run_attempt ?? 1,
+          event: run.event,
+          status: pipelineState(run.status, run.conclusion),
+          url: run.html_url,
+          headBranch: run.head_branch,
+          headSha: run.head_sha,
+          checkSuiteId,
+          canRetry: retryUnavailableReason === null,
+          retryUnavailableReason,
+          pullRequests: pullRequestNumbers.map((number) => ({
+            number,
+            url: `${target.url}/pull/${number}`,
+          })),
+          jiraKey:
+            parseJiraKey(run.display_title, titleRegex) ??
+            parseJiraKey(run.head_branch ?? "", branchRegex),
+          worktreeId: run.head_branch
+            ? (worktreeByRepositoryAndBranch.get(
+                `${target.id}\u0000${run.head_branch}`,
+              ) ?? null)
+            : null,
+          startedAt: run.run_started_at ?? run.created_at,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+        };
+      },
+    );
+    const hasNextPage = streams.some(
+      (stream) =>
+        !stream.failed &&
+        (stream.current !== null || stream.consumed < stream.totalCount),
+    );
+    const endCursor = hasNextPage
+      ? encodeActionsCursor({
+          version: 1,
+          codebaseRepositoryId: selectedRepositoryId,
+          consumed: Object.fromEntries(
+            streams.map((stream) => [stream.target.id, stream.consumed]),
+          ),
+        })
+      : null;
+    return {
+      items,
+      repositories: repositories.map(({ id, nameWithOwner, url }) => ({
+        id,
+        nameWithOwner,
+        url,
+      })),
+      repositoryErrors,
+      hasNextPage,
+      endCursor,
+    };
+  }
+
+  async actionsWorkflowJobs(
+    codebaseRepositoryId: string,
+    workflowRunId: string,
+  ): Promise<GitHubWorkflowJobView[]> {
+    if (!codebaseRepositoryId.trim() || !workflowRunId.trim()) {
+      throw new Error("Codebase repository and workflow run IDs are required");
+    }
+    const prisma = await getPrismaClient();
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { id: codebaseRepositoryId },
+      select: {
+        id: true,
+        canonicalOrigin: true,
+        jiraBranchRegex: true,
+      },
+    });
+    const target = repository ? actionsRepositoryTarget(repository) : null;
+    if (!target) throw new Error("GitHub codebase repository was not found");
+    const [token, appSettings] = await Promise.all([
+      this.requireToken(),
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const jobs = await this.patWorkflowJobs(
+      target.owner,
+      target.name,
+      workflowRunId,
+      token,
+    );
+    return this.workflowJobViews(jobs, appSettings !== null);
+  }
+
   async addRepository(input: {
     nameWithOwner: string;
     jiraKeyRegex?: string | null;
@@ -1332,36 +1889,74 @@ export class GitHubService {
     return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
   }
 
-  private async searchPullRequests(
+  private async searchPullRequestPage(
     query: string,
     token: string,
-  ): Promise<{ items: RawPullRequest[]; truncated: boolean }> {
-    const items: RawPullRequest[] = [];
-    let after: string | null = null;
-    let truncated = false;
-    while (true) {
-      const data: {
-        search: RawConnection<RawPullRequest>;
-      } = await this.request(
-        `query GitHubPullRequestSearch($query: String!, $after: String) {
-          search(query: $query, type: ISSUE, first: 50, after: $after) {
+    after: string | null,
+  ): Promise<RawConnection<RawPullRequest>> {
+    const data: {
+      search: RawConnection<RawPullRequest>;
+    } = await this.request(
+      `query GitHubPullRequestSearch($query: String!, $after: String) {
+        search(
+          query: $query
+          type: ISSUE
+          first: ${PULL_REQUEST_PAGE_SIZE}
+          after: $after
+        ) {
+          nodes { ...PullRequestTableFields }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+      ${PULL_REQUEST_FRAGMENT}`,
+      { query, after },
+      token,
+    );
+    return data.search;
+  }
+
+  private async repositoryPullRequestPage(
+    repository: GitHubRepositoryView,
+    token: string,
+    state: GitHubPullRequestStateFilter,
+    after: string | null,
+  ): Promise<RawConnection<RawPullRequest>> {
+    const data: {
+      repository: {
+        pullRequests: RawConnection<RawPullRequest>;
+      } | null;
+    } = await this.request(
+      `query GitHubRepositoryPullRequests(
+        $owner: String!
+        $name: String!
+        $states: [PullRequestState!]!
+        $after: String
+      ) {
+        repository(owner: $owner, name: $name) {
+          pullRequests(
+            states: $states
+            first: ${PULL_REQUEST_PAGE_SIZE}
+            after: $after
+            orderBy: { field: UPDATED_AT, direction: DESC }
+          ) {
             nodes { ...PullRequestTableFields }
             pageInfo { hasNextPage endCursor }
           }
         }
-        ${PULL_REQUEST_FRAGMENT}`,
-        { query, after },
-        token,
-      );
-      items.push(...connectionNodes(data.search));
-      if (items.length >= SEARCH_RESULT_LIMIT) {
-        truncated = data.search.pageInfo.hasNextPage;
-        break;
       }
-      if (!data.search.pageInfo.hasNextPage) break;
-      after = data.search.pageInfo.endCursor;
+      ${PULL_REQUEST_FRAGMENT}`,
+      {
+        owner: repository.owner,
+        name: repository.name,
+        states: state === "ALL" ? ["OPEN", "CLOSED", "MERGED"] : [state],
+        after,
+      },
+      token,
+    );
+    if (!data.repository) {
+      throw new Error("Managed repository was not found or is not accessible");
     }
-    return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
+    return data.repository.pullRequests;
   }
 
   private async repositoryPullRequests(
@@ -1371,42 +1966,18 @@ export class GitHubService {
     const items: RawPullRequest[] = [];
     let after: string | null = null;
     while (true) {
-      const data: {
-        repository: {
-          pullRequests: RawConnection<RawPullRequest>;
-        } | null;
-      } = await this.request(
-        `query GitHubRepositoryPullRequests(
-          $owner: String!
-          $name: String!
-          $after: String
-        ) {
-          repository(owner: $owner, name: $name) {
-            pullRequests(
-              states: OPEN
-              first: 50
-              after: $after
-              orderBy: { field: UPDATED_AT, direction: DESC }
-            ) {
-              nodes { ...PullRequestTableFields }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-        }
-        ${PULL_REQUEST_FRAGMENT}`,
-        { owner: repository.owner, name: repository.name, after },
+      const connection = await this.repositoryPullRequestPage(
+        repository,
         token,
+        "OPEN",
+        after,
       );
-      if (!data.repository) {
-        throw new Error(
-          "Managed repository was not found or is not accessible",
-        );
+      items.push(...connectionNodes(connection));
+      if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
+        return items;
       }
-      items.push(...connectionNodes(data.repository.pullRequests));
-      if (!data.repository.pullRequests.pageInfo.hasNextPage) break;
-      after = data.repository.pullRequests.pageInfo.endCursor;
+      after = connection.pageInfo.endCursor;
     }
-    return items;
   }
 
   private async remainingLabels(
@@ -1584,6 +2155,7 @@ export class GitHubService {
       pipelines: normalizePipelines(pipelineContexts, appConfigured),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
+      state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
       headRefName: pullRequest.headRefName,
       createdAt: pullRequest.createdAt,
     };
@@ -1592,8 +2164,23 @@ export class GitHubService {
   async pullRequests(
     scope: GitHubPullRequestScope,
     repositoryId?: string | null,
-    options: { includePipelineJobs?: boolean } = {},
+    options: {
+      includePipelineJobs?: boolean;
+      state?: GitHubPullRequestStateFilter;
+      first?: number;
+      after?: string | null;
+    } = {},
   ): Promise<GitHubPullRequestPage> {
+    const first = options.first ?? PULL_REQUEST_PAGE_SIZE;
+    if (
+      !Number.isInteger(first) ||
+      first < 1 ||
+      first > PULL_REQUEST_PAGE_SIZE
+    ) {
+      throw new Error(
+        `first must be an integer from 1 to ${PULL_REQUEST_PAGE_SIZE}`,
+      );
+    }
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
     const repositories = await prisma.gitHubRepository.findMany();
@@ -1609,14 +2196,25 @@ export class GitHubService {
     const appCredentials = appSettings
       ? this.appCredentials(appSettings)
       : null;
+    const state = options.state ?? "OPEN";
+    const searchState = pullRequestSearchState(state);
+    const scopedRepositoryId = repositoryId ?? null;
+    const cursor = decodePullRequestCursor(
+      options.after,
+      scope,
+      scopedRepositoryId,
+      state,
+    );
     const regexByGitHubId = new Map(
       repositories.map((repository) => [
         repository.githubId,
         repository.jiraKeyRegex,
       ]),
     );
-    let rawItems: RawPullRequest[];
-    let truncated = false;
+    const loaders = new Map<
+      string,
+      (after: string | null) => Promise<RawConnection<RawPullRequest>>
+    >();
 
     if (scope === "REPOSITORY") {
       if (!repositoryId) {
@@ -1626,9 +2224,13 @@ export class GitHubService {
       }
       const repository = repositories.find((item) => item.id === repositoryId);
       if (!repository) throw new Error("Managed repository was not found");
-      rawItems = await this.repositoryPullRequests(
-        repositoryView(repository),
-        token,
+      loaders.set("repository", (after) =>
+        this.repositoryPullRequestPage(
+          repositoryView(repository),
+          token,
+          state,
+          after,
+        ),
       );
     } else {
       if (repositoryId) {
@@ -1638,36 +2240,149 @@ export class GitHubService {
       }
       const viewer = await this.viewer(token);
       if (scope === "REVIEW_REQUESTED") {
-        const result = await this.searchPullRequests(
-          `is:pr is:open review-requested:${viewer.login} sort:updated-desc`,
-          token,
+        const query = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `review-requested:${viewer.login}`,
+          "sort:updated-desc",
         );
-        rawItems = result.items;
-        truncated = result.truncated;
+        loaders.set("review", (after) =>
+          this.searchPullRequestPage(query, token, after),
+        );
       } else if (scope === "MINE") {
-        const [authored, assigned] = await Promise.all([
-          this.searchPullRequests(
-            `is:pr is:open author:${viewer.login} sort:updated-desc`,
-            token,
-          ),
-          this.searchPullRequests(
-            `is:pr is:open assignee:${viewer.login} sort:updated-desc`,
-            token,
-          ),
-        ]);
-        const unique = new Map<string, RawPullRequest>();
-        for (const pullRequest of [...authored.items, ...assigned.items]) {
-          unique.set(pullRequest.id, pullRequest);
-        }
-        rawItems = [...unique.values()].sort(
-          (left, right) =>
-            Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+        const authoredQuery = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `author:${viewer.login}`,
+          "sort:updated-desc",
         );
-        truncated = authored.truncated || assigned.truncated;
+        const assignedQuery = pullRequestSearchQuery(
+          "is:pr",
+          searchState,
+          `assignee:${viewer.login}`,
+          `-author:${viewer.login}`,
+          "sort:updated-desc",
+        );
+        loaders.set("authored", (after) =>
+          this.searchPullRequestPage(authoredQuery, token, after),
+        );
+        loaders.set("assigned", (after) =>
+          this.searchPullRequestPage(assignedQuery, token, after),
+        );
       } else {
         throw new Error("Unknown GitHub pull request scope");
       }
     }
+
+    type RuntimePullRequestStream = {
+      cursor: PullRequestCursorStream;
+      loader: (after: string | null) => Promise<RawConnection<RawPullRequest>>;
+      searchLimited: boolean;
+      items: RawPullRequest[] | null;
+      pageInfo: PageInfo | null;
+      current: RawPullRequest | null;
+    };
+    const streams: RuntimePullRequestStream[] = Object.entries(
+      cursor.streams,
+    ).map(([key, stream]) => {
+      const loader = loaders.get(key);
+      if (!loader) {
+        throw new Error("GitHub pull request pagination cursor is invalid");
+      }
+      return {
+        cursor: stream,
+        loader,
+        searchLimited: scope !== "REPOSITORY",
+        items: null,
+        pageInfo: null,
+        current: null,
+      };
+    });
+
+    const ensureCurrent = async (stream: RuntimePullRequestStream) => {
+      while (!stream.cursor.exhausted && !stream.current) {
+        if (
+          stream.searchLimited &&
+          stream.cursor.consumed >= SEARCH_RESULT_LIMIT
+        ) {
+          stream.cursor.exhausted = true;
+          return;
+        }
+        if (!stream.items || !stream.pageInfo) {
+          const connection = await stream.loader(stream.cursor.after);
+          stream.items = connectionNodes(connection);
+          stream.pageInfo = connection.pageInfo;
+        }
+        if (stream.cursor.offset < stream.items.length) {
+          stream.current = stream.items[stream.cursor.offset] ?? null;
+          return;
+        }
+        if (stream.cursor.offset > stream.items.length) {
+          throw new Error("GitHub pull request pagination cursor is invalid");
+        }
+        if (stream.pageInfo.hasNextPage && stream.pageInfo.endCursor) {
+          stream.cursor.after = stream.pageInfo.endCursor;
+          stream.cursor.offset = 0;
+          stream.items = null;
+          stream.pageInfo = null;
+        } else {
+          stream.cursor.exhausted = true;
+        }
+      }
+    };
+
+    const consumeCurrent = (stream: RuntimePullRequestStream) => {
+      stream.current = null;
+      stream.cursor.offset += 1;
+      stream.cursor.consumed += 1;
+      const hasMoreInPage = Boolean(
+        stream.items && stream.cursor.offset < stream.items.length,
+      );
+      const hasMorePages = Boolean(stream.pageInfo?.hasNextPage);
+      if (
+        stream.searchLimited &&
+        stream.cursor.consumed >= SEARCH_RESULT_LIMIT
+      ) {
+        stream.cursor.limitReached = hasMoreInPage || hasMorePages;
+        stream.cursor.exhausted = true;
+      } else if (hasMoreInPage) {
+        stream.current = stream.items?.[stream.cursor.offset] ?? null;
+      } else if (hasMorePages && stream.pageInfo?.endCursor) {
+        stream.cursor.after = stream.pageInfo.endCursor;
+        stream.cursor.offset = 0;
+        stream.items = null;
+        stream.pageInfo = null;
+      } else {
+        stream.cursor.exhausted = true;
+      }
+    };
+
+    const rawItems: RawPullRequest[] = [];
+    const selectedIds = new Set<string>();
+    while (rawItems.length < first) {
+      await Promise.all(streams.map(ensureCurrent));
+      const next = streams
+        .filter(
+          (
+            stream,
+          ): stream is RuntimePullRequestStream & {
+            current: RawPullRequest;
+          } => stream.current !== null,
+        )
+        .sort((left, right) =>
+          comparePullRequests(left.current, right.current),
+        )[0];
+      if (!next) break;
+      if (!selectedIds.has(next.current.id)) {
+        selectedIds.add(next.current.id);
+        rawItems.push(next.current);
+      }
+      consumeCurrent(next);
+    }
+
+    const hasNextPage = streams.some((stream) => !stream.cursor.exhausted);
+    const truncated = streams.some((stream) => stream.cursor.limitReached);
+    const endCursor = hasNextPage ? encodePullRequestCursor(cursor) : null;
 
     const items = await Promise.all(
       rawItems.map((pullRequest) =>
@@ -1679,7 +2394,9 @@ export class GitHubService {
         ),
       ),
     );
-    if (!options.includePipelineJobs) return { items, truncated };
+    if (!options.includePipelineJobs) {
+      return { items, truncated, hasNextPage, endCursor };
+    }
 
     return {
       items: await Promise.all(
@@ -1708,6 +2425,8 @@ export class GitHubService {
         }),
       ),
       truncated,
+      hasNextPage,
+      endCursor,
     };
   }
 

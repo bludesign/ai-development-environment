@@ -5,6 +5,7 @@ import type {
   GitHubAuditContext,
   GitHubMergeMethod,
   GitHubPullRequestScope,
+  GitHubPullRequestStateFilter,
   GitHubService,
 } from "@/services/github";
 import { normalizeGitHubRepositoryName } from "@/services/github";
@@ -119,21 +120,65 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.availableRepositories(after);
     },
+    githubActionsWorkflowRuns: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        first,
+        after,
+      }: {
+        codebaseRepositoryId?: string | null;
+        first?: number | null;
+        after?: string | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.actionsWorkflowRuns(
+        codebaseRepositoryId,
+        first ?? 25,
+        after,
+      );
+    },
+    githubActionsWorkflowJobs: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        workflowRunId,
+      }: { codebaseRepositoryId: string; workflowRunId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.actionsWorkflowJobs(
+        codebaseRepositoryId,
+        workflowRunId,
+      );
+    },
     githubPullRequests: (
       _root: unknown,
       {
         scope,
         repositoryId,
-      }: { scope: GitHubPullRequestScope; repositoryId?: string | null },
+        state,
+        first,
+        after,
+      }: {
+        scope: GitHubPullRequestScope;
+        repositoryId?: string | null;
+        state?: GitHubPullRequestStateFilter | null;
+        first?: number | null;
+        after?: string | null;
+      },
       context: GraphQLContext,
       info?: GraphQLResolveInfo,
     ) => {
       requireControlPlane(context);
-      return requestsPipelineJobs(info)
-        ? gitHubService.pullRequests(scope, repositoryId, {
-            includePipelineJobs: true,
-          })
-        : gitHubService.pullRequests(scope, repositoryId);
+      return gitHubService.pullRequests(scope, repositoryId, {
+        includePipelineJobs: requestsPipelineJobs(info),
+        state: state ?? "OPEN",
+        first: first ?? 25,
+        after,
+      });
     },
     githubPullRequest: (
       _root: unknown,
