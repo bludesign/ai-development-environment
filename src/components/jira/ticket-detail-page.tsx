@@ -2,6 +2,8 @@
 
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   GitBranch,
   Pencil,
@@ -85,6 +87,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [fieldSearch, setFieldSearch] = useState("");
+  const [fieldsOpen, setFieldsOpen] = useState(false);
 
   const loadEditFields = useCallback(async () => {
     try {
@@ -462,46 +465,75 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
       </Card>
 
       <Card className="min-w-0 gap-0 overflow-hidden py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader className={fieldsOpen ? "border-b py-4" : "py-4"}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>{t("allFields")}</CardTitle>
-            <Input
-              aria-label={t("searchFields")}
-              className="max-w-72"
-              onChange={(event) => setFieldSearch(event.target.value)}
-              placeholder={t("searchFields")}
-              value={fieldSearch}
-            />
+            <button
+              aria-controls="jira-all-fields"
+              aria-expanded={fieldsOpen}
+              className="-m-2 flex min-w-0 flex-1 items-center rounded-lg p-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              onClick={() => setFieldsOpen((current) => !current)}
+              type="button"
+            >
+              <CardTitle>{t("allFields")}</CardTitle>
+            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {fieldsOpen && (
+                <Input
+                  aria-label={t("searchFields")}
+                  className="h-7 max-w-72"
+                  onChange={(event) => setFieldSearch(event.target.value)}
+                  placeholder={t("searchFields")}
+                  value={fieldSearch}
+                />
+              )}
+              <Button
+                aria-controls="jira-all-fields"
+                aria-expanded={fieldsOpen}
+                onClick={() => setFieldsOpen((current) => !current)}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                {fieldsOpen ? <ChevronDown /> : <ChevronRight />}
+                {fieldsOpen ? t("collapseFields") : t("expandFields")}
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <Table className="table-fixed" containerClassName="overflow-x-hidden">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-40 whitespace-normal break-words sm:w-56">
-                {t("field")}
-              </TableHead>
-              <TableHead className="whitespace-normal break-words">
-                {t("value")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredFields.map((field) => (
-              <TableRow key={field.id}>
-                <TableCell className="min-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
-                  <p className="break-words font-medium">{field.name}</p>
-                  <p className="break-words text-xs text-muted-foreground">
-                    {field.id}
-                    {field.custom ? ` · ${t("custom")}` : ""}
-                  </p>
-                </TableCell>
-                <TableCell className="min-w-0 max-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
-                  <JiraFieldValue field={field} />
-                </TableCell>
+        {fieldsOpen && (
+          <Table
+            className="table-fixed"
+            containerClassName="overflow-x-hidden"
+            id="jira-all-fields"
+          >
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-40 whitespace-normal break-words sm:w-56">
+                  {t("field")}
+                </TableHead>
+                <TableHead className="whitespace-normal break-words">
+                  {t("value")}
+                </TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {filteredFields.map((field) => (
+                <TableRow key={field.id}>
+                  <TableCell className="min-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
+                    <p className="break-words font-medium">{field.name}</p>
+                    <p className="break-words text-xs text-muted-foreground">
+                      {field.id}
+                      {field.custom ? ` · ${t("custom")}` : ""}
+                    </p>
+                  </TableCell>
+                  <TableCell className="min-w-0 max-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
+                    <JiraFieldValue field={field} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       <EditDetailsDialog

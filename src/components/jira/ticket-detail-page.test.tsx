@@ -172,6 +172,21 @@ describe("JiraTicketDetailPage", () => {
     expect(
       screen.getByRole("link", { name: /APP-41/ }).getAttribute("href"),
     ).toBe("/jira/tickets/APP-41");
+    expect(screen.queryByText("Customer impact")).toBeNull();
+    const fieldsTitle = screen.getByRole("button", {
+      name: "All Jira fields",
+    });
+    const fieldsHeader = fieldsTitle.closest('[data-slot="card-header"]');
+    expect(fieldsTitle.getAttribute("aria-expanded")).toBe("false");
+    expect(fieldsHeader?.classList.contains("border-b")).toBe(false);
+    fireEvent.click(fieldsTitle);
+    expect(fieldsTitle.getAttribute("aria-expanded")).toBe("true");
+    expect(fieldsHeader?.classList.contains("border-b")).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Hide fields" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
     expect(screen.getByText("Customer impact")).toBeDefined();
     expect(screen.getByText("High impact")).toBeDefined();
     const descriptionTitle = screen.getByText("Description");
@@ -206,6 +221,10 @@ describe("JiraTicketDetailPage", () => {
         name: "Render format",
       }),
     ).toBeNull();
+    fireEvent.click(fieldsTitle);
+    expect(fieldsTitle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Customer impact")).toBeNull();
+    expect(fieldsHeader?.classList.contains("border-b")).toBe(false);
     expect(screen.getByRole("textbox", { name: "Comment" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("tab", { name: "History" }));

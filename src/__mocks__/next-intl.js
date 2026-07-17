@@ -309,6 +309,8 @@ const mockTranslations = {
     started: "Started {date}",
     noWorklogs: "No worklogs are available.",
     allFields: "All Jira fields",
+    expandFields: "Show fields",
+    collapseFields: "Hide fields",
     searchFields: "Search fields",
     field: "Field",
     value: "Value",

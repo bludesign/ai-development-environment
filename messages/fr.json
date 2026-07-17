@@ -282,6 +282,8 @@
     "started": "Commencé {date}",
     "noWorklogs": "Aucun journal de travail disponible.",
     "allFields": "Tous les champs Jira",
+    "expandFields": "Afficher les champs",
+    "collapseFields": "Masquer les champs",
     "searchFields": "Rechercher des champs",
     "field": "Champ",
     "value": "Valeur",

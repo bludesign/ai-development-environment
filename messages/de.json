@@ -282,6 +282,8 @@
     "started": "Begonnen {date}",
     "noWorklogs": "Keine Arbeitsprotokolle verfügbar.",
     "allFields": "Alle Jira-Felder",
+    "expandFields": "Felder anzeigen",
+    "collapseFields": "Felder ausblenden",
     "searchFields": "Felder suchen",
     "field": "Feld",
     "value": "Wert",
