@@ -605,7 +605,7 @@
     "noRepositoryMatches": "Keine Repositories entsprechen der Suche.",
     "truncated": "Die GitHub-Suche liefert höchstens 1.000 Ergebnisse. Grenze deine Arbeitslast auf GitHub ein, um Ergebnisse über diesem Limit zu sehen.",
     "loadingPullRequests": "Pull Requests werden geladen…",
-    "loadingMore": "Weitere Pull Requests werden geladen…",
+    "loadingMore": "Weitere werden geladen…",
     "retryLoad": "Erneut versuchen",
     "empty": "Keine Pull Requests",
     "emptyDescription": "Derzeit entsprechen keine Pull Requests dieser Ansicht.",

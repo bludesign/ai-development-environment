@@ -672,7 +672,7 @@ const mockTranslations = {
     truncated:
       "GitHub search returns at most 1,000 results. Refine your workload on GitHub to see anything beyond this limit.",
     loadingPullRequests: "Loading pull requests…",
-    loadingMore: "Loading more pull requests…",
+    loadingMore: "Loading more…",
     retryLoad: "Try again",
     empty: "No pull requests",
     emptyDescription: "No pull requests currently match this view.",

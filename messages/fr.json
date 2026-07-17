@@ -605,7 +605,7 @@
     "noRepositoryMatches": "Aucun dépôt ne correspond à la recherche.",
     "truncated": "La recherche GitHub renvoie au maximum 1 000 résultats. Affinez votre charge de travail sur GitHub pour voir les éléments au-delà de cette limite.",
     "loadingPullRequests": "Chargement des demandes de tirage…",
-    "loadingMore": "Chargement de demandes de tirage supplémentaires…",
+    "loadingMore": "Chargement…",
     "retryLoad": "Réessayer",
     "empty": "Aucune demande de tirage",
     "emptyDescription": "Aucune demande de tirage ne correspond actuellement à cette vue.",
