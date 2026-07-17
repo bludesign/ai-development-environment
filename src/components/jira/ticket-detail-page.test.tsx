@@ -175,6 +175,15 @@ describe("JiraTicketDetailPage", () => {
     expect(descriptionTitle.parentElement?.parentElement).toBe(
       descriptionViewMenu?.parentElement?.parentElement,
     );
+    fireEvent.pointerDown(descriptionViewMenu!, {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Markdown" }));
+    const markdownSource = screen.getByText("## Deployment");
+    expect(markdownSource.className).toContain("max-h-none");
+    expect(markdownSource.className).toContain("overflow-visible");
+    expect(markdownSource.className).not.toContain("max-h-96");
     const descriptionEdit = within(descriptionCard as HTMLElement).getByRole(
       "button",
       { name: "Edit" },

@@ -111,6 +111,7 @@ export function JiraRichTextBlock({
   header,
   headerActions,
   headerClassName,
+  sourceClassName,
   value,
 }: {
   bodyClassName?: string;
@@ -118,6 +119,7 @@ export function JiraRichTextBlock({
   header?: ReactNode;
   headerActions?: ReactNode;
   headerClassName?: string;
+  sourceClassName?: string;
   value: unknown;
 }) {
   const t = useTranslations("jiraTickets");
@@ -255,11 +257,21 @@ export function JiraRichTextBlock({
       )}
       <div className={bodyClassName}>
         {viewMode === "RAW" ? (
-          <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+          <pre
+            className={cn(
+              "rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap",
+              sourceClassName ?? "max-h-96 overflow-auto",
+            )}
+          >
             {normalized.rawText}
           </pre>
         ) : viewMode === "MARKDOWN" ? (
-          <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+          <pre
+            className={cn(
+              "rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap",
+              sourceClassName ?? "max-h-96 overflow-auto",
+            )}
+          >
             {visibleMarkdown}
           </pre>
         ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (

@@ -397,6 +397,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                 ) : null
               }
               headerClassName="border-b pb-4"
+              sourceClassName="max-h-none overflow-visible break-words [overflow-wrap:anywhere]"
               value={ticket.description}
             />
           )}
