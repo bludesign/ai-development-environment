@@ -111,6 +111,7 @@ export function JiraRichTextBlock({
   header,
   headerActions,
   headerClassName,
+  showFormatOverride = true,
   sourceClassName,
   value,
 }: {
@@ -119,6 +120,7 @@ export function JiraRichTextBlock({
   header?: ReactNode;
   headerActions?: ReactNode;
   headerClassName?: string;
+  showFormatOverride?: boolean;
   sourceClassName?: string;
   value: unknown;
 }) {
@@ -196,7 +198,7 @@ export function JiraRichTextBlock({
         {(header || headerActions) && <div>{header}</div>}
         <div className="flex flex-wrap items-center justify-end gap-1">
           {headerActions}
-          {normalized.format !== "ADF" && (
+          {showFormatOverride && normalized.format !== "ADF" && (
             <Select
               onValueChange={(next) =>
                 setFormatOverride(next as "MARKDOWN" | "JIRA_WIKI")

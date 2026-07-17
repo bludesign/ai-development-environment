@@ -578,7 +578,11 @@ function JiraFieldValue({ field }: { field: JiraTicketField }) {
   if (field.content)
     return (
       <div className="min-w-0 max-w-full overflow-hidden [overflow-wrap:anywhere] [&_a]:break-all [&_code]:break-all [&_pre]:max-w-full [&_pre]:break-all [&_pre]:whitespace-pre-wrap">
-        <JiraRichTextBlock content={field.content} value={field.value} />
+        <JiraRichTextBlock
+          content={field.content}
+          showFormatOverride={false}
+          value={field.value}
+        />
       </div>
     );
   if (field.value === null || field.value === undefined || field.value === "")

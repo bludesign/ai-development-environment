@@ -75,7 +75,13 @@ const ticket = {
       schemaType: "string",
       custom: true,
       value: "High impact",
-      content: null,
+      content: {
+        format: "MARKDOWN",
+        raw: "High impact",
+        rawText: "High impact",
+        markdown: "High impact",
+        wikiMarkup: "High impact",
+      },
     },
   ],
   cache: {
@@ -195,6 +201,11 @@ describe("JiraTicketDetailPage", () => {
     expect(fieldsTable?.parentElement?.className).toContain(
       "overflow-x-hidden",
     );
+    expect(
+      within(fieldsTable as HTMLElement).queryByRole("combobox", {
+        name: "Render format",
+      }),
+    ).toBeNull();
     expect(screen.getByRole("textbox", { name: "Comment" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("tab", { name: "History" }));
