@@ -117,7 +117,11 @@ describe("GitHub resolvers", () => {
     await expect(
       resolvers.Query.githubPullRequests(
         {},
-        { scope: "REPOSITORY", repositoryId: "repository-1" },
+        {
+          scope: "REPOSITORY",
+          repositoryId: "repository-1",
+          state: "CLOSED",
+        },
         context(null),
       ),
     ).resolves.toEqual({ items: [], truncated: false });
@@ -151,6 +155,7 @@ describe("GitHub resolvers", () => {
     expect(service.pullRequests).toHaveBeenCalledWith(
       "REPOSITORY",
       "repository-1",
+      { includePipelineJobs: false, state: "CLOSED" },
     );
     await resolvers.Query.githubPullRequest(
       {},
@@ -272,6 +277,7 @@ describe("GitHub resolvers", () => {
 
     expect(service.pullRequests).toHaveBeenCalledWith("MINE", undefined, {
       includePipelineJobs: true,
+      state: "OPEN",
     });
   });
 });

@@ -49,6 +49,13 @@ import {
   type SearchableSelectOption,
 } from "@/components/ui/searchable-select";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -63,6 +70,7 @@ import type {
   GitHubPipelineView,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
+  GitHubPullRequestState,
   GitHubPullRequestView,
   GitHubRepositoryCandidate,
   GitHubRepositoryCandidatePage,
@@ -74,7 +82,7 @@ import type {
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount headRefName createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount state headRefName createdAt";
 
 type TabKey = "mine" | "review" | "repositories";
 
@@ -137,6 +145,8 @@ export function PullRequestsPage() {
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [repositories, setRepositories] = useState<GitHubRepositoryView[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("mine");
+  const [pullRequestState, setPullRequestState] =
+    useState<GitHubPullRequestState>("OPEN");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [pages, setPages] = useState<Record<string, GitHubPullRequestPage>>({});
   const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
@@ -173,47 +183,62 @@ export function PullRequestsPage() {
     return () => window.clearTimeout(timeout);
   }, [loadConfiguration]);
 
-  const loadTab = useCallback(async (tab: TabKey, repositoryId: string) => {
-    const pageKey = tab === "repositories" ? `repository:${repositoryId}` : tab;
-    if (tab === "repositories" && !repositoryId) return;
-    setLoadingTabs((current) => ({ ...current, [pageKey]: true }));
-    try {
-      const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
-      const scope: GitHubPullRequestScope = scopedRepositoryId
-        ? "REPOSITORY"
-        : tab === "review"
-          ? "REVIEW_REQUESTED"
-          : "MINE";
-      const data = await controlPlaneRequest<{
-        githubPullRequests: GitHubPullRequestPage;
-      }>(
-        `query GitHubPullRequests(
-          $scope: GitHubPullRequestScope!
-          $repositoryId: ID
-        ) {
-          githubPullRequests(scope: $scope, repositoryId: $repositoryId) {
-            items { ${PULL_REQUEST_FIELDS} }
-            truncated
-          }
-        }`,
-        { scope, repositoryId: scopedRepositoryId },
-      );
-      setPages((current) => ({
-        ...current,
-        [pageKey]: data.githubPullRequests,
-      }));
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoadingTabs((current) => ({ ...current, [pageKey]: false }));
-    }
-  }, []);
+  const loadTab = useCallback(
+    async (
+      tab: TabKey,
+      repositoryId: string,
+      state: GitHubPullRequestState,
+    ) => {
+      const pageKey =
+        tab === "repositories"
+          ? `${state}:repository:${repositoryId}`
+          : `${state}:${tab}`;
+      if (tab === "repositories" && !repositoryId) return;
+      setLoadingTabs((current) => ({ ...current, [pageKey]: true }));
+      try {
+        const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
+        const scope: GitHubPullRequestScope = scopedRepositoryId
+          ? "REPOSITORY"
+          : tab === "review"
+            ? "REVIEW_REQUESTED"
+            : "MINE";
+        const data = await controlPlaneRequest<{
+          githubPullRequests: GitHubPullRequestPage;
+        }>(
+          `query GitHubPullRequests(
+            $scope: GitHubPullRequestScope!
+            $repositoryId: ID
+            $state: GitHubPullRequestState!
+          ) {
+            githubPullRequests(
+              scope: $scope
+              repositoryId: $repositoryId
+              state: $state
+            ) {
+              items { ${PULL_REQUEST_FIELDS} }
+              truncated
+            }
+          }`,
+          { scope, repositoryId: scopedRepositoryId, state },
+        );
+        setPages((current) => ({
+          ...current,
+          [pageKey]: data.githubPullRequests,
+        }));
+        setError(null);
+      } catch (value) {
+        setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        setLoadingTabs((current) => ({ ...current, [pageKey]: false }));
+      }
+    },
+    [],
+  );
 
   const pageKey =
     activeTab === "repositories"
-      ? `repository:${selectedRepositoryId}`
-      : activeTab;
+      ? `${pullRequestState}:repository:${selectedRepositoryId}`
+      : `${pullRequestState}:${activeTab}`;
 
   useEffect(() => {
     if (
@@ -223,7 +248,7 @@ export function PullRequestsPage() {
       !loadingTabs[pageKey]
     ) {
       const timeout = window.setTimeout(
-        () => void loadTab(activeTab, selectedRepositoryId),
+        () => void loadTab(activeTab, selectedRepositoryId, pullRequestState),
         0,
       );
       return () => window.clearTimeout(timeout);
@@ -234,6 +259,7 @@ export function PullRequestsPage() {
     loadingTabs,
     pageKey,
     pages,
+    pullRequestState,
     selectedRepositoryId,
     settings?.tokenConfigured,
   ]);
@@ -252,7 +278,6 @@ export function PullRequestsPage() {
 
   const page = pages[pageKey];
   const loading = Boolean(loadingTabs[pageKey]);
-  const repositorySpecific = activeTab === "repositories";
 
   const repositoriesChanged = (next: GitHubRepositoryView[]) => {
     setRepositories(next);
@@ -310,7 +335,9 @@ export function PullRequestsPage() {
         <div className="flex gap-2">
           <Button
             disabled={!settings?.tokenConfigured || loading}
-            onClick={() => void loadTab(activeTab, selectedRepositoryId)}
+            onClick={() =>
+              void loadTab(activeTab, selectedRepositoryId, pullRequestState)
+            }
             variant="outline"
           >
             <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -366,25 +393,44 @@ export function PullRequestsPage() {
             </Tabs>
           </div>
 
-          {activeTab === "repositories" && repositories.length > 0 && (
-            <div className="max-w-lg">
-              <SearchableSelect
-                ariaLabel={t("repositoryFilter")}
-                emptyMessage={t("noRepositoryMatches")}
-                onValueChange={setSelectedRepositoryId}
-                options={repositories.map<SearchableSelectOption>(
-                  (repository) => ({
-                    value: repository.id,
-                    label: repository.nameWithOwner,
-                    keywords: `${repository.owner} ${repository.name}`,
-                  }),
-                )}
-                placeholder={t("selectRepository")}
-                searchPlaceholder={t("searchRepositories")}
-                value={selectedRepositoryId}
-              />
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Select
+              onValueChange={(value) =>
+                setPullRequestState(value as GitHubPullRequestState)
+              }
+              value={pullRequestState}
+            >
+              <SelectTrigger aria-label={t("stateFilter")} className="min-w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {(["OPEN", "CLOSED", "MERGED"] as const).map((state) => (
+                  <SelectItem key={state} value={state}>
+                    {t(`pullRequestStates.${state}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {activeTab === "repositories" && repositories.length > 0 && (
+              <div className="min-w-64 max-w-lg flex-1">
+                <SearchableSelect
+                  ariaLabel={t("repositoryFilter")}
+                  emptyMessage={t("noRepositoryMatches")}
+                  onValueChange={setSelectedRepositoryId}
+                  options={repositories.map<SearchableSelectOption>(
+                    (repository) => ({
+                      value: repository.id,
+                      label: repository.nameWithOwner,
+                      keywords: `${repository.owner} ${repository.name}`,
+                    }),
+                  )}
+                  placeholder={t("selectRepository")}
+                  searchPlaceholder={t("searchRepositories")}
+                  value={selectedRepositoryId}
+                />
+              </div>
+            )}
+          </div>
 
           {page?.truncated && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
@@ -420,9 +466,10 @@ export function PullRequestsPage() {
             <PullRequestTable
               items={page.items}
               locale={locale}
-              onMerged={() => loadTab(activeTab, selectedRepositoryId)}
+              onMerged={() =>
+                loadTab(activeTab, selectedRepositoryId, pullRequestState)
+              }
               onPipelineRetried={pipelineRetried}
-              repositorySpecific={repositorySpecific}
             />
           ) : null}
         </>
@@ -451,7 +498,6 @@ function PullRequestTable({
   locale,
   onMerged,
   onPipelineRetried,
-  repositorySpecific,
 }: {
   items: GitHubPullRequestView[];
   locale: string;
@@ -460,7 +506,6 @@ function PullRequestTable({
     pullRequestId: string,
     pipeline: GitHubPipelineView,
   ) => void;
-  repositorySpecific: boolean;
 }) {
   const t = useTranslations("pullRequests");
   const router = useRouter();
@@ -471,9 +516,8 @@ function PullRequestTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {!repositorySpecific && <TableHead>{t("repository")}</TableHead>}
             <TableHead>{t("number")}</TableHead>
-            <TableHead>{t("pullRequest")}</TableHead>
+            <TableHead>{t("pullRequestAndRepository")}</TableHead>
             <TableHead>{t("labels")}</TableHead>
             <TableHead>{t("jira")}</TableHead>
             <TableHead>{t("pipeline")}</TableHead>
@@ -490,19 +534,6 @@ function PullRequestTable({
               className="cursor-pointer"
               onClick={() => router.push(pullRequestDetailHref(pullRequest))}
             >
-              {!repositorySpecific && (
-                <TableCell className="whitespace-nowrap">
-                  <a
-                    className="text-primary hover:underline"
-                    href={pullRequest.repositoryUrl}
-                    onClick={stopRowClick}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {pullRequest.repositoryNameWithOwner}
-                  </a>
-                </TableCell>
-              )}
               <TableCell>
                 <Link
                   className="font-semibold text-primary hover:underline"
@@ -521,6 +552,20 @@ function PullRequestTable({
                   >
                     {pullRequest.title}
                   </Link>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <a
+                      className="text-muted-foreground hover:text-foreground"
+                      href={pullRequest.repositoryUrl}
+                      onClick={stopRowClick}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {pullRequest.repositoryNameWithOwner}
+                    </a>
+                    <Badge variant="outline">
+                      {t(`pullRequestStates.${pullRequest.state}`)}
+                    </Badge>
+                  </div>
                   <p className="font-mono text-xs break-all text-muted-foreground">
                     {pullRequest.headRefName}
                   </p>
@@ -593,10 +638,14 @@ function PullRequestTable({
                 </time>
               </TableCell>
               <TableCell className="text-right">
-                <MergePullRequestButton
-                  onMerged={onMerged}
-                  pullRequest={pullRequest}
-                />
+                {pullRequest.state === "OPEN" ? (
+                  <MergePullRequestButton
+                    onMerged={onMerged}
+                    pullRequest={pullRequest}
+                  />
+                ) : (
+                  "—"
+                )}
               </TableCell>
             </TableRow>
           ))}

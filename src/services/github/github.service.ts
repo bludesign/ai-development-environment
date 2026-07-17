@@ -29,6 +29,7 @@ import type {
   GitHubPullRequestMergeResult,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
+  GitHubPullRequestState,
   GitHubPullRequestView,
   GitHubReviewComment,
   GitHubRepositoryCandidatePage,
@@ -68,6 +69,8 @@ type RawPullRequest = {
   url: string;
   createdAt: string;
   updatedAt: string;
+  state: GitHubPullRequestState;
+  mergedAt: string | null;
   headRefName: string;
   headRepository: { nameWithOwner: string } | null;
   repository: {
@@ -286,6 +289,8 @@ const PULL_REQUEST_FRAGMENT = `
     url
     createdAt
     updatedAt
+    state
+    mergedAt
     headRefName
     headRepository { nameWithOwner }
     repository { id nameWithOwner url }
@@ -496,6 +501,12 @@ function pipelineStatus(
     return value;
   }
   return "NONE";
+}
+
+function pullRequestSearchState(state: GitHubPullRequestState): string {
+  if (state === "MERGED") return "is:merged";
+  if (state === "CLOSED") return "is:closed is:unmerged";
+  return "is:open";
 }
 
 function pipelineState(
@@ -828,6 +839,41 @@ export class GitHubService {
       page += 1;
     } while (jobs.length < totalCount);
     return jobs;
+  }
+
+  private async actionsPullRequestNumbers(
+    run: RawActionsWorkflowRun,
+    target: ActionsRepositoryTarget,
+    token: string,
+  ): Promise<number[]> {
+    const reported = [
+      ...new Set(
+        (run.pull_requests ?? [])
+          .map((pullRequest) => pullRequest.number)
+          .filter((number) => Number.isInteger(number) && number > 0),
+      ),
+    ];
+    if (reported.length > 0 || !run.head_sha) return reported;
+    try {
+      const associated = await this.restRequest<Array<{ number: number }>>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+          target.owner,
+        )}/${encodeURIComponent(target.name)}/commits/${encodeURIComponent(
+          run.head_sha,
+        )}/pulls?per_page=100`,
+        token,
+      );
+      return [
+        ...new Set(
+          associated
+            .map((pullRequest) => pullRequest.number)
+            .filter((number) => Number.isInteger(number) && number > 0),
+        ),
+      ];
+    } catch {
+      // Pull request association is supplementary; keep the workflow run visible.
+      return [];
+    }
   }
 
   private async requireToken(): Promise<string> {
@@ -1386,8 +1432,13 @@ export class GitHubService {
     const defaultBranchRegex =
       codebaseSettings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_KEY_REGEX;
     const appConfigured = appSettings !== null;
+    const pullRequestNumbersByRun = await Promise.all(
+      selectedRuns.map(({ run, target }) =>
+        this.actionsPullRequestNumbers(run, target, token),
+      ),
+    );
     const items: GitHubActionsWorkflowRunView[] = selectedRuns.map(
-      ({ run, target }) => {
+      ({ run, target }, index) => {
         const completed = run.status.toLowerCase() === "completed";
         const checkSuiteId = run.check_suite_node_id || null;
         const retryUnavailableReason = !completed
@@ -1401,13 +1452,7 @@ export class GitHubService {
           managedByName.get(target.nameWithOwner.toLowerCase())?.jiraKeyRegex ??
           defaultGitHubRegex;
         const branchRegex = target.jiraBranchRegex ?? defaultBranchRegex;
-        const pullRequestNumbers = [
-          ...new Set(
-            (run.pull_requests ?? [])
-              .map((pullRequest) => pullRequest.number)
-              .filter((number) => Number.isInteger(number) && number > 0),
-          ),
-        ];
+        const pullRequestNumbers = pullRequestNumbersByRun[index] ?? [];
         return {
           id: String(run.id),
           repositoryGithubId: run.repository.node_id,
@@ -1767,6 +1812,7 @@ export class GitHubService {
   private async repositoryPullRequests(
     repository: GitHubRepositoryView,
     token: string,
+    state: GitHubPullRequestState = "OPEN",
   ): Promise<RawPullRequest[]> {
     const items: RawPullRequest[] = [];
     let after: string | null = null;
@@ -1779,11 +1825,12 @@ export class GitHubService {
         `query GitHubRepositoryPullRequests(
           $owner: String!
           $name: String!
+          $states: [PullRequestState!]!
           $after: String
         ) {
           repository(owner: $owner, name: $name) {
             pullRequests(
-              states: OPEN
+              states: $states
               first: 50
               after: $after
               orderBy: { field: UPDATED_AT, direction: DESC }
@@ -1794,7 +1841,12 @@ export class GitHubService {
           }
         }
         ${PULL_REQUEST_FRAGMENT}`,
-        { owner: repository.owner, name: repository.name, after },
+        {
+          owner: repository.owner,
+          name: repository.name,
+          states: [state],
+          after,
+        },
         token,
       );
       if (!data.repository) {
@@ -1984,6 +2036,7 @@ export class GitHubService {
       pipelines: normalizePipelines(pipelineContexts, appConfigured),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
+      state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
       headRefName: pullRequest.headRefName,
       createdAt: pullRequest.createdAt,
     };
@@ -1992,7 +2045,10 @@ export class GitHubService {
   async pullRequests(
     scope: GitHubPullRequestScope,
     repositoryId?: string | null,
-    options: { includePipelineJobs?: boolean } = {},
+    options: {
+      includePipelineJobs?: boolean;
+      state?: GitHubPullRequestState;
+    } = {},
   ): Promise<GitHubPullRequestPage> {
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
@@ -2009,6 +2065,8 @@ export class GitHubService {
     const appCredentials = appSettings
       ? this.appCredentials(appSettings)
       : null;
+    const state = options.state ?? "OPEN";
+    const searchState = pullRequestSearchState(state);
     const regexByGitHubId = new Map(
       repositories.map((repository) => [
         repository.githubId,
@@ -2029,6 +2087,7 @@ export class GitHubService {
       rawItems = await this.repositoryPullRequests(
         repositoryView(repository),
         token,
+        state,
       );
     } else {
       if (repositoryId) {
@@ -2039,7 +2098,7 @@ export class GitHubService {
       const viewer = await this.viewer(token);
       if (scope === "REVIEW_REQUESTED") {
         const result = await this.searchPullRequests(
-          `is:pr is:open review-requested:${viewer.login} sort:updated-desc`,
+          `is:pr ${searchState} review-requested:${viewer.login} sort:updated-desc`,
           token,
         );
         rawItems = result.items;
@@ -2047,11 +2106,11 @@ export class GitHubService {
       } else if (scope === "MINE") {
         const [authored, assigned] = await Promise.all([
           this.searchPullRequests(
-            `is:pr is:open author:${viewer.login} sort:updated-desc`,
+            `is:pr ${searchState} author:${viewer.login} sort:updated-desc`,
             token,
           ),
           this.searchPullRequests(
-            `is:pr is:open assignee:${viewer.login} sort:updated-desc`,
+            `is:pr ${searchState} assignee:${viewer.login} sort:updated-desc`,
             token,
           ),
         ]);

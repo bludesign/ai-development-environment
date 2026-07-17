@@ -4,6 +4,12 @@ enum GitHubPullRequestScope {
   REPOSITORY
 }
 
+enum GitHubPullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
 enum GitHubPipelineStatus {
   ERROR
   EXPECTED
@@ -116,6 +122,7 @@ type GitHubPullRequest {
   pipelines: [GitHubPipeline!]!
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
+  state: GitHubPullRequestState!
   headRefName: String!
   createdAt: String!
 }
@@ -361,6 +368,7 @@ extend type Query {
   githubPullRequests(
     scope: GitHubPullRequestScope!
     repositoryId: ID
+    state: GitHubPullRequestState = OPEN
   ): GitHubPullRequestPage!
   githubPullRequest(
     owner: String!

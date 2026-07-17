@@ -1,5 +1,7 @@
 export type GitHubPullRequestScope = "MINE" | "REVIEW_REQUESTED" | "REPOSITORY";
 
+export type GitHubPullRequestState = "OPEN" | "CLOSED" | "MERGED";
+
 export type GitHubPipelineStatus =
   "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS" | "NONE";
 
@@ -180,6 +182,7 @@ export type GitHubPullRequestView = {
   pipelines: GitHubPipelineView[];
   reviewDecision: GitHubReviewDecision;
   unresolvedReviewThreadCount: number;
+  state: GitHubPullRequestState;
   headRefName: string;
   createdAt: string;
 };

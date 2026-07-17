@@ -66,6 +66,7 @@ const pullRequest = {
   ],
   reviewDecision: "APPROVED",
   unresolvedReviewThreadCount: 2,
+  state: "OPEN",
   headRefName: "feature/app-42",
   createdAt: "2026-07-01T00:00:00.000Z",
 };
@@ -100,12 +101,15 @@ function configureRequests() {
       } as never;
     }
     if (query.includes("query GitHubPullRequests")) {
+      const state = String(variables?.state ?? "OPEN") as
+        "OPEN" | "CLOSED" | "MERGED";
+      const item = { ...pullRequest, state };
       return {
         githubPullRequests: {
           items:
             variables?.scope === "REVIEW_REQUESTED"
-              ? [{ ...pullRequest, id: "review-1", title: "Review this" }]
-              : [pullRequest],
+              ? [{ ...item, id: "review-1", title: "Review this" }]
+              : [item],
           truncated: false,
         },
       } as never;
@@ -184,6 +188,14 @@ describe("PullRequestsPage", () => {
     });
     const row = title.closest("tr");
     expect(row).not.toBeNull();
+    const cells = within(row as HTMLTableRowElement).getAllByRole("cell");
+    expect(cells[0]?.textContent).toBe("#17");
+    expect(
+      within(cells[1] as HTMLTableCellElement).getByText("APP-42 Add the API"),
+    ).toBeDefined();
+    expect(
+      within(cells[1] as HTMLTableCellElement).getByText("acme/widgets"),
+    ).toBeDefined();
     expect(
       within(row as HTMLTableRowElement).getByText("backend"),
     ).toBeDefined();
@@ -232,7 +244,7 @@ describe("PullRequestsPage", () => {
     await screen.findByText("Review this");
     expect(requestMock).toHaveBeenCalledWith(
       expect.stringContaining("query GitHubPullRequests"),
-      { scope: "REVIEW_REQUESTED", repositoryId: null },
+      { scope: "REVIEW_REQUESTED", repositoryId: null, state: "OPEN" },
     );
 
     const callsBeforeRefresh = requestMock.mock.calls.filter(([query]) =>
@@ -254,7 +266,11 @@ describe("PullRequestsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("query GitHubPullRequests"),
-        { scope: "REPOSITORY", repositoryId: "local-repository-1" },
+        {
+          scope: "REPOSITORY",
+          repositoryId: "local-repository-1",
+          state: "OPEN",
+        },
       ),
     );
     activateTab(screen.getByRole("tab", { name: "Review requests" }));
@@ -269,6 +285,47 @@ describe("PullRequestsPage", () => {
     expect(new URLSearchParams(window.location.search).get("issue")).toBe(
       "APP-42",
     );
+  });
+
+  test("switches between open, closed, and merged pull requests", async () => {
+    configureRequests();
+    render(<PullRequestsPage />);
+
+    const stateFilter = await screen.findByRole("combobox", {
+      name: "Pull request state",
+    });
+    expect(stateFilter.textContent).toContain("Open");
+    expect(await screen.findByRole("button", { name: "Merge" })).toBeDefined();
+
+    fireEvent.pointerDown(stateFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Closed" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        { scope: "MINE", repositoryId: null, state: "CLOSED" },
+      ),
+    );
+    expect((await screen.findAllByText("Closed")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+
+    fireEvent.pointerDown(stateFilter, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Merged" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubPullRequests"),
+        { scope: "MINE", repositoryId: null, state: "MERGED" },
+      ),
+    );
+    expect((await screen.findAllByText("Merged")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
   });
 
   test("browses repositories and supports exact owner/name entry", async () => {
