@@ -213,6 +213,11 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
       .toLowerCase()
       .includes(fieldSearch.toLowerCase()),
   );
+  const relatedIssues = [
+    ...(ticket.parent ? [ticket.parent] : []),
+    ...ticket.subtasks,
+    ...ticket.issueLinks,
+  ];
 
   const saveSummary = async (event: FormEvent) => {
     event.preventDefault();
@@ -306,119 +311,105 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
 
       <JiraTicketActions onTicketChange={ticketChanged} ticket={ticket} />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(19rem,1fr)]">
-        <div className="space-y-5">
-          <Card>
-            <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b">
-              <CardTitle>{tt("descriptionTitle")}</CardTitle>
-              {editable.has("description") && !descriptionEditing && (
-                <Button
-                  onClick={() => setDescriptionEditing(true)}
-                  size="sm"
-                  variant="ghost"
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b">
+            <CardTitle>{t("details")}</CardTitle>
+            {editFields.length > 0 && (
+              <Button
+                onClick={() => setDetailsOpen(true)}
+                size="sm"
+                variant="ghost"
+              >
+                <Pencil /> {t("edit")}
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent>
+            <TicketMetadata ticket={ticket} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle>{tt("relatedIssues")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {relatedIssues.length > 0 ? (
+              relatedIssues.map((link, index) => (
+                <Link
+                  className="block rounded border p-2 text-sm hover:bg-muted"
+                  href={`/jira/tickets/${encodeURIComponent(link.key)}`}
+                  key={`${link.key}-${index}`}
                 >
-                  <Pencil /> {t("edit")}
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              {descriptionEditing ? (
-                <JiraTextComposer
-                  busy={busy}
-                  initialFormat={
-                    ticket.descriptionContent?.format === "JIRA_WIKI"
-                      ? "JIRA_WIKI"
-                      : "MARKDOWN"
-                  }
-                  initialValue={
-                    ticket.descriptionContent?.format === "JIRA_WIKI"
-                      ? ticket.descriptionContent.wikiMarkup
-                      : (ticket.descriptionContent?.markdown ?? "")
-                  }
-                  onCancel={() => setDescriptionEditing(false)}
-                  onSubmit={saveDescription}
-                  submitLabel={t("saveDescription")}
-                />
-              ) : (
-                <JiraRichTextBlock
-                  content={ticket.descriptionContent}
-                  value={ticket.description}
-                />
-              )}
-            </CardContent>
-          </Card>
+                  <span className="font-medium">{link.key}</span> ·{" "}
+                  {link.summary}
+                  <span className="block text-xs text-muted-foreground">
+                    {link.relationship}
+                    {link.status ? ` · ${link.status}` : ""}
+                  </span>
+                </Link>
+              ))
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle>{t("activity")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <JiraTicketActivity
-                key={ticket.key}
-                onTicketChange={ticketChanged}
-                ticket={ticket}
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>{t("allFields")}</CardTitle>
-                <Input
-                  aria-label={t("searchFields")}
-                  className="max-w-72"
-                  onChange={(event) => setFieldSearch(event.target.value)}
-                  placeholder={t("searchFields")}
-                  value={fieldSearch}
-                />
+      <Card>
+        <CardContent>
+          {descriptionEditing ? (
+            <div className="space-y-4">
+              <div className="border-b pb-4">
+                <CardTitle>{tt("descriptionTitle")}</CardTitle>
               </div>
-            </CardHeader>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("field")}</TableHead>
-                  <TableHead>{t("value")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredFields.map((field) => (
-                  <TableRow key={field.id}>
-                    <TableCell className="align-top">
-                      <p className="font-medium">{field.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {field.id}
-                        {field.custom ? ` · ${t("custom")}` : ""}
-                      </p>
-                    </TableCell>
-                    <TableCell className="max-w-3xl align-top">
-                      <JiraFieldValue field={field} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-        </div>
+              <JiraTextComposer
+                busy={busy}
+                initialFormat={
+                  ticket.descriptionContent?.format === "JIRA_WIKI"
+                    ? "JIRA_WIKI"
+                    : "MARKDOWN"
+                }
+                initialValue={
+                  ticket.descriptionContent?.format === "JIRA_WIKI"
+                    ? ticket.descriptionContent.wikiMarkup
+                    : (ticket.descriptionContent?.markdown ?? "")
+                }
+                onCancel={() => setDescriptionEditing(false)}
+                onSubmit={saveDescription}
+                submitLabel={t("saveDescription")}
+              />
+            </div>
+          ) : (
+            <JiraRichTextBlock
+              content={ticket.descriptionContent}
+              header={<CardTitle>{tt("descriptionTitle")}</CardTitle>}
+              headerActions={
+                editable.has("description") ? (
+                  <Button
+                    onClick={() => setDescriptionEditing(true)}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <Pencil /> {t("edit")}
+                  </Button>
+                ) : null
+              }
+              headerClassName="border-b pb-4"
+              value={ticket.description}
+            />
+          )}
+        </CardContent>
+      </Card>
 
-        <aside className="space-y-5">
-          <Card>
-            <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b">
-              <CardTitle>{t("details")}</CardTitle>
-              {editFields.length > 0 && (
-                <Button
-                  onClick={() => setDetailsOpen(true)}
-                  size="sm"
-                  variant="ghost"
-                >
-                  <Pencil /> {t("edit")}
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              <TicketMetadata ticket={ticket} />
-            </CardContent>
-          </Card>
+      {(ticket.labels.length > 0 ||
+        ticket.components.length > 0 ||
+        ticket.fixVersions.length > 0 ||
+        ticket.affectedVersions.length > 0 ||
+        ticket.sprintNames.length > 0 ||
+        ticket.attachments.length > 0) && (
+        <div className="grid gap-5 lg:grid-cols-2">
           {(ticket.labels.length > 0 ||
             ticket.components.length > 0 ||
             ticket.fixVersions.length > 0 ||
@@ -430,35 +421,6 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               </CardHeader>
               <CardContent>
                 <Classification ticket={ticket} />
-              </CardContent>
-            </Card>
-          )}
-          {(ticket.parent ||
-            ticket.subtasks.length > 0 ||
-            ticket.issueLinks.length > 0) && (
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle>{tt("relatedIssues")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {[
-                  ...(ticket.parent ? [ticket.parent] : []),
-                  ...ticket.subtasks,
-                  ...ticket.issueLinks,
-                ].map((link, index) => (
-                  <Link
-                    className="block rounded border p-2 text-sm hover:bg-muted"
-                    href={`/jira/tickets/${encodeURIComponent(link.key)}`}
-                    key={`${link.key}-${index}`}
-                  >
-                    <span className="font-medium">{link.key}</span> ·{" "}
-                    {link.summary}
-                    <span className="block text-xs text-muted-foreground">
-                      {link.relationship}
-                      {link.status ? ` · ${link.status}` : ""}
-                    </span>
-                  </Link>
-                ))}
               </CardContent>
             </Card>
           )}
@@ -482,8 +444,64 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               </CardContent>
             </Card>
           )}
-        </aside>
-      </div>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>{t("activity")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <JiraTicketActivity
+            key={ticket.key}
+            onTicketChange={ticketChanged}
+            ticket={ticket}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="min-w-0 gap-0 overflow-hidden py-0">
+        <CardHeader className="border-b py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>{t("allFields")}</CardTitle>
+            <Input
+              aria-label={t("searchFields")}
+              className="max-w-72"
+              onChange={(event) => setFieldSearch(event.target.value)}
+              placeholder={t("searchFields")}
+              value={fieldSearch}
+            />
+          </div>
+        </CardHeader>
+        <Table className="table-fixed" containerClassName="overflow-x-hidden">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-40 whitespace-normal break-words sm:w-56">
+                {t("field")}
+              </TableHead>
+              <TableHead className="whitespace-normal break-words">
+                {t("value")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredFields.map((field) => (
+              <TableRow key={field.id}>
+                <TableCell className="min-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
+                  <p className="break-words font-medium">{field.name}</p>
+                  <p className="break-words text-xs text-muted-foreground">
+                    {field.id}
+                    {field.custom ? ` · ${t("custom")}` : ""}
+                  </p>
+                </TableCell>
+                <TableCell className="min-w-0 max-w-0 align-top whitespace-normal [overflow-wrap:anywhere]">
+                  <JiraFieldValue field={field} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
 
       <EditDetailsDialog
         busy={busy}
@@ -557,7 +575,11 @@ function Classification({ ticket }: { ticket: JiraTicketDetail }) {
 
 function JiraFieldValue({ field }: { field: JiraTicketField }) {
   if (field.content)
-    return <JiraRichTextBlock content={field.content} value={field.value} />;
+    return (
+      <div className="min-w-0 max-w-full overflow-hidden [overflow-wrap:anywhere] [&_a]:break-all [&_code]:break-all [&_pre]:max-w-full [&_pre]:break-all [&_pre]:whitespace-pre-wrap">
+        <JiraRichTextBlock content={field.content} value={field.value} />
+      </div>
+    );
   if (field.value === null || field.value === undefined || field.value === "")
     return <span className="text-muted-foreground">—</span>;
   if (
@@ -565,9 +587,13 @@ function JiraFieldValue({ field }: { field: JiraTicketField }) {
     typeof field.value === "number" ||
     typeof field.value === "boolean"
   )
-    return <span className="whitespace-pre-wrap">{String(field.value)}</span>;
+    return (
+      <span className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {String(field.value)}
+      </span>
+    );
   return (
-    <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">
+    <pre className="max-h-72 max-w-full overflow-y-auto break-all whitespace-pre-wrap text-xs">
       {JSON.stringify(field.value, null, 2)}
     </pre>
   );

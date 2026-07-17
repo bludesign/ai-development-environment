@@ -2,7 +2,7 @@
 
 import { Check, Copy, Eye, FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -29,6 +29,7 @@ import type {
   JiraTextFormat,
   JiraTextInput,
 } from "@/services/jira/types";
+import { cn } from "@/lib/utils";
 
 type CopyState = "IDLE" | "COPIED" | "FAILED";
 
@@ -88,10 +89,18 @@ export function RichTextPreview({ markdown }: { markdown: string }) {
 }
 
 export function JiraRichTextBlock({
+  bodyClassName,
   content,
+  header,
+  headerActions,
+  headerClassName,
   value,
 }: {
+  bodyClassName?: string;
   content?: JiraRichText | null;
+  header?: ReactNode;
+  headerActions?: ReactNode;
+  headerClassName?: string;
   value: unknown;
 }) {
   const t = useTranslations("jiraTickets");
@@ -106,7 +115,23 @@ export function JiraRichTextBlock({
     "ADF"
   > | null>(null);
 
-  if (!normalized) return <p className="text-muted-foreground">—</p>;
+  if (!normalized)
+    return (
+      <div className="space-y-2">
+        {(header || headerActions) && (
+          <div
+            className={cn(
+              "flex flex-wrap items-center justify-between gap-2",
+              headerClassName,
+            )}
+          >
+            <div>{header}</div>
+            <div>{headerActions}</div>
+          </div>
+        )}
+        <p className={cn("text-muted-foreground", bodyClassName)}>—</p>
+      </div>
+    );
   const selectedFormat = formatOverride ?? normalized.format;
   const markdown =
     normalized.format === "ADF"
@@ -126,59 +151,71 @@ export function JiraRichTextBlock({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-end gap-1">
-        {normalized.format !== "ADF" && (
-          <Select
-            onValueChange={(next) =>
-              setFormatOverride(next as "MARKDOWN" | "JIRA_WIKI")
-            }
-            value={selectedFormat}
-          >
-            <SelectTrigger
-              aria-label={t("renderFormat")}
-              className="h-7 w-auto min-w-28 text-xs"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="MARKDOWN">{t("markdown")}</SelectItem>
-              <SelectItem value="JIRA_WIKI">{t("jiraWiki")}</SelectItem>
-            </SelectContent>
-          </Select>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2",
+          header || headerActions ? "justify-between" : "justify-end",
+          headerClassName,
         )}
-        <Button
-          aria-label={raw ? t("viewRendered") : t("viewRaw")}
-          onClick={() => setRaw((current) => !current)}
-          size="icon-sm"
-          title={raw ? t("viewRendered") : t("viewRaw")}
-          type="button"
-          variant="ghost"
-        >
-          {raw ? <Eye /> : <FileText />}
-        </Button>
-        <Button
-          aria-label={copyState === "COPIED" ? t("copied") : t("copyRaw")}
-          onClick={() => void copy()}
-          size="icon-sm"
-          title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
-          type="button"
-          variant="ghost"
-        >
-          {copyState === "COPIED" ? <Check /> : <Copy />}
-        </Button>
+      >
+        {(header || headerActions) && <div>{header}</div>}
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          {headerActions}
+          {normalized.format !== "ADF" && (
+            <Select
+              onValueChange={(next) =>
+                setFormatOverride(next as "MARKDOWN" | "JIRA_WIKI")
+              }
+              value={selectedFormat}
+            >
+              <SelectTrigger
+                aria-label={t("renderFormat")}
+                className="h-7 w-auto min-w-28 text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MARKDOWN">{t("markdown")}</SelectItem>
+                <SelectItem value="JIRA_WIKI">{t("jiraWiki")}</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+          <Button
+            aria-label={raw ? t("viewRendered") : t("viewRaw")}
+            onClick={() => setRaw((current) => !current)}
+            size="icon-sm"
+            title={raw ? t("viewRendered") : t("viewRaw")}
+            type="button"
+            variant="ghost"
+          >
+            {raw ? <Eye /> : <FileText />}
+          </Button>
+          <Button
+            aria-label={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+            onClick={() => void copy()}
+            size="icon-sm"
+            title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+            type="button"
+            variant="ghost"
+          >
+            {copyState === "COPIED" ? <Check /> : <Copy />}
+          </Button>
+        </div>
       </div>
       {copyState === "FAILED" && (
         <p className="text-xs text-destructive">{t("copyFailed")}</p>
       )}
-      {raw ? (
-        <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-          {normalized.rawText}
-        </pre>
-      ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (
-        <AdfRenderer value={normalized.raw} />
-      ) : (
-        <RichTextPreview markdown={markdown} />
-      )}
+      <div className={bodyClassName}>
+        {raw ? (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+            {normalized.rawText}
+          </pre>
+        ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (
+          <AdfRenderer value={normalized.raw} />
+        ) : (
+          <RichTextPreview markdown={markdown} />
+        )}
+      </div>
     </div>
   );
 }

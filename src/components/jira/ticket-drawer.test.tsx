@@ -126,11 +126,25 @@ describe("JiraTicketDrawer", () => {
     expect(
       screen.getByText("Ticket details").closest('[data-slot="card"]'),
     ).not.toBeNull();
+    const descriptionTitle = screen.getByText("Description");
+    const descriptionRaw = screen.getAllByRole("button", {
+      name: "View raw",
+    })[0];
+    expect(descriptionTitle.parentElement?.parentElement).toBe(
+      descriptionRaw?.parentElement?.parentElement,
+    );
     expect(
       screen
         .getByText("APP-122 · Prepare the repository")
         .closest('[data-slot="item"]'),
     ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("link", {
+          name: /APP-122 · Prepare the repository blocks Done/,
+        })
+        .getAttribute("href"),
+    ).toBe("/jira/tickets/APP-122");
     expect(
       screen
         .getByRole("link", { name: /notes\.txt/ })

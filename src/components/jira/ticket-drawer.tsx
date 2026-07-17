@@ -174,13 +174,16 @@ export function JiraTicketDrawer({
                 />
                 <DetailGrid ticket={ticket} />
                 <section>
-                  <h3 className="mb-2 font-semibold">
-                    {t("descriptionTitle")}
-                  </h3>
                   <Card size="sm">
                     <CardContent>
                       <JiraRichTextBlock
                         content={ticket.descriptionContent}
+                        header={
+                          <h3 className="font-semibold">
+                            {t("descriptionTitle")}
+                          </h3>
+                        }
+                        headerClassName="border-b pb-2"
                         value={ticket.description}
                       />
                     </CardContent>
@@ -239,18 +242,26 @@ export function JiraTicketDrawer({
                         ...ticket.subtasks,
                         ...ticket.issueLinks,
                       ].map((link, index) => (
-                        <Item key={`${link.key}-${index}`} variant="outline">
-                          <ItemContent>
-                            <ItemTitle>
-                              {link.key} · {link.summary}
-                            </ItemTitle>
-                            <ItemDescription>
-                              {link.relationship}
-                            </ItemDescription>
-                          </ItemContent>
-                          <ItemActions>
-                            {link.status && <Badge>{link.status}</Badge>}
-                          </ItemActions>
+                        <Item
+                          asChild
+                          key={`${link.key}-${index}`}
+                          variant="outline"
+                        >
+                          <Link
+                            href={`/jira/tickets/${encodeURIComponent(link.key)}`}
+                          >
+                            <ItemContent>
+                              <ItemTitle>
+                                {link.key} · {link.summary}
+                              </ItemTitle>
+                              <ItemDescription>
+                                {link.relationship}
+                              </ItemDescription>
+                            </ItemContent>
+                            <ItemActions>
+                              {link.status && <Badge>{link.status}</Badge>}
+                            </ItemActions>
+                          </Link>
                         </Item>
                       ))}
                     </ItemGroup>

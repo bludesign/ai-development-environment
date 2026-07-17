@@ -48,7 +48,14 @@ const ticket = {
   sprintNames: [],
   parent: null,
   subtasks: [],
-  issueLinks: [],
+  issueLinks: [
+    {
+      relationship: "blocks",
+      key: "APP-41",
+      summary: "Prepare the release",
+      status: "Done",
+    },
+  ],
   attachments: [],
   comments: [],
   createdAt: "2026-07-16T12:00:00.000Z",
@@ -126,8 +133,37 @@ describe("JiraTicketDetailPage", () => {
     render(<JiraTicketDetailPage issueKey="APP-42" />);
 
     expect(await screen.findByText("Ship rich Jira details")).toBeDefined();
+    const detailsCard = screen
+      .getByText("Details")
+      .closest('[data-slot="card"]');
+    const relatedCard = screen
+      .getByText("Related issues")
+      .closest('[data-slot="card"]');
+    const descriptionCard = screen
+      .getByText("Description")
+      .closest('[data-slot="card"]');
+    expect(detailsCard?.parentElement).toBe(relatedCard?.parentElement);
+    expect(detailsCard?.parentElement?.className).toContain("lg:grid-cols-2");
+    expect(
+      detailsCard?.parentElement?.compareDocumentPosition(descriptionCard!),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      screen.getByRole("link", { name: /APP-41/ }).getAttribute("href"),
+    ).toBe("/jira/tickets/APP-41");
     expect(screen.getByText("Customer impact")).toBeDefined();
     expect(screen.getByText("High impact")).toBeDefined();
+    const descriptionTitle = screen.getByText("Description");
+    const descriptionRaw = screen.getAllByRole("button", {
+      name: "View raw",
+    })[0];
+    expect(descriptionTitle.parentElement?.parentElement).toBe(
+      descriptionRaw?.parentElement?.parentElement,
+    );
+    const fieldsTable = screen.getByText("Customer impact").closest("table");
+    expect(fieldsTable?.className).toContain("table-fixed");
+    expect(fieldsTable?.parentElement?.className).toContain(
+      "overflow-x-hidden",
+    );
     expect(screen.getByRole("textbox", { name: "Comment" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("tab", { name: "History" }));
