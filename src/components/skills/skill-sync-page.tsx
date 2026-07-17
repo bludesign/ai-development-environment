@@ -64,6 +64,8 @@ type PackageFile = NonNullable<
   NonNullable<SkillSyncItem["candidatePackage"]>["package"]
 >["files"][number];
 
+const NO_SKILL_GROUP_VALUE = "__none__";
+
 function bytes(value: string): Uint8Array {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -488,8 +490,25 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                           {displayEnum(tStatus(online ? "online" : "offline"))}
                         </Badge>
                       </TableCell>
-                      <TableCell>{displayEnum(item.direction)}</TableCell>
-                      <TableCell>{displayEnum(item.status)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {displayEnum(item.direction)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            item.status === "FAILED"
+                              ? "destructive"
+                              : item.status === "COMPLETE" ||
+                                  item.status === "SUCCEEDED"
+                                ? "secondary"
+                                : "outline"
+                          }
+                        >
+                          {displayEnum(item.status)}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -567,15 +586,22 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                           onValueChange={(value) =>
                             setGroupChoices((current) => ({
                               ...current,
-                              [item.id]: value,
+                              [item.id]:
+                                value === NO_SKILL_GROUP_VALUE ? "" : value,
                             }))
                           }
-                          value={groupChoices[item.id] ?? ""}
+                          value={groupChoices[item.id] || NO_SKILL_GROUP_VALUE}
                         >
-                          <SelectTrigger className="mb-2 w-full min-w-48">
+                          <SelectTrigger
+                            className="mb-1 w-full min-w-48"
+                            size="sm"
+                          >
                             <SelectValue placeholder={t("chooseGroup")} />
                           </SelectTrigger>
                           <SelectContent align="start">
+                            <SelectItem value={NO_SKILL_GROUP_VALUE}>
+                              {t("chooseGroup")}
+                            </SelectItem>
                             {groups.map((group) => (
                               <SelectItem key={group.id} value={group.id}>
                                 {group.name}

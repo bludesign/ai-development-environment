@@ -23,6 +23,13 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const encoded = (value: string) => Buffer.from(value).toString("base64");
 
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
+
 const targetPackage = {
   name: "swift-review",
   description: "Review Swift code safely.",
@@ -199,6 +206,8 @@ describe("SkillSyncPage", () => {
     render(<SkillSyncPage runId="run-1" />);
     expect(await screen.findByText("Agent sync status")).toBeTruthy();
     expect(screen.getByText("Offline").getAttribute("data-slot")).toBe("badge");
+    expect(screen.getByText("Scan").getAttribute("data-slot")).toBe("badge");
+    expect(screen.getByText("Pending").getAttribute("data-slot")).toBe("badge");
     expect(screen.getByText("Proposed changes")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: /skip pending clients/i }),
@@ -288,6 +297,27 @@ describe("SkillSyncPage", () => {
 
     const groupSelect = await screen.findByRole("combobox");
     expect(groupSelect.getAttribute("data-slot")).toBe("select-trigger");
+    expect(groupSelect.getAttribute("data-size")).toBe("sm");
+    expect(groupSelect.className).toContain("mb-1");
+
+    fireEvent.pointerDown(groupSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Swift" }));
+    expect(groupSelect.textContent).toContain("Swift");
+
+    fireEvent.pointerDown(groupSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Choose a skill group" }),
+    );
+    expect(groupSelect.textContent).toContain("Choose a skill group");
+
     fireEvent.click(
       screen.getByRole("button", { name: /delete client copy/i }),
     );
