@@ -38,6 +38,12 @@ enum GitHubReviewDecision {
   NONE
 }
 
+enum GitHubMergeMethod {
+  MERGE
+  REBASE
+  SQUASH
+}
+
 enum GitHubPipelineRetryUnavailableReason {
   GITHUB_APP_NOT_CONFIGURED
   NOT_COMPLETED
@@ -47,6 +53,7 @@ enum GitHubPipelineRetryUnavailableReason {
 
 type GitHubSettings {
   tokenConfigured: Boolean!
+  defaultJiraKeyRegex: String!
   updatedAt: String!
 }
 
@@ -109,6 +116,7 @@ type GitHubPullRequest {
   pipelines: [GitHubPipeline!]!
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
+  headRefName: String!
   createdAt: String!
 }
 
@@ -229,6 +237,24 @@ type GitHubPullRequestDetail {
   commitCount: Int!
   updatedAt: String!
   mergedAt: String
+  worktreeId: ID
+}
+
+type GitHubPullRequestMergeOptions {
+  availableMethods: [GitHubMergeMethod!]!
+  commitEmails: [String!]!
+  defaultCommitEmail: String
+  defaultCommitHeadline: String!
+  defaultCommitBody: String!
+  canMerge: Boolean!
+  blockedReason: String
+}
+
+type GitHubPullRequestMergeResult {
+  id: ID!
+  state: String!
+  url: String!
+  mergedAt: String
 }
 
 type GitHubPullRequestPage {
@@ -238,6 +264,7 @@ type GitHubPullRequestPage {
 
 input SaveGitHubSettingsInput {
   apiToken: String
+  defaultJiraKeyRegex: String
 }
 
 input SaveGitHubAppSettingsInput {
@@ -256,6 +283,16 @@ input UpdateGitHubRepositoryInput {
   jiraKeyRegex: String
 }
 
+input MergeGitHubPullRequestInput {
+  owner: String!
+  name: String!
+  number: Int!
+  method: GitHubMergeMethod!
+  commitHeadline: String!
+  commitBody: String!
+  authorEmail: String
+}
+
 extend type Query {
   githubSettings: GitHubSettings!
   githubAppSettings: GitHubAppSettings!
@@ -270,6 +307,11 @@ extend type Query {
     name: String!
     number: Int!
   ): GitHubPullRequestDetail
+  githubPullRequestMergeOptions(
+    owner: String!
+    name: String!
+    number: Int!
+  ): GitHubPullRequestMergeOptions!
   githubReviewThreads: GitHubReviewThreadPage!
 }
 
@@ -285,6 +327,9 @@ extend type Mutation {
     input: UpdateGitHubRepositoryInput!
   ): [GitHubRepository!]!
   removeGitHubRepository(id: ID!): [GitHubRepository!]!
+  mergeGitHubPullRequest(
+    input: MergeGitHubPullRequestInput!
+  ): GitHubPullRequestMergeResult!
   retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
   retryGitHubWorkflowJob(
     repositoryId: ID!

@@ -19,7 +19,10 @@ import type {
   GitHubPipelineState,
   GitHubPipelineStatus,
   GitHubPipelineView,
+  GitHubMergeMethod,
   GitHubPullRequestDetail,
+  GitHubPullRequestMergeOptions,
+  GitHubPullRequestMergeResult,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestView,
@@ -134,6 +137,20 @@ type RawPullRequestDetail = RawPullRequest & {
   commits: { totalCount: number };
   mergedAt: string | null;
 };
+
+type RawPullRequestMergeState = {
+  id: string;
+  title: string;
+  body: string;
+  url: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  mergeStateStatus: string;
+  headRefOid: string;
+};
+
+type RepositoryPermission = "ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE" | "READ";
 
 type RawActor = {
   login: string;
@@ -719,24 +736,37 @@ export class GitHubService {
     });
     return {
       tokenConfigured: Boolean(settings.apiToken),
+      defaultJiraKeyRegex: settings.defaultJiraKeyRegex,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }
 
   async saveSettings(input: {
     apiToken?: string | null;
+    defaultJiraKeyRegex?: string | null;
   }): Promise<GitHubSettingsView> {
     const prisma = await getPrismaClient();
     const existing = await prisma.gitHubSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
     const nextToken = input.apiToken?.trim() || existing?.apiToken || null;
-    if (!nextToken)
+    if (input.apiToken !== undefined && !nextToken)
       throw new Error("A GitHub personal access token is required");
+    const defaultJiraKeyRegex =
+      input.defaultJiraKeyRegex === undefined
+        ? (existing?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX)
+        : normalizeJiraKeyRegex(input.defaultJiraKeyRegex);
+    if (!defaultJiraKeyRegex) {
+      throw new Error("A default Jira key regex is required");
+    }
     await prisma.gitHubSettings.upsert({
       where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID, apiToken: nextToken },
-      update: { apiToken: nextToken },
+      create: {
+        id: SETTINGS_ID,
+        apiToken: nextToken,
+        defaultJiraKeyRegex,
+      },
+      update: { apiToken: nextToken, defaultJiraKeyRegex },
     });
     return this.getSettings();
   }
@@ -1079,11 +1109,7 @@ export class GitHubService {
     jiraKeyRegex?: string | null;
   }): Promise<GitHubRepositoryView[]> {
     const { owner, name } = normalizeGitHubRepositoryName(input.nameWithOwner);
-    const jiraKeyRegex = normalizeJiraKeyRegex(
-      input.jiraKeyRegex === undefined
-        ? DEFAULT_JIRA_KEY_REGEX
-        : input.jiraKeyRegex,
-    );
+    const jiraKeyRegex = normalizeJiraKeyRegex(input.jiraKeyRegex);
     const token = await this.requireToken();
     const data = await this.request<{
       repository: {
@@ -1558,6 +1584,7 @@ export class GitHubService {
       pipelines: normalizePipelines(pipelineContexts, appConfigured),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
+      headRefName: pullRequest.headRefName,
       createdAt: pullRequest.createdAt,
     };
   }
@@ -1570,6 +1597,11 @@ export class GitHubService {
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
     const repositories = await prisma.gitHubRepository.findMany();
+    const settings = await prisma.gitHubSettings.findUnique({
+      where: { id: SETTINGS_ID },
+    });
+    const defaultJiraKeyRegex =
+      settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX;
     const appSettings = await prisma.gitHubAppSettings.findUnique({
       where: { id: GITHUB_APP_SETTINGS_ID },
     });
@@ -1641,7 +1673,7 @@ export class GitHubService {
       rawItems.map((pullRequest) =>
         this.normalizePullRequest(
           pullRequest,
-          regexByGitHubId.get(pullRequest.repository.id) ?? null,
+          regexByGitHubId.get(pullRequest.repository.id) ?? defaultJiraKeyRegex,
           token,
           appConfigured,
         ),
@@ -1773,6 +1805,11 @@ export class GitHubService {
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
     ]);
+    const settings = await (
+      await getPrismaClient()
+    ).gitHubSettings.findUnique({
+      where: { id: SETTINGS_ID },
+    });
     const matching = rawItems.filter(
       (pullRequest) =>
         pullRequest.headRepository?.nameWithOwner.toLowerCase() ===
@@ -1782,7 +1819,7 @@ export class GitHubService {
       matching.map(async (raw) => ({
         ...(await this.normalizePullRequest(
           raw,
-          null,
+          settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
           token,
           Boolean(appSettings),
         )),
@@ -1845,18 +1882,21 @@ export class GitHubService {
     const pullRequest = data.repository?.pullRequest;
     if (!pullRequest) return null;
     const prisma = await getPrismaClient();
-    const [managedRepositories, appSettings] = await Promise.all([
+    const [managedRepositories, appSettings, settings] = await Promise.all([
       prisma.gitHubRepository.findMany(),
       prisma.gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
+      prisma.gitHubSettings.findUnique({ where: { id: SETTINGS_ID } }),
     ]);
     const managedRepository = managedRepositories.find(
       (repository) => repository.githubId === pullRequest.repository.id,
     );
     const summary = await this.normalizePullRequest(
       pullRequest,
-      managedRepository?.jiraKeyRegex ?? null,
+      managedRepository?.jiraKeyRegex ??
+        settings?.defaultJiraKeyRegex ??
+        DEFAULT_JIRA_KEY_REGEX,
       token,
       Boolean(appSettings),
     );
@@ -1881,6 +1921,26 @@ export class GitHubService {
       pullRequest.reviewThreadsFull,
       token,
     );
+    const canonicalOrigin = pullRequest.headRepository
+      ? `github.com/${pullRequest.headRepository.nameWithOwner.toLowerCase()}`
+      : null;
+    const matchingRepository = canonicalOrigin
+      ? await prisma.codebaseRepository.findFirst({
+          where: { canonicalOrigin },
+          select: { id: true },
+        })
+      : null;
+    const worktree = matchingRepository
+      ? await prisma.worktree.findFirst({
+          where: {
+            branch: pullRequest.headRefName,
+            missingAt: null,
+            codebase: { repositoryId: matchingRepository.id },
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true },
+        })
+      : null;
     return {
       ...summary,
       pipelines,
@@ -1900,7 +1960,237 @@ export class GitHubService {
       commitCount: pullRequest.commits.totalCount,
       updatedAt: pullRequest.updatedAt,
       mergedAt: pullRequest.mergedAt,
+      worktreeId: worktree?.id ?? null,
     };
+  }
+
+  private mergeBlockedReason(
+    pullRequest: RawPullRequestMergeState,
+    viewerPermission: RepositoryPermission | null,
+  ): string | null {
+    if (pullRequest.state !== "OPEN") return "The pull request is not open.";
+    if (pullRequest.isDraft) return "Draft pull requests cannot be merged.";
+    if (
+      !viewerPermission ||
+      !["ADMIN", "MAINTAIN", "WRITE"].includes(viewerPermission)
+    ) {
+      return "You do not have permission to merge pull requests in this repository.";
+    }
+    if (pullRequest.mergeable === "CONFLICTING")
+      return "The pull request has merge conflicts.";
+    if (pullRequest.mergeable === "UNKNOWN")
+      return "GitHub is still calculating mergeability. Try again shortly.";
+    if (pullRequest.mergeStateStatus === "BEHIND")
+      return "The branch must be updated with the base branch before it can be merged.";
+    if (pullRequest.mergeStateStatus === "BLOCKED")
+      return "Required reviews, checks, or branch protection rules have not been satisfied.";
+    if (pullRequest.mergeStateStatus === "DIRTY")
+      return "The pull request has merge conflicts.";
+    if (pullRequest.mergeStateStatus === "DRAFT")
+      return "Draft pull requests cannot be merged.";
+    if (pullRequest.mergeStateStatus === "UNKNOWN")
+      return "GitHub is still calculating the merge requirements. Try again shortly.";
+    return null;
+  }
+
+  private async mergeState(
+    owner: string,
+    name: string,
+    number: number,
+    token: string,
+  ): Promise<{
+    pullRequest: RawPullRequestMergeState;
+    availableMethods: GitHubMergeMethod[];
+    viewerEmail: string | null;
+    viewerPermission: RepositoryPermission | null;
+  }> {
+    const data = await this.request<{
+      viewer: { email: string };
+      repository: {
+        mergeCommitAllowed: boolean;
+        rebaseMergeAllowed: boolean;
+        squashMergeAllowed: boolean;
+        viewerPermission: RepositoryPermission | null;
+        pullRequest: RawPullRequestMergeState | null;
+      } | null;
+    }>(
+      `query GitHubPullRequestMergeOptions(
+        $owner: String!
+        $name: String!
+        $number: Int!
+      ) {
+        viewer { email }
+        repository(owner: $owner, name: $name) {
+          mergeCommitAllowed
+          rebaseMergeAllowed
+          squashMergeAllowed
+          viewerPermission
+          pullRequest(number: $number) {
+            id title body url state isDraft mergeable mergeStateStatus headRefOid
+          }
+        }
+      }`,
+      { owner, name, number },
+      token,
+    );
+    const pullRequest = data.repository?.pullRequest;
+    if (!pullRequest) throw new Error("Pull request was not found");
+    const availableMethods: GitHubMergeMethod[] = [];
+    if (data.repository?.squashMergeAllowed) availableMethods.push("SQUASH");
+    if (data.repository?.mergeCommitAllowed) availableMethods.push("MERGE");
+    if (data.repository?.rebaseMergeAllowed) availableMethods.push("REBASE");
+    return {
+      pullRequest,
+      availableMethods,
+      viewerEmail: data.viewer.email.trim() || null,
+      viewerPermission: data.repository?.viewerPermission ?? null,
+    };
+  }
+
+  private async commitEmailOptions(
+    token: string,
+    viewerEmail: string | null,
+  ): Promise<{ emails: string[]; primaryEmail: string | null }> {
+    const emails = new Set<string>();
+    let primaryEmail: string | null = null;
+    if (viewerEmail) emails.add(viewerEmail);
+    try {
+      const values = await this.restRequest<
+        Array<{ email: string; verified: boolean; primary: boolean }>
+      >(`${GITHUB_API_BASE_URL}/user/emails?per_page=100`, token);
+      for (const value of values) {
+        const email = value.email.trim();
+        if (!value.verified || !email) continue;
+        emails.add(email);
+        if (value.primary) primaryEmail = email;
+      }
+    } catch {
+      // The token may not include user:email. The public viewer email and
+      // GitHub's account-default option remain available in that case.
+    }
+    return {
+      emails: [...emails].sort((left, right) => left.localeCompare(right)),
+      primaryEmail,
+    };
+  }
+
+  async pullRequestMergeOptions(
+    ownerValue: string,
+    nameValue: string,
+    number: number,
+  ): Promise<GitHubPullRequestMergeOptions> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${ownerValue}/${nameValue}`,
+    );
+    if (!Number.isInteger(number) || number < 1) {
+      throw new Error("Pull request number must be a positive integer");
+    }
+    const token = await this.requireToken();
+    const state = await this.mergeState(owner, name, number, token);
+    const commitEmailOptions = await this.commitEmailOptions(
+      token,
+      state.viewerEmail,
+    );
+    const blockedReason =
+      this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
+      (state.availableMethods.length === 0
+        ? "This repository does not have an available merge method."
+        : null);
+    return {
+      availableMethods: state.availableMethods,
+      commitEmails: commitEmailOptions.emails,
+      defaultCommitEmail: commitEmailOptions.primaryEmail,
+      defaultCommitHeadline: state.pullRequest.title,
+      defaultCommitBody: state.pullRequest.body,
+      canMerge: blockedReason === null,
+      blockedReason,
+    };
+  }
+
+  async mergePullRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    method: GitHubMergeMethod;
+    commitHeadline: string;
+    commitBody: string;
+    authorEmail?: string | null;
+  }): Promise<GitHubPullRequestMergeResult> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    if (!Number.isInteger(input.number) || input.number < 1) {
+      throw new Error("Pull request number must be a positive integer");
+    }
+    const commitHeadline = input.commitHeadline.trim();
+    if (!commitHeadline) throw new Error("A commit message is required");
+    const token = await this.requireToken();
+    const state = await this.mergeState(owner, name, input.number, token);
+    const blockedReason = this.mergeBlockedReason(
+      state.pullRequest,
+      state.viewerPermission,
+    );
+    if (blockedReason) throw new Error(blockedReason);
+    if (!state.availableMethods.includes(input.method)) {
+      throw new Error(
+        "The selected merge method is not enabled for this repository.",
+      );
+    }
+    const authorEmail = input.authorEmail?.trim() || null;
+    if (authorEmail) {
+      const availableEmails = await this.commitEmailOptions(
+        token,
+        state.viewerEmail,
+      );
+      if (!availableEmails.emails.includes(authorEmail)) {
+        throw new Error(
+          "The selected commit email is not available for this GitHub account.",
+        );
+      }
+    }
+    const data = await this.request<{
+      mergePullRequest: {
+        pullRequest: {
+          id: string;
+          state: "OPEN" | "CLOSED" | "MERGED";
+          url: string;
+          mergedAt: string | null;
+        } | null;
+      };
+    }>(
+      `mutation MergeGitHubPullRequest(
+        $pullRequestId: ID!
+        $method: PullRequestMergeMethod!
+        $commitHeadline: String!
+        $commitBody: String!
+        $authorEmail: String
+        $expectedHeadOid: GitObjectID!
+      ) {
+        mergePullRequest(input: {
+          pullRequestId: $pullRequestId
+          mergeMethod: $method
+          commitHeadline: $commitHeadline
+          commitBody: $commitBody
+          authorEmail: $authorEmail
+          expectedHeadOid: $expectedHeadOid
+        }) {
+          pullRequest { id state url mergedAt }
+        }
+      }`,
+      {
+        pullRequestId: state.pullRequest.id,
+        method: input.method,
+        commitHeadline,
+        commitBody: input.commitBody,
+        authorEmail,
+        expectedHeadOid: state.pullRequest.headRefOid,
+      },
+      token,
+    );
+    const pullRequest = data.mergePullRequest.pullRequest;
+    if (!pullRequest)
+      throw new Error("GitHub did not return the merged pull request");
+    return pullRequest;
   }
 
   async replyToReviewThread(

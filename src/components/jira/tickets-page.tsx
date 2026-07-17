@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
   Columns3,
   FolderKanban,
   Pencil,
@@ -134,6 +135,9 @@ export function JiraTicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   const [layout, setLayout] = useState<"table" | "board">("table");
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const requestedProjectId = searchParams.get("project");
   const requestedSourceId = searchParams.get("source");
@@ -238,6 +242,15 @@ export function JiraTicketsPage() {
     }
     return [...groups.entries()];
   }, [displayedBoard]);
+
+  const toggleStatus = (status: string) => {
+    setCollapsedStatuses((current) => {
+      const next = new Set(current);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
 
   return (
     <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-5">
@@ -393,71 +406,117 @@ export function JiraTicketsPage() {
               <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (
                   <Card key={status} className="gap-0 py-0">
-                    <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-2 border-b bg-muted/40 py-3">
-                      <h2 className="font-medium">{status}</h2>
-                      <Badge>{tickets.length}</Badge>
+                    <CardHeader
+                      className={
+                        collapsedStatuses.has(status)
+                          ? "bg-muted/40 py-3"
+                          : "border-b bg-muted/40 py-3"
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <Button
+                          aria-expanded={!collapsedStatuses.has(status)}
+                          className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+                          onClick={() => toggleStatus(status)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <span className="truncate font-medium">{status}</span>
+                        </Button>
+                        <div className="ml-auto flex items-center justify-end gap-2">
+                          <Badge>{tickets.length}</Badge>
+                          <Button
+                            aria-expanded={!collapsedStatuses.has(status)}
+                            aria-label={t(
+                              collapsedStatuses.has(status)
+                                ? "expandStatus"
+                                : "collapseStatus",
+                              { status },
+                            )}
+                            className="aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+                            onClick={() => toggleStatus(status)}
+                            size="icon-sm"
+                            title={t(
+                              collapsedStatuses.has(status)
+                                ? "expandStatus"
+                                : "collapseStatus",
+                              { status },
+                            )}
+                            type="button"
+                            variant="ghost"
+                          >
+                            {collapsedStatuses.has(status) ? (
+                              <ChevronRight className="size-5" />
+                            ) : (
+                              <ChevronDown className="size-5" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
                     </CardHeader>
-                    <CardContent className="px-0">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead>{t("ticket")}</TableHead>
-                            <TableHead>{t("issueType")}</TableHead>
-                            <TableHead>{t("priority")}</TableHead>
-                            <TableHead>{t("assignee")}</TableHead>
-                            <TableHead>{t("updated")}</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {tickets.map((ticket) => (
-                            <TableRow key={ticket.key}>
-                              <TableCell className="min-w-80 whitespace-normal">
-                                <Button
-                                  className="group h-auto w-full flex-col items-start justify-start gap-0 px-1 py-0.5 text-left whitespace-normal"
-                                  onClick={() =>
-                                    replaceParams({ issue: ticket.key })
-                                  }
-                                  type="button"
-                                  variant="ghost"
-                                >
-                                  <span className="block text-xs font-semibold text-primary group-hover:underline">
-                                    {ticket.key}
-                                  </span>
-                                  <span className="mt-1 block font-medium">
-                                    {ticket.summary}
-                                  </span>
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                {ticket.issueType ?? t("issue")}
-                              </TableCell>
-                              <TableCell>
-                                {ticket.priority ? (
-                                  <Badge
-                                    className={priorityClass(ticket.priority)}
-                                  >
-                                    {ticket.priority}
-                                  </Badge>
-                                ) : (
-                                  "—"
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <span className="flex items-center gap-1.5">
-                                  <JiraPersonAvatar
-                                    avatarUrl={ticket.assigneeAvatarUrl}
-                                  />
-                                  {ticket.assignee ?? t("unassigned")}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {displayDate(ticket.updatedAt)}
-                              </TableCell>
+                    {!collapsedStatuses.has(status) && (
+                      <CardContent className="px-0">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>{t("ticket")}</TableHead>
+                              <TableHead>{t("issueType")}</TableHead>
+                              <TableHead>{t("priority")}</TableHead>
+                              <TableHead>{t("assignee")}</TableHead>
+                              <TableHead>{t("updated")}</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
+                          </TableHeader>
+                          <TableBody>
+                            {tickets.map((ticket) => (
+                              <TableRow key={ticket.key}>
+                                <TableCell className="min-w-80 whitespace-normal">
+                                  <Button
+                                    className="group h-auto w-full flex-col items-start justify-start gap-0 px-1 py-0.5 text-left whitespace-normal"
+                                    onClick={() =>
+                                      replaceParams({ issue: ticket.key })
+                                    }
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    <span className="block text-xs font-semibold text-primary group-hover:underline">
+                                      {ticket.key}
+                                    </span>
+                                    <span className="mt-1 block font-medium">
+                                      {ticket.summary}
+                                    </span>
+                                  </Button>
+                                </TableCell>
+                                <TableCell>
+                                  {ticket.issueType ?? t("issue")}
+                                </TableCell>
+                                <TableCell>
+                                  {ticket.priority ? (
+                                    <Badge
+                                      className={priorityClass(ticket.priority)}
+                                    >
+                                      {ticket.priority}
+                                    </Badge>
+                                  ) : (
+                                    "—"
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <span className="flex items-center gap-1.5">
+                                    <JiraPersonAvatar
+                                      avatarUrl={ticket.assigneeAvatarUrl}
+                                    />
+                                    {ticket.assignee ?? t("unassigned")}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {displayDate(ticket.updatedAt)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    )}
                   </Card>
                 ))}
               </div>

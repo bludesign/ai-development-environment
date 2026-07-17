@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Settings2,
   Trash2,
 } from "lucide-react";
@@ -14,6 +15,7 @@ import { useSearchParams } from "next/navigation";
 import { FormEvent, MouseEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -43,6 +45,10 @@ import { Item } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  SearchableSelect,
+  type SearchableSelectOption,
+} from "@/components/ui/searchable-select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -65,13 +71,12 @@ import type {
   GitHubSettingsView,
 } from "@/services/github/types";
 
-const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount headRefName createdAt";
 
-type TabKey = "mine" | "review" | `repo:${string}`;
+type TabKey = "mine" | "review" | "repositories";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -132,12 +137,9 @@ export function PullRequestsPage() {
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [repositories, setRepositories] = useState<GitHubRepositoryView[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("mine");
-  const [pages, setPages] = useState<
-    Partial<Record<TabKey, GitHubPullRequestPage>>
-  >({});
-  const [loadingTabs, setLoadingTabs] = useState<
-    Partial<Record<TabKey, boolean>>
-  >({});
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
+  const [pages, setPages] = useState<Record<string, GitHubPullRequestPage>>({});
+  const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
   const [configurationLoading, setConfigurationLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
@@ -148,11 +150,16 @@ export function PullRequestsPage() {
         githubSettings: GitHubSettingsView;
         githubRepositories: GitHubRepositoryView[];
       }>(`query GitHubPullRequestConfiguration {
-        githubSettings { tokenConfigured updatedAt }
+        githubSettings { tokenConfigured defaultJiraKeyRegex updatedAt }
         githubRepositories { ${REPOSITORY_FIELDS} }
       }`);
       setSettings(data.githubSettings);
       setRepositories(data.githubRepositories);
+      setSelectedRepositoryId((current) =>
+        data.githubRepositories.some((repository) => repository.id === current)
+          ? current
+          : (data.githubRepositories[0]?.id ?? ""),
+      );
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -166,11 +173,13 @@ export function PullRequestsPage() {
     return () => window.clearTimeout(timeout);
   }, [loadConfiguration]);
 
-  const loadTab = useCallback(async (tab: TabKey) => {
-    setLoadingTabs((current) => ({ ...current, [tab]: true }));
+  const loadTab = useCallback(async (tab: TabKey, repositoryId: string) => {
+    const pageKey = tab === "repositories" ? `repository:${repositoryId}` : tab;
+    if (tab === "repositories" && !repositoryId) return;
+    setLoadingTabs((current) => ({ ...current, [pageKey]: true }));
     try {
-      const repositoryId = tab.startsWith("repo:") ? tab.slice(5) : null;
-      const scope: GitHubPullRequestScope = repositoryId
+      const scopedRepositoryId = tab === "repositories" ? repositoryId : null;
+      const scope: GitHubPullRequestScope = scopedRepositoryId
         ? "REPOSITORY"
         : tab === "review"
           ? "REVIEW_REQUESTED"
@@ -187,47 +196,76 @@ export function PullRequestsPage() {
             truncated
           }
         }`,
-        { scope, repositoryId },
+        { scope, repositoryId: scopedRepositoryId },
       );
       setPages((current) => ({
         ...current,
-        [tab]: data.githubPullRequests,
+        [pageKey]: data.githubPullRequests,
       }));
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setLoadingTabs((current) => ({ ...current, [tab]: false }));
+      setLoadingTabs((current) => ({ ...current, [pageKey]: false }));
     }
   }, []);
+
+  const pageKey =
+    activeTab === "repositories"
+      ? `repository:${selectedRepositoryId}`
+      : activeTab;
 
   useEffect(() => {
     if (
       settings?.tokenConfigured &&
-      !pages[activeTab] &&
-      !loadingTabs[activeTab]
+      (activeTab !== "repositories" || selectedRepositoryId) &&
+      !pages[pageKey] &&
+      !loadingTabs[pageKey]
     ) {
-      const timeout = window.setTimeout(() => void loadTab(activeTab), 0);
+      const timeout = window.setTimeout(
+        () => void loadTab(activeTab, selectedRepositoryId),
+        0,
+      );
       return () => window.clearTimeout(timeout);
     }
-  }, [activeTab, loadTab, loadingTabs, pages, settings?.tokenConfigured]);
+  }, [
+    activeTab,
+    loadTab,
+    loadingTabs,
+    pageKey,
+    pages,
+    selectedRepositoryId,
+    settings?.tokenConfigured,
+  ]);
 
   useEffect(() => {
     if (
-      activeTab.startsWith("repo:") &&
-      !repositories.some((repository) => `repo:${repository.id}` === activeTab)
+      !repositories.some((repository) => repository.id === selectedRepositoryId)
     ) {
-      const timeout = window.setTimeout(() => setActiveTab("mine"), 0);
+      const timeout = window.setTimeout(
+        () => setSelectedRepositoryId(repositories[0]?.id ?? ""),
+        0,
+      );
       return () => window.clearTimeout(timeout);
     }
-  }, [activeTab, repositories]);
+  }, [repositories, selectedRepositoryId]);
 
-  const page = pages[activeTab];
-  const loading = Boolean(loadingTabs[activeTab]);
-  const repositorySpecific = activeTab.startsWith("repo:");
+  const page = pages[pageKey];
+  const loading = Boolean(loadingTabs[pageKey]);
+  const repositorySpecific = activeTab === "repositories";
 
   const repositoriesChanged = (next: GitHubRepositoryView[]) => {
     setRepositories(next);
+    setPages({});
+    setSelectedRepositoryId((current) =>
+      next.some((repository) => repository.id === current)
+        ? current
+        : (next[0]?.id ?? ""),
+    );
+  };
+
+  const settingsChanged = (next: GitHubSettingsView) => {
+    setSettings(next);
     setPages({});
   };
 
@@ -236,11 +274,11 @@ export function PullRequestsPage() {
     pipeline: GitHubPipelineView,
   ) => {
     setPages((current) => {
-      const currentPage = current[activeTab];
+      const currentPage = current[pageKey];
       if (!currentPage) return current;
       return {
         ...current,
-        [activeTab]: {
+        [pageKey]: {
           ...currentPage,
           items: currentPage.items.map((pullRequest) =>
             pullRequest.id === pullRequestId
@@ -272,7 +310,7 @@ export function PullRequestsPage() {
         <div className="flex gap-2">
           <Button
             disabled={!settings?.tokenConfigured || loading}
-            onClick={() => void loadTab(activeTab)}
+            onClick={() => void loadTab(activeTab, selectedRepositoryId)}
             variant="outline"
           >
             <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -321,17 +359,32 @@ export function PullRequestsPage() {
               <TabsList aria-label={t("tabsLabel")}>
                 <TabsTrigger value="mine">{t("mine")}</TabsTrigger>
                 <TabsTrigger value="review">{t("reviewRequests")}</TabsTrigger>
-                {repositories.map((repository) => (
-                  <TabsTrigger
-                    key={repository.id}
-                    value={`repo:${repository.id}`}
-                  >
-                    {repository.nameWithOwner}
-                  </TabsTrigger>
-                ))}
+                <TabsTrigger value="repositories">
+                  {t("repositories")}
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
+
+          {activeTab === "repositories" && repositories.length > 0 && (
+            <div className="max-w-lg">
+              <SearchableSelect
+                ariaLabel={t("repositoryFilter")}
+                emptyMessage={t("noRepositoryMatches")}
+                onValueChange={setSelectedRepositoryId}
+                options={repositories.map<SearchableSelectOption>(
+                  (repository) => ({
+                    value: repository.id,
+                    label: repository.nameWithOwner,
+                    keywords: `${repository.owner} ${repository.name}`,
+                  }),
+                )}
+                placeholder={t("selectRepository")}
+                searchPlaceholder={t("searchRepositories")}
+                value={selectedRepositoryId}
+              />
+            </div>
+          )}
 
           {page?.truncated && (
             <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300">
@@ -341,7 +394,17 @@ export function PullRequestsPage() {
             </Alert>
           )}
 
-          {loading && !page ? (
+          {activeTab === "repositories" && repositories.length === 0 ? (
+            <Empty className="border py-12">
+              <EmptyHeader>
+                <EmptyTitle>{t("noManagedRepositories")}</EmptyTitle>
+                <EmptyDescription>{t("manageDescription")}</EmptyDescription>
+              </EmptyHeader>
+              <Button className="mt-4" onClick={() => setManagerOpen(true)}>
+                <Plus /> {t("addRepository")}
+              </Button>
+            </Empty>
+          ) : loading && !page ? (
             <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
               <Spinner />
               {t("loadingPullRequests")}
@@ -357,6 +420,7 @@ export function PullRequestsPage() {
             <PullRequestTable
               items={page.items}
               locale={locale}
+              onMerged={() => loadTab(activeTab, selectedRepositoryId)}
               onPipelineRetried={pipelineRetried}
               repositorySpecific={repositorySpecific}
             />
@@ -365,9 +429,12 @@ export function PullRequestsPage() {
       )}
 
       <GitHubRepositoryManager
+        key={settings?.updatedAt ?? "loading"}
         onRepositoriesChanged={repositoriesChanged}
+        onSettingsChanged={settingsChanged}
         open={managerOpen}
         repositories={repositories}
+        settings={settings}
         setOpen={setManagerOpen}
         tokenConfigured={Boolean(settings?.tokenConfigured)}
       />
@@ -382,11 +449,13 @@ export function PullRequestsPage() {
 function PullRequestTable({
   items,
   locale,
+  onMerged,
   onPipelineRetried,
   repositorySpecific,
 }: {
   items: GitHubPullRequestView[];
   locale: string;
+  onMerged: () => void | Promise<void>;
   onPipelineRetried: (
     pullRequestId: string,
     pipeline: GitHubPipelineView,
@@ -411,6 +480,7 @@ function PullRequestTable({
             <TableHead>{t("approval")}</TableHead>
             <TableHead>{t("openComments")}</TableHead>
             <TableHead>{t("age")}</TableHead>
+            <TableHead className="text-right">{t("actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -443,13 +513,18 @@ function PullRequestTable({
                 </Link>
               </TableCell>
               <TableCell className="min-w-72 whitespace-normal">
-                <Link
-                  className="font-medium hover:underline"
-                  href={pullRequestDetailHref(pullRequest)}
-                  onClick={stopRowClick}
-                >
-                  {pullRequest.title}
-                </Link>
+                <div className="space-y-1">
+                  <Link
+                    className="font-medium hover:underline"
+                    href={pullRequestDetailHref(pullRequest)}
+                    onClick={stopRowClick}
+                  >
+                    {pullRequest.title}
+                  </Link>
+                  <p className="font-mono text-xs break-all text-muted-foreground">
+                    {pullRequest.headRefName}
+                  </p>
+                </div>
               </TableCell>
               <TableCell className="min-w-40 whitespace-normal">
                 <div className="flex flex-wrap gap-1">
@@ -517,6 +592,12 @@ function PullRequestTable({
                   {relativeAge(pullRequest.createdAt, locale)}
                 </time>
               </TableCell>
+              <TableCell className="text-right">
+                <MergePullRequestButton
+                  onMerged={onMerged}
+                  pullRequest={pullRequest}
+                />
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -529,21 +610,29 @@ function GitHubRepositoryManager({
   open,
   setOpen,
   repositories,
+  settings,
   onRepositoriesChanged,
+  onSettingsChanged,
   tokenConfigured,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
   repositories: GitHubRepositoryView[];
+  settings: GitHubSettingsView | null;
   onRepositoriesChanged: (repositories: GitHubRepositoryView[]) => void;
+  onSettingsChanged: (settings: GitHubSettingsView) => void;
   tokenConfigured: boolean;
 }) {
   const t = useTranslations("pullRequests");
   const [available, setAvailable] = useState<GitHubRepositoryCandidate[]>([]);
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [repositorySearch, setRepositorySearch] = useState("");
   const [nameWithOwner, setNameWithOwner] = useState("");
-  const [jiraKeyRegex, setJiraKeyRegex] = useState(DEFAULT_JIRA_KEY_REGEX);
+  const [jiraKeyRegex, setJiraKeyRegex] = useState("");
+  const [defaultJiraKeyRegex, setDefaultJiraKeyRegex] = useState(
+    settings?.defaultJiraKeyRegex ?? "",
+  );
   const [busy, setBusy] = useState(false);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -606,7 +695,7 @@ function GitHubRepositoryManager({
       );
       onRepositoriesChanged(data.addGitHubRepository);
       setNameWithOwner("");
-      setJiraKeyRegex(DEFAULT_JIRA_KEY_REGEX);
+      setJiraKeyRegex("");
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -619,6 +708,40 @@ function GitHubRepositoryManager({
     event.preventDefault();
     void addRepository(nameWithOwner, jiraKeyRegex);
   };
+
+  const saveDefaultRegex = async () => {
+    if (!defaultJiraKeyRegex.trim() || validateRegex(defaultJiraKeyRegex)) {
+      setError(t("invalidRegex"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        saveGitHubSettings: GitHubSettingsView;
+      }>(
+        `mutation SaveDefaultGitHubJiraKeyRegex(
+          $input: SaveGitHubSettingsInput!
+        ) {
+          saveGitHubSettings(input: $input) {
+            tokenConfigured defaultJiraKeyRegex updatedAt
+          }
+        }`,
+        { input: { defaultJiraKeyRegex } },
+      );
+      onSettingsChanged(data.saveGitHubSettings);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const filteredAvailable = available.filter((candidate) =>
+    candidate.nameWithOwner
+      .toLowerCase()
+      .includes(repositorySearch.trim().toLowerCase()),
+  );
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
@@ -645,6 +768,32 @@ function GitHubRepositoryManager({
           <div className="grid min-w-0 gap-6 md:grid-cols-2">
             <section className="min-w-0 space-y-3">
               <h3 className="font-medium">{t("managedRepositories")}</h3>
+              <Item className="block space-y-2 p-3" variant="outline">
+                <Label htmlFor="default-github-jira-regex">
+                  {t("defaultJiraKeyRegex")}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="default-github-jira-regex"
+                    onChange={(event) =>
+                      setDefaultJiraKeyRegex(event.target.value)
+                    }
+                    value={defaultJiraKeyRegex}
+                  />
+                  <Button
+                    aria-label={t("saveDefaultRegex")}
+                    disabled={busy}
+                    onClick={() => void saveDefaultRegex()}
+                    size="icon"
+                    type="button"
+                  >
+                    {busy ? <Spinner /> : <Save />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("defaultJiraKeyRegexHelp")}
+                </p>
+              </Item>
               {repositories.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {t("noManagedRepositories")}
@@ -672,7 +821,19 @@ function GitHubRepositoryManager({
                   <TabsTrigger value="manual">{t("enterManually")}</TabsTrigger>
                 </TabsList>
                 <TabsContent className="mt-3 space-y-2" value="browse">
-                  {available.map((candidate) => {
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      aria-label={t("searchAvailableRepositories")}
+                      className="pl-8"
+                      onChange={(event) =>
+                        setRepositorySearch(event.target.value)
+                      }
+                      placeholder={t("searchAvailableRepositories")}
+                      value={repositorySearch}
+                    />
+                  </div>
+                  {filteredAvailable.map((candidate) => {
                     const managed = repositories.some(
                       (repository) =>
                         repository.githubId === candidate.githubId,
@@ -697,10 +858,7 @@ function GitHubRepositoryManager({
                         <Button
                           disabled={busy || managed}
                           onClick={() =>
-                            void addRepository(
-                              candidate.nameWithOwner,
-                              DEFAULT_JIRA_KEY_REGEX,
-                            )
+                            void addRepository(candidate.nameWithOwner, "")
                           }
                           size="sm"
                         >
@@ -710,6 +868,11 @@ function GitHubRepositoryManager({
                       </Item>
                     );
                   })}
+                  {!browseLoading && filteredAvailable.length === 0 && (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      {t("noRepositoryMatches")}
+                    </p>
+                  )}
                   {browseLoading && (
                     <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
                       <Spinner />
@@ -761,7 +924,7 @@ function GitHubRepositoryManager({
                         value={jiraKeyRegex}
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {t("jiraKeyRegexHelp")}
+                        {t("jiraKeyRegexOverrideHelp")}
                       </p>
                     </div>
                     <Button disabled={busy} type="submit">
@@ -888,6 +1051,9 @@ function ManagedRepositoryEditor({
             <span className="sr-only">{t("saveRegex")}</span>
           </Button>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t("jiraKeyRegexOverrideHelp")}
+        </p>
       </div>
     </Item>
   );

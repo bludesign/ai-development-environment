@@ -127,6 +127,7 @@ const detail = {
   commitCount: 2,
   updatedAt: "2026-07-15T00:00:00.000Z",
   mergedAt: null,
+  worktreeId: "worktree-1",
 };
 
 beforeEach(() => {
@@ -179,22 +180,23 @@ describe("PullRequestDetailPage", () => {
     const descriptionCard = screen
       .getByText("Description")
       .closest('[data-slot="card"]') as HTMLElement;
-    fireEvent.pointerDown(
-      within(descriptionCard).getByRole("button", { name: "Rendered" }),
-      {
-        button: 0,
-        ctrlKey: false,
-      },
+    fireEvent.click(
+      within(descriptionCard).getByRole("button", { name: "Raw" }),
     );
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Markdown" }));
     expect(screen.getByText("Detailed pull request description").tagName).toBe(
       "PRE",
     );
+    expect(
+      within(descriptionCard).getByRole("button", { name: "Rendered" }),
+    ).toBeDefined();
     fireEvent.click(
       within(descriptionCard).getByRole("button", { name: "Copy" }),
     );
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(detail.body));
     expect(screen.getByText("feature/app-42 → main")).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "View Worktree" }).getAttribute("href"),
+    ).toBe("/worktrees/worktree-1");
     expect(screen.getByText("+20")).toBeDefined();
     expect(screen.getByText("−5")).toBeDefined();
     expect(screen.getByText("CI")).toBeDefined();

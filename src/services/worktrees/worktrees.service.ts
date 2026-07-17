@@ -275,6 +275,15 @@ export class WorktreesService {
     );
   }
 
+  invalidatePullRequestsForOrigin(canonicalOrigin: string): void {
+    const normalizedOrigin = canonicalOrigin.toLowerCase();
+    for (const origin of this.pullRequestCache.keys()) {
+      if (origin.toLowerCase() === normalizedOrigin) {
+        this.pullRequestCache.delete(origin);
+      }
+    }
+  }
+
   private async cleanupExpired() {
     const prisma = await getPrismaClient();
     await prisma.worktree.deleteMany({

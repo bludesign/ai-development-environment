@@ -7,11 +7,18 @@ import {
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { GitHubService } from "@/services/github";
+import type { WorktreesService } from "@/services/worktrees";
 
 import { createGitHubResolvers } from "./github";
 
 function context(agentId: string | null): GraphQLContext {
   return { agentId, ipAddress: "127.0.0.1" } as GraphQLContext;
+}
+
+function worktreesService() {
+  return {
+    invalidatePullRequestsForOrigin: vi.fn(),
+  } as unknown as WorktreesService;
 }
 
 function resolveInfo(source: string): GraphQLResolveInfo {
@@ -43,7 +50,7 @@ describe("GitHub resolvers", () => {
       getSettings: vi.fn(),
       pullRequests: vi.fn(),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const resolvers = createGitHubResolvers(service, worktreesService());
 
     expect(() =>
       resolvers.Query.githubSettings({}, {}, context("agent-1")),
@@ -72,6 +79,8 @@ describe("GitHub resolvers", () => {
       saveAppSettings: vi.fn().mockResolvedValue({ configured: true }),
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
+      pullRequestMergeOptions: vi.fn().mockResolvedValue({ canMerge: true }),
+      mergePullRequest: vi.fn().mockResolvedValue({ state: "MERGED" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
       reviewThreads: vi.fn().mockResolvedValue({ threads: [] }),
@@ -80,7 +89,8 @@ describe("GitHub resolvers", () => {
         .fn()
         .mockResolvedValue({ id: "thread-1", isResolved: true }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const worktrees = worktreesService();
+    const resolvers = createGitHubResolvers(service, worktrees);
     const input = { apiToken: "secret-token" };
     const appInput = {
       appId: "123",
@@ -117,6 +127,25 @@ describe("GitHub resolvers", () => {
       { owner: "acme", name: "widgets", number: 17 },
       context(null),
     );
+    await resolvers.Query.githubPullRequestMergeOptions(
+      {},
+      { owner: "acme", name: "widgets", number: 17 },
+      context(null),
+    );
+    const mergeInput = {
+      owner: "acme",
+      name: "widgets",
+      number: 17,
+      method: "SQUASH" as const,
+      commitHeadline: "Ship widgets",
+      commitBody: "Release notes",
+      authorEmail: "octocat@example.com",
+    };
+    await resolvers.Mutation.mergeGitHubPullRequest(
+      {},
+      { input: mergeInput },
+      context(null),
+    );
     await resolvers.Mutation.retryGitHubPipeline(
       {},
       { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
@@ -143,6 +172,15 @@ describe("GitHub resolvers", () => {
       context(null),
     );
     expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
+    expect(service.pullRequestMergeOptions).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      17,
+    );
+    expect(service.mergePullRequest).toHaveBeenCalledWith(mergeInput);
+    expect(worktrees.invalidatePullRequestsForOrigin).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+    );
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
@@ -170,7 +208,7 @@ describe("GitHub resolvers", () => {
     const service = {
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
     } as unknown as GitHubService;
-    const resolvers = createGitHubResolvers(service);
+    const resolvers = createGitHubResolvers(service, worktreesService());
     const info = resolveInfo(`
       query PullRequests($scope: GitHubPullRequestScope!) {
         githubPullRequests(scope: $scope) {

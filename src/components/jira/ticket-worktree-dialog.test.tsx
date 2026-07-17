@@ -154,6 +154,28 @@ afterEach(async () => {
 });
 
 describe("TicketWorktreeDialog", () => {
+  test("dismisses the dialog after creating a ticket worktree", async () => {
+    mockRequests();
+    waitForJob.mockResolvedValue();
+    const onOpenChange = vi.fn();
+    render(
+      <TicketWorktreeDialog
+        issueKey="APP-123"
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+
+    expect(await screen.findByText("Add searchable worktrees")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create ticket worktree" }),
+    );
+
+    await waitFor(() => expect(waitForJob).toHaveBeenCalledWith("job-create"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText("The ticket worktree was created.")).toBeNull();
+  });
+
   test("lists existing worktrees and switches one to the ticket branch", async () => {
     mockRequests();
     waitForJob.mockResolvedValue();

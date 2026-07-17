@@ -87,6 +87,78 @@ describe("WorktreesService", () => {
     ]);
   });
 
+  test("refetches pull requests after case-insensitive cache invalidation", async () => {
+    const pullRequest = {
+      id: "pull-request-1",
+      headRefName: "feature/AIDE-24",
+    };
+    const pullRequestsForOrigin = vi
+      .fn()
+      .mockResolvedValueOnce([pullRequest])
+      .mockResolvedValueOnce([]);
+    const github = { pullRequestsForOrigin } as unknown as GitHubService;
+    const jira = {
+      cachedTicket: vi.fn(),
+      ticket: vi.fn(),
+    } as unknown as JiraService;
+    const worktree = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      folder: "/repo",
+      baseBranchOverride: null,
+      tags: [],
+      codebase: {
+        id: "codebase-1",
+        defaultBranch: "main",
+        jobs: [],
+        agent: { id: "agent-1", baseRepoDirectory: "/repo" },
+        repository: {
+          id: "repository-1",
+          canonicalOrigin: "github.com/acme/widgets",
+          jiraBranchRegex: null,
+        },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        deleteMany: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([worktree]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      worktreeTag: { findMany: vi.fn().mockResolvedValue([]) },
+      worktreeSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          id: "default",
+          editorVariant: "CODE",
+        }),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const worktrees = new WorktreesService(
+      {
+        registerCompletionHandler: vi.fn(),
+      } as unknown as AgentControlService,
+      jira,
+      github,
+    );
+
+    const initial = await worktrees.overview();
+    expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.pullRequest).toEqual(
+      pullRequest,
+    );
+    await worktrees.overview();
+    expect(pullRequestsForOrigin).toHaveBeenCalledOnce();
+
+    worktrees.invalidatePullRequestsForOrigin("GitHub.com/Acme/Widgets");
+    const refreshed = await worktrees.overview();
+
+    expect(pullRequestsForOrigin).toHaveBeenCalledTimes(2);
+    expect(
+      refreshed.agents[0]?.codebases[0]?.worktrees[0]?.pullRequest,
+    ).toBeNull();
+  });
+
   test("upserts inventory and tombstones rows absent from a complete scan", async () => {
     const transaction = {
       codebase: { update: vi.fn() },
