@@ -18,6 +18,7 @@ import type {
 
 import { JiraRichTextBlock } from "./rich-text";
 import { JiraTicketComments } from "./ticket-comments";
+import { JiraUser } from "./jira-user";
 import {
   JIRA_CACHE_FIELDS,
   JIRA_PERSON_FIELDS,
@@ -140,9 +141,10 @@ export function JiraTicketActivity({
               <Card key={change.id} size="sm">
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-                    <span>
-                      {change.author?.displayName ?? t("unknownUser")}
-                    </span>
+                    <JiraUser
+                      avatarUrl={change.author?.avatarUrl ?? null}
+                      name={change.author?.displayName ?? t("unknownUser")}
+                    />
                     <time>{date(change.createdAt)}</time>
                   </div>
                   <ul className="space-y-1 text-sm">
@@ -182,9 +184,11 @@ export function JiraTicketActivity({
               <Card key={worklog.id} size="sm">
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap justify-between gap-2">
-                    <span className="font-medium">
-                      {worklog.author?.displayName ?? t("unknownUser")}
-                    </span>
+                    <JiraUser
+                      avatarUrl={worklog.author?.avatarUrl ?? null}
+                      className="font-medium"
+                      name={worklog.author?.displayName ?? t("unknownUser")}
+                    />
                     <span className="text-sm">{worklog.timeSpent ?? "—"}</span>
                   </div>
                   <p className="text-xs text-muted-foreground">

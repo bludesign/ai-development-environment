@@ -33,7 +33,7 @@ const ticket = {
   priority: "High",
   assignee: "Ada",
   assigneeAccountId: "ada",
-  assigneeAvatarUrl: null,
+  assigneeAvatarUrl: "https://example.com/ada.png",
   projectKey: "APP",
   updatedAt: "2026-07-17T12:00:00.000Z",
   jiraUrl: "https://example.atlassian.net/browse/APP-42",
@@ -45,7 +45,11 @@ const ticket = {
     markdown: "## Deployment",
     wikiMarkup: "h2. Deployment",
   },
-  reporter: null,
+  reporter: {
+    accountId: "grace",
+    displayName: "Grace Hopper",
+    avatarUrl: "https://example.com/grace.png",
+  },
   creator: null,
   labels: ["release"],
   components: [],
@@ -116,10 +120,27 @@ describe("JiraTicketDetailPage", () => {
               schemaType: "doc",
               allowedValues: [],
             },
+            {
+              id: "duedate",
+              name: "Due date",
+              required: false,
+              schemaType: "date",
+              allowedValues: [],
+            },
           ],
         } as never;
       if (query.includes("query JiraTicketTransitions"))
         return { jiraTicketTransitions: [] } as never;
+      if (query.includes("query JiraAssignableUsers"))
+        return {
+          jiraAssignableUsers: [
+            {
+              accountId: "grace",
+              displayName: "Grace Hopper",
+              avatarUrl: "https://example.com/grace.png",
+            },
+          ],
+        } as never;
       if (query.includes("query JiraTicketChanges")) {
         return {
           jiraTicketChanges: {
@@ -129,7 +150,7 @@ describe("JiraTicketDetailPage", () => {
                 author: {
                   accountId: "ada",
                   displayName: "Ada",
-                  avatarUrl: null,
+                  avatarUrl: "https://example.com/ada.png",
                 },
                 createdAt: "2026-07-17T12:00:00.000Z",
                 items: [
@@ -165,6 +186,9 @@ describe("JiraTicketDetailPage", () => {
       .getByText("Description")
       .closest('[data-slot="card"]');
     expect(detailsCard?.parentElement).toBe(relatedCard?.parentElement);
+    expect(detailsCard?.querySelectorAll('[data-slot="avatar"]')).toHaveLength(
+      2,
+    );
     expect(detailsCard?.parentElement?.className).toContain("lg:grid-cols-2");
     expect(
       detailsCard?.parentElement?.compareDocumentPosition(descriptionCard!),
@@ -246,13 +270,34 @@ describe("JiraTicketDetailPage", () => {
     expect(fieldsHeader?.classList.contains("border-b")).toBe(false);
     expect(screen.getByRole("textbox", { name: "Comment" })).toBeDefined();
 
-    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    const assigneeTrigger = screen.getByRole("combobox", {
+      name: "Change assignee",
+    });
     expect(
-      await screen.findByText(
-        (_text, element) =>
-          element?.tagName === "LI" &&
-          Boolean(element.textContent?.includes("To Do → In Progress")),
-      ),
-    ).toBeDefined();
+      assigneeTrigger.querySelector('[data-slot="avatar"]'),
+    ).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    const historyItem = await screen.findByText(
+      (_text, element) =>
+        element?.tagName === "LI" &&
+        Boolean(element.textContent?.includes("To Do → In Progress")),
+    );
+    expect(historyItem).toBeDefined();
+    expect(
+      historyItem
+        .closest('[data-slot="card"]')
+        ?.querySelector('[data-slot="avatar"]'),
+    ).not.toBeNull();
+
+    fireEvent.click(
+      within(detailsCard as HTMLElement).getByRole("button", { name: "Edit" }),
+    );
+    const dueDatePicker = await screen.findByRole("button", {
+      name: "Choose a date",
+    });
+    expect(dueDatePicker.getAttribute("data-variant")).toBe("outline");
+    expect(dueDatePicker.querySelector(".lucide-calendar-days")).not.toBeNull();
+    expect(document.querySelector('input[type="date"]')).toBeNull();
   });
 });

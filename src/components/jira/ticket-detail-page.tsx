@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   ExternalLink,
@@ -10,8 +11,16 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
+import { JiraUser } from "@/components/jira/jira-user";
 import {
   JiraRichTextBlock,
   JiraTextComposer,
@@ -22,6 +31,7 @@ import { TicketWorktreeDialog } from "@/components/jira/ticket-worktree-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -40,6 +50,11 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -71,6 +86,19 @@ import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
 
 function date(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
+}
+
+function parseDateOnly(value: string): Date | undefined {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return undefined;
+  return new Date(year, month - 1, day);
+}
+
+function toDateOnly(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
@@ -461,15 +489,16 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
       <Card className="min-w-0 gap-0 overflow-hidden py-0">
         <CardHeader className={fieldsOpen ? "border-b py-4" : "py-4"}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <button
+            <Button
               aria-controls="jira-all-fields"
               aria-expanded={fieldsOpen}
-              className="-m-2 flex min-w-0 flex-1 items-center rounded-lg p-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left"
               onClick={() => setFieldsOpen((current) => !current)}
               type="button"
+              variant="ghost"
             >
               <CardTitle>{t("allFields")}</CardTitle>
-            </button>
+            </Button>
             <div className="ml-auto flex items-center justify-end gap-2">
               {fieldsOpen && (
                 <Input
@@ -560,9 +589,27 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
 
 function TicketMetadata({ ticket }: { ticket: JiraTicketDetail }) {
   const t = useTranslations("jiraTickets");
-  const rows = [
-    [t("assignee"), ticket.assignee ?? t("unassigned")],
-    [t("reporter"), ticket.reporter?.displayName ?? "—"],
+  const rows: Array<[string, ReactNode]> = [
+    [
+      t("assignee"),
+      <JiraUser
+        avatarUrl={ticket.assigneeAvatarUrl}
+        key="assignee"
+        name={ticket.assignee ?? t("unassigned")}
+      />,
+    ],
+    [
+      t("reporter"),
+      ticket.reporter ? (
+        <JiraUser
+          avatarUrl={ticket.reporter.avatarUrl}
+          key="reporter"
+          name={ticket.reporter.displayName}
+        />
+      ) : (
+        "—"
+      ),
+    ],
     [t("created"), date(ticket.createdAt)],
     [t("updated"), date(ticket.updatedAt)],
     [t("due"), date(ticket.dueAt)],
@@ -685,6 +732,8 @@ function EditDetailsDialog({
     [editFields, ticket],
   );
   const [draft, setDraft] = useState(initial);
+  const [dueDateOpen, setDueDateOpen] = useState(false);
+  const selectedDueDate = parseDateOnly(draft.dueDate);
 
   const byId = new Map(editFields.map((field) => [field.id, field]));
   const submit = async (event: FormEvent) => {
@@ -786,17 +835,62 @@ function EditDetailsDialog({
               <Label className="mb-1.5 block" htmlFor="jira-due-date">
                 {tt("due")}
               </Label>
-              <Input
-                id="jira-due-date"
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    dueDate: event.target.value,
-                  }))
-                }
-                type="date"
-                value={draft.dueDate}
-              />
+              <Popover onOpenChange={setDueDateOpen} open={dueDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    aria-label={t("pickDate")}
+                    className="w-full justify-start font-normal"
+                    disabled={busy}
+                    id="jira-due-date"
+                    type="button"
+                    variant="outline"
+                  >
+                    <CalendarDays />
+                    {selectedDueDate
+                      ? selectedDueDate.toLocaleDateString(undefined, {
+                          dateStyle: "medium",
+                        })
+                      : t("pickDate")}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-0">
+                  <Calendar
+                    autoFocus
+                    captionLayout="dropdown"
+                    endMonth={new Date(new Date().getFullYear() + 10, 11)}
+                    mode="single"
+                    onSelect={(nextDate) => {
+                      if (!nextDate) return;
+                      setDraft((current) => ({
+                        ...current,
+                        dueDate: toDateOnly(nextDate),
+                      }));
+                      setDueDateOpen(false);
+                    }}
+                    selected={selectedDueDate}
+                    startMonth={new Date(new Date().getFullYear() - 10, 0)}
+                  />
+                  {selectedDueDate && (
+                    <div className="border-t p-2">
+                      <Button
+                        className="w-full"
+                        onClick={() => {
+                          setDraft((current) => ({
+                            ...current,
+                            dueDate: "",
+                          }));
+                          setDueDateOpen(false);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {t("clearDate")}
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
             </div>
           )}
           <DialogFooter>

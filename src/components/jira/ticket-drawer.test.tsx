@@ -45,14 +45,18 @@ describe("JiraTicketDrawer", () => {
         statusCategory: "indeterminate",
         issueType: "Story",
         priority: "High",
-        assignee: null,
-        assigneeAccountId: null,
-        assigneeAvatarUrl: null,
+        assignee: "Ada",
+        assigneeAccountId: "ada",
+        assigneeAvatarUrl: "https://example.com/ada.png",
         projectKey: "APP",
         updatedAt: "2026-07-16T12:00:00.000Z",
         jiraUrl: "https://example.atlassian.net/browse/APP-123",
         description: "Ticket details",
-        reporter: null,
+        reporter: {
+          accountId: "grace",
+          displayName: "Grace Hopper",
+          avatarUrl: "https://example.com/grace.png",
+        },
         creator: null,
         labels: [],
         components: [],
@@ -86,7 +90,7 @@ describe("JiraTicketDrawer", () => {
             author: {
               accountId: "reviewer-1",
               displayName: "Reviewer",
-              avatarUrl: null,
+              avatarUrl: "https://example.com/reviewer.png",
             },
             body: "Looks good",
             createdAt: "2026-07-16T12:00:00.000Z",
@@ -165,6 +169,7 @@ describe("JiraTicketDrawer", () => {
     const commentItem = screen
       .getByText("Reviewer")
       .closest('[data-slot="item"]') as HTMLElement;
+    expect(commentItem.querySelector('[data-slot="avatar"]')).not.toBeNull();
     const commentDate = commentItem.querySelector("time");
     const commentActions = within(commentItem).getByRole("button", {
       name: "Comment actions",

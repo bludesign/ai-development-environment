@@ -7,8 +7,9 @@ import {
   Maximize2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
+import { JiraUser } from "@/components/jira/jira-user";
 import { JiraRichTextBlock } from "@/components/jira/rich-text";
 import { JiraTicketActions } from "@/components/jira/ticket-actions";
 import { JiraTicketComments } from "@/components/jira/ticket-comments";
@@ -315,9 +316,27 @@ export function JiraTicketDrawer({
 
 function DetailGrid({ ticket }: { ticket: JiraTicketDetail }) {
   const t = useTranslations("jiraTickets");
-  const rows = [
-    [t("assignee"), ticket.assignee ?? t("unassigned")],
-    [t("reporter"), ticket.reporter?.displayName ?? "—"],
+  const rows: Array<[string, ReactNode]> = [
+    [
+      t("assignee"),
+      <JiraUser
+        avatarUrl={ticket.assigneeAvatarUrl}
+        key="assignee"
+        name={ticket.assignee ?? t("unassigned")}
+      />,
+    ],
+    [
+      t("reporter"),
+      ticket.reporter ? (
+        <JiraUser
+          avatarUrl={ticket.reporter.avatarUrl}
+          key="reporter"
+          name={ticket.reporter.displayName}
+        />
+      ) : (
+        "—"
+      ),
+    ],
     [t("created"), displayDate(ticket.createdAt)],
     [t("updated"), displayDate(ticket.updatedAt)],
     [t("due"), displayDate(ticket.dueAt)],

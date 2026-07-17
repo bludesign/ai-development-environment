@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { JiraUser } from "@/components/jira/jira-user";
 import {
   Popover,
   PopoverContent,
@@ -161,9 +162,12 @@ export function JiraTicketActions({
                 role="combobox"
                 variant="outline"
               >
-                <span className="truncate">
-                  {ticket.assignee ?? t("unassigned")}
-                </span>
+                <JiraUser
+                  avatarUrl={ticket.assigneeAvatarUrl}
+                  className="min-w-0"
+                  name={ticket.assignee ?? t("unassigned")}
+                  nameClassName="truncate"
+                />
                 <ChevronsUpDown className="opacity-50" />
               </Button>
             </PopoverTrigger>
@@ -182,7 +186,7 @@ export function JiraTicketActions({
                   size="sm"
                   variant="ghost"
                 >
-                  {t("unassigned")}
+                  <JiraUser avatarUrl={null} name={t("unassigned")} />
                 </Button>
                 {loadingAssignees ? (
                   <p className="flex items-center gap-2 p-2 text-xs text-muted-foreground">
@@ -201,7 +205,10 @@ export function JiraTicketActions({
                       size="sm"
                       variant="ghost"
                     >
-                      {person.displayName}
+                      <JiraUser
+                        avatarUrl={person.avatarUrl}
+                        name={person.displayName}
+                      />
                     </Button>
                   ))
                 )}

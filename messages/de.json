@@ -294,6 +294,8 @@
     "editDetailsDescription": "Es werden nur Felder angezeigt, die Jira bearbeiten lässt.",
     "none": "Keine",
     "commaSeparated": "Kommagetrennte Werte",
+    "pickDate": "Datum auswählen",
+    "clearDate": "Datum löschen",
     "saving": "Wird gespeichert…"
   },
   "jiraCache": {

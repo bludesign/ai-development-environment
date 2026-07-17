@@ -7,6 +7,7 @@ import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTextInput, JiraTicketDetail } from "@/services/jira/types";
 
+import { JiraUser } from "./jira-user";
 import { JiraRichTextBlock, JiraTextComposer } from "./rich-text";
 import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
 
@@ -67,7 +68,10 @@ export function JiraTicketComments({
                     controlsClassName="contents @md/comment:flex @md/comment:flex-wrap @md/comment:items-center @md/comment:justify-end @md/comment:gap-1"
                     header={
                       <ItemTitle>
-                        {comment.author?.displayName ?? t("unknownUser")}
+                        <JiraUser
+                          avatarUrl={comment.author?.avatarUrl ?? null}
+                          name={comment.author?.displayName ?? t("unknownUser")}
+                        />
                       </ItemTitle>
                     }
                     headerActions={

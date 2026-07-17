@@ -294,6 +294,8 @@
     "editDetailsDescription": "Seuls les champs modifiables dans Jira sont affichés.",
     "none": "Aucun",
     "commaSeparated": "Valeurs séparées par des virgules",
+    "pickDate": "Choisir une date",
+    "clearDate": "Effacer la date",
     "saving": "Enregistrement…"
   },
   "jiraCache": {

@@ -321,6 +321,8 @@ const mockTranslations = {
     editDetailsDescription: "Only fields Jira allows you to edit are shown.",
     none: "None",
     commaSeparated: "Comma-separated values",
+    pickDate: "Choose a date",
+    clearDate: "Clear date",
     saving: "Saving…",
   },
   jiraCache: {
