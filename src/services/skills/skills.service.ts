@@ -1281,7 +1281,7 @@ export class SkillsService {
 
   async resolveItem(input: {
     itemId: string;
-    resolution: "DATABASE" | "TARGET" | "MANUAL" | "SKIP";
+    resolution: "DATABASE" | "TARGET" | "MANUAL" | "DELETE" | "SKIP";
     groupId?: string | null;
     package?: SkillPackage | null;
   }) {
@@ -1304,7 +1304,13 @@ export class SkillsService {
     if (input.resolution === "TARGET" && !candidate.package) {
       throw new Error("The target package is unavailable");
     }
-    if (candidate.projectGroupRequired) {
+    if (input.resolution === "DELETE" && !item.installationId) {
+      throw new Error("The client skill installation is unavailable");
+    }
+    if (
+      candidate.projectGroupRequired &&
+      ["TARGET", "MANUAL"].includes(input.resolution)
+    ) {
       if (
         !input.groupId ||
         !(await prisma.skillGroup.findUnique({ where: { id: input.groupId } }))
@@ -1317,6 +1323,8 @@ export class SkillsService {
       where: { id: item.id },
       data: {
         resolution: input.resolution,
+        direction:
+          input.resolution === "DELETE" ? "DELETE_REDUNDANT" : item.direction,
         candidatePackageJson: JSON.stringify(candidate),
         status: input.resolution === "SKIP" ? "SKIPPED" : "READY",
       },

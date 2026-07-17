@@ -1374,6 +1374,7 @@
     "chooseGroup": "Fähigkeitsgruppe auswählen",
     "useDatabase": "Datenbank verwenden",
     "useTarget": "Client-Kopie verwenden",
+    "deleteClientCopy": "Client-Kopie löschen",
     "editManually": "Manuell bearbeiten",
     "compareAndResolve": "Vergleichen und lösen",
     "skip": "Überspringen",

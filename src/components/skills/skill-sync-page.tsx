@@ -34,6 +34,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -94,6 +101,14 @@ function directionIcon(direction: string) {
   if (direction === "DELETE_REDUNDANT") return <Trash2 />;
   if (direction === "CONFLICT") return <GitCompareArrows />;
   return <Check />;
+}
+
+function displayEnum(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toLocaleUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function FilePreview({
@@ -232,7 +247,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
 
   const resolve = async (
     item: SkillSyncItem,
-    resolution: "DATABASE" | "TARGET" | "MANUAL" | "SKIP",
+    resolution: "DATABASE" | "TARGET" | "MANUAL" | "DELETE" | "SKIP",
     manualPackage?: SkillSyncItem["candidatePackage"],
   ) => {
     setBusy(true);
@@ -413,7 +428,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={run.status === "SUCCEEDED" ? "secondary" : "outline"}>
-            {run.status}
+            {displayEnum(run.status)}
           </Badge>
           {pendingAgentItems.length > 0 && (
             <Button
@@ -462,22 +477,19 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                         {item.agent?.name ?? t("unknownAgent")}
                       </TableCell>
                       <TableCell>
-                        <span className="inline-flex items-center gap-2">
-                          <span
-                            aria-hidden="true"
-                            className={`size-2 rounded-full ${
-                              online ? "bg-emerald-500" : "bg-muted-foreground"
-                            }`}
-                          />
-                          {tStatus(online ? "online" : "offline")}
-                        </span>
+                        <Badge
+                          className={
+                            online
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : undefined
+                          }
+                          variant={online ? "outline" : "secondary"}
+                        >
+                          {displayEnum(tStatus(online ? "online" : "offline"))}
+                        </Badge>
                       </TableCell>
-                      <TableCell className="capitalize">
-                        {item.direction.toLocaleLowerCase()}
-                      </TableCell>
-                      <TableCell className="capitalize">
-                        {item.status.toLocaleLowerCase()}
-                      </TableCell>
+                      <TableCell>{displayEnum(item.direction)}</TableCell>
+                      <TableCell>{displayEnum(item.status)}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -507,6 +519,10 @@ export function SkillSyncPage({ runId }: { runId: string }) {
               {visibleItems.map((item) => {
                 const projectGroupRequired =
                   item.candidatePackage?.projectGroupRequired;
+                const canDeleteClientCopy =
+                  item.direction === "IMPORT" &&
+                  item.installation &&
+                  !item.installation.tracked;
                 return (
                   <TableRow key={item.id}>
                     <TableCell>
@@ -518,7 +534,8 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                             : "outline"
                         }
                       >
-                        {directionIcon(item.direction)} {item.direction}
+                        {directionIcon(item.direction)}{" "}
+                        {displayEnum(item.direction)}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-medium">
@@ -530,26 +547,42 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                     <TableCell className="max-w-md whitespace-normal font-mono text-xs">
                       {item.installation?.rootPath ?? t("newSharedLocation")}
                     </TableCell>
-                    <TableCell>{item.status}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          item.status === "BLOCKED"
+                            ? "destructive"
+                            : item.status === "READY" ||
+                                item.status === "COMPLETE"
+                              ? "secondary"
+                              : "outline"
+                        }
+                      >
+                        {displayEnum(item.status)}
+                      </Badge>
+                    </TableCell>
                     <TableCell>
                       {projectGroupRequired && item.status === "BLOCKED" && (
-                        <select
-                          className="mb-2 block h-9 rounded-md border bg-background px-2 text-sm"
-                          onChange={(event) =>
+                        <Select
+                          onValueChange={(value) =>
                             setGroupChoices((current) => ({
                               ...current,
-                              [item.id]: event.target.value,
+                              [item.id]: value,
                             }))
                           }
                           value={groupChoices[item.id] ?? ""}
                         >
-                          <option value="">{t("chooseGroup")}</option>
-                          {groups.map((group) => (
-                            <option key={group.id} value={group.id}>
-                              {group.name}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger className="mb-2 w-full min-w-48">
+                            <SelectValue placeholder={t("chooseGroup")} />
+                          </SelectTrigger>
+                          <SelectContent align="start">
+                            {groups.map((group) => (
+                              <SelectItem key={group.id} value={group.id}>
+                                {group.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       )}
                       {item.status === "BLOCKED" ? (
                         <div className="flex flex-wrap gap-1">
@@ -587,17 +620,38 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                               </Button>
                             </>
                           )}
+                          {canDeleteClientCopy && (
+                            <Button
+                              disabled={busy}
+                              onClick={() => void resolve(item, "DELETE")}
+                              size="sm"
+                              variant="destructive"
+                            >
+                              <Trash2 /> {t("deleteClientCopy")}
+                            </Button>
+                          )}
                           <Button
                             disabled={busy}
                             onClick={() => void resolve(item, "SKIP")}
                             size="sm"
-                            variant="ghost"
+                            variant="outline"
                           >
                             {t("skip")}
                           </Button>
                         </div>
+                      ) : canDeleteClientCopy && item.status === "READY" ? (
+                        <Button
+                          disabled={busy}
+                          onClick={() => void resolve(item, "DELETE")}
+                          size="sm"
+                          variant="destructive"
+                        >
+                          <Trash2 /> {t("deleteClientCopy")}
+                        </Button>
+                      ) : item.resolution ? (
+                        displayEnum(item.resolution)
                       ) : (
-                        (item.resolution ?? "—")
+                        "—"
                       )}
                     </TableCell>
                   </TableRow>
@@ -658,11 +712,11 @@ export function SkillSyncPage({ runId }: { runId: string }) {
             >
               <ArrowDownToLine /> {t("startFromTarget")}
             </Button>
-            <Label className="cursor-pointer" htmlFor="manual-package-upload">
-              <span className="inline-flex h-8 items-center rounded-md border px-3 text-sm">
+            <Button asChild size="sm" variant="outline">
+              <Label className="cursor-pointer" htmlFor="manual-package-upload">
                 {t("addFiles")}
-              </span>
-            </Label>
+              </Label>
+            </Button>
             <Input
               className="sr-only"
               id="manual-package-upload"
@@ -747,12 +801,11 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                             ))
                         }
                         onClick={renameManualFile}
-                        size="sm"
                         variant="outline"
                       >
                         {t("rename")}
                       </Button>
-                      <Label className="flex h-9 items-center gap-2 rounded-md border px-3">
+                      <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
                         <Checkbox
                           checked={manualFile.executable}
                           onCheckedChange={(checked) =>
@@ -781,7 +834,6 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                           setSelectedPath(next ?? "SKILL.md");
                           setRenamePath(next ?? "SKILL.md");
                         }}
-                        size="sm"
                         variant="destructive"
                       >
                         <Trash2 /> {t("removeFile")}

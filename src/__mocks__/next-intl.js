@@ -1516,6 +1516,7 @@ const mockTranslations = {
     chooseGroup: "Choose a skill group",
     useDatabase: "Use database",
     useTarget: "Use client copy",
+    deleteClientCopy: "Delete client copy",
     editManually: "Edit manually",
     compareAndResolve: "Compare and resolve",
     skip: "Skip",

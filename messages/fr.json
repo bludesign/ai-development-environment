@@ -1374,6 +1374,7 @@
     "chooseGroup": "Choisir un groupe",
     "useDatabase": "Utiliser la base",
     "useTarget": "Utiliser la copie client",
+    "deleteClientCopy": "Supprimer la copie client",
     "editManually": "Modifier manuellement",
     "compareAndResolve": "Comparer et résoudre",
     "skip": "Ignorer",

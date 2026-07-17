@@ -29,6 +29,7 @@ enum SkillConflictResolution {
   DATABASE
   TARGET
   MANUAL
+  DELETE
   SKIP
 }
 

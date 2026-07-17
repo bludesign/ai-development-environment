@@ -178,7 +178,7 @@ export const createSkillResolvers = (service: SkillsService) => ({
       }: {
         input: {
           itemId: string;
-          resolution: "DATABASE" | "TARGET" | "MANUAL" | "SKIP";
+          resolution: "DATABASE" | "TARGET" | "MANUAL" | "DELETE" | "SKIP";
           groupId?: string | null;
           package?: Parameters<typeof packageValue>[0] | null;
         };

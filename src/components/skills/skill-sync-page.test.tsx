@@ -111,8 +111,16 @@ describe("SkillSyncPage", () => {
   test("compares full packages and prepares a complete manual result", async () => {
     render(<SkillSyncPage runId="run-1" />);
 
+    expect(
+      (await screen.findByText("Needs Resolution")).getAttribute("data-slot"),
+    ).toBe("badge");
+    expect(screen.getByText("Conflict").getAttribute("data-slot")).toBe(
+      "badge",
+    );
+    expect(screen.getByText("Blocked").getAttribute("data-slot")).toBe("badge");
+
     fireEvent.click(
-      await screen.findByRole("button", { name: /compare and resolve/i }),
+      screen.getByRole("button", { name: /compare and resolve/i }),
     );
 
     expect(await screen.findByText(/Database instructions/)).toBeTruthy();
@@ -124,6 +132,20 @@ describe("SkillSyncPage", () => {
     expect(
       screen.getByRole("button", { name: /use edited version/i }),
     ).toBeTruthy();
+    const uploadControl = screen.getByText("Add or replace package files");
+    expect(uploadControl.getAttribute("data-size")).toBe("sm");
+    expect(uploadControl.className).toContain("h-7");
+    expect(screen.getByLabelText("File path").className).toContain("h-8");
+    expect(screen.getByRole("button", { name: "Rename" }).className).toContain(
+      "h-8",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Executable" }).closest("label")
+        ?.className,
+    ).toContain("h-8");
+    expect(screen.getByRole("button", { name: "Remove" }).className).toContain(
+      "h-8",
+    );
   });
 
   test("offers to skip pending clients and advances the run", async () => {
@@ -176,7 +198,7 @@ describe("SkillSyncPage", () => {
 
     render(<SkillSyncPage runId="run-1" />);
     expect(await screen.findByText("Agent sync status")).toBeTruthy();
-    expect(screen.getByText("offline")).toBeTruthy();
+    expect(screen.getByText("Offline").getAttribute("data-slot")).toBe("badge");
     expect(screen.getByText("Proposed changes")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: /skip pending clients/i }),
@@ -190,7 +212,102 @@ describe("SkillSyncPage", () => {
     );
     expect(
       await screen.findByRole("row", {
-        name: /Offline Mac offline scan skipped/i,
+        name: /Offline Mac Offline Scan Skipped/i,
+      }),
+    ).toBeTruthy();
+  });
+
+  test("can delete a discovered client skill instead of importing it", async () => {
+    const importItem = {
+      id: "import-1",
+      direction: "IMPORT",
+      status: "BLOCKED",
+      sourceHash: null,
+      targetHash: "target-hash",
+      resolution: null,
+      candidatePackage: {
+        package: targetPackage,
+        projectGroupRequired: true,
+      },
+      error: null,
+      skill: null,
+      installation: {
+        id: "installation-1",
+        skillName: "swift-review",
+        rootPath: "/Users/test/.claude/skills",
+        tracked: false,
+        agent: {
+          id: "agent-1",
+          name: "Studio Mac",
+          connectionStatus: "ONLINE",
+        },
+      },
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        connectionStatus: "ONLINE",
+      },
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const importRun = {
+      id: "run-1",
+      kind: "ALL",
+      status: "NEEDS_RESOLUTION",
+      error: null,
+      group: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      finishedAt: null,
+      items: [importItem],
+    };
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("ResolveSkillSyncItem")) {
+        return {
+          resolveSkillSyncItem: {
+            ...importRun,
+            status: "READY",
+            items: [
+              {
+                ...importItem,
+                direction: "DELETE_REDUNDANT",
+                resolution: "DELETE",
+                status: "READY",
+              },
+            ],
+          },
+        } as never;
+      }
+      return {
+        skillSyncRun: importRun,
+        skillsOverview: { groups: [{ id: "group-1", name: "Swift" }] },
+      } as never;
+    });
+
+    render(<SkillSyncPage runId="run-1" />);
+
+    const groupSelect = await screen.findByRole("combobox");
+    expect(groupSelect.getAttribute("data-slot")).toBe("select-trigger");
+    fireEvent.click(
+      screen.getByRole("button", { name: /delete client copy/i }),
+    );
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("resolveSkillSyncItem"),
+        {
+          input: {
+            itemId: "import-1",
+            resolution: "DELETE",
+            groupId: null,
+            package: null,
+          },
+        },
+      ),
+    );
+    expect(
+      await screen.findByRole("row", {
+        name: /Delete Redundant.*Ready/i,
       }),
     ).toBeTruthy();
   });

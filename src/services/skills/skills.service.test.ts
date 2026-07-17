@@ -116,3 +116,57 @@ describe("SkillsService.skipPending", () => {
     });
   });
 });
+
+describe("SkillsService.resolveItem", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("turns a client import into a planned deletion", async () => {
+    const item = {
+      id: "import-item-1",
+      runId: "run-1",
+      installationId: "installation-1",
+      direction: "IMPORT",
+      status: "BLOCKED",
+      candidatePackageJson: JSON.stringify({
+        projectGroupRequired: true,
+        package: { name: "swift-review" },
+      }),
+    };
+    const persistedRun = { id: "run-1", status: "READY" };
+    const prisma = {
+      skillSyncItem: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(item),
+        update: vi.fn().mockResolvedValue({
+          ...item,
+          direction: "DELETE_REDUNDANT",
+          resolution: "DELETE",
+          status: "READY",
+        }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    vi.spyOn(
+      service as unknown as { refreshRunStatus(runId: string): Promise<void> },
+      "refreshRunStatus",
+    ).mockResolvedValue();
+    vi.spyOn(service, "getRun").mockResolvedValue(persistedRun as never);
+
+    await expect(
+      service.resolveItem({
+        itemId: "import-item-1",
+        resolution: "DELETE",
+      }),
+    ).resolves.toBe(persistedRun);
+
+    expect(prisma.skillSyncItem.update).toHaveBeenCalledWith({
+      where: { id: "import-item-1" },
+      data: {
+        resolution: "DELETE",
+        direction: "DELETE_REDUNDANT",
+        candidatePackageJson: item.candidatePackageJson,
+        status: "READY",
+      },
+    });
+  });
+});
