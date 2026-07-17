@@ -16,6 +16,15 @@ enum CodebaseAvailability {
   ERROR
 }
 
+enum CodebaseGitOperation {
+  SWITCH_BRANCH
+  DELETE_BRANCH
+  DELETE_REMOTE_BRANCH
+  PULL_BRANCH
+  APPLY_STASH
+  DELETE_STASH
+}
+
 type CodebaseRepository {
   id: ID!
   canonicalOrigin: String!
@@ -42,6 +51,7 @@ type Codebase {
   availability: CodebaseAvailability!
   statusError: String
   defaultBranch: String
+  localBranches: [String!]!
   remoteBranches: [String!]!
   lastCheckedAt: String
   lastFetchedAt: String
@@ -146,6 +156,35 @@ type CodebaseOverviewChange {
   repositoryId: ID
 }
 
+type CodebaseGitBranch {
+  name: String!
+  local: Boolean!
+  remote: Boolean!
+  current: Boolean!
+  checkedOutPath: String
+}
+
+type CodebaseStash {
+  oid: ID!
+  selector: String!
+  message: String!
+  createdAt: String!
+}
+
+type CodebaseGitState {
+  dirty: Boolean!
+  branches: [CodebaseGitBranch!]!
+  branchesTruncated: Boolean!
+  stashes: [CodebaseStash!]!
+  stashesTruncated: Boolean!
+}
+
+type CodebaseStashDiff {
+  oid: ID!
+  patch: String!
+  truncated: Boolean!
+}
+
 input BrowseAgentDirectoryInput {
   agentId: ID!
   path: String
@@ -183,6 +222,26 @@ input RunCodebaseOperationInput {
   requestId: ID!
 }
 
+input InspectCodebaseGitStateInput {
+  codebaseId: ID!
+  requestId: ID!
+}
+
+input InspectCodebaseStashInput {
+  codebaseId: ID!
+  stashOid: ID!
+  requestId: ID!
+}
+
+input RunCodebaseGitOperationInput {
+  codebaseId: ID!
+  operation: CodebaseGitOperation!
+  branch: String
+  stashOid: ID
+  stashChanges: Boolean = false
+  requestId: ID!
+}
+
 input CodebaseSnapshotInput {
   folder: String!
   observedOrigin: String
@@ -208,6 +267,7 @@ input CodebaseStatusReportInput {
 
 extend type Query {
   codebaseOverview: CodebaseOverview!
+  codebase(id: ID!): Codebase
   codebaseSettings: CodebaseSettings!
   agentCodebases: [AgentCodebaseRegistration!]!
   agentCodebaseConfiguration: AgentCodebaseConfiguration!
@@ -226,6 +286,11 @@ extend type Mutation {
   removeCodebase(id: ID!): CodebaseRemoval!
   refreshCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
   fetchCodebases(input: RunCodebaseOperationInput!): CodebaseOperationBatch!
+  inspectCodebaseGitState(
+    input: InspectCodebaseGitStateInput!
+  ): CodebaseGitState!
+  inspectCodebaseStash(input: InspectCodebaseStashInput!): CodebaseStashDiff!
+  runCodebaseGitOperation(input: RunCodebaseGitOperationInput!): AgentJob!
   reportCodebaseStatuses(reports: [CodebaseStatusReportInput!]!): [Codebase!]!
 }
 

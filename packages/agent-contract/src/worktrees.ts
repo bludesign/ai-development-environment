@@ -3,10 +3,18 @@ import type { CodebaseSyncState } from "./codebases.ts";
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
+export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
+export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
+export const WORKTREE_MOVE_CHECKOUT_JOB_KIND = "worktree.move.checkout";
+export const WORKTREE_DELETE_JOB_KIND = "worktree.delete";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_MOVE_PUSH_JOB_KIND,
+  WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+  WORKTREE_DELETE_JOB_KIND,
 ] as const;
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
@@ -28,6 +36,18 @@ export const WORKTREE_OPERATIONS = [
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
 export type WorktreeWatchAction = "START" | "STOP";
+export type WorktreeBranchAction = "CREATE" | "CHANGE";
+export type WorktreeBranchJobMode = "NEW" | "EXISTING";
+export const WORKTREE_PUSH_STATUSES = [
+  "READY",
+  "DIRTY",
+  "DETACHED",
+  "BEHIND",
+  "DIVERGED",
+  "UNKNOWN",
+] as const;
+export type WorktreePushStatus = (typeof WORKTREE_PUSH_STATUSES)[number];
+export type WorktreeMoveDestinationMode = "NEW" | "EXISTING";
 
 export type WorktreeActivityReport = {
   codebaseId: string;
@@ -42,6 +62,7 @@ export type WorktreeActivityReport = {
   baseBehind?: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  pushStatus?: WorktreePushStatus;
   observedAt: string;
 };
 
@@ -60,6 +81,7 @@ export type WorktreeInventoryItem = {
   baseBehind: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  pushStatus?: WorktreePushStatus;
   availability: "AVAILABLE" | "MISSING" | "ERROR";
   error: string | null;
   checkedAt: string;
@@ -69,12 +91,32 @@ export type CodebaseWorktreeReport = {
   codebaseId: string;
   complete: boolean;
   defaultBranch: string | null;
+  localBranches: string[];
   remoteBranches: string[];
   fetchedAt: string | null;
   fetchAttemptedAt: string | null;
   fetchError: string | null;
   worktrees: WorktreeInventoryItem[];
 };
+
+export function validGitBranchName(value: string): boolean {
+  if (!value || value.length > 255 || value === "@" || value.startsWith("-"))
+    return false;
+  if (
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.endsWith(".") ||
+    value.includes("//") ||
+    value.includes("..") ||
+    value.includes("@{") ||
+    /[\u0000-\u0020\u007f~^:?*[\\]/.test(value)
+  ) {
+    return false;
+  }
+  return value
+    .split("/")
+    .every((part) => part && !part.startsWith(".") && !part.endsWith(".lock"));
+}
 
 export type WorktreeCommit = {
   sha: string;
@@ -164,6 +206,24 @@ function optionalSyncState(
   return syncState(value, name);
 }
 
+function pushStatus(value: unknown, name: string): WorktreePushStatus {
+  if (
+    typeof value !== "string" ||
+    !WORKTREE_PUSH_STATUSES.includes(value as WorktreePushStatus)
+  ) {
+    throw new Error(`${name} is invalid`);
+  }
+  return value as WorktreePushStatus;
+}
+
+function optionalPushStatus(
+  value: unknown,
+  name: string,
+): WorktreePushStatus | undefined {
+  if (value === undefined || value === null) return undefined;
+  return pushStatus(value, name);
+}
+
 function dateString(value: unknown, name: string): string {
   const result = stringValue(value, name);
   if (Number.isNaN(new Date(result).valueOf())) {
@@ -234,6 +294,8 @@ export function parseWorktreeInventoryItem(
       item.hasUnstagedChanges,
       `${name}.hasUnstagedChanges`,
     ),
+    pushStatus:
+      optionalPushStatus(item.pushStatus, `${name}.pushStatus`) ?? "UNKNOWN",
     availability: availability as WorktreeInventoryItem["availability"],
     error: nullableString(item.error, `${name}.error`),
     checkedAt: dateString(item.checkedAt, `${name}.checkedAt`),
@@ -244,10 +306,13 @@ export function parseCodebaseWorktreeReport(
   value: unknown,
 ): CodebaseWorktreeReport {
   const report = objectValue(value, "worktree report");
+  const localBranches =
+    report.localBranches === undefined ? [] : report.localBranches;
   if (typeof report.complete !== "boolean") {
     throw new Error("worktree report.complete must be a boolean");
   }
   if (
+    !Array.isArray(localBranches) ||
     !Array.isArray(report.remoteBranches) ||
     !Array.isArray(report.worktrees)
   ) {
@@ -259,6 +324,9 @@ export function parseCodebaseWorktreeReport(
     defaultBranch: nullableString(
       report.defaultBranch,
       "worktree report.defaultBranch",
+    ),
+    localBranches: localBranches.map((branch, index) =>
+      stringValue(branch, `worktree report.localBranches[${index}]`),
     ),
     remoteBranches: report.remoteBranches.map((branch, index) =>
       stringValue(branch, `worktree report.remoteBranches[${index}]`),
@@ -272,6 +340,327 @@ export function parseCodebaseWorktreeReport(
     worktrees: report.worktrees.map((item, index) =>
       parseWorktreeInventoryItem(item, `worktree report.worktrees[${index}]`),
     ),
+  };
+}
+
+export function worktreeBranchJobPayload(value: unknown): {
+  codebaseId: string;
+  rootFolder: string;
+  folder: string | null;
+  gitDirectory: string | null;
+  expectedOrigin: string;
+  baseBranch: string;
+  action: WorktreeBranchAction;
+  mode: WorktreeBranchJobMode;
+  candidates: string[];
+  stashOnFailure: boolean;
+} {
+  const payload = objectValue(value, "worktree branch payload");
+  const allowed = new Set([
+    "codebaseId",
+    "rootFolder",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "action",
+    "mode",
+    "candidates",
+    "stashOnFailure",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree branch payload field: ${unexpected}`);
+  }
+  if (!(payload.action === "CREATE" || payload.action === "CHANGE")) {
+    throw new Error("worktree branch payload.action is invalid");
+  }
+  if (!(payload.mode === "NEW" || payload.mode === "EXISTING")) {
+    throw new Error("worktree branch payload.mode is invalid");
+  }
+  if (
+    !Array.isArray(payload.candidates) ||
+    payload.candidates.length < 1 ||
+    payload.candidates.length > 100
+  ) {
+    throw new Error("worktree branch payload.candidates is invalid");
+  }
+  const candidates = payload.candidates.map((candidate, index) => {
+    const branch = stringValue(
+      candidate,
+      `worktree branch payload.candidates[${index}]`,
+    );
+    if (!validGitBranchName(branch)) {
+      throw new Error(`Invalid Git branch name: ${branch}`);
+    }
+    return branch;
+  });
+  if (new Set(candidates).size !== candidates.length) {
+    throw new Error("worktree branch candidates must be unique");
+  }
+  const folder = nullableString(
+    payload.folder,
+    "worktree branch payload.folder",
+  );
+  const gitDirectory = nullableString(
+    payload.gitDirectory,
+    "worktree branch payload.gitDirectory",
+  );
+  if (payload.action === "CHANGE" && (!folder || !gitDirectory)) {
+    throw new Error(
+      "Changing a branch requires a worktree folder and Git directory",
+    );
+  }
+  if (typeof payload.stashOnFailure !== "boolean") {
+    throw new Error("worktree branch payload.stashOnFailure must be a boolean");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree branch payload.codebaseId",
+    ),
+    rootFolder: stringValue(
+      payload.rootFolder,
+      "worktree branch payload.rootFolder",
+    ),
+    folder,
+    gitDirectory,
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree branch payload.expectedOrigin",
+    ),
+    baseBranch: stringValue(
+      payload.baseBranch,
+      "worktree branch payload.baseBranch",
+    ),
+    action: payload.action,
+    mode: payload.mode,
+    candidates,
+    stashOnFailure: payload.stashOnFailure,
+  };
+}
+
+export function worktreeMovePushJobPayload(value: unknown): {
+  moveId: string;
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  branch: string;
+  expectedHeadSha: string;
+} {
+  const payload = objectValue(value, "worktree move push payload");
+  const allowed = new Set([
+    "moveId",
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "branch",
+    "expectedHeadSha",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree move push payload field: ${unexpected}`,
+    );
+  }
+  const branch = stringValue(
+    payload.branch,
+    "worktree move push payload.branch",
+  );
+  if (!validGitBranchName(branch)) throw new Error("Invalid Git branch name");
+  return {
+    moveId: stringValue(payload.moveId, "worktree move push payload.moveId"),
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree move push payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree move push payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree move push payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree move push payload.expectedOrigin",
+    ),
+    branch,
+    expectedHeadSha: stringValue(
+      payload.expectedHeadSha,
+      "worktree move push payload.expectedHeadSha",
+    ),
+  };
+}
+
+export function worktreeMoveCheckoutJobPayload(value: unknown): {
+  moveId: string;
+  codebaseId: string;
+  rootFolder: string;
+  folder: string | null;
+  gitDirectory: string | null;
+  expectedOrigin: string;
+  branch: string;
+  expectedHeadSha: string;
+  baseBranch: string;
+  mode: WorktreeMoveDestinationMode;
+  stashOnFailure: boolean;
+} {
+  const payload = objectValue(value, "worktree move checkout payload");
+  const allowed = new Set([
+    "moveId",
+    "codebaseId",
+    "rootFolder",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "branch",
+    "expectedHeadSha",
+    "baseBranch",
+    "mode",
+    "stashOnFailure",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree move checkout payload field: ${unexpected}`,
+    );
+  }
+  if (!(payload.mode === "NEW" || payload.mode === "EXISTING")) {
+    throw new Error("worktree move checkout payload.mode is invalid");
+  }
+  if (typeof payload.stashOnFailure !== "boolean") {
+    throw new Error(
+      "worktree move checkout payload.stashOnFailure must be a boolean",
+    );
+  }
+  const folder = nullableString(
+    payload.folder,
+    "worktree move checkout payload.folder",
+  );
+  const gitDirectory = nullableString(
+    payload.gitDirectory,
+    "worktree move checkout payload.gitDirectory",
+  );
+  if (payload.mode === "EXISTING" && (!folder || !gitDirectory)) {
+    throw new Error("An existing destination worktree is required");
+  }
+  const branch = stringValue(
+    payload.branch,
+    "worktree move checkout payload.branch",
+  );
+  if (!validGitBranchName(branch)) throw new Error("Invalid Git branch name");
+  return {
+    moveId: stringValue(
+      payload.moveId,
+      "worktree move checkout payload.moveId",
+    ),
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree move checkout payload.codebaseId",
+    ),
+    rootFolder: stringValue(
+      payload.rootFolder,
+      "worktree move checkout payload.rootFolder",
+    ),
+    folder,
+    gitDirectory,
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree move checkout payload.expectedOrigin",
+    ),
+    branch,
+    expectedHeadSha: stringValue(
+      payload.expectedHeadSha,
+      "worktree move checkout payload.expectedHeadSha",
+    ),
+    baseBranch: stringValue(
+      payload.baseBranch,
+      "worktree move checkout payload.baseBranch",
+    ),
+    mode: payload.mode,
+    stashOnFailure: payload.stashOnFailure,
+  };
+}
+
+export function worktreeDeleteJobPayload(value: unknown): {
+  moveId: string | null;
+  codebaseId: string;
+  rootFolder: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  branch: string | null;
+  defaultBranch: string | null;
+  deleteRemoteBranch: boolean;
+  requireClean: boolean;
+  expectedHeadSha: string | null;
+} {
+  const payload = objectValue(value, "worktree delete payload");
+  const allowed = new Set([
+    "moveId",
+    "codebaseId",
+    "rootFolder",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "branch",
+    "defaultBranch",
+    "deleteRemoteBranch",
+    "requireClean",
+    "expectedHeadSha",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree delete payload field: ${unexpected}`);
+  }
+  if (
+    typeof payload.deleteRemoteBranch !== "boolean" ||
+    typeof payload.requireClean !== "boolean"
+  ) {
+    throw new Error("worktree delete payload flags must be booleans");
+  }
+  const branch = nullableString(
+    payload.branch,
+    "worktree delete payload.branch",
+  );
+  if (branch && !validGitBranchName(branch)) {
+    throw new Error("Invalid Git branch name");
+  }
+  const expectedHeadSha = nullableString(
+    payload.expectedHeadSha,
+    "worktree delete payload.expectedHeadSha",
+  );
+  if (payload.requireClean && !expectedHeadSha) {
+    throw new Error("Clean worktree deletion requires an expected HEAD");
+  }
+  return {
+    moveId: nullableString(payload.moveId, "worktree delete payload.moveId"),
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree delete payload.codebaseId",
+    ),
+    rootFolder: stringValue(
+      payload.rootFolder,
+      "worktree delete payload.rootFolder",
+    ),
+    folder: stringValue(payload.folder, "worktree delete payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree delete payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree delete payload.expectedOrigin",
+    ),
+    branch,
+    defaultBranch: nullableString(
+      payload.defaultBranch,
+      "worktree delete payload.defaultBranch",
+    ),
+    deleteRemoteBranch: payload.deleteRemoteBranch,
+    requireClean: payload.requireClean,
+    expectedHeadSha,
   };
 }
 
@@ -402,6 +791,7 @@ export function parseWorktreeActivityReport(
     "baseBehind",
     "hasStagedChanges",
     "hasUnstagedChanges",
+    "pushStatus",
     "observedAt",
   ]);
   const unexpected = Object.keys(report).find((key) => !allowed.has(key));
@@ -456,6 +846,10 @@ export function parseWorktreeActivityReport(
     hasUnstagedChanges: optionalBoolean(
       report.hasUnstagedChanges,
       "worktree activity report.hasUnstagedChanges",
+    ),
+    pushStatus: optionalPushStatus(
+      report.pushStatus,
+      "worktree activity report.pushStatus",
     ),
     observedAt: dateString(
       report.observedAt,

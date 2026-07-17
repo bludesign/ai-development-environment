@@ -5,6 +5,8 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import {
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_GIT_INSPECT_JOB_KIND,
+  CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   type CodebaseSnapshot,
 } from "@ai-development-environment/agent-contract/codebases";
@@ -296,6 +298,161 @@ describe("CodebasesService", () => {
       { codebaseId: "mismatch", reason: "ORIGIN_MISMATCH" },
       { codebaseId: "active", reason: "ACTIVE_OPERATION" },
     ]);
+  });
+
+  test("returns one codebase detail with its active operation", async () => {
+    const record = { id: "codebase-1", jobs: [{ id: "job-1" }] };
+    const prisma = {
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      codebase: { findUnique: vi.fn().mockResolvedValue(record) },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+
+    await expect(
+      new CodebasesService(control()).detail("codebase-1"),
+    ).resolves.toBe(record);
+    expect(prisma.codebase.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "codebase-1" } }),
+    );
+  });
+
+  test("queues guarded Git operations only for an available capable checkout", async () => {
+    const codebase = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      folder: "/repo",
+      defaultBranch: "main",
+      availability: "AVAILABLE",
+      statusError: null,
+      agent: {
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        capabilitiesJson: JSON.stringify([
+          CODEBASE_GIT_INSPECT_JOB_KIND,
+          CODEBASE_GIT_OPERATION_JOB_KIND,
+        ]),
+      },
+      repository: { canonicalOrigin: "example.com/repo" },
+      jobs: [],
+    };
+    const prisma = {
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      codebase: { findUnique: vi.fn().mockResolvedValue(codebase) },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = control();
+    const service = new CodebasesService(agentControl);
+
+    await service.runGitOperation({
+      codebaseId: codebase.id,
+      operation: "SWITCH_BRANCH",
+      branch: "feature/detail",
+      stashChanges: true,
+      requestId: "request-1",
+    });
+
+    expect(agentControl.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: CODEBASE_GIT_OPERATION_JOB_KIND,
+        codebaseId: codebase.id,
+        payload: {
+          codebaseId: codebase.id,
+          folder: "/repo",
+          expectedOrigin: "example.com/repo",
+          defaultBranch: "main",
+          operation: "SWITCH_BRANCH",
+          branch: "feature/detail",
+          stashChanges: true,
+        },
+      }),
+    );
+  });
+
+  test("returns live Git state from a short-lived system job and cleans it up", async () => {
+    const codebase = {
+      id: "codebase-1",
+      agentId: "agent-1",
+      folder: "/repo",
+      availability: "AVAILABLE",
+      statusError: null,
+      agent: {
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        capabilitiesJson: JSON.stringify([CODEBASE_GIT_INSPECT_JOB_KIND]),
+      },
+      repository: { canonicalOrigin: "example.com/repo" },
+      jobs: [],
+    };
+    const prisma = {
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      codebase: { findUnique: vi.fn().mockResolvedValue(codebase) },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const agentControl = control();
+    Object.assign(agentControl, {
+      getJob: vi.fn().mockResolvedValue({
+        id: "job-codebase-1",
+        agentId: "agent-1",
+        codebaseId: "codebase-1",
+        kind: CODEBASE_GIT_INSPECT_JOB_KIND,
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({
+          state: {
+            dirty: false,
+            branches: [],
+            branchesTruncated: false,
+            stashes: [],
+            stashesTruncated: false,
+          },
+        }),
+        error: null,
+      }),
+    });
+
+    await expect(
+      new CodebasesService(agentControl).inspectGitState(
+        "codebase-1",
+        "request-live",
+      ),
+    ).resolves.toMatchObject({ dirty: false, branches: [], stashes: [] });
+    expect(agentControl.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: CODEBASE_GIT_INSPECT_JOB_KIND,
+        visibility: "SYSTEM",
+      }),
+    );
+    expect(prisma.agentJob.deleteMany).toHaveBeenCalledWith({
+      where: { id: "job-codebase-1", visibility: "SYSTEM" },
+    });
+  });
+
+  test("rejects Git management while another codebase job is active", async () => {
+    const prisma = {
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "codebase-1",
+          availability: "AVAILABLE",
+          agent: {
+            lastSeenAt: new Date(),
+            disconnectedAt: null,
+            capabilitiesJson: JSON.stringify([CODEBASE_GIT_OPERATION_JOB_KIND]),
+          },
+          repository: { canonicalOrigin: "example.com/repo" },
+          jobs: [{ id: "job-active" }],
+        }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+
+    await expect(
+      new CodebasesService(control()).runGitOperation({
+        codebaseId: "codebase-1",
+        operation: "DELETE_BRANCH",
+        branch: "old",
+        requestId: "request-2",
+      }),
+    ).rejects.toThrow("already running");
   });
 
   test("skips a codebase when another request wins the scheduling race", async () => {

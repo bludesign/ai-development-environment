@@ -2,6 +2,8 @@ import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contr
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_GIT_INSPECT_JOB_KIND,
+  CODEBASE_GIT_OPERATION_JOB_KIND,
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
 } from "@ai-development-environment/agent-contract/codebases";
@@ -12,17 +14,27 @@ import type { ProcessLog, ProcessResult } from "../process-runner.js";
 import {
   browseCodebaseDirectories,
   fetchCodebase,
+  inspectCodebaseGit,
   inspectCodebaseFolder,
+  operateCodebaseGit,
   refreshCodebase,
 } from "./codebases.js";
 import {
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+  WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   type WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
   inspectWorktree,
+  branchWorktree,
+  deleteWorktree,
+  checkoutMovedWorktree,
+  pushMovedWorktree,
   operateWorktree,
   watchWorktree,
 } from "./worktrees.js";
@@ -46,7 +58,13 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_INSPECT_JOB_KIND]: inspectCodebaseFolder,
   [CODEBASE_REFRESH_JOB_KIND]: refreshCodebase,
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,
+  [CODEBASE_GIT_INSPECT_JOB_KIND]: inspectCodebaseGit,
+  [CODEBASE_GIT_OPERATION_JOB_KIND]: operateCodebaseGit,
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
+  [WORKTREE_BRANCH_JOB_KIND]: branchWorktree,
+  [WORKTREE_MOVE_PUSH_JOB_KIND]: pushMovedWorktree,
+  [WORKTREE_MOVE_CHECKOUT_JOB_KIND]: checkoutMovedWorktree,
+  [WORKTREE_DELETE_JOB_KIND]: deleteWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
   [WORKTREE_WATCH_JOB_KIND]: watchWorktree,
 };

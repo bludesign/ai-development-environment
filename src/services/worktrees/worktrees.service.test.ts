@@ -5,6 +5,10 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
 import {
+  WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+  WORKTREE_MOVE_PUSH_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
+import {
   agentEventBus,
   WORKTREE_CHANGED_TOPIC,
 } from "@/services/agent-control";
@@ -27,6 +31,7 @@ function report(complete = true) {
     codebaseId: "codebase-1",
     complete,
     defaultBranch: "main",
+    localBranches: ["feature/AIDE-24", "main"],
     remoteBranches: ["main", "release"],
     fetchedAt: new Date(1).toISOString(),
     fetchAttemptedAt: new Date(2).toISOString(),
@@ -372,6 +377,7 @@ describe("WorktreesService", () => {
         }),
       },
       agentJob: { findFirst: vi.fn().mockResolvedValue(null), deleteMany },
+      worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
     });
 
     await expect(
@@ -464,6 +470,226 @@ describe("WorktreesService", () => {
     );
     expect(createJob.mock.calls[0]?.[0]).not.toHaveProperty("codebaseId");
     expect(createJob.mock.calls[1]?.[0]).not.toHaveProperty("codebaseId");
+  });
+
+  test("starts a durable move only for a clean matching repository checkout", async () => {
+    const source = {
+      id: "worktree-source",
+      codebaseId: "codebase-source",
+      folder: "/source-linked",
+      gitDirectory: "/source/.git/worktrees/source-linked",
+      branch: "feature/move",
+      headSha: "abc",
+      primary: false,
+      missingAt: null,
+      availability: "AVAILABLE",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      pushStatus: "READY",
+      codebase: {
+        id: "codebase-source",
+        agentId: "agent-source",
+        repositoryId: "repository-1",
+        folder: "/source",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([
+            WORKTREE_MOVE_PUSH_JOB_KIND,
+            "worktree.delete",
+          ]),
+        },
+        repository: {
+          canonicalOrigin: "github.com/openai/codex",
+        },
+      },
+    };
+    const target = {
+      id: "codebase-target",
+      agentId: "agent-target",
+      repositoryId: "repository-1",
+      folder: "/target",
+      defaultBranch: "main",
+      availability: "AVAILABLE",
+      agent: {
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        capabilitiesJson: JSON.stringify([WORKTREE_MOVE_CHECKOUT_JOB_KIND]),
+      },
+      repository: { canonicalOrigin: "github.com/openai/codex" },
+    };
+    const move = {
+      id: "move-1",
+      requestId: "request-1",
+      sourceWorktreeId: source.id,
+      sourceCodebaseId: source.codebaseId,
+      targetCodebaseId: target.id,
+      targetWorktreeId: null,
+      destinationMode: "NEW",
+      branch: source.branch,
+      headSha: source.headSha,
+      baseBranch: "main",
+      deleteSource: true,
+      status: "PUSHING",
+      sourceJobId: null,
+    };
+    const update = vi.fn().mockImplementation(({ data }) => ({
+      ...move,
+      ...data,
+    }));
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue(source),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      codebase: { findUnique: vi.fn().mockResolvedValue(target) },
+      agentJob: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeMove: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(move),
+        update,
+      },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "push-job" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+
+    await expect(
+      service(control).moveWorktree({
+        sourceWorktreeId: source.id,
+        targetCodebaseId: target.id,
+        targetWorktreeId: null,
+        deleteSource: true,
+        requestId: "request-1",
+      }),
+    ).resolves.toMatchObject({ sourceJobId: "push-job" });
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: WORKTREE_MOVE_PUSH_JOB_KIND,
+        agentId: "agent-source",
+        payload: expect.objectContaining({
+          branch: "feature/move",
+          expectedHeadSha: "abc",
+        }),
+      }),
+    );
+  });
+
+  test("advances a successful source push into destination checkout", async () => {
+    const handlers = new Map<string, (job: never) => Promise<void>>();
+    const createJob = vi.fn().mockResolvedValue({ id: "checkout-job" });
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) =>
+        handlers.set(kind, handler),
+      ),
+      createJob,
+    } as unknown as AgentControlService;
+    const move = {
+      id: "move-1",
+      sourceWorktreeId: "source-worktree",
+      sourceCodebaseId: "source-codebase",
+      targetCodebaseId: "target-codebase",
+      targetWorktreeId: null,
+      destinationMode: "NEW",
+      branch: "feature/move",
+      headSha: "abc",
+      baseBranch: "main",
+      status: "PUSHING",
+    };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktreeMove: {
+        findUnique: vi.fn().mockResolvedValue(move),
+        updateMany,
+      },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "target-codebase",
+          agentId: "target-agent",
+          folder: "/target",
+          agent: {
+            lastSeenAt: new Date(),
+            disconnectedAt: null,
+            capabilitiesJson: JSON.stringify([WORKTREE_MOVE_CHECKOUT_JOB_KIND]),
+          },
+          repository: { canonicalOrigin: "github.com/openai/codex" },
+        }),
+      },
+      worktree: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    service(control);
+
+    await handlers.get(WORKTREE_MOVE_PUSH_JOB_KIND)!({
+      id: "push-job",
+      payloadJson: JSON.stringify({ moveId: move.id }),
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        branch: move.branch,
+        headSha: move.headSha,
+      }),
+      error: null,
+    } as never);
+
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: WORKTREE_MOVE_CHECKOUT_JOB_KIND,
+        agentId: "target-agent",
+      }),
+    );
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "CHECKING_OUT",
+          targetJobId: "checkout-job",
+        }),
+      }),
+    );
+  });
+
+  test("persists a recoverable stash decision from destination checkout", async () => {
+    const handlers = new Map<string, (job: never) => Promise<void>>();
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) =>
+        handlers.set(kind, handler),
+      ),
+    } as unknown as AgentControlService;
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktreeMove: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "move-1",
+          sourceWorktreeId: "source-worktree",
+          sourceCodebaseId: "source-codebase",
+          status: "CHECKING_OUT",
+        }),
+        updateMany,
+      },
+    });
+    service(control);
+
+    await handlers.get(WORKTREE_MOVE_CHECKOUT_JOB_KIND)!({
+      id: "checkout-job",
+      payloadJson: JSON.stringify({ moveId: "move-1" }),
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        outcome: "NEEDS_STASH",
+        message: "README.md would be overwritten",
+      }),
+      error: null,
+    } as never);
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "AWAITING_STASH",
+          error: "README.md would be overwritten",
+        }),
+      }),
+    );
   });
 });
 

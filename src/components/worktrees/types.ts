@@ -32,6 +32,8 @@ export type Worktree = {
   baseBehind: number | null;
   hasStagedChanges: boolean;
   hasUnstagedChanges: boolean;
+  pushStatus:
+    "READY" | "DIRTY" | "DETACHED" | "BEHIND" | "DIVERGED" | "UNKNOWN";
   highlightColor: string | null;
   availability: string;
   statusError: string | null;
@@ -50,6 +52,7 @@ export type Worktree = {
 export type WorktreeCodebaseGroup = {
   codebase: Codebase & {
     defaultBranch: string | null;
+    localBranches: string[];
     remoteBranches: string[];
     lastFetchAttemptAt: string | null;
     lastFetchError: string | null;
@@ -71,6 +74,36 @@ export type WorktreeOverview = {
     updatedAt: string;
   };
   hiddenCount: number;
+  activeMoves: WorktreeMove[];
+};
+
+export type WorktreeMove = {
+  id: string;
+  sourceWorktreeId: string;
+  sourceCodebaseId: string;
+  targetCodebaseId: string;
+  targetWorktreeId: string | null;
+  destinationMode: "NEW" | "EXISTING";
+  branch: string;
+  headSha: string;
+  deleteSource: boolean;
+  status:
+    | "PUSHING"
+    | "CHECKING_OUT"
+    | "AWAITING_STASH"
+    | "CLEANING_UP"
+    | "SUCCEEDED"
+    | "SUCCEEDED_WITH_WARNING"
+    | "FAILED"
+    | "CANCELLED";
+  sourceJobId: string | null;
+  targetJobId: string | null;
+  cleanupJobId: string | null;
+  error: string | null;
+  warning: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
 };
 
 export type WorktreeDetail = {

@@ -197,6 +197,20 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
       requireControlPlane(context);
       return jiraService.updateProjectDisplaySettings(input);
     },
+    updateJiraProjectBranchNaming: (
+      _root: unknown,
+      {
+        projectId,
+        branchNamingScript,
+      }: { projectId: string; branchNamingScript: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.updateProjectBranchNaming(
+        projectId,
+        branchNamingScript,
+      );
+    },
     refreshJiraSource: (
       _root: unknown,
       { sourceId }: { sourceId: string },

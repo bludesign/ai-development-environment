@@ -31,7 +31,16 @@ export type JiraProjectView = {
   ticketAssignmentFilter: JiraTicketAssignmentFilter;
   hideCompletedTickets: boolean;
   completedStatusIds: string[];
+  branchNamingScript: string;
   sources: JiraSourceView[];
+};
+
+export type JiraBranchTicket = {
+  ticketKey: string;
+  ticketTitle: string;
+  ticketType: string | null;
+  projectKey: string;
+  branchNamingScript: string;
 };
 
 export type JiraProjectStatus = {

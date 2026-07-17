@@ -1,4 +1,10 @@
 import type { Agent, AgentJob } from "@/components/agents/types";
+import type {
+  CodebaseGitBranch,
+  CodebaseGitState,
+  CodebaseStash,
+  CodebaseStashDiff,
+} from "@ai-development-environment/agent-contract/codebases";
 
 export type Codebase = {
   id: string;
@@ -21,6 +27,7 @@ export type Codebase = {
     "AVAILABLE" | "MISSING" | "NOT_REPOSITORY" | "ORIGIN_MISMATCH" | "ERROR";
   statusError: string | null;
   defaultBranch: string | null;
+  localBranches: string[];
   remoteBranches: string[];
   lastCheckedAt: string | null;
   lastFetchedAt: string | null;
@@ -69,4 +76,15 @@ export type Inspection = {
     syncState: Codebase["syncState"];
   };
   existingRepository: CodebaseRepository | null;
+};
+
+export type CodebaseDetail = Codebase & {
+  repository: Omit<CodebaseRepository, "codebases">;
+};
+
+export type {
+  CodebaseGitBranch,
+  CodebaseGitState,
+  CodebaseStash,
+  CodebaseStashDiff,
 };

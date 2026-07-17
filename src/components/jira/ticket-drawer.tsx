@@ -1,12 +1,23 @@
 "use client";
 
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, ExternalLink, GitBranch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 import { AdfRenderer } from "@/components/jira/adf-renderer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemHeader,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Sheet,
   SheetContent,
@@ -17,6 +28,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTicketDetail } from "@/services/jira/types";
+import { TicketWorktreeDialog } from "./ticket-worktree-dialog";
 
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
@@ -54,6 +66,7 @@ export function JiraTicketDrawer({
   const [ticket, setTicket] = useState<JiraTicketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!issueKey) {
@@ -81,188 +94,215 @@ export function JiraTicketDrawer({
   }, [issueKey]);
 
   return (
-    <Sheet
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      open={Boolean(issueKey)}
-    >
-      <SheetContent className="w-[min(48rem,95vw)] overflow-y-auto sm:max-w-3xl">
-        <SheetHeader className="border-b pr-12">
-          <SheetTitle>{ticket?.key ?? issueKey ?? t("ticket")}</SheetTitle>
-          <SheetDescription>
-            {ticket?.summary ?? t("loadingTicket")}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="space-y-6 px-4 pb-6">
-          {loading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner />
-              {t("loadingTicket")}
-            </div>
-          )}
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {ticket && (
-            <>
-              {(ticket.cache.stale || ticket.commentsCache.stale) && (
-                <Alert className="border-amber-500/30 bg-amber-500/10">
-                  <AlertTriangle />
-                  <AlertDescription>{t("staleTicket")}</AlertDescription>
-                </Alert>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Badge>{ticket.status}</Badge>
-                {ticket.issueType && <Badge>{ticket.issueType}</Badge>}
-                {ticket.priority && (
-                  <Badge className={priorityClass(ticket.priority)}>
-                    {ticket.priority}
-                  </Badge>
-                )}
-                <a
-                  className="ml-auto inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                  href={ticket.jiraUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {t("openInJira")}
-                  <ExternalLink className="size-3" />
-                </a>
+    <>
+      <Sheet
+        onOpenChange={(open) => {
+          if (!open) onClose();
+        }}
+        open={Boolean(issueKey)}
+      >
+        <SheetContent className="w-[min(48rem,95vw)] overflow-y-auto sm:max-w-3xl">
+          <SheetHeader className="border-b pr-12">
+            <SheetTitle>{ticket?.key ?? issueKey ?? t("ticket")}</SheetTitle>
+            <SheetDescription>
+              {ticket?.summary ?? t("loadingTicket")}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-6 px-4 pb-6">
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner />
+                {t("loadingTicket")}
               </div>
-              <DetailGrid ticket={ticket} />
-              <section>
-                <h3 className="mb-2 font-semibold">{t("descriptionTitle")}</h3>
-                <div className="rounded-lg border p-4">
-                  <AdfRenderer value={ticket.description} />
-                </div>
-              </section>
-              {(ticket.labels.length > 0 ||
-                ticket.components.length > 0 ||
-                ticket.fixVersions.length > 0 ||
-                ticket.sprintNames.length > 0) && (
-                <section>
-                  <h3 className="mb-2 font-semibold">{t("classification")}</h3>
-                  <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                    {ticket.labels.length > 0 && (
-                      <div>
-                        <dt className="text-muted-foreground">{t("labels")}</dt>
-                        <dd className="mt-1 flex flex-wrap gap-1">
-                          {ticket.labels.map((label) => (
-                            <Badge key={label}>{label}</Badge>
-                          ))}
-                        </dd>
-                      </div>
-                    )}
-                    {ticket.components.length > 0 && (
-                      <NamedList
-                        label={t("components")}
-                        values={ticket.components.map((item) => item.name)}
-                      />
-                    )}
-                    {ticket.fixVersions.length > 0 && (
-                      <NamedList
-                        label={t("fixVersions")}
-                        values={ticket.fixVersions.map((item) => item.name)}
-                      />
-                    )}
-                    {ticket.sprintNames.length > 0 && (
-                      <NamedList
-                        label={t("sprints")}
-                        values={ticket.sprintNames}
-                      />
-                    )}
-                  </dl>
-                </section>
-              )}
-              {(ticket.parent ||
-                ticket.subtasks.length > 0 ||
-                ticket.issueLinks.length > 0) && (
-                <section>
-                  <h3 className="mb-2 font-semibold">{t("relatedIssues")}</h3>
-                  <div className="space-y-2">
-                    {[
-                      ...(ticket.parent ? [ticket.parent] : []),
-                      ...ticket.subtasks,
-                      ...ticket.issueLinks,
-                    ].map((link, index) => (
-                      <div
-                        key={`${link.key}-${index}`}
-                        className="rounded-lg border p-3 text-sm"
-                      >
-                        <div className="flex justify-between gap-2">
-                          <span className="font-medium">
-                            {link.key} · {link.summary}
-                          </span>
-                          {link.status && <Badge>{link.status}</Badge>}
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {link.relationship}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-              {ticket.attachments.length > 0 && (
-                <section>
-                  <h3 className="mb-2 font-semibold">{t("attachments")}</h3>
-                  <div className="space-y-2">
-                    {ticket.attachments.map((attachment) => (
-                      <a
-                        key={attachment.id}
-                        className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted"
-                        href={attachment.contentUrl ?? "#"}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        <span>{attachment.filename}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {attachment.size
-                            ? `${Math.round(attachment.size / 1024)} KB`
-                            : ""}
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                </section>
-              )}
-              <section>
-                <h3 className="mb-2 font-semibold">
-                  {t("comments", { count: ticket.comments.length })}
-                </h3>
-                {ticket.comments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("noComments")}
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {ticket.comments.map((comment) => (
-                      <article
-                        key={comment.id}
-                        className="rounded-lg border p-4"
-                      >
-                        <div className="mb-3 flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">
-                            {comment.author?.displayName ?? t("unknownUser")}
-                          </span>
-                          <time className="text-xs text-muted-foreground">
-                            {displayDate(comment.createdAt)}
-                          </time>
-                        </div>
-                        <AdfRenderer value={comment.body} />
-                      </article>
-                    ))}
-                  </div>
+            )}
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            {ticket && (
+              <>
+                {(ticket.cache.stale || ticket.commentsCache.stale) && (
+                  <Alert className="border-amber-500/30 bg-amber-500/10">
+                    <AlertTriangle />
+                    <AlertDescription>{t("staleTicket")}</AlertDescription>
+                  </Alert>
                 )}
-              </section>
-            </>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge>{ticket.status}</Badge>
+                    {ticket.issueType && <Badge>{ticket.issueType}</Badge>}
+                    {ticket.priority && (
+                      <Badge className={priorityClass(ticket.priority)}>
+                        {ticket.priority}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => setWorktreeDialogOpen(true)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <GitBranch /> {t("worktreeAction")}
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <a href={ticket.jiraUrl} rel="noreferrer" target="_blank">
+                        <ExternalLink /> {t("openInJira")}
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+                <DetailGrid ticket={ticket} />
+                <section>
+                  <h3 className="mb-2 font-semibold">
+                    {t("descriptionTitle")}
+                  </h3>
+                  <Card size="sm">
+                    <CardContent>
+                      <AdfRenderer value={ticket.description} />
+                    </CardContent>
+                  </Card>
+                </section>
+                {(ticket.labels.length > 0 ||
+                  ticket.components.length > 0 ||
+                  ticket.fixVersions.length > 0 ||
+                  ticket.sprintNames.length > 0) && (
+                  <section>
+                    <h3 className="mb-2 font-semibold">
+                      {t("classification")}
+                    </h3>
+                    <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                      {ticket.labels.length > 0 && (
+                        <div>
+                          <dt className="text-muted-foreground">
+                            {t("labels")}
+                          </dt>
+                          <dd className="mt-1 flex flex-wrap gap-1">
+                            {ticket.labels.map((label) => (
+                              <Badge key={label}>{label}</Badge>
+                            ))}
+                          </dd>
+                        </div>
+                      )}
+                      {ticket.components.length > 0 && (
+                        <NamedList
+                          label={t("components")}
+                          values={ticket.components.map((item) => item.name)}
+                        />
+                      )}
+                      {ticket.fixVersions.length > 0 && (
+                        <NamedList
+                          label={t("fixVersions")}
+                          values={ticket.fixVersions.map((item) => item.name)}
+                        />
+                      )}
+                      {ticket.sprintNames.length > 0 && (
+                        <NamedList
+                          label={t("sprints")}
+                          values={ticket.sprintNames}
+                        />
+                      )}
+                    </dl>
+                  </section>
+                )}
+                {(ticket.parent ||
+                  ticket.subtasks.length > 0 ||
+                  ticket.issueLinks.length > 0) && (
+                  <section>
+                    <h3 className="mb-2 font-semibold">{t("relatedIssues")}</h3>
+                    <ItemGroup className="gap-2">
+                      {[
+                        ...(ticket.parent ? [ticket.parent] : []),
+                        ...ticket.subtasks,
+                        ...ticket.issueLinks,
+                      ].map((link, index) => (
+                        <Item key={`${link.key}-${index}`} variant="outline">
+                          <ItemContent>
+                            <ItemTitle>
+                              {link.key} · {link.summary}
+                            </ItemTitle>
+                            <ItemDescription>
+                              {link.relationship}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            {link.status && <Badge>{link.status}</Badge>}
+                          </ItemActions>
+                        </Item>
+                      ))}
+                    </ItemGroup>
+                  </section>
+                )}
+                {ticket.attachments.length > 0 && (
+                  <section>
+                    <h3 className="mb-2 font-semibold">{t("attachments")}</h3>
+                    <ItemGroup className="gap-2">
+                      {ticket.attachments.map((attachment) => (
+                        <Item asChild key={attachment.id} variant="outline">
+                          <a
+                            href={attachment.contentUrl ?? "#"}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <ItemContent>
+                              <ItemTitle>{attachment.filename}</ItemTitle>
+                            </ItemContent>
+                            <ItemActions className="text-xs text-muted-foreground">
+                              {attachment.size
+                                ? `${Math.round(attachment.size / 1024)} KB`
+                                : ""}
+                            </ItemActions>
+                          </a>
+                        </Item>
+                      ))}
+                    </ItemGroup>
+                  </section>
+                )}
+                <section>
+                  <h3 className="mb-2 font-semibold">
+                    {t("comments", { count: ticket.comments.length })}
+                  </h3>
+                  {ticket.comments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t("noComments")}
+                    </p>
+                  ) : (
+                    <ItemGroup className="gap-3">
+                      {ticket.comments.map((comment) => (
+                        <Item asChild key={comment.id} variant="outline">
+                          <article>
+                            <ItemHeader>
+                              <ItemTitle>
+                                {comment.author?.displayName ??
+                                  t("unknownUser")}
+                              </ItemTitle>
+                              <time className="text-xs text-muted-foreground">
+                                {displayDate(comment.createdAt)}
+                              </time>
+                            </ItemHeader>
+                            <ItemContent className="basis-full">
+                              <AdfRenderer value={comment.body} />
+                            </ItemContent>
+                          </article>
+                        </Item>
+                      ))}
+                    </ItemGroup>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+      {ticket && (
+        <TicketWorktreeDialog
+          issueKey={ticket.key}
+          onOpenChange={setWorktreeDialogOpen}
+          open={worktreeDialogOpen}
+        />
+      )}
+    </>
   );
 }
 

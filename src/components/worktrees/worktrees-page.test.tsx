@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -17,6 +18,7 @@ import {
   WorktreesPage,
   worktreeChangeActionState,
 } from "./worktrees-page";
+import type { WorktreeOverview } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -25,6 +27,12 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 describe("displayedWorktreePath", () => {
   test("uses the full path without a base and outside a configured base", () => {
@@ -68,6 +76,7 @@ describe("worktreeChangeActionState", () => {
 
 describe("WorktreesPage", () => {
   beforeEach(() => {
+    global.ResizeObserver = ResizeObserverMock;
     window.history.replaceState(null, "", "/worktrees");
     window.localStorage.clear();
     Element.prototype.scrollIntoView = vi.fn();
@@ -75,6 +84,7 @@ describe("WorktreesPage", () => {
     request.mockResolvedValue({
       worktreeOverview: {
         hiddenCount: 0,
+        activeMoves: [],
         settings: {
           editorVariant: "CODE",
           updatedAt: new Date(0).toISOString(),
@@ -98,11 +108,12 @@ describe("WorktreesPage", () => {
               osVersion: "macOS",
               architecture: "arm64",
               capabilities: [
+                "worktree.branch",
                 "worktree.inspect",
                 "worktree.operation",
                 "worktree.watch",
               ],
-              baseRepoDirectory: null,
+              baseRepoDirectory: "/workspaces",
               connectionStatus: "ONLINE",
               ipAddress: null,
               lastSeenAt: new Date().toISOString(),
@@ -124,7 +135,7 @@ describe("WorktreesPage", () => {
                 },
                 codebase: {
                   id: "codebase-1",
-                  folder: "/repo",
+                  folder: "/workspaces/repo",
                   observedOrigin: "git@github.com:openai/codex.git",
                   branch: "main",
                   headSha: "abc",
@@ -147,8 +158,8 @@ describe("WorktreesPage", () => {
                   {
                     id: "worktree-1",
                     codebaseId: "codebase-1",
-                    gitDirectory: "/repo/.git",
-                    folder: "/repo",
+                    gitDirectory: "/workspaces/repo/.git",
+                    folder: "/workspaces/repo",
                     relativePath: ".",
                     primary: true,
                     branch: "feature/AIDE-24",
@@ -163,6 +174,7 @@ describe("WorktreesPage", () => {
                     baseBehind: 0,
                     hasStagedChanges: false,
                     hasUnstagedChanges: false,
+                    pushStatus: "READY",
                     highlightColor: "blue",
                     availability: "AVAILABLE",
                     statusError: null,
@@ -227,7 +239,7 @@ describe("WorktreesPage", () => {
     expect(
       screen.getByText("Ready").closest('[data-slot="badge"]')?.className,
     ).toContain("dark:text-green-300");
-    expect(screen.getByText("/repo")).toBeDefined();
+    expect(screen.getByText("repo")).toBeDefined();
     expect(screen.queryByText(".")).toBeNull();
     expect(screen.getByText("Yes").className).toContain(
       "dark:text-emerald-300",
@@ -255,7 +267,8 @@ describe("WorktreesPage", () => {
     const tagsTrigger = screen.getByRole("button", {
       name: "Tags: feature/AIDE-24",
     });
-    expect(tagsTrigger.className).not.toContain("focus-visible:ring");
+    expect(tagsTrigger.getAttribute("data-variant")).toBe("ghost");
+    expect(tagsTrigger.className).toContain("focus-visible:ring");
     fireEvent.pointerDown(tagsTrigger, { button: 0, ctrlKey: false });
     await waitFor(() =>
       expect(
@@ -273,10 +286,187 @@ describe("WorktreesPage", () => {
         "size-3",
       );
     }
-    expect(menu.querySelector('button[aria-label="fuchsia"]')).toBeTruthy();
     expect(
-      menu.querySelector('button[aria-label="fuchsia"]')?.className,
+      menu.querySelector(
+        '[data-slot="toggle-group-item"][aria-label="fuchsia"]',
+      ),
+    ).toBeTruthy();
+    expect(
+      menu.querySelector(
+        '[data-slot="toggle-group-item"][aria-label="fuchsia"]',
+      )?.className,
     ).toContain("bg-fuchsia-500");
+  });
+
+  test("keeps the change branch popover open with an agent-relative path", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Tags: feature/AIDE-24" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Change branch" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-slot="dropdown-menu-content"]'),
+      ).toBeNull();
+      const popover = document.querySelector('[data-slot="popover-content"]');
+      expect(popover).toBeTruthy();
+      expect(popover?.querySelector("p")?.textContent).toBe("repo");
+    });
+    expect(
+      screen.getByRole("heading", { name: "Change branch" }),
+    ).toBeDefined();
+  });
+
+  test("offers matching agents and warns about dirty existing destinations", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const source = response.worktreeOverview.agents[0]!;
+    source.agent.capabilities.push("worktree.move.push", "worktree.delete");
+    const target = structuredClone(source);
+    target.agent.id = "agent-2";
+    target.agent.name = "Laptop";
+    target.agent.hostname = "laptop.local";
+    target.agent.capabilities = ["worktree.move.checkout", "worktree.delete"];
+    target.codebases[0]!.codebase.id = "codebase-2";
+    target.codebases[0]!.codebase.folder = "/workspaces/destination";
+    target.codebases[0]!.worktrees[0]!.id = "worktree-2";
+    target.codebases[0]!.worktrees[0]!.codebaseId = "codebase-2";
+    target.codebases[0]!.worktrees[0]!.folder = "/workspaces/destination";
+    target.codebases[0]!.worktrees[0]!.gitDirectory =
+      "/workspaces/destination/.git";
+    target.codebases[0]!.worktrees[0]!.branch = "main";
+    target.codebases[0]!.worktrees[0]!.hasUnstagedChanges = true;
+    response.worktreeOverview.agents.push(target);
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.pointerDown(
+      screen.getAllByRole("button", { name: "Customize worktree" })[0]!,
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Move to agent" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Move to agent" }),
+    ).toBeDefined();
+    expect(screen.getByText("Laptop · Codex")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Destination worktree" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: /main · \./ }));
+    expect(
+      await screen.findByText(/destination has uncommitted changes/i),
+    ).toBeDefined();
+    expect(
+      (
+        screen.getByRole("checkbox", {
+          name: "Delete old worktree after moving",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+
+  test("confirms forced linked-worktree and optional remote deletion", async () => {
+    const response = (await request("query Fixture")) as unknown as {
+      worktreeOverview: WorktreeOverview;
+    };
+    const agent = response.worktreeOverview.agents[0]!;
+    agent.agent.capabilities.push("worktree.delete");
+    const group = agent.codebases[0]!;
+    group.codebase.remoteBranches.push("feature/AIDE-24");
+    group.worktrees[0]!.primary = false;
+    request.mockClear();
+
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+    const deleteItem = await screen.findByRole("menuitem", {
+      name: "Delete worktree",
+    });
+    expect(deleteItem.getAttribute("data-variant")).toBe("destructive");
+    fireEvent.click(deleteItem);
+    expect(
+      await screen.findByRole("heading", { name: "Delete worktree" }),
+    ).toBeDefined();
+    expect(screen.getByText(/permanently lost/i)).toBeDefined();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Also delete origin/feature/AIDE-24",
+      }),
+    ).toBeDefined();
+  });
+
+  test("uses shadcn items and color toggles in the tag manager dialog", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Tags: feature/AIDE-24" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Manage tags" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Manage tags" });
+    expect(
+      within(dialog).getByText("Ready").closest('[data-slot="item"]'),
+    ).not.toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Edit" }));
+    expect(within(dialog).getByRole("textbox")).toHaveProperty(
+      "value",
+      "Ready",
+    );
+
+    const fuchsia = within(dialog).getByRole("radio", { name: "fuchsia" });
+    expect(fuchsia.getAttribute("data-slot")).toBe("toggle-group-item");
+    fireEvent.click(fuchsia);
+    expect(fuchsia.getAttribute("aria-checked")).toBe("true");
+  });
+
+  test("uses shadcn items and an empty state in the hidden worktrees dialog", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+    request.mockResolvedValueOnce({
+      hiddenWorktrees: [
+        {
+          id: "hidden-1",
+          branch: "feature/hidden",
+          folder: "/workspaces/hidden",
+        },
+      ],
+    } as never);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hidden (0)" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Hidden worktrees",
+    });
+    expect(
+      (await within(dialog).findByText("feature/hidden")).closest(
+        '[data-slot="item"]',
+      ),
+    ).not.toBeNull();
+
+    request.mockResolvedValueOnce({ purgeHiddenWorktree: true } as never);
+    request.mockResolvedValueOnce({ hiddenWorktrees: [] } as never);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Purge" }));
+
+    const emptyMessage = await within(dialog).findByText(
+      "No hidden worktrees.",
+    );
+    expect(emptyMessage.closest('[data-slot="empty"]')).not.toBeNull();
   });
 
   test("opens pull request actions from the PR badge", async () => {
@@ -327,10 +517,14 @@ describe("WorktreesPage", () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
 
-    expect(screen.queryByRole("combobox", { name: "Base branch" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Edit base branch" }));
+    const editBase = screen.getByRole("button", { name: "Edit base branch" });
+    const baseControl = editBase.parentElement!;
+    expect(baseControl.querySelector('[role="combobox"]')).toBeNull();
+    fireEvent.click(editBase);
 
-    expect(document.querySelector('[data-slot="select-trigger"]')).toBeTruthy();
+    expect(
+      baseControl.querySelector('[data-slot="select-trigger"]'),
+    ).toBeTruthy();
     expect(await screen.findAllByRole("option")).toHaveLength(2);
   });
 
@@ -583,10 +777,13 @@ describe("WorktreesPage", () => {
   test("switches to the compact table and remembers the choice", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
-    fireEvent.click(screen.getByRole("button", { name: "Table layout" }));
+    const tableLayout = screen.getByRole("radio", { name: "Table layout" });
+    expect(tableLayout.getAttribute("data-slot")).toBe("toggle-group-item");
+    fireEvent.click(tableLayout);
     await waitFor(() =>
       expect(window.localStorage.getItem("worktrees-layout")).toBe("table"),
     );
+    expect(tableLayout.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("columnheader", { name: "Branch" })).toBeDefined();
   });
 });

@@ -105,6 +105,7 @@ model Codebase {
   availability       String             @default("AVAILABLE")
   statusError        String?
   defaultBranch      String?
+  localBranchesJson  String             @default("[]")
   remoteBranchesJson String             @default("[]")
   lastCheckedAt      DateTime?
   lastFetchedAt      DateTime?
@@ -149,6 +150,7 @@ model Worktree {
   baseBehind         Int?
   hasStagedChanges   Boolean                 @default(false)
   hasUnstagedChanges Boolean                 @default(false)
+  pushStatus         String                  @default("UNKNOWN")
   highlightColor     String?
   availability       String                  @default("AVAILABLE")
   statusError        String?
@@ -162,6 +164,35 @@ model Worktree {
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model WorktreeMove {
+  id                  String    @id
+  requestId           String
+  sourceWorktreeId    String
+  sourceCodebaseId    String
+  targetCodebaseId    String
+  targetWorktreeId    String?
+  destinationMode     String
+  branch              String
+  headSha             String
+  baseBranch          String
+  deleteSource        Boolean   @default(false)
+  status              String
+  sourceJobId         String?
+  targetJobId         String?
+  cleanupJobId        String?
+  error               String?
+  warning             String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  finishedAt          DateTime?
+
+  @@unique([sourceWorktreeId, requestId])
+  @@index([status, updatedAt])
+  @@index([sourceJobId])
+  @@index([targetJobId])
+  @@index([cleanupJobId])
 }
 
 model WorktreeTag {
@@ -287,6 +318,7 @@ model JiraProject {
   ticketAssignmentFilter String       @default("ALL")
   hideCompletedTickets   Boolean      @default(false)
   completedStatusIdsJson String       @default("[]")
+  branchNamingScript     String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
   sources                JiraSource[]

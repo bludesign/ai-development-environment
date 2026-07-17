@@ -6,7 +6,10 @@ import type {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { WorktreesService } from "@/services/worktrees";
+import type {
+  WorktreeBranchSelection,
+  WorktreesService,
+} from "@/services/worktrees";
 
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
@@ -38,6 +41,11 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
   WorktreeSettings: {
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
+  WorktreeMove: {
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+    finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
+  },
   Query: {
     worktreeOverview: (
       _root: unknown,
@@ -62,6 +70,30 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
     ) => {
       requireControlPlane(context);
       return service.settings();
+    },
+    previewWorktreeTicketBranch: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          codebaseId: string;
+          worktreeId?: string | null;
+          ticketKey: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.previewTicketBranch(input);
+    },
+    worktreeMove: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.getMove(id);
     },
   },
   Mutation: {
@@ -110,6 +142,89 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
         input.operation,
         input.requestId,
       );
+    },
+    createWorktree: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          codebaseId: string;
+          selection: WorktreeBranchSelection;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.createWorktree(input);
+    },
+    changeWorktreeBranch: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          selection: WorktreeBranchSelection;
+          requestId: string;
+          stashOnFailure?: boolean | null;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.changeWorktreeBranch(input);
+    },
+    moveWorktree: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          sourceWorktreeId: string;
+          targetCodebaseId: string;
+          targetWorktreeId?: string | null;
+          deleteSource: boolean;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.moveWorktree(input);
+    },
+    retryWorktreeMoveWithStash: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.retryWorktreeMoveWithStash(id);
+    },
+    cancelWorktreeMove: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.cancelWorktreeMove(id);
+    },
+    deleteWorktree: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          deleteRemoteBranch: boolean;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteWorktree(input);
     },
     updateWorktreeBaseBranch: (
       _root: unknown,

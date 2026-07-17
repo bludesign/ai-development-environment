@@ -4,10 +4,17 @@ import { dirname, join, resolve } from "node:path";
 
 import {
   codebaseBrowsePayload,
+  codebaseGitInspectPayload,
+  codebaseGitOperationPayload,
   codebaseJobPayload,
+  MAX_CODEBASE_GIT_BRANCHES,
+  MAX_CODEBASE_STASHES,
+  MAX_CODEBASE_STASH_PATCH_BYTES,
   normalizeGitOrigin,
   type CodebaseDirectoryListing,
+  type CodebaseGitState,
   type CodebaseSnapshot,
+  type CodebaseStash,
 } from "@ai-development-environment/agent-contract/codebases";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
@@ -56,6 +63,35 @@ async function git(
   });
   if (result.cancelled || result.timedOut) {
     throw new InterruptedGitInspection(result);
+  }
+  return result;
+}
+
+async function mutatingGit(
+  folder: string,
+  args: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CaptureResult> {
+  const result = await captureCommand({
+    command: "git",
+    args: ["-C", folder, ...args],
+    timeoutMs,
+    signal,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (result.cancelled || result.timedOut) {
+    throw new InterruptedGitInspection(result);
+  }
+  return result;
+}
+
+function requireSuccess(
+  result: CaptureResult,
+  fallback: string,
+): CaptureResult {
+  if (result.exitCode !== 0) {
+    throw new Error(cleanError(result.stderr || fallback));
   }
   return result;
 }
@@ -485,5 +521,507 @@ export const fetchCodebase: AgentJobHandler = async (
     timedOut: result.timedOut,
     cancelled: result.cancelled,
     snapshot,
+  };
+};
+
+async function validateGitCodebase(
+  folder: string,
+  expectedOrigin: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const snapshot = await inspectCodebase(
+    folder,
+    Math.min(timeoutMs, 30_000),
+    signal,
+    expectedOrigin,
+  );
+  if (snapshot.availability !== "AVAILABLE") {
+    throw new Error(snapshot.error || "Codebase is unavailable");
+  }
+  return snapshot.folder;
+}
+
+function parsedRefLines(value: string): Array<[string, string | null]> {
+  return value
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf("\0");
+      if (separator < 0) return [line, null];
+      return [
+        line.slice(0, separator),
+        line.slice(separator + 1).trim() || null,
+      ];
+    });
+}
+
+async function inspectStashes(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ stashes: CodebaseStash[]; truncated: boolean }> {
+  const result = requireSuccess(
+    await git(
+      folder,
+      [
+        "stash",
+        "list",
+        `--max-count=${MAX_CODEBASE_STASHES + 1}`,
+        "--format=%H%x00%gd%x00%ci%x00%gs",
+      ],
+      timeoutMs,
+      signal,
+    ),
+    "Could not list stashes",
+  );
+  const stashes = result.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [oid = "", selector = "", date = "", ...message] = line.split("\0");
+      const createdAt = new Date(date);
+      if (!oid || !selector || Number.isNaN(createdAt.valueOf())) {
+        throw new Error("Git returned an invalid stash entry");
+      }
+      return {
+        oid: oid.toLowerCase(),
+        selector,
+        message: message.join("\0"),
+        createdAt: createdAt.toISOString(),
+      };
+    });
+  return {
+    stashes: stashes.slice(0, MAX_CODEBASE_STASHES),
+    truncated: stashes.length > MAX_CODEBASE_STASHES,
+  };
+}
+
+export async function inspectCodebaseGitState(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CodebaseGitState> {
+  const [currentResult, statusResult, localResult, remoteResult, stashResult] =
+    await Promise.all([
+      git(folder, ["symbolic-ref", "--short", "-q", "HEAD"], timeoutMs, signal),
+      git(
+        folder,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        timeoutMs,
+        signal,
+      ),
+      git(
+        folder,
+        [
+          "for-each-ref",
+          "--format=%(refname:strip=2)%00%(worktreepath)",
+          "refs/heads",
+        ],
+        timeoutMs,
+        signal,
+      ),
+      git(
+        folder,
+        ["for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin"],
+        timeoutMs,
+        signal,
+      ),
+      inspectStashes(folder, timeoutMs, signal),
+    ]);
+  requireSuccess(statusResult, "Could not inspect codebase changes");
+  requireSuccess(localResult, "Could not list local branches");
+  requireSuccess(remoteResult, "Could not list remote branches");
+  const current =
+    currentResult.exitCode === 0 ? currentResult.stdout.trim() : null;
+  const branches = new Map<string, CodebaseGitState["branches"][number]>();
+  for (const [name, checkedOutPath] of parsedRefLines(localResult.stdout)) {
+    branches.set(name, {
+      name,
+      local: true,
+      remote: false,
+      current: name === current,
+      checkedOutPath,
+    });
+  }
+  for (const name of remoteResult.stdout
+    .split("\n")
+    .map((branch) => branch.trim())
+    .filter((branch) => branch && branch !== "HEAD")) {
+    const existing = branches.get(name);
+    branches.set(
+      name,
+      existing ?? {
+        name,
+        local: false,
+        remote: true,
+        current: false,
+        checkedOutPath: null,
+      },
+    );
+    if (existing) existing.remote = true;
+  }
+  const sorted = [...branches.values()].sort((first, second) =>
+    first.name.localeCompare(second.name),
+  );
+  return {
+    dirty: Boolean(statusResult.stdout),
+    branches: sorted.slice(0, MAX_CODEBASE_GIT_BRANCHES),
+    branchesTruncated: sorted.length > MAX_CODEBASE_GIT_BRANCHES,
+    stashes: stashResult.stashes,
+    stashesTruncated: stashResult.truncated,
+  };
+}
+
+async function resolveStashSelector(
+  folder: string,
+  oid: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const result = requireSuccess(
+    await git(
+      folder,
+      ["reflog", "show", "--format=%H%x00%gd", "refs/stash"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not resolve the stash",
+  );
+  const match = parsedRefLines(result.stdout).find(
+    ([candidate]) => candidate.toLowerCase() === oid.toLowerCase(),
+  );
+  if (!match?.[1]) {
+    throw new Error(
+      "The selected stash no longer exists; refresh and try again",
+    );
+  }
+  return match[1];
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  const buffer = Buffer.from(value, "utf8");
+  return {
+    value:
+      buffer.byteLength <= maxBytes
+        ? value
+        : buffer
+            .subarray(0, maxBytes)
+            .toString("utf8")
+            .replace(/\uFFFD$/, ""),
+    truncated: buffer.byteLength > maxBytes,
+  };
+}
+
+export const inspectCodebaseGit: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = codebaseGitInspectPayload(payload);
+  const folder = await validateGitCodebase(
+    input.folder,
+    input.expectedOrigin,
+    timeoutMs,
+    signal,
+  );
+  if (input.action === "STATE") {
+    return {
+      ...successfulProcess,
+      state: await inspectCodebaseGitState(folder, timeoutMs, signal),
+    };
+  }
+  await resolveStashSelector(folder, input.stashOid, timeoutMs, signal);
+  const result = requireSuccess(
+    await git(
+      folder,
+      [
+        "stash",
+        "show",
+        "--stat",
+        "--patch",
+        "--include-untracked",
+        "--no-color",
+        "--no-ext-diff",
+        input.stashOid,
+      ],
+      timeoutMs,
+      signal,
+    ),
+    "Could not inspect the stash",
+  );
+  const patch = truncateUtf8(result.stdout, MAX_CODEBASE_STASH_PATCH_BYTES);
+  return {
+    ...successfulProcess,
+    diff: {
+      oid: input.stashOid,
+      patch: patch.value,
+      truncated: patch.truncated,
+    },
+  };
+};
+
+function branchFromState(state: CodebaseGitState, name: string) {
+  return state.branches.find((branch) => branch.name === name) ?? null;
+}
+
+async function runSwitchBranch(
+  folder: string,
+  branch: string,
+  stashChanges: boolean,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const state = await inspectCodebaseGitState(folder, timeoutMs, signal);
+  const selected = branchFromState(state, branch);
+  if (!selected?.local && !selected?.remote) {
+    throw new Error(`Branch ${branch} is unavailable; refresh and try again`);
+  }
+  if (selected.current) return;
+  if (selected.checkedOutPath) {
+    throw new Error(`Branch ${branch} is checked out in another worktree`);
+  }
+  let stashed = false;
+  if (state.dirty) {
+    if (!stashChanges) {
+      throw new Error("Stash or commit changes before switching branches");
+    }
+    const stash = requireSuccess(
+      await mutatingGit(
+        folder,
+        [
+          "stash",
+          "push",
+          "--include-untracked",
+          "-m",
+          `Automatic stash before switching to ${branch}`,
+        ],
+        timeoutMs,
+        signal,
+      ),
+      "Could not stash codebase changes",
+    );
+    stashed = !stash.stdout.toLowerCase().includes("no local changes");
+  }
+  const switched = await mutatingGit(
+    folder,
+    selected.local
+      ? ["switch", branch]
+      : ["switch", "--track", "-c", branch, `refs/remotes/origin/${branch}`],
+    timeoutMs,
+    signal,
+  );
+  if (switched.exitCode !== 0) {
+    throw new Error(
+      `${cleanError(switched.stderr || "Could not switch branches")}${
+        stashed ? ". The automatic stash was preserved." : ""
+      }`,
+    );
+  }
+}
+
+async function runDeleteBranch(
+  folder: string,
+  branch: string,
+  defaultBranch: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const selected = branchFromState(
+    await inspectCodebaseGitState(folder, timeoutMs, signal),
+    branch,
+  );
+  if (!selected?.local) throw new Error(`Local branch ${branch} was not found`);
+  if (selected.current) throw new Error("The current branch cannot be deleted");
+  if (branch === defaultBranch)
+    throw new Error("The default branch cannot be deleted");
+  if (selected.checkedOutPath) {
+    throw new Error(`Branch ${branch} is checked out in another worktree`);
+  }
+  requireSuccess(
+    await mutatingGit(
+      folder,
+      ["branch", "--delete", "--", branch],
+      timeoutMs,
+      signal,
+    ),
+    `Could not safely delete branch ${branch}`,
+  );
+}
+
+export async function pullCodebaseBranch(
+  folder: string,
+  branch: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  requireSuccess(
+    await mutatingGit(folder, ["fetch", "origin"], timeoutMs, signal),
+    "Could not fetch origin",
+  );
+  const state = await inspectCodebaseGitState(folder, timeoutMs, signal);
+  const selected = branchFromState(state, branch);
+  if (!selected?.local || !selected.remote) {
+    throw new Error(
+      `Pull requires matching local and origin branches for ${branch}`,
+    );
+  }
+  if (selected.checkedOutPath && !selected.current) {
+    throw new Error(`Branch ${branch} is checked out in another worktree`);
+  }
+  if (selected.current && state.dirty) {
+    throw new Error("Stash or commit changes before pulling");
+  }
+  const localRef = `refs/heads/${branch}`;
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  const ancestry = await git(
+    folder,
+    ["merge-base", "--is-ancestor", localRef, remoteRef],
+    timeoutMs,
+    signal,
+  );
+  if (ancestry.exitCode === 1) {
+    throw new Error(`Branch ${branch} cannot be fast-forwarded from origin`);
+  }
+  requireSuccess(ancestry, "Could not compare local and origin branches");
+  requireSuccess(
+    await mutatingGit(
+      folder,
+      selected.current
+        ? ["merge", "--ff-only", remoteRef]
+        : ["branch", "--force", "--", branch, remoteRef],
+      timeoutMs,
+      signal,
+    ),
+    `Could not fast-forward branch ${branch}`,
+  );
+}
+
+export async function deleteCodebaseRemoteBranch(
+  folder: string,
+  branch: string,
+  defaultBranch: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  if (branch === "main") {
+    throw new Error("origin/main cannot be deleted");
+  }
+  if (branch === defaultBranch) {
+    throw new Error("The default remote branch cannot be deleted");
+  }
+  const state = await inspectCodebaseGitState(folder, timeoutMs, signal);
+  if (!branchFromState(state, branch)?.remote) {
+    throw new Error(`Remote branch origin/${branch} was not found`);
+  }
+  const remote = await git(
+    folder,
+    ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`],
+    timeoutMs,
+    signal,
+  );
+  if (remote.exitCode === 2) {
+    throw new Error(`Remote branch origin/${branch} no longer exists`);
+  }
+  requireSuccess(remote, `Could not inspect origin/${branch}`);
+  requireSuccess(
+    await mutatingGit(
+      folder,
+      ["push", "origin", "--delete", branch],
+      timeoutMs,
+      signal,
+    ),
+    `Could not delete origin/${branch}`,
+  );
+}
+
+export const operateCodebaseGit: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = codebaseGitOperationPayload(payload);
+  const folder = await validateGitCodebase(
+    input.folder,
+    input.expectedOrigin,
+    timeoutMs,
+    signal,
+  );
+  switch (input.operation) {
+    case "SWITCH_BRANCH":
+      await runSwitchBranch(
+        folder,
+        input.branch!,
+        Boolean(input.stashChanges),
+        timeoutMs,
+        signal,
+      );
+      break;
+    case "DELETE_BRANCH":
+      await runDeleteBranch(
+        folder,
+        input.branch!,
+        input.defaultBranch,
+        timeoutMs,
+        signal,
+      );
+      break;
+    case "DELETE_REMOTE_BRANCH":
+      await deleteCodebaseRemoteBranch(
+        folder,
+        input.branch!,
+        input.defaultBranch,
+        timeoutMs,
+        signal,
+      );
+      break;
+    case "PULL_BRANCH":
+      await pullCodebaseBranch(folder, input.branch!, timeoutMs, signal);
+      break;
+    case "APPLY_STASH":
+      await resolveStashSelector(folder, input.stashOid!, timeoutMs, signal);
+      requireSuccess(
+        await mutatingGit(
+          folder,
+          ["stash", "apply", input.stashOid!],
+          timeoutMs,
+          signal,
+        ),
+        "Could not apply the stash; it was retained",
+      );
+      break;
+    case "DELETE_STASH": {
+      const selector = await resolveStashSelector(
+        folder,
+        input.stashOid!,
+        timeoutMs,
+        signal,
+      );
+      requireSuccess(
+        await mutatingGit(
+          folder,
+          ["stash", "drop", selector],
+          timeoutMs,
+          signal,
+        ),
+        "Could not delete the stash",
+      );
+      break;
+    }
+  }
+  return {
+    ...successfulProcess,
+    snapshot: await inspectCodebase(
+      folder,
+      Math.min(timeoutMs, 30_000),
+      signal,
+      input.expectedOrigin,
+    ),
+    state: await inspectCodebaseGitState(
+      folder,
+      Math.min(timeoutMs, 30_000),
+      signal,
+    ),
   };
 };

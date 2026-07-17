@@ -45,6 +45,7 @@ describe("CodebaseMonitor", () => {
     discover.mockResolvedValue({
       complete: true,
       defaultBranch: "main",
+      localBranches: ["main"],
       remoteBranches: ["main"],
       worktrees: [],
     });

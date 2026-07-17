@@ -164,6 +164,9 @@ describe("CodebasesPage", () => {
     expect(screen.getByText("/Users/test/codex")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
     expect(screen.getByText("Developer tooling")).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "View" }).getAttribute("href"),
+    ).toBe("/codebases/codebase-1");
 
     fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
     expect(await screen.findByText("github.com/openai/codex")).toBeDefined();
