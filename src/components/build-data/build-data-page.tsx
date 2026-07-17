@@ -1,8 +1,21 @@
 "use client";
 
-import { Calculator, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Calculator,
+  Check,
+  MoreHorizontal,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
@@ -18,6 +31,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -150,7 +169,8 @@ export function BuildDataPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
+  const [armedDeleteKey, setArmedDeleteKey] = useState<string | null>(null);
+  const armedDeleteTimer = useRef<number | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
@@ -253,6 +273,15 @@ export function BuildDataPage() {
     }
   }, []);
 
+  useEffect(
+    () => () => {
+      if (armedDeleteTimer.current) {
+        window.clearTimeout(armedDeleteTimer.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const timer = window.setTimeout(() => void loadHistory(), 0);
     return () => window.clearTimeout(timer);
@@ -296,6 +325,7 @@ export function BuildDataPage() {
       applyCollection(data[operation]);
       if (operation === "deleteDerivedDataEntries") {
         setSelected(new Set());
+        setArmedDeleteKey(null);
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -318,7 +348,28 @@ export function BuildDataPage() {
     setLoading(true);
     setError(null);
     setSelected(new Set());
+    setArmedDeleteKey(null);
     setCollectionId(createClientId());
+  };
+
+  const inlineDelete = (key: string, entryIds: string[]) => {
+    if (armedDeleteKey !== key) {
+      setArmedDeleteKey(key);
+      if (armedDeleteTimer.current) {
+        window.clearTimeout(armedDeleteTimer.current);
+      }
+      armedDeleteTimer.current = window.setTimeout(
+        () => setArmedDeleteKey(null),
+        5_000,
+      );
+      return;
+    }
+    if (armedDeleteTimer.current) {
+      window.clearTimeout(armedDeleteTimer.current);
+      armedDeleteTimer.current = null;
+    }
+    setArmedDeleteKey(null);
+    void runOperation("deleteDerivedDataEntries", entryIds);
   };
 
   const groupedHistory = useMemo(() => {
@@ -336,6 +387,11 @@ export function BuildDataPage() {
     }
     return [...groups.values()];
   }, [history, locale]);
+  const bulkDeleteKey = `bulk:${selectedEntries
+    .map((entry) => entry.id)
+    .sort()
+    .join(":")}`;
+  const bulkDeleteArmed = armedDeleteKey === bulkDeleteKey;
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -401,14 +457,19 @@ export function BuildDataPage() {
                 {t("selected", { count: selectedEntries.length })}
               </p>
               <Button
+                className="w-40"
                 disabled={activeOperation || operationBusy}
                 onClick={() =>
-                  setConfirmDelete(selectedEntries.map((entry) => entry.id))
+                  inlineDelete(
+                    bulkDeleteKey,
+                    selectedEntries.map((entry) => entry.id),
+                  )
                 }
                 size="sm"
-                variant="destructive"
+                variant={bulkDeleteArmed ? "destructive" : "outline"}
               >
-                <Trash2 /> {t("deleteSelected")}
+                {bulkDeleteArmed ? <Check /> : <Trash2 />}
+                {bulkDeleteArmed ? t("confirmDelete") : t("deleteSelected")}
               </Button>
             </div>
           )}
@@ -425,20 +486,23 @@ export function BuildDataPage() {
                           ? "indeterminate"
                           : false
                     }
-                    onCheckedChange={(checked) =>
+                    onCheckedChange={(checked) => {
+                      setArmedDeleteKey(null);
                       setSelected(
                         checked === true
                           ? new Set(entries.map((entry) => entry.id))
                           : new Set(),
-                      )
-                    }
+                      );
+                    }}
                   />
                 </TableHead>
                 <TableHead>{t("folder")}</TableHead>
                 <TableHead>{t("worktree")}</TableHead>
                 <TableHead>{t("size")}</TableHead>
                 <TableHead>{t("agent")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
+                <TableHead className="w-12 text-right">
+                  <span className="sr-only">{t("actions")}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -448,14 +512,15 @@ export function BuildDataPage() {
                     <Checkbox
                       aria-label={t("selectEntry", { name: entry.name })}
                       checked={selected.has(entry.id)}
-                      onCheckedChange={(checked) =>
+                      onCheckedChange={(checked) => {
+                        setArmedDeleteKey(null);
                         setSelected((current) => {
                           const next = new Set(current);
                           if (checked === true) next.add(entry.id);
                           else next.delete(entry.id);
                           return next;
-                        })
-                      }
+                        });
+                      }}
                     />
                   </TableCell>
                   <TableCell>
@@ -501,16 +566,57 @@ export function BuildDataPage() {
                       {entry.agent.name}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      aria-label={t("deleteEntry", { name: entry.name })}
-                      disabled={activeOperation || operationBusy}
-                      onClick={() => setConfirmDelete([entry.id])}
-                      size="icon-sm"
-                      variant="ghost"
+                  <TableCell className="w-12 text-right">
+                    <DropdownMenu
+                      onOpenChange={(open) => {
+                        if (
+                          !open &&
+                          armedDeleteKey === `row:${entry.id}`
+                        ) {
+                          if (armedDeleteTimer.current) {
+                            window.clearTimeout(armedDeleteTimer.current);
+                            armedDeleteTimer.current = null;
+                          }
+                          setArmedDeleteKey(null);
+                        }
+                      }}
                     >
-                      <Trash2 />
-                    </Button>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label={t("entryActions", { name: entry.name })}
+                          className="ml-auto"
+                          disabled={activeOperation || operationBusy}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem
+                          onSelect={(event) => {
+                            if (armedDeleteKey !== `row:${entry.id}`) {
+                              event.preventDefault();
+                            }
+                            inlineDelete(`row:${entry.id}`, [entry.id]);
+                          }}
+                          variant={
+                            armedDeleteKey === `row:${entry.id}`
+                              ? "destructive"
+                              : "default"
+                          }
+                        >
+                          {armedDeleteKey === `row:${entry.id}` ? (
+                            <Check />
+                          ) : (
+                            <Trash2 />
+                          )}
+                          {armedDeleteKey === `row:${entry.id}`
+                            ? t("confirmDelete")
+                            : t("delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
@@ -570,8 +676,11 @@ export function BuildDataPage() {
               <TableBody>
                 {groupedHistory.map((group) => (
                   <Fragment key={group.label}>
-                    <TableRow className="bg-muted/30 hover:bg-muted/30">
-                      <TableCell className="font-medium" colSpan={5}>
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell
+                        className="py-1.5 text-xs font-normal text-muted-foreground"
+                        colSpan={5}
+                      >
                         {group.label}
                       </TableCell>
                     </TableRow>
@@ -620,22 +729,6 @@ export function BuildDataPage() {
           </>
         )}
       </Card>
-
-      <ConfirmationDialog
-        actionLabel={t("delete")}
-        cancelLabel={tc("cancel")}
-        description={t("deleteDescription", {
-          count: confirmDelete?.length ?? 0,
-        })}
-        onConfirm={() => {
-          const ids = confirmDelete ?? [];
-          setConfirmDelete(null);
-          return runOperation("deleteDerivedDataEntries", ids);
-        }}
-        onOpenChange={(open) => !open && setConfirmDelete(null)}
-        open={confirmDelete !== null}
-        title={t("deleteTitle")}
-      />
     </section>
   );
 }

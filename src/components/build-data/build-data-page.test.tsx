@@ -108,6 +108,11 @@ function collection(operation: "IDLE" | "SIZING" | "DELETING" = "IDLE") {
 
 describe("BuildDataPage", () => {
   beforeEach(() => {
+    Object.defineProperties(HTMLElement.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      releasePointerCapture: { configurable: true, value: () => undefined },
+      setPointerCapture: { configurable: true, value: () => undefined },
+    });
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockImplementation(async (query) => {
       const operation = String(query);
@@ -157,19 +162,67 @@ describe("BuildDataPage", () => {
     );
   });
 
-  test("requires confirmation before deleting a row", async () => {
+  test("requires inline confirmation before deleting a row", async () => {
     render(<BuildDataPage />);
     await screen.findByText("App-hash");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete App-hash" }));
-    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Actions for App-hash" }),
+      {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const confirm = screen.getByRole("menuitem", { name: "Confirm" });
+    expect(confirm.getAttribute("data-variant")).toBe("destructive");
     expect(
       request.mock.calls.some(([query]) =>
         String(query).includes("deleteDerivedDataEntries"),
       ),
     ).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("menuitem", { name: "Confirm" })).toBeNull(),
+    );
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Actions for App-hash" }),
+      {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const reopenedConfirm = screen.getByRole("menuitem", { name: "Confirm" });
+
+    fireEvent.click(reopenedConfirm);
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(([query]) =>
+          String(query).includes("deleteDerivedDataEntries"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  test("uses the same inline confirmation for bulk deletion", async () => {
+    render(<BuildDataPage />);
+    await screen.findByText("App-hash");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select App-hash" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm.getAttribute("data-variant")).toBe("destructive");
+    expect(
+      request.mock.calls.some(([query]) =>
+        String(query).includes("deleteDerivedDataEntries"),
+      ),
+    ).toBe(false);
+
+    fireEvent.click(confirm);
     await waitFor(() =>
       expect(
         request.mock.calls.some(([query]) =>

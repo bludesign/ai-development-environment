@@ -214,7 +214,10 @@ const mockTranslations = {
     size: "Disk usage",
     agent: "Agent",
     actions: "Actions",
+    entryActions: "Actions for {name}",
     deleteEntry: "Delete {name}",
+    confirmDeleteEntry: "Confirm deletion of {name}",
+    confirmDelete: "Confirm",
     delete: "Delete",
     deleteTitle: "Delete Derived Data?",
     deleteDescription:
