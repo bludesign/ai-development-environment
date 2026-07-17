@@ -83,6 +83,7 @@ import type {
   JiraSourceView,
   JiraTicketBoard,
   JiraTicketAssignmentFilter,
+  JiraTicketDetail,
   JiraTicketSummary,
 } from "@/services/jira/types";
 
@@ -220,6 +221,22 @@ export function JiraTicketsPage() {
     } finally {
       if (requestId === boardRequestIdRef.current) setBoardLoading(false);
     }
+  }, []);
+
+  const updateBoardTicket = useCallback((ticket: JiraTicketDetail) => {
+    setBoard((current) =>
+      current
+        ? {
+            ...current,
+            tickets: current.tickets.map((item) =>
+              item.key === ticket.key ? { ...item, ...ticket } : item,
+            ),
+            statusOrder: current.statusOrder.includes(ticket.status)
+              ? current.statusOrder
+              : [...current.statusOrder, ticket.status],
+          }
+        : current,
+    );
   }, []);
 
   useEffect(() => {
@@ -545,6 +562,7 @@ export function JiraTicketsPage() {
       <JiraTicketDrawer
         issueKey={issueKey}
         onClose={() => replaceParams({ issue: null })}
+        onTicketChange={updateBoardTicket}
       />
     </section>
   );

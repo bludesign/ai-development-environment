@@ -110,9 +110,14 @@ describe("JiraTicketDrawer", () => {
       name: "Create worktree",
     });
     const openInJira = screen.getByRole("link", { name: "Open in Jira" });
+    expect(
+      screen
+        .getByRole("link", { name: "Open full details" })
+        .getAttribute("href"),
+    ).toBe("/jira/tickets/APP-123");
     expect(createWorktree.parentElement).toBe(openInJira.parentElement);
     expect(createWorktree.parentElement).not.toBe(
-      screen.getByText("In Progress").parentElement,
+      screen.getAllByText("In Progress")[0]?.parentElement,
     );
     expect(createWorktree.getAttribute("data-variant")).toBe("outline");
     expect(openInJira.getAttribute("data-variant")).toBe("outline");

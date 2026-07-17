@@ -2,7 +2,9 @@ import type { GraphQLContext } from "@/services/graphql-server/graphql-server.se
 import type { JiraService } from "@/services/jira";
 import type {
   JiraSourceKind,
+  JiraTextInput,
   JiraTicketAssignmentFilter,
+  UpdateJiraTicketInput,
 } from "@/services/jira";
 
 function requireControlPlane(context: GraphQLContext): void {
@@ -54,6 +56,54 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
     ) => {
       requireControlPlane(context);
       return jiraService.ticket(issueKey);
+    },
+    jiraAssignableUsers: (
+      _root: unknown,
+      { issueKey, query }: { issueKey: string; query?: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.assignableUsers(issueKey, query);
+    },
+    jiraTicketTransitions: (
+      _root: unknown,
+      { issueKey }: { issueKey: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.ticketTransitions(issueKey);
+    },
+    jiraTicketEditFields: (
+      _root: unknown,
+      { issueKey }: { issueKey: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.ticketEditFields(issueKey);
+    },
+    jiraTicketChanges: (
+      _root: unknown,
+      {
+        issueKey,
+        limit,
+        offset,
+      }: { issueKey: string; limit?: number; offset?: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.ticketChanges(issueKey, limit, offset);
+    },
+    jiraTicketWorklogs: (
+      _root: unknown,
+      {
+        issueKey,
+        limit,
+        offset,
+      }: { issueKey: string; limit?: number; offset?: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.ticketWorklogs(issueKey, limit, offset);
     },
     jiraCacheMetrics: (
       _root: unknown,
@@ -250,6 +300,38 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
     ) => {
       requireControlPlane(context);
       return jiraService.deleteCachedTicket(issueKey);
+    },
+    addJiraComment: (
+      _root: unknown,
+      { issueKey, content }: { issueKey: string; content: JiraTextInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.addComment(issueKey, content);
+    },
+    assignJiraTicket: (
+      _root: unknown,
+      { issueKey, accountId }: { issueKey: string; accountId?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.assignTicket(issueKey, accountId ?? null);
+    },
+    transitionJiraTicket: (
+      _root: unknown,
+      { issueKey, transitionId }: { issueKey: string; transitionId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.transitionTicket(issueKey, transitionId);
+    },
+    updateJiraTicket: (
+      _root: unknown,
+      { input }: { input: UpdateJiraTicketInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.updateTicket(input);
     },
   },
 });

@@ -1,0 +1,286 @@
+"use client";
+
+import { Check, Copy, Eye, FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { FormEvent, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import { AdfRenderer } from "@/components/jira/adf-renderer";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  detectJiraTextFormat,
+  isAdfDocument,
+  jiraWikiToMarkdown,
+  rawJiraText,
+} from "@/lib/jira-markup";
+import { copyText } from "@/lib/browser-utils";
+import type {
+  JiraRichText,
+  JiraTextFormat,
+  JiraTextInput,
+} from "@/services/jira/types";
+
+type CopyState = "IDLE" | "COPIED" | "FAILED";
+
+function normalizedContent(
+  content: JiraRichText | null | undefined,
+  value: unknown,
+): JiraRichText | null {
+  if (content) return content;
+  if (value === null || value === undefined) return null;
+  const format = detectJiraTextFormat(value);
+  const rawText = rawJiraText(value);
+  return {
+    format,
+    raw: value,
+    rawText,
+    markdown: format === "JIRA_WIKI" ? jiraWikiToMarkdown(rawText) : rawText,
+    wikiMarkup: rawText,
+  };
+}
+
+function safeUrl(value: string): string {
+  if (value === "jira-underline:") return value;
+  if (/^(https?:|mailto:)/i.test(value)) return value;
+  if (value.startsWith("/") || value.startsWith("#")) return value;
+  return "";
+}
+
+function displayMarkdown(value: string): string {
+  return value.replace(
+    /<ins>([^<]*)<\/ins>/g,
+    (_match, text: string) => `[${text}](jira-underline:)`,
+  );
+}
+
+export function RichTextPreview({ markdown }: { markdown: string }) {
+  return (
+    <div className="prose prose-sm max-w-none dark:prose-invert prose-pre:overflow-x-auto prose-a:text-primary">
+      <ReactMarkdown
+        components={{
+          a: ({ href, children }) =>
+            href === "jira-underline:" ? (
+              <u>{children}</u>
+            ) : (
+              <a href={href} rel="noreferrer" target="_blank">
+                {children}
+              </a>
+            ),
+        }}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        urlTransform={safeUrl}
+      >
+        {displayMarkdown(markdown)}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+export function JiraRichTextBlock({
+  content,
+  value,
+}: {
+  content?: JiraRichText | null;
+  value: unknown;
+}) {
+  const t = useTranslations("jiraTickets");
+  const normalized = useMemo(
+    () => normalizedContent(content, value),
+    [content, value],
+  );
+  const [raw, setRaw] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("IDLE");
+  const [formatOverride, setFormatOverride] = useState<Exclude<
+    JiraTextFormat,
+    "ADF"
+  > | null>(null);
+
+  if (!normalized) return <p className="text-muted-foreground">—</p>;
+  const selectedFormat = formatOverride ?? normalized.format;
+  const markdown =
+    normalized.format === "ADF"
+      ? normalized.markdown
+      : selectedFormat === "JIRA_WIKI"
+        ? jiraWikiToMarkdown(normalized.rawText)
+        : normalized.rawText;
+
+  const copy = async () => {
+    try {
+      await copyText(normalized.rawText);
+      setCopyState("COPIED");
+    } catch {
+      setCopyState("FAILED");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-end gap-1">
+        {normalized.format !== "ADF" && (
+          <Select
+            onValueChange={(next) =>
+              setFormatOverride(next as "MARKDOWN" | "JIRA_WIKI")
+            }
+            value={selectedFormat}
+          >
+            <SelectTrigger
+              aria-label={t("renderFormat")}
+              className="h-7 w-auto min-w-28 text-xs"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="MARKDOWN">{t("markdown")}</SelectItem>
+              <SelectItem value="JIRA_WIKI">{t("jiraWiki")}</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        <Button
+          aria-label={raw ? t("viewRendered") : t("viewRaw")}
+          onClick={() => setRaw((current) => !current)}
+          size="icon-sm"
+          title={raw ? t("viewRendered") : t("viewRaw")}
+          type="button"
+          variant="ghost"
+        >
+          {raw ? <Eye /> : <FileText />}
+        </Button>
+        <Button
+          aria-label={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+          onClick={() => void copy()}
+          size="icon-sm"
+          title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+          type="button"
+          variant="ghost"
+        >
+          {copyState === "COPIED" ? <Check /> : <Copy />}
+        </Button>
+      </div>
+      {copyState === "FAILED" && (
+        <p className="text-xs text-destructive">{t("copyFailed")}</p>
+      )}
+      {raw ? (
+        <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+          {normalized.rawText}
+        </pre>
+      ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (
+        <AdfRenderer value={normalized.raw} />
+      ) : (
+        <RichTextPreview markdown={markdown} />
+      )}
+    </div>
+  );
+}
+
+export function JiraTextComposer({
+  busy,
+  error,
+  initialFormat = "MARKDOWN",
+  initialValue = "",
+  onCancel,
+  onSubmit,
+  submitLabel,
+}: {
+  busy: boolean;
+  error?: string | null;
+  initialFormat?: JiraTextInput["format"];
+  initialValue?: string;
+  onCancel?: () => void;
+  onSubmit: (input: JiraTextInput) => Promise<void>;
+  submitLabel: string;
+}) {
+  const t = useTranslations("jiraTickets");
+  const [format, setFormat] = useState<JiraTextInput["format"]>(initialFormat);
+  const [value, setValue] = useState(initialValue);
+  const [preview, setPreview] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!value.trim() || busy) return;
+    try {
+      await onSubmit({ format, value });
+      if (!initialValue) {
+        setValue("");
+        setPreview(false);
+      }
+    } catch {
+      // The caller owns the visible error state and keeps the draft intact.
+    }
+  };
+
+  return (
+    <form className="space-y-3" onSubmit={submit}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Select
+          onValueChange={(next) => setFormat(next as JiraTextInput["format"])}
+          value={format}
+        >
+          <SelectTrigger aria-label={t("authoringFormat")} className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="MARKDOWN">{t("markdown")}</SelectItem>
+            <SelectItem value="JIRA_WIKI">{t("jiraWiki")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          onClick={() => setPreview((current) => !current)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <Eye /> {preview ? t("hidePreview") : t("preview")}
+        </Button>
+      </div>
+      {preview ? (
+        <div className="min-h-28 rounded-lg border p-3">
+          <RichTextPreview
+            markdown={
+              format === "JIRA_WIKI" ? jiraWikiToMarkdown(value) : value
+            }
+          />
+        </div>
+      ) : (
+        <Textarea
+          aria-label={t("commentBody")}
+          className="min-h-28"
+          disabled={busy}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={t("commentPlaceholder")}
+          value={value}
+        />
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button
+            disabled={busy}
+            onClick={onCancel}
+            type="button"
+            variant="ghost"
+          >
+            {t("cancel")}
+          </Button>
+        )}
+        <Button disabled={busy || !value.trim()} type="submit">
+          {busy ? t("saving") : submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}

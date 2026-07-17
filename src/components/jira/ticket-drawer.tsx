@@ -1,10 +1,17 @@
 "use client";
 
-import { AlertTriangle, ExternalLink, GitBranch } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  GitBranch,
+  Maximize2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
-import { AdfRenderer } from "@/components/jira/adf-renderer";
+import { JiraRichTextBlock } from "@/components/jira/rich-text";
+import { JiraTicketActions } from "@/components/jira/ticket-actions";
+import { JiraTicketComments } from "@/components/jira/ticket-comments";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +22,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemGroup,
-  ItemHeader,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -26,16 +32,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
+import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTicketDetail } from "@/services/jira/types";
 import { TicketWorktreeDialog } from "./ticket-worktree-dialog";
-
-const SUMMARY_FIELDS =
-  "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
-const CACHE_FIELDS = "source stale fetchedAt";
-const PERSON_FIELDS = "accountId displayName avatarUrl";
-const LINK_FIELDS = "relationship key summary status";
-const DETAIL_FIELDS = `${SUMMARY_FIELDS} jiraUrl description reporter { ${PERSON_FIELDS} } creator { ${PERSON_FIELDS} } labels components { id name } fixVersions { id name } affectedVersions { id name } sprintNames parent { ${LINK_FIELDS} } subtasks { ${LINK_FIELDS} } issueLinks { ${LINK_FIELDS} } attachments { id filename contentUrl mimeType size author { ${PERSON_FIELDS} } createdAt } comments { id author { ${PERSON_FIELDS} } body createdAt updatedAt } createdAt dueAt resolvedAt timeTracking cache { ${CACHE_FIELDS} } commentsCache { ${CACHE_FIELDS} }`;
+import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
 
 const PRIORITY_CLASSES: Record<string, string> = {
   highest: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
@@ -58,9 +59,11 @@ function priorityClass(priority: string) {
 export function JiraTicketDrawer({
   issueKey,
   onClose,
+  onTicketChange,
 }: {
   issueKey: string | null;
   onClose: () => void;
+  onTicketChange?: (ticket: JiraTicketDetail) => void;
 }) {
   const t = useTranslations("jiraTickets");
   const [ticket, setTicket] = useState<JiraTicketDetail | null>(null);
@@ -79,7 +82,7 @@ export function JiraTicketDrawer({
         const data = await controlPlaneRequest<{
           jiraTicket: JiraTicketDetail;
         }>(
-          `query JiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey) { ${DETAIL_FIELDS} } }`,
+          `query JiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey) { ${JIRA_TICKET_DETAIL_FIELDS} } }`,
           { issueKey },
         );
         setTicket(data.jiraTicket);
@@ -92,6 +95,11 @@ export function JiraTicketDrawer({
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [issueKey]);
+
+  const ticketChanged = (next: JiraTicketDetail) => {
+    setTicket(next);
+    onTicketChange?.(next);
+  };
 
   return (
     <>
@@ -147,12 +155,23 @@ export function JiraTicketDrawer({
                       <GitBranch /> {t("worktreeAction")}
                     </Button>
                     <Button asChild size="sm" variant="outline">
+                      <Link
+                        href={`/jira/tickets/${encodeURIComponent(ticket.key)}`}
+                      >
+                        <Maximize2 /> {t("openFullDetails")}
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
                       <a href={ticket.jiraUrl} rel="noreferrer" target="_blank">
                         <ExternalLink /> {t("openInJira")}
                       </a>
                     </Button>
                   </div>
                 </div>
+                <JiraTicketActions
+                  onTicketChange={ticketChanged}
+                  ticket={ticket}
+                />
                 <DetailGrid ticket={ticket} />
                 <section>
                   <h3 className="mb-2 font-semibold">
@@ -160,7 +179,10 @@ export function JiraTicketDrawer({
                   </h3>
                   <Card size="sm">
                     <CardContent>
-                      <AdfRenderer value={ticket.description} />
+                      <JiraRichTextBlock
+                        content={ticket.descriptionContent}
+                        value={ticket.description}
+                      />
                     </CardContent>
                   </Card>
                 </section>
@@ -259,37 +281,10 @@ export function JiraTicketDrawer({
                     </ItemGroup>
                   </section>
                 )}
-                <section>
-                  <h3 className="mb-2 font-semibold">
-                    {t("comments", { count: ticket.comments.length })}
-                  </h3>
-                  {ticket.comments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      {t("noComments")}
-                    </p>
-                  ) : (
-                    <ItemGroup className="gap-3">
-                      {ticket.comments.map((comment) => (
-                        <Item asChild key={comment.id} variant="outline">
-                          <article>
-                            <ItemHeader>
-                              <ItemTitle>
-                                {comment.author?.displayName ??
-                                  t("unknownUser")}
-                              </ItemTitle>
-                              <time className="text-xs text-muted-foreground">
-                                {displayDate(comment.createdAt)}
-                              </time>
-                            </ItemHeader>
-                            <ItemContent className="basis-full">
-                              <AdfRenderer value={comment.body} />
-                            </ItemContent>
-                          </article>
-                        </Item>
-                      ))}
-                    </ItemGroup>
-                  )}
-                </section>
+                <JiraTicketComments
+                  onTicketChange={ticketChanged}
+                  ticket={ticket}
+                />
               </>
             )}
           </div>
