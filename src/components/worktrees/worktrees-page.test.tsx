@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -27,6 +28,23 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({
+    href,
+    children,
+    ...props
+  }: AnchorHTMLAttributes<HTMLAnchorElement> & {
+    href: string;
+    children: ReactNode;
+  }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+  useRouter: () => ({ push: navigation.push }),
+}));
 
 class ResizeObserverMock {
   observe() {}
@@ -79,6 +97,7 @@ describe("WorktreesPage", () => {
     global.ResizeObserver = ResizeObserverMock;
     window.history.replaceState(null, "", "/worktrees");
     window.localStorage.clear();
+    navigation.push.mockReset();
     Element.prototype.scrollIntoView = vi.fn();
     subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
     request.mockResolvedValue({
@@ -258,6 +277,37 @@ describe("WorktreesPage", () => {
       (screen.getByRole("button", { name: "Stage all" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+  });
+
+  test("opens details from card and table summary surfaces without hijacking controls", async () => {
+    render(<WorktreesPage />);
+    const branchLink = await screen.findByRole("link", {
+      name: "feature/AIDE-24",
+    });
+    expect(branchLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+
+    fireEvent.click(screen.getByText("Path"));
+    expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+
+    navigation.push.mockClear();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand commits and changes" }),
+    );
+    expect(navigation.push).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Table layout" }));
+    const tableBranch = screen.getByRole("link", {
+      name: "feature/AIDE-24",
+    });
+    expect(tableBranch.getAttribute("href")).toBe("/worktrees/worktree-1");
+    const row = tableBranch.closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row!);
+    expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
+
+    navigation.push.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Customize worktree" }));
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
   test("uses compact menu labels and the expanded bright color palette", async () => {
@@ -617,7 +667,9 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand commits and changes" }),
+    );
     expect(await screen.findByText("old-file.ts")).toBeDefined();
 
     request.mockResolvedValueOnce({ refreshWorktrees: 1 } as never);
@@ -707,7 +759,9 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand commits and changes" }),
+    );
     expect(await screen.findByText("before-save.ts")).toBeDefined();
     await waitFor(() => expect(activityCallbacks).toHaveLength(1));
 
@@ -768,7 +822,9 @@ describe("WorktreesPage", () => {
         changesTruncated: false,
       },
     } as never);
-    fireEvent.click(screen.getByText("feature/AIDE-24"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand commits and changes" }),
+    );
     expect(await screen.findByText("The worktree is clean.")).toBeDefined();
 
     await waitFor(() => expect(liveAttempts).toBe(2), { timeout: 2_500 });
