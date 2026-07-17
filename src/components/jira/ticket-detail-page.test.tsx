@@ -189,7 +189,8 @@ describe("JiraTicketDetailPage", () => {
     expect(collapseFields.getAttribute("data-variant")).toBe("ghost");
     expect(collapseFields.getAttribute("data-size")).toBe("icon-sm");
     expect(collapseFields.textContent).toBe("");
-    expect(collapseFields.compareDocumentPosition(fieldSearch)).toBe(
+    expect(fieldSearch.parentElement).toBe(collapseFields.parentElement);
+    expect(fieldSearch.compareDocumentPosition(collapseFields)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(
@@ -199,6 +200,14 @@ describe("JiraTicketDetailPage", () => {
     ).toBe("true");
     expect(screen.getByText("Customer impact")).toBeDefined();
     expect(screen.getByText("High impact")).toBeDefined();
+    const activityHeader = screen
+      .getByText("Activity")
+      .closest('[data-slot="card-header"]');
+    expect(
+      screen
+        .getByRole("tab", { name: "History" })
+        .closest('[data-slot="card-header"]'),
+    ).toBe(activityHeader);
     const descriptionTitle = screen.getByText("Description");
     const descriptionViewMenu = screen.getAllByRole("button", {
       name: "Rendered",

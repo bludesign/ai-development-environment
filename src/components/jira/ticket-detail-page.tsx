@@ -451,18 +451,12 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
         </div>
       )}
 
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle>{t("activity")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <JiraTicketActivity
-            key={ticket.key}
-            onTicketChange={ticketChanged}
-            ticket={ticket}
-          />
-        </CardContent>
-      </Card>
+      <JiraTicketActivity
+        key={ticket.key}
+        onTicketChange={ticketChanged}
+        ticket={ticket}
+        title={t("activity")}
+      />
 
       <Card className="min-w-0 gap-0 overflow-hidden py-0">
         <CardHeader className={fieldsOpen ? "border-b py-4" : "py-4"}>
@@ -476,7 +470,16 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
             >
               <CardTitle>{t("allFields")}</CardTitle>
             </button>
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="ml-auto flex items-center justify-end gap-2">
+              {fieldsOpen && (
+                <Input
+                  aria-label={t("searchFields")}
+                  className="h-7 w-48 sm:w-64"
+                  onChange={(event) => setFieldSearch(event.target.value)}
+                  placeholder={t("searchFields")}
+                  value={fieldSearch}
+                />
+              )}
               <Button
                 aria-controls="jira-all-fields"
                 aria-expanded={fieldsOpen}
@@ -495,15 +498,6 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                   <ChevronRight className="size-5" />
                 )}
               </Button>
-              {fieldsOpen && (
-                <Input
-                  aria-label={t("searchFields")}
-                  className="h-7 max-w-72"
-                  onChange={(event) => setFieldSearch(event.target.value)}
-                  placeholder={t("searchFields")}
-                  value={fieldSearch}
-                />
-              )}
             </div>
           </div>
         </CardHeader>
