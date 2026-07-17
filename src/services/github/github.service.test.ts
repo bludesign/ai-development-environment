@@ -40,6 +40,25 @@ const state = vi.hoisted(() => ({
   } | null,
   linkedWorktree: null as { id: string; branch: string } | null,
   codebaseRepositoryOrigins: [] as string[],
+  codebaseRepositories: [
+    {
+      id: "codebase-repository-1",
+      canonicalOrigin: "github.com/acme/widgets",
+      name: "widgets",
+      jiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+    },
+  ] as Array<{
+    id: string;
+    canonicalOrigin: string;
+    name: string;
+    jiraBranchRegex: string | null;
+  }>,
+  worktrees: [] as Array<{
+    id: string;
+    branch: string | null;
+    updatedAt: Date;
+    codebase: { repositoryId: string };
+  }>,
   repositories: [
     {
       id: "local-repository-1",
@@ -82,7 +101,13 @@ vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitHubSettings: {
       findUnique: async () =>
-        state.apiToken ? { id: "default", apiToken: state.apiToken } : null,
+        state.apiToken
+          ? {
+              id: "default",
+              apiToken: state.apiToken,
+              defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+            }
+          : null,
     },
     gitHubRepository: {
       findMany: async () => state.repositories,
@@ -92,6 +117,11 @@ vi.mock("@/data/prisma-client", () => ({
         ) ?? null,
     },
     codebaseRepository: {
+      findMany: async () => state.codebaseRepositories,
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        state.codebaseRepositories.find(
+          (repository) => repository.id === where.id,
+        ) ?? null,
       findFirst: async ({ where }: { where: { canonicalOrigin: string } }) => {
         state.codebaseRepositoryOrigins.push(where.canonicalOrigin);
         return state.linkedCodebaseRepository?.canonicalOrigin ===
@@ -101,10 +131,23 @@ vi.mock("@/data/prisma-client", () => ({
       },
     },
     worktree: {
+      findMany: async ({ where }: { where: { codebase?: unknown } }) =>
+        where.codebase
+          ? [...state.worktrees].sort(
+              (left, right) =>
+                right.updatedAt.getTime() - left.updatedAt.getTime(),
+            )
+          : [],
       findFirst: async ({ where }: { where: { branch: string } }) =>
         state.linkedWorktree?.branch === where.branch
           ? { id: state.linkedWorktree.id }
           : null,
+    },
+    codebaseSettings: {
+      findUnique: async () => ({
+        id: "default",
+        defaultJiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+      }),
     },
     gitHubAppSettings: {
       findUnique: async () => state.appSettings,
@@ -232,6 +275,43 @@ function rawPullRequest(
   };
 }
 
+function rawActionsWorkflowRun(
+  id: number,
+  repository: string,
+  createdAt: string,
+  options: {
+    branch?: string | null;
+    conclusion?: string | null;
+    displayTitle?: string;
+    pullRequests?: number[];
+    status?: string;
+  } = {},
+) {
+  const [, name] = repository.split("/");
+  return {
+    id,
+    name: "CI",
+    display_title: options.displayTitle ?? `Run ${id}`,
+    run_number: id,
+    run_attempt: 1,
+    event: "pull_request",
+    status: options.status ?? "completed",
+    conclusion: options.conclusion ?? "success",
+    html_url: `https://github.com/${repository}/actions/runs/${id}`,
+    head_branch: options.branch ?? "feature/APP-42",
+    head_sha: `sha-${id}`,
+    check_suite_node_id: `check-suite-${id}`,
+    repository: {
+      node_id: `repository-${name}`,
+      full_name: repository,
+      html_url: `https://github.com/${repository}`,
+    },
+    pull_requests: (options.pullRequests ?? []).map((number) => ({ number })),
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+}
+
 function rawReviewThread(
   id: string,
   options: {
@@ -327,6 +407,15 @@ beforeEach(() => {
   state.linkedCodebaseRepository = null;
   state.linkedWorktree = null;
   state.codebaseRepositoryOrigins = [];
+  state.codebaseRepositories = [
+    {
+      id: "codebase-repository-1",
+      canonicalOrigin: "github.com/acme/widgets",
+      name: "widgets",
+      jiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+    },
+  ];
+  state.worktrees = [];
   appClient.clearTokenCache.mockReset();
   appClient.graphql.mockReset();
   appClient.graphql.mockResolvedValue({
@@ -391,6 +480,200 @@ describe("GitHub service", () => {
       "APP-42",
     );
     expect(parseJiraKey("ship APP-42", null)).toBeNull();
+  });
+
+  test("merges and paginates workflow runs across unique GitHub codebases", async () => {
+    state.codebaseRepositories = [
+      ...state.codebaseRepositories,
+      {
+        id: "codebase-repository-2",
+        canonicalOrigin: "github.com/acme/platform",
+        name: "platform",
+        jiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+      },
+      {
+        id: "codebase-repository-3",
+        canonicalOrigin: "gitlab.com/acme/ignored",
+        name: "ignored",
+        jiraBranchRegex: null,
+      },
+    ];
+    state.worktrees = [
+      {
+        id: "worktree-old",
+        branch: "feature/APP-42",
+        updatedAt: new Date("2026-07-14T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+      {
+        id: "worktree-new",
+        branch: "feature/APP-42",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/repos/acme/widgets/actions/runs")) {
+        return response({
+          total_count: 2,
+          workflow_runs: [
+            rawActionsWorkflowRun(
+              1,
+              "acme/widgets",
+              "2026-07-16T12:00:00.000Z",
+              { displayTitle: "Build branch", pullRequests: [17] },
+            ),
+            rawActionsWorkflowRun(
+              3,
+              "acme/widgets",
+              "2026-07-14T12:00:00.000Z",
+            ),
+          ],
+        });
+      }
+      if (url.includes("/repos/acme/platform/actions/runs")) {
+        return response({
+          total_count: 1,
+          workflow_runs: [
+            rawActionsWorkflowRun(
+              2,
+              "acme/platform",
+              "2026-07-17T12:00:00.000Z",
+              { displayTitle: "APP-99 Ship platform", branch: "main" },
+            ),
+          ],
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new GitHubService();
+    const firstPage = await service.actionsWorkflowRuns(null, 2);
+
+    expect(firstPage.repositories.map((item) => item.nameWithOwner)).toEqual([
+      "acme/platform",
+      "acme/widgets",
+    ]);
+    expect(firstPage.items.map((item) => item.id)).toEqual(["2", "1"]);
+    expect(firstPage.items[0]).toMatchObject({
+      jiraKey: "APP-99",
+      repositoryNameWithOwner: "acme/platform",
+      canRetry: true,
+    });
+    expect(firstPage.items[1]).toMatchObject({
+      jiraKey: "APP-42",
+      worktreeId: "worktree-new",
+      pullRequests: [
+        {
+          number: 17,
+          url: "https://github.com/acme/widgets/pull/17",
+        },
+      ],
+    });
+    expect(firstPage.hasNextPage).toBe(true);
+    expect(firstPage.endCursor).toBeTruthy();
+
+    const secondPage = await service.actionsWorkflowRuns(
+      null,
+      2,
+      firstPage.endCursor,
+    );
+    expect(secondPage.items.map((item) => item.id)).toEqual(["3"]);
+    expect(secondPage.hasNextPage).toBe(false);
+  });
+
+  test("isolates inaccessible workflow repositories and validates filter cursors", async () => {
+    state.codebaseRepositories = [
+      ...state.codebaseRepositories,
+      {
+        id: "codebase-repository-2",
+        canonicalOrigin: "github.com/acme/private",
+        name: "private",
+        jiraBranchRegex: null,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url.includes("/repos/acme/private/")
+          ? response({ message: "Resource not accessible by token" }, 403)
+          : response({ total_count: 0, workflow_runs: [] }),
+      ),
+    );
+
+    const page = await new GitHubService().actionsWorkflowRuns(null, 25);
+    expect(page.items).toEqual([]);
+    expect(page.repositoryErrors).toEqual([
+      expect.objectContaining({
+        codebaseRepositoryId: "codebase-repository-2",
+        nameWithOwner: "acme/private",
+        message: "Resource not accessible by token",
+      }),
+    ]);
+    await expect(
+      new GitHubService().actionsWorkflowRuns(
+        "codebase-repository-1",
+        25,
+        Buffer.from(
+          JSON.stringify({
+            version: 1,
+            codebaseRepositoryId: null,
+            consumed: {},
+          }),
+        ).toString("base64url"),
+      ),
+    ).rejects.toThrow("cursor");
+  });
+
+  test("loads workflow jobs through the PAT and reserves retries for the App", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("/actions/runs/44/jobs");
+      return response({
+        total_count: 1,
+        jobs: [
+          {
+            id: 441,
+            name: "test",
+            status: "completed",
+            conclusion: "failure",
+            html_url: "https://github.com/acme/widgets/actions/runs/44/job/441",
+            steps: [
+              {
+                number: 1,
+                name: "Run tests",
+                status: "completed",
+                conclusion: "failure",
+              },
+            ],
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new GitHubService();
+    await expect(
+      service.actionsWorkflowJobs("codebase-repository-1", "44"),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "441",
+        status: "FAILURE",
+        canRetry: true,
+        steps: [{ number: 1, name: "Run tests", status: "FAILURE" }],
+      }),
+    ]);
+    expect(appClient.listJobs).not.toHaveBeenCalled();
+
+    state.appSettings = null;
+    const jobs = await service.actionsWorkflowJobs(
+      "codebase-repository-1",
+      "44",
+    );
+    expect(jobs[0]).toMatchObject({
+      canRetry: false,
+      retryUnavailableReason: "GITHUB_APP_NOT_CONFIGURED",
+    });
   });
 
   test("deduplicates Mine results, normalizes badges, parses Jira, and paginates unresolved threads", async () => {

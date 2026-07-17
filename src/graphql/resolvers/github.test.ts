@@ -48,12 +48,20 @@ describe("GitHub resolvers", () => {
   test("rejects agent credentials from GitHub configuration and data", () => {
     const service = {
       getSettings: vi.fn(),
+      actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
 
     expect(() =>
       resolvers.Query.githubSettings({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubActionsWorkflowRuns(
+        {},
+        { first: 25 },
+        context("agent-1"),
+      ),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Query.githubPullRequests(
@@ -66,6 +74,7 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubReviewThreads({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
+    expect(service.actionsWorkflowRuns).not.toHaveBeenCalled();
     expect(service.pullRequests).not.toHaveBeenCalled();
   });
 
@@ -77,6 +86,10 @@ describe("GitHub resolvers", () => {
     const service = {
       saveSettings: vi.fn().mockResolvedValue(safeSettings),
       saveAppSettings: vi.fn().mockResolvedValue({ configured: true }),
+      actionsWorkflowRuns: vi
+        .fn()
+        .mockResolvedValue({ items: [], hasNextPage: false }),
+      actionsWorkflowJobs: vi.fn().mockResolvedValue([]),
       pullRequests: vi.fn().mockResolvedValue({ items: [], truncated: false }),
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       pullRequestMergeOptions: vi.fn().mockResolvedValue({ canMerge: true }),
@@ -109,6 +122,23 @@ describe("GitHub resolvers", () => {
       ),
     ).resolves.toEqual({ items: [], truncated: false });
     expect(service.saveSettings).toHaveBeenCalledWith(input);
+    await resolvers.Query.githubActionsWorkflowRuns(
+      {},
+      {
+        codebaseRepositoryId: "codebase-repository-1",
+        first: 10,
+        after: "cursor-1",
+      },
+      context(null),
+    );
+    await resolvers.Query.githubActionsWorkflowJobs(
+      {},
+      {
+        codebaseRepositoryId: "codebase-repository-1",
+        workflowRunId: "44",
+      },
+      context(null),
+    );
     await resolvers.Mutation.saveGitHubAppSettings(
       {},
       { input: appInput },
@@ -172,6 +202,15 @@ describe("GitHub resolvers", () => {
       context(null),
     );
     expect(service.pullRequest).toHaveBeenCalledWith("acme", "widgets", 17);
+    expect(service.actionsWorkflowRuns).toHaveBeenCalledWith(
+      "codebase-repository-1",
+      10,
+      "cursor-1",
+    );
+    expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
+      "codebase-repository-1",
+      "44",
+    );
     expect(service.pullRequestMergeOptions).toHaveBeenCalledWith(
       "acme",
       "widgets",

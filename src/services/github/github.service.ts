@@ -14,6 +14,10 @@ import {
 } from "@/server/github/github-app";
 
 import type {
+  GitHubActionsRepositoryErrorView,
+  GitHubActionsRepositoryView,
+  GitHubActionsWorkflowRunPage,
+  GitHubActionsWorkflowRunView,
   GitHubAppSettingsView,
   GitHubAuditContext,
   GitHubPipelineState,
@@ -44,6 +48,7 @@ const GITHUB_APP_SETTINGS_ID = "default";
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const SEARCH_RESULT_LIMIT = 1000;
+const ACTIONS_PAGE_SIZE = 25;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 
 type PageInfo = {
@@ -99,6 +104,41 @@ type RawRetryCheckSuite = RawCheckSuite & {
     name: string;
     owner: { login: string };
   };
+};
+
+type RawActionsWorkflowRun = {
+  id: string | number;
+  name: string | null;
+  display_title: string;
+  run_number: number;
+  run_attempt: number | null;
+  event: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+  head_branch: string | null;
+  head_sha: string;
+  check_suite_node_id: string | null;
+  repository: {
+    node_id: string;
+    full_name: string;
+    html_url: string;
+  };
+  pull_requests: Array<{ number: number }>;
+  created_at: string;
+  updated_at: string;
+};
+
+type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
+  owner: string;
+  name: string;
+  jiraBranchRegex: string | null;
+};
+
+type ActionsCursor = {
+  version: 1;
+  codebaseRepositoryId: string | null;
+  consumed: Record<string, number>;
 };
 
 type RawPipelineContext =
@@ -372,6 +412,74 @@ export function parseJiraKey(
   const match = new RegExp(pattern, "i").exec(title);
   const value = (match?.[1] ?? match?.[0])?.trim();
   return value ? value.toUpperCase() : null;
+}
+
+function actionsRepositoryTarget(repository: {
+  id: string;
+  canonicalOrigin: string;
+  jiraBranchRegex: string | null;
+}): ActionsRepositoryTarget | null {
+  const match = /^github\.com\/([^/]+)\/([^/]+)$/i.exec(
+    repository.canonicalOrigin.trim(),
+  );
+  if (!match?.[1] || !match[2]) return null;
+  const owner = match[1];
+  const name = match[2];
+  const nameWithOwner = `${owner}/${name}`;
+  return {
+    id: repository.id,
+    owner,
+    name,
+    nameWithOwner,
+    url: `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    jiraBranchRegex: repository.jiraBranchRegex,
+  };
+}
+
+function decodeActionsCursor(
+  value: string | null | undefined,
+  codebaseRepositoryId: string | null,
+): ActionsCursor {
+  if (!value) {
+    return { version: 1, codebaseRepositoryId, consumed: {} };
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<ActionsCursor>;
+    if (
+      parsed.version !== 1 ||
+      parsed.codebaseRepositoryId !== codebaseRepositoryId ||
+      !parsed.consumed ||
+      typeof parsed.consumed !== "object" ||
+      Object.values(parsed.consumed).some(
+        (item) => !Number.isInteger(item) || Number(item) < 0,
+      )
+    ) {
+      throw new Error("invalid");
+    }
+    return parsed as ActionsCursor;
+  } catch {
+    throw new Error("GitHub Actions pagination cursor is invalid");
+  }
+}
+
+function encodeActionsCursor(cursor: ActionsCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function compareWorkflowRuns(
+  left: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
+  right: { run: RawActionsWorkflowRun; target: ActionsRepositoryTarget },
+): number {
+  const createdDifference =
+    Date.parse(right.run.created_at) - Date.parse(left.run.created_at);
+  if (createdDifference !== 0) return createdDifference;
+  const repositoryDifference = left.target.nameWithOwner.localeCompare(
+    right.target.nameWithOwner,
+  );
+  if (repositoryDifference !== 0) return repositoryDifference;
+  return String(right.run.id).localeCompare(String(left.run.id));
 }
 
 function pipelineStatus(
@@ -666,8 +774,13 @@ export class GitHubService {
           workflowRunId,
         })
       : await this.patWorkflowJobs(owner, repository, workflowRunId, token);
-    const appConfigured = appCredentials !== null;
+    return this.workflowJobViews(jobs, appCredentials !== null);
+  }
 
+  private workflowJobViews(
+    jobs: GitHubActionsWorkflowJob[],
+    appConfigured: boolean,
+  ): GitHubWorkflowJobView[] {
     return jobs.map((job) => {
       const completed = job.status.toLowerCase() === "completed";
       return {
@@ -1102,6 +1215,291 @@ export class GitHubService {
       hasNextPage: connection.pageInfo.hasNextPage,
       endCursor: connection.pageInfo.endCursor,
     };
+  }
+
+  async actionsWorkflowRuns(
+    codebaseRepositoryId?: string | null,
+    first = ACTIONS_PAGE_SIZE,
+    after?: string | null,
+  ): Promise<GitHubActionsWorkflowRunPage> {
+    if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
+      throw new Error(
+        `first must be an integer from 1 to ${ACTIONS_PAGE_SIZE}`,
+      );
+    }
+    const selectedRepositoryId = codebaseRepositoryId?.trim() || null;
+    const cursor = decodeActionsCursor(after, selectedRepositoryId);
+    const token = await this.requireToken();
+    const prisma = await getPrismaClient();
+    const codebaseRepositories = await prisma.codebaseRepository.findMany({
+      orderBy: [{ name: "asc" }, { canonicalOrigin: "asc" }],
+      select: {
+        id: true,
+        canonicalOrigin: true,
+        jiraBranchRegex: true,
+      },
+    });
+    const repositories = codebaseRepositories
+      .map(actionsRepositoryTarget)
+      .filter((item): item is ActionsRepositoryTarget => item !== null)
+      .sort((left, right) =>
+        left.nameWithOwner.localeCompare(right.nameWithOwner),
+      );
+    const targets = selectedRepositoryId
+      ? repositories.filter((item) => item.id === selectedRepositoryId)
+      : repositories;
+    if (selectedRepositoryId && targets.length === 0) {
+      throw new Error("GitHub codebase repository was not found");
+    }
+
+    type WorkflowRunStream = {
+      target: ActionsRepositoryTarget;
+      consumed: number;
+      loadedPage: number | null;
+      runs: RawActionsWorkflowRun[];
+      totalCount: number;
+      current: RawActionsWorkflowRun | null;
+      failed: boolean;
+    };
+    const streams: WorkflowRunStream[] = targets.map((target) => ({
+      target,
+      consumed: cursor.consumed[target.id] ?? 0,
+      loadedPage: null,
+      runs: [],
+      totalCount: Number.POSITIVE_INFINITY,
+      current: null,
+      failed: false,
+    }));
+    const repositoryErrors: GitHubActionsRepositoryErrorView[] = [];
+
+    const ensureCurrent = async (stream: WorkflowRunStream) => {
+      if (stream.failed || stream.consumed >= stream.totalCount) {
+        stream.current = null;
+        return;
+      }
+      const page = Math.floor(stream.consumed / ACTIONS_PAGE_SIZE) + 1;
+      const offset = stream.consumed % ACTIONS_PAGE_SIZE;
+      try {
+        if (stream.loadedPage !== page) {
+          const result = await this.restRequest<{
+            total_count: number;
+            workflow_runs: RawActionsWorkflowRun[];
+          }>(
+            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(
+              stream.target.owner,
+            )}/${encodeURIComponent(
+              stream.target.name,
+            )}/actions/runs?per_page=${ACTIONS_PAGE_SIZE}&page=${page}`,
+            token,
+          );
+          if (
+            !Number.isInteger(result.total_count) ||
+            !Array.isArray(result.workflow_runs)
+          ) {
+            throw new Error(
+              "GitHub returned an invalid workflow runs response",
+            );
+          }
+          stream.loadedPage = page;
+          stream.runs = result.workflow_runs;
+          stream.totalCount = result.total_count;
+        }
+        stream.current = stream.runs[offset] ?? null;
+      } catch (error) {
+        stream.failed = true;
+        stream.current = null;
+        repositoryErrors.push({
+          codebaseRepositoryId: stream.target.id,
+          nameWithOwner: stream.target.nameWithOwner,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    await Promise.all(streams.map(ensureCurrent));
+    const selectedRuns: Array<{
+      run: RawActionsWorkflowRun;
+      target: ActionsRepositoryTarget;
+    }> = [];
+    while (selectedRuns.length < first) {
+      const next = streams
+        .filter(
+          (
+            stream,
+          ): stream is WorkflowRunStream & {
+            current: RawActionsWorkflowRun;
+          } => stream.current !== null,
+        )
+        .map((stream) => ({
+          stream,
+          run: stream.current,
+          target: stream.target,
+        }))
+        .sort(compareWorkflowRuns)[0];
+      if (!next) break;
+      selectedRuns.push({ run: next.run, target: next.target });
+      next.stream.consumed += 1;
+      await ensureCurrent(next.stream);
+    }
+
+    const [settings, codebaseSettings, appSettings, managedRepositories] =
+      await Promise.all([
+        prisma.gitHubSettings.findUnique({ where: { id: SETTINGS_ID } }),
+        prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
+        prisma.gitHubAppSettings.findUnique({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+        }),
+        prisma.gitHubRepository.findMany(),
+      ]);
+    const targetIds = [...new Set(selectedRuns.map(({ target }) => target.id))];
+    const worktrees = targetIds.length
+      ? await prisma.worktree.findMany({
+          where: {
+            missingAt: null,
+            codebase: { repositoryId: { in: targetIds } },
+          },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            branch: true,
+            codebase: { select: { repositoryId: true } },
+          },
+        })
+      : [];
+    const worktreeByRepositoryAndBranch = new Map<string, string>();
+    for (const worktree of worktrees) {
+      if (!worktree.branch) continue;
+      const key = `${worktree.codebase.repositoryId}\u0000${worktree.branch}`;
+      if (!worktreeByRepositoryAndBranch.has(key)) {
+        worktreeByRepositoryAndBranch.set(key, worktree.id);
+      }
+    }
+    const managedByName = new Map(
+      managedRepositories.map((repository) => [
+        repository.nameWithOwner.toLowerCase(),
+        repository,
+      ]),
+    );
+    const defaultGitHubRegex =
+      settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX;
+    const defaultBranchRegex =
+      codebaseSettings?.defaultJiraBranchRegex ?? DEFAULT_JIRA_KEY_REGEX;
+    const appConfigured = appSettings !== null;
+    const items: GitHubActionsWorkflowRunView[] = selectedRuns.map(
+      ({ run, target }) => {
+        const completed = run.status.toLowerCase() === "completed";
+        const checkSuiteId = run.check_suite_node_id || null;
+        const retryUnavailableReason = !completed
+          ? "NOT_COMPLETED"
+          : !checkSuiteId
+            ? "WORKFLOW_RUN_UNAVAILABLE"
+            : appConfigured
+              ? null
+              : "GITHUB_APP_NOT_CONFIGURED";
+        const titleRegex =
+          managedByName.get(target.nameWithOwner.toLowerCase())?.jiraKeyRegex ??
+          defaultGitHubRegex;
+        const branchRegex = target.jiraBranchRegex ?? defaultBranchRegex;
+        const pullRequestNumbers = [
+          ...new Set(
+            (run.pull_requests ?? [])
+              .map((pullRequest) => pullRequest.number)
+              .filter((number) => Number.isInteger(number) && number > 0),
+          ),
+        ];
+        return {
+          id: String(run.id),
+          repositoryGithubId: run.repository.node_id,
+          codebaseRepositoryId: target.id,
+          repositoryNameWithOwner: target.nameWithOwner,
+          repositoryUrl: target.url,
+          name: run.name?.trim() || "GitHub Actions",
+          displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+          runNumber: run.run_number,
+          runAttempt: run.run_attempt ?? 1,
+          event: run.event,
+          status: pipelineState(run.status, run.conclusion),
+          url: run.html_url,
+          headBranch: run.head_branch,
+          headSha: run.head_sha,
+          checkSuiteId,
+          canRetry: retryUnavailableReason === null,
+          retryUnavailableReason,
+          pullRequests: pullRequestNumbers.map((number) => ({
+            number,
+            url: `${target.url}/pull/${number}`,
+          })),
+          jiraKey:
+            parseJiraKey(run.display_title, titleRegex) ??
+            parseJiraKey(run.head_branch ?? "", branchRegex),
+          worktreeId: run.head_branch
+            ? (worktreeByRepositoryAndBranch.get(
+                `${target.id}\u0000${run.head_branch}`,
+              ) ?? null)
+            : null,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+        };
+      },
+    );
+    const hasNextPage = streams.some(
+      (stream) =>
+        !stream.failed &&
+        (stream.current !== null || stream.consumed < stream.totalCount),
+    );
+    const endCursor = hasNextPage
+      ? encodeActionsCursor({
+          version: 1,
+          codebaseRepositoryId: selectedRepositoryId,
+          consumed: Object.fromEntries(
+            streams.map((stream) => [stream.target.id, stream.consumed]),
+          ),
+        })
+      : null;
+    return {
+      items,
+      repositories: repositories.map(({ id, nameWithOwner, url }) => ({
+        id,
+        nameWithOwner,
+        url,
+      })),
+      repositoryErrors,
+      hasNextPage,
+      endCursor,
+    };
+  }
+
+  async actionsWorkflowJobs(
+    codebaseRepositoryId: string,
+    workflowRunId: string,
+  ): Promise<GitHubWorkflowJobView[]> {
+    if (!codebaseRepositoryId.trim() || !workflowRunId.trim()) {
+      throw new Error("Codebase repository and workflow run IDs are required");
+    }
+    const prisma = await getPrismaClient();
+    const repository = await prisma.codebaseRepository.findUnique({
+      where: { id: codebaseRepositoryId },
+      select: {
+        id: true,
+        canonicalOrigin: true,
+        jiraBranchRegex: true,
+      },
+    });
+    const target = repository ? actionsRepositoryTarget(repository) : null;
+    if (!target) throw new Error("GitHub codebase repository was not found");
+    const [token, appSettings] = await Promise.all([
+      this.requireToken(),
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const jobs = await this.patWorkflowJobs(
+      target.owner,
+      target.name,
+      workflowRunId,
+      token,
+    );
+    return this.workflowJobViews(jobs, appSettings !== null);
   }
 
   async addRepository(input: {

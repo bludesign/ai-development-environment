@@ -119,6 +119,40 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.availableRepositories(after);
     },
+    githubActionsWorkflowRuns: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        first,
+        after,
+      }: {
+        codebaseRepositoryId?: string | null;
+        first?: number | null;
+        after?: string | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.actionsWorkflowRuns(
+        codebaseRepositoryId,
+        first ?? 25,
+        after,
+      );
+    },
+    githubActionsWorkflowJobs: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        workflowRunId,
+      }: { codebaseRepositoryId: string; workflowRunId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.actionsWorkflowJobs(
+        codebaseRepositoryId,
+        workflowRunId,
+      );
+    },
     githubPullRequests: (
       _root: unknown,
       {

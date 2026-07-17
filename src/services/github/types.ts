@@ -115,6 +115,56 @@ export type GitHubWorkflowJobView = {
   steps: GitHubWorkflowJobStepView[];
 };
 
+export type GitHubActionsRepositoryView = {
+  id: string;
+  nameWithOwner: string;
+  url: string;
+};
+
+export type GitHubActionsRepositoryErrorView = {
+  codebaseRepositoryId: string;
+  nameWithOwner: string;
+  message: string;
+};
+
+export type GitHubActionsPullRequestView = {
+  number: number;
+  url: string;
+};
+
+export type GitHubActionsWorkflowRunView = {
+  id: string;
+  repositoryGithubId: string;
+  codebaseRepositoryId: string;
+  repositoryNameWithOwner: string;
+  repositoryUrl: string;
+  name: string;
+  displayTitle: string;
+  runNumber: number;
+  runAttempt: number;
+  event: string;
+  status: GitHubPipelineState;
+  url: string;
+  headBranch: string | null;
+  headSha: string;
+  checkSuiteId: string | null;
+  canRetry: boolean;
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
+  pullRequests: GitHubActionsPullRequestView[];
+  jiraKey: string | null;
+  worktreeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GitHubActionsWorkflowRunPage = {
+  items: GitHubActionsWorkflowRunView[];
+  repositories: GitHubActionsRepositoryView[];
+  repositoryErrors: GitHubActionsRepositoryErrorView[];
+  hasNextPage: boolean;
+  endCursor: string | null;
+};
+
 export type GitHubPullRequestView = {
   id: string;
   number: number;

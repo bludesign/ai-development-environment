@@ -14,6 +14,7 @@ import {
   MessageSquareText,
   PanelLeft,
   PanelRight,
+  PlayCircle,
   Settings,
   TicketCheck,
   Wrench,
@@ -355,6 +356,22 @@ function NavigationSidebar() {
                   >
                     <GitPullRequest />
                     <span>{t("pullRequests")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/actions")}
+                >
+                  <Link
+                    href="/actions"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <PlayCircle />
+                    <span>{t("actions")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
