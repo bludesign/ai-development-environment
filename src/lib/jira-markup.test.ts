@@ -5,6 +5,7 @@ import {
   jiraWikiToMarkdown,
   markdownToJiraWiki,
   rawJiraText,
+  stripAdfMarkdownMetadata,
 } from "./jira-markup";
 
 describe("Jira markup helpers", () => {
@@ -34,5 +35,13 @@ describe("Jira markup helpers", () => {
     );
     expect(rawJiraText(" exact\ntext ")).toBe(" exact\ntext ");
     expect(rawJiraText({ type: "doc", version: 1 })).toContain('"type": "doc"');
+  });
+
+  test("removes ADF round-trip metadata from user-facing Markdown", () => {
+    expect(
+      stripAdfMarkdownMetadata(
+        '<!-- adf:paragraph attrs=\'{"localId":"794242e5a900"}\' -->\n\nDeployment notes\n\n<!-- /adf:paragraph -->',
+      ),
+    ).toBe("Deployment notes");
   });
 });

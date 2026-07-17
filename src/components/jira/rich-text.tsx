@@ -29,6 +29,7 @@ import {
   isAdfDocument,
   jiraWikiToMarkdown,
   rawJiraText,
+  stripAdfMarkdownMetadata,
 } from "@/lib/jira-markup";
 import { copyText } from "@/lib/browser-utils";
 import type {
@@ -153,6 +154,7 @@ export function JiraRichTextBlock({
       : selectedFormat === "JIRA_WIKI"
         ? jiraWikiToMarkdown(normalized.rawText)
         : normalized.rawText;
+  const visibleMarkdown = stripAdfMarkdownMetadata(markdown);
   const viewModes = [
     { value: "RENDERED", label: t("rendered"), icon: Eye },
     { value: "MARKDOWN", label: t("markdown"), icon: FileCode2 },
@@ -163,7 +165,9 @@ export function JiraRichTextBlock({
 
   const copy = async () => {
     try {
-      await copyText(viewMode === "MARKDOWN" ? markdown : normalized.rawText);
+      await copyText(
+        viewMode === "MARKDOWN" ? visibleMarkdown : normalized.rawText,
+      );
       setCopyState("COPIED");
     } catch {
       setCopyState("FAILED");
@@ -248,12 +252,12 @@ export function JiraRichTextBlock({
           </pre>
         ) : viewMode === "MARKDOWN" ? (
           <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-            {markdown}
+            {visibleMarkdown}
           </pre>
         ) : normalized.format === "ADF" && isAdfDocument(normalized.raw) ? (
           <AdfRenderer value={normalized.raw} />
         ) : (
-          <RichTextPreview markdown={markdown} />
+          <RichTextPreview markdown={visibleMarkdown} />
         )}
       </div>
     </div>

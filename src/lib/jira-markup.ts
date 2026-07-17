@@ -52,6 +52,14 @@ export function markdownToJiraWiki(value: string): string {
   return jira2md.to_jira(value);
 }
 
+export function stripAdfMarkdownMetadata(value: string): string {
+  return value
+    .replace(/<!--\s*\/?adf:[\s\S]*?-->/gi, "")
+    .replace(/^[\t ]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function rawJiraText(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return "";

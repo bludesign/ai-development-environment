@@ -66,7 +66,8 @@ describe("JiraRichTextBlock", () => {
             ],
           },
           rawText: '{"type":"doc","version":1}',
-          markdown: "## Deployment",
+          markdown:
+            '<!-- adf:paragraph attrs=\'{"localId":"794242e5a900"}\' -->\n\n## Deployment',
           wikiMarkup: "h2. Deployment",
         }}
         value={null}
@@ -80,6 +81,7 @@ describe("JiraRichTextBlock", () => {
     });
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Markdown" }));
     expect(screen.getByText("## Deployment").tagName).toBe("PRE");
+    expect(screen.queryByText(/adf:paragraph/)).toBeNull();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Markdown" }), {
       button: 0,
       ctrlKey: false,
