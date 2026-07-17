@@ -16,7 +16,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -123,6 +129,7 @@ function FilePreview({
 
 export function SkillSyncPage({ runId }: { runId: string }) {
   const t = useTranslations("skills");
+  const tStatus = useTranslations("status");
   const [run, setRun] = useState<SkillSyncRun | null>(null);
   const [groups, setGroups] = useState<SkillGroupSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -431,20 +438,59 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         </Alert>
       )}
       {agentProgress.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {agentProgress.map((item) => (
-            <Badge
-              key={item.id}
-              variant={item.status === "FAILED" ? "destructive" : "outline"}
-            >
-              {item.agent?.name ?? t("unknownAgent")}:{" "}
-              {item.direction.toLocaleLowerCase()}{" "}
-              {item.status.toLocaleLowerCase()}
-            </Badge>
-          ))}
-        </div>
+        <Card className="gap-0 py-0">
+          <CardHeader className="border-b py-4">
+            <CardTitle>{t("syncAgents")}</CardTitle>
+            <CardDescription>{t("syncAgentsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="px-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("agent")}</TableHead>
+                  <TableHead>{t("connection")}</TableHead>
+                  <TableHead>{t("operation")}</TableHead>
+                  <TableHead>{t("syncStatus")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {agentProgress.map((item) => {
+                  const online = item.agent?.connectionStatus === "ONLINE";
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">
+                        {item.agent?.name ?? t("unknownAgent")}
+                      </TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={`size-2 rounded-full ${
+                              online ? "bg-emerald-500" : "bg-muted-foreground"
+                            }`}
+                          />
+                          {tStatus(online ? "online" : "offline")}
+                        </span>
+                      </TableCell>
+                      <TableCell className="capitalize">
+                        {item.direction.toLocaleLowerCase()}
+                      </TableCell>
+                      <TableCell className="capitalize">
+                        {item.status.toLocaleLowerCase()}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
-      <Card>
+      <Card className="gap-0 py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle>{t("syncChanges")}</CardTitle>
+          <CardDescription>{t("syncChangesDescription")}</CardDescription>
+        </CardHeader>
         <CardContent className="px-0">
           <Table>
             <TableHeader>

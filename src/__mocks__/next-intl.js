@@ -1404,6 +1404,12 @@ const mockTranslations = {
     searchPlaceholder:
       "Search names, descriptions, groups, repositories, agents, or paths…",
     database: "Database",
+    databaseSkills: "Database skills",
+    databaseSkillsDescription:
+      "Canonical skill packages stored in the control plane.",
+    clientSkills: "Client skills",
+    clientSkillsDescription:
+      "Skill packages discovered in the selected AI client.",
     loading: "Loading skills…",
     name: "Name",
     skillDescription: "Description",
@@ -1461,6 +1467,8 @@ const mockTranslations = {
     skillGroups: "Skill groups",
     groupsDescription:
       "Bundle project-only skills and assign them to repositories.",
+    groupsTableDescription:
+      "Project skill groups and their assigned skills and repositories.",
     addGroup: "Add group",
     loadingGroups: "Loading skill groups…",
     skillsCount: "Skills",
@@ -1493,6 +1501,15 @@ const mockTranslations = {
     applySync: "Apply sync",
     skipPendingClients: "Skip pending clients",
     unknownAgent: "Unknown agent",
+    syncAgents: "Agent sync status",
+    syncAgentsDescription:
+      "Connection and synchronization status for every participating agent.",
+    connection: "Connection",
+    operation: "Operation",
+    syncStatus: "Sync status",
+    syncChanges: "Proposed changes",
+    syncChangesDescription:
+      "Review the changes and resolve conflicts before applying this sync.",
     change: "Change",
     resolution: "Resolution",
     newSharedLocation: "New shared location",

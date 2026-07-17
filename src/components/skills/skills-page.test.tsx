@@ -78,6 +78,7 @@ describe("SkillsPage", () => {
     ).toBe("/skills/skill-1");
     expect(screen.getByRole("tab", { name: "Cursor" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Claude Code" })).toBeNull();
+    expect(screen.getByText("Database skills")).toBeTruthy();
     expect(screen.getByText("Swift")).toBeTruthy();
   });
 });

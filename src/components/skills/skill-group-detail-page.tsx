@@ -178,7 +178,7 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
             onConfirm={remove}
             title={t("deleteGroup")}
             trigger={
-              <Button disabled={busy} variant="ghost">
+              <Button disabled={busy} variant="destructive">
                 <Trash2 /> {t("delete")}
               </Button>
             }

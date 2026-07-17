@@ -6,7 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -114,7 +120,11 @@ export function SkillGroupsPage() {
           <Spinner /> {t("loadingGroups")}
         </div>
       ) : (
-        <Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="border-b py-4">
+            <CardTitle>{t("skillGroups")}</CardTitle>
+            <CardDescription>{t("groupsTableDescription")}</CardDescription>
+          </CardHeader>
           <CardContent className="px-0">
             <Table>
               <TableHeader>
@@ -127,14 +137,23 @@ export function SkillGroupsPage() {
               </TableHeader>
               <TableBody>
                 {groups.map((group) => (
-                  <TableRow key={group.id}>
+                  <TableRow
+                    className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                    key={group.id}
+                    onClick={() => router.push(`/skills/groups/${group.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(`/skills/groups/${group.id}`);
+                      }
+                    }}
+                    role="link"
+                    tabIndex={0}
+                  >
                     <TableCell>
-                      <Link
-                        className="inline-flex items-center gap-2 font-medium text-primary hover:underline"
-                        href={`/skills/groups/${group.id}`}
-                      >
+                      <span className="inline-flex items-center gap-2 font-medium text-primary">
                         <FolderTree /> {group.name}
-                      </Link>
+                      </span>
                     </TableCell>
                     <TableCell>{group.skills?.length ?? 0}</TableCell>
                     <TableCell>{group.repositories?.length ?? 0}</TableCell>

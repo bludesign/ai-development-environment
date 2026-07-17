@@ -17,7 +17,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -266,7 +272,11 @@ export function SkillsPage() {
 function DatabaseTable({ overview }: { overview: SkillsOverview }) {
   const t = useTranslations("skills");
   return (
-    <Card>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{t("databaseSkills")}</CardTitle>
+        <CardDescription>{t("databaseSkillsDescription")}</CardDescription>
+      </CardHeader>
       <CardContent className="px-0">
         <Table>
           <TableHeader>
@@ -339,7 +349,11 @@ function InstallationTable({
 }) {
   const t = useTranslations("skills");
   return (
-    <Card>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{t("clientSkills")}</CardTitle>
+        <CardDescription>{t("clientSkillsDescription")}</CardDescription>
+      </CardHeader>
       <CardContent className="px-0">
         <Table>
           <TableHeader>

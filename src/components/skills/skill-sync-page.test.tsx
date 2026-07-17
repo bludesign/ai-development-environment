@@ -148,7 +148,11 @@ describe("SkillSyncPage", () => {
           error: null,
           skill: null,
           installation: null,
-          agent: { id: "agent-1", name: "Offline Mac" },
+          agent: {
+            id: "agent-1",
+            name: "Offline Mac",
+            connectionStatus: "OFFLINE",
+          },
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
         },
@@ -171,8 +175,11 @@ describe("SkillSyncPage", () => {
     });
 
     render(<SkillSyncPage runId="run-1" />);
+    expect(await screen.findByText("Agent sync status")).toBeTruthy();
+    expect(screen.getByText("offline")).toBeTruthy();
+    expect(screen.getByText("Proposed changes")).toBeTruthy();
     fireEvent.click(
-      await screen.findByRole("button", { name: /skip pending clients/i }),
+      screen.getByRole("button", { name: /skip pending clients/i }),
     );
 
     await waitFor(() =>
@@ -181,6 +188,10 @@ describe("SkillSyncPage", () => {
         { runId: "run-1" },
       ),
     );
-    expect(await screen.findByText(/scan skipped/i)).toBeTruthy();
+    expect(
+      await screen.findByRole("row", {
+        name: /Offline Mac offline scan skipped/i,
+      }),
+    ).toBeTruthy();
   });
 });
