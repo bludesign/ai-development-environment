@@ -153,6 +153,7 @@ export type GitHubActionsWorkflowRunView = {
   pullRequests: GitHubActionsPullRequestView[];
   jiraKey: string | null;
   worktreeId: string | null;
+  startedAt: string;
   createdAt: string;
   updatedAt: string;
 };

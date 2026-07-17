@@ -909,6 +909,7 @@ const mockTranslations = {
     ticket: "Ticket",
     worktree: "Worktree",
     started: "Started",
+    duration: "Duration {duration}",
     actions: "Actions",
     runNumber: "Run #{number}",
     attempt: "Attempt {attempt}",

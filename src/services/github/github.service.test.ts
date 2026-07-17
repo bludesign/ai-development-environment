@@ -307,6 +307,7 @@ function rawActionsWorkflowRun(
       html_url: `https://github.com/${repository}`,
     },
     pull_requests: (options.pullRequests ?? []).map((number) => ({ number })),
+    run_started_at: createdAt,
     created_at: createdAt,
     updated_at: createdAt,
   };

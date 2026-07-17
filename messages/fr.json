@@ -823,6 +823,7 @@
     "ticket": "Ticket",
     "worktree": "Arbre de travail",
     "started": "Démarrée",
+    "duration": "Durée : {duration}",
     "actions": "Actions",
     "runNumber": "Exécution n° {number}",
     "attempt": "Tentative {attempt}",

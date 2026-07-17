@@ -823,6 +823,7 @@
     "ticket": "Incidencia",
     "worktree": "Árbol de trabajo",
     "started": "Iniciada",
+    "duration": "Duración: {duration}",
     "actions": "Acciones",
     "runNumber": "Ejecución n.º {number}",
     "attempt": "Intento {attempt}",

@@ -185,6 +185,7 @@ type GitHubActionsWorkflowRun {
   pullRequests: [GitHubActionsPullRequest!]!
   jiraKey: String
   worktreeId: ID
+  startedAt: String!
   createdAt: String!
   updatedAt: String!
 }

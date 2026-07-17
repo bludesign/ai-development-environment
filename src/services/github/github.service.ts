@@ -125,6 +125,7 @@ type RawActionsWorkflowRun = {
     html_url: string;
   };
   pull_requests: Array<{ number: number }>;
+  run_started_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1437,6 +1438,7 @@ export class GitHubService {
                 `${target.id}\u0000${run.head_branch}`,
               ) ?? null)
             : null,
+          startedAt: run.run_started_at ?? run.created_at,
           createdAt: run.created_at,
           updatedAt: run.updated_at,
         };

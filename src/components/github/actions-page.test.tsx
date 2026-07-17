@@ -58,6 +58,7 @@ const run = {
   ],
   jiraKey: "APP-42",
   worktreeId: "worktree-1",
+  startedAt: "2026-07-17T12:00:00.000Z",
   createdAt: "2026-07-17T12:00:00.000Z",
   updatedAt: "2026-07-17T12:05:00.000Z",
 };
@@ -96,7 +97,17 @@ beforeEach(() => {
       return {
         githubActionsWorkflowRuns: {
           items: after
-            ? [{ ...run, id: "43", runNumber: 43, displayTitle: "Older run" }]
+            ? [
+                {
+                  ...run,
+                  id: "43",
+                  runNumber: 43,
+                  displayTitle: "Older run",
+                  startedAt: "2026-07-16T12:00:00.000Z",
+                  createdAt: "2026-07-16T12:00:00.000Z",
+                  updatedAt: "2026-07-16T12:05:00.000Z",
+                },
+              ]
             : [run],
           repositories: [
             {
@@ -202,16 +213,39 @@ describe("ActionsPage", () => {
     expect(
       within(row).getByRole("link", { name: "#17" }).getAttribute("href"),
     ).toBe("/pull-requests/acme/widgets/17");
+    const workflowLink = within(row)
+      .getAllByRole("link")
+      .find((link) => link.getAttribute("href") === run.url);
+    expect(workflowLink?.getAttribute("href")).toBe(run.url);
+    expect(workflowLink?.className).toContain("hover:bg-muted");
+    expect(workflowLink?.className).not.toContain("hover:underline");
+    expect(within(row).getByText("Duration 5m")).toBeDefined();
     expect(
-      within(row)
-        .getAllByRole("link", { name: "View" })
-        .find((link) => link.getAttribute("href")?.startsWith("/worktrees/"))
-        ?.getAttribute("href"),
+      within(row).getByRole("button", { name: "APP-42" }).className,
+    ).toContain("hover:bg-primary/80");
+    const expandRun = within(row).getByRole("button", {
+      name: "Show jobs for APP-42 Ship widgets",
+    });
+    fireEvent.pointerDown(
+      within(row).getByRole("button", {
+        name: "Actions: APP-42 Ship widgets",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(expandRun.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen.getByRole("menuitem", { name: "View" }).getAttribute("href"),
+    ).toBe(run.url);
+    expect(
+      screen.getByRole("menuitem", { name: "Worktree" }).getAttribute("href"),
     ).toBe("/worktrees/worktree-1");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("acme/private:")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Older run")).toBeDefined();
+    expect(screen.getByText("Friday, July 17, 2026")).toBeDefined();
+    expect(screen.getByText("Thursday, July 16, 2026")).toBeDefined();
     expect(requestMock).toHaveBeenCalledWith(
       expect.stringContaining("query GitHubActionsWorkflowRuns"),
       expect.objectContaining({ after: "cursor-1" }),
@@ -243,11 +277,23 @@ describe("ActionsPage", () => {
     const expandRun = await screen.findByRole("button", {
       name: "Show jobs for APP-42 Ship widgets",
     });
-    fireEvent.click(expandRun);
+    const runRow = expandRun.closest("tr") as HTMLTableRowElement;
+    fireEvent.click(runRow);
+    expect(expandRun.getAttribute("aria-expanded")).toBe("true");
 
     const expandJob = await screen.findByRole("button", {
       name: "Show steps for test",
     });
+    const pullRequestLink = within(runRow).getByRole("link", { name: "#17" });
+    pullRequestLink.addEventListener(
+      "click",
+      (event) => event.preventDefault(),
+      {
+        once: true,
+      },
+    );
+    fireEvent.click(pullRequestLink);
+    expect(expandRun.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(expandJob);
     expect(screen.getByText("Set up job")).toBeDefined();
     expect(screen.getByText("Run tests")).toBeDefined();
@@ -275,7 +321,13 @@ describe("ActionsPage", () => {
     await screen.findByRole("button", { name: "Show steps for test" });
 
     const runRow = screen.getByRole("row", { name: /APP-42 Ship widgets/ });
-    fireEvent.click(within(runRow).getByRole("button", { name: "Retry" }));
+    fireEvent.pointerDown(
+      within(runRow).getByRole("button", {
+        name: "Actions: APP-42 Ship widgets",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubPipeline"),

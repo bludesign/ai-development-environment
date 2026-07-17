@@ -5,23 +5,35 @@ import {
   ChevronRight,
   ExternalLink,
   GitBranch,
+  MoreHorizontal,
   PlayCircle,
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { Fragment, MouseEvent, useCallback, useEffect, useState } from "react";
-
 import {
-  RetryPipelineButton,
-  pipelineStateClass,
-} from "@/components/github/pipeline-menu";
+  Fragment,
+  MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { pipelineStateClass } from "@/components/github/pipeline-menu";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -49,7 +61,6 @@ import type {
   GitHubActionsRepositoryView,
   GitHubActionsWorkflowRunPage,
   GitHubActionsWorkflowRunView,
-  GitHubPipelineView,
   GitHubSettingsView,
   GitHubWorkflowJobView,
 } from "@/services/github/types";
@@ -57,7 +68,7 @@ import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 
 const ALL_REPOSITORIES = "all";
 const RUN_FIELDS =
-  "id repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId createdAt updatedAt";
+  "id repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
 const JOB_FIELDS =
   "id name status url canRetry retryUnavailableReason steps { number name status }";
@@ -101,6 +112,36 @@ function relativeAge(value: string, locale: string) {
     }
   }
   return formatter.format(seconds, "second");
+}
+
+function runDuration(run: GitHubActionsWorkflowRunView) {
+  const startedAt = Date.parse(run.startedAt);
+  const active =
+    run.status === "ACTION_REQUIRED" ||
+    run.status === "EXPECTED" ||
+    run.status === "IN_PROGRESS" ||
+    run.status === "PENDING" ||
+    run.status === "QUEUED";
+  const finishedAt = active ? Date.now() : Date.parse(run.updatedAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt)) return "—";
+  const totalSeconds = Math.max(0, Math.floor((finishedAt - startedAt) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
+  return `${seconds}s`;
+}
+
+function shouldToggleRunRow(event: MouseEvent<HTMLTableRowElement>) {
+  if (event.defaultPrevented || event.button !== 0) return false;
+  const target = event.target;
+  if (!(target instanceof Element) || !event.currentTarget.contains(target)) {
+    return false;
+  }
+  return !target.closest(
+    "a, button, input, select, textarea, [role='button'], [role='link'], [role='menuitem']",
+  );
 }
 
 export function ActionsPage() {
@@ -519,6 +560,24 @@ function ActionsTable({
   const t = useTranslations("actionsPage");
   const tp = useTranslations("pullRequests");
   const locale = useLocale();
+  const groupedRuns = useMemo(() => {
+    const groups = new Map<
+      string,
+      { label: string; items: GitHubActionsWorkflowRunView[] }
+    >();
+    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
+    for (const run of runs) {
+      const date = new Date(run.startedAt);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = groups.get(key) ?? {
+        label: formatter.format(date),
+        items: [],
+      };
+      group.items.push(run);
+      groups.set(key, group);
+    }
+    return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
+  }, [locale, runs]);
 
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -528,173 +587,260 @@ function ActionsTable({
             <TableHead className="w-10">
               <span className="sr-only">{t("expand")}</span>
             </TableHead>
-            <TableHead>{t("repository")}</TableHead>
-            <TableHead>{t("workflowRun")}</TableHead>
+            <TableHead>
+              {t("workflowRun")} / {t("repository")}
+            </TableHead>
             <TableHead>{t("trigger")}</TableHead>
             <TableHead>{t("status")}</TableHead>
             <TableHead>{t("pullRequest")}</TableHead>
             <TableHead>{t("ticket")}</TableHead>
-            <TableHead>{t("worktree")}</TableHead>
             <TableHead>{t("started")}</TableHead>
             <TableHead className="text-right">{t("actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {runs.map((run) => {
-            const key = runKey(run);
-            const expanded = expandedRuns.has(key);
-            const jobState = jobStates[key];
-            const pipeline: GitHubPipelineView = {
-              id: run.id,
-              name: run.name,
-              status: run.status,
-              url: run.url,
-              checkSuiteId: run.checkSuiteId,
-              canRetry: run.canRetry,
-              retryUnavailableReason: run.retryUnavailableReason,
-              jobs: [],
-            };
-            return (
-              <Fragment key={key}>
-                <TableRow>
-                  <TableCell className="pr-0">
-                    <Button
-                      aria-expanded={expanded}
-                      aria-label={t(expanded ? "hideJobs" : "showJobs", {
-                        run: run.displayTitle,
-                      })}
-                      onClick={() => onToggleRun(run)}
-                      size="icon-sm"
-                      variant="ghost"
+          {groupedRuns.map((group) => (
+            <Fragment key={group.key}>
+              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                <TableCell
+                  className="py-1.5 text-xs font-normal text-muted-foreground"
+                  colSpan={8}
+                >
+                  {group.label}
+                </TableCell>
+              </TableRow>
+              {group.items.map((run) => {
+                const key = runKey(run);
+                const expanded = expandedRuns.has(key);
+                const jobState = jobStates[key];
+                return (
+                  <Fragment key={key}>
+                    <TableRow
+                      className="cursor-pointer"
+                      onClick={(event) => {
+                        if (shouldToggleRunRow(event)) onToggleRun(run);
+                      }}
                     >
-                      {expanded ? <ChevronDown /> : <ChevronRight />}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <a
-                      className="font-medium text-primary hover:underline"
-                      href={run.repositoryUrl}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {run.repositoryNameWithOwner}
-                    </a>
-                  </TableCell>
-                  <TableCell className="min-w-72 whitespace-normal">
-                    <p className="font-medium">{run.name}</p>
-                    <p className="mt-0.5 text-sm text-muted-foreground">
-                      {run.displayTitle}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {t("runNumber", { number: run.runNumber })}
-                      {run.runAttempt > 1
-                        ? ` · ${t("attempt", { attempt: run.runAttempt })}`
-                        : ""}
-                    </p>
-                  </TableCell>
-                  <TableCell className="min-w-48 whitespace-normal">
-                    <p>{run.event}</p>
-                    <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
-                      {run.headBranch ?? run.headSha.slice(0, 7)}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={pipelineStateClass(run.status)}>
-                      {tp(`pipelineStates.${run.status}`)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {run.pullRequests.length === 0 ? (
-                      "—"
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {run.pullRequests.map((pullRequest) => (
-                          <Link
-                            className="font-medium text-primary hover:underline"
-                            href={pullRequestDetailHref({
-                              repositoryNameWithOwner:
-                                run.repositoryNameWithOwner,
-                              number: pullRequest.number,
-                            })}
-                            key={pullRequest.number}
-                          >
-                            #{pullRequest.number}
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {run.jiraKey ? (
-                      <Badge
-                        asChild
-                        className="cursor-pointer hover:bg-muted/80"
-                      >
-                        <button
-                          onClick={() => replaceIssueParam(run.jiraKey)}
-                          type="button"
+                      <TableCell className="pr-0">
+                        <Button
+                          aria-expanded={expanded}
+                          aria-label={t(expanded ? "hideJobs" : "showJobs", {
+                            run: run.displayTitle,
+                          })}
+                          onClick={() => onToggleRun(run)}
+                          size="icon-sm"
+                          variant="ghost"
                         >
-                          {run.jiraKey}
-                        </button>
-                      </Badge>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {run.worktreeId ? (
-                      <Link
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                        href={worktreeDetailHref(run.worktreeId)}
-                      >
-                        <GitBranch className="size-3.5" />
-                        {t("viewWorktree")}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    <time dateTime={run.createdAt} title={run.createdAt}>
-                      {relativeAge(run.createdAt, locale)}
-                    </time>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button asChild size="sm" variant="outline">
-                        <a href={run.url} rel="noreferrer" target="_blank">
-                          {t("view")}
-                          <ExternalLink />
+                          {expanded ? <ChevronDown /> : <ChevronRight />}
+                        </Button>
+                      </TableCell>
+                      <TableCell className="min-w-72 whitespace-normal">
+                        <a
+                          className="block rounded-md px-2 py-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          href={run.url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <span className="flex items-center gap-1 font-medium text-primary">
+                            {run.name}
+                            <ExternalLink className="size-3.5 shrink-0" />
+                          </span>
+                          <span className="mt-0.5 block text-sm text-foreground">
+                            {run.displayTitle}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {run.repositoryNameWithOwner} ·{" "}
+                            {t("runNumber", { number: run.runNumber })}
+                            {run.runAttempt > 1
+                              ? ` · ${t("attempt", { attempt: run.runAttempt })}`
+                              : ""}
+                          </span>
                         </a>
-                      </Button>
-                      <RetryPipelineButton
-                        onError={onError}
-                        onPipelineRetried={() => onRunRetried(run)}
-                        pipeline={pipeline}
-                        repositoryId={run.repositoryGithubId}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-                {expanded && (
-                  <TableRow className="bg-muted/20 hover:bg-muted/20">
-                    <TableCell className="p-0" colSpan={10}>
-                      <WorkflowJobsPanel
-                        onError={onError}
-                        onReload={() => onLoadJobs(run)}
-                        onRetried={(jobId) => onJobRetried(run, jobId)}
-                        run={run}
-                        state={jobState}
-                      />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
-            );
-          })}
+                      </TableCell>
+                      <TableCell className="min-w-48 whitespace-normal">
+                        <p>{run.event}</p>
+                        <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
+                          {run.headBranch ?? run.headSha.slice(0, 7)}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={pipelineStateClass(run.status)}>
+                          {tp(`pipelineStates.${run.status}`)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {run.pullRequests.length === 0 ? (
+                          "—"
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {run.pullRequests.map((pullRequest) => (
+                              <Badge
+                                asChild
+                                className="cursor-pointer hover:bg-muted/80"
+                                key={pullRequest.number}
+                              >
+                                <Link
+                                  href={pullRequestDetailHref({
+                                    repositoryNameWithOwner:
+                                      run.repositoryNameWithOwner,
+                                    number: pullRequest.number,
+                                  })}
+                                >
+                                  #{pullRequest.number}
+                                </Link>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {run.jiraKey ? (
+                          <Badge
+                            asChild
+                            className="cursor-pointer hover:bg-primary/80"
+                          >
+                            <button
+                              onClick={() => replaceIssueParam(run.jiraKey)}
+                              type="button"
+                            >
+                              {run.jiraKey}
+                            </button>
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <div className="flex flex-col gap-0.5">
+                          <time dateTime={run.startedAt} title={run.startedAt}>
+                            {relativeAge(run.startedAt, locale)}
+                          </time>
+                          <span className="text-xs">
+                            {t("duration", { duration: runDuration(run) })}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end">
+                          <WorkflowRunActionsMenu
+                            onError={onError}
+                            onRetried={() => onRunRetried(run)}
+                            run={run}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableCell className="p-0" colSpan={8}>
+                          <WorkflowJobsPanel
+                            onError={onError}
+                            onReload={() => onLoadJobs(run)}
+                            onRetried={(jobId) => onJobRetried(run, jobId)}
+                            run={run}
+                            state={jobState}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          ))}
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function WorkflowRunActionsMenu({
+  run,
+  onRetried,
+  onError,
+}: {
+  run: GitHubActionsWorkflowRunView;
+  onRetried: () => void;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("actionsPage");
+  const tp = useTranslations("pullRequests");
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async () => {
+    if (!run.canRetry || !run.checkSuiteId) return;
+    setRetrying(true);
+    try {
+      await controlPlaneRequest<{ retryGitHubPipeline: { id: string } }>(
+        `mutation RetryGitHubPipeline(
+          $repositoryId: ID!
+          $checkSuiteId: ID!
+        ) {
+          retryGitHubPipeline(
+            repositoryId: $repositoryId
+            checkSuiteId: $checkSuiteId
+          ) { id }
+        }`,
+        {
+          repositoryId: run.repositoryGithubId,
+          checkSuiteId: run.checkSuiteId,
+        },
+      );
+      onRetried();
+      onError(null);
+    } catch (value) {
+      onError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const retryUnavailableMessage = run.retryUnavailableReason
+    ? tp(`retryUnavailable.${run.retryUnavailableReason}`)
+    : undefined;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={`${t("actions")}: ${run.displayTitle}`}
+          size="icon-sm"
+          variant="outline"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuItem asChild>
+          <a href={run.url} rel="noreferrer" target="_blank">
+            <ExternalLink />
+            {t("view")}
+          </a>
+        </DropdownMenuItem>
+        {run.worktreeId ? (
+          <DropdownMenuItem asChild>
+            <Link href={worktreeDetailHref(run.worktreeId)}>
+              <GitBranch />
+              {t("worktree")}
+            </Link>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled>
+            <GitBranch />
+            {t("worktree")}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={retrying || !run.canRetry || !run.checkSuiteId}
+          onSelect={() => void retry()}
+          title={retryUnavailableMessage}
+        >
+          {retrying ? <Spinner /> : <RotateCcw />}
+          {retrying ? tp("retrying") : tp("retry")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
