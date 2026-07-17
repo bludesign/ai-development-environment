@@ -115,7 +115,7 @@ const pullRequest = {
   unresolvedReviewThreadCount: 2,
   state: "OPEN",
   headRefName: "feature/app-42",
-  createdAt: "2026-07-01T00:00:00.000Z",
+  createdAt: "2026-07-17T12:00:00.000Z",
 };
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -167,6 +167,7 @@ function configureRequests() {
                   id: "pull-request-older",
                   number: 16,
                   title: "Older merged pull request",
+                  createdAt: "2026-07-16T12:00:00.000Z",
                 },
               ]
             : variables?.scope === "REVIEW_REQUESTED"
@@ -482,6 +483,10 @@ describe("PullRequestsPage", () => {
       intersectPaginationTrigger();
     });
     expect(await screen.findByText("Older merged pull request")).toBeDefined();
+    const newestDaySeparator = screen.getByText("Friday, July 17, 2026");
+    const olderDaySeparator = screen.getByText("Thursday, July 16, 2026");
+    expect(newestDaySeparator.closest("td")?.colSpan).toBe(9);
+    expect(olderDaySeparator.closest("td")?.colSpan).toBe(9);
     expect(
       requestMock.mock.calls.filter(
         ([query, variables]) =>

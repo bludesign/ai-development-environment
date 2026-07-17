@@ -17,10 +17,12 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
+  Fragment,
   FormEvent,
   MouseEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -697,6 +699,24 @@ function PullRequestTable({
   const t = useTranslations("pullRequests");
   const router = useRouter();
   const stopRowClick = (event: MouseEvent) => event.stopPropagation();
+  const groupedPullRequests = useMemo(() => {
+    const groups = new Map<
+      string,
+      { label: string; items: GitHubPullRequestView[] }
+    >();
+    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
+    for (const pullRequest of items) {
+      const date = new Date(pullRequest.createdAt);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = groups.get(key) ?? {
+        label: formatter.format(date),
+        items: [],
+      };
+      group.items.push(pullRequest);
+      groups.set(key, group);
+    }
+    return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
+  }, [items, locale]);
 
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -715,129 +735,146 @@ function PullRequestTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((pullRequest) => (
-            <TableRow
-              key={pullRequest.id}
-              className="cursor-pointer"
-              onClick={() => router.push(pullRequestDetailHref(pullRequest))}
-            >
-              <TableCell>
-                <Badge
-                  asChild
-                  className="cursor-pointer hover:bg-muted/80"
-                  variant="outline"
+          {groupedPullRequests.map((group) => (
+            <Fragment key={group.key}>
+              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                <TableCell
+                  className="py-1.5 text-xs font-normal text-muted-foreground"
+                  colSpan={9}
                 >
-                  <Link
-                    href={pullRequestDetailHref(pullRequest)}
-                    onClick={stopRowClick}
-                  >
-                    #{pullRequest.number}
-                  </Link>
-                </Badge>
-              </TableCell>
-              <TableCell className="min-w-72 whitespace-normal">
-                <div className="space-y-1">
-                  <Link
-                    className="font-medium hover:underline"
-                    href={pullRequestDetailHref(pullRequest)}
-                    onClick={stopRowClick}
-                  >
-                    {pullRequest.title}
-                  </Link>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                    <a
-                      className="text-muted-foreground hover:text-foreground"
-                      href={pullRequest.repositoryUrl}
-                      onClick={stopRowClick}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {pullRequest.repositoryNameWithOwner}
-                    </a>
-                  </div>
-                  <p className="font-mono text-xs break-all text-muted-foreground">
-                    {pullRequest.headRefName}
-                  </p>
-                </div>
-              </TableCell>
-              <TableCell className="min-w-40 whitespace-normal">
-                <div className="flex flex-wrap gap-1">
-                  {pullRequest.labels.length > 0
-                    ? pullRequest.labels.map((label) => (
-                        <Badge key={label}>{label}</Badge>
-                      ))
-                    : "—"}
-                </div>
-              </TableCell>
-              <TableCell>
-                {pullRequest.jiraKey ? (
-                  <Badge asChild className="cursor-pointer hover:bg-primary/80">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        replaceIssueParam(pullRequest.jiraKey);
-                      }}
-                      type="button"
-                    >
-                      {pullRequest.jiraKey}
-                    </button>
-                  </Badge>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell>
-                <PipelineMenu
-                  onPipelineRetried={(pipeline) =>
-                    onPipelineRetried(pullRequest.id, pipeline)
-                  }
-                  pipelineStatus={pullRequest.pipelineStatus}
-                  pipelines={pullRequest.pipelines}
-                  repositoryId={pullRequest.repositoryGithubId}
-                />
-              </TableCell>
-              <TableCell>
-                <Badge className={reviewClass(pullRequest.reviewDecision)}>
-                  {t(`reviewStates.${pullRequest.reviewDecision}`)}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Badge
-                  asChild
-                  className={
-                    pullRequest.unresolvedReviewThreadCount === 0
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                      : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  {group.label}
+                </TableCell>
+              </TableRow>
+              {group.items.map((pullRequest) => (
+                <TableRow
+                  key={pullRequest.id}
+                  className="cursor-pointer"
+                  onClick={() =>
+                    router.push(pullRequestDetailHref(pullRequest))
                   }
                 >
-                  <Link
-                    aria-label={t("viewOpenComments", {
-                      count: pullRequest.unresolvedReviewThreadCount,
-                    })}
-                    href={pullRequestCommentsHref(pullRequest)}
-                    onClick={stopRowClick}
-                  >
-                    {pullRequest.unresolvedReviewThreadCount}
-                  </Link>
-                </Badge>
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">
-                <div className="flex flex-col items-start gap-1.5">
-                  <Badge variant="outline">
-                    {t(`pullRequestStates.${pullRequest.state}`)}
-                  </Badge>
-                  <time dateTime={pullRequest.createdAt}>
-                    {relativeAge(pullRequest.createdAt, locale)}
-                  </time>
-                </div>
-              </TableCell>
-              <TableCell className="text-right">
-                <PullRequestActionsMenu
-                  onMerged={onMerged}
-                  pullRequest={pullRequest}
-                />
-              </TableCell>
-            </TableRow>
+                  <TableCell>
+                    <Badge
+                      asChild
+                      className="cursor-pointer hover:bg-muted/80"
+                      variant="outline"
+                    >
+                      <Link
+                        href={pullRequestDetailHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        #{pullRequest.number}
+                      </Link>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="min-w-72 whitespace-normal">
+                    <div className="space-y-1">
+                      <Link
+                        className="font-medium hover:underline"
+                        href={pullRequestDetailHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        {pullRequest.title}
+                      </Link>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <a
+                          className="text-muted-foreground hover:text-foreground"
+                          href={pullRequest.repositoryUrl}
+                          onClick={stopRowClick}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {pullRequest.repositoryNameWithOwner}
+                        </a>
+                      </div>
+                      <p className="font-mono text-xs break-all text-muted-foreground">
+                        {pullRequest.headRefName}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="min-w-40 whitespace-normal">
+                    <div className="flex flex-wrap gap-1">
+                      {pullRequest.labels.length > 0
+                        ? pullRequest.labels.map((label) => (
+                            <Badge key={label}>{label}</Badge>
+                          ))
+                        : "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {pullRequest.jiraKey ? (
+                      <Badge
+                        asChild
+                        className="cursor-pointer hover:bg-primary/80"
+                      >
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            replaceIssueParam(pullRequest.jiraKey);
+                          }}
+                          type="button"
+                        >
+                          {pullRequest.jiraKey}
+                        </button>
+                      </Badge>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <PipelineMenu
+                      onPipelineRetried={(pipeline) =>
+                        onPipelineRetried(pullRequest.id, pipeline)
+                      }
+                      pipelineStatus={pullRequest.pipelineStatus}
+                      pipelines={pullRequest.pipelines}
+                      repositoryId={pullRequest.repositoryGithubId}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={reviewClass(pullRequest.reviewDecision)}>
+                      {t(`reviewStates.${pullRequest.reviewDecision}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      asChild
+                      className={
+                        pullRequest.unresolvedReviewThreadCount === 0
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      }
+                    >
+                      <Link
+                        aria-label={t("viewOpenComments", {
+                          count: pullRequest.unresolvedReviewThreadCount,
+                        })}
+                        href={pullRequestCommentsHref(pullRequest)}
+                        onClick={stopRowClick}
+                      >
+                        {pullRequest.unresolvedReviewThreadCount}
+                      </Link>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    <div className="flex flex-col items-start gap-1.5">
+                      <Badge variant="outline">
+                        {t(`pullRequestStates.${pullRequest.state}`)}
+                      </Badge>
+                      <time dateTime={pullRequest.createdAt}>
+                        {relativeAge(pullRequest.createdAt, locale)}
+                      </time>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <PullRequestActionsMenu
+                      onMerged={onMerged}
+                      pullRequest={pullRequest}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </Fragment>
           ))}
         </TableBody>
       </Table>
