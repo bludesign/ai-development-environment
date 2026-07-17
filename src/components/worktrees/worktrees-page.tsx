@@ -22,6 +22,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Search,
   Tags,
   Trash2,
   Upload,
@@ -32,6 +33,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -177,6 +179,88 @@ const COLORS = [
   "pink",
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
+const ALL_FILTER_VALUE = "__all__";
+
+export type WorktreeListFilters = {
+  query: string;
+  agentId: string | null;
+  repositoryId: string | null;
+};
+
+function matchesWorktreeSearch(values: Array<unknown>, query: string) {
+  return values.some(
+    (value) =>
+      (typeof value === "string" || typeof value === "number") &&
+      String(value).toLocaleLowerCase().includes(query),
+  );
+}
+
+export function filterWorktreeAgentGroups(
+  agents: WorktreeAgentGroup[],
+  filters: WorktreeListFilters,
+): WorktreeAgentGroup[] {
+  const query = filters.query.trim().toLocaleLowerCase();
+  if (!query && !filters.agentId && !filters.repositoryId) return agents;
+  return agents.flatMap((agentGroup) => {
+    if (filters.agentId && agentGroup.agent.id !== filters.agentId) return [];
+    const agentMatches =
+      query.length > 0 &&
+      matchesWorktreeSearch(
+        [agentGroup.agent.id, agentGroup.agent.name, agentGroup.agent.hostname],
+        query,
+      );
+    const codebases = agentGroup.codebases.flatMap((group) => {
+      if (
+        filters.repositoryId &&
+        group.repository.id !== filters.repositoryId
+      ) {
+        return [];
+      }
+      const groupMatches =
+        query.length > 0 &&
+        matchesWorktreeSearch(
+          [
+            group.repository.id,
+            group.repository.name,
+            group.repository.description,
+            group.repository.canonicalOrigin,
+            group.repository.displayOrigin,
+            group.codebase.id,
+            group.codebase.folder,
+            group.codebase.observedOrigin,
+            group.codebase.branch,
+            group.codebase.defaultBranch,
+          ],
+          query,
+        );
+      const worktrees =
+        !query || agentMatches || groupMatches
+          ? group.worktrees
+          : group.worktrees.filter((worktree) =>
+              matchesWorktreeSearch(
+                [
+                  worktree.id,
+                  worktree.branch,
+                  worktree.folder,
+                  worktree.relativePath,
+                  worktree.ticketKey,
+                  worktree.ticketTitle,
+                  worktree.ticketStatus,
+                  worktree.pullRequest?.number,
+                  worktree.pullRequest?.title,
+                  worktree.pullRequest?.repositoryNameWithOwner,
+                  worktree.pullRequest?.jiraKey,
+                  ...worktree.tags.map((tag) => tag.name),
+                ],
+                query,
+              ),
+            );
+      return worktrees.length ? [{ ...group, worktrees }] : [];
+    });
+    return codebases.length ? [{ ...agentGroup, codebases }] : [];
+  });
+}
+
 export function displayedWorktreePath(
   folder: string,
   baseRepoDirectory: string | null | undefined,
@@ -354,6 +438,9 @@ export function WorktreesPage() {
   const [inspectionRefreshToken, setInspectionRefreshToken] = useState(0);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [agentFilter, setAgentFilter] = useState(ALL_FILTER_VALUE);
+  const [repositoryFilter, setRepositoryFilter] = useState(ALL_FILTER_VALUE);
   const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
@@ -507,6 +594,35 @@ export function WorktreesPage() {
     );
   };
 
+  const repositoryOptions = useMemo(() => {
+    const repositories = new Map<string, { id: string; name: string }>();
+    overview?.agents.forEach((agentGroup) =>
+      agentGroup.codebases.forEach((group) =>
+        repositories.set(group.repository.id, {
+          id: group.repository.id,
+          name: group.repository.name,
+        }),
+      ),
+    );
+    return [...repositories.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [overview]);
+  const filteredAgents = useMemo(
+    () =>
+      filterWorktreeAgentGroups(overview?.agents ?? [], {
+        query,
+        agentId: agentFilter === ALL_FILTER_VALUE ? null : agentFilter,
+        repositoryId:
+          repositoryFilter === ALL_FILTER_VALUE ? null : repositoryFilter,
+      }),
+    [agentFilter, overview, query, repositoryFilter],
+  );
+  const filtersActive =
+    Boolean(query.trim()) ||
+    agentFilter !== ALL_FILTER_VALUE ||
+    repositoryFilter !== ALL_FILTER_VALUE;
+
   return (
     <section className="flex w-full flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -579,6 +695,69 @@ export function WorktreesPage() {
         </Alert>
       )}
 
+      {overview && overview.agents.length > 0 && (
+        <div
+          aria-label={t("filters")}
+          className="flex flex-wrap gap-2"
+          role="search"
+        >
+          <div className="relative min-w-0 flex-[2_1_18rem]">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label={t("searchWorktrees")}
+              className="pl-9"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("searchWorktreesPlaceholder")}
+              type="search"
+              value={query}
+            />
+          </div>
+          <div className="min-w-0 flex-[1_1_12rem]">
+            <Select onValueChange={setAgentFilter} value={agentFilter}>
+              <SelectTrigger aria-label={t("filterByAgent")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("allAgents")}
+                </SelectItem>
+                {overview.agents.map((agentGroup) => (
+                  <SelectItem
+                    key={agentGroup.agent.id}
+                    value={agentGroup.agent.id}
+                  >
+                    {agentGroup.agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-0 flex-[1_1_12rem]">
+            <Select
+              onValueChange={setRepositoryFilter}
+              value={repositoryFilter}
+            >
+              <SelectTrigger
+                aria-label={t("filterByRepository")}
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("allRepositories")}
+                </SelectItem>
+                {repositoryOptions.map((repository) => (
+                  <SelectItem key={repository.id} value={repository.id}>
+                    {repository.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
       {overview && overview.activeMoves.length > 0 && (
         <ActiveWorktreeMoves
           moves={overview.activeMoves}
@@ -612,8 +791,20 @@ export function WorktreesPage() {
             <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
+      ) : filtersActive && filteredAgents.length === 0 ? (
+        <Empty className="border py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Search />
+            </EmptyMedia>
+            <EmptyTitle>{t("noMatchingWorktrees")}</EmptyTitle>
+            <EmptyDescription>
+              {t("noMatchingWorktreesDescription")}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        overview.agents.map((agentGroup) => (
+        filteredAgents.map((agentGroup) => (
           <AgentSection
             agentGroup={agentGroup}
             allTags={overview.tags}
@@ -1092,11 +1283,11 @@ function WorktreeCard(props: WorktreeItemProps) {
         }
       }}
     >
-      <CardHeader className="border-b">
-        <CardTitle>
+      <CardHeader className="grid-cols-1! border-b @md/card-header:grid-cols-[minmax(0,1fr)_auto]!">
+        <CardTitle className="min-w-0">
           <Button
             aria-expanded={expanded}
-            className="h-auto max-w-full justify-start gap-1 p-1 text-left"
+            className="h-auto w-full max-w-full justify-start gap-1 p-1 text-left"
             onClick={() => void toggle()}
             variant="ghost"
           >
@@ -1111,7 +1302,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             <WorktreeTicketLink {...liveProps} />
           )}
         </CardTitle>
-        <CardAction className="flex max-w-full flex-wrap items-center justify-end gap-1">
+        <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           <OriginStatusBadges worktree={worktree} />
           {worktree.hasUnstagedChanges && (
             <Badge variant="destructive">{t("dirty")}</Badge>

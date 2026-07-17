@@ -60,6 +60,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "./graphql-fields";
+import { samplePayloadForCapability } from "./capability-payloads";
 
 type AgentCodebase = {
   id: string;
@@ -698,12 +699,6 @@ function CapabilityRow({
   );
 }
 
-function defaultPayload(capability: string): Record<string, unknown> {
-  return capability === "cloudflared.runTunnel"
-    ? { tunnelName: "dev-tunnel" }
-    : {};
-}
-
 function CapabilityRunner({
   agentId,
   capability,
@@ -720,7 +715,7 @@ function CapabilityRunner({
   const t = useTranslations("agentDetail");
   const toolsT = useTranslations("tools");
   const [payloadText, setPayloadText] = useState(() =>
-    JSON.stringify(defaultPayload(capability), null, 2),
+    JSON.stringify(samplePayloadForCapability(capability), null, 2),
   );
   const [job, setJob] = useState<AgentJob | null>(null);
   const [eventResponse, setEventResponse] = useState<unknown>(undefined);

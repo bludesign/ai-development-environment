@@ -99,7 +99,7 @@ describe("AgentDetail", () => {
     expect(screen.queryByText("cloudflared.runTunnel")).toBeNull();
   });
 
-  test("invokes the tunnel capability with its default payload", async () => {
+  test("shows an empty sample payload before invoking a capability", async () => {
     const createdAt = new Date(0).toISOString();
     const job: AgentJob = {
       id: "job-dev-tunnel",
@@ -160,7 +160,11 @@ describe("AgentDetail", () => {
           name: "Payload (JSON object)",
         }) as HTMLTextAreaElement
       ).value,
-    ).toBe('{\n  "tunnelName": "dev-tunnel"\n}');
+    ).toBe('{\n  "tunnelName": ""\n}');
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Payload (JSON object)" }),
+      { target: { value: '{"tunnelName":"dev-tunnel"}' } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Invoke capability" }));
 
     await waitFor(() =>
