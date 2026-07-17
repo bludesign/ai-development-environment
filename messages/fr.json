@@ -1354,6 +1354,7 @@
     "syncGroupName": "Synchronisation du groupe {name} dans ses dépôts.",
     "syncAllDescription": "Rapprochement des compétences de base, personnelles et projet.",
     "applySync": "Appliquer la synchronisation",
+    "skipPendingClients": "Ignorer les clients en attente",
     "unknownAgent": "Agent inconnu",
     "change": "Modification",
     "resolution": "Résolution",

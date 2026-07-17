@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -118,5 +124,63 @@ describe("SkillSyncPage", () => {
     expect(
       screen.getByRole("button", { name: /use edited version/i }),
     ).toBeTruthy();
+  });
+
+  test("offers to skip pending clients and advances the run", async () => {
+    const pendingRun = {
+      id: "run-1",
+      kind: "ALL",
+      status: "PREPARING",
+      error: null,
+      group: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      finishedAt: null,
+      items: [
+        {
+          id: "scan-1",
+          direction: "SCAN",
+          status: "PENDING",
+          sourceHash: null,
+          targetHash: null,
+          resolution: null,
+          candidatePackage: null,
+          error: null,
+          skill: null,
+          installation: null,
+          agent: { id: "agent-1", name: "Offline Mac" },
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+      ],
+    };
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("SkipPendingSkillSync")) {
+        return {
+          skipPendingSkillSync: {
+            ...pendingRun,
+            status: "READY",
+            items: [{ ...pendingRun.items[0], status: "SKIPPED" }],
+          },
+        } as never;
+      }
+      return {
+        skillSyncRun: pendingRun,
+        skillsOverview: { groups: [] },
+      } as never;
+    });
+
+    render(<SkillSyncPage runId="run-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /skip pending clients/i }),
+    );
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("skipPendingSkillSync"),
+        { runId: "run-1" },
+      ),
+    );
+    expect(await screen.findByText(/scan skipped/i)).toBeTruthy();
   });
 });

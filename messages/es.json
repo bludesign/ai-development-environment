@@ -1354,6 +1354,7 @@
     "syncGroupName": "Sincronizando el grupo {name} en sus repositorios.",
     "syncAllDescription": "Conciliando habilidades de base de datos, personales y de proyecto.",
     "applySync": "Aplicar sincronización",
+    "skipPendingClients": "Omitir clientes pendientes",
     "unknownAgent": "Agente desconocido",
     "change": "Cambio",
     "resolution": "Resolución",

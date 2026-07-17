@@ -7,6 +7,7 @@ import {
   Check,
   GitCompareArrows,
   Play,
+  SkipForward,
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -199,6 +200,10 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       ) ?? [],
     [run],
   );
+  const pendingAgentItems = useMemo(
+    () => agentProgress.filter((item) => item.status === "PENDING"),
+    [agentProgress],
+  );
   const targetFiles = useMemo(
     () => manualItem?.candidatePackage?.package?.files ?? [],
     [manualItem],
@@ -267,6 +272,26 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         { runId },
       );
       setRun(data.applySkillSync);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const skipPending = async () => {
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        skipPendingSkillSync: SkillSyncRun;
+      }>(
+        `mutation SkipPendingSkillSync($runId: ID!) {
+          skipPendingSkillSync(runId: $runId) { ${SKILL_SYNC_RUN_FIELDS} }
+        }`,
+        { runId },
+      );
+      setRun(data.skipPendingSkillSync);
+      setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -383,6 +408,15 @@ export function SkillSyncPage({ runId }: { runId: string }) {
           <Badge variant={run.status === "SUCCEEDED" ? "secondary" : "outline"}>
             {run.status}
           </Badge>
+          {pendingAgentItems.length > 0 && (
+            <Button
+              disabled={busy}
+              onClick={() => void skipPending()}
+              variant="outline"
+            >
+              {busy ? <Spinner /> : <SkipForward />} {t("skipPendingClients")}
+            </Button>
+          )}
           <Button
             disabled={busy || !["READY", "PARTIAL"].includes(run.status)}
             onClick={() => void apply()}

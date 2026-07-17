@@ -1491,6 +1491,7 @@ const mockTranslations = {
     syncAllDescription:
       "Reconciling database, personal, and project skills across all agents.",
     applySync: "Apply sync",
+    skipPendingClients: "Skip pending clients",
     unknownAgent: "Unknown agent",
     change: "Change",
     resolution: "Resolution",

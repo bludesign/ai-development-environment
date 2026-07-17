@@ -163,6 +163,14 @@ export const createSkillResolvers = (service: SkillsService) => ({
       requireControlPlane(context);
       return service.prepareSync(kind, groupId ?? null);
     },
+    skipPendingSkillSync: (
+      _root: unknown,
+      { runId }: { runId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.skipPending(runId);
+    },
     resolveSkillSyncItem: (
       _root: unknown,
       {

@@ -38,6 +38,8 @@ const ACTIVE_RUN_STATUSES = [
   "APPLYING",
   "NEEDS_RESOLUTION",
 ];
+const PREPARATION_DIRECTIONS = ["SCAN", "READ"];
+const PROGRESS_DIRECTIONS = [...PREPARATION_DIRECTIONS, "APPLY"];
 
 const skillInclude = {
   files: { orderBy: { path: "asc" as const } },
@@ -599,9 +601,18 @@ export class SkillsService {
     const { syncRunId, syncItemId } = this.completionIds(job);
     if (!syncRunId || !syncItemId) return;
     const prisma = await getPrismaClient();
+    const pendingItem = await prisma.skillSyncItem.findFirst({
+      where: {
+        id: syncItemId,
+        runId: syncRunId,
+        direction: "SCAN",
+        status: "PENDING",
+      },
+    });
+    if (!pendingItem) return;
     if (job.status !== "SUCCEEDED" || !job.resultJson) {
       await prisma.skillSyncItem.updateMany({
-        where: { id: syncItemId },
+        where: { id: syncItemId, status: "PENDING" },
         data: { status: "FAILED", error: job.error ?? "Skill scan failed" },
       });
     } else {
@@ -688,8 +699,8 @@ export class SkillsService {
             },
           });
         }
-        await transaction.skillSyncItem.update({
-          where: { id: syncItemId },
+        await transaction.skillSyncItem.updateMany({
+          where: { id: syncItemId, status: "PENDING" },
           data: {
             status: "COMPLETE",
             error: result.warnings?.length
@@ -700,7 +711,11 @@ export class SkillsService {
       });
     }
     const pending = await prisma.skillSyncItem.count({
-      where: { runId: syncRunId, direction: "SCAN", status: "PENDING" },
+      where: {
+        runId: syncRunId,
+        direction: "SCAN",
+        status: "PENDING",
+      },
     });
     if (!pending) await this.buildPlan(syncRunId);
     this.publish(syncRunId);
@@ -723,10 +738,13 @@ export class SkillsService {
     return byAgent;
   }
 
-  private async desiredLocations(run: {
-    kind: string;
-    groupId: string | null;
-  }) {
+  private async desiredLocations(
+    run: {
+      kind: string;
+      groupId: string | null;
+    },
+    excludedAgentIds = new Set<string>(),
+  ) {
     const prisma = await getPrismaClient();
     const configured = await this.configuredByAgent();
     const observations = await prisma.skillToolObservation.findMany({
@@ -752,6 +770,7 @@ export class SkillsService {
         include: skillInclude,
       });
       for (const [agentId, tools] of configured) {
+        if (excludedAgentIds.has(agentId)) continue;
         const home = homeByAgent.get(agentId);
         if (!home) continue;
         for (const rootKind of selectSharedSkillRoots(tools, "GLOBAL")) {
@@ -795,6 +814,7 @@ export class SkillsService {
     for (const group of groups) {
       for (const assignment of group.repositories) {
         for (const codebase of assignment.repository.codebases) {
+          if (excludedAgentIds.has(codebase.agentId)) continue;
           const tools = configured.get(codebase.agentId) ?? [];
           const roots = selectSharedSkillRoots(tools, "PROJECT");
           const targets = [
@@ -840,6 +860,13 @@ export class SkillsService {
     const run = await prisma.skillSyncRun.findUniqueOrThrow({
       where: { id: runId },
     });
+    const skippedScanItems = await prisma.skillSyncItem.findMany({
+      where: { runId, direction: "SCAN", status: "SKIPPED" },
+      select: { agentId: true },
+    });
+    const excludedAgentIds = new Set(
+      skippedScanItems.flatMap((item) => (item.agentId ? [item.agentId] : [])),
+    );
     await prisma.skillSyncItem.deleteMany({
       where: { runId, direction: { not: "SCAN" } },
     });
@@ -852,11 +879,14 @@ export class SkillsService {
       prisma.skillInstallation.findMany({
         where: {
           present: true,
+          ...(excludedAgentIds.size
+            ? { agentId: { notIn: [...excludedAgentIds] } }
+            : {}),
           ...(run.kind === "GROUP" ? { scope: "PROJECT" } : {}),
         },
         include: { baseline: true },
       }),
-      this.desiredLocations(run),
+      this.desiredLocations(run, excludedAgentIds),
     ]);
     const skillsByName = new Map(skills.map((skill) => [skill.name, skill]));
     const deletedByName = new Map(
@@ -1064,9 +1094,18 @@ export class SkillsService {
     const { syncRunId, syncItemId } = this.completionIds(job);
     if (!syncRunId || !syncItemId) return;
     const prisma = await getPrismaClient();
+    const pendingItem = await prisma.skillSyncItem.findFirst({
+      where: {
+        id: syncItemId,
+        runId: syncRunId,
+        direction: "READ",
+        status: "PENDING",
+      },
+    });
+    if (!pendingItem) return;
     if (job.status !== "SUCCEEDED" || !job.resultJson) {
-      await prisma.skillSyncItem.update({
-        where: { id: syncItemId },
+      await prisma.skillSyncItem.updateMany({
+        where: { id: syncItemId, status: "PENDING" },
         data: {
           status: "FAILED",
           error: job.error ?? "Skill package read failed",
@@ -1113,8 +1152,8 @@ export class SkillsService {
           },
         });
       }
-      await prisma.skillSyncItem.update({
-        where: { id: syncItemId },
+      await prisma.skillSyncItem.updateMany({
+        where: { id: syncItemId, status: "PENDING" },
         data: { status: "COMPLETE" },
       });
     }
@@ -1127,7 +1166,8 @@ export class SkillsService {
     const items = await prisma.skillSyncItem.findMany({ where: { runId } });
     const pendingPreparation = items.some(
       (item) =>
-        ["SCAN", "READ"].includes(item.direction) && item.status === "PENDING",
+        PREPARATION_DIRECTIONS.includes(item.direction) &&
+        item.status === "PENDING",
     );
     if (pendingPreparation) return;
     const blocked = items.some((item) => item.status === "BLOCKED");
@@ -1139,6 +1179,104 @@ export class SkillsService {
     });
     this.publish(runId);
     if (run.automatic && status === "READY") await this.applyRun(runId);
+  }
+
+  async skipPending(runId: string) {
+    const prisma = await getPrismaClient();
+    await prisma.skillSyncRun.findUniqueOrThrow({ where: { id: runId } });
+    const pendingItems = await prisma.skillSyncItem.findMany({
+      where: {
+        runId,
+        direction: { in: PROGRESS_DIRECTIONS },
+        status: "PENDING",
+        agentId: { not: null },
+      },
+    });
+    const skippedItems: typeof pendingItems = [];
+    for (const item of pendingItems) {
+      const skipped = await prisma.skillSyncItem.updateMany({
+        where: { id: item.id, status: "PENDING" },
+        data: { status: "SKIPPED", resolution: "SKIP" },
+      });
+      if (skipped.count !== 1 || !item.agentId) continue;
+      skippedItems.push(item);
+      const job = await prisma.agentJob.findUnique({
+        where: {
+          agentId_idempotencyKey: {
+            agentId: item.agentId,
+            idempotencyKey: `skills:${item.direction.toLowerCase()}:${runId}:${item.agentId}`,
+          },
+        },
+      });
+      if (job) await this.agentControl.cancelJob(job.id);
+    }
+    if (!skippedItems.length) return this.getRun(runId);
+
+    const skippedReadAgentIds = [
+      ...new Set(
+        skippedItems.flatMap((item) =>
+          item.direction === "READ" && item.agentId ? [item.agentId] : [],
+        ),
+      ),
+    ];
+    if (skippedReadAgentIds.length) {
+      await prisma.skillSyncItem.updateMany({
+        where: {
+          runId,
+          agentId: { in: skippedReadAgentIds },
+          direction: { notIn: PROGRESS_DIRECTIONS },
+          status: { in: ["READY", "BLOCKED"] },
+        },
+        data: { status: "SKIPPED", resolution: "SKIP" },
+      });
+    }
+
+    const skippedApplyItems = skippedItems.filter(
+      (item) => item.direction === "APPLY",
+    );
+    const skippedDeploymentIds = skippedApplyItems.flatMap((item) => {
+      const { deployments = [] } = parseJson<{
+        deployments?: Array<{ id: string }>;
+      }>(item.candidatePackageJson, {});
+      return deployments.map((deployment) => deployment.id);
+    });
+    if (skippedDeploymentIds.length) {
+      await prisma.skillDeployment.updateMany({
+        where: { id: { in: skippedDeploymentIds }, status: "PENDING" },
+        data: { status: "SKIPPED" },
+      });
+    }
+
+    if (skippedItems.some((item) => item.direction === "SCAN")) {
+      const remainingScans = await prisma.skillSyncItem.count({
+        where: {
+          runId,
+          direction: "SCAN",
+          status: "PENDING",
+        },
+      });
+      if (!remainingScans) await this.buildPlan(runId);
+    } else if (skippedReadAgentIds.length) {
+      await this.refreshRunStatus(runId);
+    }
+
+    if (skippedApplyItems.length) {
+      const remainingApplies = await prisma.skillSyncItem.count({
+        where: {
+          runId,
+          direction: "APPLY",
+          status: "PENDING",
+        },
+      });
+      if (!remainingApplies) {
+        await prisma.skillSyncRun.update({
+          where: { id: runId },
+          data: { status: "PARTIAL", finishedAt: new Date() },
+        });
+      }
+    }
+    this.publish(runId);
+    return this.getRun(runId);
   }
 
   async resolveItem(input: {
@@ -1282,9 +1420,27 @@ export class SkillsService {
     });
     if (blocked) throw new Error("Resolve all conflicts before applying sync");
     await this.importCandidates(runId);
-    const desired = await this.desiredLocations(run);
+    const skippedPreparationItems = await prisma.skillSyncItem.findMany({
+      where: {
+        runId,
+        direction: { in: PREPARATION_DIRECTIONS },
+        status: "SKIPPED",
+      },
+      select: { agentId: true },
+    });
+    const excludedAgentIds = new Set(
+      skippedPreparationItems.flatMap((item) =>
+        item.agentId ? [item.agentId] : [],
+      ),
+    );
+    const desired = await this.desiredLocations(run, excludedAgentIds);
     const installations = await prisma.skillInstallation.findMany({
-      where: { present: true },
+      where: {
+        present: true,
+        ...(excludedAgentIds.size
+          ? { agentId: { notIn: [...excludedAgentIds] } }
+          : {}),
+      },
     });
     const operations = new Map<string, Array<Record<string, unknown>>>();
     const deploymentRefs = new Map<
@@ -1455,15 +1611,21 @@ export class SkillsService {
     const { syncRunId, syncItemId } = this.completionIds(job);
     if (!syncRunId || !syncItemId) return;
     const prisma = await getPrismaClient();
-    const succeeded = job.status === "SUCCEEDED";
-    const syncItem = await prisma.skillSyncItem.findUnique({
-      where: { id: syncItemId },
+    const syncItem = await prisma.skillSyncItem.findFirst({
+      where: {
+        id: syncItemId,
+        runId: syncRunId,
+        direction: "APPLY",
+        status: "PENDING",
+      },
     });
+    if (!syncItem) return;
+    const succeeded = job.status === "SUCCEEDED";
     const { deployments: deploymentRefs = [] } = parseJson<{
       deployments?: Array<{ id: string; desiredHash: string }>;
     }>(syncItem?.candidatePackageJson ?? null, {});
-    await prisma.skillSyncItem.update({
-      where: { id: syncItemId },
+    await prisma.skillSyncItem.updateMany({
+      where: { id: syncItemId, status: "PENDING" },
       data: {
         status: succeeded ? "COMPLETE" : "FAILED",
         error: succeeded ? null : (job.error ?? "Skill apply failed"),
@@ -1606,16 +1768,24 @@ export class SkillsService {
       }
     }
     const remaining = await prisma.skillSyncItem.count({
-      where: { runId: syncRunId, direction: "APPLY", status: "PENDING" },
+      where: {
+        runId: syncRunId,
+        direction: "APPLY",
+        status: "PENDING",
+      },
     });
     if (!remaining) {
-      const failures = await prisma.skillSyncItem.count({
-        where: { runId: syncRunId, direction: "APPLY", status: "FAILED" },
+      const incomplete = await prisma.skillSyncItem.count({
+        where: {
+          runId: syncRunId,
+          direction: "APPLY",
+          status: { in: ["FAILED", "SKIPPED"] },
+        },
       });
       await prisma.skillSyncRun.update({
         where: { id: syncRunId },
         data: {
-          status: failures ? "PARTIAL" : "SUCCEEDED",
+          status: incomplete ? "PARTIAL" : "SUCCEEDED",
           finishedAt: new Date(),
         },
       });

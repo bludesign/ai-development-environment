@@ -195,6 +195,7 @@ extend type Mutation {
   deleteSkillGroup(id: ID!): Boolean!
   saveSkillSettings(input: SaveSkillSettingsInput!): SkillSettings!
   prepareSkillSync(kind: SkillSyncKind! = ALL, groupId: ID): SkillSyncRun!
+  skipPendingSkillSync(runId: ID!): SkillSyncRun!
   resolveSkillSyncItem(input: ResolveSkillSyncItemInput!): SkillSyncRun!
   applySkillSync(runId: ID!): SkillSyncRun!
 }

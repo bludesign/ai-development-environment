@@ -1354,6 +1354,7 @@
     "syncGroupName": "Gruppe {name} wird in zugewiesenen Repositories synchronisiert.",
     "syncAllDescription": "Datenbank-, persönliche und Projektfähigkeiten werden abgeglichen.",
     "applySync": "Synchronisierung anwenden",
+    "skipPendingClients": "Ausstehende Clients überspringen",
     "unknownAgent": "Unbekannter Agent",
     "change": "Änderung",
     "resolution": "Auflösung",
