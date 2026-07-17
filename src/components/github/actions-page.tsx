@@ -18,6 +18,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -163,9 +164,13 @@ export function ActionsPage() {
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [paginationError, setPaginationError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [jobStates, setJobStates] = useState<Record<string, JobState>>({});
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+  const requestGenerationRef = useRef(0);
+  const appendInFlightGenerationRef = useRef<number | null>(null);
 
   const loadRuns = useCallback(
     async (
@@ -174,9 +179,24 @@ export function ActionsPage() {
         append: false,
       },
     ) => {
-      if (options.append) setLoadingMore(true);
-      else {
+      const generation = options.append
+        ? requestGenerationRef.current
+        : ++requestGenerationRef.current;
+      if (options.append) {
+        if (
+          !options.cursor ||
+          appendInFlightGenerationRef.current === generation
+        ) {
+          return;
+        }
+        appendInFlightGenerationRef.current = generation;
+        setLoadingMore(true);
+        setPaginationError(null);
+      } else {
+        appendInFlightGenerationRef.current = null;
         setLoading(true);
+        setLoadingMore(false);
+        setPaginationError(null);
         setRuns([]);
         setRepositoryErrors([]);
         setEndCursor(null);
@@ -212,6 +232,7 @@ export function ActionsPage() {
             after: options.cursor ?? null,
           },
         );
+        if (generation !== requestGenerationRef.current) return;
         const page = data.githubActionsWorkflowRuns;
         setRuns((current) =>
           options.append
@@ -231,11 +252,21 @@ export function ActionsPage() {
         setEndCursor(page.endCursor);
         setHasNextPage(page.hasNextPage);
         setError(null);
+        setPaginationError(null);
       } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
+        if (generation !== requestGenerationRef.current) return;
+        const message = value instanceof Error ? value.message : String(value);
+        if (options.append) setPaginationError(message);
+        else setError(message);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (options.append) {
+          if (appendInFlightGenerationRef.current === generation) {
+            appendInFlightGenerationRef.current = null;
+            setLoadingMore(false);
+          }
+        } else if (generation === requestGenerationRef.current) {
+          setLoading(false);
+        }
       }
     },
     [],
@@ -262,6 +293,42 @@ export function ActionsPage() {
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [loadRuns]);
+
+  useEffect(() => {
+    if (
+      !settings?.tokenConfigured ||
+      !hasNextPage ||
+      !endCursor ||
+      loading ||
+      loadingMore ||
+      paginationError
+    ) {
+      return;
+    }
+    const trigger = loadMoreTriggerRef.current;
+    if (!trigger) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        void loadRuns(selectedRepositoryId, {
+          append: true,
+          cursor: endCursor,
+        });
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [
+    endCursor,
+    hasNextPage,
+    loadRuns,
+    loading,
+    loadingMore,
+    paginationError,
+    selectedRepositoryId,
+    settings?.tokenConfigured,
+  ]);
 
   const selectRepository = (repositoryId: string) => {
     setSelectedRepositoryId(repositoryId);
@@ -511,22 +578,38 @@ export function ActionsPage() {
             />
           )}
 
-          {hasNextPage && (
-            <Button
-              className="self-center"
-              disabled={loadingMore || !endCursor}
-              onClick={() =>
-                void loadRuns(selectedRepositoryId, {
-                  append: true,
-                  cursor: endCursor,
-                })
-              }
-              variant="outline"
+          {paginationError && hasNextPage ? (
+            <Alert variant="destructive">
+              <AlertDescription className="flex items-center justify-between gap-3">
+                <span>{paginationError}</span>
+                <Button
+                  disabled={loadingMore || !endCursor}
+                  onClick={() =>
+                    void loadRuns(selectedRepositoryId, {
+                      append: true,
+                      cursor: endCursor,
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw /> {t("retryLoad")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : hasNextPage ? (
+            <div
+              className="flex min-h-10 items-center justify-center gap-2 text-sm text-muted-foreground"
+              ref={loadMoreTriggerRef}
+              role="status"
             >
-              {loadingMore && <Spinner />}
-              {loadingMore ? t("loadingMore") : t("loadMore")}
-            </Button>
-          )}
+              {loadingMore && (
+                <>
+                  <Spinner /> {t("loadingMore")}
+                </>
+              )}
+            </div>
+          ) : null}
         </>
       )}
 

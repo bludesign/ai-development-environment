@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -26,6 +27,52 @@ class ResizeObserverMock {
   observe() {}
   unobserve() {}
   disconnect() {}
+}
+
+let intersectionCallback: IntersectionObserverCallback | null = null;
+let intersectionTarget: Element | null = null;
+let intersectionObserver: IntersectionObserver | null = null;
+
+class IntersectionObserverMock {
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds = [0];
+
+  constructor(callback: IntersectionObserverCallback) {
+    intersectionCallback = callback;
+    intersectionObserver = this as unknown as IntersectionObserver;
+  }
+
+  observe(target: Element) {
+    intersectionTarget = target;
+  }
+
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+
+function intersectPaginationTrigger() {
+  if (!intersectionCallback || !intersectionTarget || !intersectionObserver) {
+    throw new Error("Pagination trigger is not being observed");
+  }
+  const bounds = intersectionTarget.getBoundingClientRect();
+  intersectionCallback(
+    [
+      {
+        boundingClientRect: bounds,
+        intersectionRatio: 1,
+        intersectionRect: bounds,
+        isIntersecting: true,
+        rootBounds: null,
+        target: intersectionTarget,
+        time: 0,
+      },
+    ],
+    intersectionObserver,
+  );
 }
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -80,6 +127,11 @@ const jobs = [
 
 beforeEach(() => {
   global.ResizeObserver = ResizeObserverMock;
+  global.IntersectionObserver =
+    IntersectionObserverMock as unknown as typeof IntersectionObserver;
+  intersectionCallback = null;
+  intersectionTarget = null;
+  intersectionObserver = null;
   window.history.replaceState(null, "", "/actions");
   requestMock.mockImplementation(async (query, variables) => {
     if (query.includes("GitHubActionsConfiguration")) {
@@ -201,7 +253,7 @@ describe("ActionsPage", () => {
     expect(await screen.findByText("No GitHub codebases")).toBeDefined();
   });
 
-  test("renders related links, filters and paginates runs", async () => {
+  test("renders related links, filters and infinitely paginates runs", async () => {
     render(<ActionsPage />);
 
     expect(
@@ -242,7 +294,11 @@ describe("ActionsPage", () => {
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("acme/private:")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    act(() => {
+      intersectPaginationTrigger();
+      intersectPaginationTrigger();
+    });
     expect(await screen.findByText("Older run")).toBeDefined();
     expect(screen.getByText("Friday, July 17, 2026")).toBeDefined();
     expect(screen.getByText("Thursday, July 16, 2026")).toBeDefined();
@@ -250,6 +306,13 @@ describe("ActionsPage", () => {
       expect.stringContaining("query GitHubActionsWorkflowRuns"),
       expect.objectContaining({ after: "cursor-1" }),
     );
+    expect(
+      requestMock.mock.calls.filter(
+        ([query, variables]) =>
+          String(query).includes("query GitHubActionsWorkflowRuns") &&
+          variables?.after === "cursor-1",
+      ),
+    ).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("combobox", { name: "Repository" }));
     fireEvent.click(screen.getByRole("option", { name: "acme/widgets" }));
