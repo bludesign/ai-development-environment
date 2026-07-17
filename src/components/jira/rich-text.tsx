@@ -1,6 +1,14 @@
 "use client";
 
-import { Braces, Check, Copy, Eye, FileCode2 } from "lucide-react";
+import {
+  BookOpenText,
+  Braces,
+  Check,
+  ChevronDown,
+  Copy,
+  Eye,
+  FileCode,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -157,7 +165,7 @@ export function JiraRichTextBlock({
   const visibleMarkdown = stripAdfMarkdownMetadata(markdown);
   const viewModes = [
     { value: "RENDERED", label: t("rendered"), icon: Eye },
-    { value: "MARKDOWN", label: t("markdown"), icon: FileCode2 },
+    { value: "MARKDOWN", label: t("markdown"), icon: FileCode },
     { value: "RAW", label: t("raw"), icon: Braces },
   ] as const;
   const activeViewMode = viewModes.find((mode) => mode.value === viewMode)!;
@@ -285,6 +293,14 @@ export function JiraTextComposer({
   const [format, setFormat] = useState<JiraTextInput["format"]>(initialFormat);
   const [value, setValue] = useState(initialValue);
   const [preview, setPreview] = useState(false);
+  const authoringFormats = [
+    { value: "MARKDOWN", label: t("markdown"), icon: FileCode },
+    { value: "JIRA_WIKI", label: t("jiraWiki"), icon: BookOpenText },
+  ] as const;
+  const activeAuthoringFormat = authoringFormats.find(
+    (option) => option.value === format,
+  )!;
+  const ActiveAuthoringIcon = activeAuthoringFormat.icon;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -303,18 +319,33 @@ export function JiraTextComposer({
   return (
     <form className="space-y-3" onSubmit={submit}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Select
-          onValueChange={(next) => setFormat(next as JiraTextInput["format"])}
-          value={format}
-        >
-          <SelectTrigger aria-label={t("authoringFormat")} className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="MARKDOWN">{t("markdown")}</SelectItem>
-            <SelectItem value="JIRA_WIKI">{t("jiraWiki")}</SelectItem>
-          </SelectContent>
-        </Select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="xs"
+              title={t("authoringFormat")}
+              type="button"
+              variant="outline"
+            >
+              <ActiveAuthoringIcon /> {activeAuthoringFormat.label}{" "}
+              <ChevronDown />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuRadioGroup
+              onValueChange={(next) =>
+                setFormat(next as JiraTextInput["format"])
+              }
+              value={format}
+            >
+              {authoringFormats.map(({ icon: FormatIcon, label, value }) => (
+                <DropdownMenuRadioItem key={value} value={value}>
+                  <FormatIcon /> {label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           onClick={() => setPreview((current) => !current)}
           size="xs"

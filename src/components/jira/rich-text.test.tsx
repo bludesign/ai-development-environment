@@ -131,5 +131,21 @@ describe("JiraTextComposer", () => {
     const previewButton = screen.getByRole("button", { name: "Preview" });
     expect(previewButton.getAttribute("data-size")).toBe("xs");
     expect(previewButton.getAttribute("data-variant")).toBe("outline");
+
+    const formatMenu = screen.getByRole("button", { name: "Markdown" });
+    expect(formatMenu.getAttribute("data-size")).toBe("xs");
+    expect(formatMenu.getAttribute("data-variant")).toBe("outline");
+    expect(formatMenu.querySelector(".lucide-file-code")).not.toBeNull();
+    expect(formatMenu.querySelector(".lucide-chevron-down")).not.toBeNull();
+
+    fireEvent.pointerDown(formatMenu, { button: 0, ctrlKey: false });
+    const wikiItem = screen.getByRole("menuitemradio", { name: "Jira Wiki" });
+    expect(wikiItem.querySelector(".lucide-book-open-text")).not.toBeNull();
+    fireEvent.click(wikiItem);
+    expect(
+      screen
+        .getByRole("button", { name: "Jira Wiki" })
+        .querySelector(".lucide-chevron-down"),
+    ).not.toBeNull();
   });
 });
