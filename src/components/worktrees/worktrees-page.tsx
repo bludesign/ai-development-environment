@@ -2074,9 +2074,9 @@ function WorktreeMenus(
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
                   disabled={deleteDisabled}
                   onSelect={() => setDeleteOpen(true)}
+                  variant="destructive"
                 >
                   <Trash2 /> {t("deleteWorktree")}
                 </DropdownMenuItem>

@@ -392,9 +392,11 @@ describe("WorktreesPage", () => {
       screen.getByRole("button", { name: "Customize worktree" }),
       { button: 0, ctrlKey: false },
     );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Delete worktree" }),
-    );
+    const deleteItem = await screen.findByRole("menuitem", {
+      name: "Delete worktree",
+    });
+    expect(deleteItem.getAttribute("data-variant")).toBe("destructive");
+    fireEvent.click(deleteItem);
     expect(
       await screen.findByRole("heading", { name: "Delete worktree" }),
     ).toBeDefined();
