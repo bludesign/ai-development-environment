@@ -284,10 +284,16 @@ describe("WorktreesPage", () => {
     const branchButton = await screen.findByRole("button", {
       name: "feature/AIDE-24",
     });
+    const cardDetailsLink = screen.getByRole("link", {
+      name: "Open details for feature/AIDE-24",
+    });
     const card = branchButton.closest('[data-slot="card"]');
     expect(card?.className).toContain("hover:bg-blue-500/20");
     expect(card?.className).toContain("hover:border-blue-500/50");
     expect(branchButton.getAttribute("aria-expanded")).toBe("false");
+    expect(cardDetailsLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+    cardDetailsLink.focus();
+    expect(document.activeElement).toBe(cardDetailsLink);
 
     fireEvent.click(branchButton);
     expect(branchButton.getAttribute("aria-expanded")).toBe("true");
@@ -302,8 +308,14 @@ describe("WorktreesPage", () => {
       name: "feature/AIDE-24",
     });
     const row = tableBranch.closest("tr");
+    const tableDetailsLink = screen.getByRole("link", {
+      name: "Open details for feature/AIDE-24",
+    });
     expect(row).not.toBeNull();
     expect(row?.className).toContain("hover:bg-blue-500/20");
+    expect(tableDetailsLink.getAttribute("href")).toBe("/worktrees/worktree-1");
+    tableDetailsLink.focus();
+    expect(document.activeElement).toBe(tableDetailsLink);
     fireEvent.click(row!);
     expect(navigation.push).toHaveBeenCalledWith("/worktrees/worktree-1");
 
@@ -373,6 +385,9 @@ describe("WorktreesPage", () => {
     expect(
       screen.getByRole("heading", { name: "Change branch" }),
     ).toBeDefined();
+    navigation.push.mockClear();
+    fireEvent.click(screen.getByRole("heading", { name: "Change branch" }));
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
   test("offers matching agents and warns about dirty existing destinations", async () => {

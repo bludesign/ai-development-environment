@@ -292,6 +292,61 @@ describe("WorktreeDetailPage", () => {
     ).toBeDefined();
   });
 
+  test("reloads when a sibling worktree in the displayed codebase changes", async () => {
+    let overviewSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeDetailChanged")) {
+            overviewSink = sink;
+          }
+          return vi.fn();
+        },
+      ),
+    } as never);
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: overview() } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    await screen.findByRole("heading", { name: "feature/AIDE-43" });
+    await waitFor(() => expect(overviewSink).toBeDefined());
+    const overviewRequestCount = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("WorktreeDetailOverview"),
+      ).length;
+    const beforeEvents = overviewRequestCount();
+
+    overviewSink!.next({
+      data: {
+        worktreeOverviewChanged: {
+          worktreeId: "unrelated-worktree",
+          codebaseId: "unrelated-codebase",
+        },
+      },
+    });
+    expect(overviewRequestCount()).toBe(beforeEvents);
+
+    overviewSink!.next({
+      data: {
+        worktreeOverviewChanged: {
+          worktreeId: "sibling-worktree",
+          codebaseId: "codebase-1",
+        },
+      },
+    });
+    await waitFor(() => expect(overviewRequestCount()).toBe(beforeEvents + 1));
+  });
+
   test("shows an inspection error while keeping management controls available", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {

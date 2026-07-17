@@ -26,7 +26,11 @@ export function shouldNavigateWorktreeSurface(
   event: MouseEvent<HTMLElement>,
 ): boolean {
   if (event.defaultPrevented || event.button !== 0) return false;
-  return !(event.target as HTMLElement).closest(INTERACTIVE_SELECTOR);
+  const target = event.target;
+  if (!(target instanceof Element) || !event.currentTarget.contains(target)) {
+    return false;
+  }
+  return !target.closest(INTERACTIVE_SELECTOR);
 }
 
 export type WorktreeOverviewEntry = {

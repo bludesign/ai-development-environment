@@ -94,6 +94,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const latestLoad = useRef(0);
+  const displayedCodebaseId = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const requestId = ++latestLoad.current;
@@ -102,6 +103,9 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         worktreeOverview: WorktreeOverview;
       }>(OVERVIEW_QUERY);
       if (requestId !== latestLoad.current) return;
+      displayedCodebaseId.current =
+        findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
+          .codebase.id ?? null;
       setOverview(data.worktreeOverview);
       setError(null);
     } catch (value) {
@@ -111,9 +115,10 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     } finally {
       if (requestId === latestLoad.current) setLoading(false);
     }
-  }, []);
+  }, [worktreeId]);
 
   useEffect(() => {
+    displayedCodebaseId.current = null;
     const initial = window.setTimeout(() => void load(), 0);
     const poll = window.setInterval(() => void load(), 30_000);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
@@ -132,7 +137,9 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           if (
             !changed ||
             changed.worktreeId === null ||
-            changed.worktreeId === worktreeId
+            changed.worktreeId === worktreeId ||
+            (changed.codebaseId !== null &&
+              changed.codebaseId === displayedCodebaseId.current)
           ) {
             void load();
           }

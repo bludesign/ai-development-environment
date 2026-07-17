@@ -922,6 +922,7 @@ const mockTranslations = {
     pullRequest: "Pull request",
     openInGitHub: "Open in GitHub",
     openDetails: "Open details",
+    openWorktreeDetails: "Open details for {branch}",
     hiddenTitle: "Hidden worktrees",
     hiddenDescription:
       "Missing worktrees are retained for seven days. Rediscovery restores their saved metadata.",

@@ -3,6 +3,7 @@
 import {
   Archive,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   Check,
   ChevronDown,
@@ -1110,6 +1111,7 @@ function WorktreeCard(props: WorktreeItemProps) {
           {worktree.hasUnstagedChanges && (
             <Badge variant="destructive">{t("dirty")}</Badge>
           )}
+          <WorktreeDetailsLink worktree={worktree} />
           <WorktreeMenus {...liveProps} />
         </CardAction>
       </CardHeader>
@@ -1157,6 +1159,24 @@ export type WorktreeItemProps = {
   onMoved?: (move: WorktreeMove) => void;
   overview: WorktreeOverview;
 };
+
+function WorktreeDetailsLink({ worktree }: { worktree: Worktree }) {
+  const t = useTranslations("worktrees");
+  const branch =
+    worktree.branch ?? worktree.headSha?.slice(0, 10) ?? t("detached");
+  const label = t("openWorktreeDetails", { branch });
+  return (
+    <Button asChild size="icon-sm" variant="ghost">
+      <Link
+        aria-label={label}
+        href={worktreeDetailHref(worktree.id)}
+        title={label}
+      >
+        <ArrowRight />
+      </Link>
+    </Button>
+  );
+}
 
 export function WorktreeTicketLink({
   worktree,
@@ -2676,7 +2696,10 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           </div>
         </TableCell>
         <TableCell>
-          <WorktreeMenus {...liveProps} />
+          <div className="flex items-center justify-end gap-1">
+            <WorktreeDetailsLink worktree={worktree} />
+            <WorktreeMenus {...liveProps} />
+          </div>
         </TableCell>
       </TableRow>
       <TableRow className={cn(highlight)}>

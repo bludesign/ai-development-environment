@@ -832,6 +832,7 @@
     "pullRequest": "Pull request",
     "openInGitHub": "Ouvrir dans GitHub",
     "openDetails": "Ouvrir les détails",
+    "openWorktreeDetails": "Ouvrir les détails de {branch}",
     "hiddenTitle": "Worktrees masqués",
     "hiddenDescription": "Les worktrees absents sont conservés sept jours. Une redécouverte restaure leurs métadonnées.",
     "noHidden": "Aucun worktree masqué.",
