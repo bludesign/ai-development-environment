@@ -226,7 +226,9 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       const key = item.agent?.id ?? item.id;
       const current = latestByAgent.get(key);
       const rank = AGENT_PHASE_RANK[item.direction] ?? 0;
-      const currentRank = current ? (AGENT_PHASE_RANK[current.direction] ?? 0) : -1;
+      const currentRank = current
+        ? (AGENT_PHASE_RANK[current.direction] ?? 0)
+        : -1;
       if (
         !current ||
         rank > currentRank ||
