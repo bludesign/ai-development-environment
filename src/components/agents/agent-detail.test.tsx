@@ -35,7 +35,71 @@ afterEach(() => {
 });
 
 describe("AgentDetail", () => {
-  test("uses the localized placeholder when the tunnel name is empty", async () => {
+  test("shows live system information and codebases for the agent", async () => {
+    const createdAt = new Date(0).toISOString();
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockResolvedValue({
+      agent: {
+        id: "agent-1",
+        name: "Development Mac",
+        hostname: "dev-mac.local",
+        version: "1.0.0",
+        osVersion: "macOS",
+        architecture: "arm64",
+        cpuModel: "M4 Pro",
+        memoryTotalBytes: 24 * 1024 ** 3,
+        memoryFreeBytes: 12 * 1024 ** 3,
+        diskTotalBytes: 512 * 1024 ** 3,
+        diskFreeBytes: 256 * 1024 ** 3,
+        capabilities: ["cloudflared.runTunnel", "ccusage.report"],
+        baseRepoDirectory: null,
+        connectionStatus: "ONLINE",
+        ipAddress: "192.168.1.20",
+        lastSeenAt: createdAt,
+        disconnectedAt: null,
+        createdAt,
+      },
+      agentJobs: [],
+      codebaseOverview: {
+        repositories: [
+          {
+            id: "repository-1",
+            name: "Project Atlas",
+            description: "",
+            displayOrigin: "github.com/example/atlas",
+            codebases: [
+              {
+                id: "codebase-1",
+                folder: "/Users/test/atlas",
+                branch: "main",
+                headSha: "abc123",
+                syncState: "IN_SYNC",
+                availability: "AVAILABLE",
+                lastCheckedAt: createdAt,
+                agent: { id: "agent-1" },
+              },
+            ],
+          },
+        ],
+      },
+    } as never);
+
+    render(<AgentDetail agentId="agent-1" />);
+
+    expect(await screen.findByText("M4 Pro")).toBeDefined();
+    expect(screen.getByText("Project Atlas")).toBeDefined();
+    expect(screen.getByText("/Users/test/atlas")).toBeDefined();
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search capabilities" }),
+      { target: { value: "ccusage" } },
+    );
+    expect(screen.getByText("ccusage.report")).toBeDefined();
+    expect(screen.queryByText("cloudflared.runTunnel")).toBeNull();
+  });
+
+  test("invokes the tunnel capability with its default payload", async () => {
     const createdAt = new Date(0).toISOString();
     const job: AgentJob = {
       id: "job-dev-tunnel",
@@ -75,7 +139,7 @@ describe("AgentDetail", () => {
           agentJobs: [],
         } as never;
       }
-      if (query.includes("mutation RunTunnel")) {
+      if (query.includes("mutation InvokeAgentCapability")) {
         return { createAgentJob: job } as never;
       }
       if (query.includes("query Job")) {
@@ -85,17 +149,29 @@ describe("AgentDetail", () => {
     });
 
     render(<AgentDetail agentId="agent-1" />);
-    const input = await screen.findByRole("textbox", { name: "Tunnel name" });
-    expect(input.getAttribute("placeholder")).toBe("dev-tunnel");
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Expand cloudflared.runTunnel",
+      }),
+    );
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Payload (JSON object)",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe('{\n  "tunnelName": "dev-tunnel"\n}');
+    fireEvent.click(screen.getByRole("button", { name: "Invoke capability" }));
 
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
-        expect.stringContaining("mutation RunTunnel"),
+        expect.stringContaining("mutation InvokeAgentCapability"),
         expect.objectContaining({
           input: expect.objectContaining({
             payload: { tunnelName: "dev-tunnel" },
-            idempotencyKey: expect.stringMatching(/^cloudflared:dev-tunnel:/),
+            idempotencyKey: expect.stringMatching(
+              /^manual:cloudflared\.runTunnel:/,
+            ),
           }),
         }),
       ),

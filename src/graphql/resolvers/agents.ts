@@ -184,6 +184,11 @@ export const createAgentResolvers = (
           version: string;
           osVersion: string;
           architecture: string;
+          cpuModel?: string | null;
+          memoryTotalBytes?: number | null;
+          memoryFreeBytes?: number | null;
+          diskTotalBytes?: number | null;
+          diskFreeBytes?: number | null;
           capabilities: string[];
         }),
         ipAddress: context.ipAddress,
@@ -198,6 +203,11 @@ export const createAgentResolvers = (
           version: string;
           osVersion: string;
           architecture: string;
+          cpuModel?: string | null;
+          memoryTotalBytes?: number | null;
+          memoryFreeBytes?: number | null;
+          diskTotalBytes?: number | null;
+          diskFreeBytes?: number | null;
           capabilities: string[];
         }),
         ipAddress: context.ipAddress,
@@ -244,6 +254,16 @@ export const createAgentResolvers = (
     ) => {
       requireControlPlane(context);
       return agentControlService.cancelJob(jobId);
+    },
+    requestAgentCodebaseReconcile: async (
+      _root: unknown,
+      { agentId }: { agentId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return (
+        (await agentControlService.requestCodebaseReconcile([agentId])) === 1
+      );
     },
     updateAgentBaseRepoDirectory: (
       _root: unknown,

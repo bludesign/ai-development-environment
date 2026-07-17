@@ -63,4 +63,20 @@ describe("agent read ownership", () => {
       ),
     ).resolves.toEqual({ id: "agent-1" });
   });
+
+  test("only the control plane can request an immediate codebase reconcile", async () => {
+    const service = {
+      requestCodebaseReconcile: vi.fn().mockResolvedValue(1),
+    } as unknown as AgentControlService;
+    const mutation =
+      createAgentResolvers(service).Mutation.requestAgentCodebaseReconcile;
+
+    await expect(
+      mutation({}, { agentId: "agent-1" }, context("agent-1")),
+    ).rejects.toThrow("cannot perform control-plane operations");
+    await expect(
+      mutation({}, { agentId: "agent-1" }, context(null)),
+    ).resolves.toBe(true);
+    expect(service.requestCodebaseReconcile).toHaveBeenCalledWith(["agent-1"]);
+  });
 });

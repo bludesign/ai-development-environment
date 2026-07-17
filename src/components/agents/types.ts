@@ -5,6 +5,11 @@ export type Agent = {
   version: string;
   osVersion: string;
   architecture: string;
+  cpuModel?: string | null;
+  memoryTotalBytes?: number | null;
+  memoryFreeBytes?: number | null;
+  diskTotalBytes?: number | null;
+  diskFreeBytes?: number | null;
   capabilities: string[];
   baseRepoDirectory: string | null;
   connectionStatus: "ONLINE" | "OFFLINE";

@@ -113,12 +113,34 @@ export class AgentGraphQLClient {
   }
 
   heartbeat(inventory: AgentInventory) {
-    const { version, osVersion, architecture, capabilities } = inventory;
+    const {
+      version,
+      osVersion,
+      architecture,
+      cpuModel,
+      memoryTotalBytes,
+      memoryFreeBytes,
+      diskTotalBytes,
+      diskFreeBytes,
+      capabilities,
+    } = inventory;
     return this.request<{ heartbeatAgent: { id: string } }>(
       `mutation Heartbeat($input: AgentHeartbeatInput!) {
         heartbeatAgent(input: $input) { id }
       }`,
-      { input: { version, osVersion, architecture, capabilities } },
+      {
+        input: {
+          version,
+          osVersion,
+          architecture,
+          cpuModel,
+          memoryTotalBytes,
+          memoryFreeBytes,
+          diskTotalBytes,
+          diskFreeBytes,
+          capabilities,
+        },
+      },
     );
   }
 

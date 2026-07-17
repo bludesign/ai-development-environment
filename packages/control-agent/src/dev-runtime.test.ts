@@ -12,6 +12,11 @@ const inventory: AgentInventory = {
   version: "0.1.0",
   osVersion: "macOS test",
   architecture: "arm64",
+  cpuModel: "M4 Pro",
+  memoryTotalBytes: 24 * 1024 ** 3,
+  memoryFreeBytes: 12 * 1024 ** 3,
+  diskTotalBytes: 512 * 1024 ** 3,
+  diskFreeBytes: 256 * 1024 ** 3,
   capabilities: ["cloudflared.runTunnel"],
 };
 

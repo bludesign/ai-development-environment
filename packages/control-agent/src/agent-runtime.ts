@@ -19,7 +19,6 @@ export async function runAgent(
   const repositoryCoordinator = new RepositoryCoordinator();
   const executor = new JobExecutor(client, repositoryCoordinator);
   const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);
-  const inventory = collectInventory();
   let reconciling = false;
   let codebaseTimer: ReturnType<typeof setTimeout> | undefined;
   let startupRecoveryPending = true;
@@ -74,7 +73,7 @@ export async function runAgent(
     reconciling = true;
     try {
       try {
-        await client.heartbeat(inventory);
+        await client.heartbeat(collectInventory());
       } catch (error) {
         console.error(
           "Heartbeat failed:",
