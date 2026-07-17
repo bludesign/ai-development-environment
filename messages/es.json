@@ -197,6 +197,7 @@
     "deleteTitle": "¿Eliminar Derived Data?",
     "deleteDescription": "¿Eliminar permanentemente {count} entradas seleccionadas? Esta acción no se puede deshacer.",
     "history": "Historial de eliminaciones",
+    "historyDescription": "Derived Data eliminado de los agentes registrados durante los últimos 90 días.",
     "clearHistory": "Borrar historial",
     "clearHistoryTitle": "¿Borrar el historial?",
     "clearHistoryDescription": "¿Eliminar todos los registros conservados? Esto no afecta a los archivos de los agentes.",

@@ -10,7 +10,13 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
@@ -514,102 +520,105 @@ export function BuildDataPage() {
       )}
 
       <Card className="gap-0 py-0">
-        <CardHeader className="flex-row items-center justify-between gap-3 border-b">
+        <CardHeader className="border-b py-4">
           <CardTitle>{t("history")}</CardTitle>
+          <CardDescription>{t("historyDescription")}</CardDescription>
           {history.length > 0 && (
-            <ConfirmationDialog
-              actionLabel={t("clearHistory")}
-              cancelLabel={tc("cancel")}
-              description={t("clearHistoryDescription")}
-              onConfirm={async () => {
-                await controlPlaneRequest(
-                  `mutation { clearDerivedDataDeletionHistory }`,
-                );
-                setHistoryVersion((value) => value + 1);
-              }}
-              title={t("clearHistoryTitle")}
-              trigger={
-                <Button size="sm" variant="outline">
-                  <Trash2 /> {t("clearHistory")}
-                </Button>
-              }
-            />
+            <CardAction>
+              <ConfirmationDialog
+                actionLabel={t("clearHistory")}
+                cancelLabel={tc("cancel")}
+                description={t("clearHistoryDescription")}
+                onConfirm={async () => {
+                  await controlPlaneRequest(
+                    `mutation { clearDerivedDataDeletionHistory }`,
+                  );
+                  setHistoryVersion((value) => value + 1);
+                }}
+                title={t("clearHistoryTitle")}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    <Trash2 /> {t("clearHistory")}
+                  </Button>
+                }
+              />
+            </CardAction>
           )}
         </CardHeader>
-        <CardContent className="p-0">
-          {historyLoading && history.length === 0 ? (
-            <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-              <Spinner /> {t("loadingHistory")}
-            </p>
-          ) : history.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">
-              {t("noHistory")}
-            </p>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("folder")}</TableHead>
-                    <TableHead>{t("worktree")}</TableHead>
-                    <TableHead>{t("agent")}</TableHead>
-                    <TableHead>{t("deleted")}</TableHead>
-                    <TableHead>{t("sourceLabel")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {groupedHistory.map((group) => (
-                    <Fragment key={group.label}>
-                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableCell className="font-medium" colSpan={5}>
-                          {group.label}
+        {historyLoading && history.length === 0 ? (
+          <p className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+            <Spinner /> {t("loadingHistory")}
+          </p>
+        ) : history.length === 0 ? (
+          <Empty className="py-8">
+            <EmptyHeader>
+              <EmptyDescription>{t("noHistory")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("folder")}</TableHead>
+                  <TableHead>{t("worktree")}</TableHead>
+                  <TableHead>{t("agent")}</TableHead>
+                  <TableHead>{t("deleted")}</TableHead>
+                  <TableHead>{t("sourceLabel")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {groupedHistory.map((group) => (
+                  <Fragment key={group.label}>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell className="font-medium" colSpan={5}>
+                        {group.label}
+                      </TableCell>
+                    </TableRow>
+                    {group.items.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-mono text-xs">
+                          {item.folderName}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {item.worktreePath ?? "—"}
+                        </TableCell>
+                        <TableCell>{item.agentName}</TableCell>
+                        <TableCell
+                          title={new Date(item.deletedAt).toLocaleString(
+                            locale,
+                          )}
+                        >
+                          {relativeAge(
+                            item.deletedAt,
+                            locale,
+                            now ?? Date.parse(item.deletedAt),
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            {t(`source.${item.source}`)}
+                          </Badge>
                         </TableCell>
                       </TableRow>
-                      {group.items.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-mono text-xs">
-                            {item.folderName}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {item.worktreePath ?? "—"}
-                          </TableCell>
-                          <TableCell>{item.agentName}</TableCell>
-                          <TableCell
-                            title={new Date(item.deletedAt).toLocaleString(
-                              locale,
-                            )}
-                          >
-                            {relativeAge(
-                              item.deletedAt,
-                              locale,
-                              now ?? Date.parse(item.deletedAt),
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">
-                              {t(`source.${item.source}`)}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </Fragment>
-                  ))}
-                </TableBody>
-              </Table>
-              {historyCursor && (
-                <div className="border-t p-3 text-center">
-                  <Button
-                    disabled={historyLoading}
-                    onClick={() => void loadHistory(historyCursor)}
-                    variant="outline"
-                  >
-                    {historyLoading && <Spinner />} {t("loadMore")}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </CardContent>
+                    ))}
+                  </Fragment>
+                ))}
+              </TableBody>
+            </Table>
+            {historyCursor && (
+              <div className="border-t p-3 text-center">
+                <Button
+                  disabled={historyLoading}
+                  onClick={() => void loadHistory(historyCursor)}
+                  variant="outline"
+                >
+                  {historyLoading && <Spinner />} {t("loadMore")}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
       </Card>
 
       <ConfirmationDialog

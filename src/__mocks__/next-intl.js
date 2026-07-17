@@ -220,6 +220,8 @@ const mockTranslations = {
     deleteDescription:
       "Permanently delete {count} selected Derived Data entries? This cannot be undone.",
     history: "Deletion history",
+    historyDescription:
+      "Derived Data removed from enrolled agents during the last 90 days.",
     clearHistory: "Clear history",
     clearHistoryTitle: "Clear deletion history?",
     clearHistoryDescription:

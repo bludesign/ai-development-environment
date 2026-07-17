@@ -197,6 +197,7 @@
     "deleteTitle": "Supprimer Derived Data ?",
     "deleteDescription": "Supprimer définitivement {count} entrées sélectionnées ? Cette action est irréversible.",
     "history": "Historique des suppressions",
+    "historyDescription": "Derived Data supprimées des agents inscrits au cours des 90 derniers jours.",
     "clearHistory": "Effacer l’historique",
     "clearHistoryTitle": "Effacer l’historique ?",
     "clearHistoryDescription": "Supprimer tous les enregistrements conservés ? Cela n’affecte pas les fichiers des agents.",

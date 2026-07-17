@@ -197,6 +197,7 @@
     "deleteTitle": "Derived Data löschen?",
     "deleteDescription": "{count} ausgewählte Derived-Data-Einträge dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.",
     "history": "Löschverlauf",
+    "historyDescription": "In den letzten 90 Tagen von registrierten Agenten entfernte Derived Data.",
     "clearHistory": "Verlauf löschen",
     "clearHistoryTitle": "Löschverlauf leeren?",
     "clearHistoryDescription": "Alle gespeicherten Löschdatensätze entfernen? Dateien auf Agenten bleiben unverändert.",
