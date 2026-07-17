@@ -108,21 +108,25 @@ export function RichTextPreview({ markdown }: { markdown: string }) {
 export function JiraRichTextBlock({
   bodyClassName,
   content,
+  controlsClassName,
   header,
   headerActions,
   headerClassName,
   showFormatOverride = true,
   sourceClassName,
   value,
+  viewActionsClassName,
 }: {
   bodyClassName?: string;
   content?: JiraRichText | null;
+  controlsClassName?: string;
   header?: ReactNode;
   headerActions?: ReactNode;
   headerClassName?: string;
   showFormatOverride?: boolean;
   sourceClassName?: string;
   value: unknown;
+  viewActionsClassName?: string;
 }) {
   const t = useTranslations("jiraTickets");
   const normalized = useMemo(
@@ -196,7 +200,12 @@ export function JiraRichTextBlock({
         )}
       >
         {(header || headerActions) && <div>{header}</div>}
-        <div className="flex flex-wrap items-center justify-end gap-1">
+        <div
+          className={cn(
+            "flex flex-wrap items-center justify-end gap-1",
+            controlsClassName,
+          )}
+        >
           {headerActions}
           {showFormatOverride && normalized.format !== "ADF" && (
             <Select
@@ -217,41 +226,43 @@ export function JiraRichTextBlock({
               </SelectContent>
             </Select>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="xs"
-                title={t("renderFormat")}
-                type="button"
-                variant="outline"
-              >
-                <ActiveViewIcon /> {activeViewMode.label}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup
-                onValueChange={(mode) => setViewMode(mode as ViewMode)}
-                value={viewMode}
-              >
-                {viewModes.map(({ icon: ViewIcon, label, value }) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <ViewIcon /> {label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            aria-label={t("copy")}
-            onClick={() => void copy()}
-            size="xs"
-            title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
-            type="button"
-            variant="outline"
-          >
-            {copyState === "COPIED" ? <Check /> : <Copy />}
-            {t("copy")}
-          </Button>
+          <div className={cn("flex items-center gap-1", viewActionsClassName)}>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="xs"
+                  title={t("renderFormat")}
+                  type="button"
+                  variant="outline"
+                >
+                  <ActiveViewIcon /> {activeViewMode.label}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  onValueChange={(mode) => setViewMode(mode as ViewMode)}
+                  value={viewMode}
+                >
+                  {viewModes.map(({ icon: ViewIcon, label, value }) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <ViewIcon /> {label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              aria-label={t("copy")}
+              onClick={() => void copy()}
+              size="xs"
+              title={copyState === "COPIED" ? t("copied") : t("copyRaw")}
+              type="button"
+              variant="outline"
+            >
+              {copyState === "COPIED" ? <Check /> : <Copy />}
+              {t("copy")}
+            </Button>
+          </div>
         </div>
       </div>
       {copyState === "FAILED" && (

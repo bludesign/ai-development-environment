@@ -477,6 +477,24 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               <CardTitle>{t("allFields")}</CardTitle>
             </button>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                aria-controls="jira-all-fields"
+                aria-expanded={fieldsOpen}
+                aria-label={
+                  fieldsOpen ? t("collapseFields") : t("expandFields")
+                }
+                onClick={() => setFieldsOpen((current) => !current)}
+                size="icon-sm"
+                title={fieldsOpen ? t("collapseFields") : t("expandFields")}
+                type="button"
+                variant="ghost"
+              >
+                {fieldsOpen ? (
+                  <ChevronDown className="size-5" />
+                ) : (
+                  <ChevronRight className="size-5" />
+                )}
+              </Button>
               {fieldsOpen && (
                 <Input
                   aria-label={t("searchFields")}
@@ -486,17 +504,6 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
                   value={fieldSearch}
                 />
               )}
-              <Button
-                aria-controls="jira-all-fields"
-                aria-expanded={fieldsOpen}
-                onClick={() => setFieldsOpen((current) => !current)}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {fieldsOpen ? <ChevronDown /> : <ChevronRight />}
-                {fieldsOpen ? t("collapseFields") : t("expandFields")}
-              </Button>
             </div>
           </div>
         </CardHeader>

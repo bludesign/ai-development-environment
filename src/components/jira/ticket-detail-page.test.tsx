@@ -182,6 +182,16 @@ describe("JiraTicketDetailPage", () => {
     fireEvent.click(fieldsTitle);
     expect(fieldsTitle.getAttribute("aria-expanded")).toBe("true");
     expect(fieldsHeader?.classList.contains("border-b")).toBe(true);
+    const collapseFields = screen.getByRole("button", {
+      name: "Hide fields",
+    });
+    const fieldSearch = screen.getByRole("textbox", { name: "Search fields" });
+    expect(collapseFields.getAttribute("data-variant")).toBe("ghost");
+    expect(collapseFields.getAttribute("data-size")).toBe("icon-sm");
+    expect(collapseFields.textContent).toBe("");
+    expect(collapseFields.compareDocumentPosition(fieldSearch)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(
       screen
         .getByRole("button", { name: "Hide fields" })
@@ -194,7 +204,7 @@ describe("JiraTicketDetailPage", () => {
       name: "Rendered",
     })[0];
     expect(descriptionTitle.parentElement?.parentElement).toBe(
-      descriptionViewMenu?.parentElement?.parentElement,
+      descriptionViewMenu?.parentElement?.parentElement?.parentElement,
     );
     fireEvent.pointerDown(descriptionViewMenu!, {
       button: 0,

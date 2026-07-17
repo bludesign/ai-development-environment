@@ -3,13 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemHeader,
-  ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTextInput, JiraTicketDetail } from "@/services/jira/types";
 
@@ -56,17 +50,9 @@ export function JiraTicketComments({
 
   return (
     <section className="space-y-4">
-      <div>
-        <h3 className="mb-2 font-semibold">
-          {t("comments", { count: ticket.comments.length })}
-        </h3>
-        <JiraTextComposer
-          busy={busy}
-          error={error}
-          onSubmit={addComment}
-          submitLabel={t("addComment")}
-        />
-      </div>
+      <h3 className="font-semibold">
+        {t("comments", { count: ticket.comments.length })}
+      </h3>
       {ticket.comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("noComments")}</p>
       ) : (
@@ -74,18 +60,23 @@ export function JiraTicketComments({
           {ticket.comments.map((comment) => (
             <Item asChild key={comment.id} variant="outline">
               <article>
-                <ItemHeader>
-                  <ItemTitle>
-                    {comment.author?.displayName ?? t("unknownUser")}
-                  </ItemTitle>
-                  <time className="text-xs text-muted-foreground">
-                    {displayDate(comment.createdAt)}
-                  </time>
-                </ItemHeader>
-                <ItemContent className="basis-full">
+                <ItemContent className="@container/comment basis-full">
                   <JiraRichTextBlock
                     content={comment.content}
+                    controlsClassName="contents @md/comment:flex @md/comment:flex-wrap @md/comment:items-center @md/comment:justify-end @md/comment:gap-1"
+                    header={
+                      <ItemTitle>
+                        {comment.author?.displayName ?? t("unknownUser")}
+                      </ItemTitle>
+                    }
+                    headerActions={
+                      <time className="col-start-1 row-start-2 mr-auto shrink-0 text-xs text-muted-foreground">
+                        {displayDate(comment.createdAt)}
+                      </time>
+                    }
+                    headerClassName="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-1 border-b pb-2 @md/comment:flex @md/comment:flex-row @md/comment:items-center @md/comment:gap-2"
                     value={comment.body}
+                    viewActionsClassName="col-start-2 row-span-2 row-start-1 ml-auto flex-col items-end gap-0.5 @md/comment:ml-0 @md/comment:flex-row @md/comment:items-center @md/comment:gap-1"
                   />
                 </ItemContent>
               </article>
@@ -93,6 +84,14 @@ export function JiraTicketComments({
           ))}
         </ItemGroup>
       )}
+      <div className="border-t pt-4">
+        <JiraTextComposer
+          busy={busy}
+          error={error}
+          onSubmit={addComment}
+          submitLabel={t("addComment")}
+        />
+      </div>
     </section>
   );
 }
