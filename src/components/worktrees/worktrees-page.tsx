@@ -74,6 +74,15 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
+  SearchableSelect,
+  type SearchableSelectOption,
+} from "@/components/ui/searchable-select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
@@ -97,6 +106,12 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { Link } from "@/i18n/navigation";
+
+import {
+  WorktreeBranchForm,
+  type WorktreeBranchSelection,
+  type WorktreeBranchTarget,
+} from "./worktree-branch-form";
 
 import type {
   Worktree,
@@ -141,7 +156,7 @@ const WORKTREE_FIELDS = `
 `;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError
-  defaultBranch remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
+  defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError createdAt updatedAt
 `;
 const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
   inspectWorktree(id: $id, requestId: $requestId) {
@@ -730,6 +745,16 @@ export function WorktreesPage() {
         </Alert>
       )}
 
+      {overview && (
+        <CreateWorktreeCard
+          onCreated={async () => {
+            await load();
+            setNotice(t("worktreeCreated"));
+          }}
+          overview={overview}
+        />
+      )}
+
       {loading && !overview ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
@@ -781,6 +806,131 @@ export function WorktreesPage() {
   );
 }
 
+function branchTarget(
+  group: WorktreeCodebaseGroup,
+  worktree?: Worktree,
+): WorktreeBranchTarget {
+  return {
+    codebaseId: group.codebase.id,
+    ...(worktree ? { worktreeId: worktree.id } : {}),
+    defaultBranch: group.codebase.defaultBranch,
+    currentBranch: worktree?.branch,
+    currentBaseBranch: worktree?.baseBranch,
+    localBranches: group.codebase.localBranches,
+    remoteBranches: group.codebase.remoteBranches,
+    unavailableBranches: group.worktrees.flatMap((candidate) =>
+      candidate.branch && candidate.id !== worktree?.id
+        ? [candidate.branch]
+        : [],
+    ),
+  };
+}
+
+function CreateWorktreeCard({
+  overview,
+  onCreated,
+}: {
+  overview: WorktreeOverview;
+  onCreated: () => Promise<void>;
+}) {
+  const t = useTranslations("worktrees");
+  const eligible = overview.agents.flatMap((agentGroup) =>
+    agentGroup.codebases.flatMap((group) =>
+      agentGroup.agent.connectionStatus === "ONLINE" &&
+      agentGroup.agent.capabilities.includes("worktree.branch") &&
+      group.codebase.availability === "AVAILABLE" &&
+      !group.worktrees.some((worktree) => worktree.activeJob)
+        ? [{ agentGroup, group }]
+        : [],
+    ),
+  );
+  const [codebaseId, setCodebaseId] = useState(
+    eligible.length === 1 ? eligible[0]!.group.codebase.id : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const effectiveCodebaseId = eligible.some(
+    (entry) => entry.group.codebase.id === codebaseId,
+  )
+    ? codebaseId
+    : eligible.length === 1
+      ? eligible[0]!.group.codebase.id
+      : "";
+  const selected = eligible.find(
+    (entry) => entry.group.codebase.id === effectiveCodebaseId,
+  );
+  const options: SearchableSelectOption[] = eligible.map(
+    ({ agentGroup, group }) => ({
+      value: group.codebase.id,
+      label: `${group.repository.name} · ${agentGroup.agent.name}`,
+      description: group.codebase.folder,
+      keywords: `${group.repository.displayOrigin} ${agentGroup.agent.hostname}`,
+    }),
+  );
+  const create = async (selection: WorktreeBranchSelection) => {
+    if (!selected) throw new Error(t("selectCodebase"));
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        createWorktree: { id: string };
+      }>(
+        `mutation CreateWorktree($input: CreateWorktreeInput!) {
+          createWorktree(input: $input) { id }
+        }`,
+        {
+          input: {
+            codebaseId: selected.group.codebase.id,
+            selection,
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.createWorktree.id);
+      await onCreated();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle className="flex items-center gap-2">
+          <Plus /> {t("createWorktree")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label className="mb-1.5 block">{t("repositoryCheckout")}</Label>
+          <SearchableSelect
+            ariaLabel={t("repositoryCheckout")}
+            disabled={busy || options.length === 0}
+            emptyMessage={t("noEligibleCodebases")}
+            onValueChange={setCodebaseId}
+            options={options}
+            placeholder={t("selectCodebase")}
+            searchPlaceholder={t("searchCodebases")}
+            value={effectiveCodebaseId}
+          />
+        </div>
+        {selected ? (
+          <WorktreeBranchForm
+            busy={busy}
+            key={selected.group.codebase.id}
+            onSubmit={create}
+            submitLabel={t("createWorktree")}
+            target={branchTarget(selected.group)}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {options.length
+              ? t("selectCodebaseHelp")
+              : t("noEligibleCodebases")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AgentSection({
   agentGroup,
   layout,
@@ -808,6 +958,9 @@ function AgentSection({
   const liveUpdatesEnabled =
     agentGroup.agent.connectionStatus === "ONLINE" &&
     agentGroup.agent.capabilities.includes("worktree.watch");
+  const branchManagementEnabled =
+    agentGroup.agent.connectionStatus === "ONLINE" &&
+    agentGroup.agent.capabilities.includes("worktree.branch");
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2 border-b pb-2">
@@ -838,6 +991,7 @@ function AgentSection({
                 <WorktreeCard
                   allTags={allTags}
                   baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
+                  branchManagementEnabled={branchManagementEnabled}
                   editorVariant={editorVariant}
                   group={group}
                   inspectionRefreshToken={inspectionRefreshToken}
@@ -856,6 +1010,7 @@ function AgentSection({
             <WorktreeTable
               allTags={allTags}
               baseRepoDirectory={agentGroup.agent.baseRepoDirectory}
+              branchManagementEnabled={branchManagementEnabled}
               editorVariant={editorVariant}
               group={group}
               inspectionRefreshToken={inspectionRefreshToken}
@@ -1038,6 +1193,7 @@ type WorktreeItemProps = {
   group: WorktreeCodebaseGroup;
   allTags: WorktreeTag[];
   baseRepoDirectory: string | null;
+  branchManagementEnabled: boolean;
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
   inspectionRefreshToken: number;
   liveUpdatesEnabled: boolean;
@@ -1476,6 +1632,11 @@ function WorktreeMenus(
     trigger,
   } = props;
   const t = useTranslations("worktrees");
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [failedSelection, setFailedSelection] =
+    useState<WorktreeBranchSelection | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const assigned = new Set(worktree.tags.map((tag) => tag.id));
   const assign = async (tagId: string, checked: boolean) => {
     const tagIds = checked
@@ -1506,75 +1667,191 @@ function WorktreeMenus(
       onError(error instanceof Error ? error.message : String(error));
     }
   };
+  const changeBranch = async (
+    selection: WorktreeBranchSelection,
+    stashOnFailure = false,
+  ) => {
+    setChangeBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        changeWorktreeBranch: { id: string };
+      }>(
+        `mutation ChangeWorktreeBranch($input: ChangeWorktreeBranchInput!) {
+          changeWorktreeBranch(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId: worktree.id,
+            selection,
+            requestId: createClientId(),
+            stashOnFailure,
+          },
+        },
+      );
+      await waitForWorktreeJob(data.changeWorktreeBranch.id);
+      await props.onReload();
+      setFailedSelection(null);
+      setRetryError(null);
+      setChangeOpen(false);
+      onError(null);
+    } finally {
+      setChangeBusy(false);
+    }
+  };
+  const recover = async () => {
+    if (!failedSelection) return;
+    try {
+      setRetryError(null);
+      await changeBranch(failedSelection, true);
+    } catch (value) {
+      setRetryError(value instanceof Error ? value.message : String(value));
+    }
+  };
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {trigger ?? (
-          <Button aria-label={t("customize")} size="icon-sm" variant="ghost">
-            <MoreHorizontal />
-          </Button>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={contentAlign}
-        alignOffset={contentAlignOffset}
-        className="w-72"
-      >
-        <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-          <Tags className="size-3" />
-          <span>{t("tags")}</span>
-        </DropdownMenuLabel>
-        {allTags.map((tag) => (
-          <DropdownMenuCheckboxItem
-            checked={assigned.has(tag.id)}
-            key={tag.id}
-            onCheckedChange={(checked) => void assign(tag.id, Boolean(checked))}
-          >
-            <span
-              className={cn(
-                "size-3 rounded-full border",
-                colorSwatchClasses[tag.color],
-              )}
-            />{" "}
-            {tag.name}
-          </DropdownMenuCheckboxItem>
-        ))}
-        <DropdownMenuItem onSelect={onManageTags}>
-          <Plus /> {t("manageTags")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
-          <Paintbrush className="size-3" />
-          <span>{t("highlight")}</span>
-        </DropdownMenuLabel>
-        <div
-          className="grid grid-cols-7 gap-1 p-2"
-          onClick={(event) => event.stopPropagation()}
+    <Popover
+      onOpenChange={(open) => {
+        setChangeOpen(open);
+        if (!open) {
+          setFailedSelection(null);
+          setRetryError(null);
+        }
+      }}
+      open={changeOpen}
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <PopoverAnchor asChild>
+            {trigger ?? (
+              <Button
+                aria-label={t("customize")}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <MoreHorizontal />
+              </Button>
+            )}
+          </PopoverAnchor>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align={contentAlign}
+          alignOffset={contentAlignOffset}
+          className="w-72"
         >
-          <button
-            aria-label={t("clearHighlight")}
-            className="flex size-7 items-center justify-center rounded border"
-            onClick={() => void highlight(null)}
-            type="button"
+          <DropdownMenuItem
+            disabled={
+              !props.branchManagementEnabled ||
+              worktree.availability !== "AVAILABLE" ||
+              Boolean(worktree.activeJob)
+            }
+            onSelect={() => setChangeOpen(true)}
           >
-            <Trash2 className="size-3" />
-          </button>
-          {COLORS.map((color) => (
-            <button
-              aria-label={color}
-              className={cn(
-                "size-7 rounded border",
-                colorSwatchClasses[color],
-                worktree.highlightColor === color && "ring-2 ring-foreground",
-              )}
-              key={color}
-              onClick={() => void highlight(color)}
-              type="button"
-            />
+            <GitBranch /> {t("changeBranch")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+            <Tags className="size-3" />
+            <span>{t("tags")}</span>
+          </DropdownMenuLabel>
+          {allTags.map((tag) => (
+            <DropdownMenuCheckboxItem
+              checked={assigned.has(tag.id)}
+              key={tag.id}
+              onCheckedChange={(checked) =>
+                void assign(tag.id, Boolean(checked))
+              }
+            >
+              <span
+                className={cn(
+                  "size-3 rounded-full border",
+                  colorSwatchClasses[tag.color],
+                )}
+              />{" "}
+              {tag.name}
+            </DropdownMenuCheckboxItem>
           ))}
+          <DropdownMenuItem onSelect={onManageTags}>
+            <Plus /> {t("manageTags")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
+            <Paintbrush className="size-3" />
+            <span>{t("highlight")}</span>
+          </DropdownMenuLabel>
+          <div
+            className="grid grid-cols-7 gap-1 p-2"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              aria-label={t("clearHighlight")}
+              className="flex size-7 items-center justify-center rounded border"
+              onClick={() => void highlight(null)}
+              type="button"
+            >
+              <Trash2 className="size-3" />
+            </button>
+            {COLORS.map((color) => (
+              <button
+                aria-label={color}
+                className={cn(
+                  "size-7 rounded border",
+                  colorSwatchClasses[color],
+                  worktree.highlightColor === color && "ring-2 ring-foreground",
+                )}
+                key={color}
+                onClick={() => void highlight(color)}
+                type="button"
+              />
+            ))}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <PopoverContent
+        align={contentAlign}
+        className="z-60 w-[min(28rem,calc(100vw-2rem))]"
+      >
+        <div className="mb-4">
+          <h3 className="font-semibold">{t("changeBranch")}</h3>
+          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+            {worktree.folder}
+          </p>
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <WorktreeBranchForm
+          busy={changeBusy}
+          onSubmit={(selection) => changeBranch(selection)}
+          onSubmitError={(selection) => {
+            setFailedSelection(
+              worktree.hasStagedChanges || worktree.hasUnstagedChanges
+                ? selection
+                : null,
+            );
+          }}
+          recovery={
+            failedSelection ? (
+              <Alert>
+                <AlertDescription className="space-y-2">
+                  <p>{t("stashRetryHelp")}</p>
+                  {retryError && (
+                    <p className="text-destructive">{retryError}</p>
+                  )}
+                  <Button
+                    disabled={changeBusy}
+                    onClick={() => void recover()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {changeBusy && <Spinner />}
+                    {t("stashAndRetry")}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null
+          }
+          submitLabel={t("changeBranch")}
+          target={branchTarget(props.group, worktree)}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 

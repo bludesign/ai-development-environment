@@ -27,6 +27,7 @@ function report(complete = true) {
     codebaseId: "codebase-1",
     complete,
     defaultBranch: "main",
+    localBranches: ["feature/AIDE-24", "main"],
     remoteBranches: ["main", "release"],
     fetchedAt: new Date(1).toISOString(),
     fetchAttemptedAt: new Date(2).toISOString(),

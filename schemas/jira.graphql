@@ -49,6 +49,7 @@ type JiraProject {
   ticketAssignmentFilter: JiraTicketAssignmentFilter!
   hideCompletedTickets: Boolean!
   completedStatusIds: [ID!]!
+  branchNamingScript: String!
   sources: [JiraSource!]!
 }
 
@@ -303,6 +304,10 @@ extend type Mutation {
   deleteJiraSource(id: ID!): [JiraProject!]!
   updateJiraProjectDisplaySettings(
     input: UpdateJiraProjectDisplaySettingsInput!
+  ): [JiraProject!]!
+  updateJiraProjectBranchNaming(
+    projectId: ID!
+    branchNamingScript: String!
   ): [JiraProject!]!
   refreshJiraSource(sourceId: ID!): JiraTicketBoard!
   updateJiraCacheTtl(ttlMinutes: Int!): JiraSettings!

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  branchWorktree,
   closeAllWorktreeWatches,
   discoverWorktrees,
   inspectWorktreeDetail,
@@ -93,6 +94,7 @@ describe("worktree inventory and inspection", () => {
     expect(inventory).toMatchObject({
       complete: true,
       defaultBranch: "main",
+      localBranches: ["feature/AIDE-24", "main"],
       remoteBranches: ["main"],
     });
     expect(inventory.worktrees).toHaveLength(2);
@@ -137,6 +139,87 @@ describe("worktree inventory and inspection", () => {
     );
 
     expect(inventory.defaultBranch).toBe("release");
+  });
+
+  test("creates a sibling worktree without tracking its base branch", async () => {
+    const folder = await repository();
+    const target = `${folder}-feature-APP-123`;
+    temporaryDirectories.push(target);
+    const result = (await branchWorktree(
+      {
+        codebaseId: "codebase-1",
+        rootFolder: folder,
+        folder: null,
+        gitDirectory: null,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        action: "CREATE",
+        mode: "NEW",
+        candidates: ["feature/APP-123"],
+        stashOnFailure: false,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    )) as unknown as {
+      branch: string;
+      worktree: { folder: string; upstream: string | null };
+    };
+
+    expect(result.branch).toBe("feature/APP-123");
+    expect(result.worktree.folder).toBe(await realpath(target));
+    expect(result.worktree.upstream).toBeNull();
+    expect((await git(target, "branch", "--show-current")).stdout.trim()).toBe(
+      "feature/APP-123",
+    );
+  });
+
+  test("stashes and retries a branch switch after Git rejects dirty changes", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "release");
+    await writeFile(join(folder, "README.md"), "release\n");
+    await git(folder, "add", "README.md");
+    await git(folder, "commit", "-m", "Release change");
+    await git(folder, "switch", "main");
+    await writeFile(join(folder, "README.md"), "dirty main\n");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const payload = {
+      codebaseId: "codebase-1",
+      rootFolder: folder,
+      folder,
+      gitDirectory,
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      action: "CHANGE",
+      mode: "EXISTING",
+      candidates: ["release"],
+    };
+
+    await expect(
+      branchWorktree(
+        { ...payload, stashOnFailure: false },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow();
+    await branchWorktree(
+      { ...payload, stashOnFailure: true },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "release",
+    );
+    expect((await git(folder, "stash", "list")).stdout).toContain(
+      "Automatic stash before switching to release",
+    );
   });
 
   test("reports base-relative commits and staged, unstaged, and untracked files", async () => {
@@ -330,6 +413,48 @@ describe("worktree inventory and inspection", () => {
     await writeFile(join(folder, "watched.txt"), "stopped\n");
     await new Promise((resolve) => setTimeout(resolve, 750));
     expect(reportWorktreeActivity).not.toHaveBeenCalled();
+  });
+
+  test("reports switching to a same-commit branch", async () => {
+    const folder = await repository();
+    const head = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const reportWorktreeActivity = vi.fn(async () => ({}));
+    const payload = {
+      codebaseId: "codebase-1",
+      folder,
+      gitDirectory,
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      watchId: "branch-watch",
+    };
+    await watchWorktree(
+      { ...payload, action: "START" },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+      { reportWorktreeActivity },
+    );
+    await vi.waitFor(() => expect(reportWorktreeActivity).toHaveBeenCalled());
+    await git(folder, "branch", "alternate");
+    await git(folder, "switch", "alternate");
+    await vi.waitFor(
+      () =>
+        expect(reportWorktreeActivity).toHaveBeenCalledWith(
+          expect.objectContaining({ branch: "alternate", headSha: head }),
+        ),
+      { timeout: 3_000 },
+    );
+    await watchWorktree(
+      { ...payload, action: "STOP" },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
   });
 
   test("blocks sync when the worktree is dirty", async () => {

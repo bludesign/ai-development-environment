@@ -15,6 +15,12 @@ enum WorktreeOperation {
   UNSTAGE_ALL
 }
 
+enum WorktreeBranchMode {
+  NEW
+  EXISTING
+  TICKET
+}
+
 type WorktreeTag {
   id: ID!
   name: String!
@@ -128,6 +134,14 @@ type WorktreeActivity {
   observedAt: String!
 }
 
+type WorktreeTicketBranchPreview {
+  ticketKey: ID!
+  ticketTitle: String!
+  ticketType: String
+  projectKey: String!
+  branchName: String!
+}
+
 input WorktreeInventoryInput {
   gitDirectory: String!
   folder: String!
@@ -152,6 +166,7 @@ input CodebaseWorktreeReportInput {
   codebaseId: ID!
   complete: Boolean!
   defaultBranch: String
+  localBranches: [String!]!
   remoteBranches: [String!]!
   fetchedAt: String
   fetchAttemptedAt: String
@@ -187,10 +202,39 @@ input RunWorktreeOperationInput {
   requestId: ID!
 }
 
+input WorktreeBranchSelectionInput {
+  mode: WorktreeBranchMode!
+  branchName: String
+  ticketKey: ID
+  baseBranch: String!
+}
+
+input PreviewWorktreeTicketBranchInput {
+  codebaseId: ID!
+  worktreeId: ID
+  ticketKey: ID!
+}
+
+input CreateWorktreeInput {
+  codebaseId: ID!
+  selection: WorktreeBranchSelectionInput!
+  requestId: ID!
+}
+
+input ChangeWorktreeBranchInput {
+  worktreeId: ID!
+  selection: WorktreeBranchSelectionInput!
+  requestId: ID!
+  stashOnFailure: Boolean = false
+}
+
 extend type Query {
   worktreeOverview: WorktreeOverview!
   hiddenWorktrees: [Worktree!]!
   worktreeSettings: WorktreeSettings!
+  previewWorktreeTicketBranch(
+    input: PreviewWorktreeTicketBranchInput!
+  ): WorktreeTicketBranchPreview!
 }
 
 extend type Mutation {
@@ -199,6 +243,8 @@ extend type Mutation {
   reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
   inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!
   runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
+  createWorktree(input: CreateWorktreeInput!): AgentJob!
+  changeWorktreeBranch(input: ChangeWorktreeBranchInput!): AgentJob!
   updateWorktreeBaseBranch(id: ID!, baseBranch: String): Worktree!
   updateWorktreeHighlight(id: ID!, color: String): Worktree!
   setWorktreeTags(id: ID!, tagIds: [ID!]!): Worktree!

@@ -5,6 +5,8 @@ import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
   parseWorktreeInventoryItem,
+  validGitBranchName,
+  WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_OPERATIONS,
@@ -27,6 +29,7 @@ import {
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
+import { jiraBranchCandidates } from "@/services/jira";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -99,6 +102,17 @@ type WorktreeWatchDemand = {
   payload: WorktreeWatchPayload;
   started: Promise<void>;
 };
+
+export type WorktreeBranchSelection = {
+  mode: "NEW" | "EXISTING" | "TICKET";
+  branchName?: string | null;
+  ticketKey?: string | null;
+  baseBranch: string;
+};
+
+type RunnableCodebase = Prisma.CodebaseGetPayload<{
+  include: { agent: true; repository: true };
+}>;
 
 function online(agent: {
   lastSeenAt: Date | null;
@@ -200,6 +214,10 @@ export class WorktreesService {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
       (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_BRANCH_JOB_KIND,
+      (job) => this.projectBranchOperation(job),
     );
   }
 
@@ -431,6 +449,7 @@ export class WorktreesService {
           where: { id: codebase.id },
           data: {
             defaultBranch: report.defaultBranch,
+            localBranchesJson: JSON.stringify(report.localBranches),
             remoteBranchesJson: JSON.stringify(report.remoteBranches),
             ...(report.fetchedAt
               ? { lastFetchedAt: new Date(report.fetchedAt) }
@@ -640,6 +659,7 @@ export class WorktreesService {
       include: worktreeInclude,
     });
     this.publish(id, worktree.codebaseId);
+    await this.restartWatch(id);
     return this.view(updated);
   }
 
@@ -718,6 +738,224 @@ export class WorktreesService {
     const deleted = await prisma.worktreeTag.deleteMany({ where: { id } });
     if (deleted.count) this.publish(null, null);
     return deleted.count > 0;
+  }
+
+  private async repositoryTakenBranches(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    const codebases = await prisma.codebase.findMany({
+      where: { repositoryId },
+      select: {
+        localBranchesJson: true,
+        remoteBranchesJson: true,
+        worktrees: {
+          where: { missingAt: null },
+          select: { branch: true },
+        },
+      },
+    });
+    return new Set(
+      codebases.flatMap((codebase) => [
+        ...parseBranches(codebase.localBranchesJson),
+        ...parseBranches(codebase.remoteBranchesJson),
+        ...codebase.worktrees.flatMap((worktree) =>
+          worktree.branch ? [worktree.branch] : [],
+        ),
+      ]),
+    );
+  }
+
+  private requireBaseBranch(codebase: RunnableCodebase, value: string) {
+    const baseBranch = value.trim();
+    if (
+      !baseBranch ||
+      !parseBranches(codebase.remoteBranchesJson).includes(baseBranch)
+    ) {
+      throw new Error(
+        "The selected origin base branch is unavailable; fetch and try again",
+      );
+    }
+    return baseBranch;
+  }
+
+  private async ticketBranch(
+    codebase: RunnableCodebase,
+    ticketKeyValue: string | null | undefined,
+    currentBranch: string | null,
+  ) {
+    const ticketKey = ticketKeyValue?.trim() ?? "";
+    const ticket = await this.jiraService.branchTicket(ticketKey);
+    const candidates = jiraBranchCandidates(ticket.branchNamingScript, {
+      ticketKey: ticket.ticketKey,
+      type: ticket.ticketType ?? "",
+      title: ticket.ticketTitle,
+    });
+    const taken = await this.repositoryTakenBranches(codebase.repositoryId);
+    const available = candidates.filter(
+      (candidate) => candidate === currentBranch || !taken.has(candidate),
+    );
+    if (!available.length) {
+      throw new Error("Every generated ticket branch name is already taken");
+    }
+    return { ticket, candidates: available };
+  }
+
+  async previewTicketBranch(input: {
+    codebaseId: string;
+    worktreeId?: string | null;
+    ticketKey: string;
+  }) {
+    const prisma = await getPrismaClient();
+    const codebase = await prisma.codebase.findUnique({
+      where: { id: input.codebaseId },
+      include: { agent: true, repository: true },
+    });
+    if (!codebase) throw new Error("Codebase not found");
+    let currentBranch: string | null = null;
+    if (input.worktreeId) {
+      const worktree = await prisma.worktree.findFirst({
+        where: {
+          id: input.worktreeId,
+          codebaseId: input.codebaseId,
+          missingAt: null,
+        },
+        select: { branch: true },
+      });
+      if (!worktree) throw new Error("Worktree not found for this codebase");
+      currentBranch = worktree.branch;
+    }
+    const { ticket, candidates } = await this.ticketBranch(
+      codebase,
+      input.ticketKey,
+      currentBranch,
+    );
+    return {
+      ticketKey: ticket.ticketKey,
+      ticketTitle: ticket.ticketTitle,
+      ticketType: ticket.ticketType,
+      projectKey: ticket.projectKey,
+      branchName: candidates[0]!,
+    };
+  }
+
+  private async resolveBranchSelection(
+    codebase: RunnableCodebase,
+    selection: WorktreeBranchSelection,
+    currentWorktree: { id: string; branch: string | null } | null,
+  ) {
+    const baseBranch = this.requireBaseBranch(codebase, selection.baseBranch);
+    if (selection.mode === "TICKET") {
+      const { candidates } = await this.ticketBranch(
+        codebase,
+        selection.ticketKey,
+        currentWorktree?.branch ?? null,
+      );
+      return { baseBranch, mode: "NEW" as const, candidates };
+    }
+    const branch = selection.branchName?.trim() ?? "";
+    if (!validGitBranchName(branch)) {
+      throw new Error("Enter a valid Git branch name");
+    }
+    if (selection.mode === "NEW") {
+      const taken = await this.repositoryTakenBranches(codebase.repositoryId);
+      if (taken.has(branch))
+        throw new Error(`Branch ${branch} is already taken`);
+      return { baseBranch, mode: "NEW" as const, candidates: [branch] };
+    }
+    if (selection.mode !== "EXISTING") {
+      throw new Error("Unknown worktree branch mode");
+    }
+    const exists = new Set([
+      ...parseBranches(codebase.localBranchesJson),
+      ...parseBranches(codebase.remoteBranchesJson),
+    ]).has(branch);
+    if (!exists) {
+      throw new Error(
+        `Existing branch ${branch} is unavailable; refresh and try again`,
+      );
+    }
+    const prisma = await getPrismaClient();
+    const checkedOutElsewhere = await prisma.worktree.findFirst({
+      where: {
+        codebaseId: codebase.id,
+        branch,
+        missingAt: null,
+        ...(currentWorktree ? { id: { not: currentWorktree.id } } : {}),
+      },
+      select: { id: true },
+    });
+    if (checkedOutElsewhere) {
+      throw new Error(`Branch ${branch} is checked out in another worktree`);
+    }
+    return { baseBranch, mode: "EXISTING" as const, candidates: [branch] };
+  }
+
+  async createWorktree(input: {
+    codebaseId: string;
+    selection: WorktreeBranchSelection;
+    requestId: string;
+  }) {
+    const codebase = await this.requireRunnableCodebase(input.codebaseId);
+    const resolved = await this.resolveBranchSelection(
+      codebase,
+      input.selection,
+      null,
+    );
+    return this.agentControl.createJob({
+      agentId: codebase.agentId,
+      codebaseId: codebase.id,
+      kind: WORKTREE_BRANCH_JOB_KIND,
+      payload: {
+        codebaseId: codebase.id,
+        rootFolder: codebase.folder,
+        folder: null,
+        gitDirectory: null,
+        expectedOrigin: codebase.repository.canonicalOrigin,
+        baseBranch: resolved.baseBranch,
+        action: "CREATE",
+        mode: resolved.mode,
+        candidates: resolved.candidates,
+        stashOnFailure: false,
+      },
+      idempotencyKey: `worktree:branch:create:${input.requestId}:${codebase.id}`,
+      timeoutSeconds: 600,
+    });
+  }
+
+  async changeWorktreeBranch(input: {
+    worktreeId: string;
+    selection: WorktreeBranchSelection;
+    requestId: string;
+    stashOnFailure?: boolean | null;
+  }) {
+    const worktree = await this.requireRunnable(
+      input.worktreeId,
+      WORKTREE_BRANCH_JOB_KIND,
+    );
+    const resolved = await this.resolveBranchSelection(
+      worktree.codebase,
+      input.selection,
+      { id: worktree.id, branch: worktree.branch },
+    );
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_BRANCH_JOB_KIND,
+      payload: {
+        codebaseId: worktree.codebaseId,
+        rootFolder: worktree.codebase.folder,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+        baseBranch: resolved.baseBranch,
+        action: "CHANGE",
+        mode: resolved.mode,
+        candidates: resolved.candidates,
+        stashOnFailure: Boolean(input.stashOnFailure),
+      },
+      idempotencyKey: `worktree:branch:change:${input.requestId}:${worktree.id}`,
+      timeoutSeconds: 600,
+    });
   }
 
   async inspect(id: string, requestId: string) {
@@ -821,6 +1059,27 @@ export class WorktreesService {
         throw new Error("Another operation is active for this codebase");
     }
     return worktree;
+  }
+
+  private async requireRunnableCodebase(id: string): Promise<RunnableCodebase> {
+    const prisma = await getPrismaClient();
+    const codebase = await prisma.codebase.findUnique({
+      where: { id },
+      include: { agent: true, repository: true },
+    });
+    if (!codebase || codebase.availability !== "AVAILABLE") {
+      throw new Error("Codebase is unavailable");
+    }
+    if (!online(codebase.agent)) throw new Error("Agent is offline");
+    if (!capabilities(codebase.agent).includes(WORKTREE_BRANCH_JOB_KIND)) {
+      throw new Error("Agent must be updated to create or change worktrees");
+    }
+    const active = await prisma.agentJob.findFirst({
+      where: { codebaseId: id, status: { in: ACTIVE_STATUSES } },
+    });
+    if (active)
+      throw new Error("Another operation is active for this codebase");
+    return codebase;
   }
 
   async purge(id: string) {
@@ -940,6 +1199,39 @@ export class WorktreesService {
     }
   }
 
+  private async restartWatch(worktreeId: string) {
+    const previous = this.watchDemand.get(worktreeId);
+    if (!previous) return;
+    try {
+      await previous.started;
+      if (this.watchDemand.get(worktreeId) !== previous) return;
+      await this.runWatchAction(previous, "STOP");
+      if (this.watchDemand.get(worktreeId) !== previous) return;
+      const worktree = await this.requireRunnable(
+        worktreeId,
+        WORKTREE_WATCH_JOB_KIND,
+        true,
+      );
+      const demand = {
+        subscribers: previous.subscribers,
+        watchId: randomUUID(),
+        agentId: worktree.codebase.agentId,
+        worktreeId: worktree.id,
+        codebaseId: worktree.codebaseId,
+        payload: this.payload(worktree),
+        started: Promise.resolve(),
+      } satisfies WorktreeWatchDemand;
+      demand.started = this.runWatchAction(demand, "START");
+      this.watchDemand.set(worktreeId, demand);
+      await demand.started;
+    } catch (error) {
+      console.error(
+        "Could not restart worktree watcher:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   private publish(worktreeId: string | null, codebaseId: string | null) {
     agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
       worktreeOverviewChanged: { worktreeId, codebaseId },
@@ -986,6 +1278,75 @@ export class WorktreesService {
     if (updated.count > 0) {
       this.publish(current.id, current.codebaseId);
     }
+  }
+
+  private async projectBranchOperation(job: {
+    codebaseId: string | null;
+    worktreeId: string | null;
+    resultJson: string | null;
+    status: string;
+  }) {
+    if (!job.codebaseId || job.status !== "SUCCEEDED" || !job.resultJson) {
+      return;
+    }
+    const result = resultObject({ ...job, error: null });
+    if (!result.worktree || typeof result.baseBranch !== "string") return;
+    const item = parseWorktreeInventoryItem(result.worktree);
+    const prisma = await getPrismaClient();
+    const codebase = await prisma.codebase.findUnique({
+      where: { id: job.codebaseId },
+      select: { localBranchesJson: true },
+    });
+    if (!codebase) return;
+    const branchSet = new Set(parseBranches(codebase.localBranchesJson));
+    if (item.branch) branchSet.add(item.branch);
+    let worktreeId = job.worktreeId;
+    await prisma.$transaction(async (transaction) => {
+      await transaction.codebase.update({
+        where: { id: job.codebaseId! },
+        data: {
+          localBranchesJson: JSON.stringify(
+            [...branchSet].sort((first, second) => first.localeCompare(second)),
+          ),
+        },
+      });
+      if (job.worktreeId) {
+        const updated = await transaction.worktree.updateMany({
+          where: { id: job.worktreeId, codebaseId: job.codebaseId! },
+          data: {
+            ...this.inventoryData(item),
+            gitDirectory: item.gitDirectory,
+            baseBranchOverride: result.baseBranch as string,
+            missingAt: null,
+          },
+        });
+        if (updated.count !== 1) throw new Error("Worktree no longer exists");
+        return;
+      }
+      const projected = await transaction.worktree.upsert({
+        where: {
+          codebaseId_gitDirectory: {
+            codebaseId: job.codebaseId!,
+            gitDirectory: item.gitDirectory,
+          },
+        },
+        create: {
+          id: randomUUID(),
+          codebaseId: job.codebaseId!,
+          gitDirectory: item.gitDirectory,
+          ...this.inventoryData(item),
+          baseBranchOverride: result.baseBranch as string,
+        },
+        update: {
+          ...this.inventoryData(item),
+          baseBranchOverride: result.baseBranch as string,
+          missingAt: null,
+        },
+      });
+      worktreeId = projected.id;
+    });
+    this.publish(worktreeId ?? null, job.codebaseId);
+    if (job.worktreeId) await this.restartWatch(job.worktreeId);
   }
 
   private async waitForJob(jobId: string) {

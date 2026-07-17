@@ -42,6 +42,7 @@ type Codebase {
   availability: CodebaseAvailability!
   statusError: String
   defaultBranch: String
+  localBranches: [String!]!
   remoteBranches: [String!]!
   lastCheckedAt: String
   lastFetchedAt: String

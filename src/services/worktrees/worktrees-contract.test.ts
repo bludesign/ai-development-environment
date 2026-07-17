@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
+  worktreeBranchJobPayload,
   worktreeJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -14,6 +15,7 @@ describe("worktree agent contract", () => {
         codebaseId: "codebase-1",
         complete: true,
         defaultBranch: "main",
+        localBranches: ["main"],
         remoteBranches: ["main", "release"],
         fetchedAt: null,
         fetchAttemptedAt: null,
@@ -110,5 +112,27 @@ describe("worktree agent contract", () => {
         observedAt: new Date(0).toISOString(),
       }),
     ).toThrow("non-negative integer");
+  });
+
+  test("validates create and change branch job payloads", () => {
+    const payload = worktreeBranchJobPayload({
+      codebaseId: "codebase-1",
+      rootFolder: "/repo",
+      folder: null,
+      gitDirectory: null,
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      action: "CREATE",
+      mode: "NEW",
+      candidates: ["feature/APP-123", "feature/APP-123-2"],
+      stashOnFailure: false,
+    });
+    expect(payload.candidates).toHaveLength(2);
+    expect(() =>
+      worktreeBranchJobPayload({
+        ...payload,
+        candidates: ["invalid..branch"],
+      }),
+    ).toThrow("Invalid Git branch name");
   });
 });

@@ -1,9 +1,10 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
+  worktreeBranchJobPayload,
   worktreeJobPayload,
   worktreeWatchJobPayload,
   type WorktreeActivityReport,
@@ -450,6 +451,7 @@ export async function discoverWorktrees(
 ): Promise<{
   complete: boolean;
   defaultBranch: string | null;
+  localBranches: string[];
   remoteBranches: string[];
   worktrees: WorktreeInventoryItem[];
 }> {
@@ -485,13 +487,26 @@ export async function discoverWorktrees(
         : null;
     defaultBranch = localDefaultBranch || knownDefaultBranch;
   }
-  const branchesResult = await git(
-    rootFolder,
-    ["for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin"],
-    timeoutMs,
-    signal,
-  );
-  const remoteBranches = branchesResult.stdout
+  const [localBranchesResult, remoteBranchesResult] = await Promise.all([
+    git(
+      rootFolder,
+      ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads"],
+      timeoutMs,
+      signal,
+    ),
+    git(
+      rootFolder,
+      ["for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin"],
+      timeoutMs,
+      signal,
+    ),
+  ]);
+  const localBranches = localBranchesResult.stdout
+    .split("\n")
+    .map((branch) => branch.trim())
+    .filter(Boolean)
+    .sort((first, second) => first.localeCompare(second));
+  const remoteBranches = remoteBranchesResult.stdout
     .split("\n")
     .map((branch) => branch.trim())
     .filter((branch) => branch && branch !== "HEAD")
@@ -519,7 +534,13 @@ export async function discoverWorktrees(
       ),
     );
   }
-  return { complete: true, defaultBranch, remoteBranches, worktrees };
+  return {
+    complete: true,
+    defaultBranch,
+    localBranches,
+    remoteBranches,
+    worktrees,
+  };
 }
 
 function parseNumstat(
@@ -729,6 +750,7 @@ export const watchWorktree: AgentJobHandler = async (
       watcher.unref();
       entry.watchers.push(watcher);
     }
+    scheduleWorktreeActivity(entry);
   } catch (error) {
     closeWorktreeWatch(entry);
     activeWorktreeWatches.delete(input.gitDirectory);
@@ -753,6 +775,269 @@ export const inspectWorktree: AgentJobHandler = async (
       timeoutMs,
       signal,
     ),
+  };
+};
+
+async function refExists(
+  folder: string,
+  ref: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const result = await git(
+    folder,
+    ["show-ref", "--verify", "--quiet", ref],
+    timeoutMs,
+    signal,
+  );
+  return result.exitCode === 0;
+}
+
+async function currentBranch(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const result = await git(
+    folder,
+    ["symbolic-ref", "--short", "-q", "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  return result.exitCode === 0 ? result.stdout.trim() : null;
+}
+
+async function chooseNewBranch(
+  folder: string,
+  candidates: string[],
+  allowedCurrentBranch: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  for (const candidate of candidates) {
+    if (candidate === allowedCurrentBranch) return candidate;
+    const [local, remote] = await Promise.all([
+      refExists(folder, `refs/heads/${candidate}`, timeoutMs, signal),
+      refExists(folder, `refs/remotes/origin/${candidate}`, timeoutMs, signal),
+    ]);
+    if (!local && !remote) return candidate;
+  }
+  throw new Error("Every generated ticket branch name is already taken");
+}
+
+async function validateBranchRoot(
+  input: ReturnType<typeof worktreeBranchJobPayload>,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const rootFolder = await realpath(input.rootFolder);
+  if (!(await stat(rootFolder)).isDirectory()) {
+    throw new Error("Base repository is missing");
+  }
+  if ((await origin(rootFolder, timeoutMs, signal)) !== input.expectedOrigin) {
+    throw new Error("Repository origin changed; refresh the codebase");
+  }
+  if (
+    !(await refExists(
+      rootFolder,
+      `refs/remotes/origin/${input.baseBranch}`,
+      timeoutMs,
+      signal,
+    ))
+  ) {
+    throw new Error(
+      "The selected origin base branch is unavailable; fetch and try again",
+    );
+  }
+  return rootFolder;
+}
+
+async function existingBranchArgs(
+  folder: string,
+  branch: string,
+  action: "CREATE" | "CHANGE",
+  targetFolder: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const [local, remote] = await Promise.all([
+    refExists(folder, `refs/heads/${branch}`, timeoutMs, signal),
+    refExists(folder, `refs/remotes/origin/${branch}`, timeoutMs, signal),
+  ]);
+  if (!local && !remote) {
+    throw new Error(
+      `Existing branch ${branch} is unavailable; refresh and try again`,
+    );
+  }
+  if (action === "CREATE") {
+    return local
+      ? ["worktree", "add", targetFolder!, branch]
+      : [
+          "worktree",
+          "add",
+          "--track",
+          "-b",
+          branch,
+          targetFolder!,
+          `refs/remotes/origin/${branch}`,
+        ];
+  }
+  return local
+    ? ["switch", branch]
+    : ["switch", "--track", "-c", branch, `refs/remotes/origin/${branch}`];
+}
+
+export const branchWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeBranchJobPayload(payload);
+  const rootFolder = await validateBranchRoot(input, timeoutMs, signal);
+  const changeFolder =
+    input.action === "CHANGE"
+      ? await validateWorktree(
+          {
+            codebaseId: input.codebaseId,
+            folder: input.folder!,
+            gitDirectory: input.gitDirectory!,
+            expectedOrigin: input.expectedOrigin,
+            baseBranch: input.baseBranch,
+          },
+          timeoutMs,
+          signal,
+        )
+      : null;
+  const beforeBranch = changeFolder
+    ? await currentBranch(changeFolder, timeoutMs, signal)
+    : null;
+  const branch =
+    input.mode === "NEW"
+      ? await chooseNewBranch(
+          rootFolder,
+          input.candidates,
+          input.action === "CHANGE" ? beforeBranch : null,
+          timeoutMs,
+          signal,
+        )
+      : input.candidates[0]!;
+  const targetFolder =
+    input.action === "CREATE"
+      ? join(
+          dirname(rootFolder),
+          `${basename(rootFolder)}-${branch.replaceAll("/", "-")}`,
+        )
+      : changeFolder!;
+
+  if (input.action === "CREATE") {
+    try {
+      await stat(targetFolder);
+      throw new Error(`Worktree folder already exists: ${targetFolder}`);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  let args: string[];
+  if (input.mode === "EXISTING") {
+    args = await existingBranchArgs(
+      rootFolder,
+      branch,
+      input.action,
+      input.action === "CREATE" ? targetFolder : null,
+      timeoutMs,
+      signal,
+    );
+  } else if (input.action === "CREATE") {
+    args = [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      branch,
+      targetFolder,
+      `refs/remotes/origin/${input.baseBranch}`,
+    ];
+  } else if (branch === beforeBranch) {
+    args = [];
+  } else {
+    args = [
+      "switch",
+      "--no-track",
+      "-c",
+      branch,
+      `refs/remotes/origin/${input.baseBranch}`,
+    ];
+  }
+
+  let stashed = false;
+  if (args.length > 0) {
+    let switched = await git(
+      input.action === "CREATE" ? rootFolder : targetFolder,
+      args,
+      timeoutMs,
+      signal,
+    );
+    if (
+      switched.exitCode !== 0 &&
+      input.action === "CHANGE" &&
+      input.stashOnFailure
+    ) {
+      const stash = requireSuccess(
+        await git(
+          targetFolder,
+          [
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            `Automatic stash before switching to ${branch}`,
+          ],
+          timeoutMs,
+          signal,
+        ),
+        "Could not stash worktree changes",
+      );
+      stashed = !stash.stdout.toLowerCase().includes("no local changes");
+      switched = await git(targetFolder, args, timeoutMs, signal);
+      if (switched.exitCode !== 0) {
+        throw new Error(
+          `${cleanError(switched.stderr || "Branch switch failed after stashing")}. The stash was preserved.`,
+        );
+      }
+    } else {
+      requireSuccess(
+        switched,
+        input.action === "CREATE"
+          ? "Could not create the worktree"
+          : "Could not change the worktree branch",
+      );
+    }
+  }
+
+  const worktree = await inspectWorktreeItem(
+    targetFolder,
+    rootFolder,
+    input.baseBranch,
+    targetFolder === rootFolder,
+    Math.min(timeoutMs, 30_000),
+    signal,
+  );
+  if (worktree.availability !== "AVAILABLE") {
+    throw new Error(worktree.error || "Could not inspect the updated worktree");
+  }
+  return {
+    ...successfulProcess,
+    worktree,
+    branch,
+    baseBranch: input.baseBranch,
+    stashed,
   };
 };
 

@@ -105,6 +105,7 @@ model Codebase {
   availability       String             @default("AVAILABLE")
   statusError        String?
   defaultBranch      String?
+  localBranchesJson  String             @default("[]")
   remoteBranchesJson String             @default("[]")
   lastCheckedAt      DateTime?
   lastFetchedAt      DateTime?
@@ -287,6 +288,7 @@ model JiraProject {
   ticketAssignmentFilter String       @default("ALL")
   hideCompletedTickets   Boolean      @default(false)
   completedStatusIdsJson String       @default("[]")
+  branchNamingScript     String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
   sources                JiraSource[]

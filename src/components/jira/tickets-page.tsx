@@ -87,7 +87,7 @@ import type {
 } from "@/services/jira/types";
 
 const SOURCE_FIELDS = "id projectId name kind value boardId position";
-const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds sources { ${SOURCE_FIELDS} }`;
+const PROJECT_FIELDS = `id jiraId key name avatarUrl position ticketAssignmentFilter hideCompletedTickets completedStatusIds branchNamingScript sources { ${SOURCE_FIELDS} }`;
 const SUMMARY_FIELDS =
   "id key summary statusId status statusCategory issueType priority assignee assigneeAccountId assigneeAvatarUrl projectKey updatedAt";
 const CACHE_FIELDS = "source stale fetchedAt";
@@ -635,6 +635,7 @@ function JiraManagerDialog({
     useState<JiraTicketAssignmentFilter>("ALL");
   const [hideCompletedTickets, setHideCompletedTickets] = useState(false);
   const [completedStatusIds, setCompletedStatusIds] = useState<string[]>([]);
+  const [branchNamingScript, setBranchNamingScript] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -670,6 +671,7 @@ function JiraManagerDialog({
       setAssignmentFilter(selectedProject.ticketAssignmentFilter);
       setHideCompletedTickets(selectedProject.hideCompletedTickets);
       setCompletedStatusIds(selectedProject.completedStatusIds);
+      setBranchNamingScript(selectedProject.branchNamingScript ?? "");
       setStatusesLoading(true);
       try {
         const data = await controlPlaneRequest<{
@@ -832,6 +834,27 @@ function JiraManagerDialog({
         { input },
       );
       onProjectsChanged(data.updateJiraProjectDisplaySettings);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveBranchNaming = async () => {
+    if (!selectedProject) return;
+    setBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        updateJiraProjectBranchNaming: JiraProjectView[];
+      }>(
+        `mutation UpdateJiraProjectBranchNaming($projectId: ID!, $branchNamingScript: String!) {
+          updateJiraProjectBranchNaming(projectId: $projectId, branchNamingScript: $branchNamingScript) { ${PROJECT_FIELDS} }
+        }`,
+        { projectId: selectedProject.id, branchNamingScript },
+      );
+      onProjectsChanged(data.updateJiraProjectBranchNaming);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -1140,6 +1163,45 @@ function JiraManagerDialog({
                     type="button"
                   >
                     {t("saveDisplaySettings")}
+                  </Button>
+                </div>
+              </section>
+            )}
+            {selectedProject && (
+              <section className="min-w-0 space-y-3 rounded-lg border p-3">
+                <div>
+                  <h4 className="text-sm font-medium">{t("branchNaming")}</h4>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("branchNamingDescription")}
+                  </p>
+                </div>
+                <div>
+                  <Label
+                    className="mb-1 block text-xs font-medium"
+                    htmlFor="jira-branch-naming-script"
+                  >
+                    {t("branchNamingFunction")}
+                  </Label>
+                  <Textarea
+                    className="min-h-48 font-mono text-xs"
+                    id="jira-branch-naming-script"
+                    onChange={(event) =>
+                      setBranchNamingScript(event.target.value)
+                    }
+                    spellCheck={false}
+                    value={branchNamingScript}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("branchNamingFunctionHelp")}
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    disabled={busy || !branchNamingScript.trim()}
+                    onClick={() => void saveBranchNaming()}
+                    type="button"
+                  >
+                    {t("saveBranchNaming")}
                   </Button>
                 </div>
               </section>

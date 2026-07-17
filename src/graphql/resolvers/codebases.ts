@@ -41,6 +41,16 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       iso(value.lastFetchedAt),
     lastFetchAttemptAt: (value: { lastFetchAttemptAt: Date | null }) =>
       iso(value.lastFetchAttemptAt),
+    localBranches: (value: { localBranchesJson: string }) => {
+      try {
+        const parsed: unknown = JSON.parse(value.localBranchesJson);
+        return Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === "string")
+          : [];
+      } catch {
+        return [];
+      }
+    },
     remoteBranches: (value: { remoteBranchesJson: string }) => {
       try {
         const parsed: unknown = JSON.parse(value.remoteBranchesJson);

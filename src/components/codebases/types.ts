@@ -21,6 +21,7 @@ export type Codebase = {
     "AVAILABLE" | "MISSING" | "NOT_REPOSITORY" | "ORIGIN_MISMATCH" | "ERROR";
   statusError: string | null;
   defaultBranch: string | null;
+  localBranches: string[];
   remoteBranches: string[];
   lastCheckedAt: string | null;
   lastFetchedAt: string | null;

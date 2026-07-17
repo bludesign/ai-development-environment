@@ -17,10 +17,12 @@ import {
 } from "@ai-development-environment/agent-contract/codebases";
 import {
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_JOB_KINDS,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
+  worktreeBranchJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -101,6 +103,10 @@ export function validateJob(kind: string, payload: unknown): void {
     kind === CODEBASE_FETCH_JOB_KIND
   ) {
     codebaseJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_BRANCH_JOB_KIND) {
+    worktreeBranchJobPayload(value);
     return;
   }
   if (

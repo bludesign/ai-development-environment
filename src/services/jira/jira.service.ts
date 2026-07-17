@@ -29,8 +29,13 @@ import type {
   JiraTicketAssignmentFilter,
   JiraTicketDetail,
   JiraTicketSummary,
+  JiraBranchTicket,
   PaginatedResult,
 } from "./types";
+import {
+  DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
+  validateJiraBranchNamingScript,
+} from "./branch-naming";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -516,6 +521,8 @@ export class JiraService {
       ),
       hideCompletedTickets: project.hideCompletedTickets,
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
+      branchNamingScript:
+        project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
       sources: project.sources.map(sourceView),
     }));
   }
@@ -582,6 +589,27 @@ export class JiraService {
         hideCompletedTickets: input.hideCompletedTickets,
         completedStatusIdsJson: JSON.stringify(completedStatusIds),
       },
+    });
+    return this.listProjects();
+  }
+
+  async updateProjectBranchNaming(
+    projectId: string,
+    branchNamingScript: string,
+  ): Promise<JiraProjectView[]> {
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { id: projectId },
+      select: { key: true },
+    });
+    if (!project) throw new Error("Jira project not found");
+    const validated = validateJiraBranchNamingScript(
+      branchNamingScript,
+      project.key,
+    );
+    await prisma.jiraProject.update({
+      where: { id: projectId },
+      data: { branchNamingScript: validated },
     });
     return this.listProjects();
   }
@@ -662,6 +690,7 @@ export class JiraService {
         name,
         avatarUrl: asString(avatars["48x48"]) ?? asString(avatars["32x32"]),
         position: (aggregate._max.position ?? -1) + 1,
+        branchNamingScript: DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
       },
     });
     return this.listProjects();
@@ -853,6 +882,54 @@ export class JiraService {
       cacheMeta(detail),
       combineCacheMeta(commentResults),
     );
+  }
+
+  async branchTicket(issueKey: string): Promise<JiraBranchTicket> {
+    const key = issueKey.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key)) {
+      throw new Error("Invalid Jira issue key");
+    }
+    const projectKey = key.replace(/-\d+$/, "");
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { key: projectKey },
+      select: { key: true, branchNamingScript: true },
+    });
+    if (!project) {
+      throw new Error(
+        `Jira project ${projectKey} is not managed; add it in Manage Jira projects and sources`,
+      );
+    }
+    const result = await this.cachedCall<RawIssue>({
+      operation: "ISSUE_BRANCH",
+      params: { issueKey: key, fields: ["summary", "issuetype", "project"] },
+      requestSummary: `Branch details for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issues.getIssue<RawIssue>({
+          issueIdOrKey: key,
+          fields: ["summary", "issuetype", "project"],
+          updateHistory: false,
+        });
+      },
+    });
+    const fields = asRecord(result.value.fields);
+    const returnedKey =
+      asString(asRecord(fields.project).key) ??
+      projectKeyForIssue(result.value);
+    if (returnedKey !== project.key) {
+      throw new Error(
+        `Jira ticket ${key} does not belong to project ${project.key}`,
+      );
+    }
+    return {
+      ticketKey: result.value.key ?? key,
+      ticketTitle: asString(fields.summary) ?? key,
+      ticketType: asString(asRecord(fields.issuetype).name),
+      projectKey: project.key,
+      branchNamingScript:
+        project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
+    };
   }
 
   async clearCache(): Promise<boolean> {

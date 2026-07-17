@@ -3,10 +3,12 @@ import type { CodebaseSyncState } from "./codebases.ts";
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
+export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
 ] as const;
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
@@ -28,6 +30,8 @@ export const WORKTREE_OPERATIONS = [
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
 export type WorktreeWatchAction = "START" | "STOP";
+export type WorktreeBranchAction = "CREATE" | "CHANGE";
+export type WorktreeBranchJobMode = "NEW" | "EXISTING";
 
 export type WorktreeActivityReport = {
   codebaseId: string;
@@ -69,12 +73,32 @@ export type CodebaseWorktreeReport = {
   codebaseId: string;
   complete: boolean;
   defaultBranch: string | null;
+  localBranches: string[];
   remoteBranches: string[];
   fetchedAt: string | null;
   fetchAttemptedAt: string | null;
   fetchError: string | null;
   worktrees: WorktreeInventoryItem[];
 };
+
+export function validGitBranchName(value: string): boolean {
+  if (!value || value.length > 255 || value === "@" || value.startsWith("-"))
+    return false;
+  if (
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.endsWith(".") ||
+    value.includes("//") ||
+    value.includes("..") ||
+    value.includes("@{") ||
+    /[\u0000-\u0020\u007f~^:?*[\\]/.test(value)
+  ) {
+    return false;
+  }
+  return value
+    .split("/")
+    .every((part) => part && !part.startsWith(".") && !part.endsWith(".lock"));
+}
 
 export type WorktreeCommit = {
   sha: string;
@@ -248,6 +272,7 @@ export function parseCodebaseWorktreeReport(
     throw new Error("worktree report.complete must be a boolean");
   }
   if (
+    !Array.isArray(report.localBranches) ||
     !Array.isArray(report.remoteBranches) ||
     !Array.isArray(report.worktrees)
   ) {
@@ -259,6 +284,9 @@ export function parseCodebaseWorktreeReport(
     defaultBranch: nullableString(
       report.defaultBranch,
       "worktree report.defaultBranch",
+    ),
+    localBranches: report.localBranches.map((branch, index) =>
+      stringValue(branch, `worktree report.localBranches[${index}]`),
     ),
     remoteBranches: report.remoteBranches.map((branch, index) =>
       stringValue(branch, `worktree report.remoteBranches[${index}]`),
@@ -272,6 +300,103 @@ export function parseCodebaseWorktreeReport(
     worktrees: report.worktrees.map((item, index) =>
       parseWorktreeInventoryItem(item, `worktree report.worktrees[${index}]`),
     ),
+  };
+}
+
+export function worktreeBranchJobPayload(value: unknown): {
+  codebaseId: string;
+  rootFolder: string;
+  folder: string | null;
+  gitDirectory: string | null;
+  expectedOrigin: string;
+  baseBranch: string;
+  action: WorktreeBranchAction;
+  mode: WorktreeBranchJobMode;
+  candidates: string[];
+  stashOnFailure: boolean;
+} {
+  const payload = objectValue(value, "worktree branch payload");
+  const allowed = new Set([
+    "codebaseId",
+    "rootFolder",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "action",
+    "mode",
+    "candidates",
+    "stashOnFailure",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree branch payload field: ${unexpected}`);
+  }
+  if (!(payload.action === "CREATE" || payload.action === "CHANGE")) {
+    throw new Error("worktree branch payload.action is invalid");
+  }
+  if (!(payload.mode === "NEW" || payload.mode === "EXISTING")) {
+    throw new Error("worktree branch payload.mode is invalid");
+  }
+  if (
+    !Array.isArray(payload.candidates) ||
+    payload.candidates.length < 1 ||
+    payload.candidates.length > 100
+  ) {
+    throw new Error("worktree branch payload.candidates is invalid");
+  }
+  const candidates = payload.candidates.map((candidate, index) => {
+    const branch = stringValue(
+      candidate,
+      `worktree branch payload.candidates[${index}]`,
+    );
+    if (!validGitBranchName(branch)) {
+      throw new Error(`Invalid Git branch name: ${branch}`);
+    }
+    return branch;
+  });
+  if (new Set(candidates).size !== candidates.length) {
+    throw new Error("worktree branch candidates must be unique");
+  }
+  const folder = nullableString(
+    payload.folder,
+    "worktree branch payload.folder",
+  );
+  const gitDirectory = nullableString(
+    payload.gitDirectory,
+    "worktree branch payload.gitDirectory",
+  );
+  if (payload.action === "CHANGE" && (!folder || !gitDirectory)) {
+    throw new Error(
+      "Changing a branch requires a worktree folder and Git directory",
+    );
+  }
+  if (typeof payload.stashOnFailure !== "boolean") {
+    throw new Error("worktree branch payload.stashOnFailure must be a boolean");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree branch payload.codebaseId",
+    ),
+    rootFolder: stringValue(
+      payload.rootFolder,
+      "worktree branch payload.rootFolder",
+    ),
+    folder,
+    gitDirectory,
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree branch payload.expectedOrigin",
+    ),
+    baseBranch: stringValue(
+      payload.baseBranch,
+      "worktree branch payload.baseBranch",
+    ),
+    action: payload.action,
+    mode: payload.mode,
+    candidates,
+    stashOnFailure: payload.stashOnFailure,
   };
 }
 

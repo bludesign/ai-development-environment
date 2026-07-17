@@ -17,12 +17,14 @@ import {
 } from "./codebases.js";
 import {
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   type WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
   inspectWorktree,
+  branchWorktree,
   operateWorktree,
   watchWorktree,
 } from "./worktrees.js";
@@ -47,6 +49,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_REFRESH_JOB_KIND]: refreshCodebase,
   [CODEBASE_FETCH_JOB_KIND]: fetchCodebase,
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
+  [WORKTREE_BRANCH_JOB_KIND]: branchWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
   [WORKTREE_WATCH_JOB_KIND]: watchWorktree,
 };

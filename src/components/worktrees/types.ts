@@ -50,6 +50,7 @@ export type Worktree = {
 export type WorktreeCodebaseGroup = {
   codebase: Codebase & {
     defaultBranch: string | null;
+    localBranches: string[];
     remoteBranches: string[];
     lastFetchAttemptAt: string | null;
     lastFetchError: string | null;

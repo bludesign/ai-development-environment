@@ -129,6 +129,7 @@ export class CodebaseMonitor {
                 inventory = {
                   complete: false,
                   defaultBranch: null,
+                  localBranches: [],
                   remoteBranches: [],
                   worktrees: [],
                 };
