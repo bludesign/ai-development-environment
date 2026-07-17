@@ -86,6 +86,7 @@ export function WorktreeBranchForm({
   onSubmit,
   onSubmitError,
   recovery,
+  fixedTicketKey,
 }: {
   target: WorktreeBranchTarget;
   busy: boolean;
@@ -93,10 +94,12 @@ export function WorktreeBranchForm({
   onSubmit: (selection: WorktreeBranchSelection) => Promise<void>;
   onSubmitError?: (selection: WorktreeBranchSelection, error: Error) => void;
   recovery?: ReactNode;
+  fixedTicketKey?: string;
 }) {
   const t = useTranslations("worktrees");
   const id = useId();
-  const [mode, setMode] = useRememberedBranchMode();
+  const [rememberedMode, setRememberedMode] = useRememberedBranchMode();
+  const mode: WorktreeBranchMode = fixedTicketKey ? "TICKET" : rememberedMode;
   const [branchName, setBranchName] = useState("");
   const [existingBranch, setExistingBranch] = useState(
     target.currentBranch ?? "",
@@ -104,7 +107,7 @@ export function WorktreeBranchForm({
   const [baseBranch, setBaseBranch] = useState(
     target.currentBaseBranch ?? target.defaultBranch ?? "",
   );
-  const [ticketKey, setTicketKey] = useState("");
+  const [ticketKey, setTicketKey] = useState(fixedTicketKey ?? "");
   const [preview, setPreview] = useState<TicketPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,21 +214,23 @@ export function WorktreeBranchForm({
 
   return (
     <form className="space-y-4" onSubmit={(event) => void submit(event)}>
-      <Tabs
-        onValueChange={(value) => {
-          setPreview(null);
-          setPreviewLoading(false);
-          setError(null);
-          setMode(value as WorktreeBranchMode);
-        }}
-        value={mode}
-      >
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="NEW">{t("newBranch")}</TabsTrigger>
-          <TabsTrigger value="EXISTING">{t("existingBranch")}</TabsTrigger>
-          <TabsTrigger value="TICKET">{t("fromTicket")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {!fixedTicketKey && (
+        <Tabs
+          onValueChange={(value) => {
+            setPreview(null);
+            setPreviewLoading(false);
+            setError(null);
+            setRememberedMode(value as WorktreeBranchMode);
+          }}
+          value={mode}
+        >
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="NEW">{t("newBranch")}</TabsTrigger>
+            <TabsTrigger value="EXISTING">{t("existingBranch")}</TabsTrigger>
+            <TabsTrigger value="TICKET">{t("fromTicket")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
 
       {mode === "NEW" && (
         <div>
@@ -273,6 +278,7 @@ export function WorktreeBranchForm({
                 setError(null);
               }}
               placeholder="TICKET-123"
+              readOnly={Boolean(fixedTicketKey)}
               value={ticketKey}
             />
           </div>

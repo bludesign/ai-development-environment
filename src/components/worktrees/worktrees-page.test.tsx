@@ -98,6 +98,7 @@ describe("WorktreesPage", () => {
               osVersion: "macOS",
               architecture: "arm64",
               capabilities: [
+                "worktree.branch",
                 "worktree.inspect",
                 "worktree.operation",
                 "worktree.watch",
@@ -279,6 +280,31 @@ describe("WorktreesPage", () => {
     ).toContain("bg-fuchsia-500");
   });
 
+  test("keeps the change branch popover open after its menu closes", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Tags: feature/AIDE-24" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Change branch" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-slot="dropdown-menu-content"]'),
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-slot="popover-content"]'),
+      ).toBeTruthy();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Change branch" }),
+    ).toBeDefined();
+  });
+
   test("opens pull request actions from the PR badge", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
@@ -327,10 +353,14 @@ describe("WorktreesPage", () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
 
-    expect(screen.queryByRole("combobox", { name: "Base branch" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Edit base branch" }));
+    const editBase = screen.getByRole("button", { name: "Edit base branch" });
+    const baseControl = editBase.parentElement!;
+    expect(baseControl.querySelector('[role="combobox"]')).toBeNull();
+    fireEvent.click(editBase);
 
-    expect(document.querySelector('[data-slot="select-trigger"]')).toBeTruthy();
+    expect(
+      baseControl.querySelector('[data-slot="select-trigger"]'),
+    ).toBeTruthy();
     expect(await screen.findAllByRole("option")).toHaveLength(2);
   });
 

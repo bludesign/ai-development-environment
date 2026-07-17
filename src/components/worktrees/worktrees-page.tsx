@@ -112,6 +112,7 @@ import {
   type WorktreeBranchSelection,
   type WorktreeBranchTarget,
 } from "./worktree-branch-form";
+import { waitForWorktreeJob } from "./worktree-jobs";
 
 import type {
   Worktree,
@@ -229,29 +230,6 @@ export function worktreeChangeActionState(
       ? ("UNSTAGE_ALL" as const)
       : ("STAGE_ALL" as const),
   };
-}
-
-async function waitForWorktreeJob(jobId: string): Promise<void> {
-  const deadline = new Date().getTime() + 10 * 60_000;
-  while (new Date().getTime() < deadline) {
-    await new Promise((resolve) => window.setTimeout(resolve, 750));
-    const data = await controlPlaneRequest<{
-      agentJob: { status: string; error: string | null } | null;
-    }>("query WorktreeJob($id: ID!) { agentJob(id: $id) { status error } }", {
-      id: jobId,
-    });
-    const job = data.agentJob;
-    if (!job || ["QUEUED", "RUNNING"].includes(job.status)) continue;
-    if (job.status !== "SUCCEEDED") {
-      throw new Error(
-        job.error || `Worktree operation ${job.status.toLowerCase()}`,
-      );
-    }
-    return;
-  }
-  throw new Error(
-    "Worktree operation is still running; check the agent job history",
-  );
 }
 
 async function inspectWorktree(worktreeId: string): Promise<WorktreeDetail> {
@@ -1637,6 +1615,7 @@ function WorktreeMenus(
   const [failedSelection, setFailedSelection] =
     useState<WorktreeBranchSelection | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const openChangeBranchOnMenuClose = useRef(false);
   const assigned = new Set(worktree.tags.map((tag) => tag.id));
   const assign = async (tagId: string, checked: boolean) => {
     const tagIds = checked
@@ -1736,6 +1715,12 @@ function WorktreeMenus(
           align={contentAlign}
           alignOffset={contentAlignOffset}
           className="w-72"
+          onCloseAutoFocus={(event) => {
+            if (!openChangeBranchOnMenuClose.current) return;
+            openChangeBranchOnMenuClose.current = false;
+            event.preventDefault();
+            setChangeOpen(true);
+          }}
         >
           <DropdownMenuItem
             disabled={
@@ -1743,7 +1728,9 @@ function WorktreeMenus(
               worktree.availability !== "AVAILABLE" ||
               Boolean(worktree.activeJob)
             }
-            onSelect={() => setChangeOpen(true)}
+            onSelect={() => {
+              openChangeBranchOnMenuClose.current = true;
+            }}
           >
             <GitBranch /> {t("changeBranch")}
           </DropdownMenuItem>
