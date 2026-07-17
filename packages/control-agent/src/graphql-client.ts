@@ -34,6 +34,7 @@ export type AgentCodebaseRegistration = {
   folder: string;
   canonicalOrigin: string;
   defaultBranch: string | null;
+  keepBaseBranchUpToDate: boolean;
   lastFetchedAt: string | null;
   lastFetchAttemptAt: string | null;
   worktrees: Array<{
@@ -188,6 +189,7 @@ export class AgentGraphQLClient {
         folder: string;
         canonicalOrigin: string;
         defaultBranch: string | null;
+        keepBaseBranchUpToDate: boolean;
         lastFetchedAt: string | null;
         lastFetchAttemptAt: string | null;
         worktrees: Array<{
@@ -197,7 +199,7 @@ export class AgentGraphQLClient {
       }>;
     }>(`query AgentCodebases {
       agentCodebases {
-        id folder canonicalOrigin defaultBranch lastFetchedAt lastFetchAttemptAt
+        id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
         worktrees { gitDirectory baseBranchOverride }
       }
     }`);
@@ -212,7 +214,7 @@ export class AgentGraphQLClient {
         refreshIntervalSeconds
         fetchIntervalSeconds
         codebases {
-          id folder canonicalOrigin defaultBranch lastFetchedAt lastFetchAttemptAt
+          id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
           worktrees { gitDirectory baseBranchOverride }
         }
       }

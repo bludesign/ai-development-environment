@@ -574,6 +574,8 @@
     "cancel": "Abbrechen",
     "confirm": "Codebasis bestätigen",
     "editTitle": "Repository-Details bearbeiten",
+    "keepBaseBranchUpToDate": "Basis-Branch aktuell halten",
+    "keepBaseBranchUpToDateHelp": "Nach einem erfolgreichen Abruf wird der Basis-Branch per Fast-Forward aktualisiert, wenn keine vorgemerkten Änderungen vorhanden sind. Diese Repository-Einstellung gilt für alle Agenten.",
     "save": "Speichern",
     "remove": "Entfernen",
     "confirmRemoveTitle": "Registrierung der Codebasis entfernen?",

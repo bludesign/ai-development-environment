@@ -119,7 +119,12 @@ export class CodebasesService {
         defaultBranch: true,
         lastFetchedAt: true,
         lastFetchAttemptAt: true,
-        repository: { select: { canonicalOrigin: true } },
+        repository: {
+          select: {
+            canonicalOrigin: true,
+            keepBaseBranchUpToDate: true,
+          },
+        },
         worktrees: {
           where: { missingAt: null },
           select: { gitDirectory: true, baseBranchOverride: true },
@@ -369,6 +374,7 @@ export class CodebasesService {
     nameValue: string,
     descriptionValue: string,
     jiraBranchRegexValue?: string | null,
+    keepBaseBranchUpToDate = true,
   ) {
     const name = nameValue.trim();
     const description = descriptionValue.trim();
@@ -389,7 +395,12 @@ export class CodebasesService {
     const prisma = await getPrismaClient();
     const repository = await prisma.codebaseRepository.update({
       where: { id },
-      data: { name, description, jiraBranchRegex },
+      data: {
+        name,
+        description,
+        jiraBranchRegex,
+        keepBaseBranchUpToDate,
+      },
     });
     this.publish(null, id);
     return repository;
@@ -499,6 +510,15 @@ export class CodebasesService {
               codebaseId: codebase.id,
               folder: codebase.folder,
               expectedOrigin: codebase.repository.canonicalOrigin,
+              ...(kind === CODEBASE_FETCH_JOB_KIND && codebase.defaultBranch
+                ? { baseBranch: codebase.defaultBranch }
+                : {}),
+              ...(kind === CODEBASE_FETCH_JOB_KIND
+                ? {
+                    keepBaseBranchUpToDate:
+                      codebase.repository.keepBaseBranchUpToDate,
+                  }
+                : {}),
             },
             idempotencyKey: `codebase:${kind}:${requestId}:${codebase.id}`,
             timeoutSeconds: kind === CODEBASE_FETCH_JOB_KIND ? 300 : 30,

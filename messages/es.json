@@ -574,6 +574,8 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar base de código",
     "editTitle": "Editar detalles del repositorio",
+    "keepBaseBranchUpToDate": "Mantener actualizada la rama base",
+    "keepBaseBranchUpToDateHelp": "Después de una obtención correcta, la rama base avanza mediante fast-forward cuando no hay cambios preparados. Esta configuración del repositorio se aplica a todos los agentes.",
     "save": "Guardar",
     "remove": "Eliminar",
     "confirmRemoveTitle": "¿Eliminar el registro de la base de código?",

@@ -574,6 +574,8 @@
     "cancel": "Annuler",
     "confirm": "Confirmer la base de code",
     "editTitle": "Modifier les détails du dépôt",
+    "keepBaseBranchUpToDate": "Maintenir la branche de base à jour",
+    "keepBaseBranchUpToDateHelp": "Après une récupération réussie, la branche de base est avancée en mode fast-forward lorsqu’aucune modification n’est indexée. Ce réglage du dépôt s’applique à tous les agents.",
     "save": "Enregistrer",
     "remove": "Supprimer",
     "confirmRemoveTitle": "Supprimer l’enregistrement de la base de code ?",

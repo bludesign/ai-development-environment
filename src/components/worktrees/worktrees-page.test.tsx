@@ -118,6 +118,7 @@ describe("WorktreesPage", () => {
                   name: "Codex",
                   description: "",
                   jiraBranchRegex: null,
+                  keepBaseBranchUpToDate: true,
                   createdAt: new Date(0).toISOString(),
                   updatedAt: new Date(0).toISOString(),
                 },

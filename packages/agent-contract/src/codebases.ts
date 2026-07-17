@@ -86,6 +86,13 @@ function nullableCount(value: unknown, name: string): number | null {
   return value;
 }
 
+function booleanValue(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${name} must be a boolean`);
+  }
+  return value;
+}
+
 function enumValue<T extends string>(
   value: unknown,
   values: readonly T[],
@@ -276,9 +283,17 @@ export function codebaseJobPayload(value: unknown): {
   folder: string;
   codebaseId?: string;
   expectedOrigin?: string;
+  baseBranch?: string;
+  keepBaseBranchUpToDate?: boolean;
 } {
   const payload = objectValue(value, "codebase job payload");
-  const allowed = new Set(["folder", "codebaseId", "expectedOrigin"]);
+  const allowed = new Set([
+    "folder",
+    "codebaseId",
+    "expectedOrigin",
+    "baseBranch",
+    "keepBaseBranchUpToDate",
+  ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected)
     throw new Error(`Unexpected codebase payload field: ${unexpected}`);
@@ -293,6 +308,19 @@ export function codebaseJobPayload(value: unknown): {
           expectedOrigin: stringValue(
             payload.expectedOrigin,
             "payload.expectedOrigin",
+          ),
+        }),
+    ...(payload.baseBranch === undefined
+      ? {}
+      : {
+          baseBranch: stringValue(payload.baseBranch, "payload.baseBranch"),
+        }),
+    ...(payload.keepBaseBranchUpToDate === undefined
+      ? {}
+      : {
+          keepBaseBranchUpToDate: booleanValue(
+            payload.keepBaseBranchUpToDate,
+            "payload.keepBaseBranchUpToDate",
           ),
         }),
   };

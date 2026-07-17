@@ -37,6 +37,7 @@ export type CodebaseRepository = {
   name: string;
   description: string;
   jiraBranchRegex: string | null;
+  keepBaseBranchUpToDate: boolean;
   codebases: Codebase[];
   createdAt: string;
   updatedAt: string;

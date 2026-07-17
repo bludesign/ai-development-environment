@@ -631,6 +631,9 @@ const mockTranslations = {
     cancel: "Cancel",
     confirm: "Confirm codebase",
     editTitle: "Edit repository details",
+    keepBaseBranchUpToDate: "Keep base branch up to date",
+    keepBaseBranchUpToDateHelp:
+      "After a successful fetch, fast-forward the base branch when there are no staged changes. This repository setting applies to every agent.",
     save: "Save",
     remove: "Remove",
     confirmRemoveTitle: "Remove codebase registration?",

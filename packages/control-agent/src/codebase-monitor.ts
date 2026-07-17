@@ -7,7 +7,10 @@ import {
 import type { CodebaseWorktreeReport } from "@ai-development-environment/agent-contract/worktrees";
 
 import type { AgentGraphQLClient } from "./graphql-client.js";
-import { inspectCodebase } from "./handlers/codebases.js";
+import {
+  inspectCodebase,
+  updateBaseBranchAfterFetch,
+} from "./handlers/codebases.js";
 import { discoverWorktrees } from "./handlers/worktrees.js";
 import { captureCommand } from "./capture-command.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
@@ -82,6 +85,17 @@ export class CodebaseMonitor {
                   },
                 });
                 if (fetchResult.exitCode === 0) {
+                  if (
+                    codebase.keepBaseBranchUpToDate &&
+                    codebase.defaultBranch
+                  ) {
+                    await updateBaseBranchAfterFetch(
+                      codebase.folder,
+                      codebase.defaultBranch,
+                      INSPECTION_TIMEOUT_MS,
+                      signal,
+                    );
+                  }
                   snapshot = await inspectCodebase(
                     codebase.folder,
                     INSPECTION_TIMEOUT_MS,

@@ -76,15 +76,16 @@ model AgentJob {
 }
 
 model CodebaseRepository {
-  id              String     @id
-  canonicalOrigin String     @unique
-  displayOrigin   String
-  name            String
-  description     String     @default("")
-  jiraBranchRegex String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  codebases       Codebase[]
+  id                       String     @id
+  canonicalOrigin          String     @unique
+  displayOrigin            String
+  name                     String
+  description              String     @default("")
+  jiraBranchRegex          String?
+  keepBaseBranchUpToDate   Boolean    @default(true)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+  codebases                Codebase[]
 
   @@index([name])
 }

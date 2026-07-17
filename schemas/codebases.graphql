@@ -23,6 +23,7 @@ type CodebaseRepository {
   name: String!
   description: String!
   jiraBranchRegex: String
+  keepBaseBranchUpToDate: Boolean!
   codebases: [Codebase!]!
   createdAt: String!
   updatedAt: String!
@@ -107,6 +108,7 @@ type AgentCodebaseRegistration {
   folder: String!
   canonicalOrigin: String!
   defaultBranch: String
+  keepBaseBranchUpToDate: Boolean!
   lastFetchedAt: String
   lastFetchAttemptAt: String
   worktrees: [AgentWorktreeConfiguration!]!
@@ -167,6 +169,7 @@ input UpdateCodebaseRepositoryInput {
   name: String!
   description: String!
   jiraBranchRegex: String
+  keepBaseBranchUpToDate: Boolean!
 }
 
 input UpdateCodebaseSettingsInput {

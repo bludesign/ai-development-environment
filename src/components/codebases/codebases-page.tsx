@@ -41,6 +41,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -91,7 +92,7 @@ const CODEBASE_FIELDS = `
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
 `;
 const REPOSITORY_FIELDS = `
-  id canonicalOrigin displayOrigin name description jiraBranchRegex createdAt updatedAt
+  id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
   codebases { ${CODEBASE_FIELDS} }
 `;
 
@@ -1030,6 +1031,9 @@ function EditRepositoryDialog({
   const [jiraBranchRegex, setJiraBranchRegex] = useState(
     repository?.jiraBranchRegex ?? "",
   );
+  const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(
+    repository?.keepBaseBranchUpToDate ?? true,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (event: FormEvent) => {
@@ -1047,6 +1051,7 @@ function EditRepositoryDialog({
             name,
             description,
             jiraBranchRegex: jiraBranchRegex || null,
+            keepBaseBranchUpToDate,
           },
         },
       );
@@ -1104,6 +1109,24 @@ function EditRepositoryDialog({
               onChange={(event) => setDescription(event.target.value)}
               value={description}
             />
+          </div>
+          <div className="flex items-start gap-3 rounded-lg border p-3">
+            <Checkbox
+              checked={keepBaseBranchUpToDate}
+              className="mt-0.5"
+              id="edit-codebase-keep-base-branch-up-to-date"
+              onCheckedChange={(checked) =>
+                setKeepBaseBranchUpToDate(checked === true)
+              }
+            />
+            <div className="space-y-1">
+              <Label htmlFor="edit-codebase-keep-base-branch-up-to-date">
+                {t("keepBaseBranchUpToDate")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t("keepBaseBranchUpToDateHelp")}
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button disabled={busy} type="submit">

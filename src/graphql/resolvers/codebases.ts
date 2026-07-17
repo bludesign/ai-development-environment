@@ -58,6 +58,9 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
   AgentCodebaseRegistration: {
     canonicalOrigin: (value: { repository: { canonicalOrigin: string } }) =>
       value.repository.canonicalOrigin,
+    keepBaseBranchUpToDate: (value: {
+      repository: { keepBaseBranchUpToDate: boolean };
+    }) => value.repository.keepBaseBranchUpToDate,
     worktrees: (value: { worktrees?: unknown[] }) => value.worktrees ?? [],
     lastFetchedAt: (value: { lastFetchedAt: Date | null }) =>
       iso(value.lastFetchedAt),
@@ -138,6 +141,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
           name: string;
           description: string;
           jiraBranchRegex?: string | null;
+          keepBaseBranchUpToDate: boolean;
         };
       },
       context: GraphQLContext,
@@ -148,6 +152,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.name,
         input.description,
         input.jiraBranchRegex,
+        input.keepBaseBranchUpToDate,
       );
     },
     updateCodebaseSettings: (

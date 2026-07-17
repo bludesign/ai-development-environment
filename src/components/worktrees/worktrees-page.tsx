@@ -457,7 +457,7 @@ export function WorktreesPage() {
             agents {
               agent { ${AGENT_FIELDS} }
               codebases {
-                repository { id canonicalOrigin displayOrigin name description jiraBranchRegex createdAt updatedAt }
+                repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_FIELDS} }
               }
