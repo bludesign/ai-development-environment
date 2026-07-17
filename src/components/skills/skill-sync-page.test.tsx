@@ -226,6 +226,91 @@ describe("SkillSyncPage", () => {
     ).toBeTruthy();
   });
 
+  test("lists each agent once across scan and read phases", async () => {
+    const progressItem = (
+      id: string,
+      direction: string,
+      status: string,
+      agent: { id: string; name: string; connectionStatus: string },
+      updatedAt: string,
+    ) => ({
+      id,
+      direction,
+      status,
+      sourceHash: null,
+      targetHash: null,
+      resolution: null,
+      candidatePackage: null,
+      error: null,
+      skill: null,
+      installation: null,
+      agent,
+      createdAt: new Date(0).toISOString(),
+      updatedAt,
+    });
+    const devBox = {
+      id: "agent-1",
+      name: "Dev Box",
+      connectionStatus: "ONLINE",
+    };
+    request.mockImplementation(
+      async () =>
+        ({
+          skillSyncRun: {
+            id: "run-1",
+            kind: "ALL",
+            status: "RUNNING",
+            error: null,
+            group: null,
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+            finishedAt: null,
+            items: [
+              progressItem(
+                "scan-1",
+                "SCAN",
+                "COMPLETE",
+                devBox,
+                new Date(1).toISOString(),
+              ),
+              progressItem(
+                "read-1",
+                "READ",
+                "COMPLETE",
+                devBox,
+                new Date(2).toISOString(),
+              ),
+              progressItem(
+                "scan-2",
+                "SCAN",
+                "SKIPPED",
+                { id: "agent-3", name: "Twin Mac", connectionStatus: "OFFLINE" },
+                new Date(1).toISOString(),
+              ),
+              progressItem(
+                "scan-3",
+                "SCAN",
+                "SKIPPED",
+                { id: "agent-4", name: "Twin Mac", connectionStatus: "OFFLINE" },
+                new Date(1).toISOString(),
+              ),
+            ],
+          },
+          skillsOverview: { groups: [] },
+        }) as never,
+    );
+
+    render(<SkillSyncPage runId="run-1" />);
+    expect(await screen.findByText("Agent sync status")).toBeTruthy();
+    // One agent id, two phases: the scan row folds into the furthest phase.
+    expect(screen.getAllByRole("row", { name: /Dev Box/ })).toHaveLength(1);
+    expect(
+      screen.getByRole("row", { name: /Dev Box Online Read Complete/i }),
+    ).toBeTruthy();
+    // Two distinct agents that happen to share a name stay separate.
+    expect(screen.getAllByRole("row", { name: /Twin Mac/ })).toHaveLength(2);
+  });
+
   test("can delete a discovered client skill instead of importing it", async () => {
     const importItem = {
       id: "import-1",

@@ -174,7 +174,10 @@
     "derivedDataRelativePath": "Chemin de dossier relatif",
     "derivedDataAbsoluteHelp": "Saisissez un chemin absolu sur cet agent ou choisissez un répertoire existant.",
     "derivedDataRelativeHelp": "Ce dossier est recherché sous chaque arbre de travail actif suivi.",
-    "saveDerivedDataSettings": "Enregistrer les paramètres Derived Data"
+    "saveDerivedDataSettings": "Enregistrer les paramètres Derived Data",
+    "deleteAgent": "Supprimer l’agent",
+    "deleteAgentTitle": "Supprimer cet agent ?",
+    "deleteAgentDescription": "Supprimer définitivement {name} ainsi que tous ses jobs et enregistrements de bases de code. Cette action est irréversible."
   },
   "buildData": {
     "title": "Données de build",

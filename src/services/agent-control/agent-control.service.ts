@@ -435,6 +435,16 @@ export class AgentControlService {
     return prisma.agent.findUnique({ where: { id } });
   }
 
+  async deleteAgent(id: string) {
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.findUnique({ where: { id } });
+    if (!agent) return false;
+    // Cascading foreign keys remove this agent's jobs, codebase registrations,
+    // usage/build-data links, skill installations, and audit events.
+    await prisma.agent.delete({ where: { id } });
+    return true;
+  }
+
   async updateBaseRepoDirectory(
     agentId: string,
     baseRepoDirectory: string | null,

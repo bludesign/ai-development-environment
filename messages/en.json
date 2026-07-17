@@ -174,7 +174,10 @@
     "derivedDataRelativePath": "Relative folder path",
     "derivedDataAbsoluteHelp": "Enter an absolute path on this agent or choose an existing directory below.",
     "derivedDataRelativeHelp": "This folder is checked beneath every active tracked worktree.",
-    "saveDerivedDataSettings": "Save Derived Data settings"
+    "saveDerivedDataSettings": "Save Derived Data settings",
+    "deleteAgent": "Delete agent",
+    "deleteAgentTitle": "Delete this agent?",
+    "deleteAgentDescription": "Permanently delete {name} and all of its jobs and codebase registrations. This cannot be undone."
   },
   "buildData": {
     "title": "Build Data",

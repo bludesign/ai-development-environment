@@ -195,6 +195,10 @@ const mockTranslations = {
     derivedDataRelativeHelp:
       "This folder is checked beneath every active tracked worktree.",
     saveDerivedDataSettings: "Save Derived Data settings",
+    deleteAgent: "Delete agent",
+    deleteAgentTitle: "Delete this agent?",
+    deleteAgentDescription:
+      "Permanently delete {name} and all of its jobs and codebase registrations. This cannot be undone.",
   },
   buildData: {
     title: "Build Data",

@@ -173,6 +173,7 @@ type Mutation {
     agentId: ID!
     input: UpdateAgentDerivedDataSettingsInput!
   ): Agent!
+  deleteAgent(agentId: ID!): Boolean!
 }
 
 type Subscription {

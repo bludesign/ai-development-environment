@@ -174,7 +174,10 @@
     "derivedDataRelativePath": "Ruta de carpeta relativa",
     "derivedDataAbsoluteHelp": "Introduce una ruta absoluta en este agente o elige un directorio existente.",
     "derivedDataRelativeHelp": "Esta carpeta se comprueba bajo cada árbol de trabajo activo registrado.",
-    "saveDerivedDataSettings": "Guardar configuración de Derived Data"
+    "saveDerivedDataSettings": "Guardar configuración de Derived Data",
+    "deleteAgent": "Eliminar agente",
+    "deleteAgentTitle": "¿Eliminar este agente?",
+    "deleteAgentDescription": "Eliminar permanentemente {name} y todos sus trabajos y registros de bases de código. Esta acción no se puede deshacer."
   },
   "buildData": {
     "title": "Datos de compilación",

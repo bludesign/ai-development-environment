@@ -29,6 +29,7 @@ import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-brows
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
 import type { Agent, AgentJob } from "@/components/agents/types";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
@@ -112,7 +113,9 @@ function upsertJob(jobs: AgentJob[], changed: AgentJob): AgentJob[] {
 
 export function AgentDetail({ agentId }: { agentId: string }) {
   const t = useTranslations("agentDetail");
+  const common = useTranslations("common");
   const locale = useLocale();
+  const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [codebases, setCodebases] = useState<AgentCodebase[]>([]);
@@ -120,6 +123,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const latestLoad = useRef(0);
@@ -274,6 +278,21 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     if (select) setSelectedJobId(changed.id);
   }, []);
 
+  const deleteAgent = async () => {
+    setDeleting(true);
+    setLoadError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteAgent($agentId: ID!) { deleteAgent(agentId: $agentId) }`,
+        { agentId },
+      );
+      router.push("/agents");
+    } catch (value) {
+      setLoadError(value instanceof Error ? value.message : String(value));
+      setDeleting(false);
+    }
+  };
+
   if (loading)
     return (
       <p className="mx-auto flex max-w-6xl items-center gap-2 text-sm text-muted-foreground">
@@ -303,13 +322,26 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
-      <div>
+      <div className="flex items-center justify-between gap-4">
         <Button asChild size="sm" variant="ghost">
           <Link href="/agents">
             <ArrowLeft />
             {t("back")}
           </Link>
         </Button>
+        <ConfirmationDialog
+          actionLabel={t("deleteAgent")}
+          cancelLabel={common("cancel")}
+          description={t("deleteAgentDescription", { name: agent.name })}
+          onConfirm={deleteAgent}
+          title={t("deleteAgentTitle")}
+          trigger={
+            <Button disabled={deleting} size="sm" variant="destructive">
+              {deleting ? <Spinner /> : <Trash2 />}
+              {t("deleteAgent")}
+            </Button>
+          }
+        />
       </div>
       {loadError && (
         <Alert variant="destructive">

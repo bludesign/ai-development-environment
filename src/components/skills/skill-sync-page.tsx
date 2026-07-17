@@ -66,6 +66,8 @@ type PackageFile = NonNullable<
 
 const NO_SKILL_GROUP_VALUE = "__none__";
 
+const AGENT_PHASE_RANK: Record<string, number> = { SCAN: 0, READ: 1, APPLY: 2 };
+
 function bytes(value: string): Uint8Array {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -138,7 +140,7 @@ function FilePreview({
     );
   }
   return (
-    <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs">
+    <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs">
       {text}
     </pre>
   );
@@ -217,13 +219,24 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       ) ?? [],
     [run],
   );
-  const agentProgress = useMemo(
-    () =>
-      run?.items.filter((item) =>
-        ["SCAN", "READ", "APPLY"].includes(item.direction),
-      ) ?? [],
-    [run],
-  );
+  const agentProgress = useMemo(() => {
+    const latestByAgent = new Map<string, SkillSyncItem>();
+    for (const item of run?.items ?? []) {
+      if (!["SCAN", "READ", "APPLY"].includes(item.direction)) continue;
+      const key = item.agent?.id ?? item.id;
+      const current = latestByAgent.get(key);
+      const rank = AGENT_PHASE_RANK[item.direction] ?? 0;
+      const currentRank = current ? (AGENT_PHASE_RANK[current.direction] ?? 0) : -1;
+      if (
+        !current ||
+        rank > currentRank ||
+        (rank === currentRank && item.updatedAt > current.updatedAt)
+      ) {
+        latestByAgent.set(key, item);
+      }
+    }
+    return [...latestByAgent.values()];
+  }, [run]);
   const pendingAgentItems = useMemo(
     () => agentProgress.filter((item) => item.status === "PENDING"),
     [agentProgress],
@@ -709,14 +722,14 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         }}
         open={Boolean(manualItem)}
       >
-        <DialogContent className="max-h-[92vh] overflow-auto sm:max-w-6xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden sm:max-w-6xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{t("manualResolution")}</DialogTitle>
             <DialogDescription>
               {t("manualResolutionDescription")}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Button
               disabled={!databaseFiles.length || compareLoading}
               onClick={() =>
@@ -753,7 +766,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
               type="file"
             />
           </div>
-          <div className="grid min-h-96 gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[14rem_minmax(0,1fr)]">
             <div className="space-y-1 rounded-md border p-2">
               <p className="px-2 py-1 text-xs font-medium text-muted-foreground">
                 {t("packageFiles")}
@@ -877,7 +890,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                       </div>
                     ) : (
                       <Textarea
-                        className="min-h-72 font-mono text-xs"
+                        className="min-h-48 font-mono text-xs"
                         onChange={(event) =>
                           setManualFiles((current) =>
                             current.map((file) =>
@@ -902,7 +915,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button
               disabled={
                 busy ||

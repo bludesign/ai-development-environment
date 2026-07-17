@@ -174,7 +174,10 @@
     "derivedDataRelativePath": "Relativer Ordnerpfad",
     "derivedDataAbsoluteHelp": "Geben Sie einen absoluten Pfad auf diesem Agenten ein oder wählen Sie unten ein vorhandenes Verzeichnis.",
     "derivedDataRelativeHelp": "Dieser Ordner wird unter jedem aktiven erfassten Worktree geprüft.",
-    "saveDerivedDataSettings": "Derived-Data-Einstellungen speichern"
+    "saveDerivedDataSettings": "Derived-Data-Einstellungen speichern",
+    "deleteAgent": "Agent löschen",
+    "deleteAgentTitle": "Diesen Agenten löschen?",
+    "deleteAgentDescription": "{name} und alle zugehörigen Jobs und Codebasis-Registrierungen dauerhaft löschen. Dies kann nicht rückgängig gemacht werden."
   },
   "buildData": {
     "title": "Build-Daten",

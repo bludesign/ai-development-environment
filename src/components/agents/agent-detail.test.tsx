@@ -361,6 +361,57 @@ describe("AgentDetail", () => {
     );
   });
 
+  test("deletes the agent after confirming the dialog", async () => {
+    const createdAt = new Date(0).toISOString();
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query AgentDetail")) {
+        return {
+          agent: {
+            id: "agent-1",
+            name: "Development Mac",
+            hostname: "dev-mac.local",
+            version: "1.0.0",
+            osVersion: "macOS",
+            architecture: "arm64",
+            capabilities: [],
+            baseRepoDirectory: null,
+            connectionStatus: "ONLINE",
+            ipAddress: null,
+            lastSeenAt: createdAt,
+            disconnectedAt: null,
+            createdAt,
+          },
+          agentJobs: [],
+        } as never;
+      }
+      if (query.includes("mutation DeleteAgent")) {
+        return { deleteAgent: true } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<AgentDetail agentId="agent-1" />);
+    // Only the trigger exists until the dialog opens.
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete agent" }),
+    );
+    // Once open, the confirm action shares the trigger's label; click the last match.
+    const deleteButtons = await screen.findAllByRole("button", {
+      name: "Delete agent",
+    });
+    fireEvent.click(deleteButtons[deleteButtons.length - 1]!);
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteAgent"),
+        { agentId: "agent-1" },
+      ),
+    );
+  });
+
   test("browses and saves the base repository directory for this agent", async () => {
     const createdAt = new Date(0).toISOString();
     const agent = {
