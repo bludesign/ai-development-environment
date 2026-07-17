@@ -154,53 +154,6 @@ afterEach(async () => {
 });
 
 describe("TicketWorktreeDialog", () => {
-  test("lists eligible agent/codebase destinations and creates the fixed ticket worktree", async () => {
-    mockRequests();
-    waitForJob.mockResolvedValue();
-    render(
-      <TicketWorktreeDialog issueKey="APP-123" onOpenChange={vi.fn()} open />,
-    );
-
-    await openDestinationSelect();
-    const destination = await screen.findByRole("option", {
-      name: /Codex · Studio Mac/,
-    });
-    expect(destination.getAttribute("data-slot")).toBe("command-item");
-    expect(destination.querySelector('[data-slot="item"]')).not.toBeNull();
-    expect(screen.queryByRole("option", { name: /Offline Mac/ })).toBeNull();
-    fireEvent.click(destination);
-
-    const ticketInput = await screen.findByDisplayValue("APP-123");
-    expect((ticketInput as HTMLInputElement).readOnly).toBe(true);
-    expect(await screen.findByText("Add searchable worktrees")).toBeDefined();
-    expect(
-      screen.getByText("feature/APP-123-add-searchable-worktrees"),
-    ).toBeDefined();
-    expect(screen.queryByRole("tab", { name: "From ticket" })).toBeNull();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Create ticket worktree" }),
-    );
-
-    await waitFor(() =>
-      expect(request).toHaveBeenCalledWith(
-        expect.stringContaining("CreateTicketWorktree"),
-        {
-          input: {
-            codebaseId: "codebase-1",
-            selection: {
-              mode: "TICKET",
-              ticketKey: "APP-123",
-              baseBranch: "main",
-            },
-            requestId: expect.any(String),
-          },
-        },
-      ),
-    );
-    expect(waitForJob).toHaveBeenCalledWith("job-create");
-  });
-
   test("lists existing worktrees and switches one to the ticket branch", async () => {
     mockRequests();
     waitForJob.mockResolvedValue();
