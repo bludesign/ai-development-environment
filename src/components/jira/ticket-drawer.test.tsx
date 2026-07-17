@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -39,14 +45,18 @@ describe("JiraTicketDrawer", () => {
         statusCategory: "indeterminate",
         issueType: "Story",
         priority: "High",
-        assignee: null,
-        assigneeAccountId: null,
-        assigneeAvatarUrl: null,
+        assignee: "Ada",
+        assigneeAccountId: "ada",
+        assigneeAvatarUrl: "https://example.com/ada.png",
         projectKey: "APP",
         updatedAt: "2026-07-16T12:00:00.000Z",
         jiraUrl: "https://example.atlassian.net/browse/APP-123",
         description: "Ticket details",
-        reporter: null,
+        reporter: {
+          accountId: "grace",
+          displayName: "Grace Hopper",
+          avatarUrl: "https://example.com/grace.png",
+        },
         creator: null,
         labels: [],
         components: [],
@@ -80,7 +90,7 @@ describe("JiraTicketDrawer", () => {
             author: {
               accountId: "reviewer-1",
               displayName: "Reviewer",
-              avatarUrl: null,
+              avatarUrl: "https://example.com/reviewer.png",
             },
             body: "Looks good",
             createdAt: "2026-07-16T12:00:00.000Z",
@@ -110,9 +120,14 @@ describe("JiraTicketDrawer", () => {
       name: "Create worktree",
     });
     const openInJira = screen.getByRole("link", { name: "Open in Jira" });
+    expect(
+      screen
+        .getByRole("link", { name: "Open full details" })
+        .getAttribute("href"),
+    ).toBe("/jira/tickets/APP-123");
     expect(createWorktree.parentElement).toBe(openInJira.parentElement);
     expect(createWorktree.parentElement).not.toBe(
-      screen.getByText("In Progress").parentElement,
+      screen.getAllByText("In Progress")[0]?.parentElement,
     );
     expect(createWorktree.getAttribute("data-variant")).toBe("outline");
     expect(openInJira.getAttribute("data-variant")).toBe("outline");
@@ -121,11 +136,28 @@ describe("JiraTicketDrawer", () => {
     expect(
       screen.getByText("Ticket details").closest('[data-slot="card"]'),
     ).not.toBeNull();
+    const descriptionTitle = screen.getByText("Description");
+    const descriptionViewMenu = screen.getAllByRole("button", {
+      name: "Rendered",
+    })[0];
+    expect(descriptionTitle.parentElement?.parentElement).toBe(
+      descriptionViewMenu?.parentElement?.parentElement?.parentElement,
+    );
+    const relatedItem = screen
+      .getByText("APP-122 · Prepare the repository")
+      .closest('[data-slot="item"]');
+    expect(relatedItem).not.toBeNull();
+    expect(relatedItem?.getAttribute("data-size")).toBe("xs");
+    expect(
+      screen.getByText("APP-122 · Prepare the repository").className,
+    ).toContain("leading-tight");
     expect(
       screen
-        .getByText("APP-122 · Prepare the repository")
-        .closest('[data-slot="item"]'),
-    ).not.toBeNull();
+        .getByRole("link", {
+          name: /APP-122 · Prepare the repository blocks Done/,
+        })
+        .getAttribute("href"),
+    ).toBe("/jira/tickets/APP-122");
     expect(
       screen
         .getByRole("link", { name: /notes\.txt/ })
@@ -134,7 +166,52 @@ describe("JiraTicketDrawer", () => {
     expect(
       screen.getByText("Reviewer").closest('[data-slot="item"]'),
     ).not.toBeNull();
+    const commentItem = screen
+      .getByText("Reviewer")
+      .closest('[data-slot="item"]') as HTMLElement;
+    expect(commentItem.querySelector('[data-slot="avatar"]')).not.toBeNull();
+    const commentDate = commentItem.querySelector("time");
+    const commentActions = within(commentItem).getByRole("button", {
+      name: "Comment actions",
+    });
+    const commentViewActions = commentActions.parentElement;
+    const commentControls = commentViewActions?.parentElement;
+    expect(commentDate?.parentElement).toBe(commentControls);
+    expect(commentViewActions?.querySelectorAll("button")).toHaveLength(1);
+    expect(commentViewActions?.className).toContain("ml-auto");
+    expect(commentViewActions?.className).toContain("row-start-1");
+    expect(commentDate?.className).toContain("row-start-2");
+    expect(commentDate?.className).toContain("-mt-1");
+    expect(commentControls?.className).toContain("contents");
+    expect(commentControls?.parentElement?.className).toContain("grid");
+    expect(commentControls?.parentElement?.className).toContain("gap-y-0.5");
+    expect(commentControls?.parentElement?.className).toContain(
+      "@md/comment:flex",
+    );
+    expect(
+      within(commentItem).queryByRole("button", { name: "Rendered" }),
+    ).toBeNull();
+    expect(
+      within(commentItem).queryByRole("button", { name: "Copy" }),
+    ).toBeNull();
+    fireEvent.pointerDown(commentActions, { button: 0, ctrlKey: false });
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Rendered" })
+        .querySelector(".lucide-eye"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Copy" })
+        .querySelector(".lucide-copy"),
+    ).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(screen.getByText("Looks good")).toBeDefined();
+    expect(
+      commentItem.compareDocumentPosition(
+        screen.getByRole("textbox", { name: "Comment" }),
+      ),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByText(/Ticket worktree popup/)).toBeNull();
     fireEvent.click(createWorktree);
     expect(

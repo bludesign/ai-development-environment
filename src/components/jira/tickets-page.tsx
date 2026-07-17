@@ -11,7 +11,6 @@ import {
   Settings2,
   Table2,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
@@ -25,9 +24,9 @@ import {
 } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { JiraPersonAvatar } from "@/components/jira/jira-user";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -125,23 +124,6 @@ function priorityClass(priority: string) {
   return PRIORITY_CLASSES[priority.trim().toLowerCase()];
 }
 
-function AssigneeAvatar({
-  avatarUrl,
-  compact = false,
-}: {
-  avatarUrl: string | null;
-  compact?: boolean;
-}) {
-  return (
-    <Avatar aria-hidden="true" className={compact ? "size-4" : "size-5"}>
-      <AvatarImage alt="" src={avatarUrl ?? undefined} />
-      <AvatarFallback>
-        <UserRound className={compact ? "size-3" : "size-3.5"} />
-      </AvatarFallback>
-    </Avatar>
-  );
-}
-
 export function JiraTicketsPage() {
   const t = useTranslations("jiraTickets");
   const searchParams = useSearchParams();
@@ -221,6 +203,10 @@ export function JiraTicketsPage() {
       if (requestId === boardRequestIdRef.current) setBoardLoading(false);
     }
   }, []);
+
+  const reloadBoardAfterTicketChange = useCallback(() => {
+    if (selectedSource) void loadBoard(selectedSource.id);
+  }, [loadBoard, selectedSource]);
 
   useEffect(() => {
     if (!selectedSource) {
@@ -458,7 +444,7 @@ export function JiraTicketsPage() {
                               </TableCell>
                               <TableCell>
                                 <span className="flex items-center gap-1.5">
-                                  <AssigneeAvatar
+                                  <JiraPersonAvatar
                                     avatarUrl={ticket.assigneeAvatarUrl}
                                   />
                                   {ticket.assignee ?? t("unassigned")}
@@ -514,7 +500,7 @@ export function JiraTicketsPage() {
                             <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                               <span>{ticket.issueType ?? t("issue")}</span>
                               <span className="flex min-w-0 items-center gap-1">
-                                <AssigneeAvatar
+                                <JiraPersonAvatar
                                   avatarUrl={ticket.assigneeAvatarUrl}
                                   compact
                                 />
@@ -545,6 +531,7 @@ export function JiraTicketsPage() {
       <JiraTicketDrawer
         issueKey={issueKey}
         onClose={() => replaceParams({ issue: null })}
+        onTicketChange={reloadBoardAfterTicketChange}
       />
     </section>
   );

@@ -20,6 +20,12 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
 }));
 
+vi.mock("@/components/jira/ticket-drawer", () => ({
+  JiraTicketDrawer: ({ onTicketChange }: { onTicketChange?: () => void }) => (
+    <button onClick={onTicketChange}>Simulate ticket change</button>
+  ),
+}));
+
 const requestMock = vi.mocked(controlPlaneRequest);
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -260,6 +266,90 @@ describe("JiraTicketsPage", () => {
     });
     await waitFor(() => expect(screen.queryByText("First ticket")).toBeNull());
     expect(screen.getByText("Second ticket")).toBeDefined();
+  });
+
+  test("reloads the filtered board after a drawer ticket mutation", async () => {
+    const source = {
+      id: "source-1",
+      projectId: "project-1",
+      name: "Current sprint",
+      kind: "JQL",
+      value: "project = APP",
+      boardId: null,
+      position: 0,
+    };
+    const visibleBoard = {
+      source,
+      tickets: [
+        {
+          id: "10001",
+          key: "APP-1",
+          summary: "Visible ticket",
+          statusId: "doing",
+          status: "In Progress",
+          statusCategory: "indeterminate",
+          issueType: "Task",
+          priority: null,
+          assignee: "Ada",
+          assigneeAccountId: "ada",
+          assigneeAvatarUrl: null,
+          projectKey: "APP",
+          updatedAt: null,
+        },
+      ],
+      statusOrder: ["In Progress"],
+      cache: {
+        source: "LIVE",
+        stale: false,
+        fetchedAt: new Date().toISOString(),
+      },
+      truncated: false,
+      warnings: [],
+    };
+    const filteredBoard = {
+      ...visibleBoard,
+      tickets: [],
+      statusOrder: [],
+    };
+    let boardRequests = 0;
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query JiraProjects")) {
+        return {
+          jiraProjects: [
+            {
+              id: "project-1",
+              jiraId: "10000",
+              key: "APP",
+              name: "Application",
+              avatarUrl: null,
+              position: 0,
+              ticketAssignmentFilter: "SELF_IN_PROGRESS",
+              hideCompletedTickets: true,
+              completedStatusIds: ["done"],
+              sources: [source],
+            },
+          ],
+        } as never;
+      }
+      if (query.includes("JiraTicketBoard")) {
+        boardRequests += 1;
+        return {
+          jiraTicketBoard: boardRequests === 1 ? visibleBoard : filteredBoard,
+        } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<JiraTicketsPage />);
+    expect(await screen.findByText("Visible ticket")).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Simulate ticket change" }),
+    );
+
+    await waitFor(() => expect(boardRequests).toBe(2));
+    expect(screen.queryByText("Visible ticket")).toBeNull();
+    expect(screen.getByText("No tickets matched this source.")).toBeDefined();
   });
 
   test("adds a source to the project selected in the manager", async () => {

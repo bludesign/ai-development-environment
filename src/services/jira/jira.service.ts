@@ -14,7 +14,10 @@ import type {
   JiraCacheMeta,
   JiraCacheMetrics,
   JiraCallSource,
+  JiraChange,
+  JiraActivityPage,
   JiraCommentView,
+  JiraEditField,
   JiraIssueLinkView,
   JiraMetricWindow,
   JiraNamedValue,
@@ -30,12 +33,17 @@ import type {
   JiraTicketDetail,
   JiraTicketSummary,
   JiraBranchTicket,
+  JiraTextInput,
+  JiraTransition,
+  JiraWorklog,
+  UpdateJiraTicketInput,
   PaginatedResult,
 } from "./types";
 import {
   DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
   validateJiraBranchNamingScript,
 } from "./branch-naming";
+import { jiraTextInputToAdf, normalizeJiraRichText } from "./text-format";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -114,6 +122,18 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function normalizeIssueKey(value: string): string {
+  const key = value.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key)) {
+    throw new Error("Invalid Jira issue key");
+  }
+  return key;
 }
 
 function parseJson(value: string | null): unknown {
@@ -214,6 +234,29 @@ function namedValues(value: unknown): JiraNamedValue[] {
       id: asString(entry.id),
       name: asString(entry.name) ?? "Unknown",
     }));
+}
+
+function editableValues(value: unknown): JiraNamedValue[] {
+  return asArray(value).flatMap((entry) => {
+    if (typeof entry === "string") return [{ id: entry, name: entry }];
+    const record = asRecord(entry);
+    const name =
+      asString(record.name) ??
+      asString(record.value) ??
+      asString(record.displayName) ??
+      asString(record.key);
+    if (!name) return [];
+    return [
+      {
+        id:
+          asString(record.id) ??
+          asString(record.accountId) ??
+          asString(record.value) ??
+          name,
+        name,
+      },
+    ];
+  });
 }
 
 function issueLink(
@@ -816,9 +859,7 @@ export class JiraService {
   }
 
   async ticket(issueKey: string, force = false): Promise<JiraTicketDetail> {
-    const key = issueKey.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key))
-      throw new Error("Invalid Jira issue key");
+    const key = normalizeIssueKey(issueKey);
     const detail = await this.cachedCall<RawIssue>({
       operation: "ISSUE",
       params: { issueKey: key, fields: "*all", expand: "names,schema" },
@@ -829,7 +870,9 @@ export class JiraService {
         return version3.issues.getIssue<RawIssue>({
           issueIdOrKey: key,
           fields: ["*all"],
-          expand: ["name", "schema"],
+          // Jira Cloud expects `names`; jira.js 5.4's generated union currently
+          // exposes the singular `name`, so keep the runtime-correct value.
+          expand: ["names", "schema"] as never,
           updateHistory: false,
         });
       },
@@ -884,11 +927,390 @@ export class JiraService {
     );
   }
 
-  async branchTicket(issueKey: string): Promise<JiraBranchTicket> {
-    const key = issueKey.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key)) {
-      throw new Error("Invalid Jira issue key");
+  async assignableUsers(issueKey: string, query = ""): Promise<JiraPerson[]> {
+    const key = normalizeIssueKey(issueKey);
+    const normalizedQuery = query.trim().slice(0, 100);
+    const result = await this.cachedCall({
+      operation: "ASSIGNABLE_USERS",
+      params: { issueKey: key, query: normalizedQuery, maxResults: 50 },
+      requestSummary: `Assignable users for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.userSearch.findAssignableUsers({
+          issueKey: key,
+          query: normalizedQuery,
+          maxResults: 50,
+          recommend: true,
+        });
+      },
+      itemCount: (value) => asArray(value).length,
+    });
+    await this.linkCacheEntryToIssue(key, result.entryId);
+    return asArray(result.value)
+      .map(person)
+      .filter((value): value is JiraPerson => value !== null);
+  }
+
+  async ticketTransitions(issueKey: string): Promise<JiraTransition[]> {
+    const key = normalizeIssueKey(issueKey);
+    const result = await this.cachedCall({
+      operation: "ISSUE_TRANSITIONS",
+      params: { issueKey: key, expand: "transitions.fields" },
+      requestSummary: `Available transitions for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issues.getTransitions({
+          issueIdOrKey: key,
+          expand: "transitions.fields",
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).transitions).length,
+    });
+    await this.linkCacheEntryToIssue(key, result.entryId);
+    return asArray(asRecord(result.value).transitions)
+      .map(asRecord)
+      .filter((transition) => transition.isAvailable !== false)
+      .flatMap((transition) => {
+        const id = asString(transition.id);
+        const name = asString(transition.name);
+        if (!id || !name) return [];
+        const destination = asRecord(transition.to);
+        const category = asRecord(destination.statusCategory);
+        const requiredFields = Object.entries(asRecord(transition.fields))
+          .filter(([, rawField]) => asBoolean(asRecord(rawField).required))
+          .map(
+            ([fieldId, rawField]) =>
+              asString(asRecord(rawField).name) ?? fieldId,
+          );
+        return [
+          {
+            id,
+            name,
+            toStatusId: asString(destination.id),
+            toStatus: asString(destination.name) ?? name,
+            toStatusCategory: asString(category.key) ?? asString(category.name),
+            hasScreen: asBoolean(transition.hasScreen),
+            requiredFields,
+          },
+        ];
+      });
+  }
+
+  async ticketEditFields(issueKey: string): Promise<JiraEditField[]> {
+    const key = normalizeIssueKey(issueKey);
+    const result = await this.cachedCall({
+      operation: "ISSUE_EDIT_META",
+      params: { issueKey: key },
+      requestSummary: `Editable fields for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issues.getEditIssueMeta({ issueIdOrKey: key });
+      },
+      itemCount: (value) =>
+        Object.keys(asRecord(asRecord(value).fields)).length,
+    });
+    await this.linkCacheEntryToIssue(key, result.entryId);
+    return Object.entries(asRecord(asRecord(result.value).fields))
+      .map(([id, rawValue]) => {
+        const field = asRecord(rawValue);
+        return {
+          id,
+          name: asString(field.name) ?? id,
+          required: asBoolean(field.required),
+          schemaType: asString(asRecord(field.schema).type),
+          allowedValues: editableValues(field.allowedValues),
+        };
+      })
+      .sort((first, second) => first.name.localeCompare(second.name));
+  }
+
+  async ticketChanges(
+    issueKey: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<JiraActivityPage<JiraChange>> {
+    const key = normalizeIssueKey(issueKey);
+    const pagination = this.validatePagination(limit, offset);
+    const probe = await this.cachedCall({
+      operation: "ISSUE_CHANGELOG",
+      params: { issueKey: key, startAt: 0, maxResults: 1 },
+      requestSummary: `Changelog count for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issues.getChangeLogs({
+          issueIdOrKey: key,
+          startAt: 0,
+          maxResults: 1,
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).values).length,
+    });
+    await this.linkCacheEntryToIssue(key, probe.entryId);
+    const total = asNumber(asRecord(probe.value).total) ?? 0;
+    const count = Math.min(
+      pagination.limit,
+      Math.max(0, total - pagination.offset),
+    );
+    const startAt = Math.max(0, total - pagination.offset - count);
+    if (count === 0) {
+      return { ...pagination, total, items: [], cache: cacheMeta(probe) };
     }
+    const page = await this.cachedCall({
+      operation: "ISSUE_CHANGELOG",
+      params: { issueKey: key, startAt, maxResults: count },
+      requestSummary: `Changelog for ${key} from ${startAt}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issues.getChangeLogs({
+          issueIdOrKey: key,
+          startAt,
+          maxResults: count,
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).values).length,
+    });
+    await this.linkCacheEntryToIssue(key, page.entryId);
+    const items = asArray(asRecord(page.value).values)
+      .map(asRecord)
+      .reverse()
+      .map((change) => ({
+        id: asString(change.id) ?? randomUUID(),
+        author: person(change.author),
+        createdAt: asString(change.created),
+        items: asArray(change.items)
+          .map(asRecord)
+          .map((item) => ({
+            field: asString(item.field) ?? "Field",
+            fieldId: asString(item.fieldId),
+            from: asString(item.fromString) ?? asString(item.from),
+            to: asString(item.toString) ?? asString(item.to),
+          })),
+      }));
+    return {
+      ...pagination,
+      total,
+      items,
+      cache: combineCacheMeta([probe, page]),
+    };
+  }
+
+  async ticketWorklogs(
+    issueKey: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<JiraActivityPage<JiraWorklog>> {
+    const key = normalizeIssueKey(issueKey);
+    const pagination = this.validatePagination(limit, offset);
+    const probe = await this.cachedCall({
+      operation: "ISSUE_WORKLOGS",
+      params: { issueKey: key, startAt: 0, maxResults: 1 },
+      requestSummary: `Worklog count for ${key}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issueWorklogs.getIssueWorklog({
+          issueIdOrKey: key,
+          startAt: 0,
+          maxResults: 1,
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).worklogs).length,
+    });
+    await this.linkCacheEntryToIssue(key, probe.entryId);
+    const total = asNumber(asRecord(probe.value).total) ?? 0;
+    const count = Math.min(
+      pagination.limit,
+      Math.max(0, total - pagination.offset),
+    );
+    const startAt = Math.max(0, total - pagination.offset - count);
+    if (count === 0) {
+      return { ...pagination, total, items: [], cache: cacheMeta(probe) };
+    }
+    const page = await this.cachedCall({
+      operation: "ISSUE_WORKLOGS",
+      params: { issueKey: key, startAt, maxResults: count },
+      requestSummary: `Worklogs for ${key} from ${startAt}`,
+      fetcher: async () => {
+        const { version3 } = await this.getClients();
+        return version3.issueWorklogs.getIssueWorklog({
+          issueIdOrKey: key,
+          startAt,
+          maxResults: count,
+        });
+      },
+      itemCount: (value) => asArray(asRecord(value).worklogs).length,
+    });
+    await this.linkCacheEntryToIssue(key, page.entryId);
+    const settings = await this.requireCredentials();
+    const items = asArray(asRecord(page.value).worklogs)
+      .map(asRecord)
+      .reverse()
+      .map((worklog) => ({
+        id: asString(worklog.id) ?? randomUUID(),
+        author: person(worklog.author),
+        comment: normalizeJiraRichText(
+          worklog.comment ?? null,
+          settings.siteUrl,
+        ),
+        timeSpent: asString(worklog.timeSpent),
+        timeSpentSeconds: asNumber(worklog.timeSpentSeconds),
+        startedAt: asString(worklog.started),
+        createdAt: asString(worklog.created),
+        updatedAt: asString(worklog.updated),
+      }));
+    return {
+      ...pagination,
+      total,
+      items,
+      cache: combineCacheMeta([probe, page]),
+    };
+  }
+
+  async addComment(
+    issueKey: string,
+    content: JiraTextInput,
+  ): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(issueKey);
+    if (!content.value.trim()) throw new Error("Comment text is required");
+    const document = jiraTextInputToAdf(content);
+    return this.mutateTicket(key, "ADD_COMMENT", async () => {
+      const { version3 } = await this.getClients();
+      await version3.issueComments.addComment({
+        issueIdOrKey: key,
+        comment: document,
+      });
+    });
+  }
+
+  async assignTicket(
+    issueKey: string,
+    accountId: string | null,
+  ): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(issueKey);
+    const normalizedAccountId = accountId?.trim() || null;
+    return this.mutateTicket(key, "ASSIGN_ISSUE", async () => {
+      const { version3 } = await this.getClients();
+      await version3.issues.assignIssue({
+        issueIdOrKey: key,
+        accountId: normalizedAccountId,
+      });
+    });
+  }
+
+  async transitionTicket(
+    issueKey: string,
+    transitionId: string,
+  ): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(issueKey);
+    const transition = (await this.ticketTransitions(key)).find(
+      (item) => item.id === transitionId,
+    );
+    if (!transition) throw new Error("The Jira transition is not available");
+    if (transition.requiredFields.length > 0) {
+      throw new Error(
+        `This transition requires fields that must be completed in Jira: ${transition.requiredFields.join(", ")}`,
+      );
+    }
+    return this.mutateTicket(key, "TRANSITION_ISSUE", async () => {
+      const { version3 } = await this.getClients();
+      await version3.issues.doTransition({
+        issueIdOrKey: key,
+        transition: { id: transition.id },
+      });
+    });
+  }
+
+  async updateTicket(input: UpdateJiraTicketInput): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(input.issueKey);
+    const editFields = new Map(
+      (await this.ticketEditFields(key)).map((field) => [field.id, field]),
+    );
+    const fields: JsonRecord = {};
+    const requested = (fieldId: string) => {
+      const field = editFields.get(fieldId);
+      if (!field) throw new Error(`${fieldId} is not editable on this ticket`);
+      return field;
+    };
+    const has = (name: keyof UpdateJiraTicketInput) =>
+      Object.prototype.hasOwnProperty.call(input, name);
+
+    if (has("summary")) {
+      requested("summary");
+      const summary = input.summary?.trim();
+      if (!summary) throw new Error("Ticket summary is required");
+      fields.summary = summary;
+    }
+    if (has("description")) {
+      const field = requested("description");
+      if (input.description === null) {
+        if (field.required) throw new Error("Description is required");
+        fields.description = null;
+      } else if (input.description) {
+        fields.description = jiraTextInputToAdf(input.description);
+      }
+    }
+    if (has("priorityId")) {
+      const field = requested("priority");
+      const priorityId = input.priorityId?.trim() || null;
+      if (!priorityId && field.required)
+        throw new Error("Priority is required");
+      if (
+        priorityId &&
+        field.allowedValues.length > 0 &&
+        !field.allowedValues.some((value) => value.id === priorityId)
+      ) {
+        throw new Error("The selected priority is not available");
+      }
+      fields.priority = priorityId ? { id: priorityId } : null;
+    }
+    if (has("labels")) {
+      requested("labels");
+      fields.labels = [
+        ...new Set(
+          (input.labels ?? []).map((label) => label.trim()).filter(Boolean),
+        ),
+      ];
+    }
+    const setIds = (
+      inputName: "componentIds" | "fixVersionIds" | "affectedVersionIds",
+      fieldId: "components" | "fixVersions" | "versions",
+    ) => {
+      if (!has(inputName)) return;
+      const field = requested(fieldId);
+      const ids = [...new Set(input[inputName] ?? [])];
+      if (
+        field.allowedValues.length > 0 &&
+        ids.some((id) => !field.allowedValues.some((value) => value.id === id))
+      ) {
+        throw new Error(`A selected ${field.name} value is not available`);
+      }
+      fields[fieldId] = ids.map((id) => ({ id }));
+    };
+    setIds("componentIds", "components");
+    setIds("fixVersionIds", "fixVersions");
+    setIds("affectedVersionIds", "versions");
+    if (has("dueDate")) {
+      const field = requested("duedate");
+      const dueDate = input.dueDate?.trim() || null;
+      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        throw new Error("Due date must use YYYY-MM-DD");
+      }
+      if (!dueDate && field.required) throw new Error("Due date is required");
+      fields.duedate = dueDate;
+    }
+    if (Object.keys(fields).length === 0) {
+      throw new Error("At least one editable Jira field is required");
+    }
+    return this.mutateTicket(key, "EDIT_ISSUE", async () => {
+      const { version3 } = await this.getClients();
+      await version3.issues.editIssue({
+        issueIdOrKey: key,
+        fields,
+      });
+    });
+  }
+
+  async branchTicket(issueKey: string): Promise<JiraBranchTicket> {
+    const key = normalizeIssueKey(issueKey);
     const projectKey = key.replace(/-\d+$/, "");
     const prisma = await getPrismaClient();
     const project = await prisma.jiraProject.findUnique({
@@ -913,6 +1335,7 @@ export class JiraService {
         });
       },
     });
+    await this.linkCacheEntryToIssue(key, result.entryId);
     const fields = asRecord(result.value.fields);
     const returnedKey =
       asString(asRecord(fields.project).key) ??
@@ -942,6 +1365,11 @@ export class JiraService {
   }
 
   async deleteCachedTicket(issueKey: string): Promise<boolean> {
+    await this.invalidateIssueCaches(normalizeIssueKey(issueKey));
+    return true;
+  }
+
+  private async invalidateIssueCaches(issueKey: string): Promise<void> {
     const prisma = await getPrismaClient();
     const links = await prisma.jiraCacheEntryIssue.findMany({
       where: { issueKey },
@@ -955,7 +1383,6 @@ export class JiraService {
       }
       await transaction.jiraCachedTicket.deleteMany({ where: { issueKey } });
     });
-    return true;
   }
 
   async refreshCachedTicket(issueKey: string): Promise<JiraTicketDetail> {
@@ -1147,6 +1574,62 @@ export class JiraService {
     const accountId = asString(asRecord(result.value).accountId);
     if (!accountId) throw new Error("Jira did not return the current user ID");
     return accountId;
+  }
+
+  private async linkCacheEntryToIssue(issueKey: string, cacheEntryId: string) {
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      await transaction.jiraCachedTicket.upsert({
+        where: { issueKey },
+        create: {
+          issueKey,
+          projectKey: issueKey.replace(/-\d+$/, ""),
+        },
+        update: {},
+      });
+      await transaction.jiraCacheEntryIssue.upsert({
+        where: { cacheEntryId_issueKey: { cacheEntryId, issueKey } },
+        create: { cacheEntryId, issueKey },
+        update: {},
+      });
+    });
+  }
+
+  private async mutateTicket(
+    issueKey: string,
+    operation: string,
+    mutation: () => Promise<void>,
+  ): Promise<JiraTicketDetail> {
+    const settings = await this.requireCredentials();
+    const startedAt = Date.now();
+    try {
+      await mutation();
+      await this.logCall({
+        operation,
+        requestSummary: `${operation.replaceAll("_", " ")} for ${issueKey}`,
+        source: "LIVE",
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      const message = sanitizeError(error, settings.apiToken);
+      await this.logCall({
+        operation,
+        requestSummary: `${operation.replaceAll("_", " ")} for ${issueKey}`,
+        source: "ERROR",
+        durationMs: Date.now() - startedAt,
+        statusCode: errorStatus(error),
+        error: message,
+      });
+      throw new Error(message);
+    }
+    await this.invalidateIssueCaches(issueKey);
+    try {
+      return await this.ticket(issueKey, true);
+    } catch (error) {
+      throw new Error(
+        `Jira accepted the update, but refreshed ticket details could not be loaded: ${sanitizeError(error, settings.apiToken)}`,
+      );
+    }
   }
 
   private cacheKey(
@@ -1708,6 +2191,8 @@ export class JiraService {
   ): JiraTicketDetail {
     const summary = ticketSummary(issue);
     const fields = asRecord(issue.fields);
+    const fieldNames = asRecord(issue.names);
+    const fieldSchemas = asRecord(issue.schema);
     const links: JiraIssueLinkView[] = [];
     for (const rawLink of asArray(fields.issuelinks).map(asRecord)) {
       const type = asRecord(rawLink.type);
@@ -1737,6 +2222,7 @@ export class JiraService {
         id: asString(comment.id) ?? randomUUID(),
         author: person(comment.author),
         body: comment.body ?? null,
+        content: normalizeJiraRichText(comment.body ?? null, siteUrl),
         createdAt: asString(comment.created),
         updatedAt: asString(comment.updated),
       }));
@@ -1744,6 +2230,10 @@ export class JiraService {
       ...summary,
       jiraUrl: `${siteUrl}/browse/${summary.key}`,
       description: fields.description ?? null,
+      descriptionContent: normalizeJiraRichText(
+        fields.description ?? null,
+        siteUrl,
+      ),
       reporter: person(fields.reporter),
       creator: person(fields.creator),
       labels: asArray(fields.labels).filter(
@@ -1772,6 +2262,24 @@ export class JiraService {
       dueAt: asString(fields.duedate),
       resolvedAt: asString(fields.resolutiondate),
       timeTracking: fields.timetracking ?? null,
+      allFields: Object.entries(fields)
+        .map(([id, value]) => {
+          const schema = asRecord(fieldSchemas[id]);
+          const richValue =
+            typeof value === "string" ||
+            (isRecord(value) && value.type === "doc")
+              ? normalizeJiraRichText(value, siteUrl)
+              : null;
+          return {
+            id,
+            name: asString(fieldNames[id]) ?? id,
+            schemaType: asString(schema.type),
+            custom: asBoolean(schema.custom) || id.startsWith("customfield_"),
+            value: value ?? null,
+            content: richValue,
+          };
+        })
+        .sort((first, second) => first.name.localeCompare(second.name)),
       cache: detailCache,
       commentsCache,
     };

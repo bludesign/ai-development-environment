@@ -12,7 +12,9 @@ const state = vi.hoisted(() => ({
   },
   calls: [] as Array<Record<string, unknown>>,
   currentUser: vi.fn(),
+  linkEvents: [] as string[],
   issueLinks: [] as Array<{ cacheEntryId: string; issueKey: string }>,
+  ticketUpserts: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("jira.js", () => ({
@@ -25,7 +27,11 @@ vi.mock("jira.js", () => ({
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => {
     const jiraCachedTicket = {
-      upsert: async () => ({}),
+      upsert: async ({ create }: { create: Record<string, unknown> }) => {
+        state.linkEvents.push("ticket");
+        state.ticketUpserts.push(create);
+        return create;
+      },
     };
     const jiraCacheEntryIssue = {
       deleteMany: async ({ where }: { where: { cacheEntryId: string } }) => {
@@ -42,6 +48,23 @@ vi.mock("@/data/prisma-client", () => ({
         state.issueLinks.push(...data);
         return { count: data.length };
       },
+      upsert: async ({
+        create,
+      }: {
+        create: { cacheEntryId: string; issueKey: string };
+      }) => {
+        state.linkEvents.push("link");
+        if (
+          !state.issueLinks.some(
+            (link) =>
+              link.cacheEntryId === create.cacheEntryId &&
+              link.issueKey === create.issueKey,
+          )
+        ) {
+          state.issueLinks.push(create);
+        }
+        return create;
+      },
     };
     return {
       jiraSettings: {
@@ -51,6 +74,12 @@ vi.mock("@/data/prisma-client", () => ({
           email: "user@example.com",
           apiToken: "secret-token",
           cacheTtlSeconds: 300,
+        }),
+      },
+      jiraProject: {
+        findUnique: async () => ({
+          key: "APP",
+          branchNamingScript: "return ticketKey;",
         }),
       },
       jiraCacheEntry: {
@@ -108,6 +137,7 @@ type CacheInvoker = {
     issues: Array<Record<string, unknown>>,
     fetchedAt: Date,
   ): Promise<void>;
+  linkCacheEntryToIssue(issueKey: string, cacheEntryId: string): Promise<void>;
 };
 
 function invoker() {
@@ -118,7 +148,9 @@ beforeEach(() => {
   state.entry = null;
   state.calls = [];
   state.currentUser.mockReset();
+  state.linkEvents = [];
   state.issueLinks = [];
+  state.ticketUpserts = [];
 });
 
 describe("Jira SDK cache wrapper", () => {
@@ -231,6 +263,51 @@ describe("Jira SDK cache wrapper", () => {
     expect(state.issueLinks).toEqual([
       { cacheEntryId: "entry-2", issueKey: "APP-2" },
     ]);
+  });
+
+  test("creates a cached ticket before linking a per-ticket cache entry", async () => {
+    const service = invoker();
+
+    await service.linkCacheEntryToIssue("APP-1", "entry-1");
+
+    expect(state.linkEvents).toEqual(["ticket", "link"]);
+    expect(state.ticketUpserts).toEqual([
+      { issueKey: "APP-1", projectKey: "APP" },
+    ]);
+    expect(state.issueLinks).toEqual([
+      { cacheEntryId: "entry-1", issueKey: "APP-1" },
+    ]);
+  });
+
+  test("links cached branch details to the ticket for later invalidation", async () => {
+    const service = new JiraService();
+    const internal = service as unknown as {
+      cachedCall: ReturnType<typeof vi.fn>;
+      linkCacheEntryToIssue: ReturnType<typeof vi.fn>;
+    };
+    internal.cachedCall = vi.fn().mockResolvedValue({
+      value: {
+        key: "APP-1",
+        fields: {
+          summary: "Fresh summary",
+          issuetype: { name: "Task" },
+          project: { key: "APP" },
+        },
+      },
+      source: "LIVE",
+      stale: false,
+      fetchedAt: new Date(),
+      entryId: "branch-entry",
+    });
+    internal.linkCacheEntryToIssue = vi.fn().mockResolvedValue(undefined);
+
+    await expect(service.branchTicket("APP-1")).resolves.toMatchObject({
+      ticketTitle: "Fresh summary",
+    });
+    expect(internal.linkCacheEntryToIssue).toHaveBeenCalledWith(
+      "APP-1",
+      "branch-entry",
+    );
   });
 
   test("coalesces concurrent misses and records the follower as a cache call", async () => {

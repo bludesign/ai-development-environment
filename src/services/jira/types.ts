@@ -1,5 +1,6 @@
 export type JiraSourceKind = "JQL" | "BOARD";
 export type JiraCallSource = "LIVE" | "CACHE" | "ERROR";
+export type JiraTextFormat = "ADF" | "MARKDOWN" | "JIRA_WIKI";
 export type JiraTicketAssignmentFilter =
   "ALL" | "UNASSIGNED_OR_SELF" | "SELF_IN_PROGRESS";
 
@@ -93,12 +94,53 @@ export type JiraPerson = {
   avatarUrl: string | null;
 };
 
+export type JiraRichText = {
+  format: JiraTextFormat;
+  raw: unknown;
+  rawText: string;
+  markdown: string;
+  wikiMarkup: string;
+};
+
+export type JiraTextInput = {
+  format: Exclude<JiraTextFormat, "ADF">;
+  value: string;
+};
+
 export type JiraCommentView = {
   id: string;
   author: JiraPerson | null;
   body: unknown;
+  content: JiraRichText | null;
   createdAt: string | null;
   updatedAt: string | null;
+};
+
+export type JiraTicketField = {
+  id: string;
+  name: string;
+  schemaType: string | null;
+  custom: boolean;
+  value: unknown;
+  content: JiraRichText | null;
+};
+
+export type JiraEditField = {
+  id: string;
+  name: string;
+  required: boolean;
+  schemaType: string | null;
+  allowedValues: JiraNamedValue[];
+};
+
+export type JiraTransition = {
+  id: string;
+  name: string;
+  toStatusId: string | null;
+  toStatus: string;
+  toStatusCategory: string | null;
+  hasScreen: boolean;
+  requiredFields: string[];
 };
 
 export type JiraNamedValue = {
@@ -126,6 +168,7 @@ export type JiraIssueLinkView = {
 export type JiraTicketDetail = JiraTicketSummary & {
   jiraUrl: string;
   description: unknown;
+  descriptionContent: JiraRichText | null;
   reporter: JiraPerson | null;
   creator: JiraPerson | null;
   labels: string[];
@@ -142,8 +185,50 @@ export type JiraTicketDetail = JiraTicketSummary & {
   dueAt: string | null;
   resolvedAt: string | null;
   timeTracking: unknown;
+  allFields: JiraTicketField[];
   cache: JiraCacheMeta;
   commentsCache: JiraCacheMeta;
+};
+
+export type JiraChangeItem = {
+  field: string;
+  fieldId: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export type JiraChange = {
+  id: string;
+  author: JiraPerson | null;
+  createdAt: string | null;
+  items: JiraChangeItem[];
+};
+
+export type JiraWorklog = {
+  id: string;
+  author: JiraPerson | null;
+  comment: JiraRichText | null;
+  timeSpent: string | null;
+  timeSpentSeconds: number | null;
+  startedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type JiraActivityPage<T> = PaginatedResult<T> & {
+  cache: JiraCacheMeta;
+};
+
+export type UpdateJiraTicketInput = {
+  issueKey: string;
+  summary?: string | null;
+  description?: JiraTextInput | null;
+  priorityId?: string | null;
+  labels?: string[] | null;
+  componentIds?: string[] | null;
+  fixVersionIds?: string[] | null;
+  affectedVersionIds?: string[] | null;
+  dueDate?: string | null;
 };
 
 export type JiraMetricWindow = {

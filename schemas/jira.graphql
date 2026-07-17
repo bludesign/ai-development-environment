@@ -15,6 +15,17 @@ enum JiraTicketAssignmentFilter {
   SELF_IN_PROGRESS
 }
 
+enum JiraTextFormat {
+  ADF
+  MARKDOWN
+  JIRA_WIKI
+}
+
+enum JiraTextInputFormat {
+  MARKDOWN
+  JIRA_WIKI
+}
+
 type JiraSettings {
   siteUrl: String
   email: String
@@ -106,8 +117,44 @@ type JiraComment {
   id: ID!
   author: JiraPerson
   body: JSON
+  content: JiraRichText
   createdAt: String
   updatedAt: String
+}
+
+type JiraRichText {
+  format: JiraTextFormat!
+  raw: JSON
+  rawText: String!
+  markdown: String!
+  wikiMarkup: String!
+}
+
+type JiraTicketField {
+  id: ID!
+  name: String!
+  schemaType: String
+  custom: Boolean!
+  value: JSON
+  content: JiraRichText
+}
+
+type JiraEditField {
+  id: ID!
+  name: String!
+  required: Boolean!
+  schemaType: String
+  allowedValues: [JiraNamedValue!]!
+}
+
+type JiraTransition {
+  id: ID!
+  name: String!
+  toStatusId: ID
+  toStatus: String!
+  toStatusCategory: String
+  hasScreen: Boolean!
+  requiredFields: [String!]!
 }
 
 type JiraAttachment {
@@ -143,6 +190,7 @@ type JiraTicketDetail {
   updatedAt: String
   jiraUrl: String!
   description: JSON
+  descriptionContent: JiraRichText
   reporter: JiraPerson
   creator: JiraPerson
   labels: [String!]!
@@ -159,8 +207,50 @@ type JiraTicketDetail {
   dueAt: String
   resolvedAt: String
   timeTracking: JSON
+  allFields: [JiraTicketField!]!
   cache: JiraCacheMeta!
   commentsCache: JiraCacheMeta!
+}
+
+type JiraChangeItem {
+  field: String!
+  fieldId: ID
+  from: String
+  to: String
+}
+
+type JiraChange {
+  id: ID!
+  author: JiraPerson
+  createdAt: String
+  items: [JiraChangeItem!]!
+}
+
+type JiraChangePage {
+  items: [JiraChange!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+  cache: JiraCacheMeta!
+}
+
+type JiraWorklog {
+  id: ID!
+  author: JiraPerson
+  comment: JiraRichText
+  timeSpent: String
+  timeSpentSeconds: Int
+  startedAt: String
+  createdAt: String
+  updatedAt: String
+}
+
+type JiraWorklogPage {
+  items: [JiraWorklog!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+  cache: JiraCacheMeta!
 }
 
 type JiraConnectionTest {
@@ -280,6 +370,23 @@ input UpdateJiraProjectDisplaySettingsInput {
   completedStatusIds: [ID!]!
 }
 
+input JiraTextInput {
+  format: JiraTextInputFormat!
+  value: String!
+}
+
+input UpdateJiraTicketInput {
+  issueKey: ID!
+  summary: String
+  description: JiraTextInput
+  priorityId: ID
+  labels: [String!]
+  componentIds: [ID!]
+  fixVersionIds: [ID!]
+  affectedVersionIds: [ID!]
+  dueDate: String
+}
+
 extend type Query {
   jiraSettings: JiraSettings!
   jiraAvailableProjects: [JiraAvailableProject!]!
@@ -287,6 +394,19 @@ extend type Query {
   jiraProjectStatuses(projectId: ID!): [JiraProjectStatus!]!
   jiraTicketBoard(sourceId: ID!): JiraTicketBoard!
   jiraTicket(issueKey: ID!): JiraTicketDetail!
+  jiraAssignableUsers(issueKey: ID!, query: String = ""): [JiraPerson!]!
+  jiraTicketTransitions(issueKey: ID!): [JiraTransition!]!
+  jiraTicketEditFields(issueKey: ID!): [JiraEditField!]!
+  jiraTicketChanges(
+    issueKey: ID!
+    limit: Int = 50
+    offset: Int = 0
+  ): JiraChangePage!
+  jiraTicketWorklogs(
+    issueKey: ID!
+    limit: Int = 50
+    offset: Int = 0
+  ): JiraWorklogPage!
   jiraCacheMetrics: JiraCacheMetrics!
   jiraApiCalls(limit: Int = 50, offset: Int = 0): JiraApiCallPage!
   jiraCachedTickets(limit: Int = 50, offset: Int = 0): JiraCachedTicketPage!
@@ -314,4 +434,8 @@ extend type Mutation {
   clearJiraCache: Boolean!
   refreshJiraCachedTicket(issueKey: ID!): JiraTicketDetail!
   deleteJiraCachedTicket(issueKey: ID!): Boolean!
+  addJiraComment(issueKey: ID!, content: JiraTextInput!): JiraTicketDetail!
+  assignJiraTicket(issueKey: ID!, accountId: ID): JiraTicketDetail!
+  transitionJiraTicket(issueKey: ID!, transitionId: ID!): JiraTicketDetail!
+  updateJiraTicket(input: UpdateJiraTicketInput!): JiraTicketDetail!
 }
