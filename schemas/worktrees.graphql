@@ -179,6 +179,7 @@ type WorktreeActivity {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  pushStatus: WorktreePushStatus
   observedAt: String!
 }
 
@@ -215,7 +216,7 @@ input CodebaseWorktreeReportInput {
   codebaseId: ID!
   complete: Boolean!
   defaultBranch: String
-  localBranches: [String!]!
+  localBranches: [String!]! = []
   remoteBranches: [String!]!
   fetchedAt: String
   fetchAttemptedAt: String

@@ -824,7 +824,7 @@ export class WorktreesService {
   ) {
     const ticketKey = ticketKeyValue?.trim() ?? "";
     const ticket = await this.jiraService.branchTicket(ticketKey);
-    const candidates = jiraBranchCandidates(ticket.branchNamingScript, {
+    const candidates = await jiraBranchCandidates(ticket.branchNamingScript, {
       ticketKey: ticket.ticketKey,
       type: ticket.ticketType ?? "",
       title: ticket.ticketTitle,

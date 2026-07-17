@@ -306,11 +306,13 @@ export function parseCodebaseWorktreeReport(
   value: unknown,
 ): CodebaseWorktreeReport {
   const report = objectValue(value, "worktree report");
+  const localBranches =
+    report.localBranches === undefined ? [] : report.localBranches;
   if (typeof report.complete !== "boolean") {
     throw new Error("worktree report.complete must be a boolean");
   }
   if (
-    !Array.isArray(report.localBranches) ||
+    !Array.isArray(localBranches) ||
     !Array.isArray(report.remoteBranches) ||
     !Array.isArray(report.worktrees)
   ) {
@@ -323,7 +325,7 @@ export function parseCodebaseWorktreeReport(
       report.defaultBranch,
       "worktree report.defaultBranch",
     ),
-    localBranches: report.localBranches.map((branch, index) =>
+    localBranches: localBranches.map((branch, index) =>
       stringValue(branch, `worktree report.localBranches[${index}]`),
     ),
     remoteBranches: report.remoteBranches.map((branch, index) =>

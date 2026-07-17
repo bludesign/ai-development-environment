@@ -52,6 +52,19 @@ describe("worktree agent contract", () => {
       defaultBranch: "main",
       worktrees: [expect.objectContaining({ pushStatus: "READY" })],
     });
+
+    expect(
+      parseCodebaseWorktreeReport({
+        codebaseId: "codebase-1",
+        complete: true,
+        defaultBranch: "main",
+        remoteBranches: ["main"],
+        fetchedAt: null,
+        fetchAttemptedAt: null,
+        fetchError: null,
+        worktrees: [],
+      }),
+    ).toMatchObject({ localBranches: [] });
   });
 
   test("rejects arbitrary operation names and payload fields", () => {

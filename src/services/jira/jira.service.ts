@@ -603,7 +603,7 @@ export class JiraService {
       select: { key: true },
     });
     if (!project) throw new Error("Jira project not found");
-    const validated = validateJiraBranchNamingScript(
+    const validated = await validateJiraBranchNamingScript(
       branchNamingScript,
       project.key,
     );
