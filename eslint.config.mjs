@@ -15,7 +15,16 @@ const eslintConfig = defineConfig([
     // Generated code (Prisma client, GraphQL resolver types, bundled SDL).
     "src/generated/**",
     "packages/*/dist/**",
+    // npm publish staging output (assembled by scripts/prepare-npm-server-package.mjs).
+    ".npm-staging/**",
   ]),
+  // CommonJS launcher scripts shipped inside the npm server package.
+  {
+    files: ["scripts/npm/**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
