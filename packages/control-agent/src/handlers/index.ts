@@ -50,9 +50,47 @@ import {
   operateWorktree,
   watchWorktree,
 } from "./worktrees.js";
+import {
+  deployIosBuild,
+  discoverBuildSources,
+  exportIosArchive,
+  inspectBuildDestinations,
+  inspectBuildRunDestinations,
+  parseBuildSourceMetadata,
+  runIosBuild,
+} from "./builds.js";
+import {
+  IOS_BUILD_JOB_KIND,
+  IOS_DEPLOY_JOB_KIND,
+  IOS_DESTINATIONS_JOB_KIND,
+  IOS_RUN_DESTINATIONS_JOB_KIND,
+  IOS_EXPORT_JOB_KIND,
+  IOS_SOURCE_DISCOVER_JOB_KIND,
+  IOS_SOURCE_PARSE_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
 
 export type AgentJobHandlerContext = {
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
+  reportBuildProgress?: (input: {
+    buildId: string;
+    status: "PREPARING" | "RUNNING";
+    startedAt?: string;
+    errorCode?: string;
+    error?: string;
+  }) => Promise<unknown>;
+  appendBuildLogs?: (
+    buildId: string,
+    events: Array<{
+      scope: string;
+      scopeId: string;
+      sequence: number;
+      phase: string;
+      level: string;
+      stream: string;
+      message: string;
+      createdAt: string;
+    }>,
+  ) => Promise<unknown>;
 };
 
 export type AgentJobHandler = (
@@ -85,4 +123,11 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [SKILL_SCAN_JOB_KIND]: scanSkills,
   [SKILL_READ_JOB_KIND]: readSkills,
   [SKILL_APPLY_JOB_KIND]: applySkills,
+  [IOS_SOURCE_DISCOVER_JOB_KIND]: discoverBuildSources,
+  [IOS_SOURCE_PARSE_JOB_KIND]: parseBuildSourceMetadata,
+  [IOS_DESTINATIONS_JOB_KIND]: inspectBuildDestinations,
+  [IOS_RUN_DESTINATIONS_JOB_KIND]: inspectBuildRunDestinations,
+  [IOS_BUILD_JOB_KIND]: runIosBuild,
+  [IOS_DEPLOY_JOB_KIND]: deployIosBuild,
+  [IOS_EXPORT_JOB_KIND]: exportIosArchive,
 };

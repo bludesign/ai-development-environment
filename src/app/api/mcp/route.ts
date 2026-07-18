@@ -11,6 +11,7 @@ async function handle(request: Request): Promise<Response> {
     const transport = new WebStandardStreamableHTTPServerTransport();
     const server = createCodebasesMcpServer(
       getServerServices().codebaseToolsService,
+      getServerServices().buildsService,
     );
     await server.connect(transport);
     return await transport.handleRequest(request);

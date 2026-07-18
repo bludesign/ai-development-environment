@@ -1,5 +1,14 @@
 import { statfsSync } from "node:fs";
-import { arch, cpus, freemem, hostname, release, totalmem } from "node:os";
+import {
+  arch,
+  cpus,
+  freemem,
+  homedir,
+  hostname,
+  release,
+  totalmem,
+} from "node:os";
+import { join } from "node:path";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
@@ -9,6 +18,7 @@ import {
 } from "@ai-development-environment/agent-contract/codebases";
 import { WORKTREE_JOB_KINDS } from "@ai-development-environment/agent-contract/worktrees";
 import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
+import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
@@ -19,6 +29,7 @@ export const AGENT_CAPABILITIES = [
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
+  ...IOS_BUILD_JOB_KINDS,
 ];
 
 export type AgentInventory = {
@@ -32,6 +43,7 @@ export type AgentInventory = {
   diskTotalBytes: number;
   diskFreeBytes: number;
   capabilities: string[];
+  defaultBuildsDirectory?: string;
 };
 
 export function collectInventory(): AgentInventory {
@@ -47,5 +59,12 @@ export function collectInventory(): AgentInventory {
     diskTotalBytes: Number(disk.blocks * disk.bsize),
     diskFreeBytes: Number(disk.bavail * disk.bsize),
     capabilities: AGENT_CAPABILITIES,
+    defaultBuildsDirectory: join(
+      homedir(),
+      "Library",
+      "Application Support",
+      "AI Development Environment",
+      "Builds",
+    ),
   };
 }

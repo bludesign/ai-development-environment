@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./build-data": "./src/build-data.ts",
+    "./builds": "./src/builds.ts",
     "./codebases": "./src/codebases.ts",
     "./skills": "./src/skills.ts",
     "./worktrees": "./src/worktrees.ts"

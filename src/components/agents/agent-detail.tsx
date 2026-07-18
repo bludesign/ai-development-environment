@@ -524,6 +524,13 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         onSaved={setAgent}
       />
 
+      <BuildsDirectorySettingsCard
+        agent={agent}
+        canBrowseDirectories={canBrowseDirectories}
+        key={`${agent.id}:${agent.buildsDirectory ?? "default"}:${agent.defaultBuildsDirectory ?? ""}`}
+        onSaved={setAgent}
+      />
+
       {selectedJobId && (
         <JobMonitor key={selectedJobId} compact jobId={selectedJobId} />
       )}
@@ -589,6 +596,112 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         )}
       </section>
     </div>
+  );
+}
+
+function BuildsDirectorySettingsCard({
+  agent,
+  canBrowseDirectories,
+  onSaved,
+}: {
+  agent: Agent;
+  canBrowseDirectories: boolean;
+  onSaved: (agent: Agent) => void;
+}) {
+  const t = useTranslations("agentDetail");
+  const [path, setPath] = useState(agent.buildsDirectory ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (buildsDirectory: string | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        updateAgentBuildsDirectory: Agent;
+      }>(
+        `mutation UpdateAgentBuildsDirectory($agentId: ID!, $buildsDirectory: String) {
+          updateAgentBuildsDirectory(agentId: $agentId, buildsDirectory: $buildsDirectory) { ${AGENT_FIELDS} }
+        }`,
+        { agentId: agent.id, buildsDirectory },
+      );
+      onSaved(data.updateAgentBuildsDirectory);
+      setPath(data.updateAgentBuildsDirectory.buildsDirectory ?? "");
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("buildsDirectory")}</CardTitle>
+        <CardDescription>{t("buildsDirectoryDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg bg-muted p-3">
+          <p className="text-xs text-muted-foreground">
+            {t("effectiveDirectory")}
+          </p>
+          <p className="mt-1 break-all font-mono text-xs">
+            {agent.effectiveBuildsDirectory ??
+              agent.buildsDirectory ??
+              agent.defaultBuildsDirectory ??
+              t("notConfigured")}
+          </p>
+          {!agent.buildsDirectory && agent.defaultBuildsDirectory && (
+            <Badge className="mt-2" variant="outline">
+              {t("agentDefault")}
+            </Badge>
+          )}
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="builds-directory-path">
+            {t("customBuildsDirectory")}
+          </Label>
+          <Input
+            disabled={busy}
+            id="builds-directory-path"
+            onChange={(event) => setPath(event.target.value)}
+            placeholder={
+              agent.defaultBuildsDirectory ?? "/Users/example/Builds"
+            }
+            value={path}
+          />
+        </div>
+        {canBrowseDirectories && (
+          <AgentDirectoryBrowser
+            agentId={agent.id}
+            browseLabel={t("browseBuildsDirectory")}
+            disabled={busy}
+            onSelect={setPath}
+            selectLabel={t("useDirectory")}
+          />
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={busy || !path.trim()}
+            onClick={() => void save(path.trim())}
+          >
+            {busy && <Spinner />} {t("saveBuildsDirectory")}
+          </Button>
+          {agent.buildsDirectory && (
+            <Button
+              disabled={busy}
+              onClick={() => void save(null)}
+              variant="outline"
+            >
+              <Trash2 /> {t("useAgentDefault")}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

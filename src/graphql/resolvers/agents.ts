@@ -96,6 +96,10 @@ export const createAgentResolvers = (
         ? "ONLINE"
         : "OFFLINE";
     },
+    effectiveBuildsDirectory: (agent: {
+      buildsDirectory: string | null;
+      defaultBuildsDirectory: string | null;
+    }) => agent.buildsDirectory ?? agent.defaultBuildsDirectory,
     lastSeenAt: (agent: { lastSeenAt: Date | null }) =>
       agent.lastSeenAt?.toISOString() ?? null,
     disconnectedAt: (agent: { disconnectedAt: Date | null }) =>
@@ -190,6 +194,7 @@ export const createAgentResolvers = (
           diskTotalBytes?: number | null;
           diskFreeBytes?: number | null;
           capabilities: string[];
+          defaultBuildsDirectory?: string | null;
         }),
         ipAddress: context.ipAddress,
       }),
@@ -209,6 +214,7 @@ export const createAgentResolvers = (
           diskTotalBytes?: number | null;
           diskFreeBytes?: number | null;
           capabilities: string[];
+          defaultBuildsDirectory?: string | null;
         }),
         ipAddress: context.ipAddress,
       }),
@@ -277,6 +283,20 @@ export const createAgentResolvers = (
       return agentControlService.updateBaseRepoDirectory(
         agentId,
         baseRepoDirectory ?? null,
+      );
+    },
+    updateAgentBuildsDirectory: (
+      _root: unknown,
+      {
+        agentId,
+        buildsDirectory,
+      }: { agentId: string; buildsDirectory?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.updateBuildsDirectory(
+        agentId,
+        buildsDirectory ?? null,
       );
     },
     updateAgentDerivedDataSettings: (

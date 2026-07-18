@@ -71,7 +71,14 @@ const worktreeInclude = {
   codebase: {
     include: {
       agent: true,
-      repository: true,
+      repository: {
+        include: {
+          projects: {
+            where: { type: "IOS_APP" },
+            include: { configurations: { select: { id: true } } },
+          },
+        },
+      },
       jobs: {
         where: { status: { in: ACTIVE_STATUSES } },
         orderBy: { createdAt: "desc" as const },
@@ -422,6 +429,7 @@ export class WorktreesService {
       codebase: View["codebase"];
       repository: View["codebase"]["repository"];
       worktrees: View[];
+      iosBuildConfigured: boolean;
     };
     type AgentGroup = {
       agent: View["codebase"]["agent"];
@@ -442,6 +450,10 @@ export class WorktreesService {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
           worktrees: [],
+          iosBuildConfigured:
+            worktree.codebase.repository.projects?.some(
+              (project) => project.configurations.length > 0,
+            ) ?? false,
         };
         agentGroup.codebaseMap.set(worktree.codebase.id, codebaseGroup);
         agentGroup.codebases.push(codebaseGroup);

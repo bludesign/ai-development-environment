@@ -123,6 +123,7 @@ export class AgentGraphQLClient {
       diskTotalBytes,
       diskFreeBytes,
       capabilities,
+      defaultBuildsDirectory,
     } = inventory;
     return this.request<{ heartbeatAgent: { id: string } }>(
       `mutation Heartbeat($input: AgentHeartbeatInput!) {
@@ -139,6 +140,7 @@ export class AgentGraphQLClient {
           diskTotalBytes,
           diskFreeBytes,
           capabilities,
+          defaultBuildsDirectory,
         },
       },
     );
@@ -177,6 +179,42 @@ export class AgentGraphQLClient {
         appendAgentJobLogs(jobId: $jobId, logs: $logs) { id }
       }`,
       { jobId, logs: [log] },
+    );
+  }
+
+  reportBuildProgress(input: {
+    buildId: string;
+    status: "PREPARING" | "RUNNING";
+    startedAt?: string;
+    errorCode?: string;
+    error?: string;
+  }) {
+    return this.request<{ reportBuildProgress: { id: string } }>(
+      `mutation ReportBuildProgress($input: BuildProgressInput!) {
+        reportBuildProgress(input: $input) { id }
+      }`,
+      { input },
+    );
+  }
+
+  appendBuildLogs(
+    buildId: string,
+    events: Array<{
+      scope: string;
+      scopeId: string;
+      sequence: number;
+      phase: string;
+      level: string;
+      stream: string;
+      message: string;
+      createdAt: string;
+    }>,
+  ) {
+    return this.request<{ appendBuildLogEvents: Array<{ id: string }> }>(
+      `mutation AppendBuildLogs($buildId: ID!, $events: [BuildLogEventInput!]!) {
+        appendBuildLogEvents(buildId: $buildId, events: $events) { id }
+      }`,
+      { buildId, events },
     );
   }
 

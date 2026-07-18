@@ -15,6 +15,7 @@ export function captureCommand(options: {
   timeoutMs: number;
   signal: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
 }): Promise<CaptureResult> {
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -26,6 +27,7 @@ export function captureCommand(options: {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       env: options.env ?? process.env,
+      cwd: options.cwd,
     });
     const append = (current: string, chunk: Buffer | string) =>
       `${current}${String(chunk)}`.slice(0, MAX_OUTPUT_BYTES);

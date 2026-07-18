@@ -60,6 +60,7 @@ import type {
   CodebaseStash,
   CodebaseStashDiff,
 } from "./types";
+import { IosProjectSection } from "@/components/builds/ios-project-section";
 
 const CODEBASE_DETAIL_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
@@ -553,6 +554,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           <TabsTrigger value="stashes">
             {t("stashes", { count: gitState?.stashes.length ?? 0 })}
           </TabsTrigger>
+          <TabsTrigger value="ios-app">{t("iosApp")}</TabsTrigger>
         </TabsList>
         <TabsContent className="space-y-6" value="branches">
           <BranchTable
@@ -589,6 +591,9 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             stashes={gitState?.stashes ?? []}
             truncated={Boolean(gitState?.stashesTruncated)}
           />
+        </TabsContent>
+        <TabsContent value="ios-app">
+          <IosProjectSection codebaseId={codebaseId} />
         </TabsContent>
       </Tabs>
     </div>

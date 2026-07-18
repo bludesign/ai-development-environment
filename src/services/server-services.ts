@@ -3,6 +3,7 @@ import "server-only";
 import { AgentControlService } from "@/services/agent-control";
 import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
+import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import { GitHubService } from "@/services/github";
 import { JiraService } from "@/services/jira";
@@ -16,6 +17,7 @@ export type ServerServices = {
   agentControlService: AgentControlService;
   ccusageService: CcusageService;
   buildDataService: BuildDataService;
+  buildsService: BuildsService;
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
   jiraService: JiraService;
@@ -30,6 +32,7 @@ function createServerServices(): ServerServices {
   const agentControlService = new AgentControlService();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
+  const buildsService = new BuildsService(agentControlService);
   const skillsService = new SkillsService(agentControlService);
   const codebasesService = new CodebasesService(
     agentControlService,
@@ -49,13 +52,14 @@ function createServerServices(): ServerServices {
     agentControlService,
     ccusageService,
     buildDataService,
+    buildsService,
     codebasesService,
     codebaseToolsService,
     jiraService,
     gitHubService,
     worktreesService,
     skillsService,
-    toolsService: new ToolsService(codebaseToolsService),
+    toolsService: new ToolsService(codebaseToolsService, buildsService),
   };
 }
 
