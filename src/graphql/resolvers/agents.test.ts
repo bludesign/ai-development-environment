@@ -12,8 +12,8 @@ function context(agentId: string | null): GraphQLContext {
 describe("agent read ownership", () => {
   test("derives the build folder from the base repository directory", () => {
     const service = {} as AgentControlService;
-    const resolver = createAgentResolvers(service).Agent
-      .effectiveBuildsDirectory;
+    const resolver =
+      createAgentResolvers(service).Agent.effectiveBuildsDirectory;
 
     expect(
       resolver({

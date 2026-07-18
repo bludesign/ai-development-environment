@@ -6,5 +6,7 @@ export default async function RepositoryDetailRoute({
   params: Promise<{ locale: string; repositoryId: string }>;
 }) {
   const { repositoryId } = await params;
-  return <RepositoryDetailPage repositoryId={repositoryId} key={repositoryId} />;
+  return (
+    <RepositoryDetailPage repositoryId={repositoryId} key={repositoryId} />
+  );
 }

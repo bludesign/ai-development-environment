@@ -661,7 +661,8 @@ function BuildsDirectorySettingsCard({
             id="builds-directory-path"
             onChange={(event) => setPath(event.target.value)}
             placeholder={
-              agent.effectiveBuildsDirectory ?? "/Users/example/Repositories/Builds"
+              agent.effectiveBuildsDirectory ??
+              "/Users/example/Repositories/Builds"
             }
             value={path}
           />

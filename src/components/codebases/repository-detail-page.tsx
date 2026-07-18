@@ -47,13 +47,17 @@ const REPOSITORY_FIELDS = `
   }
 `;
 
-export function RepositoryDetailPage({ repositoryId }: { repositoryId: string }) {
+export function RepositoryDetailPage({
+  repositoryId,
+}: {
+  repositoryId: string;
+}) {
   const t = useTranslations("codebases");
   const buildsT = useTranslations("builds");
   const [repository, setRepository] = useState<CodebaseRepository | null>(null);
-  const [skillGroups, setSkillGroups] = useState<Array<{ id: string; name: string }>>(
-    [],
-  );
+  const [skillGroups, setSkillGroups] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,7 +171,9 @@ export function RepositoryDetailPage({ repositoryId }: { repositoryId: string })
             <FolderGit2 />
           </EmptyMedia>
           <EmptyTitle>{t("repositoryNotFound")}</EmptyTitle>
-          <EmptyDescription>{t("repositoryNotFoundDescription")}</EmptyDescription>
+          <EmptyDescription>
+            {t("repositoryNotFoundDescription")}
+          </EmptyDescription>
         </EmptyHeader>
         <Button asChild variant="outline">
           <Link href="/codebases">
@@ -196,7 +202,9 @@ export function RepositoryDetailPage({ repositoryId }: { repositoryId: string })
         </Button>
       </div>
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("editTitle")}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {t("editTitle")}
+        </h1>
         <p className="mt-1 font-mono text-xs text-muted-foreground">
           {repository.displayOrigin}
         </p>
@@ -225,7 +233,9 @@ export function RepositoryDetailPage({ repositoryId }: { repositoryId: string })
             <Card>
               <CardHeader>
                 <CardTitle>{t("repositoryDetails")}</CardTitle>
-                <CardDescription>{t("repositoryDetailsDescription")}</CardDescription>
+                <CardDescription>
+                  {t("repositoryDetailsDescription")}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -239,7 +249,9 @@ export function RepositoryDetailPage({ repositoryId }: { repositoryId: string })
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="repository-jira-regex">{t("jiraBranchRegex")}</Label>
+                  <Label htmlFor="repository-jira-regex">
+                    {t("jiraBranchRegex")}
+                  </Label>
                   <Input
                     id="repository-jira-regex"
                     onChange={(event) => setJiraBranchRegex(event.target.value)}
@@ -281,7 +293,9 @@ export function RepositoryDetailPage({ repositoryId }: { repositoryId: string })
                 </div>
                 <div className="space-y-2">
                   <Label>{t("skillGroups")}</Label>
-                  <p className="text-xs text-muted-foreground">{t("skillGroupsHelp")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("skillGroupsHelp")}
+                  </p>
                   <div className="max-h-56 space-y-1 overflow-auto rounded-lg border p-2">
                     {skillGroups.map((group) => (
                       <label

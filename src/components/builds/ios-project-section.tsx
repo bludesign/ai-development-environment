@@ -258,7 +258,9 @@ export function IosProjectSection({
                     value={checkout.codebaseId}
                   >
                     {checkout.label}
-                    {!checkout.available ? ` · ${t("checkoutUnavailable")}` : ""}
+                    {!checkout.available
+                      ? ` · ${t("checkoutUnavailable")}`
+                      : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

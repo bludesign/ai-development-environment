@@ -1,12 +1,5 @@
 import { statfsSync } from "node:fs";
-import {
-  arch,
-  cpus,
-  freemem,
-  hostname,
-  release,
-  totalmem,
-} from "node:os";
+import { arch, cpus, freemem, hostname, release, totalmem } from "node:os";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
