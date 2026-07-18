@@ -24,6 +24,8 @@ import { createToolsResolvers } from "./resolvers/tools";
 import type { ToolsService } from "@/services/tools";
 import type { WorktreesService } from "@/services/worktrees";
 import { createWorktreeResolvers } from "./resolvers/worktrees";
+import { createSkillResolvers } from "./resolvers/skills";
+import type { SkillsService } from "@/services/skills";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -40,6 +42,7 @@ export const createSchema = (
   toolsService: ToolsService,
   worktreesService: WorktreesService,
   buildDataService: BuildDataService,
+  skillsService: SkillsService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -51,6 +54,7 @@ export const createSchema = (
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
     createWorktreeResolvers(worktreesService),
+    createSkillResolvers(skillsService),
   ]);
 
   return buildSubgraphSchema({

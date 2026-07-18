@@ -95,6 +95,7 @@ const CODEBASE_FIELDS = `
 `;
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
+  skillGroups { id name }
   codebases { ${CODEBASE_FIELDS} }
 `;
 
@@ -104,6 +105,9 @@ export function CodebasesPage() {
   const t = useTranslations("codebases");
   const [repositories, setRepositories] = useState<CodebaseRepository[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [skillGroups, setSkillGroups] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
   const [settings, setSettings] = useState<CodebaseSettings | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>("agents");
   const [loading, setLoading] = useState(true);
@@ -122,15 +126,18 @@ export function CodebasesPage() {
         codebaseOverview: { repositories: CodebaseRepository[] };
         codebaseSettings: CodebaseSettings;
         agents: Agent[];
+        skillsOverview?: { groups: Array<{ id: string; name: string }> };
       }>(`query CodebaseOverview {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
         codebaseSettings { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
         agents { ${AGENT_FIELDS} }
+        skillsOverview { groups { id name } }
       }`);
       if (loadId !== latestLoad.current) return;
       setRepositories(data.codebaseOverview.repositories);
       setSettings(data.codebaseSettings);
       setAgents(data.agents);
+      setSkillGroups(data.skillsOverview?.groups ?? []);
       setError(null);
     } catch (value) {
       if (loadId !== latestLoad.current) return;
@@ -356,6 +363,7 @@ export function CodebasesPage() {
         settings={settings}
       />
       <EditRepositoryDialog
+        groups={skillGroups}
         key={editing?.id ?? "closed"}
         onOpenChange={(open) => !open && setEditing(null)}
         onSaved={async () => {
@@ -1024,10 +1032,12 @@ function AddCodebaseDialog({
 }
 
 function EditRepositoryDialog({
+  groups,
   repository,
   onOpenChange,
   onSaved,
 }: {
+  groups: Array<{ id: string; name: string }>;
   repository: CodebaseRepository | null;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
@@ -1040,6 +1050,9 @@ function EditRepositoryDialog({
   );
   const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(
     repository?.keepBaseBranchUpToDate ?? true,
+  );
+  const [skillGroupIds, setSkillGroupIds] = useState(
+    repository?.skillGroups?.map((group) => group.id) ?? [],
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1059,6 +1072,7 @@ function EditRepositoryDialog({
             description,
             jiraBranchRegex: jiraBranchRegex || null,
             keepBaseBranchUpToDate,
+            skillGroupIds,
           },
         },
       );
@@ -1133,6 +1147,37 @@ function EditRepositoryDialog({
               <p className="text-xs text-muted-foreground">
                 {t("keepBaseBranchUpToDateHelp")}
               </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>{t("skillGroups")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("skillGroupsHelp")}
+            </p>
+            <div className="max-h-40 space-y-1 overflow-auto rounded-lg border p-2">
+              {groups.map((group) => (
+                <label
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
+                  key={group.id}
+                >
+                  <Checkbox
+                    checked={skillGroupIds.includes(group.id)}
+                    onCheckedChange={(checked) =>
+                      setSkillGroupIds((current) =>
+                        checked === true
+                          ? [...new Set([...current, group.id])]
+                          : current.filter((id) => id !== group.id),
+                      )
+                    }
+                  />
+                  {group.name}
+                </label>
+              ))}
+              {!groups.length && (
+                <p className="px-2 py-1 text-sm text-muted-foreground">
+                  {t("noSkillGroups")}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>

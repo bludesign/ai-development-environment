@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./build-data": "./src/build-data.ts",
     "./codebases": "./src/codebases.ts",
+    "./skills": "./src/skills.ts",
     "./worktrees": "./src/worktrees.ts"
   },
   "types": "./src/index.ts"

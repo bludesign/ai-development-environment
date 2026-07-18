@@ -180,6 +180,30 @@ describe("AgentControlService.updateBaseRepoDirectory", () => {
   });
 });
 
+describe("AgentControlService.deleteAgent", () => {
+  test("deletes an existing agent and reports success", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: "agent-1" });
+    const del = vi.fn().mockResolvedValue({ id: "agent-1" });
+    getPrismaClient.mockResolvedValue({ agent: { findUnique, delete: del } });
+
+    const result = await new AgentControlService().deleteAgent("agent-1");
+
+    expect(result).toBe(true);
+    expect(del).toHaveBeenCalledWith({ where: { id: "agent-1" } });
+  });
+
+  test("returns false and does not delete when the agent is missing", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const del = vi.fn();
+    getPrismaClient.mockResolvedValue({ agent: { findUnique, delete: del } });
+
+    const result = await new AgentControlService().deleteAgent("agent-1");
+
+    expect(result).toBe(false);
+    expect(del).not.toHaveBeenCalled();
+  });
+});
+
 describe("AgentControlService.updateDerivedDataSettings", () => {
   test("stores default, absolute, and relative settings with strict path validation", async () => {
     const update = vi

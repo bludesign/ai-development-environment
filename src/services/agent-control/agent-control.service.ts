@@ -45,6 +45,15 @@ import {
   worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  SKILL_APPLY_JOB_KIND,
+  SKILL_JOB_KINDS,
+  SKILL_READ_JOB_KIND,
+  SKILL_SCAN_JOB_KIND,
+  parseSkillApplyPayload,
+  parseSkillReadPayload,
+  parseSkillScanPayload,
+} from "@ai-development-environment/agent-contract/skills";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -73,6 +82,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
+  ...SKILL_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
@@ -87,6 +97,7 @@ type CompletionHandler = (job: {
   resultJson: string | null;
   error: string | null;
 }) => Promise<void>;
+type ConnectionHandler = (agentId: string) => Promise<void>;
 
 export type RequestIdentity = {
   agentId: string | null;
@@ -175,6 +186,18 @@ export function validateJob(kind: string, payload: unknown): void {
     worktreeWatchJobPayload(value);
     return;
   }
+  if (kind === SKILL_SCAN_JOB_KIND) {
+    parseSkillScanPayload(payload);
+    return;
+  }
+  if (kind === SKILL_READ_JOB_KIND) {
+    parseSkillReadPayload(payload);
+    return;
+  }
+  if (kind === SKILL_APPLY_JOB_KIND) {
+    parseSkillApplyPayload(payload);
+    return;
+  }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
     const unexpected = Object.keys(value);
     if (unexpected.length > 0) {
@@ -227,9 +250,20 @@ function publishJob(job: {
 
 export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
+  private readonly connectionHandlers = new Set<ConnectionHandler>();
 
   registerCompletionHandler(kind: string, handler: CompletionHandler): void {
     this.completionHandlers.set(kind, handler);
+  }
+
+  registerConnectionHandler(handler: ConnectionHandler): void {
+    this.connectionHandlers.add(handler);
+  }
+
+  private async notifyConnected(agentId: string): Promise<void> {
+    await Promise.allSettled(
+      [...this.connectionHandlers].map((handler) => handler(agentId)),
+    );
   }
 
   async requestCodebaseReconcile(agentIds: string[]): Promise<number> {
@@ -340,6 +374,7 @@ export class AgentControlService {
       return created;
     });
     publishAgent(agent);
+    await this.notifyConnected(agent.id);
     return { agent, credential };
   }
 
@@ -359,6 +394,15 @@ export class AgentControlService {
     },
   ) {
     const prisma = await getPrismaClient();
+    const previous = await prisma.agent.findUnique({
+      where: { id: agentId },
+      select: { lastSeenAt: true, disconnectedAt: true },
+    });
+    const now = new Date();
+    const reconnected =
+      !previous?.lastSeenAt ||
+      previous.disconnectedAt !== null ||
+      now.getTime() - previous.lastSeenAt.getTime() > AGENT_ONLINE_WINDOW_MS;
     const agent = await prisma.agent.update({
       where: { id: agentId },
       data: {
@@ -372,11 +416,12 @@ export class AgentControlService {
         diskFreeBytes: input.diskFreeBytes ?? undefined,
         capabilitiesJson: JSON.stringify(input.capabilities),
         ipAddress: input.ipAddress ?? undefined,
-        lastSeenAt: new Date(),
+        lastSeenAt: now,
         disconnectedAt: null,
       },
     });
     publishAgent(agent);
+    if (reconnected) await this.notifyConnected(agent.id);
     return agent;
   }
 
@@ -388,6 +433,16 @@ export class AgentControlService {
   async getAgent(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agent.findUnique({ where: { id } });
+  }
+
+  async deleteAgent(id: string) {
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.findUnique({ where: { id } });
+    if (!agent) return false;
+    // Cascading foreign keys remove this agent's jobs, codebase registrations,
+    // usage/build-data links, skill installations, and audit events.
+    await prisma.agent.delete({ where: { id } });
+    return true;
   }
 
   async updateBaseRepoDirectory(

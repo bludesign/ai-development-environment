@@ -8,6 +8,7 @@ import {
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
 } from "@ai-development-environment/agent-contract/codebases";
 import { WORKTREE_JOB_KINDS } from "@ai-development-environment/agent-contract/worktrees";
+import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
@@ -17,6 +18,7 @@ export const AGENT_CAPABILITIES = [
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
+  ...SKILL_JOB_KINDS,
 ];
 
 export type AgentInventory = {

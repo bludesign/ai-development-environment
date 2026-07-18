@@ -34,6 +34,7 @@ import {
   agentEventBus,
   agentJobChangedTopic,
 } from "@/services/agent-control";
+import type { SkillsService } from "@/services/skills";
 
 const INSPECTION_MAX_AGE_MS = 15 * 60_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
@@ -84,7 +85,10 @@ function online(agent: {
 }
 
 export class CodebasesService {
-  constructor(private readonly agentControl: AgentControlService) {
+  constructor(
+    private readonly agentControl: AgentControlService,
+    private readonly skillsService?: SkillsService,
+  ) {
     for (const kind of [CODEBASE_REFRESH_JOB_KIND, CODEBASE_FETCH_JOB_KIND]) {
       this.agentControl.registerCompletionHandler(kind, (job) =>
         this.projectJob(job),
@@ -102,6 +106,7 @@ export class CodebasesService {
     return prisma.codebaseRepository.findMany({
       orderBy: [{ name: "asc" }, { canonicalOrigin: "asc" }],
       include: {
+        skillGroups: { include: { group: true } },
         codebases: {
           orderBy: { folder: "asc" },
           include: {
@@ -125,7 +130,7 @@ export class CodebasesService {
       where: { id },
       include: {
         agent: true,
-        repository: true,
+        repository: { include: { skillGroups: { include: { group: true } } } },
         jobs: {
           where: { status: { in: ACTIVE_CODEBASE_JOB_STATUSES } },
           orderBy: { createdAt: "desc" },
@@ -393,6 +398,7 @@ export class CodebasesService {
       where: { id: input.inspectionJobId, visibility: "SYSTEM" },
     });
     await this.agentControl.requestCodebaseReconcile([confirmed.agentId]);
+    await this.skillsService?.requestAutoReconcile();
     return confirmed;
   }
 
@@ -402,6 +408,7 @@ export class CodebasesService {
     descriptionValue: string,
     jiraBranchRegexValue?: string | null,
     keepBaseBranchUpToDate = true,
+    skillGroupIds?: string[] | null,
   ) {
     const name = nameValue.trim();
     const description = descriptionValue.trim();
@@ -419,6 +426,10 @@ export class CodebasesService {
         throw new Error("Jira branch regex is invalid");
       }
     }
+    const validatedSkillGroupIds =
+      skillGroupIds === undefined || skillGroupIds === null
+        ? null
+        : await this.skillsService?.validateGroupIds(skillGroupIds);
     const prisma = await getPrismaClient();
     const repository = await prisma.codebaseRepository.update({
       where: { id },
@@ -430,6 +441,9 @@ export class CodebasesService {
       },
     });
     this.publish(null, id);
+    if (validatedSkillGroupIds) {
+      await this.skillsService?.setRepositoryGroups(id, validatedSkillGroupIds);
+    }
     return repository;
   }
 

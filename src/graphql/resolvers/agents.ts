@@ -297,6 +297,14 @@ export const createAgentResolvers = (
         input.path ?? null,
       );
     },
+    deleteAgent: (
+      _root: unknown,
+      { agentId }: { agentId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.deleteAgent(agentId);
+    },
   },
   Subscription: {
     agentEvents: {
