@@ -1,0 +1,353 @@
+enum CodebaseProjectType {
+  IOS_APP
+}
+
+enum BuildSourceKind {
+  PROJECT
+  WORKSPACE
+  PACKAGE
+}
+
+enum BuildSourceParseStatus {
+  UNPARSED
+  PARSING
+  VALID
+  INVALID
+  ERROR
+}
+
+enum BuildAction {
+  BUILD
+  TEST
+  ANALYZE
+  ARCHIVE
+  BUILD_FOR_TESTING
+  TEST_WITHOUT_BUILDING
+}
+
+enum BuildDestinationType {
+  SIMULATOR
+  PHYSICAL_DEVICE
+}
+
+enum BuildStatus {
+  QUEUED
+  PREPARING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum BuildScriptFailureBehavior {
+  FAIL_BUILD
+  CONTINUE
+}
+
+type BuildSourceObservation {
+  id: ID!
+  scopeKey: String!
+  status: BuildSourceParseStatus!
+  schemes: [String!]!
+  configurations: [String!]!
+  testPlans: [String!]!
+  error: String
+  stale: Boolean!
+  headSha: String
+  xcodeVersion: String
+  lastParseAttemptAt: String!
+  lastParsedAt: String
+}
+
+type BuildSource {
+  id: ID!
+  kind: BuildSourceKind!
+  relativePath: String!
+}
+
+type BuildConfiguration {
+  id: ID!
+  name: String!
+  iconKey: String
+  source: BuildSource!
+  scheme: String!
+  buildConfiguration: String!
+  defaultAction: BuildAction!
+  advancedSettings: JSON!
+  observation: BuildSourceObservation
+  createdAt: String!
+  updatedAt: String!
+}
+
+type BuildScript {
+  id: ID!
+  name: String!
+  preBuildScript: String
+  postBuildScript: String
+  enabledByDefault: Boolean!
+  timeoutSeconds: Int!
+  failureBehavior: BuildScriptFailureBehavior!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AllowedBuildScript {
+  position: Int!
+  script: BuildScript!
+}
+
+type CodebaseProject {
+  id: ID!
+  type: CodebaseProjectType!
+  repository: CodebaseRepository!
+  configurations: [BuildConfiguration!]!
+  allowedScripts: [AllowedBuildScript!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type BuildArtifact {
+  id: ID!
+  kind: String!
+  relativePath: String!
+  sizeBytes: Float
+  checksum: String
+  metadata: JSON!
+  createdAt: String!
+}
+
+type BuildScriptExecution {
+  id: ID!
+  phase: String!
+  position: Int!
+  nameSnapshot: String!
+  sourceSnapshot: String!
+  timeoutSeconds: Int!
+  failureBehavior: BuildScriptFailureBehavior!
+  status: String!
+  exitCode: Int
+  durationMs: Int
+  causedBuildFailure: Boolean!
+  outputRelativePath: String
+  error: String
+}
+
+type BuildDeployment {
+  id: ID!
+  batchId: ID!
+  destination: JSON!
+  status: String!
+  commandSummary: String!
+  outputRelativePath: String
+  error: String
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+}
+
+type BuildExport {
+  id: ID!
+  status: String!
+  settings: JSON!
+  commandSummary: String!
+  outputRelativePath: String
+  error: String
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+}
+
+type Build {
+  id: ID!
+  requestId: ID!
+  jobId: ID
+  status: BuildStatus!
+  action: BuildAction!
+  destinationType: BuildDestinationType!
+  destination: JSON!
+  snapshot: JSON!
+  commandSummary: String!
+  artifactDirectory: String!
+  errorCode: String
+  error: String
+  agent: Agent
+  codebase: Codebase
+  worktree: Worktree
+  configuration: BuildConfiguration
+  artifacts: [BuildArtifact!]!
+  scriptExecutions: [BuildScriptExecution!]!
+  deployments: [BuildDeployment!]!
+  exports: [BuildExport!]!
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+  durationMs: Float
+  updatedAt: String!
+}
+
+type BuildPage {
+  items: [Build!]!
+  nextCursor: ID
+}
+
+type BuildLogEvent {
+  id: ID!
+  scope: String!
+  scopeId: ID!
+  sequence: Int!
+  phase: String!
+  level: String!
+  stream: String!
+  message: String!
+  createdAt: String!
+}
+
+type DiscoveredBuildSource {
+  kind: BuildSourceKind!
+  relativePath: String!
+}
+
+type BuildSourceInspection {
+  source: DiscoveredBuildSource!
+  schemes: [String!]!
+  configurations: [String!]!
+  testPlans: [String!]!
+  headSha: String
+  xcodeVersion: String
+}
+
+type BuildChange {
+  id: ID!
+}
+
+input SaveBuildConfigurationInput {
+  id: ID
+  codebaseId: ID!
+  name: String!
+  iconKey: String
+  sourceKind: BuildSourceKind!
+  sourcePath: String!
+  scheme: String!
+  buildConfiguration: String!
+  defaultAction: BuildAction!
+  advancedSettings: JSON
+}
+
+input SaveBuildScriptInput {
+  id: ID
+  name: String!
+  preBuildScript: String
+  postBuildScript: String
+  enabledByDefault: Boolean!
+  timeoutSeconds: Int
+  failureBehavior: BuildScriptFailureBehavior!
+}
+
+input InspectBuildDestinationsInput {
+  worktreeId: ID!
+  configurationId: ID!
+  action: BuildAction
+  requestId: ID!
+}
+
+input InspectBuildSourceInput {
+  worktreeId: ID!
+  sourceKind: BuildSourceKind!
+  sourcePath: String!
+  scheme: String
+  requestId: ID!
+}
+
+input StartBuildInput {
+  worktreeId: ID!
+  configurationId: ID!
+  destination: JSON!
+  scriptIds: [ID!]
+  action: BuildAction
+  advancedSettings: JSON
+  requestId: ID!
+}
+
+input RunBuildInput {
+  buildId: ID!
+  destinations: [JSON!]!
+  requestId: ID!
+}
+
+input ExportBuildArchiveInput {
+  buildId: ID!
+  settings: JSON!
+  requestId: ID!
+}
+
+input BuildProgressInput {
+  buildId: ID!
+  status: BuildStatus!
+  startedAt: String
+  errorCode: String
+  error: String
+}
+
+input BuildLogEventInput {
+  scope: String!
+  scopeId: ID!
+  sequence: Int!
+  phase: String!
+  level: String!
+  stream: String!
+  message: String!
+  createdAt: String!
+}
+
+extend type Query {
+  iosAppProject(codebaseId: ID!): CodebaseProject
+  buildScripts: [BuildScript!]!
+  builds(
+    first: Int = 50
+    after: ID
+    status: BuildStatus
+    codebaseId: ID
+    worktreeId: ID
+  ): BuildPage!
+  build(id: ID!): Build
+  buildLogs(buildId: ID!, after: ID, first: Int = 1000): [BuildLogEvent!]!
+}
+
+extend type Mutation {
+  createIosAppProject(codebaseId: ID!): CodebaseProject!
+  saveBuildConfiguration(
+    input: SaveBuildConfigurationInput!
+  ): BuildConfiguration!
+  deleteBuildConfiguration(id: ID!): Boolean!
+  discoverBuildSources(
+    worktreeId: ID!
+    requestId: ID!
+  ): [DiscoveredBuildSource!]!
+  inspectBuildSource(input: InspectBuildSourceInput!): BuildSourceInspection!
+  reparseBuildConfiguration(
+    configurationId: ID!
+    worktreeId: ID!
+    requestId: ID!
+  ): BuildSourceObservation!
+  inspectBuildDestinations(input: InspectBuildDestinationsInput!): [JSON!]!
+  inspectBuildRunDestinations(buildId: ID!, requestId: ID!): [JSON!]!
+  saveBuildScript(input: SaveBuildScriptInput!): BuildScript!
+  deleteBuildScript(id: ID!): Boolean!
+  setCodebaseBuildScripts(codebaseId: ID!, scriptIds: [ID!]!): CodebaseProject!
+  startBuild(input: StartBuildInput!): Build!
+  cancelBuild(id: ID!): Build!
+  deleteBuilds(ids: [ID!]!): Int!
+  runBuild(input: RunBuildInput!): [BuildDeployment!]!
+  exportBuildArchive(input: ExportBuildArchiveInput!): BuildExport!
+  reportBuildProgress(input: BuildProgressInput!): Build!
+  appendBuildLogEvents(
+    buildId: ID!
+    events: [BuildLogEventInput!]!
+  ): [BuildLogEvent!]!
+}
+
+extend type Subscription {
+  buildsChanged: BuildChange!
+  buildChanged(id: ID!): BuildChange!
+  buildLogAdded(buildId: ID!): BuildLogEvent!
+}

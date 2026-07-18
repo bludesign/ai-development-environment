@@ -17,6 +17,7 @@ import {
   Download,
   GitBranch,
   RefreshCw,
+  Settings2,
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -488,6 +489,13 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline">
+                <Link
+                  href={`/codebases/repositories/${codebase.repository.id}`}
+                >
+                  <Settings2 /> {t("repositorySettings")}
+                </Link>
+              </Button>
               <Button
                 disabled={
                   busy ||

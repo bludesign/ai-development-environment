@@ -98,6 +98,7 @@ type WorktreeCodebaseGroup {
   codebase: Codebase!
   repository: CodebaseRepository!
   worktrees: [Worktree!]!
+  iosBuildConfigured: Boolean!
 }
 
 type WorktreeAgentGroup {

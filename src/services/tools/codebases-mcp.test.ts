@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CodebaseToolsService } from "@/services/codebases";
+import type { BuildsService } from "@/services/builds";
 
 import { createCodebasesMcpServer } from "./codebases-mcp";
 
@@ -12,8 +13,11 @@ afterEach(async () => {
   await Promise.all(closeCallbacks.splice(0).map((close) => close()));
 });
 
-async function clientFor(service: CodebaseToolsService) {
-  const server = createCodebasesMcpServer(service);
+async function clientFor(
+  service: CodebaseToolsService,
+  builds?: BuildsService,
+) {
+  const server = createCodebasesMcpServer(service, builds);
   const client = new Client({ name: "test", version: "1.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -102,5 +106,117 @@ describe("codebases MCP server", () => {
       client.callTool({ name: "get_codebase", arguments: {} }),
     ).resolves.toMatchObject({ isError: true });
     expect(service.getByPath).not.toHaveBeenCalled();
+  });
+
+  test("lists and invokes the complete Builds tool group", async () => {
+    const codebases = {
+      list: vi.fn().mockResolvedValue([]),
+      getByPath: vi.fn(),
+    } as unknown as CodebaseToolsService;
+    const build = { id: "build-1", status: "QUEUED" };
+    const builds = {
+      builds: vi.fn().mockResolvedValue({ items: [build], nextCursor: null }),
+      getBuild: vi.fn().mockResolvedValue(build),
+      logs: vi.fn().mockResolvedValue([{ sequence: 0, message: "sanitized" }]),
+      projectForWorktree: vi.fn().mockResolvedValue({ id: "project-1" }),
+      destinations: vi.fn().mockResolvedValue([
+        {
+          type: "SIMULATOR",
+          id: "SIM-1",
+          name: "iPhone 17 Pro",
+        },
+      ]),
+      destinationsForBuild: vi.fn().mockResolvedValue([
+        {
+          type: "SIMULATOR",
+          id: "SIM-1",
+          name: "iPhone 17 Pro",
+        },
+      ]),
+      startBuild: vi.fn().mockResolvedValue(build),
+      cancelBuild: vi.fn().mockResolvedValue({ ...build, status: "CANCELLED" }),
+      runBuild: vi.fn().mockResolvedValue([{ id: "deployment-1" }]),
+      exportArchive: vi.fn().mockResolvedValue({ id: "export-1" }),
+    } as unknown as BuildsService;
+    const client = await clientFor(codebases, builds);
+
+    const catalog = await client.listTools();
+    expect(catalog.tools.map(({ name }) => name)).toEqual([
+      "get_codebases",
+      "get_codebase",
+      "get_builds",
+      "get_build",
+      "get_build_configurations",
+      "get_build_destinations",
+      "start_build",
+      "cancel_build",
+      "run_build",
+      "export_build_archive",
+    ]);
+    expect(
+      catalog.tools.find(({ name }) => name === "start_build")?.annotations,
+    ).toMatchObject({ readOnlyHint: false, idempotentHint: true });
+
+    await expect(
+      client.callTool({
+        name: "start_build",
+        arguments: {
+          worktreeId: "worktree-1",
+          configurationId: "configuration-1",
+          destination: {
+            type: "SIMULATOR",
+            id: "SIM-1",
+            name: "iPhone 17 Pro",
+          },
+          requestId: "request-1",
+        },
+      }),
+    ).resolves.toMatchObject({ structuredContent: { build } });
+    expect(builds.startBuild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreeId: "worktree-1",
+        requestId: "request-1",
+        scriptIds: [],
+      }),
+    );
+
+    await expect(
+      client.callTool({
+        name: "get_build",
+        arguments: {
+          buildId: "build-1",
+          afterLogId: "log-4",
+          logLimit: 10,
+        },
+      }),
+    ).resolves.toMatchObject({
+      structuredContent: {
+        build,
+        logs: [{ sequence: 0, message: "sanitized" }],
+      },
+    });
+    expect(builds.logs).toHaveBeenCalledWith("build-1", "log-4", 10);
+
+    await expect(
+      client.callTool({
+        name: "get_build_destinations",
+        arguments: { buildId: "build-1", requestId: "destinations-1" },
+      }),
+    ).resolves.toMatchObject({
+      structuredContent: {
+        destinations: [{ id: "SIM-1" }],
+      },
+    });
+    expect(builds.destinationsForBuild).toHaveBeenCalledWith(
+      "build-1",
+      "destinations-1",
+    );
+
+    await expect(
+      client.callTool({
+        name: "cancel_build",
+        arguments: { buildId: "build-1" },
+      }),
+    ).resolves.toMatchObject({ isError: true });
   });
 });

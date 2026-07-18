@@ -29,6 +29,7 @@ function pathBreadcrumbs(path: string) {
 
 export function AgentDirectoryBrowser({
   agentId,
+  browseLabel,
   disabled = false,
   initialPath = null,
   onPathChange,
@@ -37,6 +38,7 @@ export function AgentDirectoryBrowser({
   selectLabel,
 }: {
   agentId: string;
+  browseLabel?: string;
   disabled?: boolean;
   initialPath?: string | null;
   onPathChange?: (path: string) => void;
@@ -107,7 +109,7 @@ export function AgentDirectoryBrowser({
           type="button"
           variant="outline"
         >
-          {busy ? <Spinner /> : <Folder />} {t("browseHome")}
+          {busy ? <Spinner /> : <Folder />} {browseLabel ?? t("browseHome")}
         </Button>
       </div>
     );

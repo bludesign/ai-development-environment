@@ -6,6 +6,27 @@ import {
   TUNNEL_NAME_REGEX,
 } from "@ai-development-environment/agent-contract";
 import {
+  IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
+  IOS_BUILD_JOB_KINDS,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+  IOS_DEPLOY_JOB_KIND,
+  IOS_DESTINATIONS_JOB_KIND,
+  IOS_EXPORT_JOB_KIND,
+  IOS_RUN_DESTINATIONS_JOB_KIND,
+  IOS_SOURCE_DISCOVER_JOB_KIND,
+  IOS_SOURCE_PARSE_JOB_KIND,
+  parseBuildDeploymentPayload,
+  parseBuildDestinationsPayload,
+  parseBuildArtifactDownloadPayload,
+  parseBuildExportPayload,
+  parseBuildJobPayload,
+  parseBuildDeletePayload,
+  parseBuildRunDestinationsPayload,
+  parseBuildSourceDiscoverPayload,
+  parseBuildSourceParsePayload,
+} from "@ai-development-environment/agent-contract/builds";
+import {
   BUILD_DATA_DELETE_JOB_KIND,
   BUILD_DATA_JOB_KINDS,
   BUILD_DATA_SCAN_JOB_KIND,
@@ -83,6 +104,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
+  ...IOS_BUILD_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
@@ -196,6 +218,42 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === SKILL_APPLY_JOB_KIND) {
     parseSkillApplyPayload(payload);
+    return;
+  }
+  if (kind === IOS_SOURCE_DISCOVER_JOB_KIND) {
+    parseBuildSourceDiscoverPayload(payload);
+    return;
+  }
+  if (kind === IOS_SOURCE_PARSE_JOB_KIND) {
+    parseBuildSourceParsePayload(payload);
+    return;
+  }
+  if (kind === IOS_DESTINATIONS_JOB_KIND) {
+    parseBuildDestinationsPayload(payload);
+    return;
+  }
+  if (kind === IOS_RUN_DESTINATIONS_JOB_KIND) {
+    parseBuildRunDestinationsPayload(payload);
+    return;
+  }
+  if (kind === IOS_BUILD_JOB_KIND) {
+    parseBuildJobPayload(payload);
+    return;
+  }
+  if (kind === IOS_BUILD_DELETE_JOB_KIND) {
+    parseBuildDeletePayload(payload);
+    return;
+  }
+  if (kind === IOS_ARTIFACT_DOWNLOAD_JOB_KIND) {
+    parseBuildArtifactDownloadPayload(payload);
+    return;
+  }
+  if (kind === IOS_DEPLOY_JOB_KIND) {
+    parseBuildDeploymentPayload(payload);
+    return;
+  }
+  if (kind === IOS_EXPORT_JOB_KIND) {
+    parseBuildExportPayload(payload);
     return;
   }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {
@@ -325,6 +383,7 @@ export class AgentControlService {
     diskTotalBytes?: number | null;
     diskFreeBytes?: number | null;
     capabilities: string[];
+    defaultBuildsDirectory?: string | null;
     ipAddress: string | null;
   }) {
     const prisma = await getPrismaClient();
@@ -358,6 +417,7 @@ export class AgentControlService {
           diskTotalBytes: input.diskTotalBytes,
           diskFreeBytes: input.diskFreeBytes,
           capabilitiesJson: JSON.stringify(input.capabilities),
+          defaultBuildsDirectory: input.defaultBuildsDirectory ?? null,
           secretHash: digest(credential),
           ipAddress: input.ipAddress,
           lastSeenAt: now,
@@ -390,6 +450,7 @@ export class AgentControlService {
       diskTotalBytes?: number | null;
       diskFreeBytes?: number | null;
       capabilities: string[];
+      defaultBuildsDirectory?: string | null;
       ipAddress: string | null;
     },
   ) {
@@ -415,6 +476,7 @@ export class AgentControlService {
         diskTotalBytes: input.diskTotalBytes ?? undefined,
         diskFreeBytes: input.diskFreeBytes ?? undefined,
         capabilitiesJson: JSON.stringify(input.capabilities),
+        defaultBuildsDirectory: input.defaultBuildsDirectory ?? undefined,
         ipAddress: input.ipAddress ?? undefined,
         lastSeenAt: now,
         disconnectedAt: null,
@@ -463,6 +525,26 @@ export class AgentControlService {
     const agent = await prisma.agent.update({
       where: { id: agentId },
       data: { baseRepoDirectory },
+    });
+    publishAgent(agent);
+    return agent;
+  }
+
+  async updateBuildsDirectory(agentId: string, buildsDirectory: string | null) {
+    if (
+      buildsDirectory !== null &&
+      (!buildsDirectory ||
+        buildsDirectory.length > 4_096 ||
+        buildsDirectory.includes("\0") ||
+        (!posix.isAbsolute(buildsDirectory) &&
+          !win32.isAbsolute(buildsDirectory)))
+    ) {
+      throw new Error("Builds directory must be an absolute path");
+    }
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { buildsDirectory },
     });
     publishAgent(agent);
     return agent;

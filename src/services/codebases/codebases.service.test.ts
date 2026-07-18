@@ -68,6 +68,34 @@ describe("CodebasesService", () => {
     );
   });
 
+  test("loads one logical repository with every agent checkout", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      id: "repository-1",
+      codebases: [{ id: "codebase-1" }, { id: "codebase-2" }],
+    });
+    getPrismaClient.mockResolvedValue({
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      codebaseRepository: { findUnique },
+    });
+
+    await expect(
+      new CodebasesService(control()).repositoryDetail("repository-1"),
+    ).resolves.toMatchObject({
+      id: "repository-1",
+      codebases: [{ id: "codebase-1" }, { id: "codebase-2" }],
+    });
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "repository-1" },
+        include: expect.objectContaining({
+          codebases: expect.objectContaining({
+            include: expect.objectContaining({ agent: true }),
+          }),
+        }),
+      }),
+    );
+  });
+
   test("keeps fetch time monotonic and marks an unconfirmed origin change", async () => {
     const current = {
       id: "codebase-1",

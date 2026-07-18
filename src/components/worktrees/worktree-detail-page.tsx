@@ -68,6 +68,7 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview {
     agents {
       agent { ${AGENT_FIELDS} }
       codebases {
+        iosBuildConfigured
         repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
         codebase { ${CODEBASE_FIELDS} }
         worktrees { ${WORKTREE_FIELDS} }

@@ -14,6 +14,9 @@ export type Agent = {
   baseRepoDirectory: string | null;
   derivedDataLocationMode?: "DEFAULT" | "ABSOLUTE" | "RELATIVE";
   derivedDataPath?: string | null;
+  buildsDirectory?: string | null;
+  defaultBuildsDirectory?: string | null;
+  effectiveBuildsDirectory?: string | null;
   connectionStatus: "ONLINE" | "OFFLINE";
   ipAddress: string | null;
   lastSeenAt: string | null;

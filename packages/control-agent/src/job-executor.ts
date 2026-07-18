@@ -65,6 +65,12 @@ export class JobExecutor {
           {
             reportWorktreeActivity: (input) =>
               this.client.reportWorktreeActivity(input),
+            reportBuildProgress: (input) =>
+              this.client.reportBuildProgress(input),
+            appendBuildLogs: (buildId, events) =>
+              this.client.appendBuildLogs(buildId, events),
+            uploadBuildArtifact: (input) =>
+              this.client.uploadBuildArtifact(input),
           },
         );
       const codebaseId =

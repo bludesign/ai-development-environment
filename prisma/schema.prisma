@@ -33,6 +33,8 @@ model Agent {
   baseRepoDirectory        String?
   derivedDataLocationMode  String                     @default("DEFAULT")
   derivedDataPath          String?
+  buildsDirectory          String?
+  defaultBuildsDirectory   String?
   ipAddress                String?
   lastSeenAt               DateTime?
   disconnectedAt           DateTime?
@@ -48,6 +50,7 @@ model Agent {
   skillInstallations       SkillInstallation[]
   skillDeployments         SkillDeployment[]
   skillSyncItems           SkillSyncItem[]
+  builds                   Build[]
 }
 
 model AgentEnrollmentToken {
@@ -82,6 +85,9 @@ model AgentJob {
   buildDataCollection   BuildDataCollection? @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
   codebase              Codebase?            @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
   logs                  AgentJobLog[]
+  builds                Build[]
+  deployments           BuildDeployment[]
+  exports               BuildExport[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -92,23 +98,25 @@ model AgentJob {
 }
 
 model CodebaseRepository {
-  id                     String     @id
-  canonicalOrigin        String     @unique
+  id                     String                          @id
+  canonicalOrigin        String                          @unique
   displayOrigin          String
   name                   String
-  description            String     @default("")
+  description            String                          @default("")
   jiraBranchRegex        String?
-  keepBaseBranchUpToDate Boolean    @default(true)
-  createdAt              DateTime   @default(now())
-  updatedAt              DateTime   @updatedAt
+  keepBaseBranchUpToDate Boolean                         @default(true)
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
   codebases              Codebase[]
   skillGroups            CodebaseRepositorySkillGroup[]
+  projects               CodebaseProject[]
+  buildScripts           CodebaseRepositoryBuildScript[]
 
   @@index([name])
 }
 
 model Codebase {
-  id                 String             @id
+  id                 String                   @id
   repositoryId       String
   agentId            String
   folder             String
@@ -118,24 +126,26 @@ model Codebase {
   upstream           String?
   ahead              Int?
   behind             Int?
-  syncState          String             @default("UNKNOWN")
-  availability       String             @default("AVAILABLE")
+  syncState          String                   @default("UNKNOWN")
+  availability       String                   @default("AVAILABLE")
   statusError        String?
   defaultBranch      String?
-  localBranchesJson  String             @default("[]")
-  remoteBranchesJson String             @default("[]")
+  localBranchesJson  String                   @default("[]")
+  remoteBranchesJson String                   @default("[]")
   lastCheckedAt      DateTime?
   lastFetchedAt      DateTime?
   lastFetchAttemptAt DateTime?
   lastFetchError     String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  repository         CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  agent              Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  repository         CodebaseRepository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  agent              Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   jobs               AgentJob[]
   worktrees          Worktree[]
   skillInstallations SkillInstallation[]
   skillDeployments   SkillDeployment[]
+  sourceObservations BuildSourceObservation[]
+  builds             Build[]
 
   @@unique([agentId, folder])
   @@index([repositoryId])
@@ -182,6 +192,8 @@ model Worktree {
   buildDataDeletionHistory BuildDataDeletionHistory[]
   skillInstallations       SkillInstallation[]
   skillDeployments         SkillDeployment[]
+  sourceObservations       BuildSourceObservation[]
+  builds                   Build[]
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
@@ -189,20 +201,20 @@ model Worktree {
 }
 
 model Skill {
-  id             String               @id
-  name           String               @unique
-  description    String
-  syncGlobally   Boolean              @default(true)
-  packageHash    String
-  deletedAt      DateTime?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  files          SkillFile[]
-  groups         SkillGroupSkill[]
-  installations  SkillInstallation[]
-  baselines      SkillSyncBaseline[]
-  deployments    SkillDeployment[]
-  syncItems      SkillSyncItem[]
+  id            String              @id
+  name          String              @unique
+  description   String
+  syncGlobally  Boolean             @default(true)
+  packageHash   String
+  deletedAt     DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  files         SkillFile[]
+  groups        SkillGroupSkill[]
+  installations SkillInstallation[]
+  baselines     SkillSyncBaseline[]
+  deployments   SkillDeployment[]
+  syncItems     SkillSyncItem[]
 
   @@index([name])
   @@index([deletedAt, updatedAt])
@@ -249,7 +261,7 @@ model CodebaseRepositorySkillGroup {
   repositoryId String
   groupId      String
   repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  group        SkillGroup          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group        SkillGroup         @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@id([repositoryId, groupId])
   @@index([groupId])
@@ -280,31 +292,31 @@ model SkillToolObservation {
 }
 
 model SkillInstallation {
-  id                String              @id
-  skillId           String?
-  agentId           String
-  codebaseId        String?
-  worktreeId        String?
-  scope             String
-  rootKind          String
-  rootPath          String
-  skillName         String
-  description       String
-  packageHash       String
-  present           Boolean             @default(true)
-  fileCount         Int
-  totalBytes        Int
-  tracked           Boolean             @default(false)
-  consumersJson     String               @default("[]")
-  lastSeenAt        DateTime
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  skill             Skill?              @relation(fields: [skillId], references: [id], onDelete: SetNull)
-  agent             Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  codebase          Codebase?           @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
-  worktree          Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
-  baseline          SkillSyncBaseline?
-  syncItems         SkillSyncItem[]
+  id            String             @id
+  skillId       String?
+  agentId       String
+  codebaseId    String?
+  worktreeId    String?
+  scope         String
+  rootKind      String
+  rootPath      String
+  skillName     String
+  description   String
+  packageHash   String
+  present       Boolean            @default(true)
+  fileCount     Int
+  totalBytes    Int
+  tracked       Boolean            @default(false)
+  consumersJson String             @default("[]")
+  lastSeenAt    DateTime
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  skill         Skill?             @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  agent         Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  codebase      Codebase?          @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
+  worktree      Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  baseline      SkillSyncBaseline?
+  syncItems     SkillSyncItem[]
 
   @@unique([agentId, rootPath, skillName])
   @@index([skillName, packageHash])
@@ -352,45 +364,293 @@ model SkillDeployment {
 }
 
 model SkillSyncRun {
-  id          String          @id
-  kind        String
-  groupId     String?
-  automatic   Boolean         @default(false)
-  status      String
-  error       String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  finishedAt  DateTime?
-  group       SkillGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  items       SkillSyncItem[]
+  id         String          @id
+  kind       String
+  groupId    String?
+  automatic  Boolean         @default(false)
+  status     String
+  error      String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  finishedAt DateTime?
+  group      SkillGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  items      SkillSyncItem[]
 
   @@index([status, createdAt])
   @@index([groupId, createdAt])
 }
 
 model SkillSyncItem {
-  id                  String             @id
-  runId               String
-  skillId             String?
-  installationId      String?
-  agentId             String?
-  direction           String
-  status              String
-  sourceHash          String?
-  targetHash          String?
-  resolution          String?
+  id                   String             @id
+  runId                String
+  skillId              String?
+  installationId       String?
+  agentId              String?
+  direction            String
+  status               String
+  sourceHash           String?
+  targetHash           String?
+  resolution           String?
   candidatePackageJson String?
-  error               String?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  run                 SkillSyncRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
-  skill               Skill?             @relation(fields: [skillId], references: [id], onDelete: SetNull)
-  installation        SkillInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
-  agent               Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  error                String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  run                  SkillSyncRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  skill                Skill?             @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  installation         SkillInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+  agent                Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
   @@index([runId, status])
   @@index([skillId])
   @@index([agentId])
+}
+
+model CodebaseProject {
+  id             String               @id
+  repositoryId   String
+  type           String
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  repository     CodebaseRepository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  sources        BuildSource[]
+  configurations BuildConfiguration[]
+
+  @@unique([repositoryId, type])
+  @@index([repositoryId])
+}
+
+model BuildSource {
+  id             String                   @id
+  projectId      String
+  kind           String
+  relativePath   String
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  project        CodebaseProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  configurations BuildConfiguration[]
+  observations   BuildSourceObservation[]
+
+  @@unique([projectId, relativePath])
+  @@index([projectId])
+}
+
+model BuildSourceObservation {
+  id                 String      @id
+  sourceId           String
+  scopeKey           String
+  codebaseId         String?
+  worktreeId         String?
+  status             String
+  schemesJson        String      @default("[]")
+  configurationsJson String      @default("[]")
+  testPlansJson      String      @default("[]")
+  error              String?
+  stale              Boolean     @default(false)
+  headSha            String?
+  xcodeVersion       String?
+  lastParseAttemptAt DateTime
+  lastParsedAt       DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  source             BuildSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  codebase           Codebase?   @relation(fields: [codebaseId], references: [id], onDelete: Cascade)
+  worktree           Worktree?   @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, scopeKey])
+  @@index([codebaseId])
+  @@index([worktreeId])
+}
+
+model BuildConfiguration {
+  id                   String          @id
+  projectId            String
+  sourceId             String
+  name                 String
+  iconKey              String?
+  scheme               String
+  buildConfiguration   String
+  defaultAction        String          @default("BUILD")
+  advancedSettingsJson String          @default("{}")
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  project              CodebaseProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source               BuildSource     @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  builds               Build[]
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@index([sourceId])
+}
+
+model BuildScript {
+  id               String                          @id
+  name             String                          @unique
+  preBuildScript   String?
+  postBuildScript  String?
+  enabledByDefault Boolean                         @default(false)
+  timeoutSeconds   Int                             @default(300)
+  failureBehavior  String                          @default("FAIL_BUILD")
+  deletedAt        DateTime?
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+  repositories     CodebaseRepositoryBuildScript[]
+  executions       BuildScriptExecution[]
+
+  @@index([deletedAt, name])
+}
+
+model CodebaseRepositoryBuildScript {
+  repositoryId String
+  scriptId     String
+  position     Int                @default(0)
+  repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  script       BuildScript        @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, scriptId])
+  @@index([scriptId])
+}
+
+model Build {
+  id                String                 @id
+  requestKey        String                 @unique
+  requestId         String
+  agentId           String?
+  codebaseId        String?
+  worktreeId        String?
+  configurationId   String?
+  jobId             String?
+  status            String                 @default("QUEUED")
+  action            String
+  destinationType   String
+  destinationJson   String
+  snapshotJson      String
+  commandSummary    String
+  artifactDirectory String
+  errorCode         String?
+  error             String?
+  createdAt         DateTime               @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  updatedAt         DateTime               @updatedAt
+  agent             Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  codebase          Codebase?              @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  worktree          Worktree?              @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  configuration     BuildConfiguration?    @relation(fields: [configurationId], references: [id], onDelete: SetNull)
+  job               AgentJob?              @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  artifacts         BuildArtifact[]
+  scriptExecutions  BuildScriptExecution[]
+  logs              BuildLogEvent[]
+  deployments       BuildDeployment[]
+  exports           BuildExport[]
+
+  @@index([status, createdAt])
+  @@index([agentId, createdAt])
+  @@index([codebaseId, createdAt])
+  @@index([worktreeId, createdAt])
+  @@index([jobId])
+}
+
+model BuildArtifact {
+  id           String   @id
+  buildId      String
+  kind         String
+  relativePath String
+  sizeBytes    Float?
+  checksum     String?
+  metadataJson String   @default("{}")
+  createdAt    DateTime @default(now())
+  build        Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+
+  @@unique([buildId, relativePath])
+  @@index([buildId, kind])
+}
+
+model BuildScriptExecution {
+  id                 String       @id
+  buildId            String
+  scriptId           String?
+  phase              String
+  position           Int
+  nameSnapshot       String
+  sourceSnapshot     String
+  timeoutSeconds     Int
+  failureBehavior    String
+  status             String       @default("PENDING")
+  exitCode           Int?
+  durationMs         Int?
+  causedBuildFailure Boolean      @default(false)
+  outputRelativePath String?
+  error              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  build              Build        @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  script             BuildScript? @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, phase, position])
+  @@index([buildId, phase])
+}
+
+model BuildLogEvent {
+  id        String   @id
+  buildId   String
+  scope     String
+  scopeId   String
+  sequence  Int
+  phase     String
+  level     String
+  stream    String
+  message   String
+  createdAt DateTime @default(now())
+  build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+
+  @@unique([scope, scopeId, sequence])
+  @@index([buildId, createdAt])
+}
+
+model BuildDeployment {
+  id                 String    @id
+  buildId            String
+  batchId            String
+  requestId          String
+  jobId              String?
+  destinationJson    String
+  destinationKey     String
+  status             String    @default("QUEUED")
+  commandSummary     String
+  outputRelativePath String?
+  error              String?
+  createdAt          DateTime  @default(now())
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  updatedAt          DateTime  @updatedAt
+  build              Build     @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  job                AgentJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, requestId, destinationKey])
+  @@index([buildId, createdAt])
+  @@index([jobId])
+}
+
+model BuildExport {
+  id                   String    @id
+  buildId              String
+  requestId            String
+  jobId                String?
+  status               String    @default("QUEUED")
+  settingsSnapshotJson String
+  commandSummary       String
+  outputRelativePath   String?
+  error                String?
+  createdAt            DateTime  @default(now())
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  updatedAt            DateTime  @updatedAt
+  build                Build     @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  job                  AgentJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, requestId])
+  @@index([buildId, createdAt])
+  @@index([jobId])
 }
 
 model BuildDataCollection {

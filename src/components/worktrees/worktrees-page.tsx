@@ -39,6 +39,7 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
@@ -462,6 +463,7 @@ export function WorktreesPage() {
             agents {
               agent { ${AGENT_FIELDS} }
               codebases {
+                iosBuildConfigured
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_FIELDS} }
@@ -2610,8 +2612,35 @@ export function ActionRow(
   const unavailable =
     worktree.availability !== "AVAILABLE" || Boolean(worktree.activeJob);
   const changeActions = worktreeChangeActionState(worktree);
+  const agent = props.overview.agents.find((entry) =>
+    entry.codebases.some(
+      (codebase) => codebase.codebase.id === props.group.codebase.id,
+    ),
+  )?.agent;
+  const buildUnavailable =
+    worktree.availability !== "AVAILABLE" ||
+    !agent ||
+    agent.connectionStatus !== "ONLINE" ||
+    !agent.capabilities.includes("ios.build.run") ||
+    props.group.iosBuildConfigured === false;
   return (
     <div className="flex flex-wrap gap-2">
+      <StartBuildButton
+        codebaseId={props.group.codebase.id}
+        disabled={buildUnavailable}
+        disabledReason={
+          !agent || agent.connectionStatus !== "ONLINE"
+            ? t("agentOffline")
+            : !agent.capabilities.includes("ios.build.run")
+              ? t("agentUnsupported")
+              : props.group.iosBuildConfigured === false
+                ? t("iosBuildNotConfigured")
+                : worktree.availability !== "AVAILABLE"
+                  ? t("worktreeUnavailable")
+                  : null
+        }
+        worktreeId={worktree.id}
+      />
       {worktree.pullRequest && (
         <MergePullRequestButton
           onMerged={props.onCompleted}

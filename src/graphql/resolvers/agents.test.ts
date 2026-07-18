@@ -10,6 +10,25 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("agent read ownership", () => {
+  test("derives the build folder from the base repository directory", () => {
+    const service = {} as AgentControlService;
+    const resolver =
+      createAgentResolvers(service).Agent.effectiveBuildsDirectory;
+
+    expect(
+      resolver({
+        baseRepoDirectory: "/Users/test/Repositories",
+        buildsDirectory: null,
+      }),
+    ).toBe("/Users/test/Repositories/Builds");
+    expect(
+      resolver({
+        baseRepoDirectory: "/Users/test/Repositories",
+        buildsDirectory: "/Volumes/Builds",
+      }),
+    ).toBe("/Volumes/Builds");
+  });
+
   test("rejects another agent's inventory and job list", async () => {
     const service = {
       getAgent: vi.fn(),

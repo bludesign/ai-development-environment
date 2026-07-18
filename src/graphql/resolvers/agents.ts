@@ -1,6 +1,7 @@
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 
 import type { AgentControlService } from "@/services/agent-control";
+import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
 import {
   AGENT_CHANGED_TOPIC,
   AGENT_ONLINE_WINDOW_MS,
@@ -96,6 +97,10 @@ export const createAgentResolvers = (
         ? "ONLINE"
         : "OFFLINE";
     },
+    effectiveBuildsDirectory: (agent: {
+      baseRepoDirectory: string | null;
+      buildsDirectory: string | null;
+    }) => effectiveBuildsDirectory(agent),
     lastSeenAt: (agent: { lastSeenAt: Date | null }) =>
       agent.lastSeenAt?.toISOString() ?? null,
     disconnectedAt: (agent: { disconnectedAt: Date | null }) =>
@@ -190,6 +195,7 @@ export const createAgentResolvers = (
           diskTotalBytes?: number | null;
           diskFreeBytes?: number | null;
           capabilities: string[];
+          defaultBuildsDirectory?: string | null;
         }),
         ipAddress: context.ipAddress,
       }),
@@ -209,6 +215,7 @@ export const createAgentResolvers = (
           diskTotalBytes?: number | null;
           diskFreeBytes?: number | null;
           capabilities: string[];
+          defaultBuildsDirectory?: string | null;
         }),
         ipAddress: context.ipAddress,
       }),
@@ -277,6 +284,20 @@ export const createAgentResolvers = (
       return agentControlService.updateBaseRepoDirectory(
         agentId,
         baseRepoDirectory ?? null,
+      );
+    },
+    updateAgentBuildsDirectory: (
+      _root: unknown,
+      {
+        agentId,
+        buildsDirectory,
+      }: { agentId: string; buildsDirectory?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.updateBuildsDirectory(
+        agentId,
+        buildsDirectory ?? null,
       );
     },
     updateAgentDerivedDataSettings: (

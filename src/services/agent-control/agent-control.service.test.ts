@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
+
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -72,6 +74,28 @@ describe("AgentControlService.completeJob", () => {
 });
 
 describe("agent job validation", () => {
+  test("validates iOS artifact download payloads", () => {
+    expect(SUPPORTED_AGENT_JOBS).toContain(IOS_ARTIFACT_DOWNLOAD_JOB_KIND);
+    expect(() =>
+      validateJob(IOS_ARTIFACT_DOWNLOAD_JOB_KIND, {
+        buildId: "build-1",
+        artifactDirectory: "/tmp/build-1",
+        artifactRelativePath: "products/App.app",
+        uploadId: "upload-1",
+        codebaseId: "codebase-1",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateJob(IOS_ARTIFACT_DOWNLOAD_JOB_KIND, {
+        buildId: "build-1",
+        artifactDirectory: "/tmp/build-1",
+        artifactRelativePath: "../App.app",
+        uploadId: "upload-1",
+        codebaseId: "codebase-1",
+      }),
+    ).toThrow("must stay within the worktree");
+  });
+
   test("accepts only an empty ccusage report payload", () => {
     expect(SUPPORTED_AGENT_JOBS).toContain("ccusage.report");
     expect(() => validateJob("ccusage.report", {})).not.toThrow();

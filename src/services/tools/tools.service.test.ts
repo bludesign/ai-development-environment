@@ -8,10 +8,61 @@ import {
   normalizeExternalMcpServerInput,
   ToolsService,
 } from "./tools.service";
+import type { BuildsService } from "@/services/builds";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("external MCP configuration", () => {
+  test("exposes and invokes the built-in Builds group", async () => {
+    getPrismaClient.mockResolvedValue({
+      externalMcpServer: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const startBuild = vi.fn().mockResolvedValue({
+      id: "build-1",
+      status: "QUEUED",
+    });
+    const service = new ToolsService(
+      {} as never,
+      {
+        startBuild,
+      } as unknown as BuildsService,
+    );
+
+    const catalog = await service.catalog();
+
+    expect(catalog.groups.map(({ id }) => id)).toEqual([
+      "builtin:codebases",
+      "builtin:builds",
+    ]);
+    expect(catalog.groups[1]?.tools.map(({ name }) => name)).toEqual([
+      "get_builds",
+      "get_build",
+      "get_build_configurations",
+      "get_build_destinations",
+      "start_build",
+      "cancel_build",
+      "run_build",
+      "export_build_archive",
+    ]);
+    await expect(
+      service.callTool({
+        groupId: "builtin:builds",
+        name: "start_build",
+        arguments: {
+          worktreeId: "worktree-1",
+          configurationId: "configuration-1",
+          destination: { type: "SIMULATOR", id: "SIM-1" },
+          requestId: "request-1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      structuredContent: { build: { id: "build-1" } },
+    });
+    expect(startBuild).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "request-1", scriptIds: [] }),
+    );
+  });
+
   test("preserves existing write-only header values and deletes omitted rows", async () => {
     const now = new Date();
     const state = {

@@ -90,6 +90,9 @@ export const buildDataCollectionChangedTopic = (collectionId: string) =>
 export const CODEBASE_CHANGED_TOPIC = "codebase.changed";
 export const WORKTREE_CHANGED_TOPIC = "worktree.changed";
 export const SKILLS_CHANGED_TOPIC = "skills.changed";
+export const BUILDS_CHANGED_TOPIC = "builds.changed";
+export const buildTopic = (buildId: string) => `build.${buildId}.changed`;
+export const buildLogTopic = (buildId: string) => `build.${buildId}.log`;
 export const skillSyncRunTopic = (runId: string) =>
   `skills.sync.${runId}.changed`;
 export const worktreeInspectionTopic = (worktreeId: string) =>

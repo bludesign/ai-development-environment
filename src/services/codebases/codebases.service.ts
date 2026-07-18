@@ -123,6 +123,29 @@ export class CodebasesService {
     });
   }
 
+  async repositoryDetail(id: string) {
+    await this.cleanupInternalJobs();
+    const prisma = await getPrismaClient();
+    return prisma.codebaseRepository.findUnique({
+      where: { id },
+      include: {
+        skillGroups: { include: { group: true } },
+        codebases: {
+          orderBy: [{ agent: { name: "asc" } }, { folder: "asc" }],
+          include: {
+            agent: true,
+            repository: true,
+            jobs: {
+              where: { status: { in: ["QUEUED", "RUNNING"] } },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+  }
+
   async detail(id: string) {
     await this.cleanupInternalJobs();
     const prisma = await getPrismaClient();

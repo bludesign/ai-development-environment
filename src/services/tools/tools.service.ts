@@ -12,6 +12,25 @@ import {
   GetCodebaseOutputSchema,
   GetCodebasesOutputSchema,
 } from "@/services/codebases";
+import {
+  CancelBuildToolInputSchema,
+  CancelBuildToolOutputSchema,
+  ExportBuildToolInputSchema,
+  ExportBuildToolOutputSchema,
+  GetBuildConfigurationsInputSchema,
+  GetBuildConfigurationsOutputSchema,
+  GetBuildDestinationsInputSchema,
+  GetBuildDestinationsOutputSchema,
+  GetBuildInputSchema,
+  GetBuildOutputSchema,
+  GetBuildsInputSchema,
+  GetBuildsOutputSchema,
+  RunBuildToolInputSchema,
+  RunBuildToolOutputSchema,
+  StartBuildToolInputSchema,
+  StartBuildToolOutputSchema,
+  type BuildsService,
+} from "@/services/builds";
 
 import type {
   ExternalMcpServerInput,
@@ -22,6 +41,7 @@ import type {
 } from "./types";
 
 const BUILTIN_GROUP_ID = "builtin:codebases";
+const BUILTIN_BUILDS_GROUP_ID = "builtin:builds";
 const EXTERNAL_GROUP_PREFIX = "external:";
 const CONNECT_TIMEOUT_MS = 15_000;
 const CALL_TIMEOUT_MS = 120_000;
@@ -146,7 +166,10 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 export class ToolsService {
-  constructor(private readonly codebaseTools: CodebaseToolsService) {}
+  constructor(
+    private readonly codebaseTools: CodebaseToolsService,
+    private readonly builds?: BuildsService,
+  ) {}
 
   async externalServers(): Promise<ExternalMcpServerView[]> {
     const prisma = await getPrismaClient();
@@ -309,7 +332,13 @@ export class ToolsService {
         }
       }),
     );
-    return { groups: [this.builtinGroup(), ...externalGroups] };
+    return {
+      groups: [
+        this.builtinGroup(),
+        ...(this.builds ? [this.builtinBuildsGroup()] : []),
+        ...externalGroups,
+      ],
+    };
   }
 
   async callTool(input: {
@@ -332,6 +361,9 @@ export class ToolsService {
         return this.toolResult(structuredContent);
       }
       throw new Error(`Unknown built-in tool: ${input.name}`);
+    }
+    if (input.groupId === BUILTIN_BUILDS_GROUP_ID) {
+      return this.callBuildTool(input.name, input.arguments);
     }
     if (!input.groupId.startsWith(EXTERNAL_GROUP_PREFIX)) {
       throw new Error("Unknown tool group");
@@ -391,6 +423,176 @@ export class ToolsService {
         },
       ],
     };
+  }
+
+  private builtinBuildsGroup(): ToolCatalogGroup {
+    const tool = (
+      name: string,
+      title: string,
+      description: string,
+      inputSchema: z.ZodType,
+      outputSchema: z.ZodType,
+    ) => ({
+      name,
+      title,
+      description,
+      inputSchema: jsonSchema(inputSchema),
+      outputSchema: jsonSchema(outputSchema),
+    });
+    return {
+      id: BUILTIN_BUILDS_GROUP_ID,
+      name: "Builds",
+      source: "BUILTIN",
+      transport: null,
+      url: null,
+      error: null,
+      tools: [
+        tool(
+          "get_builds",
+          "Get builds",
+          "List iOS build records.",
+          GetBuildsInputSchema,
+          GetBuildsOutputSchema,
+        ),
+        tool(
+          "get_build",
+          "Get build",
+          "Get a build with sanitized logs.",
+          GetBuildInputSchema,
+          GetBuildOutputSchema,
+        ),
+        tool(
+          "get_build_configurations",
+          "Get build configurations",
+          "List build configurations for a worktree.",
+          GetBuildConfigurationsInputSchema,
+          GetBuildConfigurationsOutputSchema,
+        ),
+        tool(
+          "get_build_destinations",
+          "Get build destinations",
+          "Inspect compatible destinations.",
+          GetBuildDestinationsInputSchema,
+          GetBuildDestinationsOutputSchema,
+        ),
+        tool(
+          "start_build",
+          "Start build",
+          "Queue an iOS build.",
+          StartBuildToolInputSchema,
+          StartBuildToolOutputSchema,
+        ),
+        tool(
+          "cancel_build",
+          "Cancel build",
+          "Cancel an active build.",
+          CancelBuildToolInputSchema,
+          CancelBuildToolOutputSchema,
+        ),
+        tool(
+          "run_build",
+          "Run build",
+          "Install and launch without rebuilding.",
+          RunBuildToolInputSchema,
+          RunBuildToolOutputSchema,
+        ),
+        tool(
+          "export_build_archive",
+          "Export build archive",
+          "Export an archive to a local IPA folder.",
+          ExportBuildToolInputSchema,
+          ExportBuildToolOutputSchema,
+        ),
+      ],
+    };
+  }
+
+  private async callBuildTool(
+    name: string,
+    rawArguments: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.builds) throw new Error("Build tools are unavailable");
+    const builds = this.builds;
+    if (name === "get_builds") {
+      const input = GetBuildsInputSchema.parse(rawArguments);
+      const page = await builds.builds(input);
+      return this.toolResult(
+        GetBuildsOutputSchema.parse({
+          builds: page.items,
+          nextCursor: page.nextCursor,
+        }),
+      );
+    }
+    if (name === "get_build") {
+      const input = GetBuildInputSchema.parse(rawArguments);
+      const build = await builds.getBuild(input.buildId);
+      if (!build) throw new Error("Build not found");
+      return this.toolResult(
+        GetBuildOutputSchema.parse({
+          build,
+          logs: await builds.logs(
+            input.buildId,
+            input.afterLogId,
+            input.logLimit,
+          ),
+        }),
+      );
+    }
+    if (name === "get_build_configurations") {
+      const input = GetBuildConfigurationsInputSchema.parse(rawArguments);
+      return this.toolResult(
+        GetBuildConfigurationsOutputSchema.parse({
+          project: await builds.projectForWorktree(input.worktreeId),
+        }),
+      );
+    }
+    if (name === "get_build_destinations") {
+      const input = GetBuildDestinationsInputSchema.parse(rawArguments);
+      return this.toolResult(
+        GetBuildDestinationsOutputSchema.parse({
+          destinations:
+            "buildId" in input
+              ? await builds.destinationsForBuild(
+                  input.buildId,
+                  input.requestId,
+                )
+              : await builds.destinations(input as never),
+        }),
+      );
+    }
+    if (name === "start_build") {
+      const input = StartBuildToolInputSchema.parse(rawArguments);
+      return this.toolResult(
+        StartBuildToolOutputSchema.parse({
+          build: await builds.startBuild(input as never),
+        }),
+      );
+    }
+    if (name === "cancel_build") {
+      const input = CancelBuildToolInputSchema.parse(rawArguments);
+      return this.toolResult(
+        CancelBuildToolOutputSchema.parse({
+          build: await builds.cancelBuild(input.buildId),
+        }),
+      );
+    }
+    if (name === "run_build") {
+      const input = RunBuildToolInputSchema.parse(rawArguments);
+      return this.toolResult(
+        RunBuildToolOutputSchema.parse({
+          deployments: await builds.runBuild(input),
+        }),
+      );
+    }
+    if (name === "export_build_archive") {
+      const input = ExportBuildToolInputSchema.parse(rawArguments);
+      return this.toolResult(
+        ExportBuildToolOutputSchema.parse({
+          export: await builds.exportArchive(input),
+        }),
+      );
+    }
+    throw new Error(`Unknown built-in build tool: ${name}`);
   }
 
   private async externalServerWithSecrets(

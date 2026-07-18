@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   GitBranch,
   HardDrive,
+  Hammer,
   FolderGit2,
   House,
   MessageSquareText,
@@ -267,6 +268,22 @@ function NavigationSidebar() {
                   >
                     <HardDrive />
                     <span>{t("buildData")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/builds")}
+                >
+                  <Link
+                    href="/builds"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Hammer />
+                    <span>{t("builds")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
