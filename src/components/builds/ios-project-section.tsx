@@ -73,8 +73,23 @@ type SourceInspection = {
   xcodeVersion: string | null;
 };
 
-export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
+type ProjectCheckout = {
+  codebaseId: string;
+  label: string;
+  available: boolean;
+};
+
+export function IosProjectSection({
+  codebaseId,
+  checkouts,
+}: {
+  codebaseId: string;
+  checkouts?: ProjectCheckout[];
+}) {
   const t = useTranslations("builds");
+  const [activeCodebaseId, setActiveCodebaseId] = useState(
+    checkouts?.find((checkout) => checkout.available)?.codebaseId ?? codebaseId,
+  );
   const [project, setProject] = useState<IosAppProject | null>(null);
   const [scripts, setScripts] = useState<BuildScript[]>([]);
   const [worktreeId, setWorktreeId] = useState<string | null>(null);
@@ -105,13 +120,13 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
             agents { codebases { codebase { id } worktrees { id primary } } }
           }
         }`,
-        { codebaseId },
+        { codebaseId: activeCodebaseId },
       );
       setProject(data.iosAppProject);
       setScripts(data.buildScripts);
       const group = data.worktreeOverview.agents
         .flatMap((agent) => agent.codebases)
-        .find((entry) => entry.codebase.id === codebaseId);
+        .find((entry) => entry.codebase.id === activeCodebaseId);
       setWorktreeId(
         group?.worktrees.find((worktree) => worktree.primary)?.id ??
           group?.worktrees[0]?.id ??
@@ -123,7 +138,7 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [codebaseId]);
+  }, [activeCodebaseId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -137,7 +152,7 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
         `mutation CreateIosProject($codebaseId: ID!) {
           createIosAppProject(codebaseId: $codebaseId) { id }
         }`,
-        { codebaseId },
+        { codebaseId: activeCodebaseId },
       );
       await load();
     } catch (value) {
@@ -195,7 +210,7 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
         `mutation SetAllowedBuildScripts($codebaseId: ID!, $scriptIds: [ID!]!) {
           setCodebaseBuildScripts(codebaseId: $codebaseId, scriptIds: $scriptIds) { id }
         }`,
-        { codebaseId, scriptIds: next },
+        { codebaseId: activeCodebaseId, scriptIds: next },
       );
       await load();
     } catch (value) {
@@ -217,6 +232,42 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+      {checkouts && checkouts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("parseCheckout")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Select
+              disabled={busy}
+              onValueChange={(value) => {
+                setLoading(true);
+                setActiveCodebaseId(value);
+              }}
+              value={activeCodebaseId}
+            >
+              <SelectTrigger aria-label={t("parseCheckout")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {checkouts.map((checkout) => (
+                  <SelectItem
+                    disabled={!checkout.available}
+                    key={checkout.codebaseId}
+                    value={checkout.codebaseId}
+                  >
+                    {checkout.label}
+                    {!checkout.available ? ` · ${t("checkoutUnavailable")}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t("parseCheckoutDescription")}
+            </p>
+          </CardContent>
+        </Card>
       )}
       {!project ? (
         <Empty className="border py-12">
@@ -381,7 +432,7 @@ export function IosProjectSection({ codebaseId }: { codebaseId: string }) {
       )}
       {configurationOpen && worktreeId && (
         <BuildConfigurationDialog
-          codebaseId={codebaseId}
+          codebaseId={activeCodebaseId}
           configuration={editing}
           onOpenChange={setConfigurationOpen}
           onSaved={load}

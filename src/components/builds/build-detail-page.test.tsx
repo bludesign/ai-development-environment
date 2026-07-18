@@ -165,6 +165,42 @@ afterEach(() => {
 });
 
 describe("BuildDetailPage", () => {
+  test("polls while a build or deployment is still active", async () => {
+    const interval = vi.spyOn(window, "setInterval");
+    request.mockImplementation(async (query) => {
+      if (String(query).includes("query BuildDetail")) {
+        return {
+          build: {
+            ...build,
+            deployments: [
+              {
+                id: "deployment-1",
+                batchId: "batch-1",
+                destination: build.destination,
+                status: "QUEUED",
+                commandSummary: "open Simulator and install",
+                outputRelativePath: null,
+                error: null,
+                createdAt: now,
+                startedAt: null,
+                finishedAt: null,
+              },
+            ],
+          },
+          buildLogs: [],
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" />);
+    expect(await screen.findByText("Development")).toBeDefined();
+    await waitFor(() =>
+      expect(interval).toHaveBeenCalledWith(expect.any(Function), 2_000),
+    );
+    interval.mockRestore();
+  });
+
   test("streams logs, runs a captured app on multiple destinations, and exports an archive after configuration deletion", async () => {
     render(<BuildDetailPage buildId="build-1" />);
 

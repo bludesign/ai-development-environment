@@ -42,7 +42,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -95,7 +94,6 @@ const CODEBASE_FIELDS = `
 `;
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
-  skillGroups { id name }
   codebases { ${CODEBASE_FIELDS} }
 `;
 
@@ -105,9 +103,6 @@ export function CodebasesPage() {
   const t = useTranslations("codebases");
   const [repositories, setRepositories] = useState<CodebaseRepository[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [skillGroups, setSkillGroups] = useState<
-    Array<{ id: string; name: string }>
-  >([]);
   const [settings, setSettings] = useState<CodebaseSettings | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>("agents");
   const [loading, setLoading] = useState(true);
@@ -116,7 +111,6 @@ export function CodebasesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [editing, setEditing] = useState<CodebaseRepository | null>(null);
   const latestLoad = useRef(0);
 
   const load = useCallback(async () => {
@@ -126,18 +120,15 @@ export function CodebasesPage() {
         codebaseOverview: { repositories: CodebaseRepository[] };
         codebaseSettings: CodebaseSettings;
         agents: Agent[];
-        skillsOverview?: { groups: Array<{ id: string; name: string }> };
       }>(`query CodebaseOverview {
         codebaseOverview { repositories { ${REPOSITORY_FIELDS} } }
         codebaseSettings { refreshIntervalSeconds fetchIntervalSeconds defaultJiraBranchRegex updatedAt }
         agents { ${AGENT_FIELDS} }
-        skillsOverview { groups { id name } }
       }`);
       if (loadId !== latestLoad.current) return;
       setRepositories(data.codebaseOverview.repositories);
       setSettings(data.codebaseSettings);
       setAgents(data.agents);
-      setSkillGroups(data.skillsOverview?.groups ?? []);
       setError(null);
     } catch (value) {
       if (loadId !== latestLoad.current) return;
@@ -335,7 +326,6 @@ export function CodebasesPage() {
       ) : (
         <RepositoryGroups
           repositories={repositories}
-          onEdit={setEditing}
           onFetch={(id) => runOperation("fetchCodebases", [id])}
           onRemove={removeCodebase}
         />
@@ -361,16 +351,6 @@ export function CodebasesPage() {
         }}
         open={settingsOpen}
         settings={settings}
-      />
-      <EditRepositoryDialog
-        groups={skillGroups}
-        key={editing?.id ?? "closed"}
-        onOpenChange={(open) => !open && setEditing(null)}
-        onSaved={async () => {
-          setEditing(null);
-          await load();
-        }}
-        repository={editing}
       />
     </section>
   );
@@ -596,12 +576,10 @@ function AgentGroups({
 
 function RepositoryGroups({
   repositories,
-  onEdit,
   onFetch,
   onRemove,
 }: {
   repositories: CodebaseRepository[];
-  onEdit: (repository: CodebaseRepository) => void;
   onFetch: (id: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
 }) {
@@ -622,12 +600,10 @@ function RepositoryGroups({
                 </p>
               )}
             </div>
-            <Button
-              onClick={() => onEdit(repository)}
-              size="sm"
-              variant="outline"
-            >
-              <Pencil /> {t("edit")}
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/codebases/repositories/${repository.id}`}>
+                <Pencil /> {t("edit")}
+              </Link>
             </Button>
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
@@ -1024,166 +1000,6 @@ function AddCodebaseDialog({
                 </Button>
               )}
             </div>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function EditRepositoryDialog({
-  groups,
-  repository,
-  onOpenChange,
-  onSaved,
-}: {
-  groups: Array<{ id: string; name: string }>;
-  repository: CodebaseRepository | null;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  const t = useTranslations("codebases");
-  const [name, setName] = useState(repository?.name ?? "");
-  const [description, setDescription] = useState(repository?.description ?? "");
-  const [jiraBranchRegex, setJiraBranchRegex] = useState(
-    repository?.jiraBranchRegex ?? "",
-  );
-  const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(
-    repository?.keepBaseBranchUpToDate ?? true,
-  );
-  const [skillGroupIds, setSkillGroupIds] = useState(
-    repository?.skillGroups?.map((group) => group.id) ?? [],
-  );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!repository) return;
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation UpdateCodebaseRepository($input: UpdateCodebaseRepositoryInput!) {
-          updateCodebaseRepository(input: $input) { id }
-        }`,
-        {
-          input: {
-            id: repository.id,
-            name,
-            description,
-            jiraBranchRegex: jiraBranchRegex || null,
-            keepBaseBranchUpToDate,
-            skillGroupIds,
-          },
-        },
-      );
-      await onSaved();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog open={Boolean(repository)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("editTitle")}</DialogTitle>
-          <DialogDescription>{repository?.displayOrigin}</DialogDescription>
-        </DialogHeader>
-        <form className="space-y-4" onSubmit={save}>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="edit-codebase-name">{t("name")}</Label>
-            <Input
-              id="edit-codebase-name"
-              maxLength={120}
-              onChange={(event) => setName(event.target.value)}
-              required
-              value={name}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-codebase-jira-regex">
-              {t("jiraBranchRegex")}
-            </Label>
-            <Input
-              id="edit-codebase-jira-regex"
-              onChange={(event) => setJiraBranchRegex(event.target.value)}
-              placeholder={t("inheritDefaultRegex")}
-              value={jiraBranchRegex}
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("jiraBranchRegexHelp")}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-codebase-description">
-              {t("repositoryDescription")}
-            </Label>
-            <Textarea
-              id="edit-codebase-description"
-              maxLength={2000}
-              onChange={(event) => setDescription(event.target.value)}
-              value={description}
-            />
-          </div>
-          <div className="flex items-start gap-3 rounded-lg border p-3">
-            <Checkbox
-              checked={keepBaseBranchUpToDate}
-              className="mt-0.5"
-              id="edit-codebase-keep-base-branch-up-to-date"
-              onCheckedChange={(checked) =>
-                setKeepBaseBranchUpToDate(checked === true)
-              }
-            />
-            <div className="space-y-1">
-              <Label htmlFor="edit-codebase-keep-base-branch-up-to-date">
-                {t("keepBaseBranchUpToDate")}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t("keepBaseBranchUpToDateHelp")}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>{t("skillGroups")}</Label>
-            <p className="text-xs text-muted-foreground">
-              {t("skillGroupsHelp")}
-            </p>
-            <div className="max-h-40 space-y-1 overflow-auto rounded-lg border p-2">
-              {groups.map((group) => (
-                <label
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
-                  key={group.id}
-                >
-                  <Checkbox
-                    checked={skillGroupIds.includes(group.id)}
-                    onCheckedChange={(checked) =>
-                      setSkillGroupIds((current) =>
-                        checked === true
-                          ? [...new Set([...current, group.id])]
-                          : current.filter((id) => id !== group.id),
-                      )
-                    }
-                  />
-                  {group.name}
-                </label>
-              ))}
-              {!groups.length && (
-                <p className="px-2 py-1 text-sm text-muted-foreground">
-                  {t("noSkillGroups")}
-                </p>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button disabled={busy} type="submit">
-              {busy && <Spinner />} {t("save")}
-            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -10,6 +10,7 @@ describe("agent inventory", () => {
     expect(inventory.memoryFreeBytes).toBeGreaterThanOrEqual(0);
     expect(inventory.diskTotalBytes).toBeGreaterThan(0);
     expect(inventory.diskFreeBytes).toBeGreaterThanOrEqual(0);
+    expect(inventory.defaultBuildsDirectory).toBeUndefined();
   });
 
   test("advertises the ccusage report capability", () => {

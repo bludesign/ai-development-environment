@@ -1646,6 +1646,10 @@ async function runSimpleLogged(
   });
 }
 
+export function simulatorAppArguments(destinationId: string): string[] {
+  return ["-a", "Simulator", "--args", "-CurrentDeviceUDID", destinationId];
+}
+
 export const deployIosBuild: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -1703,6 +1707,26 @@ export const deployIosBuild: AgentJobHandler = async (
               !/current state: Booted/i.test(boot.output)
             ) {
               failure = cleanError(boot.output || "Could not boot simulator");
+            }
+          }
+          if (!failure) {
+            const openSimulator = await runLoggedCommand({
+              command: "/usr/bin/open",
+              args: simulatorAppArguments(deployment.destination.id),
+              cwd: folder,
+              env: xcodeEnvironment(),
+              timeoutMs,
+              signal,
+              logger,
+              phase: "SIMULATOR_OPEN",
+              scope: "DEPLOYMENT",
+              scopeId: deployment.id,
+              additionalLogPath: logPath,
+            });
+            if (openSimulator.exitCode !== 0) {
+              failure = cleanError(
+                openSimulator.output || "Could not open Simulator",
+              );
             }
           }
           if (!failure) {

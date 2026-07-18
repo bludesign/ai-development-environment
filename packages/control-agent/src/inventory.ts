@@ -3,12 +3,10 @@ import {
   arch,
   cpus,
   freemem,
-  homedir,
   hostname,
   release,
   totalmem,
 } from "node:os";
-import { join } from "node:path";
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
@@ -59,12 +57,5 @@ export function collectInventory(): AgentInventory {
     diskTotalBytes: Number(disk.blocks * disk.bsize),
     diskFreeBytes: Number(disk.bavail * disk.bsize),
     capabilities: AGENT_CAPABILITIES,
-    defaultBuildsDirectory: join(
-      homedir(),
-      "Library",
-      "Application Support",
-      "AI Development Environment",
-      "Builds",
-    ),
   };
 }

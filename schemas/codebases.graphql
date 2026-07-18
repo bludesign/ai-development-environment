@@ -269,6 +269,7 @@ input CodebaseStatusReportInput {
 
 extend type Query {
   codebaseOverview: CodebaseOverview!
+  codebaseRepository(id: ID!): CodebaseRepository
   codebase(id: ID!): Codebase
   codebaseSettings: CodebaseSettings!
   agentCodebases: [AgentCodebaseRegistration!]!

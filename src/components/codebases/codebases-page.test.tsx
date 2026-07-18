@@ -144,9 +144,6 @@ describe("CodebasesPage", () => {
           },
         } as never;
       }
-      if (String(query).includes("mutation UpdateCodebaseRepository")) {
-        return { updateCodebaseRepository: { id: "repository-1" } } as never;
-      }
       throw new Error(`Unexpected operation: ${query}`);
     });
   });
@@ -170,7 +167,9 @@ describe("CodebasesPage", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
     expect(await screen.findByText("github.com/openai/codex")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Edit" }).getAttribute("href"),
+    ).toBe("/codebases/repositories/repository-1");
 
     fireEvent.click(screen.getByRole("button", { name: "Fetch" }));
     await waitFor(() => {
@@ -197,34 +196,6 @@ describe("CodebasesPage", () => {
 
     expect(overviewCalls()).toBe(before);
     await waitFor(() => expect(overviewCalls()).toBe(before + 1));
-  });
-
-  test("edits the repository-wide base branch update setting", async () => {
-    render(<CodebasesPage />);
-    await screen.findByText("Studio Mac");
-    fireEvent.click(screen.getByRole("tab", { name: "Repositories" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-
-    const checkbox = await screen.findByRole("checkbox", {
-      name: "Keep base branch up to date",
-    });
-    expect(checkbox.getAttribute("data-state")).toBe("checked");
-    fireEvent.click(checkbox);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => {
-      expect(
-        request.mock.calls.some(
-          ([query, variables]) =>
-            String(query).includes("mutation UpdateCodebaseRepository") &&
-            (
-              variables as {
-                input?: { keepBaseBranchUpToDate?: boolean };
-              }
-            )?.input?.keepBaseBranchUpToDate === false,
-        ),
-      ).toBe(true);
-    });
   });
 
   test("browses, inspects, and confirms a new codebase", async () => {

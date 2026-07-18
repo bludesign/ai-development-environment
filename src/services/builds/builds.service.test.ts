@@ -47,8 +47,9 @@ function worktree() {
         ]),
         lastSeenAt: new Date(),
         disconnectedAt: null,
+        baseRepoDirectory: "/agent/repositories",
         buildsDirectory: null,
-        defaultBuildsDirectory: "/agent/builds",
+        defaultBuildsDirectory: "/legacy/application-support/builds",
       },
       repository: {
         id: "repository-1",
@@ -231,6 +232,9 @@ describe("BuildsService", () => {
       "/client/supplied",
     );
     const createInput = buildCreate.mock.calls[0]![0];
+    expect(createInput.data.artifactDirectory).toBe(
+      `/agent/repositories/Builds/${createInput.data.id}`,
+    );
     expect(createInput.data.commandSummary).toContain(
       "-xctestrun /agent/builds/prior-build/test-products/App.xctestrun",
     );

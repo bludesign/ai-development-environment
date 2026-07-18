@@ -198,13 +198,13 @@ const mockTranslations = {
     saveDerivedDataSettings: "Save Derived Data settings",
     buildsDirectory: "Builds directory",
     buildsDirectoryDescription:
-      "Build logs, copied products, archives, and exports are stored in one folder per build. The agent default is used unless overridden here.",
+      "Build logs, copied products, archives, and exports are stored in one folder per build. The default is the Base repository directory with /Builds appended unless overridden here.",
     browseBuildsDirectory: "Browse builds directory",
     effectiveDirectory: "Effective directory",
-    agentDefault: "Agent default",
+    agentDefault: "Base repository default",
     customBuildsDirectory: "Custom absolute directory",
     saveBuildsDirectory: "Save builds directory",
-    useAgentDefault: "Use agent default",
+    useAgentDefault: "Use base repository default",
     deleteAgent: "Delete agent",
     deleteAgentTitle: "Delete this agent?",
     deleteAgentDescription:
@@ -1018,6 +1018,17 @@ const mockTranslations = {
     cancel: "Cancel",
     confirm: "Confirm codebase",
     editTitle: "Edit repository details",
+    loadingRepository: "Loading repository…",
+    repositoryNotFound: "Repository not found",
+    repositoryNotFoundDescription:
+      "This logical repository may no longer have a registered checkout.",
+    backToCodebases: "Back to codebases",
+    repositorySharedDescription:
+      "These details, build configurations, and allowed scripts belong to the logical repository and apply across every agent checkout and worktree.",
+    repositoryDetails: "Repository details",
+    repositoryDetailsDescription:
+      "Manage settings shared by every registered checkout of this repository.",
+    repositorySaved: "Repository details saved.",
     skillGroups: "Skill groups",
     skillGroupsHelp:
       "Choose the project skill groups synchronized into every checkout and worktree for this repository.",
@@ -1064,6 +1075,7 @@ const mockTranslations = {
     dirty: "Uncommitted changes",
     refresh: "Refresh",
     fetch: "Fetch origin",
+    repositorySettings: "Repository settings",
     origin: "Origin",
     currentBranch: "Current branch",
     upstream: "Upstream",
@@ -1576,7 +1588,7 @@ const mockTranslations = {
     newScript: "New build script",
     noScripts: "No build scripts",
     noScriptsDescription:
-      "Create reusable JavaScript hooks, then allow them for individual codebases.",
+      "Create reusable JavaScript hooks, then allow them for individual repositories.",
     defaultEnabled: "Enabled by default",
     preBuild: "Pre-build",
     postBuild: "Post-build",
@@ -1601,7 +1613,7 @@ const mockTranslations = {
     configurationInvalid:
       "The saved source, scheme, or configuration is unavailable in this worktree.",
     noConfigurations:
-      "Create a valid iOS build configuration on the codebase before starting a build.",
+      "Create a valid iOS build configuration in repository settings before starting a build.",
     reparse: "Reparse",
     action: "Action",
     destinationType: "Destination type",
@@ -1655,6 +1667,11 @@ const mockTranslations = {
     signingStyle: "Signing style",
     automatic: "Automatic",
     manual: "Manual",
+    iosApp: "iOS App",
+    parseCheckout: "Checkout used for parsing",
+    parseCheckoutDescription:
+      "Saved configurations are repository-wide. Source discovery, validation, and parse status use the selected agent checkout.",
+    checkoutUnavailable: "unavailable",
     addIosProject: "Add iOS App project",
     addIosProjectDescription:
       "Enable reusable Xcode build configurations for every checkout and worktree of this repository.",

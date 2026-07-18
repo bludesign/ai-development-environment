@@ -154,6 +154,21 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
     };
   }, [buildId, load]);
 
+  const activeOperation =
+    build !== null &&
+    (["QUEUED", "PREPARING", "RUNNING"].includes(build.status) ||
+      build.deployments.some((deployment) =>
+        ["QUEUED", "RUNNING"].includes(deployment.status),
+      ) ||
+      build.exports.some((entry) =>
+        ["QUEUED", "RUNNING"].includes(entry.status),
+      ));
+  useEffect(() => {
+    if (!activeOperation) return;
+    const timer = window.setInterval(() => void load(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [activeOperation, load]);
+
   const cancel = async () => {
     setBusy(true);
     try {

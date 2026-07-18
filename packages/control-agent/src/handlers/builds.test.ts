@@ -27,6 +27,7 @@ import {
   createRedactor,
   physicalDestinations,
   runIosBuild,
+  simulatorAppArguments,
   simulatorDestinations,
   workspaceProjectPaths,
   xcodeBuildArguments,
@@ -247,6 +248,16 @@ describe("iOS destination and error parsing", () => {
         id: "DEVICE-1",
         name: "Test iPhone",
       }),
+    ]);
+  });
+
+  test("opens the selected simulator UI without using a shell command", () => {
+    expect(simulatorAppArguments("SIM-1")).toEqual([
+      "-a",
+      "Simulator",
+      "--args",
+      "-CurrentDeviceUDID",
+      "SIM-1",
     ]);
   });
 

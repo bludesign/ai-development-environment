@@ -87,6 +87,14 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       requireControlPlane(context);
       return service.overview();
     },
+    codebaseRepository: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.repositoryDetail(id);
+    },
     codebase: (
       _root: unknown,
       { id }: { id: string },

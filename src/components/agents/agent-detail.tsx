@@ -644,12 +644,9 @@ function BuildsDirectorySettingsCard({
             {t("effectiveDirectory")}
           </p>
           <p className="mt-1 break-all font-mono text-xs">
-            {agent.effectiveBuildsDirectory ??
-              agent.buildsDirectory ??
-              agent.defaultBuildsDirectory ??
-              t("notConfigured")}
+            {agent.effectiveBuildsDirectory ?? t("notConfigured")}
           </p>
-          {!agent.buildsDirectory && agent.defaultBuildsDirectory && (
+          {!agent.buildsDirectory && agent.baseRepoDirectory && (
             <Badge className="mt-2" variant="outline">
               {t("agentDefault")}
             </Badge>
@@ -664,7 +661,7 @@ function BuildsDirectorySettingsCard({
             id="builds-directory-path"
             onChange={(event) => setPath(event.target.value)}
             placeholder={
-              agent.defaultBuildsDirectory ?? "/Users/example/Builds"
+              agent.effectiveBuildsDirectory ?? "/Users/example/Repositories/Builds"
             }
             value={path}
           />

@@ -1,6 +1,7 @@
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 
 import type { AgentControlService } from "@/services/agent-control";
+import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
 import {
   AGENT_CHANGED_TOPIC,
   AGENT_ONLINE_WINDOW_MS,
@@ -97,9 +98,9 @@ export const createAgentResolvers = (
         : "OFFLINE";
     },
     effectiveBuildsDirectory: (agent: {
+      baseRepoDirectory: string | null;
       buildsDirectory: string | null;
-      defaultBuildsDirectory: string | null;
-    }) => agent.buildsDirectory ?? agent.defaultBuildsDirectory,
+    }) => effectiveBuildsDirectory(agent),
     lastSeenAt: (agent: { lastSeenAt: Date | null }) =>
       agent.lastSeenAt?.toISOString() ?? null,
     disconnectedAt: (agent: { disconnectedAt: Date | null }) =>

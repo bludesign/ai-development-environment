@@ -35,6 +35,8 @@ import {
   buildTopic,
 } from "@/services/agent-control";
 
+import { effectiveBuildsDirectory } from "./build-directory";
+
 const ICON_KEYS = new Set([
   "smartphone",
   "hammer",
@@ -1088,9 +1090,7 @@ export class BuildsService {
     }
     destination = availableDestination;
     const buildId = randomUUID();
-    const buildRoot =
-      worktree.codebase.agent.buildsDirectory ??
-      worktree.codebase.agent.defaultBuildsDirectory;
+    const buildRoot = effectiveBuildsDirectory(worktree.codebase.agent);
     if (!buildRoot)
       throw new Error("The agent builds directory is unavailable");
     const artifactDirectory = join(buildRoot, buildId);
@@ -1490,7 +1490,7 @@ export class BuildsService {
               destinationJson: JSON.stringify(destination),
               commandSummary:
                 destination.type === "SIMULATOR"
-                  ? `xcrun simctl install/launch ${destination.id}`
+                  ? `open -a Simulator --args -CurrentDeviceUDID ${destination.id}; xcrun simctl install/launch ${destination.id}`
                   : `xcrun devicectl device install/process launch --device ${destination.id}`,
             },
           })),
