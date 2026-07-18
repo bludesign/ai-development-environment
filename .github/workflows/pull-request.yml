@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: dependabot
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -54,7 +54,7 @@ jobs:
         run: npm run build
 
   build-and-test-agent:
-    runs-on: ubuntu-latest
+    runs-on: dependabot
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
