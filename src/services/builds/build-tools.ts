@@ -14,7 +14,7 @@ export const GetBuildsOutputSchema = z.object({
 
 export const GetBuildInputSchema = z.object({
   buildId: z.string().min(1),
-  afterSequence: z.number().int().default(-1),
+  afterLogId: z.string().min(1).nullable().default(null),
   logLimit: z.number().int().min(1).max(5_000).default(1_000),
 });
 export const GetBuildOutputSchema = z.object({

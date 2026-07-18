@@ -9,6 +9,7 @@ import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_BUILD_JOB_KINDS,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
@@ -17,6 +18,7 @@ import {
   IOS_SOURCE_PARSE_JOB_KIND,
   parseBuildDeploymentPayload,
   parseBuildDestinationsPayload,
+  parseBuildArtifactDownloadPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
   parseBuildDeletePayload,
@@ -240,6 +242,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === IOS_BUILD_DELETE_JOB_KIND) {
     parseBuildDeletePayload(payload);
+    return;
+  }
+  if (kind === IOS_ARTIFACT_DOWNLOAD_JOB_KIND) {
+    parseBuildArtifactDownloadPayload(payload);
     return;
   }
   if (kind === IOS_DEPLOY_JOB_KIND) {

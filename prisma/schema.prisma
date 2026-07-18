@@ -614,6 +614,7 @@ model BuildDeployment {
   requestId          String
   jobId              String?
   destinationJson    String
+  destinationKey     String
   status             String    @default("QUEUED")
   commandSummary     String
   outputRelativePath String?
@@ -625,7 +626,7 @@ model BuildDeployment {
   build              Build     @relation(fields: [buildId], references: [id], onDelete: Cascade)
   job                AgentJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
-  @@unique([buildId, requestId, destinationJson])
+  @@unique([buildId, requestId, destinationKey])
   @@index([buildId, createdAt])
   @@index([jobId])
 }

@@ -124,13 +124,13 @@ export function createCodebasesMcpServer(
         outputSchema: GetBuildOutputSchema,
         annotations: READ_ONLY_ANNOTATIONS,
       },
-      async ({ buildId, afterSequence, logLimit }) => {
+      async ({ buildId, afterLogId, logLimit }) => {
         const build = await builds.getBuild(buildId);
         if (!build) throw new Error("Build not found");
         return result(
           GetBuildOutputSchema.parse({
             build,
-            logs: await builds.logs(buildId, afterSequence, logLimit),
+            logs: await builds.logs(buildId, afterLogId, logLimit),
           }) as Record<string, unknown>,
         );
       },

@@ -183,7 +183,11 @@ describe("codebases MCP server", () => {
     await expect(
       client.callTool({
         name: "get_build",
-        arguments: { buildId: "build-1", afterSequence: 4, logLimit: 10 },
+        arguments: {
+          buildId: "build-1",
+          afterLogId: "log-4",
+          logLimit: 10,
+        },
       }),
     ).resolves.toMatchObject({
       structuredContent: {
@@ -191,7 +195,7 @@ describe("codebases MCP server", () => {
         logs: [{ sequence: 0, message: "sanitized" }],
       },
     });
-    expect(builds.logs).toHaveBeenCalledWith("build-1", 4, 10);
+    expect(builds.logs).toHaveBeenCalledWith("build-1", "log-4", 10);
 
     await expect(
       client.callTool({

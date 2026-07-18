@@ -1154,6 +1154,28 @@ export function xcodeBuildArguments(input: BuildJobPayload): string[] {
   return args;
 }
 
+export function xcodeBuildSettingsArguments(
+  input: BuildJobPayload,
+  folder = input.folder,
+): string[] {
+  return [
+    "xcodebuild",
+    ...sourceArguments(
+      input.source,
+      containedPath(folder, input.source.relativePath),
+    ),
+    "-scheme",
+    input.scheme,
+    "-configuration",
+    input.configuration,
+    "-destination",
+    destinationArgument(input.destination),
+    ...advancedArguments(input.advancedSettings),
+    "-showBuildSettings",
+    "-json",
+  ];
+}
+
 function commandSummary(commandName: string, args: string[]): string {
   return [commandName, ...args]
     .map((value) =>
@@ -1426,21 +1448,7 @@ async function captureArtifacts(
   }
   const settingsResult = await command(
     "xcrun",
-    [
-      "xcodebuild",
-      ...sourceArguments(
-        input.source,
-        containedPath(folder, input.source.relativePath),
-      ),
-      "-scheme",
-      input.scheme,
-      "-configuration",
-      input.configuration,
-      "-destination",
-      destinationArgument(input.destination),
-      "-showBuildSettings",
-      "-json",
-    ],
+    xcodeBuildSettingsArguments(input, folder),
     60_000,
     signal,
     folder,

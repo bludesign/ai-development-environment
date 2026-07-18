@@ -35,6 +35,7 @@ import {
   testPlanNames,
   workspaceProjectPaths,
   xcodeBuildArguments,
+  xcodeBuildSettingsArguments,
 } from "./builds.js";
 
 const execute = promisify(execFile);
@@ -144,6 +145,26 @@ describe("iOS build command construction", () => {
         "-only-testing:AppTests/LoginTests",
         "-skip-testing:AppTests/SlowTests",
         "ONLY_ACTIVE_ARCH=YES",
+      ]),
+    );
+  });
+
+  test("applies build overrides when inspecting runnable app metadata", () => {
+    const args = xcodeBuildSettingsArguments(
+      payload({
+        advancedSettings: {
+          ...DEFAULT_BUILD_ADVANCED_SETTINGS,
+          productBundleIdentifier: "com.example.overridden",
+          buildSettingOverrides: { MARKETING_VERSION: "2.0" },
+        },
+      }),
+    );
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "PRODUCT_BUNDLE_IDENTIFIER=com.example.overridden",
+        "MARKETING_VERSION=2.0",
+        "-showBuildSettings",
       ]),
     );
   });
@@ -357,7 +378,7 @@ describe("iOS build hooks and logs", () => {
 
     await expect(
       deleteIosBuild(
-        { buildId: "build-1", artifactDirectory },
+        { buildId: "build-1", artifactDirectory, codebaseId: "codebase-1" },
         30_000,
         new AbortController().signal,
         async () => undefined,
@@ -383,6 +404,7 @@ describe("iOS build hooks and logs", () => {
           artifactDirectory,
           artifactRelativePath: "build.log",
           uploadId: "upload-1",
+          codebaseId: "codebase-1",
         },
         30_000,
         new AbortController().signal,

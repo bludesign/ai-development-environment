@@ -186,6 +186,7 @@ export type BuildDeploymentPayload = BuildWorktreeIdentity & {
 export type BuildDeletePayload = {
   buildId: string;
   artifactDirectory: string;
+  codebaseId: string;
 };
 
 export type BuildArtifactDownloadPayload = BuildDeletePayload & {
@@ -623,7 +624,14 @@ export function parseBuildDeletePayload(value: unknown): BuildDeletePayload {
   if (artifactDirectory.split("/").at(-1) !== buildId) {
     throw new Error("Build delete folder must end with the build ID");
   }
-  return { buildId, artifactDirectory };
+  return {
+    buildId,
+    artifactDirectory,
+    codebaseId: stringValue(
+      input.codebaseId,
+      "build delete payload.codebaseId",
+    ),
+  };
 }
 
 export function parseBuildArtifactDownloadPayload(

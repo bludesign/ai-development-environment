@@ -44,15 +44,18 @@ describe("iOS build agent contract", () => {
       parseBuildDeletePayload({
         buildId: "build-1",
         artifactDirectory: "/tmp/builds/build-1",
+        codebaseId: "codebase-1",
       }),
     ).toEqual({
       buildId: "build-1",
       artifactDirectory: "/tmp/builds/build-1",
+      codebaseId: "codebase-1",
     });
     expect(() =>
       parseBuildDeletePayload({
         buildId: "build-1",
         artifactDirectory: "/tmp/builds/build-2",
+        codebaseId: "codebase-1",
       }),
     ).toThrow("must end with the build ID");
   });
@@ -64,6 +67,7 @@ describe("iOS build agent contract", () => {
         artifactDirectory: "/tmp/builds/build-1",
         artifactRelativePath: "products/App.app",
         uploadId: "upload-1",
+        codebaseId: "codebase-1",
       }),
     ).toMatchObject({ artifactRelativePath: "products/App.app" });
     expect(() =>
@@ -72,6 +76,7 @@ describe("iOS build agent contract", () => {
         artifactDirectory: "/tmp/builds/build-1",
         artifactRelativePath: "../secret",
         uploadId: "upload-1",
+        codebaseId: "codebase-1",
       }),
     ).toThrow("stay within the worktree");
   });

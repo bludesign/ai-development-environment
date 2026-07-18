@@ -124,11 +124,11 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
     buildLogs: (
       _root: unknown,
-      args: { buildId: string; afterSequence?: number; first?: number },
+      args: { buildId: string; after?: string | null; first?: number },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.logs(args.buildId, args.afterSequence, args.first);
+      return service.logs(args.buildId, args.after, args.first);
     },
   },
   Mutation: {

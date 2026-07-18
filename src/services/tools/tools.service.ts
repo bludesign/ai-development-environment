@@ -532,7 +532,7 @@ export class ToolsService {
           build,
           logs: await builds.logs(
             input.buildId,
-            input.afterSequence,
+            input.afterLogId,
             input.logLimit,
           ),
         }),

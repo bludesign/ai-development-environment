@@ -310,11 +310,7 @@ extend type Query {
     worktreeId: ID
   ): BuildPage!
   build(id: ID!): Build
-  buildLogs(
-    buildId: ID!
-    afterSequence: Int = -1
-    first: Int = 1000
-  ): [BuildLogEvent!]!
+  buildLogs(buildId: ID!, after: ID, first: Int = 1000): [BuildLogEvent!]!
 }
 
 extend type Mutation {

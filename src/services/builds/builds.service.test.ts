@@ -7,13 +7,20 @@ import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
+  IOS_DEPLOY_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
+  type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
-import type { AgentControlService } from "@/services/agent-control";
+import {
+  BUILDS_CHANGED_TOPIC,
+  agentEventBus,
+  buildTopic,
+  type AgentControlService,
+} from "@/services/agent-control";
 
 import { BuildsService } from "./builds.service";
 
-const destination = {
+const destination: BuildDestination = {
   type: "SIMULATOR",
   id: "SIM-1",
   name: "iPhone 17 Pro",
@@ -121,6 +128,8 @@ describe("BuildsService", () => {
             },
             codebaseId: "codebase-1",
             worktreeId: "worktree-1",
+            deployments: [],
+            exports: [],
           },
         ]),
         deleteMany,
@@ -134,7 +143,11 @@ describe("BuildsService", () => {
       codebaseId: "codebase-1",
       worktreeId: "worktree-1",
       kind: IOS_BUILD_DELETE_JOB_KIND,
-      payload: { buildId: "build-1", artifactDirectory },
+      payload: {
+        buildId: "build-1",
+        artifactDirectory,
+        codebaseId: "codebase-1",
+      },
       idempotencyKey: "ios:build:delete:build-1",
       timeoutSeconds: 300,
       visibility: "SYSTEM",
@@ -142,6 +155,69 @@ describe("BuildsService", () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["build-1"] } },
     });
+  });
+
+  test("publishes the root field expected by each build subscription", async () => {
+    const publish = vi.spyOn(agentEventBus, "publish");
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "build-1",
+            status: "SUCCEEDED",
+            artifactDirectory: "/agent/builds/build-1",
+            agentId: null,
+            agent: null,
+            codebaseId: null,
+            worktreeId: null,
+            deployments: [],
+            exports: [],
+          },
+        ]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await new BuildsService(control()).deleteBuilds(["build-1"]);
+
+    expect(publish).toHaveBeenCalledWith(buildTopic("build-1"), {
+      buildChanged: { id: "build-1" },
+    });
+    expect(publish).toHaveBeenCalledWith(BUILDS_CHANGED_TOPIC, {
+      buildsChanged: { id: "build-1" },
+    });
+    publish.mockRestore();
+  });
+
+  test("rejects deletion while a deployment or export is active", async () => {
+    const deleteMany = vi.fn();
+    const createJob = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "build-1",
+            status: "SUCCEEDED",
+            artifactDirectory: "/agent/builds/build-1",
+            agentId: "agent-1",
+            agent: {
+              capabilitiesJson: JSON.stringify([IOS_BUILD_DELETE_JOB_KIND]),
+            },
+            codebaseId: "codebase-1",
+            worktreeId: "worktree-1",
+            deployments: [{ id: "deployment-1" }],
+            exports: [],
+          },
+        ]),
+        deleteMany,
+      },
+    });
+
+    await expect(
+      new BuildsService(control(createJob)).deleteBuilds(["build-1"]),
+    ).rejects.toThrow("running deployments or exports");
+    expect(createJob).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   test("returns an idempotent start without queueing another build", async () => {
@@ -518,6 +594,116 @@ describe("BuildsService", () => {
       expect.objectContaining({ type: "PHYSICAL_DEVICE", generic: true }),
     ]);
     expect(createJob).not.toHaveBeenCalled();
+  });
+
+  test("orders and paginates build-wide logs by timestamp and ID", async () => {
+    const createdAt = new Date("2026-07-18T12:00:00Z");
+    const findMany = vi.fn().mockResolvedValue([]);
+    getPrismaClient.mockResolvedValue({
+      buildLogEvent: {
+        findFirst: vi.fn().mockResolvedValue({ id: "log-4", createdAt }),
+        findMany,
+      },
+    });
+
+    await new BuildsService(control()).logs("build-1", "log-4", 25);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        buildId: "build-1",
+        OR: [
+          { createdAt: { gt: createdAt } },
+          { createdAt, id: { gt: "log-4" } },
+        ],
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 25,
+    });
+  });
+
+  test("reuses a deployment retry when destination metadata changes", async () => {
+    const selectedDestination = { ...destination, state: "Shutdown" };
+    const refreshedDestination = { ...destination, state: "Booted" };
+    const buildWorktree = worktree();
+    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+      IOS_DEPLOY_JOB_KIND,
+    ]);
+    const deployment = {
+      id: "deployment-1",
+      buildId: "build-1",
+      requestId: "run-1",
+      destinationJson: JSON.stringify(selectedDestination),
+      destinationKey: "SIMULATOR:SIM-1",
+      status: "RUNNING",
+    };
+    const findDeployment = vi.fn().mockResolvedValue(deployment);
+    const createDeployment = vi.fn();
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "SUCCEEDED",
+          destinationType: "SIMULATOR",
+          artifactDirectory: "/agent/builds/build-1",
+          artifacts: [
+            {
+              id: "artifact-1",
+              kind: "RUNNABLE_APP",
+              relativePath: "products/App.app",
+              metadataJson: JSON.stringify({
+                bundleIdentifier: "com.example.app",
+              }),
+            },
+          ],
+          worktree: buildWorktree,
+        }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+      buildDeployment: {
+        findUnique: findDeployment,
+        create: createDeployment,
+        updateMany,
+        findMany: vi.fn().mockResolvedValue([deployment]),
+      },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "deployment-job" });
+    const service = new BuildsService(control(createJob));
+    vi.spyOn(service, "destinationsForBuild").mockResolvedValue([
+      refreshedDestination,
+    ]);
+
+    await expect(
+      service.runBuild({
+        buildId: "build-1",
+        destinations: [selectedDestination],
+        requestId: "run-1",
+      }),
+    ).resolves.toEqual([deployment]);
+
+    expect(findDeployment).toHaveBeenCalledWith({
+      where: {
+        buildId_requestId_destinationKey: {
+          buildId: "build-1",
+          requestId: "run-1",
+          destinationKey: "SIMULATOR:SIM-1",
+        },
+      },
+    });
+    expect(createDeployment).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          deployments: [
+            { id: "deployment-1", destination: refreshedDestination },
+          ],
+        }),
+      }),
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["deployment-1"] } },
+      data: { jobId: "deployment-job" },
+    });
   });
 
   test("redacts common credentials again before central log persistence", async () => {

@@ -102,6 +102,26 @@ function cleanName(value: string, field: string, max = 80): string {
   return result;
 }
 
+function destinationKey(destination: BuildDestination): string {
+  return `${destination.type}:${destination.id}`;
+}
+
+function coordinationCodebaseId(build: {
+  codebaseId: string | null;
+  snapshotJson: string;
+}): string {
+  if (build.codebaseId) return build.codebaseId;
+  const snapshot = parseJson(build.snapshotJson, {});
+  if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
+    const codebase = (snapshot as JsonObject).codebase;
+    if (codebase && typeof codebase === "object" && !Array.isArray(codebase)) {
+      const id = (codebase as JsonObject).id;
+      if (typeof id === "string" && id.trim()) return id;
+    }
+  }
+  throw new Error("Build coordination metadata is unavailable");
+}
+
 function sanitizePersistedLog(message: string): string {
   return message
     .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[REDACTED]")
@@ -347,9 +367,12 @@ export class BuildsService {
   }
 
   private publish(buildId: string): void {
-    const event = { buildChanged: { id: buildId } };
-    agentEventBus.publish(buildTopic(buildId), event);
-    agentEventBus.publish(BUILDS_CHANGED_TOPIC, event);
+    agentEventBus.publish(buildTopic(buildId), {
+      buildChanged: { id: buildId },
+    });
+    agentEventBus.publish(BUILDS_CHANGED_TOPIC, {
+      buildsChanged: { id: buildId },
+    });
   }
 
   private async requireWorktree(worktreeId: string, capability: string) {
@@ -1408,14 +1431,32 @@ export class BuildsService {
         id: true,
         status: true,
         artifactDirectory: true,
+        snapshotJson: true,
         agentId: true,
         agent: { select: { capabilitiesJson: true } },
         codebaseId: true,
         worktreeId: true,
+        deployments: {
+          where: { status: { in: ACTIVE_BUILD_STATUSES } },
+          select: { id: true },
+        },
+        exports: {
+          where: { status: { in: ACTIVE_BUILD_STATUSES } },
+          select: { id: true },
+        },
       },
     });
     if (builds.some((build) => ACTIVE_BUILD_STATUSES.includes(build.status))) {
       throw new Error("Running builds cannot be deleted");
+    }
+    if (
+      builds.some(
+        (build) => build.deployments.length > 0 || build.exports.length > 0,
+      )
+    ) {
+      throw new Error(
+        "Builds with running deployments or exports cannot be deleted",
+      );
     }
     for (const build of builds) {
       if (
@@ -1425,6 +1466,7 @@ export class BuildsService {
         throw new Error(`Build folder is invalid for ${build.id}`);
       }
       if (build.agentId) {
+        const codebaseId = coordinationCodebaseId(build);
         if (
           !build.agent ||
           !capabilities(build.agent).includes(IOS_BUILD_DELETE_JOB_KIND)
@@ -1433,12 +1475,13 @@ export class BuildsService {
         }
         await this.agentControl.createJob({
           agentId: build.agentId,
-          codebaseId: build.codebaseId,
+          codebaseId,
           worktreeId: build.worktreeId,
           kind: IOS_BUILD_DELETE_JOB_KIND,
           payload: {
             buildId: build.id,
             artifactDirectory: build.artifactDirectory,
+            codebaseId,
           },
           idempotencyKey: `ios:build:delete:${build.id}`,
           timeoutSeconds: 300,
@@ -1476,9 +1519,10 @@ export class BuildsService {
     if (!capabilities(build.agent).includes(IOS_ARTIFACT_DOWNLOAD_JOB_KIND)) {
       throw new Error("Build agent must be updated to download artifacts");
     }
+    const codebaseId = coordinationCodebaseId(build);
     const job = await this.agentControl.createJob({
       agentId: build.agentId,
-      codebaseId: build.codebaseId,
+      codebaseId,
       worktreeId: build.worktreeId,
       kind: IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
       payload: {
@@ -1486,6 +1530,7 @@ export class BuildsService {
         artifactDirectory: build.artifactDirectory,
         artifactRelativePath: artifact.relativePath,
         uploadId,
+        codebaseId,
       },
       idempotencyKey: `ios:artifact:download:${uploadId}`,
       timeoutSeconds: 180,
@@ -1500,11 +1545,28 @@ export class BuildsService {
     }
   }
 
-  async logs(buildId: string, afterSequence = -1, first = 1_000) {
+  async logs(buildId: string, after: string | null = null, first = 1_000) {
     const prisma = await getPrismaClient();
+    const cursor = after
+      ? await prisma.buildLogEvent.findFirst({
+          where: { id: after, buildId },
+          select: { id: true, createdAt: true },
+        })
+      : null;
+    if (after && !cursor) throw new Error("Build log cursor not found");
     return prisma.buildLogEvent.findMany({
-      where: { buildId, sequence: { gt: afterSequence } },
-      orderBy: [{ sequence: "asc" }, { createdAt: "asc" }],
+      where: {
+        buildId,
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: Math.max(1, Math.min(first, 5_000)),
     });
   }
@@ -1688,10 +1750,10 @@ export class BuildsService {
     for (const destination of destinations) {
       const existing = await prisma.buildDeployment.findUnique({
         where: {
-          buildId_requestId_destinationJson: {
+          buildId_requestId_destinationKey: {
             buildId: build.id,
             requestId: input.requestId,
-            destinationJson: JSON.stringify(destination),
+            destinationKey: destinationKey(destination),
           },
         },
       });
@@ -1704,6 +1766,7 @@ export class BuildsService {
               batchId,
               requestId: input.requestId,
               destinationJson: JSON.stringify(destination),
+              destinationKey: destinationKey(destination),
               commandSummary:
                 destination.type === "SIMULATOR"
                   ? `open -a Simulator --args -CurrentDeviceUDID ${destination.id}; xcrun simctl install/launch ${destination.id}`
