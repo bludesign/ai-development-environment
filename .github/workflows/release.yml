@@ -291,7 +291,11 @@ jobs:
       - name: Publish server
         working-directory: .npm-staging/server
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish control-agent
         working-directory: packages/control-agent
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
