@@ -155,6 +155,9 @@ beforeEach(() => {
         exportBuildArchive: { id: "export-1", status: "QUEUED" },
       } as never;
     }
+    if (operation.includes("mutation DeleteBuild")) {
+      return { deleteBuilds: 1 } as never;
+    }
     throw new Error(`Unexpected request: ${operation}`);
   });
 });
@@ -165,6 +168,29 @@ afterEach(() => {
 });
 
 describe("BuildDetailPage", () => {
+  test("shows the build ID, downloads artifacts, and deletes the build", async () => {
+    render(<BuildDetailPage buildId="build-1" />);
+
+    expect(await screen.findByText("Development")).toBeDefined();
+    expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
+    const downloads = screen.getAllByRole("link", { name: "Download" });
+    expect(downloads[0]?.getAttribute("href")).toBe(
+      "/api/builds/build-1/artifacts/app-artifact",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete build" }));
+    const confirmation = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Delete build" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteBuild"),
+        { ids: ["build-1"] },
+      ),
+    );
+  });
+
   test("polls while a build or deployment is still active", async () => {
     const interval = vi.spyOn(window, "setInterval");
     request.mockImplementation(async (query) => {

@@ -3,6 +3,8 @@ export const IOS_SOURCE_PARSE_JOB_KIND = "ios.source.parse";
 export const IOS_DESTINATIONS_JOB_KIND = "ios.destinations.inspect";
 export const IOS_RUN_DESTINATIONS_JOB_KIND = "ios.runDestinations.inspect";
 export const IOS_BUILD_JOB_KIND = "ios.build.run";
+export const IOS_BUILD_DELETE_JOB_KIND = "ios.build.delete";
+export const IOS_ARTIFACT_DOWNLOAD_JOB_KIND = "ios.artifact.download";
 export const IOS_DEPLOY_JOB_KIND = "ios.build.deploy";
 export const IOS_EXPORT_JOB_KIND = "ios.archive.export";
 
@@ -12,6 +14,8 @@ export const IOS_BUILD_JOB_KINDS = [
   IOS_DESTINATIONS_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
 ] as const;
@@ -137,6 +141,7 @@ export type BuildScriptSnapshot = {
 export type BuildWorktreeIdentity = {
   codebaseId: string;
   worktreeId: string;
+  branch?: string | null;
   folder: string;
   gitDirectory: string;
   expectedOrigin: string;
@@ -176,6 +181,16 @@ export type BuildDeploymentPayload = BuildWorktreeIdentity & {
   artifactRelativePath: string;
   bundleIdentifier: string;
   deployments: Array<{ id: string; destination: BuildDestination }>;
+};
+
+export type BuildDeletePayload = {
+  buildId: string;
+  artifactDirectory: string;
+};
+
+export type BuildArtifactDownloadPayload = BuildDeletePayload & {
+  artifactRelativePath: string;
+  uploadId: string;
 };
 
 export type BuildExportSettings = {
@@ -264,6 +279,7 @@ function worktreeIdentity(value: JsonObject): BuildWorktreeIdentity {
   return {
     codebaseId: stringValue(value.codebaseId, "build payload.codebaseId"),
     worktreeId: stringValue(value.worktreeId, "build payload.worktreeId"),
+    branch: nullableString(value.branch, "build payload.branch"),
     folder: stringValue(value.folder, "build payload.folder"),
     gitDirectory: stringValue(value.gitDirectory, "build payload.gitDirectory"),
     expectedOrigin: stringValue(
@@ -594,6 +610,37 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
     destination,
     advancedSettings,
     scripts,
+  };
+}
+
+export function parseBuildDeletePayload(value: unknown): BuildDeletePayload {
+  const input = objectValue(value, "build delete payload");
+  const buildId = stringValue(input.buildId, "build delete payload.buildId");
+  const artifactDirectory = safeAbsolutePath(
+    input.artifactDirectory,
+    "build delete payload.artifactDirectory",
+  );
+  if (artifactDirectory.split("/").at(-1) !== buildId) {
+    throw new Error("Build delete folder must end with the build ID");
+  }
+  return { buildId, artifactDirectory };
+}
+
+export function parseBuildArtifactDownloadPayload(
+  value: unknown,
+): BuildArtifactDownloadPayload {
+  const input = objectValue(value, "build artifact download payload");
+  const identity = parseBuildDeletePayload(input);
+  return {
+    ...identity,
+    artifactRelativePath: safeRelativePath(
+      input.artifactRelativePath,
+      "build artifact download payload.artifactRelativePath",
+    ),
+    uploadId: stringValue(
+      input.uploadId,
+      "build artifact download payload.uploadId",
+    ),
   };
 }
 

@@ -98,6 +98,9 @@ beforeEach(() => {
     if (operation.includes("mutation SaveBuildScript")) {
       return { saveBuildScript: { id: "script-1" } } as never;
     }
+    if (operation.includes("mutation DeleteBuilds")) {
+      return { deleteBuilds: 1 } as never;
+    }
     throw new Error(`Unexpected request: ${operation}`);
   });
 });
@@ -142,5 +145,45 @@ describe("BuildsPage", () => {
         },
       ),
     );
+  });
+
+  test("selects a complete day for deletion and shows hook context templates", async () => {
+    render(<BuildsPage />);
+
+    expect(await screen.findByRole("table")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Select all builds for/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete selected (1)" }),
+    );
+    const confirmation = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Delete builds" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteBuilds"),
+        { ids: ["build-1"] },
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /Build Scripts/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New build script" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      (
+        within(dialog).getByLabelText(
+          "Pre-build JavaScript",
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toContain("buildId");
+    expect(
+      (
+        within(dialog).getByLabelText(
+          "Post-build JavaScript",
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toContain("buildFolder");
   });
 });

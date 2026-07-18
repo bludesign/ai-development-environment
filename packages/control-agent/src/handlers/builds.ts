@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   cp,
   mkdir,
@@ -25,6 +25,8 @@ import { spawn } from "node:child_process";
 
 import {
   parseBuildDeploymentPayload,
+  parseBuildDeletePayload,
+  parseBuildArtifactDownloadPayload,
   parseBuildDestinationsPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
@@ -1210,6 +1212,7 @@ async function runHook(options: {
   phase: "PRE_BUILD" | "POST_BUILD";
   source: string;
   contextPath: string;
+  hookContext: Record<string, unknown>;
   logger: BuildLogger;
   signal: AbortSignal;
 }): Promise<ScriptExecutionResult> {
@@ -1221,14 +1224,34 @@ async function runHook(options: {
   );
   const prefix = `${String(options.script.position).padStart(3, "0")}-${options.script.id}`;
   const file = join(directory, `${prefix}.mjs`);
+  const runner = join(directory, `${prefix}.runner.mjs`);
   const log = join(directory, `${prefix}.log`);
   const started = Date.now();
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(file, `${options.source}\n`, { mode: 0o600 });
+    await writeFile(
+      options.contextPath,
+      `${JSON.stringify(options.hookContext, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      runner,
+      `import { readFile } from "node:fs/promises";
+const hookModule = await import(${JSON.stringify(`./${basename(file)}`)});
+if (hookModule.default !== undefined && typeof hookModule.default !== "function") {
+  throw new TypeError("The default build hook export must be a function");
+}
+if (typeof hookModule.default === "function") {
+  const build = JSON.parse(await readFile(process.env.BUILD_CONTEXT_PATH, "utf8"));
+  await hookModule.default(build);
+}
+`,
+      { mode: 0o600 },
+    );
     const result = await runLoggedCommand({
       command: process.execPath,
-      args: [file],
+      args: [runner],
       cwd: options.folder,
       env: minimalEnvironment({
         BUILD_ID: options.input.buildId,
@@ -1527,24 +1550,21 @@ export const runIosBuild: AgentJobHandler = async (
   try {
     const scriptExecutions: ScriptExecutionResult[] = [];
     const contextPath = join(input.artifactDirectory, "context.json");
-    await writeFile(
-      contextPath,
-      `${JSON.stringify(
-        {
-          buildId: input.buildId,
-          worktree: { id: input.worktreeId, folder, headSha: input.headSha },
-          source: input.source,
-          scheme: input.scheme,
-          configuration: input.configuration,
-          action: input.action,
-          destination: input.destination,
-          artifactDirectory: input.artifactDirectory,
-        },
-        null,
-        2,
-      )}\n`,
-      { mode: 0o600 },
-    );
+    const baseHookContext = {
+      buildId: input.buildId,
+      branch: input.branch ?? null,
+      destination: input.destination,
+      action: input.action,
+      worktree: {
+        id: input.worktreeId,
+        folder,
+        branch: input.branch ?? null,
+        headSha: input.headSha,
+      },
+      source: input.source,
+      scheme: input.scheme,
+      configuration: input.configuration,
+    };
     let buildResult: CommandResult | null = null;
     let errorCode: string | null = null;
     let error: string | null = null;
@@ -1581,6 +1601,7 @@ export const runIosBuild: AgentJobHandler = async (
           phase: "PRE_BUILD",
           source: script.preBuildScript,
           contextPath,
+          hookContext: baseHookContext,
           logger,
           signal,
         });
@@ -1635,6 +1656,18 @@ export const runIosBuild: AgentJobHandler = async (
             phase: "POST_BUILD",
             source: script.postBuildScript,
             contextPath,
+            hookContext: {
+              ...baseHookContext,
+              buildFolder: input.artifactDirectory,
+              failed:
+                failBuild ||
+                (!signal.aborted &&
+                  buildResult !== null &&
+                  buildResult.exitCode !== 0),
+              cancelled: signal.aborted || buildResult?.cancelled === true,
+              errorCode,
+              error,
+            },
             logger,
             signal: postSignal,
           });
@@ -1689,6 +1722,94 @@ export const runIosBuild: AgentJobHandler = async (
     };
   } finally {
     await logger.close();
+  }
+};
+
+export const deleteIosBuild: AgentJobHandler = async (
+  payload,
+  _timeoutMs,
+  signal,
+  onLog,
+) => {
+  const input = parseBuildDeletePayload(payload);
+  if (signal.aborted) return { ...successfulProcess, cancelled: true };
+  await rm(input.artifactDirectory, { recursive: true, force: true });
+  await onLog({
+    sequence: 0,
+    stream: "SYSTEM",
+    message: `Deleted build folder ${input.artifactDirectory}`,
+    createdAt: new Date().toISOString(),
+  });
+  return successfulProcess;
+};
+
+export const downloadIosBuildArtifact: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  onLog,
+  context,
+) => {
+  const input = parseBuildArtifactDownloadPayload(payload);
+  if (!context?.uploadBuildArtifact) {
+    throw new Error("This agent cannot upload build artifacts");
+  }
+  const root = await realpath(input.artifactDirectory);
+  const target = await realpath(
+    containedPath(root, input.artifactRelativePath),
+  );
+  const difference = relative(root, target);
+  if (
+    !difference ||
+    difference === ".." ||
+    difference.startsWith(`..${sep}`) ||
+    isAbsolute(difference)
+  ) {
+    throw new Error("Build artifact resolves outside the build folder");
+  }
+  const information = await stat(target);
+  let uploadPath = target;
+  let filename = basename(target);
+  let contentType = "application/octet-stream";
+  let temporaryArchive: string | null = null;
+  try {
+    if (information.isDirectory()) {
+      temporaryArchive = join(
+        tmpdir(),
+        `ade-build-artifact-${randomUUID()}.tar.gz`,
+      );
+      requireSuccess(
+        await command(
+          "tar",
+          ["-czf", temporaryArchive, "-C", dirname(target), basename(target)],
+          timeoutMs,
+          signal,
+        ),
+        "Could not package the build artifact",
+      );
+      uploadPath = temporaryArchive;
+      filename = `${filename}.tar.gz`;
+      contentType = "application/gzip";
+    } else if (!information.isFile()) {
+      throw new Error("Build artifact is not downloadable");
+    }
+    await onLog({
+      sequence: 0,
+      stream: "SYSTEM",
+      message: `Uploading build artifact ${filename}`,
+      createdAt: new Date().toISOString(),
+    });
+    await context.uploadBuildArtifact({
+      uploadId: input.uploadId,
+      path: uploadPath,
+      filename,
+      contentType,
+    });
+    return successfulProcess;
+  } finally {
+    if (temporaryArchive) {
+      await rm(temporaryArchive, { force: true });
+    }
   }
 };
 

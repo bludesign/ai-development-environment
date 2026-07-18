@@ -69,6 +69,8 @@ export class JobExecutor {
               this.client.reportBuildProgress(input),
             appendBuildLogs: (buildId, events) =>
               this.client.appendBuildLogs(buildId, events),
+            uploadBuildArtifact: (input) =>
+              this.client.uploadBuildArtifact(input),
           },
         );
       const codebaseId =

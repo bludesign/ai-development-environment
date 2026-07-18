@@ -25,6 +25,8 @@ import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/c
 import {
   classifyFailure,
   createRedactor,
+  deleteIosBuild,
+  downloadIosBuildArtifact,
   genericBuildDestinations,
   physicalDestinations,
   runIosBuild,
@@ -347,6 +349,60 @@ describe("iOS destination and error parsing", () => {
 });
 
 describe("iOS build hooks and logs", () => {
+  test("deletes a completed build folder", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-delete-"));
+    temporaryDirectories.push(root);
+    const artifactDirectory = join(root, "build-1");
+    await mkdir(artifactDirectory);
+
+    await expect(
+      deleteIosBuild(
+        { buildId: "build-1", artifactDirectory },
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(stat(artifactDirectory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  test("uploads a build artifact through the control plane", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-download-"));
+    temporaryDirectories.push(root);
+    const artifactDirectory = join(root, "build-1");
+    await mkdir(artifactDirectory);
+    await writeFile(join(artifactDirectory, "build.log"), "build output");
+    let uploaded = "";
+
+    await expect(
+      downloadIosBuildArtifact(
+        {
+          buildId: "build-1",
+          artifactDirectory,
+          artifactRelativePath: "build.log",
+          uploadId: "upload-1",
+        },
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+        {
+          reportWorktreeActivity: async () => undefined,
+          uploadBuildArtifact: async (input) => {
+            expect(input).toMatchObject({
+              uploadId: "upload-1",
+              filename: "build.log",
+              contentType: "application/octet-stream",
+            });
+            uploaded = await readFile(input.path, "utf8");
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    expect(uploaded).toBe("build output");
+  });
+
   test("runs hooks in deterministic order, redacts output, and finalizes the raw log artifact", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-agent-"));
     temporaryDirectories.push(root);
@@ -379,7 +435,12 @@ describe("iOS build hooks and logs", () => {
     const artifactDirectory = join(builds, "build-ordered");
     const events: Array<{ message: string }> = [];
     const hookSource = (value: string, includeSecret = false) =>
-      `import { appendFile } from "node:fs/promises"; await appendFile("hook-order.txt", ${JSON.stringify(`${value}\n`)});${includeSecret ? ' console.log("integration-secret");' : ""}`;
+      `import { appendFile } from "node:fs/promises";
+export default async function hook(build) {
+  await appendFile("hook-order.txt", ${JSON.stringify(`${value}\n`)});
+  await appendFile("hook-contexts.jsonl", JSON.stringify(build) + "\\n");
+  ${includeSecret ? 'console.log("integration-secret");' : ""}
+}`;
     try {
       const result = (await runIosBuild(
         payload({
@@ -388,6 +449,7 @@ describe("iOS build hooks and logs", () => {
           expectedOrigin: normalizeGitOrigin(
             "https://github.com/example/app.git",
           ).canonicalOrigin,
+          branch: "feature/hooks",
           buildId: "build-ordered",
           artifactDirectory,
           scripts: [
@@ -431,6 +493,25 @@ describe("iOS build hooks and logs", () => {
       expect(await readFile(join(repository, "hook-order.txt"), "utf8")).toBe(
         "pre-first\npre-second\npost-second\npost-first\n",
       );
+      const contexts = (
+        await readFile(join(repository, "hook-contexts.jsonl"), "utf8")
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(contexts[0]).toMatchObject({
+        buildId: "build-ordered",
+        branch: "feature/hooks",
+        action: "BUILD",
+        destination: { id: "SIM-1" },
+      });
+      expect(contexts[2]).toMatchObject({
+        buildFolder: artifactDirectory,
+        failed: false,
+        cancelled: false,
+        errorCode: null,
+        error: null,
+      });
       expect(
         result.scriptExecutions.map(({ phase, position }) => [phase, position]),
       ).toEqual([

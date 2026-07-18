@@ -52,6 +52,8 @@ import {
 } from "./worktrees.js";
 import {
   deployIosBuild,
+  deleteIosBuild,
+  downloadIosBuildArtifact,
   discoverBuildSources,
   exportIosArchive,
   inspectBuildDestinations,
@@ -61,6 +63,8 @@ import {
 } from "./builds.js";
 import {
   IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
@@ -91,6 +95,12 @@ export type AgentJobHandlerContext = {
       createdAt: string;
     }>,
   ) => Promise<unknown>;
+  uploadBuildArtifact?: (input: {
+    uploadId: string;
+    path: string;
+    filename: string;
+    contentType: string;
+  }) => Promise<unknown>;
 };
 
 export type AgentJobHandler = (
@@ -128,6 +138,8 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_DESTINATIONS_JOB_KIND]: inspectBuildDestinations,
   [IOS_RUN_DESTINATIONS_JOB_KIND]: inspectBuildRunDestinations,
   [IOS_BUILD_JOB_KIND]: runIosBuild,
+  [IOS_BUILD_DELETE_JOB_KIND]: deleteIosBuild,
+  [IOS_ARTIFACT_DOWNLOAD_JOB_KIND]: downloadIosBuildArtifact,
   [IOS_DEPLOY_JOB_KIND]: deployIosBuild,
   [IOS_EXPORT_JOB_KIND]: exportIosArchive,
 };

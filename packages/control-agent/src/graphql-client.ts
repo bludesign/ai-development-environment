@@ -1,3 +1,7 @@
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
+
 import { createClient, type Client } from "graphql-ws";
 
 import type { AgentConfig } from "./config.js";
@@ -216,6 +220,36 @@ export class AgentGraphQLClient {
       }`,
       { buildId, events },
     );
+  }
+
+  async uploadBuildArtifact(input: {
+    uploadId: string;
+    path: string;
+    filename: string;
+    contentType: string;
+  }) {
+    const information = await stat(input.path);
+    const response = await fetch(
+      `${this.server}/api/build-artifact-uploads/${encodeURIComponent(input.uploadId)}`,
+      {
+        method: "POST",
+        headers: {
+          ...(this.credential
+            ? { authorization: `Bearer ${this.credential}` }
+            : {}),
+          "content-length": String(information.size),
+          "content-type": input.contentType,
+          "x-artifact-filename": encodeURIComponent(input.filename),
+        },
+        body: Readable.toWeb(createReadStream(input.path)),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Artifact upload failed: HTTP ${response.status} ${await response.text()}`,
+      );
+    }
   }
 
   completeJob(

@@ -5,6 +5,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import {
   IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
@@ -103,6 +104,46 @@ function control(createJob = vi.fn().mockResolvedValue({ id: "job-1" })) {
 describe("BuildsService", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  test("queues completed build folder deletion and removes its record", async () => {
+    const artifactDirectory = "/agent/builds/build-1";
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const createJob = vi.fn().mockResolvedValue({ id: "delete-job" });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "build-1",
+            status: "SUCCEEDED",
+            artifactDirectory,
+            agentId: "agent-1",
+            agent: {
+              capabilitiesJson: JSON.stringify([IOS_BUILD_DELETE_JOB_KIND]),
+            },
+            codebaseId: "codebase-1",
+            worktreeId: "worktree-1",
+          },
+        ]),
+        deleteMany,
+      },
+    });
+    const service = new BuildsService(control(createJob));
+
+    await expect(service.deleteBuilds(["build-1", "build-1"])).resolves.toBe(1);
+    expect(createJob).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-1",
+      kind: IOS_BUILD_DELETE_JOB_KIND,
+      payload: { buildId: "build-1", artifactDirectory },
+      idempotencyKey: "ios:build:delete:build-1",
+      timeoutSeconds: 300,
+      visibility: "SYSTEM",
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["build-1"] } },
+    });
+  });
+
   test("returns an idempotent start without queueing another build", async () => {
     const existing = { id: "build-existing", status: "RUNNING" };
     const findUnique = vi.fn().mockResolvedValue(existing);
@@ -176,6 +217,7 @@ describe("BuildsService", () => {
       expect.objectContaining({
         kind: IOS_BUILD_JOB_KIND,
         payload: expect.objectContaining({
+          branch: "main",
           destination: expect.objectContaining({
             id: "generic-ios-simulator",
             generic: true,

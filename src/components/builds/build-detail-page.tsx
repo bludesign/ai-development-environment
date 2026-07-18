@@ -7,10 +7,12 @@ import {
   Download,
   Play,
   Square,
+  Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
@@ -72,6 +74,7 @@ const LOG_FIELDS = `id scope scopeId sequence phase level stream message created
 export function BuildDetailPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
+  const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
   const [logs, setLogs] = useState<BuildLogEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +86,8 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   );
   const [loadingDestinations, setLoadingDestinations] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const logRef = useRef<HTMLPreElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +174,11 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
     return () => window.clearInterval(timer);
   }, [activeOperation, load]);
 
+  useEffect(() => {
+    if (!activeOperation || !logRef.current) return;
+    logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [activeOperation, logs]);
+
   const cancel = async () => {
     setBusy(true);
     try {
@@ -179,6 +189,23 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
       await load();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteBuild = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteBuild($ids: [ID!]!) { deleteBuilds(ids: $ids) }`,
+        { ids: [buildId] },
+      );
+      router.replace("/builds");
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      setDeleteOpen(false);
     } finally {
       setBusy(false);
     }
@@ -335,6 +362,9 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             {worktree?.branch ?? worktree?.folder ?? "—"} ·{" "}
             {build.destination.name}
           </p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {t("buildId")}: {build.id}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {["QUEUED", "PREPARING", "RUNNING"].includes(build.status) && (
@@ -403,6 +433,15 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               <Archive /> {t("exportArchive")}
             </Button>
           )}
+          <Button
+            disabled={
+              busy || ["QUEUED", "PREPARING", "RUNNING"].includes(build.status)
+            }
+            onClick={() => setDeleteOpen(true)}
+            variant="destructive"
+          >
+            <Trash2 /> {t("deleteBuild")}
+          </Button>
         </div>
       </div>
 
@@ -413,7 +452,10 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               <CardTitle>{t("logs")}</CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="max-h-[36rem] overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100">
+              <pre
+                className="max-h-[36rem] overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100"
+                ref={logRef}
+              >
                 {logs.length
                   ? logs
                       .map((log) => `[${log.phase}] ${log.message}`)
@@ -479,6 +521,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </CardHeader>
             <CardContent>
               <dl className="space-y-3 text-sm">
+                <Detail label={t("buildId")} value={build.id} mono />
                 <Detail
                   label={t("scheme")}
                   value={configuration?.scheme ?? "—"}
@@ -515,9 +558,16 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               {build.artifacts.length ? (
                 build.artifacts.map((artifact) => (
                   <div className="rounded-lg border p-2" key={artifact.id}>
-                    <div className="flex items-center gap-2">
-                      <Download className="size-4" />
+                    <div className="flex items-center justify-between gap-2">
                       <Badge variant="outline">{artifact.kind}</Badge>
+                      <Button asChild size="sm" variant="outline">
+                        <a
+                          download
+                          href={`/api/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
+                        >
+                          <Download /> {t("downloadArtifact")}
+                        </a>
+                      </Button>
                     </div>
                     <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                       {artifact.relativePath}
@@ -594,6 +644,15 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
           open={exportOpen}
         />
       )}
+      <ConfirmationDialog
+        actionLabel={t("deleteBuild")}
+        cancelLabel={t("cancel")}
+        description={t("deleteBuildDescription")}
+        onConfirm={deleteBuild}
+        onOpenChange={setDeleteOpen}
+        open={deleteOpen}
+        title={t("deleteBuildTitle")}
+      />
     </section>
   );
 }

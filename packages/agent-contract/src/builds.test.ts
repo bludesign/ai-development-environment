@@ -3,6 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   parseBuildAdvancedSettings,
+  parseBuildArtifactDownloadPayload,
+  parseBuildDeletePayload,
   parseBuildJobPayload,
   parseBuildSource,
 } from "./builds.js";
@@ -37,6 +39,43 @@ function buildPayload() {
 }
 
 describe("iOS build agent contract", () => {
+  test("limits build deletion to the folder named by the build ID", () => {
+    expect(
+      parseBuildDeletePayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/build-1",
+      }),
+    ).toEqual({
+      buildId: "build-1",
+      artifactDirectory: "/tmp/builds/build-1",
+    });
+    expect(() =>
+      parseBuildDeletePayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/build-2",
+      }),
+    ).toThrow("must end with the build ID");
+  });
+
+  test("accepts only contained build artifact paths", () => {
+    expect(
+      parseBuildArtifactDownloadPayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/build-1",
+        artifactRelativePath: "products/App.app",
+        uploadId: "upload-1",
+      }),
+    ).toMatchObject({ artifactRelativePath: "products/App.app" });
+    expect(() =>
+      parseBuildArtifactDownloadPayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/build-1",
+        artifactRelativePath: "../secret",
+        uploadId: "upload-1",
+      }),
+    ).toThrow("stay within the worktree");
+  });
+
   test("accepts only contained Xcode sources and a root Swift package", () => {
     expect(
       parseBuildSource({ kind: "PROJECT", relativePath: "ios/App.xcodeproj" }),

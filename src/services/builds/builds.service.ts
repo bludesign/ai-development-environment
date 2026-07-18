@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BUILD_ACTIONS,
@@ -8,6 +8,8 @@ import {
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   GENERIC_BUILD_DESTINATION_ACTIONS,
   IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
@@ -378,6 +380,7 @@ export class BuildsService {
     return {
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
+      branch: worktree.branch,
       folder: worktree.folder,
       gitDirectory: worktree.gitDirectory,
       expectedOrigin: worktree.codebase.repository.canonicalOrigin,
@@ -1391,6 +1394,110 @@ export class BuildsService {
   async getBuild(id: string) {
     const prisma = await getPrismaClient();
     return prisma.build.findUnique({ where: { id }, include: buildInclude });
+  }
+
+  async deleteBuilds(ids: string[]): Promise<number> {
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) return 0;
+    if (uniqueIds.length > 200)
+      throw new Error("At most 200 builds can be deleted at once");
+    const prisma = await getPrismaClient();
+    const builds = await prisma.build.findMany({
+      where: { id: { in: uniqueIds } },
+      select: {
+        id: true,
+        status: true,
+        artifactDirectory: true,
+        agentId: true,
+        agent: { select: { capabilitiesJson: true } },
+        codebaseId: true,
+        worktreeId: true,
+      },
+    });
+    if (builds.some((build) => ACTIVE_BUILD_STATUSES.includes(build.status))) {
+      throw new Error("Running builds cannot be deleted");
+    }
+    for (const build of builds) {
+      if (
+        !isAbsolute(build.artifactDirectory) ||
+        basename(build.artifactDirectory) !== build.id
+      ) {
+        throw new Error(`Build folder is invalid for ${build.id}`);
+      }
+      if (build.agentId) {
+        if (
+          !build.agent ||
+          !capabilities(build.agent).includes(IOS_BUILD_DELETE_JOB_KIND)
+        ) {
+          throw new Error("Build agent must be updated to delete builds");
+        }
+        await this.agentControl.createJob({
+          agentId: build.agentId,
+          codebaseId: build.codebaseId,
+          worktreeId: build.worktreeId,
+          kind: IOS_BUILD_DELETE_JOB_KIND,
+          payload: {
+            buildId: build.id,
+            artifactDirectory: build.artifactDirectory,
+          },
+          idempotencyKey: `ios:build:delete:${build.id}`,
+          timeoutSeconds: 300,
+          visibility: "SYSTEM",
+        });
+      }
+    }
+    const removed = await prisma.build.deleteMany({
+      where: { id: { in: builds.map((build) => build.id) } },
+    });
+    for (const build of builds) this.publish(build.id);
+    return removed.count;
+  }
+
+  async prepareArtifactDownload(
+    buildId: string,
+    artifactId: string,
+    uploadId: string,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    const artifact = await prisma.buildArtifact.findFirst({
+      where: { id: artifactId, buildId },
+      include: {
+        build: {
+          include: { agent: true },
+        },
+      },
+    });
+    if (!artifact) throw new Error("Build artifact not found");
+    const { build } = artifact;
+    if (!build.agentId || !build.agent) {
+      throw new Error("The build agent is no longer available");
+    }
+    if (!online(build.agent)) throw new Error("Build agent is offline");
+    if (!capabilities(build.agent).includes(IOS_ARTIFACT_DOWNLOAD_JOB_KIND)) {
+      throw new Error("Build agent must be updated to download artifacts");
+    }
+    const job = await this.agentControl.createJob({
+      agentId: build.agentId,
+      codebaseId: build.codebaseId,
+      worktreeId: build.worktreeId,
+      kind: IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+      payload: {
+        buildId: build.id,
+        artifactDirectory: build.artifactDirectory,
+        artifactRelativePath: artifact.relativePath,
+        uploadId,
+      },
+      idempotencyKey: `ios:artifact:download:${uploadId}`,
+      timeoutSeconds: 180,
+      visibility: "SYSTEM",
+    });
+    try {
+      this.result(await this.waitForJob(job.id, 170_000));
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
   }
 
   async logs(buildId: string, afterSequence = -1, first = 1_000) {

@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -127,6 +128,25 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("shows the test plan with primary settings for test actions", async () => {
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    expect(await screen.findByText("Development")).toBeDefined();
+
+    const dialog = screen.getByRole("dialog");
+    const action = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.pointerDown(action, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Test" }));
+    const testPlanLabel = await screen.findByText("Test plan");
+    expect(testPlanLabel.closest("details")).toBeNull();
+  });
+
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,

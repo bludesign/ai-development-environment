@@ -7,6 +7,7 @@ import {
 } from "@ai-development-environment/agent-contract";
 import {
   IOS_BUILD_JOB_KIND,
+  IOS_BUILD_DELETE_JOB_KIND,
   IOS_BUILD_JOB_KINDS,
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
@@ -18,6 +19,7 @@ import {
   parseBuildDestinationsPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
+  parseBuildDeletePayload,
   parseBuildRunDestinationsPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
@@ -234,6 +236,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === IOS_BUILD_JOB_KIND) {
     parseBuildJobPayload(payload);
+    return;
+  }
+  if (kind === IOS_BUILD_DELETE_JOB_KIND) {
+    parseBuildDeletePayload(payload);
     return;
   }
   if (kind === IOS_DEPLOY_JOB_KIND) {

@@ -240,6 +240,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
       requireControlPlane(context);
       return service.cancelBuild(id);
     },
+    deleteBuilds: (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteBuilds(ids);
+    },
     runBuild: (
       _root: unknown,
       { input }: { input: never },

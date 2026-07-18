@@ -340,6 +340,7 @@ extend type Mutation {
   setCodebaseBuildScripts(codebaseId: ID!, scriptIds: [ID!]!): CodebaseProject!
   startBuild(input: StartBuildInput!): Build!
   cancelBuild(id: ID!): Build!
+  deleteBuilds(ids: [ID!]!): Int!
   runBuild(input: RunBuildInput!): [BuildDeployment!]!
   exportBuildArchive(input: ExportBuildArchiveInput!): BuildExport!
   reportBuildProgress(input: BuildProgressInput!): Build!

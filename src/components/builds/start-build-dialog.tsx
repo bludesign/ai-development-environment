@@ -573,6 +573,44 @@ function StartBuildDialog({
               </div>
             )}
 
+            {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
+              action,
+            ) && (
+              <div className="space-y-2">
+                <Label>{t("testPlan")}</Label>
+                <Select
+                  onValueChange={(value) =>
+                    setAdvanced((current) => ({
+                      ...current,
+                      testPlan: value === "__SCHEME_DEFAULT__" ? null : value,
+                    }))
+                  }
+                  value={String(advanced.testPlan ?? "__SCHEME_DEFAULT__")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__SCHEME_DEFAULT__">
+                      {t("schemeDefaultTestPlan")}
+                    </SelectItem>
+                    {typeof advanced.testPlan === "string" &&
+                      advanced.testPlan &&
+                      !observation?.testPlans.includes(advanced.testPlan) && (
+                        <SelectItem value={advanced.testPlan}>
+                          {advanced.testPlan} · {t("savedValueUnavailable")}
+                        </SelectItem>
+                      )}
+                    {observation?.testPlans.map((testPlan) => (
+                      <SelectItem key={testPlan} value={testPlan}>
+                        {testPlan}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {project.allowedScripts.length > 0 && (
               <section className="space-y-2">
                 <Label>{t("scripts")}</Label>
@@ -616,48 +654,6 @@ function StartBuildDialog({
                 {t("advancedSettings")}
               </summary>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {[
-                  "TEST",
-                  "BUILD_FOR_TESTING",
-                  "TEST_WITHOUT_BUILDING",
-                ].includes(action) && (
-                  <div className="space-y-2 sm:col-span-2">
-                    <Label>{t("testPlan")}</Label>
-                    <Select
-                      onValueChange={(value) =>
-                        setAdvanced((current) => ({
-                          ...current,
-                          testPlan:
-                            value === "__SCHEME_DEFAULT__" ? null : value,
-                        }))
-                      }
-                      value={String(advanced.testPlan ?? "__SCHEME_DEFAULT__")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__SCHEME_DEFAULT__">
-                          {t("schemeDefaultTestPlan")}
-                        </SelectItem>
-                        {typeof advanced.testPlan === "string" &&
-                          advanced.testPlan &&
-                          !observation?.testPlans.includes(
-                            advanced.testPlan,
-                          ) && (
-                            <SelectItem value={advanced.testPlan}>
-                              {advanced.testPlan} · {t("savedValueUnavailable")}
-                            </SelectItem>
-                          )}
-                        {observation?.testPlans.map((testPlan) => (
-                          <SelectItem key={testPlan} value={testPlan}>
-                            {testPlan}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
                 <div className="space-y-2">
                   <Label htmlFor="development-team">
                     {t("developmentTeam")}
