@@ -499,6 +499,11 @@ function BuildConfigurationDialog({
   const [advanced, setAdvanced] = useState(
     JSON.stringify(configuration?.advancedSettings ?? {}, null, 2),
   );
+  const [testPlan, setTestPlan] = useState(
+    typeof configuration?.advancedSettings?.testPlan === "string"
+      ? configuration.advancedSettings.testPlan
+      : "__SCHEME_DEFAULT__",
+  );
   const [loadingSources, setLoadingSources] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -581,9 +586,20 @@ function BuildConfigurationDialog({
       let advancedSettings: unknown;
       try {
         advancedSettings = JSON.parse(advanced);
+        if (
+          !advancedSettings ||
+          typeof advancedSettings !== "object" ||
+          Array.isArray(advancedSettings)
+        ) {
+          throw new Error();
+        }
       } catch {
         throw new Error(t("advancedJsonInvalid"));
       }
+      advancedSettings = {
+        ...(advancedSettings as Record<string, unknown>),
+        testPlan: testPlan === "__SCHEME_DEFAULT__" ? null : testPlan,
+      };
       const data = await controlPlaneRequest<{
         saveBuildConfiguration: { id: string };
       }>(
@@ -827,6 +843,34 @@ function BuildConfigurationDialog({
               </SelectContent>
             </Select>
           </div>
+          {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
+            action,
+          ) && (
+            <div className="space-y-2">
+              <Label>{t("testPlan")}</Label>
+              <Select onValueChange={setTestPlan} value={testPlan}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__SCHEME_DEFAULT__">
+                    {t("schemeDefaultTestPlan")}
+                  </SelectItem>
+                  {testPlan !== "__SCHEME_DEFAULT__" &&
+                    !inspection?.testPlans.includes(testPlan) && (
+                      <SelectItem value={testPlan}>
+                        {testPlan} · {t("savedValueUnavailable")}
+                      </SelectItem>
+                    )}
+                  {inspection?.testPlans.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <details className="rounded-xl border p-3">
             <summary className="cursor-pointer font-medium">
               {t("advancedSettings")}

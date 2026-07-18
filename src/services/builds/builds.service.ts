@@ -6,6 +6,7 @@ import {
   BUILD_DESTINATION_TYPES,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
+  GENERIC_BUILD_DESTINATION_ACTIONS,
   IOS_BUILD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
@@ -120,10 +121,40 @@ function buildStatusFromJob(status: string): string {
 }
 
 function destinationSpecifier(destination: BuildDestination): string {
-  if (destination.generic) return "generic/platform=iOS";
+  if (destination.generic) {
+    return destination.type === "SIMULATOR"
+      ? "generic/platform=iOS Simulator"
+      : "generic/platform=iOS";
+  }
   return destination.type === "SIMULATOR"
     ? `platform=iOS Simulator,id=${destination.id}`
     : `platform=iOS,id=${destination.id}`;
+}
+
+function genericBuildDestinations(action: BuildAction): BuildDestination[] {
+  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
+  const physical: BuildDestination = {
+    type: "PHYSICAL_DEVICE",
+    id: "generic-ios",
+    name: "Any Physical iOS Device",
+    platform: "iOS",
+    osVersion: null,
+    state: null,
+    generic: true,
+  };
+  if (action === "ARCHIVE") return [physical];
+  return [
+    {
+      type: "SIMULATOR",
+      id: "generic-ios-simulator",
+      name: "Any iOS Simulator",
+      platform: "iOS Simulator",
+      osVersion: null,
+      state: null,
+      generic: true,
+    },
+    physical,
+  ];
 }
 
 function actionArgument(action: BuildAction): string {
@@ -148,55 +179,66 @@ function commandPreview(input: {
   artifactDirectory: string;
 }): string {
   const settings = input.advancedSettings;
+  const usesCapturedTestProducts = input.action === "TEST_WITHOUT_BUILDING";
   const args = [
     "xcodebuild",
-    ...(input.source.kind === "PACKAGE"
+    ...(usesCapturedTestProducts
       ? []
-      : input.source.kind === "PROJECT"
-        ? ["-project", input.source.relativePath]
-        : ["-workspace", input.source.relativePath]),
-    "-scheme",
-    input.scheme,
-    "-configuration",
-    input.configuration,
+      : [
+          ...(input.source.kind === "PACKAGE"
+            ? []
+            : input.source.kind === "PROJECT"
+              ? ["-project", input.source.relativePath]
+              : ["-workspace", input.source.relativePath]),
+          "-scheme",
+          input.scheme,
+          "-configuration",
+          input.configuration,
+        ]),
     "-destination",
     destinationSpecifier(input.destination),
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     join(input.artifactDirectory, "result.xcresult"),
   ];
-  if (settings.packageResolution === "RESOLVED_ONLY") {
-    args.push("-onlyUsePackageVersionsFromResolvedFile");
-  } else if (settings.packageResolution === "SKIP_UPDATES") {
-    args.push("-skipPackageUpdates");
-  } else if (settings.packageResolution === "DISABLE_AUTOMATIC") {
-    args.push("-disableAutomaticPackageResolution");
-  }
-  if (settings.disablePackageRepositoryCache) {
-    args.push("-disablePackageRepositoryCache");
-  }
-  if (settings.signingStyle !== "PROJECT_DEFAULT") {
-    args.push(
-      `CODE_SIGN_STYLE=${settings.signingStyle === "AUTOMATIC" ? "Automatic" : "Manual"}`,
-    );
-  }
-  if (settings.developmentTeam) {
-    args.push(`DEVELOPMENT_TEAM=${settings.developmentTeam}`);
-  }
-  if (settings.codeSignIdentity) {
-    args.push(`CODE_SIGN_IDENTITY=${settings.codeSignIdentity}`);
-  }
-  if (settings.provisioningProfileSpecifier) {
-    args.push(
-      `PROVISIONING_PROFILE_SPECIFIER=${settings.provisioningProfileSpecifier}`,
-    );
-  }
-  if (settings.productBundleIdentifier) {
-    args.push(`PRODUCT_BUNDLE_IDENTIFIER=${settings.productBundleIdentifier}`);
-  }
-  if (settings.allowProvisioningUpdates) args.push("-allowProvisioningUpdates");
-  if (settings.allowProvisioningDeviceRegistration) {
-    args.push("-allowProvisioningDeviceRegistration");
+  if (!usesCapturedTestProducts) {
+    if (settings.packageResolution === "RESOLVED_ONLY") {
+      args.push("-onlyUsePackageVersionsFromResolvedFile");
+    } else if (settings.packageResolution === "SKIP_UPDATES") {
+      args.push("-skipPackageUpdates");
+    } else if (settings.packageResolution === "DISABLE_AUTOMATIC") {
+      args.push("-disableAutomaticPackageResolution");
+    }
+    if (settings.disablePackageRepositoryCache) {
+      args.push("-disablePackageRepositoryCache");
+    }
+    if (settings.signingStyle !== "PROJECT_DEFAULT") {
+      args.push(
+        `CODE_SIGN_STYLE=${settings.signingStyle === "AUTOMATIC" ? "Automatic" : "Manual"}`,
+      );
+    }
+    if (settings.developmentTeam) {
+      args.push(`DEVELOPMENT_TEAM=${settings.developmentTeam}`);
+    }
+    if (settings.codeSignIdentity) {
+      args.push(`CODE_SIGN_IDENTITY=${settings.codeSignIdentity}`);
+    }
+    if (settings.provisioningProfileSpecifier) {
+      args.push(
+        `PROVISIONING_PROFILE_SPECIFIER=${settings.provisioningProfileSpecifier}`,
+      );
+    }
+    if (settings.productBundleIdentifier) {
+      args.push(
+        `PRODUCT_BUNDLE_IDENTIFIER=${settings.productBundleIdentifier}`,
+      );
+    }
+    if (settings.allowProvisioningUpdates) {
+      args.push("-allowProvisioningUpdates");
+    }
+    if (settings.allowProvisioningDeviceRegistration) {
+      args.push("-allowProvisioningDeviceRegistration");
+    }
   }
   if (settings.testPlan) args.push("-testPlan", settings.testPlan);
   if (settings.codeCoverage) args.push("-enableCodeCoverage", "YES");
@@ -214,8 +256,10 @@ function commandPreview(input: {
   }
   for (const test of settings.onlyTesting) args.push(`-only-testing:${test}`);
   for (const test of settings.skipTesting) args.push(`-skip-testing:${test}`);
-  for (const [key, value] of Object.entries(settings.buildSettingOverrides)) {
-    args.push(`${key}=${value}`);
+  if (!usesCapturedTestProducts) {
+    for (const [key, value] of Object.entries(settings.buildSettingOverrides)) {
+      args.push(`${key}=${value}`);
+    }
   }
   if (input.action === "ARCHIVE") {
     args.push(
@@ -226,10 +270,20 @@ function commandPreview(input: {
   if (input.action === "BUILD_FOR_TESTING") {
     args.push(
       "-testProductsPath",
-      join(input.artifactDirectory, "test-products"),
+      join(input.artifactDirectory, "test-products.xctestproducts"),
     );
   }
-  if (input.action === "TEST_WITHOUT_BUILDING" && settings.priorXctestrunPath) {
+  if (
+    input.action === "TEST_WITHOUT_BUILDING" &&
+    settings.priorTestProductsPath
+  ) {
+    args.push("-testProductsPath", settings.priorTestProductsPath);
+  }
+  if (
+    input.action === "TEST_WITHOUT_BUILDING" &&
+    !settings.priorTestProductsPath &&
+    settings.priorXctestrunPath
+  ) {
     args.push("-xctestrun", settings.priorXctestrunPath);
   }
   args.push(actionArgument(input.action));
@@ -831,6 +885,8 @@ export class BuildsService {
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
+    const genericDestinations = genericBuildDestinations(action);
+    if (genericDestinations.length) return genericDestinations;
     const job = await this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -952,22 +1008,26 @@ export class BuildsService {
         },
       },
     });
-    if (!observation || observation.status !== "VALID") {
-      throw new Error(
-        "Build configuration must be successfully parsed for this worktree",
-      );
-    }
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
-    let destination = parseBuildDestination(input.destination);
+    const destination = parseBuildDestination(input.destination);
     if (!BUILD_DESTINATION_TYPES.includes(destination.type)) {
       throw new Error("Destination is invalid");
     }
-    if (action === "ARCHIVE" && !destination.generic) {
+    if (
+      action === "ARCHIVE" &&
+      (destination.type !== "PHYSICAL_DEVICE" || !destination.generic)
+    ) {
       throw new Error(
         "Archive builds require the generic physical iOS destination",
       );
+    }
+    if (
+      destination.generic &&
+      !GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)
+    ) {
+      throw new Error("This build action requires a concrete destination");
     }
     const baseAdvanced = objectValue(
       parseJson(configuration.advancedSettingsJson, {}),
@@ -1000,7 +1060,7 @@ export class BuildsService {
         where: { id: advancedSettings.priorBuildForTestingId },
         include: {
           artifacts: {
-            where: { kind: "XCTESTRUN" },
+            where: { kind: { in: ["TEST_PRODUCTS", "XCTESTRUN"] } },
             orderBy: { createdAt: "asc" },
           },
         },
@@ -1028,17 +1088,68 @@ export class BuildsService {
           "The prior Build for Testing result uses a different destination type",
         );
       }
-      if (priorBuild.artifacts.length !== 1) {
+      const priorSnapshot = objectValue(
+        parseJson(priorBuild.snapshotJson, {}),
+        "prior Build for Testing snapshot",
+      );
+      const priorConfiguration = objectValue(
+        priorSnapshot.configuration ?? {},
+        "prior Build for Testing configuration snapshot",
+      );
+      const priorAdvancedSettings = parseBuildAdvancedSettings(
+        priorConfiguration.advancedSettings ?? {},
+      );
+      if (
+        advancedSettings.testPlan &&
+        priorAdvancedSettings.testPlan &&
+        advancedSettings.testPlan !== priorAdvancedSettings.testPlan
+      ) {
         throw new Error(
-          "The prior Build for Testing result must contain exactly one .xctestrun artifact",
+          "The selected test plan does not match the prior Build for Testing result",
         );
       }
-      const artifact = priorBuild.artifacts[0]!;
-      if (!artifact.relativePath.endsWith(".xctestrun")) {
-        throw new Error("The prior Build for Testing artifact is invalid");
+      const testPlan =
+        advancedSettings.testPlan ?? priorAdvancedSettings.testPlan ?? null;
+      const testProducts = priorBuild.artifacts.filter(
+        (artifact) =>
+          artifact.kind === "TEST_PRODUCTS" &&
+          artifact.relativePath.endsWith(".xctestproducts"),
+      );
+      const xctestruns = priorBuild.artifacts.filter(
+        (artifact) =>
+          artifact.kind === "XCTESTRUN" &&
+          artifact.relativePath.endsWith(".xctestrun"),
+      );
+      if (testProducts.length > 1) {
+        throw new Error(
+          "The prior Build for Testing result contains multiple test-products artifacts",
+        );
       }
+      let artifact: (typeof priorBuild.artifacts)[number] | undefined =
+        testProducts[0];
+      if (!artifact && xctestruns.length === 1) artifact = xctestruns[0];
+      if (!artifact && xctestruns.length > 1 && testPlan) {
+        artifact = xctestruns.find((candidate) => {
+          const metadata = objectValue(
+            parseJson(candidate.metadataJson, {}),
+            "test-run artifact metadata",
+          );
+          return (
+            metadata.testPlan === testPlan ||
+            candidate.relativePath.endsWith(`/${testPlan}.xctestrun`) ||
+            candidate.relativePath === `${testPlan}.xctestrun`
+          );
+        });
+      }
+      if (!artifact && xctestruns.length > 1) {
+        throw new Error(
+          "Select a test plan to choose among the captured .xctestrun artifacts",
+        );
+      }
+      const artifactRelativePath =
+        artifact?.relativePath ?? "test-products.xctestproducts";
       const artifactRoot = resolve(priorBuild.artifactDirectory);
-      const artifactPath = resolve(artifactRoot, artifact.relativePath);
+      const artifactPath = resolve(artifactRoot, artifactRelativePath);
       const containedRelativePath = relative(artifactRoot, artifactPath);
       if (
         !containedRelativePath ||
@@ -1049,7 +1160,13 @@ export class BuildsService {
       }
       advancedSettings = {
         ...advancedSettings,
-        priorXctestrunPath: artifactPath,
+        testPlan,
+        priorTestProductsPath: artifactRelativePath.endsWith(".xctestproducts")
+          ? artifactPath
+          : null,
+        priorXctestrunPath: artifactRelativePath.endsWith(".xctestrun")
+          ? artifactPath
+          : null,
       };
     }
     const allowed = await prisma.codebaseRepositoryBuildScript.findMany({
@@ -1071,24 +1188,6 @@ export class BuildsService {
       );
     }
     const selected = allowed.filter((entry) => selectedIds.has(entry.scriptId));
-    const availableDestinations = await this.destinations({
-      worktreeId: worktree.id,
-      configurationId: configuration.id,
-      action,
-      requestId: `${requestId}:preflight`,
-    });
-    const availableDestination = availableDestinations
-      .map((value) => parseBuildDestination(value))
-      .find(
-        (value) =>
-          value.type === destination.type &&
-          value.id === destination.id &&
-          Boolean(value.generic) === Boolean(destination.generic),
-      );
-    if (!availableDestination) {
-      throw new Error("The selected destination is no longer available");
-    }
-    destination = availableDestination;
     const buildId = randomUUID();
     const buildRoot = effectiveBuildsDirectory(worktree.codebase.agent);
     if (!buildRoot)
@@ -1144,15 +1243,25 @@ export class BuildsService {
         buildConfiguration: configuration.buildConfiguration,
         action,
         advancedSettings,
-        parse: {
-          status: observation.status,
-          schemes: parseJson(observation.schemesJson, []),
-          configurations: parseJson(observation.configurationsJson, []),
-          testPlans: parseJson(observation.testPlansJson, []),
-          headSha: observation.headSha,
-          xcodeVersion: observation.xcodeVersion,
-          parsedAt: observation.lastParsedAt?.toISOString() ?? null,
-        },
+        parse: observation
+          ? {
+              status: observation.status,
+              schemes: parseJson(observation.schemesJson, []),
+              configurations: parseJson(observation.configurationsJson, []),
+              testPlans: parseJson(observation.testPlansJson, []),
+              headSha: observation.headSha,
+              xcodeVersion: observation.xcodeVersion,
+              parsedAt: observation.lastParsedAt?.toISOString() ?? null,
+            }
+          : {
+              status: "UNPARSED",
+              schemes: [],
+              configurations: [],
+              testPlans: [],
+              headSha: null,
+              xcodeVersion: null,
+              parsedAt: null,
+            },
       },
       destination,
       scripts,

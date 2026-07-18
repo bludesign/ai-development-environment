@@ -2618,7 +2618,7 @@ export function ActionRow(
     ),
   )?.agent;
   const buildUnavailable =
-    unavailable ||
+    worktree.availability !== "AVAILABLE" ||
     !agent ||
     agent.connectionStatus !== "ONLINE" ||
     !agent.capabilities.includes("ios.build.run") ||
@@ -2635,8 +2635,8 @@ export function ActionRow(
               ? t("agentUnsupported")
               : props.group.iosBuildConfigured === false
                 ? t("iosBuildNotConfigured")
-                : unavailable
-                  ? t("operationRunning")
+                : worktree.availability !== "AVAILABLE"
+                  ? t("worktreeUnavailable")
                   : null
         }
         worktreeId={worktree.id}

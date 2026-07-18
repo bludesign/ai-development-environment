@@ -25,7 +25,7 @@ const now = new Date().toISOString();
 const observation = {
   id: "observation-1",
   scopeKey: "worktree:worktree-1",
-  status: "VALID" as const,
+  status: "UNPARSED" as const,
   schemes: ["App"],
   configurations: ["Debug", "Release"],
   testPlans: [],
@@ -95,11 +95,21 @@ beforeEach(() => {
         inspectBuildDestinations: [
           {
             type: "SIMULATOR",
-            id: "SIM-1",
-            name: "iPhone 17 Pro",
+            id: "generic-ios-simulator",
+            name: "Any iOS Simulator",
             platform: "iOS Simulator",
-            osVersion: "26.0",
-            state: "Booted",
+            osVersion: null,
+            state: null,
+            generic: true,
+          },
+          {
+            type: "PHYSICAL_DEVICE",
+            id: "generic-ios",
+            name: "Any Physical iOS Device",
+            platform: "iOS",
+            osVersion: null,
+            state: null,
+            generic: true,
           },
         ],
       } as never;
@@ -139,6 +149,11 @@ describe("StartBuildDialog", () => {
       screen.getByText(/xcrun xcodebuild -workspace App\.xcworkspace/),
     ).toBeDefined();
     expect(
+      request.mock.calls.some(([query]) =>
+        String(query).includes("mutation ReparseStartBuild"),
+      ),
+    ).toBe(false);
+    expect(
       screen.getByText(/-hideShellScriptEnvironment/).textContent,
     ).not.toContain("derivedDataPath");
     expect(
@@ -172,7 +187,10 @@ describe("StartBuildDialog", () => {
           input: expect.objectContaining({
             worktreeId: "worktree-1",
             configurationId: "configuration-1",
-            destination: expect.objectContaining({ id: "SIM-1" }),
+            destination: expect.objectContaining({
+              id: "generic-ios-simulator",
+              generic: true,
+            }),
             scriptIds: ["script-1"],
             action: "BUILD",
             advancedSettings: {

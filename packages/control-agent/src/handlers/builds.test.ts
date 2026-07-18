@@ -25,10 +25,12 @@ import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/c
 import {
   classifyFailure,
   createRedactor,
+  genericBuildDestinations,
   physicalDestinations,
   runIosBuild,
   simulatorAppArguments,
   simulatorDestinations,
+  testPlanNames,
   workspaceProjectPaths,
   xcodeBuildArguments,
 } from "./builds.js";
@@ -94,7 +96,7 @@ describe("iOS build command construction", () => {
         expect(args).toEqual(
           expect.arrayContaining([
             "-testProductsPath",
-            "/tmp/Builds/build-1/test-products",
+            "/tmp/Builds/build-1/test-products.xctestproducts",
           ]),
         );
       }
@@ -160,10 +162,66 @@ describe("iOS build command construction", () => {
       "-xctestrun",
       priorPath,
     ]);
+    expect(args).not.toContain("-project");
+    expect(args).not.toContain("-workspace");
+    expect(args).not.toContain("-scheme");
+    expect(args).not.toContain("-configuration");
+  });
+
+  test("uses captured Xcode 26 test products for Test Without Building", () => {
+    const priorPath = "/tmp/Builds/prior/test-products.xctestproducts";
+    const args = xcodeBuildArguments(
+      payload({
+        action: "TEST_WITHOUT_BUILDING",
+        advancedSettings: {
+          ...DEFAULT_BUILD_ADVANCED_SETTINGS,
+          priorBuildForTestingId: "prior",
+          priorTestProductsPath: priorPath,
+        },
+      }),
+    );
+    expect(args.slice(args.indexOf("-testProductsPath"), -1)).toEqual([
+      "-testProductsPath",
+      priorPath,
+    ]);
+    expect(args).not.toContain("-xctestrun");
+    expect(args).not.toContain("-project");
+    expect(args).not.toContain("-workspace");
+    expect(args).not.toContain("-scheme");
+    expect(args).not.toContain("-configuration");
   });
 });
 
 describe("iOS destination and error parsing", () => {
+  test("parses Xcode test-plan objects", () => {
+    expect(
+      testPlanNames([{ name: "TestPlan" }, { name: "Integration" }]),
+    ).toEqual(["Integration", "TestPlan"]);
+  });
+
+  test("offers generic simulator and physical targets for build-now/run-later", () => {
+    expect(genericBuildDestinations("BUILD")).toEqual([
+      expect.objectContaining({ type: "SIMULATOR", generic: true }),
+      expect.objectContaining({ type: "PHYSICAL_DEVICE", generic: true }),
+    ]);
+    expect(genericBuildDestinations("TEST")).toEqual([]);
+    expect(
+      xcodeBuildArguments(
+        payload({
+          destination: {
+            type: "SIMULATOR",
+            id: "generic-ios-simulator",
+            name: "Any iOS Simulator",
+            platform: "iOS Simulator",
+            osVersion: null,
+            state: null,
+            generic: true,
+          },
+        }),
+      ),
+    ).toContain("generic/platform=iOS Simulator");
+  });
+
   test("reads only contained projects referenced by a workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-workspace-fixture-"));
     temporaryDirectories.push(root);

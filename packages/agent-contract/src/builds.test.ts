@@ -93,6 +93,14 @@ describe("iOS build agent contract", () => {
       parseBuildAdvancedSettings({
         ...DEFAULT_BUILD_ADVANCED_SETTINGS,
         priorBuildForTestingId: "build-for-testing-1",
+        priorTestProductsPath:
+          "/agent/builds/build-for-testing-1/test-products.xctestproducts",
+      }).priorTestProductsPath,
+    ).toBe("/agent/builds/build-for-testing-1/test-products.xctestproducts");
+    expect(
+      parseBuildAdvancedSettings({
+        ...DEFAULT_BUILD_ADVANCED_SETTINGS,
+        priorBuildForTestingId: "build-for-testing-1",
         priorXctestrunPath: "/agent/builds/build-for-testing-1/App.xctestrun",
       }).priorXctestrunPath,
     ).toBe("/agent/builds/build-for-testing-1/App.xctestrun");
@@ -133,6 +141,27 @@ describe("iOS build agent contract", () => {
     expect(() =>
       parseBuildJobPayload({ ...buildPayload(), action: "ARCHIVE" }),
     ).toThrow("generic physical destination");
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        destination: {
+          ...destination,
+          id: "generic-ios-simulator",
+          generic: true,
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        action: "TEST",
+        destination: {
+          ...destination,
+          id: "generic-ios-simulator",
+          generic: true,
+        },
+      }),
+    ).toThrow("concrete destination");
     expect(() =>
       parseBuildJobPayload({
         ...buildPayload(),

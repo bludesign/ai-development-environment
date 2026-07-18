@@ -127,7 +127,72 @@ describe("BuildsService", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  test("resolves Test Without Building only from a compatible captured artifact", async () => {
+  test("queues a generic simulator build from saved settings without reparsing", async () => {
+    const buildCreate = vi.fn().mockResolvedValue({ id: "build-1" });
+    const buildUpdate = vi.fn().mockResolvedValue({ id: "build-1" });
+    const createJob = vi.fn().mockResolvedValue({ id: "build-job" });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: buildCreate,
+        update: buildUpdate,
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "build-1", status: "QUEUED" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+      buildConfiguration: {
+        findUnique: vi.fn().mockResolvedValue(configuration()),
+      },
+      buildSourceObservation: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildsService(control(createJob));
+
+    await expect(
+      service.startBuild({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        destination: {
+          type: "SIMULATOR",
+          id: "generic-ios-simulator",
+          name: "Any iOS Simulator",
+          platform: "iOS Simulator",
+          osVersion: null,
+          state: null,
+          generic: true,
+        },
+        action: "BUILD",
+        requestId: "queued-generic-build",
+      }),
+    ).resolves.toMatchObject({ status: "QUEUED" });
+
+    expect(createJob).toHaveBeenCalledTimes(1);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: IOS_BUILD_JOB_KIND,
+        payload: expect.objectContaining({
+          destination: expect.objectContaining({
+            id: "generic-ios-simulator",
+            generic: true,
+          }),
+        }),
+      }),
+    );
+    const data = buildCreate.mock.calls[0]![0].data;
+    expect(data.commandSummary).toContain(
+      '-destination "generic/platform=iOS Simulator"',
+    );
+    expect(JSON.parse(data.snapshotJson).configuration.parse.status).toBe(
+      "UNPARSED",
+    );
+  });
+
+  test("resolves Xcode 26 test products from a compatible prior build", async () => {
     const persistedWorktree = worktree();
     const persistedConfiguration = configuration();
     const priorBuild = {
@@ -139,13 +204,12 @@ describe("BuildsService", () => {
       configurationId: "configuration-1",
       destinationType: "SIMULATOR",
       artifactDirectory: "/agent/builds/prior-build",
-      artifacts: [
-        {
-          kind: "XCTESTRUN",
-          relativePath: "test-products/App.xctestrun",
-          createdAt: new Date(),
+      snapshotJson: JSON.stringify({
+        configuration: {
+          advancedSettings: { testPlan: "TestPlan" },
         },
-      ],
+      }),
+      artifacts: [],
     };
     const buildCreate = vi.fn().mockResolvedValue({ id: "new-build" });
     const buildUpdate = vi.fn().mockResolvedValue({ id: "new-build" });
@@ -164,7 +228,7 @@ describe("BuildsService", () => {
         findUnique: vi.fn().mockResolvedValue(persistedConfiguration),
       },
       buildSourceObservation: {
-        findUnique: vi.fn().mockResolvedValue(observation()),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       codebaseRepositoryBuildScript: {
         findMany: vi.fn().mockResolvedValue([
@@ -223,29 +287,50 @@ describe("BuildsService", () => {
     const jobInput = createJob.mock.calls.find(
       ([input]) => input.kind === IOS_BUILD_JOB_KIND,
     )![0];
+    expect(
+      createJob.mock.calls.some(
+        ([input]) => input.kind === IOS_DESTINATIONS_JOB_KIND,
+      ),
+    ).toBe(false);
     expect(jobInput.payload.advancedSettings).toMatchObject({
       priorBuildForTestingId: "prior-build",
-      priorXctestrunPath:
-        "/agent/builds/prior-build/test-products/App.xctestrun",
+      priorTestProductsPath:
+        "/agent/builds/prior-build/test-products.xctestproducts",
+      priorXctestrunPath: null,
+      testPlan: "TestPlan",
     });
-    expect(jobInput.payload.advancedSettings.priorXctestrunPath).not.toContain(
-      "/client/supplied",
-    );
+    expect(
+      jobInput.payload.advancedSettings.priorTestProductsPath,
+    ).not.toContain("/client/supplied");
     const createInput = buildCreate.mock.calls[0]![0];
     expect(createInput.data.artifactDirectory).toBe(
       `/agent/repositories/Builds/${createInput.data.id}`,
     );
     expect(createInput.data.commandSummary).toContain(
-      "-xctestrun /agent/builds/prior-build/test-products/App.xctestrun",
+      "-testProductsPath /agent/builds/prior-build/test-products.xctestproducts",
     );
+    expect(createInput.data.commandSummary).not.toContain("-project");
+    expect(createInput.data.commandSummary).not.toContain("-workspace");
+    expect(createInput.data.commandSummary).not.toContain("-scheme");
+    expect(createInput.data.commandSummary).not.toContain("-configuration");
     expect(createInput.data.commandSummary).not.toContain("derivedDataPath");
     const snapshot = JSON.parse(createInput.data.snapshotJson) as {
-      configuration: { advancedSettings: { priorXctestrunPath: string } };
+      configuration: {
+        parse: { status: string };
+        advancedSettings: {
+          priorTestProductsPath: string;
+          priorXctestrunPath: null;
+        };
+      };
       scripts: Array<{ preBuildScript: string }>;
     };
-    expect(snapshot.configuration.advancedSettings.priorXctestrunPath).toBe(
-      "/agent/builds/prior-build/test-products/App.xctestrun",
+    expect(snapshot.configuration.advancedSettings.priorTestProductsPath).toBe(
+      "/agent/builds/prior-build/test-products.xctestproducts",
     );
+    expect(
+      snapshot.configuration.advancedSettings.priorXctestrunPath,
+    ).toBeNull();
+    expect(snapshot.configuration.parse.status).toBe("UNPARSED");
     expect(snapshot.scripts[0]?.preBuildScript).toBe(
       "console.log('snapshot source')",
     );
@@ -367,6 +452,30 @@ describe("BuildsService", () => {
         }),
       }),
     );
+  });
+
+  test("returns generic build targets without queueing an agent preflight", async () => {
+    const createJob = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+      buildConfiguration: {
+        findUnique: vi.fn().mockResolvedValue(configuration()),
+      },
+    });
+    const service = new BuildsService(control(createJob));
+
+    await expect(
+      service.destinations({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        action: "BUILD",
+        requestId: "generic-destinations",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ type: "SIMULATOR", generic: true }),
+      expect.objectContaining({ type: "PHYSICAL_DEVICE", generic: true }),
+    ]);
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   test("redacts common credentials again before central log persistence", async () => {

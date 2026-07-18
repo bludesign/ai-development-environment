@@ -26,6 +26,13 @@ export const BUILD_ACTIONS = [
 ] as const;
 export type BuildAction = (typeof BUILD_ACTIONS)[number];
 
+export const GENERIC_BUILD_DESTINATION_ACTIONS: readonly BuildAction[] = [
+  "BUILD",
+  "ANALYZE",
+  "ARCHIVE",
+  "BUILD_FOR_TESTING",
+];
+
 export const BUILD_SOURCE_KINDS = ["PROJECT", "WORKSPACE", "PACKAGE"] as const;
 export type BuildSourceKind = (typeof BUILD_SOURCE_KINDS)[number];
 
@@ -91,6 +98,7 @@ export type BuildAdvancedSettings = {
   skipTesting: string[];
   buildSettingOverrides: Partial<Record<ApprovedBuildSettingOverride, string>>;
   priorBuildForTestingId: string | null;
+  priorTestProductsPath: string | null;
   priorXctestrunPath: string | null;
 };
 
@@ -112,6 +120,7 @@ export const DEFAULT_BUILD_ADVANCED_SETTINGS: BuildAdvancedSettings = {
   skipTesting: [],
   buildSettingOverrides: {},
   priorBuildForTestingId: null,
+  priorTestProductsPath: null,
   priorXctestrunPath: null,
 };
 
@@ -420,6 +429,14 @@ export function parseBuildAdvancedSettings(
       input.priorBuildForTestingId,
       "advanced settings.priorBuildForTestingId",
     ),
+    priorTestProductsPath:
+      input.priorTestProductsPath === null ||
+      input.priorTestProductsPath === undefined
+        ? null
+        : safeAbsolutePath(
+            input.priorTestProductsPath,
+            "advanced settings.priorTestProductsPath",
+          ),
     priorXctestrunPath:
       input.priorXctestrunPath === null ||
       input.priorXctestrunPath === undefined
@@ -544,13 +561,17 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
   ) {
     throw new Error("Archive builds require a generic physical destination");
   }
-  if (action !== "ARCHIVE" && destination.generic) {
-    throw new Error("Generic destinations are only valid for archive builds");
+  if (
+    destination.generic &&
+    !GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)
+  ) {
+    throw new Error("This build action requires a concrete destination");
   }
   if (
     action === "TEST_WITHOUT_BUILDING" &&
     (!advancedSettings.priorBuildForTestingId ||
-      !advancedSettings.priorXctestrunPath)
+      (!advancedSettings.priorTestProductsPath &&
+        !advancedSettings.priorXctestrunPath))
   ) {
     throw new Error(
       "Test Without Building requires a captured Build for Testing result",

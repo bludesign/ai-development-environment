@@ -31,6 +31,7 @@ import {
   parseBuildRunDestinationsPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
+  GENERIC_BUILD_DESTINATION_ACTIONS,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
@@ -391,6 +392,19 @@ async function workspaceConfigurations(
   return uniqueSorted(configurations);
 }
 
+export function testPlanNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueSorted(
+    value.flatMap((entry): string[] => {
+      if (typeof entry === "string") return [entry];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry))
+        return [];
+      const name = (entry as Record<string, unknown>).name;
+      return typeof name === "string" ? [name] : [];
+    }),
+  );
+}
+
 async function testPlans(
   source: BuildSourceSnapshot,
   absolutePath: string,
@@ -421,7 +435,7 @@ async function testPlans(
     if (parsed && typeof parsed === "object") {
       const record = parsed as Record<string, unknown>;
       return uniqueSorted(
-        strings(record.testPlans).concat(strings(record.plans)),
+        testPlanNames(record.testPlans).concat(testPlanNames(record.plans)),
       );
     }
   } catch {
@@ -575,6 +589,34 @@ export function physicalDestinations(value: unknown): BuildDestination[] {
   });
 }
 
+export function genericBuildDestinations(
+  action: BuildAction,
+): BuildDestination[] {
+  if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
+  const physical: BuildDestination = {
+    type: "PHYSICAL_DEVICE",
+    id: "generic-ios",
+    name: "Any Physical iOS Device",
+    platform: "iOS",
+    osVersion: null,
+    state: null,
+    generic: true,
+  };
+  if (action === "ARCHIVE") return [physical];
+  return [
+    {
+      type: "SIMULATOR",
+      id: "generic-ios-simulator",
+      name: "Any iOS Simulator",
+      platform: "iOS Simulator",
+      osVersion: null,
+      state: null,
+      generic: true,
+    },
+    physical,
+  ];
+}
+
 async function listPhysicalDevices(
   timeoutMs: number,
   signal: AbortSignal,
@@ -629,20 +671,10 @@ export const inspectBuildDestinations: AgentJobHandler = async (
     folder,
   );
   requireSuccess(preflight, "The saved scheme or configuration is unavailable");
-  if (input.action === "ARCHIVE") {
+  if (GENERIC_BUILD_DESTINATION_ACTIONS.includes(input.action)) {
     return {
       ...successfulProcess,
-      destinations: [
-        {
-          type: "PHYSICAL_DEVICE",
-          id: "generic-ios",
-          name: "Generic iOS Device",
-          platform: "iOS",
-          osVersion: null,
-          state: null,
-          generic: true,
-        },
-      ],
+      destinations: genericBuildDestinations(input.action),
     };
   }
   const [simulators, physical] = await Promise.all([
@@ -981,6 +1013,27 @@ function xcodeEnvironment(): NodeJS.ProcessEnv {
   });
 }
 
+function testArguments(settings: BuildAdvancedSettings): string[] {
+  const args: string[] = [];
+  if (settings.testPlan) args.push("-testPlan", settings.testPlan);
+  if (settings.codeCoverage) args.push("-enableCodeCoverage", "YES");
+  if (settings.parallelTesting !== null) {
+    args.push(
+      "-parallel-testing-enabled",
+      settings.parallelTesting ? "YES" : "NO",
+    );
+  }
+  if (settings.parallelTestingWorkers !== null) {
+    args.push(
+      "-parallel-testing-worker-count",
+      String(settings.parallelTestingWorkers),
+    );
+  }
+  for (const test of settings.onlyTesting) args.push(`-only-testing:${test}`);
+  for (const test of settings.skipTesting) args.push(`-skip-testing:${test}`);
+  return args;
+}
+
 function advancedArguments(settings: BuildAdvancedSettings): string[] {
   const args: string[] = [];
   if (settings.packageResolution === "RESOLVED_ONLY") {
@@ -1014,22 +1067,7 @@ function advancedArguments(settings: BuildAdvancedSettings): string[] {
   if (settings.allowProvisioningDeviceRegistration) {
     args.push("-allowProvisioningDeviceRegistration");
   }
-  if (settings.testPlan) args.push("-testPlan", settings.testPlan);
-  if (settings.codeCoverage) args.push("-enableCodeCoverage", "YES");
-  if (settings.parallelTesting !== null) {
-    args.push(
-      "-parallel-testing-enabled",
-      settings.parallelTesting ? "YES" : "NO",
-    );
-  }
-  if (settings.parallelTestingWorkers !== null) {
-    args.push(
-      "-parallel-testing-worker-count",
-      String(settings.parallelTestingWorkers),
-    );
-  }
-  for (const test of settings.onlyTesting) args.push(`-only-testing:${test}`);
-  for (const test of settings.skipTesting) args.push(`-skip-testing:${test}`);
+  args.push(...testArguments(settings));
   for (const [key, value] of Object.entries(settings.buildSettingOverrides)) {
     args.push(`${key}=${value}`);
   }
@@ -1037,7 +1075,11 @@ function advancedArguments(settings: BuildAdvancedSettings): string[] {
 }
 
 function destinationArgument(destination: BuildDestination): string {
-  if (destination.generic) return "generic/platform=iOS";
+  if (destination.generic) {
+    return destination.type === "SIMULATOR"
+      ? "generic/platform=iOS Simulator"
+      : "generic/platform=iOS";
+  }
   return destination.type === "SIMULATOR"
     ? `platform=iOS Simulator,id=${destination.id}`
     : `platform=iOS,id=${destination.id}`;
@@ -1057,19 +1099,26 @@ function actionArgument(action: BuildAction): string {
 export function xcodeBuildArguments(input: BuildJobPayload): string[] {
   const resultBundle = join(input.artifactDirectory, "result.xcresult");
   const sourcePath = containedPath(input.folder, input.source.relativePath);
+  const usesCapturedTestProducts = input.action === "TEST_WITHOUT_BUILDING";
   const args = [
     "xcodebuild",
-    ...sourceArguments(input.source, sourcePath),
-    "-scheme",
-    input.scheme,
-    "-configuration",
-    input.configuration,
+    ...(usesCapturedTestProducts
+      ? []
+      : [
+          ...sourceArguments(input.source, sourcePath),
+          "-scheme",
+          input.scheme,
+          "-configuration",
+          input.configuration,
+        ]),
     "-destination",
     destinationArgument(input.destination),
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     resultBundle,
-    ...advancedArguments(input.advancedSettings),
+    ...(usesCapturedTestProducts
+      ? testArguments(input.advancedSettings)
+      : advancedArguments(input.advancedSettings)),
   ];
   if (input.action === "ARCHIVE") {
     args.push(
@@ -1080,11 +1129,21 @@ export function xcodeBuildArguments(input: BuildJobPayload): string[] {
   if (input.action === "BUILD_FOR_TESTING") {
     args.push(
       "-testProductsPath",
-      join(input.artifactDirectory, "test-products"),
+      join(input.artifactDirectory, "test-products.xctestproducts"),
     );
   }
   if (
     input.action === "TEST_WITHOUT_BUILDING" &&
+    input.advancedSettings.priorTestProductsPath
+  ) {
+    args.push(
+      "-testProductsPath",
+      input.advancedSettings.priorTestProductsPath,
+    );
+  }
+  if (
+    input.action === "TEST_WITHOUT_BUILDING" &&
+    !input.advancedSettings.priorTestProductsPath &&
     input.advancedSettings.priorXctestrunPath
   ) {
     args.push("-xctestrun", input.advancedSettings.priorXctestrunPath);
@@ -1399,7 +1458,10 @@ async function captureArtifacts(
     }
   }
   if (input.action === "BUILD_FOR_TESTING") {
-    const testDirectory = join(input.artifactDirectory, "test-products");
+    const testDirectory = join(
+      input.artifactDirectory,
+      "test-products.xctestproducts",
+    );
     if (await pathExists(testDirectory)) {
       artifacts.push(
         await artifact(input.artifactDirectory, "TEST_PRODUCTS", testDirectory),
@@ -1410,7 +1472,9 @@ async function captureArtifacts(
         20,
       )) {
         artifacts.push(
-          await artifact(input.artifactDirectory, "XCTESTRUN", file),
+          await artifact(input.artifactDirectory, "XCTESTRUN", file, {
+            testPlan: basename(file, ".xctestrun"),
+          }),
         );
       }
     }
@@ -1433,9 +1497,18 @@ export const runIosBuild: AgentJobHandler = async (
   );
   await validateSource(folder, input.source);
   if (input.action === "TEST_WITHOUT_BUILDING") {
-    const xctestrunPath = input.advancedSettings.priorXctestrunPath!;
-    if (
-      !xctestrunPath.endsWith(".xctestrun") ||
+    const testProductsPath = input.advancedSettings.priorTestProductsPath;
+    const xctestrunPath = input.advancedSettings.priorXctestrunPath;
+    if (testProductsPath) {
+      if (
+        !testProductsPath.endsWith(".xctestproducts") ||
+        !(await pathExists(testProductsPath)) ||
+        !(await stat(testProductsPath)).isDirectory()
+      ) {
+        throw new Error("The captured test-products artifact is unavailable");
+      }
+    } else if (
+      !xctestrunPath?.endsWith(".xctestrun") ||
       !(await pathExists(xctestrunPath)) ||
       !(await stat(xctestrunPath)).isFile()
     ) {

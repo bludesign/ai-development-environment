@@ -44,6 +44,7 @@ import { ConfigurationIcon } from "./configuration-icon";
 type PriorBuildForTesting = {
   id: string;
   action: BuildAction;
+  destinationType: BuildDestination["type"];
   snapshot: Record<string, unknown>;
   createdAt: string;
 };
@@ -163,7 +164,7 @@ function StartBuildDialog({
       `query StartBuildProject($codebaseId: ID!, $worktreeId: ID!) {
         iosAppProject(codebaseId: $codebaseId) { ${PROJECT_FIELDS} }
         builds(first: 50, status: SUCCEEDED, worktreeId: $worktreeId) {
-          items { id action snapshot createdAt }
+          items { id action destinationType snapshot createdAt }
         }
       }`,
       { codebaseId, worktreeId },
@@ -203,11 +204,21 @@ function StartBuildDialog({
     () =>
       priorBuilds.filter((build) => {
         if (build.action !== "BUILD_FOR_TESTING") return false;
+        if (build.destinationType !== destinationType) return false;
         const snapshotConfiguration = build.snapshot.configuration as
-          { id?: string } | undefined;
-        return snapshotConfiguration?.id === configurationId;
+          | { id?: string; advancedSettings?: { testPlan?: string | null } }
+          | undefined;
+        const currentTestPlan =
+          typeof advanced.testPlan === "string" ? advanced.testPlan : null;
+        const priorTestPlan = snapshotConfiguration?.advancedSettings?.testPlan;
+        return (
+          snapshotConfiguration?.id === configurationId &&
+          (!currentTestPlan ||
+            !priorTestPlan ||
+            currentTestPlan === priorTestPlan)
+        );
       }),
-    [configurationId, priorBuilds],
+    [advanced.testPlan, configurationId, destinationType, priorBuilds],
   );
   const selectedPriorBuildId =
     compatiblePriorBuilds.find(
@@ -225,28 +236,6 @@ function StartBuildDialog({
     setDestinations([]);
     setDestinationId("");
     try {
-      const parsed = await controlPlaneRequest<{
-        reparseBuildConfiguration: BuildSourceObservation;
-      }>(
-        `mutation ReparseStartBuild($configurationId: ID!, $worktreeId: ID!, $requestId: ID!) {
-          reparseBuildConfiguration(configurationId: $configurationId, worktreeId: $worktreeId, requestId: $requestId) {
-            ${OBSERVATION_FIELDS}
-          }
-        }`,
-        {
-          configurationId: selected.id,
-          worktreeId,
-          requestId: createClientId(),
-        },
-      );
-      const nextObservation = parsed.reparseBuildConfiguration;
-      setObservations((current) => ({
-        ...current,
-        [selected.id]: nextObservation,
-      }));
-      if (nextObservation.status !== "VALID") {
-        throw new Error(nextObservation.error || t("configurationInvalid"));
-      }
       const data = await controlPlaneRequest<{
         inspectBuildDestinations: BuildDestination[];
       }>(
@@ -277,6 +266,40 @@ function StartBuildDialog({
           (destination) => destination.type === preferredType,
         )?.id ?? "",
       );
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const reparse = async (selected: BuildConfiguration) => {
+    setPreparing(true);
+    setError(null);
+    try {
+      const parsed = await controlPlaneRequest<{
+        reparseBuildConfiguration: BuildSourceObservation;
+      }>(
+        `mutation ReparseStartBuild($configurationId: ID!, $worktreeId: ID!, $requestId: ID!) {
+          reparseBuildConfiguration(configurationId: $configurationId, worktreeId: $worktreeId, requestId: $requestId) {
+            ${OBSERVATION_FIELDS}
+          }
+        }`,
+        {
+          configurationId: selected.id,
+          worktreeId,
+          requestId: createClientId(),
+        },
+      );
+      const nextObservation = parsed.reparseBuildConfiguration;
+      setObservations((current) => ({
+        ...current,
+        [selected.id]: nextObservation,
+      }));
+      if (nextObservation.status !== "VALID") {
+        throw new Error(nextObservation.error || t("configurationInvalid"));
+      }
+      await prepare(selected, action);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -339,6 +362,7 @@ function StartBuildDialog({
               ...(action === "TEST_WITHOUT_BUILDING"
                 ? {
                     priorBuildForTestingId: selectedPriorBuildId,
+                    priorTestProductsPath: null,
                     priorXctestrunPath: null,
                   }
                 : {}),
@@ -425,7 +449,7 @@ function StartBuildDialog({
                     </div>
                     <Button
                       disabled={preparing}
-                      onClick={() => void prepare(configuration, action)}
+                      onClick={() => void reparse(configuration)}
                       size="sm"
                       type="button"
                       variant="outline"
@@ -499,7 +523,11 @@ function StartBuildDialog({
                   <SelectContent>
                     {filteredDestinations.map((entry) => (
                       <SelectItem key={entry.id} value={entry.id}>
-                        {entry.name}
+                        {entry.generic
+                          ? entry.type === "SIMULATOR"
+                            ? t("anySimulator")
+                            : t("anyPhysicalDevice")
+                          : entry.name}
                         {entry.osVersion ? ` · ${entry.osVersion}` : ""}
                       </SelectItem>
                     ))}
@@ -517,6 +545,7 @@ function StartBuildDialog({
                     setAdvanced((current) => ({
                       ...current,
                       priorBuildForTestingId: value,
+                      priorTestProductsPath: null,
                       priorXctestrunPath: null,
                     }))
                   }
@@ -587,6 +616,48 @@ function StartBuildDialog({
                 {t("advancedSettings")}
               </summary>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {[
+                  "TEST",
+                  "BUILD_FOR_TESTING",
+                  "TEST_WITHOUT_BUILDING",
+                ].includes(action) && (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>{t("testPlan")}</Label>
+                    <Select
+                      onValueChange={(value) =>
+                        setAdvanced((current) => ({
+                          ...current,
+                          testPlan:
+                            value === "__SCHEME_DEFAULT__" ? null : value,
+                        }))
+                      }
+                      value={String(advanced.testPlan ?? "__SCHEME_DEFAULT__")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__SCHEME_DEFAULT__">
+                          {t("schemeDefaultTestPlan")}
+                        </SelectItem>
+                        {typeof advanced.testPlan === "string" &&
+                          advanced.testPlan &&
+                          !observation?.testPlans.includes(
+                            advanced.testPlan,
+                          ) && (
+                            <SelectItem value={advanced.testPlan}>
+                              {advanced.testPlan} · {t("savedValueUnavailable")}
+                            </SelectItem>
+                          )}
+                        {observation?.testPlans.map((testPlan) => (
+                          <SelectItem key={testPlan} value={testPlan}>
+                            {testPlan}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="development-team">
                     {t("developmentTeam")}
@@ -692,7 +763,6 @@ function StartBuildDialog({
               starting ||
               !configuration ||
               !destination ||
-              observation?.status !== "VALID" ||
               (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
             }
             onClick={() => void start()}

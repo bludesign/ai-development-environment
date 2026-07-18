@@ -1138,9 +1138,10 @@ const mockTranslations = {
     description:
       "Manage primary and linked Git worktrees across every enrolled agent.",
     agentOffline: "The agent is offline.",
+    worktreeUnavailable: "This worktree is unavailable.",
     agentUnsupported: "Update the agent to enable iOS builds.",
     iosBuildNotConfigured:
-      "Add an iOS App project and build configuration to this codebase first.",
+      "Add an iOS App project and build configuration in repository settings first.",
     filters: "Worktree filters",
     searchWorktrees: "Search worktrees",
     searchWorktreesPlaceholder:
@@ -1621,6 +1622,8 @@ const mockTranslations = {
     physicalDevice: "Physical Device",
     device: "Device",
     selectDevice: "Select a device",
+    anySimulator: "Any iOS Simulator",
+    anyPhysicalDevice: "Any Physical iOS Device",
     scripts: "Build scripts",
     advancedSettings: "Advanced settings",
     priorBuildForTesting: "Prior Build for Testing",
@@ -1629,6 +1632,8 @@ const mockTranslations = {
       "Run a successful Build for Testing with this configuration first.",
     priorBuildSummary: "uses Build for Testing {id}",
     developmentTeam: "Development team",
+    testPlan: "Test plan",
+    schemeDefaultTestPlan: "Scheme default",
     packageResolution: "Package resolution",
     codeCoverage: "Enable code coverage",
     allowProvisioningUpdates: "Allow provisioning updates",

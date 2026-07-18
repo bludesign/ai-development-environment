@@ -43,15 +43,15 @@ beforeEach(() => {
               },
               scheme: "RemovedScheme",
               buildConfiguration: "LegacyDebug",
-              defaultAction: "BUILD",
-              advancedSettings: {},
+              defaultAction: "BUILD_FOR_TESTING",
+              advancedSettings: { testPlan: "TestPlan" },
               observation: {
                 id: "observation-1",
                 scopeKey: "worktree:worktree-1",
                 status: "ERROR",
                 schemes: ["CurrentScheme"],
                 configurations: ["Debug", "Release"],
-                testPlans: [],
+                testPlans: ["TestPlan"],
                 error: "Scheme was removed",
                 stale: true,
                 headSha: "abc123",
@@ -110,6 +110,7 @@ describe("iOS project source card", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("TestPlan")).toBeDefined();
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation DiscoverBuildSources"),
