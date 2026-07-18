@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { posix, win32 } from "node:path";
 
 import {
   AI_TOOLS,
@@ -145,6 +145,24 @@ function rootParts(
   return [".opencode", "skills"];
 }
 
+function remotePath(value: string): typeof posix | typeof win32 {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\")
+    ? win32
+    : posix;
+}
+
+function remoteJoin(base: string, ...parts: string[]): string {
+  return remotePath(base).join(base, ...parts);
+}
+
+function remoteDirname(value: string): string {
+  return remotePath(value).dirname(value);
+}
+
+function remoteBasename(value: string): string {
+  return remotePath(value).basename(value);
+}
+
 export class SkillsService {
   constructor(private readonly agentControl: AgentControlService) {
     this.agentControl.registerCompletionHandler(SKILL_SCAN_JOB_KIND, (job) =>
@@ -277,6 +295,12 @@ export class SkillsService {
       throw new Error("Skill names must be unique");
     }
     const skillId = input.id ?? randomUUID();
+    const previousGroups = input.id
+      ? await prisma.skillGroupSkill.findMany({
+          where: { skillId },
+          select: { groupId: true },
+        })
+      : [];
     await prisma.$transaction(async (transaction) => {
       await transaction.skill.upsert({
         where: { id: skillId },
@@ -317,7 +341,10 @@ export class SkillsService {
       }
     });
     this.publish();
-    await this.scheduleAutoSync(uniqueGroups);
+    await this.scheduleAutoSync([
+      ...uniqueGroups,
+      ...previousGroups.map((group) => group.groupId),
+    ]);
     return (await this.getSkill(skillId))!;
   }
 
@@ -683,7 +710,7 @@ export class SkillsService {
               lastSeenAt: observedAt,
             },
             update: {
-              skillId: skill && !skill.deletedAt ? skill.id : null,
+              skillId: skill && !skill.deletedAt ? skill.id : undefined,
               codebaseId: installation.codebaseId,
               worktreeId: installation.worktreeId,
               scope: installation.scope,
@@ -774,7 +801,7 @@ export class SkillsService {
         const home = homeByAgent.get(agentId);
         if (!home) continue;
         for (const rootKind of selectSharedSkillRoots(tools, "GLOBAL")) {
-          const rootPath = join(home, ...rootParts("GLOBAL", rootKind));
+          const rootPath = remoteJoin(home, ...rootParts("GLOBAL", rootKind));
           for (const skill of skills) {
             desired.push({
               skill,
@@ -785,13 +812,15 @@ export class SkillsService {
               rootKind,
               folder: null,
               rootPath,
-              targetPath: join(rootPath, skill.name),
+              targetPath: remoteJoin(rootPath, skill.name),
             });
           }
         }
       }
     }
     const groups = await prisma.skillGroup.findMany({
+      where:
+        run.kind === "GROUP" && run.groupId ? { id: run.groupId } : undefined,
       include: {
         skills: {
           where: { skill: { deletedAt: null } },
@@ -826,7 +855,7 @@ export class SkillsService {
           ];
           for (const target of targets) {
             for (const rootKind of roots) {
-              const rootPath = join(
+              const rootPath = remoteJoin(
                 target.folder,
                 ...rootParts("PROJECT", rootKind),
               );
@@ -840,7 +869,7 @@ export class SkillsService {
                   rootKind,
                   folder: target.folder,
                   rootPath,
-                  targetPath: join(rootPath, membership.skill.name),
+                  targetPath: remoteJoin(rootPath, membership.skill.name),
                 });
               }
             }
@@ -853,6 +882,32 @@ export class SkillsService {
         desired.map((item) => [`${item.agentId}\0${item.targetPath}`, item]),
       ).values(),
     ];
+  }
+
+  private installationWhere(
+    run: { kind: string; groupId: string | null },
+    excludedAgentIds: Set<string>,
+  ): Prisma.SkillInstallationWhereInput {
+    return {
+      present: true,
+      ...(excludedAgentIds.size
+        ? { agentId: { notIn: [...excludedAgentIds] } }
+        : {}),
+      ...(run.kind === "GROUP"
+        ? {
+            scope: "PROJECT",
+            ...(run.groupId
+              ? {
+                  codebase: {
+                    repository: {
+                      skillGroups: { some: { groupId: run.groupId } },
+                    },
+                  },
+                }
+              : {}),
+          }
+        : {}),
+    };
   }
 
   private async buildPlan(runId: string) {
@@ -870,27 +925,29 @@ export class SkillsService {
     await prisma.skillSyncItem.deleteMany({
       where: { runId, direction: { not: "SCAN" } },
     });
-    const [skills, deletedSkills, installations, desired] = await Promise.all([
-      prisma.skill.findMany({
-        where: { deletedAt: null },
-        include: skillInclude,
-      }),
-      prisma.skill.findMany({ where: { deletedAt: { not: null } } }),
-      prisma.skillInstallation.findMany({
-        where: {
-          present: true,
-          ...(excludedAgentIds.size
-            ? { agentId: { notIn: [...excludedAgentIds] } }
-            : {}),
-          ...(run.kind === "GROUP" ? { scope: "PROJECT" } : {}),
-        },
-        include: { baseline: true },
-      }),
-      this.desiredLocations(run, excludedAgentIds),
-    ]);
+    const [skills, deletedSkills, installations, desired, protectedDesired] =
+      await Promise.all([
+        prisma.skill.findMany({
+          where: { deletedAt: null },
+          include: skillInclude,
+        }),
+        prisma.skill.findMany({ where: { deletedAt: { not: null } } }),
+        prisma.skillInstallation.findMany({
+          where: this.installationWhere(run, excludedAgentIds),
+          include: { baseline: true },
+        }),
+        this.desiredLocations(run, excludedAgentIds),
+        run.kind === "GROUP" && run.groupId
+          ? this.desiredLocations({ ...run, groupId: null }, excludedAgentIds)
+          : this.desiredLocations(run, excludedAgentIds),
+      ]);
     const skillsByName = new Map(skills.map((skill) => [skill.name, skill]));
+    const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
     const deletedByName = new Map(
       deletedSkills.map((skill) => [skill.name, skill]),
+    );
+    const deletedById = new Map(
+      deletedSkills.map((skill) => [skill.id, skill]),
     );
     const targetHashesByName = new Map<string, string[]>();
     for (const installation of installations) {
@@ -930,9 +987,25 @@ export class SkillsService {
       }
     }
     for (const installation of installations) {
-      const skill = skillsByName.get(installation.skillName);
-      const deletedSkill = deletedByName.get(installation.skillName);
+      const associatedSkillId =
+        installation.baseline?.skillId ?? installation.skillId;
+      const skill =
+        (associatedSkillId ? skillsById.get(associatedSkillId) : undefined) ??
+        skillsByName.get(installation.skillName);
+      const deletedSkill =
+        (associatedSkillId ? deletedById.get(associatedSkillId) : undefined) ??
+        deletedByName.get(installation.skillName);
+      const renamedManaged =
+        Boolean(installation.baseline) &&
+        Boolean(skill) &&
+        skill!.name !== installation.skillName;
       const desiredForInstallation = desired.find(
+        (target) =>
+          target.agentId === installation.agentId &&
+          target.rootPath === installation.rootPath &&
+          target.skill.name === installation.skillName,
+      );
+      const protectedDesiredForInstallation = protectedDesired.find(
         (target) =>
           target.agentId === installation.agentId &&
           target.rootPath === installation.rootPath &&
@@ -963,6 +1036,16 @@ export class SkillsService {
       if (deletedSkill && installation.baseline && !installation.tracked) {
         direction = "DELETE_MANAGED";
         status = "READY";
+      } else if (renamedManaged) {
+        direction = installation.tracked ? "CONFLICT" : "DELETE_MANAGED";
+        status = installation.tracked ? "BLOCKED" : "READY";
+      } else if (
+        !protectedDesiredForInstallation &&
+        installation.baseline &&
+        !installation.tracked
+      ) {
+        direction = "DELETE_MANAGED";
+        status = "READY";
       } else if (!skill) {
         direction = divergentTargetNames.has(installation.skillName)
           ? "CONFLICT"
@@ -982,23 +1065,18 @@ export class SkillsService {
             });
         status = direction === "CONFLICT" ? "BLOCKED" : "READY";
       } else if (
-        !desiredForInstallation &&
-        installation.scope === "PROJECT" &&
-        installation.baseline &&
-        !installation.tracked
-      ) {
-        direction = "DELETE_MANAGED";
-        status = "READY";
-      } else if (
-        !desiredForInstallation &&
+        !protectedDesiredForInstallation &&
         ["CURSOR", "GITHUB_COPILOT", "CODEX_LEGACY", "OPENCODE"].includes(
           installation.rootKind,
         )
       ) {
-        const canonicalExists = desired.some(
+        const canonicalExists = protectedDesired.some(
           (target) =>
             target.agentId === installation.agentId &&
             target.scope === installation.scope &&
+            (installation.scope === "GLOBAL" ||
+              (target.codebaseId === installation.codebaseId &&
+                target.worktreeId === installation.worktreeId)) &&
             target.skill.name === installation.skillName &&
             target.skill.packageHash === installation.packageHash,
         );
@@ -1132,7 +1210,7 @@ export class SkillsService {
             value.installation?.scope === candidate.scope &&
             (candidate.scope === "GLOBAL" ||
               value.installation?.rootPath ===
-                join(
+                remoteJoin(
                   candidate.folder!,
                   ...rootParts("PROJECT", candidate.rootKind),
                 )),
@@ -1443,12 +1521,7 @@ export class SkillsService {
     );
     const desired = await this.desiredLocations(run, excludedAgentIds);
     const installations = await prisma.skillInstallation.findMany({
-      where: {
-        present: true,
-        ...(excludedAgentIds.size
-          ? { agentId: { notIn: [...excludedAgentIds] } }
-          : {}),
-      },
+      where: this.installationWhere(run, excludedAgentIds),
     });
     const operations = new Map<string, Array<Record<string, unknown>>>();
     const deploymentRefs = new Map<
@@ -1549,6 +1622,9 @@ export class SkillsService {
           (target) =>
             target.agentId === installation.agentId &&
             target.scope === installation.scope &&
+            (installation.scope === "GLOBAL" ||
+              (target.codebaseId === installation.codebaseId &&
+                target.worktreeId === installation.worktreeId)) &&
             target.skill.name === installation.skillName &&
             target.skill.packageHash === installation.packageHash,
         ),
@@ -1676,7 +1752,7 @@ export class SkillsService {
           where: {
             agentId_rootPath_skillName: {
               agentId: deployment.agentId,
-              rootPath: dirname(deployment.targetPath),
+              rootPath: remoteDirname(deployment.targetPath),
               skillName: deployment.skill.name,
             },
           },
@@ -1688,7 +1764,7 @@ export class SkillsService {
             worktreeId: deployment.worktreeId,
             scope: deployment.scope,
             rootKind: deployment.rootKind,
-            rootPath: dirname(deployment.targetPath),
+            rootPath: remoteDirname(deployment.targetPath),
             skillName: deployment.skill.name,
             description: deployment.skill.description,
             packageHash: deployment.desiredHash,
@@ -1753,8 +1829,8 @@ export class SkillsService {
         await prisma.skillInstallation.updateMany({
           where: {
             agentId: job.agentId,
-            rootPath: dirname(applied.path),
-            skillName: basename(applied.path),
+            rootPath: remoteDirname(applied.path),
+            skillName: remoteBasename(applied.path),
           },
           data: { present: false, lastSeenAt: new Date() },
         });

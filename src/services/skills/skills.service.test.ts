@@ -17,6 +17,345 @@ function serviceWith(cancelJob = vi.fn()) {
   return { cancelJob, service: new SkillsService(agentControl) };
 }
 
+const settings = {
+  id: "default",
+  autoSyncProjectGroups: false,
+  cursorEnabled: false,
+  githubCopilotEnabled: false,
+  codexEnabled: true,
+  claudeEnabled: false,
+  openCodeEnabled: false,
+};
+
+function skill(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "skill-1",
+    name: "swift-review",
+    description: "Review Swift code safely.",
+    syncGlobally: true,
+    packageHash: "hash-1",
+    deletedAt: null,
+    files: [],
+    groups: [],
+    ...overrides,
+  };
+}
+
+describe("SkillsService synchronization planning", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("uses Windows path semantics for paths reported by a Windows agent", async () => {
+    const prisma = {
+      skillToolObservation: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            agentId: "agent-1",
+            tool: "CODEX",
+            configured: true,
+            homePath: "C:\\Users\\Ada",
+          },
+        ]),
+      },
+      skill: { findMany: vi.fn().mockResolvedValue([skill()]) },
+      skillGroup: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    vi.spyOn(service, "settings").mockResolvedValue(settings as never);
+
+    const desired = await (
+      service as unknown as {
+        desiredLocations(run: {
+          kind: string;
+          groupId: string | null;
+        }): Promise<Array<{ rootPath: string; targetPath: string }>>;
+      }
+    ).desiredLocations({ kind: "ALL", groupId: null });
+
+    expect(desired).toEqual([
+      expect.objectContaining({
+        rootPath: "C:\\Users\\Ada\\.agents\\skills",
+        targetPath: "C:\\Users\\Ada\\.agents\\skills\\swift-review",
+      }),
+    ]);
+  });
+
+  test("queries only the selected group for a targeted group plan", async () => {
+    const prisma = {
+      skillToolObservation: { findMany: vi.fn().mockResolvedValue([]) },
+      skillGroup: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    vi.spyOn(service, "settings").mockResolvedValue(settings as never);
+
+    await (
+      service as unknown as {
+        desiredLocations(run: {
+          kind: string;
+          groupId: string | null;
+        }): Promise<unknown[]>;
+      }
+    ).desiredLocations({ kind: "GROUP", groupId: "group-a" });
+
+    expect(prisma.skillGroup.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "group-a" } }),
+    );
+  });
+
+  test("deletes disabled global and renamed managed copies", async () => {
+    const disabled = skill({
+      id: "skill-disabled",
+      name: "disabled-global",
+      syncGlobally: false,
+    });
+    const renamed = skill({ id: "skill-renamed", name: "new-name" });
+    const installations = [
+      {
+        id: "install-disabled",
+        skillId: "skill-disabled",
+        agentId: "agent-1",
+        codebaseId: null,
+        worktreeId: null,
+        scope: "GLOBAL",
+        rootKind: "AGENTS",
+        rootPath: "/Users/ada/.agents/skills",
+        skillName: "disabled-global",
+        packageHash: "locally-modified-hash",
+        tracked: false,
+        baseline: { skillId: "skill-disabled", packageHash: "hash-1" },
+      },
+      {
+        id: "install-renamed",
+        skillId: null,
+        agentId: "agent-1",
+        codebaseId: null,
+        worktreeId: null,
+        scope: "GLOBAL",
+        rootKind: "AGENTS",
+        rootPath: "/Users/ada/.agents/skills",
+        skillName: "old-name",
+        packageHash: "hash-1",
+        tracked: false,
+        baseline: { skillId: "skill-renamed", packageHash: "hash-1" },
+      },
+    ];
+    const createMany = vi.fn().mockResolvedValue({ count: 3 });
+    const prisma = {
+      skillSyncRun: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue({ id: "run-1", kind: "ALL", groupId: null }),
+      },
+      skillSyncItem: {
+        findMany: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),
+        deleteMany: vi.fn(),
+        createMany,
+      },
+      skill: {
+        findMany: vi
+          .fn()
+          .mockResolvedValueOnce([disabled, renamed])
+          .mockResolvedValueOnce([]),
+      },
+      skillInstallation: { findMany: vi.fn().mockResolvedValue(installations) },
+      skillSyncBaseline: { upsert: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    vi.spyOn(service, "settings").mockResolvedValue(settings as never);
+    vi.spyOn(
+      service as unknown as {
+        desiredLocations(): Promise<unknown[]>;
+      },
+      "desiredLocations",
+    ).mockResolvedValue([
+      {
+        skill: renamed,
+        agentId: "agent-1",
+        codebaseId: null,
+        worktreeId: null,
+        scope: "GLOBAL",
+        rootKind: "AGENTS",
+        folder: null,
+        rootPath: "/Users/ada/.agents/skills",
+        targetPath: "/Users/ada/.agents/skills/new-name",
+      },
+    ]);
+    vi.spyOn(
+      service as unknown as { refreshRunStatus(): Promise<void> },
+      "refreshRunStatus",
+    ).mockResolvedValue();
+
+    await (
+      service as unknown as { buildPlan(runId: string): Promise<void> }
+    ).buildPlan("run-1");
+
+    const items = createMany.mock.calls[0]![0].data as Array<{
+      installationId?: string;
+      skillId?: string;
+      direction: string;
+    }>;
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          installationId: "install-disabled",
+          skillId: "skill-disabled",
+          direction: "DELETE_MANAGED",
+        }),
+        expect.objectContaining({
+          skillId: "skill-renamed",
+          direction: "EXPORT",
+        }),
+        expect.objectContaining({
+          installationId: "install-renamed",
+          skillId: "skill-renamed",
+          direction: "DELETE_MANAGED",
+        }),
+      ]),
+    );
+  });
+
+  test("keeps copies in a selected group's repository when another group still desires them", async () => {
+    const sharedSkill = skill();
+    const installation = {
+      id: "install-1",
+      skillId: "skill-1",
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      worktreeId: null,
+      scope: "PROJECT",
+      rootKind: "AGENTS",
+      rootPath: "/repo/.agents/skills",
+      skillName: "swift-review",
+      packageHash: "hash-1",
+      tracked: false,
+      baseline: { skillId: "skill-1", packageHash: "hash-1" },
+    };
+    const protectedTarget = {
+      skill: sharedSkill,
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      worktreeId: null,
+      scope: "PROJECT",
+      rootKind: "AGENTS",
+      folder: "/repo",
+      rootPath: "/repo/.agents/skills",
+      targetPath: "/repo/.agents/skills/swift-review",
+    };
+    const createMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findInstallations = vi.fn().mockResolvedValue([installation]);
+    const prisma = {
+      skillSyncRun: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "run-1",
+          kind: "GROUP",
+          groupId: "group-a",
+        }),
+      },
+      skillSyncItem: {
+        findMany: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),
+        deleteMany: vi.fn(),
+        createMany,
+      },
+      skill: {
+        findMany: vi
+          .fn()
+          .mockResolvedValueOnce([sharedSkill])
+          .mockResolvedValueOnce([]),
+      },
+      skillInstallation: { findMany: findInstallations },
+      skillSyncBaseline: { upsert: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    vi.spyOn(service, "settings").mockResolvedValue(settings as never);
+    vi.spyOn(
+      service as unknown as { desiredLocations(): Promise<unknown[]> },
+      "desiredLocations",
+    )
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([protectedTarget]);
+    vi.spyOn(
+      service as unknown as { refreshRunStatus(): Promise<void> },
+      "refreshRunStatus",
+    ).mockResolvedValue();
+
+    await (
+      service as unknown as { buildPlan(runId: string): Promise<void> }
+    ).buildPlan("run-1");
+
+    expect(findInstallations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          scope: "PROJECT",
+          codebase: {
+            repository: {
+              skillGroups: { some: { groupId: "group-a" } },
+            },
+          },
+        }),
+      }),
+    );
+    expect(createMany.mock.calls[0]![0].data).toEqual([
+      expect.objectContaining({
+        installationId: "install-1",
+        direction: "UNCHANGED",
+      }),
+    ]);
+  });
+});
+
+describe("SkillsService.saveSkill", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("reconciles groups removed from an existing skill", async () => {
+    const transaction = {
+      skill: { upsert: vi.fn() },
+      skillFile: { deleteMany: vi.fn(), createMany: vi.fn() },
+      skillGroupSkill: { deleteMany: vi.fn(), createMany: vi.fn() },
+    };
+    const prisma = {
+      skillGroup: { count: vi.fn().mockResolvedValue(0) },
+      skill: { findUnique: vi.fn().mockResolvedValue(null) },
+      skillGroupSkill: {
+        findMany: vi.fn().mockResolvedValue([{ groupId: "group-old" }]),
+      },
+      $transaction: vi.fn(async (callback) => callback(transaction)),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const { service } = serviceWith();
+    const scheduleAutoSync = vi
+      .spyOn(
+        service as unknown as {
+          scheduleAutoSync(groupIds: string[]): Promise<void>;
+        },
+        "scheduleAutoSync",
+      )
+      .mockResolvedValue();
+    vi.spyOn(service, "getSkill").mockResolvedValue(skill() as never);
+
+    await service.saveSkill({
+      id: "skill-1",
+      name: "swift-review",
+      description: "Review Swift code safely.",
+      syncGlobally: true,
+      groupIds: [],
+      files: [
+        {
+          path: "SKILL.md",
+          contentsBase64: Buffer.from(
+            "---\nname: swift-review\ndescription: Review Swift code safely.\n---\n",
+          ).toString("base64"),
+          executable: false,
+        },
+      ],
+    });
+
+    expect(scheduleAutoSync).toHaveBeenCalledWith(["group-old"]);
+  });
+});
+
 describe("SkillsService.skipPending", () => {
   beforeEach(() => vi.clearAllMocks());
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -153,5 +153,54 @@ describe("skill apply handler", () => {
         log,
       ),
     ).rejects.toThrow(/tracked by Git/);
+  });
+
+  test("preserves exclude rules after the managed block", async () => {
+    const folder = await repository();
+    const excludePath = join(folder, ".git", "info", "exclude");
+    await writeFile(
+      excludePath,
+      [
+        "*.local",
+        "",
+        "# BEGIN ai-development-environment skill sync",
+        "/.agents/skills/existing/",
+        "# END ai-development-environment skill sync",
+        "",
+        "generated/",
+        "!generated/keep.txt",
+        "",
+      ].join("\n"),
+    );
+    const packageFiles = files();
+
+    await applySkills(
+      {
+        operations: [
+          {
+            kind: "WRITE",
+            scope: "PROJECT",
+            rootKind: "AGENTS",
+            folder,
+            package: {
+              name: "swift-review",
+              description: "Review Swift code safely.",
+              packageHash: hashSkillFiles(packageFiles),
+              files: packageFiles,
+            },
+            manageGitExclude: true,
+          },
+        ],
+      },
+      30_000,
+      signal,
+      log,
+    );
+
+    const exclude = await readFile(excludePath, "utf8");
+    expect(exclude).toContain("*.local");
+    expect(exclude).toContain("/.agents/skills/existing/");
+    expect(exclude).toContain("/.agents/skills/swift-review/");
+    expect(exclude).toContain("generated/\n!generated/keep.txt");
   });
 });

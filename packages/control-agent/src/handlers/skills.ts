@@ -379,10 +379,18 @@ async function updateManagedExclude(
   }
   const start = existing.indexOf(MANAGED_EXCLUDE_START);
   const end = existing.indexOf(MANAGED_EXCLUDE_END);
-  const before =
-    start >= 0 ? existing.slice(0, start).trimEnd() : existing.trimEnd();
+  const hasManagedBlock = start >= 0 && end > start;
+  const before = hasManagedBlock
+    ? existing.slice(0, start).trimEnd()
+    : existing.trimEnd();
+  const after = hasManagedBlock
+    ? existing
+        .slice(end + MANAGED_EXCLUDE_END.length)
+        .trimStart()
+        .trimEnd()
+    : "";
   const managed = new Set<string>();
-  if (start >= 0 && end > start) {
+  if (hasManagedBlock) {
     for (const line of existing
       .slice(start + MANAGED_EXCLUDE_START.length, end)
       .split(/\r?\n/)) {
@@ -397,7 +405,7 @@ async function updateManagedExclude(
     : "";
   await writeFile(
     excludePath,
-    `${[before, block].filter(Boolean).join("\n\n")}\n`,
+    `${[before, block, after].filter(Boolean).join("\n\n")}\n`,
     "utf8",
   );
 }
