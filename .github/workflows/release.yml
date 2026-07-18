@@ -224,8 +224,6 @@ jobs:
       always() &&
       ((github.event_name == 'push' && needs.tag.result == 'success') ||
        github.event_name == 'workflow_dispatch')
-    # npm provenance/trusted publishing requires a GitHub-hosted runner; the self-hosted
-    # "dependabot" runner will not work here.
     runs-on: ubuntu-latest
     permissions:
       contents: read
