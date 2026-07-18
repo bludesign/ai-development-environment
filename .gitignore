@@ -21,6 +21,7 @@
 # production
 /build
 /packages/*/dist/
+/.npm-staging/
 
 # misc
 .DS_Store

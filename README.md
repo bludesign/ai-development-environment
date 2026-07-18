@@ -91,6 +91,21 @@ brew services start ai-development-environment
 
 The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL`, `AGENT_WS_HOSTNAME`, and `AGENT_WS_PORT` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
 
+## npm
+
+The server and the agent are also published to npm as [`@ai-development-environment/server`](https://www.npmjs.com/package/@ai-development-environment/server) (a prebuilt standalone build) and [`@ai-development-environment/control-agent`](https://www.npmjs.com/package/@ai-development-environment/control-agent):
+
+```bash
+npm install -g @ai-development-environment/server @ai-development-environment/control-agent
+ai-development-environment
+```
+
+The `ai-development-environment` command applies pending database migrations, then starts the server on `http://127.0.0.1:3090` with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`, storing its SQLite database at `~/.ai-development-environment/production.db`. It accepts the same `HOSTNAME`, `PORT`, `AGENT_WS_HOSTNAME`, `AGENT_WS_PORT`, and `DATABASE_URL` environment variables as the Homebrew service.
+
+Unlike Homebrew, npm does not install `cloudflared`; install it separately (for example `brew install cloudflared`) before running Cloudflared jobs — `control-agent doctor` checks for it.
+
+npm versions track the repository's `vX.Y.Z` release tags; the `publish-npm` job in `.github/workflows/release.yml` publishes both packages via npm trusted publishing on every release.
+
 ## Control agents
 
 The generic TypeScript agent lives in `packages/control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
