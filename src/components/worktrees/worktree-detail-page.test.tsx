@@ -59,6 +59,7 @@ class ResizeObserverMock {
 function overview(
   overrides: {
     online?: boolean;
+    iosBuildConfigured?: boolean;
     worktrees?: WorktreeOverview["agents"][number]["codebases"][number]["worktrees"];
   } = {},
 ): WorktreeOverview {
@@ -101,6 +102,7 @@ function overview(
         },
         codebases: [
           {
+            iosBuildConfigured: overrides.iosBuildConfigured ?? false,
             repository: {
               id: "repository-1",
               canonicalOrigin: "github.com/openai/codex",
@@ -272,7 +274,7 @@ describe("WorktreeDetailPage", () => {
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {
         return {
-          worktreeOverview: overview(),
+          worktreeOverview: overview({ iosBuildConfigured: true }),
           builds: { items: [buildHistoryItem], nextCursor: null },
         } as never;
       }
@@ -337,6 +339,23 @@ describe("WorktreeDetailPage", () => {
     );
     expect(await screen.findByText("src/worktree-details.tsx")).toBeDefined();
     expect(screen.getByText("Add worktree details")).toBeDefined();
+    const changeRow = screen.getByRole("button", {
+      name: /src\/worktree-details\.tsx/,
+    });
+    expect(changeRow.className).toContain("py-1.5");
+    expect(changeRow.className).toContain("min-h-8");
+    const coverageHeader = screen
+      .getByText("Code coverage")
+      .closest<HTMLElement>('[data-slot="card-header"]');
+    expect(coverageHeader).not.toBeNull();
+    const coverageLayout = coverageHeader!.firstElementChild as HTMLElement;
+    expect(coverageLayout.className).toContain("sm:flex-row");
+    expect(coverageLayout.className).toContain("sm:justify-between");
+    expect(
+      within(coverageHeader!).getByRole("button", {
+        name: "Generate code coverage",
+      }),
+    ).toBeDefined();
     expect(
       screen.getByRole("button", { name: "Open in VS Code" }),
     ).toBeDefined();

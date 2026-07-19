@@ -98,6 +98,35 @@ function humanizeConstant(value: string): string {
     .join(" ");
 }
 
+function humanizeIdentifier(value: string): string {
+  return humanizeConstant(
+    value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replaceAll("-", "_"),
+  );
+}
+
+const ADVANCED_SETTING_ORDER = [
+  "packageResolution",
+  "disablePackageRepositoryCache",
+  "signingStyle",
+  "developmentTeam",
+  "codeSignIdentity",
+  "provisioningProfileSpecifier",
+  "productBundleIdentifier",
+  "allowProvisioningUpdates",
+  "allowProvisioningDeviceRegistration",
+  "testPlan",
+  "codeCoverage",
+  "parseTestResults",
+  "parallelTesting",
+  "parallelTestingWorkers",
+  "onlyTesting",
+  "skipTesting",
+  "buildSettingOverrides",
+  "priorBuildForTestingId",
+  "priorTestProductsPath",
+  "priorXctestrunPath",
+] as const;
+
 export function BuildDetailPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
@@ -261,19 +290,22 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   const testAction = build
     ? ["TEST", "TEST_WITHOUT_BUILDING"].includes(build.action)
     : false;
-  const coverageAvailable =
-    resultBundle?.metadata.coverageAvailable === true ||
-    (
-      build?.snapshot.configuration as
-        { advancedSettings?: { codeCoverage?: boolean } } | undefined
-    )?.advancedSettings?.codeCoverage === true;
   const snapshot = build?.snapshot ?? {};
   const repository = snapshot.repository as { name?: string } | undefined;
   const worktree = snapshot.worktree as
     | { branch?: string | null; folder?: string; headSha?: string | null }
     | undefined;
   const configuration = snapshot.configuration as
-    { name?: string; scheme?: string; buildConfiguration?: string } | undefined;
+    | {
+        name?: string;
+        scheme?: string;
+        buildConfiguration?: string;
+        advancedSettings?: Record<string, unknown>;
+      }
+    | undefined;
+  const coverageAvailable =
+    resultBundle?.metadata.coverageAvailable === true ||
+    configuration?.advancedSettings?.codeCoverage === true;
   const date = (value: string | null) =>
     value ? new Date(value).toLocaleString(locale) : "—";
 
@@ -523,6 +555,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               </pre>
             </CardContent>
           </Card>
+          <AdvancedSettingsCard settings={configuration?.advancedSettings} />
           <Card>
             <CardHeader>
               <CardTitle>{t("commandSummary")}</CardTitle>
@@ -753,6 +786,110 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
       />
     </section>
   );
+}
+
+function AdvancedSettingsCard({
+  settings,
+}: {
+  settings: Record<string, unknown> | undefined;
+}) {
+  const t = useTranslations("builds");
+  const labels: Record<string, string> = {
+    packageResolution: t("packageResolution"),
+    disablePackageRepositoryCache: t("disablePackageRepositoryCache"),
+    signingStyle: t("signingStyle"),
+    developmentTeam: t("developmentTeam"),
+    codeSignIdentity: t("codeSignIdentity"),
+    provisioningProfileSpecifier: t("provisioningProfileSpecifier"),
+    productBundleIdentifier: t("productBundleIdentifier"),
+    allowProvisioningUpdates: t("allowProvisioningUpdates"),
+    allowProvisioningDeviceRegistration: t(
+      "allowProvisioningDeviceRegistration",
+    ),
+    testPlan: t("testPlan"),
+    codeCoverage: t("codeCoverage"),
+    parseTestResults: t("parseTestResults"),
+    parallelTesting: t("parallelTesting"),
+    parallelTestingWorkers: t("parallelTestingWorkers"),
+    onlyTesting: t("onlyTesting"),
+    skipTesting: t("skipTesting"),
+    buildSettingOverrides: t("buildSettingOverrides"),
+    priorBuildForTestingId: t("priorBuildForTesting"),
+    priorTestProductsPath: t("priorTestProductsPath"),
+    priorXctestrunPath: t("priorXctestrunPath"),
+  };
+  const known = new Set<string>(ADVANCED_SETTING_ORDER);
+  const keys = settings
+    ? [
+        ...ADVANCED_SETTING_ORDER.filter((key) => Object.hasOwn(settings, key)),
+        ...Object.keys(settings)
+          .filter((key) => !known.has(key))
+          .sort(),
+      ]
+    : [];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("advancedSettings")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {settings && keys.length ? (
+          <dl className="divide-y text-sm">
+            {keys.map((key) => (
+              <div
+                className="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0"
+                key={key}
+              >
+                <dt className="min-w-0 text-muted-foreground">
+                  {labels[key] ?? humanizeIdentifier(key)}
+                </dt>
+                <dd className="max-w-[60%] min-w-0 text-right">
+                  <AdvancedSettingValue value={settings[key]} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {t("advancedSettingsNotCaptured")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdvancedSettingValue({ value }: { value: unknown }) {
+  const t = useTranslations("builds");
+  if (typeof value === "boolean") {
+    return (
+      <Badge variant={value ? "default" : "secondary"}>
+        {t(value ? "settingsEnabled" : "settingsDisabled")}
+      </Badge>
+    );
+  }
+  if (value === null || value === undefined || value === "") return <>—</>;
+  if (Array.isArray(value)) {
+    return value.length ? (
+      <span className="break-words font-mono text-xs">
+        {value.map(String).join(", ")}
+      </span>
+    ) : (
+      <>—</>
+    );
+  }
+  if (typeof value === "object") {
+    const serialized = JSON.stringify(value);
+    return serialized && serialized !== "{}" ? (
+      <span className="break-all font-mono text-xs">{serialized}</span>
+    ) : (
+      <>—</>
+    );
+  }
+  if (typeof value === "string" && /^[A-Z][A-Z0-9_]*$/.test(value)) {
+    return <>{humanizeConstant(value)}</>;
+  }
+  return <span className="break-words font-mono text-xs">{String(value)}</span>;
 }
 
 function TestResultsCard({ report }: { report: BuildReport }) {

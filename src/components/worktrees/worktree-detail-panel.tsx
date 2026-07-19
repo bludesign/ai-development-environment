@@ -37,7 +37,7 @@ export function WorktreeDetailPanel({
   if (inline) return <InlineWorktreeDetail detail={detail} />;
   return (
     <div
-      className={cn("w-full space-y-6", inline && "border-t pt-4")}
+      className={cn("w-full space-y-4", inline && "border-t pt-4")}
       data-testid="worktree-detail"
       data-worktree-navigation-ignore={inline ? "true" : undefined}
     >
@@ -181,24 +181,40 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
               <TableBody>
                 {detail.changes.map((change) => (
                   <TableRow key={change.path}>
-                    <TableCell className="font-mono">
-                      <span title={change.path}>{change.path}</span>
+                    <TableCell className="max-w-0 px-2 py-1.5 font-mono">
+                      <span className="block truncate" title={change.path}>
+                        {change.path}
+                      </span>
                     </TableCell>
-                    <TableCell className="text-right">
-                      {change.staged && (
-                        <ChangeState
-                          additions={change.stagedAdditions}
-                          deletions={change.stagedDeletions}
-                          label={t("staged")}
-                        />
-                      )}
-                      {change.unstaged && (
-                        <ChangeState
-                          additions={change.unstagedAdditions}
-                          deletions={change.unstagedDeletions}
-                          label={t("unstaged")}
-                        />
-                      )}
+                    <TableCell className="w-px px-2 py-1.5">
+                      <div className="flex items-center justify-end gap-2">
+                        {change.conflicted && (
+                          <Badge className="px-1.5" variant="destructive">
+                            {t("conflicted")}
+                          </Badge>
+                        )}
+                        {change.staged && (
+                          <ChangeState
+                            additions={change.stagedAdditions}
+                            deletions={change.stagedDeletions}
+                            label={t("staged")}
+                          />
+                        )}
+                        {change.unstaged && (
+                          <ChangeState
+                            additions={change.unstagedAdditions}
+                            deletions={change.unstagedDeletions}
+                            label={t("unstaged")}
+                          />
+                        )}
+                        {change.untracked && (
+                          <ChangeState
+                            additions={change.unstagedAdditions}
+                            deletions={change.unstagedDeletions}
+                            label={t("untracked")}
+                          />
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -224,17 +240,21 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
               <TableBody>
                 {detail.commits.map((commit) => (
                   <TableRow key={commit.sha}>
-                    <TableCell className="w-24 font-mono text-muted-foreground">
+                    <TableCell className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
                       {commit.sha.slice(0, 8)}
                     </TableCell>
-                    <TableCell>
-                      <p className="font-medium">{commit.subject}</p>
-                      <p className="text-muted-foreground">
-                        {commit.authorName} ·{" "}
-                        {new Date(commit.authoredAt).toLocaleString(locale)}
-                      </p>
+                    <TableCell className="max-w-0 px-2 py-1.5">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span className="truncate font-medium">
+                          {commit.subject}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {commit.authorName} ·{" "}
+                          {new Date(commit.authoredAt).toLocaleString(locale)}
+                        </span>
+                      </div>
                     </TableCell>
-                    <TableCell className="w-24 text-right">
+                    <TableCell className="w-24 px-2 py-1.5 text-right">
                       <LineCounts
                         additions={commit.additions}
                         deletions={commit.deletions}
@@ -304,13 +324,13 @@ function ExpandableRow({
     <div>
       <button
         aria-expanded={open}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/40"
+        className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/40"
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
         <ChevronDown
           className={cn(
-            "size-4 shrink-0 transition-transform",
+            "size-3.5 shrink-0 transition-transform",
             open && "rotate-180",
           )}
         />
@@ -320,7 +340,7 @@ function ExpandableRow({
           </span>
         )}
         <span
-          className="min-w-0 flex-1 truncate font-mono text-sm"
+          className="min-w-0 flex-1 truncate font-mono text-xs"
           title={label}
         >
           {label}

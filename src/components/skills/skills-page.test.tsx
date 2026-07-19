@@ -78,6 +78,14 @@ describe("SkillsPage", () => {
     ).toBe("/skills/skill-1");
     expect(screen.getByRole("tab", { name: "Cursor" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Claude Code" })).toBeNull();
+    const mobileSelector = screen.getByRole("combobox", {
+      name: "Skill source",
+    });
+    expect(mobileSelector.closest(".sm\\:hidden")).toBeTruthy();
+    expect(mobileSelector.querySelector("svg")).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Cursor" }).querySelector("svg"),
+    ).toBeTruthy();
     expect(screen.getByText("Database skills")).toBeTruthy();
     expect(screen.getByText("Swift")).toBeTruthy();
   });

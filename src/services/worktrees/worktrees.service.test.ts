@@ -504,6 +504,83 @@ describe("WorktreesService", () => {
     });
   });
 
+  test("waits for a racing diff job and retries lazy diff inspection", async () => {
+    const conflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["codebaseId"] },
+    });
+    const createJob = vi
+      .fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce({ id: "diff-2" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+      getJob: vi.fn((id: string) =>
+        Promise.resolve(
+          id === "diff-active"
+            ? {
+                id,
+                status: "SUCCEEDED",
+                resultJson: '{"diff":{"files":[]}}',
+                error: null,
+              }
+            : {
+                id,
+                status: "SUCCEEDED",
+                resultJson: '{"diff":{"patch":"+ready"}}',
+                error: null,
+              },
+        ),
+      ),
+    } as unknown as AgentControlService;
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      baseBranchOverride: null,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify(["worktree.diff.inspect"]),
+        },
+        repository: { canonicalOrigin: "github.com/openai/codex" },
+      },
+    };
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "diff-active",
+        idempotencyKey: "another-request",
+        kind: "worktree.diff.inspect",
+      })
+      .mockResolvedValueOnce(null);
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+      agentJob: { findFirst, deleteMany },
+    });
+
+    await expect(
+      service(control).inspectDiff(
+        "worktree-1",
+        { scope: "BRANCH", path: "Sources/App.swift" },
+        "request-2",
+      ),
+    ).resolves.toEqual({ patch: "+ready" });
+    expect(createJob).toHaveBeenCalledTimes(2);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: "diff-2", visibility: "SYSTEM" },
+    });
+  });
+
   test("starts a demand-scoped watcher and stops it after unsubscribe", async () => {
     const createJob = vi
       .fn()

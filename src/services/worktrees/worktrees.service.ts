@@ -50,6 +50,10 @@ const ACTIVE_MOVE_STATUSES = [
 ];
 const MISSING_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
+const SERIALIZED_DIFF_JOB_KINDS = new Set<string>([
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_DIFF_ASSET_JOB_KIND,
+]);
 export const WORKTREE_COLORS = [
   "gray",
   "stone",
@@ -236,6 +240,19 @@ function resultObject(job: {
     throw new Error("Worktree job returned an invalid result");
   }
   return value as Record<string, unknown>;
+}
+
+function activeCodebaseJobConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as {
+    code?: unknown;
+    meta?: { target?: unknown };
+  };
+  if (value.code !== "P2002") return false;
+  const target = value.meta?.target;
+  return Array.isArray(target)
+    ? target.includes("codebaseId")
+    : typeof target === "string" && target.includes("codebaseId");
 }
 
 export class WorktreesService {
@@ -1333,7 +1350,7 @@ export class WorktreesService {
 
   async inspect(id: string, requestId: string) {
     const worktree = await this.requireRunnable(id, WORKTREE_INSPECT_JOB_KIND);
-    const job = await this.agentControl.createJob({
+    const job = await this.createSerializedDiffJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1396,7 +1413,7 @@ export class WorktreesService {
     );
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
-    const job = await this.agentControl.createJob({
+    const job = await this.createSerializedDiffJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1521,6 +1538,59 @@ export class WorktreesService {
       baseBranch:
         worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
     };
+  }
+
+  private async createSerializedDiffJob(
+    input: Parameters<AgentControlService["createJob"]>[0] & {
+      codebaseId: string;
+    },
+  ) {
+    const prisma = await getPrismaClient();
+    const deadline = Date.now() + INTERACTIVE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const active = await prisma.agentJob.findFirst({
+        where: {
+          codebaseId: input.codebaseId,
+          status: { in: ACTIVE_STATUSES },
+        },
+        select: { id: true, idempotencyKey: true, kind: true },
+      });
+      if (active) {
+        if (active.idempotencyKey === input.idempotencyKey) {
+          return this.agentControl.createJob(input);
+        }
+        if (!SERIALIZED_DIFF_JOB_KINDS.has(active.kind)) {
+          throw new Error("Another operation is active for this codebase");
+        }
+        await this.waitForSerializedDiffJob(active.id, deadline);
+        continue;
+      }
+      try {
+        return await this.agentControl.createJob(input);
+      } catch (error) {
+        if (!activeCodebaseJobConflict(error)) throw error;
+      }
+    }
+    throw new Error("Another diff request is still active for this codebase");
+  }
+
+  private async waitForSerializedDiffJob(jobId: string, deadline: number) {
+    const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
+    try {
+      while (Date.now() < deadline) {
+        const job = await this.agentControl.getJob(jobId);
+        if (!job || !ACTIVE_STATUSES.includes(job.status)) return;
+        await Promise.race([
+          events.next(),
+          new Promise((resolve) =>
+            setTimeout(resolve, Math.max(0, deadline - Date.now())),
+          ),
+        ]);
+      }
+      throw new Error("Another diff request is still active for this codebase");
+    } finally {
+      await events.return?.();
+    }
   }
 
   private async requireRunnable(

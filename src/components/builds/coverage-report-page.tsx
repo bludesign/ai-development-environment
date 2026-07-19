@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -54,6 +54,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [allFilesOpen, setAllFilesOpen] = useState(false);
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -191,63 +192,109 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           </CardContent>
         </Card>
       )}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("allCoverageFiles")}</CardTitle>
+      <Card className="gap-0 py-0">
+        <CardHeader
+          className={
+            allFilesOpen ? "border-b bg-muted/40 py-3" : "bg-muted/40 py-3"
+          }
+        >
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              aria-expanded={allFilesOpen}
+              className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+              onClick={() => setAllFilesOpen((current) => !current)}
+              type="button"
+              variant="ghost"
+            >
+              <span className="truncate font-medium">
+                {t("allCoverageFiles")}
+              </span>
+            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              <Badge>{files.length}</Badge>
+              <Button
+                aria-expanded={allFilesOpen}
+                aria-label={t(
+                  allFilesOpen
+                    ? "collapseCoverageFiles"
+                    : "expandCoverageFiles",
+                )}
+                onClick={() => setAllFilesOpen((current) => !current)}
+                size="icon-sm"
+                title={t(
+                  allFilesOpen
+                    ? "collapseCoverageFiles"
+                    : "expandCoverageFiles",
+                )}
+                type="button"
+                variant="ghost"
+              >
+                {allFilesOpen ? (
+                  <ChevronDown className="size-5" />
+                ) : (
+                  <ChevronRight className="size-5" />
+                )}
+              </Button>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="relative max-w-xl">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label={t("searchCoverageFiles")}
-              className="pl-9"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("searchCoverageFiles")}
-              value={search}
-            />
-          </div>
-          <div className="overflow-auto rounded-md border">
-            <Table className="min-w-[60rem]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("coverageTarget")}</TableHead>
-                  <TableHead>{t("coverageFile")}</TableHead>
-                  <TableHead className="text-right">
-                    {t("coveredLines")}
-                  </TableHead>
-                  <TableHead className="text-right">
-                    {t("uncoveredLines")}
-                  </TableHead>
-                  <TableHead className="text-right">{t("coverage")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {files.map((file, index) => (
-                  <TableRow key={`${file.target}:${file.path}:${index}`}>
-                    <TableCell>
-                      <Badge variant="outline">{file.target}</Badge>
-                    </TableCell>
-                    <TableCell className="max-w-xl whitespace-normal">
-                      <p className="font-medium">{file.name}</p>
-                      <p className="break-all font-mono text-xs text-muted-foreground">
-                        {file.path}
-                      </p>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {file.coveredLines} / {file.executableLines}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {Math.max(0, file.executableLines - file.coveredLines)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {percent(file.lineCoverage)}
-                    </TableCell>
+        {allFilesOpen && (
+          <CardContent className="space-y-4 py-4">
+            <div className="relative max-w-xl">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label={t("searchCoverageFiles")}
+                className="pl-9"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("searchCoverageFiles")}
+                value={search}
+              />
+            </div>
+            <div className="overflow-auto rounded-md border">
+              <Table className="min-w-[60rem]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("coverageTarget")}</TableHead>
+                    <TableHead>{t("coverageFile")}</TableHead>
+                    <TableHead className="text-right">
+                      {t("coveredLines")}
+                    </TableHead>
+                    <TableHead className="text-right">
+                      {t("uncoveredLines")}
+                    </TableHead>
+                    <TableHead className="text-right">
+                      {t("coverage")}
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
+                </TableHeader>
+                <TableBody>
+                  {files.map((file, index) => (
+                    <TableRow key={`${file.target}:${file.path}:${index}`}>
+                      <TableCell>
+                        <Badge variant="outline">{file.target}</Badge>
+                      </TableCell>
+                      <TableCell className="max-w-xl whitespace-normal">
+                        <p className="font-medium">{file.name}</p>
+                        <p className="break-all font-mono text-xs text-muted-foreground">
+                          {file.path}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {file.coveredLines} / {file.executableLines}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {Math.max(0, file.executableLines - file.coveredLines)}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {percent(file.lineCoverage)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        )}
       </Card>
     </section>
   );

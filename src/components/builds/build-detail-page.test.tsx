@@ -56,6 +56,13 @@ const build = {
       name: "Development",
       scheme: "App",
       buildConfiguration: "Debug",
+      advancedSettings: {
+        packageResolution: "SKIP_UPDATES",
+        codeCoverage: true,
+        parseTestResults: false,
+        onlyTesting: ["AppTests/LoginTests"],
+        buildSettingOverrides: { SWIFT_VERSION: "6.0" },
+      },
     },
   },
   commandSummary: "xcrun xcodebuild -workspace App.xcworkspace build",
@@ -237,6 +244,21 @@ describe("BuildDetailPage", () => {
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
+    const advancedSettingsCard = screen
+      .getByText("Advanced settings")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(advancedSettingsCard).not.toBeNull();
+    expect(
+      within(advancedSettingsCard!).getByText("Skip Updates"),
+    ).toBeDefined();
+    expect(
+      within(advancedSettingsCard!).getByText("AppTests/LoginTests"),
+    ).toBeDefined();
+    expect(
+      within(advancedSettingsCard!).getByText('{"SWIFT_VERSION":"6.0"}'),
+    ).toBeDefined();
+    expect(within(advancedSettingsCard!).getByText("Enabled")).toBeDefined();
+    expect(within(advancedSettingsCard!).getByText("Disabled")).toBeDefined();
     const runsCard = screen
       .getByText("Runs and exports")
       .closest<HTMLElement>('[data-slot="card"]');

@@ -864,6 +864,11 @@ describe("WorktreesPage", () => {
       screen.getByTitle("src/components/worktrees/worktrees-page.tsx"),
     ).toBeDefined();
     expect(
+      screen
+        .getByTitle("src/components/worktrees/worktrees-page.tsx")
+        .closest("td")?.className,
+    ).toContain("py-1.5");
+    expect(
       screen.getByText("Staged").closest('[data-slot="badge"]'),
     ).toBeNull();
     expect(

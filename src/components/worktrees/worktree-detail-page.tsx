@@ -735,14 +735,16 @@ function WorktreeCoverageCard({
   return (
     <Card className="gap-0 py-0">
       <CardHeader className="border-b py-4">
-        <CardTitle>{t("codeCoverage")}</CardTitle>
-        <div className="ml-auto">
-          <WorktreeCoverageButton
-            codebaseId={codebaseId}
-            disabled={disabled}
-            onStarted={() => void onReload()}
-            worktreeId={worktreeId}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>{t("codeCoverage")}</CardTitle>
+          <div className="sm:ml-auto">
+            <WorktreeCoverageButton
+              codebaseId={codebaseId}
+              disabled={disabled}
+              onStarted={() => void onReload()}
+              worktreeId={worktreeId}
+            />
+          </div>
         </div>
       </CardHeader>
       {!reports.length ? (

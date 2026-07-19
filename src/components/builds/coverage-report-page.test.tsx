@@ -64,6 +64,18 @@ describe("CoverageReportPage", () => {
     } as never);
 
     render(<CoverageReportPage buildId="build-1" />);
+    const expand = await screen.findByRole("button", {
+      name: "Expand all coverage files",
+    });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("80%")).toBeNull();
+    expect(
+      screen.queryByRole("textbox", {
+        name: "Search targets, files, or paths",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(expand);
     expect(await screen.findByText("80%")).toBeDefined();
     expect(screen.getByText("70%")).toBeDefined();
 
