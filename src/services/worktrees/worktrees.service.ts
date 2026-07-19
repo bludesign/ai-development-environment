@@ -9,6 +9,8 @@ import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
@@ -18,6 +20,7 @@ import {
   type WorktreeActivityReport,
   type WorktreeEditorVariant,
   type WorktreeOperation,
+  type WorktreeDiffScope,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -1346,13 +1349,138 @@ export class WorktreesService {
       if (!detail || typeof detail !== "object") {
         throw new Error("Invalid worktree detail");
       }
-      return detail;
+      const normalized = detail as Record<string, unknown>;
+      const changes = Array.isArray(normalized.changes)
+        ? normalized.changes.map((change) =>
+            change && typeof change === "object" && !Array.isArray(change)
+              ? {
+                  ...(change as Record<string, unknown>),
+                  changeType:
+                    typeof (change as Record<string, unknown>).changeType ===
+                    "string"
+                      ? (change as Record<string, unknown>).changeType
+                      : "MODIFIED",
+                }
+              : change,
+          )
+        : [];
+      return {
+        ...normalized,
+        changes,
+        branchChanges: Array.isArray(normalized.branchChanges)
+          ? normalized.branchChanges
+          : [],
+        branchChangesTruncated: normalized.branchChangesTruncated === true,
+      };
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
         where: { id: job.id, visibility: "SYSTEM" },
       });
     }
+  }
+
+  async inspectDiff(
+    id: string,
+    input: {
+      scope: WorktreeDiffScope;
+      path?: string | null;
+      commitSha?: string | null;
+    },
+    requestId: string,
+  ) {
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_DIFF_JOB_KIND,
+      true,
+    );
+    const identity = this.payload(worktree);
+    if (!identity.baseBranch) throw new Error("A base branch is required");
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_DIFF_JOB_KIND,
+      payload: {
+        ...identity,
+        baseBranch: identity.baseBranch,
+        scope: input.scope,
+        path: input.path ?? null,
+        commitSha: input.commitSha ?? null,
+        uploadId: null,
+        side: null,
+      },
+      idempotencyKey: `worktree:diff:${requestId}:${id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      const completed = await this.waitForJob(job.id);
+      const diff = resultObject(completed).diff;
+      if (!diff || typeof diff !== "object") {
+        throw new Error("Invalid worktree diff result");
+      }
+      return diff;
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async prepareDiffAsset(
+    id: string,
+    input: {
+      scope: WorktreeDiffScope;
+      path: string;
+      commitSha?: string | null;
+      side: "BEFORE" | "AFTER";
+    },
+    uploadId: string,
+  ): Promise<void> {
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_DIFF_ASSET_JOB_KIND,
+      true,
+    );
+    const identity = this.payload(worktree);
+    if (!identity.baseBranch) throw new Error("A base branch is required");
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_DIFF_ASSET_JOB_KIND,
+      payload: {
+        ...identity,
+        baseBranch: identity.baseBranch,
+        scope: input.scope,
+        path: input.path,
+        commitSha: input.commitSha ?? null,
+        uploadId,
+        side: input.side,
+      },
+      idempotencyKey: `worktree:diff-asset:${uploadId}:${id}`,
+      timeoutSeconds: 60,
+      visibility: "SYSTEM",
+    });
+    try {
+      resultObject(await this.waitForJob(job.id));
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async diffAssetAgentId(id: string): Promise<string | null> {
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id },
+      select: { codebase: { select: { agentId: true } } },
+    });
+    return worktree?.codebase.agentId ?? null;
   }
 
   async runOperation(

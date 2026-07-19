@@ -128,6 +128,32 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
       requireControlPlane(context);
       return service.inspect(id, requestId);
     },
+    inspectWorktreeDiff: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          scope: never;
+          path?: string | null;
+          commitSha?: string | null;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.inspectDiff(
+        input.worktreeId,
+        {
+          scope: input.scope,
+          path: input.path,
+          commitSha: input.commitSha,
+        },
+        input.requestId,
+      );
+    },
     runWorktreeOperation: (
       _root: unknown,
       {

@@ -22,11 +22,14 @@ import {
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
+import type { ProcessResult } from "../process-runner.js";
+
 import {
   classifyFailure,
   createRedactor,
   deleteIosBuild,
   downloadIosBuildArtifact,
+  generateIosBuildReport,
   genericBuildDestinations,
   physicalDestinations,
   runIosBuild,
@@ -370,6 +373,81 @@ describe("iOS destination and error parsing", () => {
 });
 
 describe("iOS build hooks and logs", () => {
+  test("atomically persists normalized test and coverage reports", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ios-build-report-"));
+    temporaryDirectories.push(root);
+    const artifactDirectory = join(root, "build-1");
+    const bin = join(root, "bin");
+    await mkdir(join(artifactDirectory, "result.xcresult"), {
+      recursive: true,
+    });
+    await mkdir(bin);
+    const xcrun = join(bin, "xcrun");
+    await writeFile(
+      xcrun,
+      `#!/bin/sh
+case " $* " in
+  *" xcresulttool "*) printf '%s' '{"devices":[],"testPlanConfigurations":[],"testNodes":[{"nodeType":"Test Plan","name":"Plan","children":[{"nodeType":"Unit test bundle","name":"AppTests","children":[{"nodeType":"Test Suite","name":"LoginTests","children":[{"nodeType":"Test Case","name":"testLogin()","nodeIdentifier":"LoginTests/testLogin()","result":"Passed","durationInSeconds":0.25}]}]}]}]}' ;;
+  *) printf '%s' '{"coveredLines":8,"executableLines":10,"lineCoverage":0.8,"targets":[{"name":"App","files":[{"name":"App.swift","path":"/tmp/App.swift","coveredLines":8,"executableLines":10,"lineCoverage":0.8,"functions":[]}]}]}' ;;
+esac
+`,
+    );
+    await chmod(xcrun, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    try {
+      const testResult = (await generateIosBuildReport(
+        {
+          buildId: "build-1",
+          artifactDirectory,
+          codebaseId: "codebase-1",
+          reportKind: "TEST_RESULTS",
+          source: "MANUAL",
+        },
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+      )) as ProcessResult & {
+        report: { status: string; summary: Record<string, unknown> };
+      };
+      expect(testResult.report).toMatchObject({
+        status: "READY",
+        summary: { total: 1, passed: 1, failed: 0 },
+      });
+      expect(
+        JSON.parse(
+          await readFile(join(artifactDirectory, "test-results.json"), "utf8"),
+        ),
+      ).toHaveProperty("testNodes");
+
+      const coverageResult = (await generateIosBuildReport(
+        {
+          buildId: "build-1",
+          artifactDirectory,
+          codebaseId: "codebase-1",
+          reportKind: "CODE_COVERAGE",
+          source: "MANUAL",
+        },
+        30_000,
+        new AbortController().signal,
+        async () => undefined,
+      )) as ProcessResult & {
+        report: { status: string; summary: Record<string, unknown> };
+      };
+      expect(coverageResult.report).toMatchObject({
+        status: "READY",
+        summary: { coveredLines: 8, executableLines: 10 },
+      });
+      expect(
+        JSON.parse(
+          await readFile(join(artifactDirectory, "code-coverage.json"), "utf8"),
+        ),
+      ).toHaveProperty("targets");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("deletes a completed build folder", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-delete-"));
     temporaryDirectories.push(root);

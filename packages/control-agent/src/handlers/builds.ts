@@ -6,6 +6,7 @@ import {
   readdir,
   readFile,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
@@ -30,6 +31,7 @@ import {
   parseBuildDestinationsPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
+  parseBuildReportPayload,
   parseBuildRunDestinationsPayload,
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
@@ -39,6 +41,7 @@ import {
   type BuildDestination,
   type BuildExportSettings,
   type BuildJobPayload,
+  type BuildReportKind,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
@@ -1370,6 +1373,469 @@ async function artifact(
   };
 }
 
+type GeneratedBuildReport = {
+  kind: BuildReportKind;
+  status: "READY" | "FAILED";
+  artifact: Artifact | null;
+  summary: Record<string, unknown>;
+  data: Record<string, unknown>;
+  error: string | null;
+  additionalArtifacts?: Artifact[];
+};
+
+function jsonObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function testDetails(node: Record<string, unknown>): string[] {
+  const own =
+    typeof node.details === "string" && node.details.trim()
+      ? [node.details.trim()]
+      : typeof node.name === "string" &&
+          ["Failure Message", "Runtime Warning"].includes(String(node.nodeType))
+        ? [node.name]
+        : [];
+  const children = Array.isArray(node.children) ? node.children : [];
+  return [
+    ...own,
+    ...children.flatMap((child) => {
+      const object = jsonObject(child);
+      return object ? testDetails(object) : [];
+    }),
+  ];
+}
+
+function normalizeTestResults(value: unknown): {
+  summary: Record<string, unknown>;
+  data: Record<string, unknown>;
+} {
+  const root = jsonObject(value);
+  if (!root || !Array.isArray(root.testNodes)) {
+    throw new Error("xcresulttool returned invalid test results JSON");
+  }
+  const tests: Array<Record<string, unknown>> = [];
+  const visit = (
+    raw: unknown,
+    context: {
+      plan: string | null;
+      configuration: string | null;
+      bundle: string | null;
+      suite: string | null;
+    },
+  ) => {
+    const node = jsonObject(raw);
+    if (!node) return;
+    const nodeType = typeof node.nodeType === "string" ? node.nodeType : "";
+    const name = typeof node.name === "string" ? node.name : "";
+    const next = {
+      plan: nodeType === "Test Plan" ? name : context.plan,
+      configuration:
+        nodeType === "Test Plan Configuration" ? name : context.configuration,
+      bundle: /test bundle$/.test(nodeType) ? name : context.bundle,
+      suite: nodeType === "Test Suite" ? name : context.suite,
+    };
+    if (nodeType === "Test Case") {
+      const result = typeof node.result === "string" ? node.result : "unknown";
+      tests.push({
+        identifier:
+          typeof node.nodeIdentifier === "string" ? node.nodeIdentifier : name,
+        name,
+        ...next,
+        result,
+        durationSeconds:
+          typeof node.durationInSeconds === "number"
+            ? node.durationInSeconds
+            : null,
+        tags: Array.isArray(node.tags)
+          ? node.tags.filter((tag): tag is string => typeof tag === "string")
+          : [],
+        details: [...new Set(testDetails(node))],
+      });
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) visit(child, next);
+    }
+  };
+  for (const node of root.testNodes) {
+    visit(node, {
+      plan: null,
+      configuration: null,
+      bundle: null,
+      suite: null,
+    });
+  }
+  const count = (result: string) =>
+    tests.filter((test) => test.result === result).length;
+  return {
+    summary: {
+      total: tests.length,
+      passed: count("Passed"),
+      failed: count("Failed"),
+      skipped: count("Skipped"),
+      expectedFailures: count("Expected Failure"),
+      unknown: tests.filter(
+        (test) =>
+          !["Passed", "Failed", "Skipped", "Expected Failure"].includes(
+            String(test.result),
+          ),
+      ).length,
+      durationSeconds: tests.reduce(
+        (total, test) => total + Number(test.durationSeconds ?? 0),
+        0,
+      ),
+    },
+    data: {
+      devices: Array.isArray(root.devices) ? root.devices : [],
+      configurations: Array.isArray(root.testPlanConfigurations)
+        ? root.testPlanConfigurations
+        : [],
+      tests,
+    },
+  };
+}
+
+function normalizeCoverage(value: unknown): {
+  summary: Record<string, unknown>;
+  data: Record<string, unknown>;
+} {
+  const root = jsonObject(value);
+  if (!root || !Array.isArray(root.targets)) {
+    throw new Error("xccov returned invalid coverage JSON");
+  }
+  const files = root.targets.flatMap((rawTarget) => {
+    const target = jsonObject(rawTarget);
+    if (!target || !Array.isArray(target.files)) return [];
+    const targetName = typeof target.name === "string" ? target.name : "";
+    return target.files.flatMap((rawFile) => {
+      const file = jsonObject(rawFile);
+      if (!file) return [];
+      return [
+        {
+          target: targetName,
+          name: typeof file.name === "string" ? file.name : "",
+          path: typeof file.path === "string" ? file.path : "",
+          coveredLines:
+            typeof file.coveredLines === "number" ? file.coveredLines : 0,
+          executableLines:
+            typeof file.executableLines === "number" ? file.executableLines : 0,
+          lineCoverage:
+            typeof file.lineCoverage === "number" ? file.lineCoverage : 0,
+        },
+      ];
+    });
+  });
+  return {
+    summary: {
+      coveredLines:
+        typeof root.coveredLines === "number" ? root.coveredLines : 0,
+      executableLines:
+        typeof root.executableLines === "number" ? root.executableLines : 0,
+      lineCoverage:
+        typeof root.lineCoverage === "number" ? root.lineCoverage : 0,
+      targetCount: root.targets.length,
+      fileCount: files.length,
+    },
+    data: { files },
+  };
+}
+
+async function writeJsonReport(
+  input: { artifactDirectory: string },
+  kind: BuildReportKind,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<GeneratedBuildReport> {
+  const resultBundle = join(input.artifactDirectory, "result.xcresult");
+  const filename =
+    kind === "TEST_RESULTS" ? "test-results.json" : "code-coverage.json";
+  const destination = join(input.artifactDirectory, filename);
+  const temporary = `${destination}.tmp-${randomUUID()}`;
+  try {
+    if (!(await pathExists(resultBundle))) {
+      throw new Error("The build result bundle is unavailable");
+    }
+    const args =
+      kind === "TEST_RESULTS"
+        ? [
+            "xcresulttool",
+            "get",
+            "test-results",
+            "tests",
+            "--path",
+            "result.xcresult",
+            "--format",
+            "json",
+          ]
+        : ["xccov", "view", "--report", "--json", "result.xcresult"];
+    const result = requireSuccess(
+      await command(
+        "xcrun",
+        args,
+        timeoutMs,
+        signal,
+        input.artifactDirectory,
+        xcodeEnvironment(),
+      ),
+      `Could not generate ${filename}`,
+    );
+    const parsed: unknown = JSON.parse(result.stdout);
+    const normalized =
+      kind === "TEST_RESULTS"
+        ? normalizeTestResults(parsed)
+        : normalizeCoverage(parsed);
+    await writeFile(temporary, result.stdout, { mode: 0o600 });
+    await rename(temporary, destination);
+    return {
+      kind,
+      status: "READY",
+      artifact: await artifact(
+        input.artifactDirectory,
+        kind === "TEST_RESULTS" ? "TEST_RESULTS_JSON" : "CODE_COVERAGE_JSON",
+        destination,
+      ),
+      ...normalized,
+      error: null,
+    };
+  } catch (error) {
+    await rm(temporary, { force: true });
+    return {
+      kind,
+      status: "FAILED",
+      artifact: null,
+      summary: {},
+      data: {},
+      error: cleanError(error),
+    };
+  }
+}
+
+type CoverageChange = {
+  path: string;
+  changeType: string;
+  lines: number[];
+};
+
+async function gitCommand(
+  folder: string,
+  args: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CaptureResult> {
+  return command("git", ["-C", folder, ...args], timeoutMs, signal, undefined, {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+  });
+}
+
+function changedLinesFromPatch(value: string): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>();
+  let path: string | null = null;
+  for (const line of value.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const raw = line.slice(4);
+      path = raw === "/dev/null" ? null : raw.replace(/^b\//, "");
+      if (path && !result.has(path)) result.set(path, new Set());
+      continue;
+    }
+    if (!path || !line.startsWith("@@")) continue;
+    const match = /\+(\d+)(?:,(\d+))?/.exec(line);
+    if (!match) continue;
+    const start = Number(match[1]);
+    const count = match[2] === undefined ? 1 : Number(match[2]);
+    const lines = result.get(path)!;
+    for (let number = start; number < start + count; number += 1) {
+      lines.add(number);
+    }
+  }
+  return result;
+}
+
+function changeTypesFromStatus(value: string): Map<string, string> {
+  const entries = value.split("\0").filter(Boolean);
+  const result = new Map<string, string>();
+  for (let index = 0; index < entries.length;) {
+    const status = entries[index++] ?? "M";
+    const renamed = status.startsWith("R") || status.startsWith("C");
+    const first = entries[index++] ?? "";
+    const second = renamed ? (entries[index++] ?? "") : null;
+    const path = second ?? first;
+    if (path) result.set(path, status[0] ?? "M");
+  }
+  return result;
+}
+
+async function snapshotCoverageChanges(
+  input: BuildJobPayload,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CoverageChange[]> {
+  if (!input.baseBranch) throw new Error("A base branch is required");
+  const base = requireSuccess(
+    await gitCommand(
+      folder,
+      ["merge-base", `refs/remotes/origin/${input.baseBranch}`, "HEAD"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not determine the coverage merge base",
+  ).stdout.trim();
+  const [patch, status, untracked] = await Promise.all([
+    gitCommand(
+      folder,
+      ["diff", "--no-color", "--unified=0", base, "--"],
+      timeoutMs,
+      signal,
+    ),
+    gitCommand(
+      folder,
+      ["diff", "--name-status", "-z", base, "--"],
+      timeoutMs,
+      signal,
+    ),
+    gitCommand(
+      folder,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      timeoutMs,
+      signal,
+    ),
+  ]);
+  requireSuccess(patch, "Could not inspect changed coverage lines");
+  requireSuccess(status, "Could not inspect coverage change types");
+  requireSuccess(untracked, "Could not inspect untracked coverage files");
+  const lines = changedLinesFromPatch(patch.stdout);
+  const types = changeTypesFromStatus(status.stdout);
+  for (const path of untracked.stdout.split("\0").filter(Boolean)) {
+    try {
+      const contents = await readFile(join(folder, path));
+      if (contents.includes(0)) continue;
+      const lineCount = contents.length
+        ? contents.toString("utf8").split("\n").length -
+          (contents.toString("utf8").endsWith("\n") ? 1 : 0)
+        : 0;
+      lines.set(
+        path,
+        new Set(Array.from({ length: lineCount }, (_, index) => index + 1)),
+      );
+      types.set(path, "A");
+    } catch {
+      // Files can disappear while the build is preparing.
+    }
+  }
+  return [...new Set([...lines.keys(), ...types.keys()])].map((path) => ({
+    path,
+    changeType: types.get(path) ?? "M",
+    lines: [...(lines.get(path) ?? [])].sort((a, b) => a - b),
+  }));
+}
+
+async function addChangedCoverage(
+  report: GeneratedBuildReport,
+  changes: CoverageChange[],
+  input: BuildJobPayload,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<GeneratedBuildReport> {
+  if (report.status !== "READY") return report;
+  const rawFiles = Array.isArray(report.data.files) ? report.data.files : [];
+  const coveragePaths = rawFiles.flatMap((raw) => {
+    const file = jsonObject(raw);
+    return file && typeof file.path === "string" ? [file.path] : [];
+  });
+  const changedFiles: Array<Record<string, unknown>> = [];
+  let changedCoveredLines = 0;
+  let changedExecutableLines = 0;
+  for (const change of changes) {
+    const coveragePath = coveragePaths.find(
+      (candidate) =>
+        relative(folder, candidate).split(sep).join("/") === change.path,
+    );
+    let covered = 0;
+    let executable = 0;
+    if (coveragePath && change.lines.length) {
+      const result = await command(
+        "xcrun",
+        [
+          "xccov",
+          "view",
+          "--archive",
+          "--file",
+          coveragePath,
+          "--json",
+          "result.xcresult",
+        ],
+        timeoutMs,
+        signal,
+        input.artifactDirectory,
+        xcodeEnvironment(),
+      );
+      if (result.exitCode === 0) {
+        const parsed = jsonObject(JSON.parse(result.stdout));
+        const lineData = parsed?.[coveragePath];
+        if (Array.isArray(lineData)) {
+          const changed = new Set(change.lines);
+          for (const rawLine of lineData) {
+            const line = jsonObject(rawLine);
+            if (
+              line?.isExecutable === true &&
+              typeof line.line === "number" &&
+              changed.has(line.line)
+            ) {
+              executable += 1;
+              if (
+                typeof line.executionCount === "number" &&
+                line.executionCount > 0
+              ) {
+                covered += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+    changedCoveredLines += covered;
+    changedExecutableLines += executable;
+    changedFiles.push({
+      path: change.path,
+      changeType: change.changeType,
+      changedCoveredLines: covered,
+      changedExecutableLines: executable,
+      changedLineCoverage: executable ? covered / executable : null,
+    });
+  }
+  const summary = {
+    ...report.summary,
+    changedCoveredLines,
+    changedExecutableLines,
+    changedLineCoverage: changedExecutableLines
+      ? changedCoveredLines / changedExecutableLines
+      : null,
+  };
+  const data = { ...report.data, changedFiles };
+  const destination = join(input.artifactDirectory, "worktree-coverage.json");
+  const temporary = `${destination}.tmp-${randomUUID()}`;
+  await writeFile(temporary, JSON.stringify({ summary, data }, null, 2), {
+    mode: 0o600,
+  });
+  await rename(temporary, destination);
+  return {
+    ...report,
+    summary,
+    data,
+    additionalArtifacts: [
+      await artifact(
+        input.artifactDirectory,
+        "WORKTREE_COVERAGE_JSON",
+        destination,
+      ),
+    ],
+  };
+}
+
 type BuildSettingEntry = {
   target: string;
   buildSettings: Record<string, string>;
@@ -1428,14 +1894,36 @@ async function captureArtifacts(
   input: BuildJobPayload,
   folder: string,
   signal: AbortSignal,
+  includeProducts = true,
 ): Promise<Artifact[]> {
   const artifacts: Artifact[] = [];
   const resultBundle = join(input.artifactDirectory, "result.xcresult");
   if (await pathExists(resultBundle)) {
+    const coverageProbe = await command(
+      "xcrun",
+      [
+        "xccov",
+        "view",
+        "--report",
+        "--only-targets",
+        "--json",
+        "result.xcresult",
+      ],
+      30_000,
+      new AbortController().signal,
+      input.artifactDirectory,
+      xcodeEnvironment(),
+    );
     artifacts.push(
-      await artifact(input.artifactDirectory, "RESULT_BUNDLE", resultBundle),
+      await artifact(input.artifactDirectory, "RESULT_BUNDLE", resultBundle, {
+        testResultsAvailable: ["TEST", "TEST_WITHOUT_BUILDING"].includes(
+          input.action,
+        ),
+        coverageAvailable: coverageProbe.exitCode === 0,
+      }),
     );
   }
+  if (!includeProducts) return artifacts;
   const archivePath = join(input.artifactDirectory, "archive.xcarchive");
   if (await pathExists(archivePath)) {
     artifacts.push(
@@ -1575,6 +2063,7 @@ export const runIosBuild: AgentJobHandler = async (
       configuration: input.configuration,
     };
     let buildResult: CommandResult | null = null;
+    let coverageChanges: CoverageChange[] = [];
     let errorCode: string | null = null;
     let error: string | null = null;
     let failBuild = false;
@@ -1631,6 +2120,18 @@ export const runIosBuild: AgentJobHandler = async (
           });
         } catch (progressError) {
           logger.emit("RUNNING", "SYSTEM", cleanError(progressError));
+        }
+        if (input.worktreeCoverage) {
+          try {
+            coverageChanges = await snapshotCoverageChanges(
+              input,
+              folder,
+              Math.min(timeoutMs, 60_000),
+              signal,
+            );
+          } catch (coverageError) {
+            logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
+          }
         }
         const args = xcodeBuildArguments(input);
         buildResult = await runLoggedCommand({
@@ -1697,12 +2198,54 @@ export const runIosBuild: AgentJobHandler = async (
       }
     }
     let artifacts: Artifact[] = [];
-    if (!failBuild && !signal.aborted && buildResult?.exitCode === 0) {
+    try {
+      artifacts = await captureArtifacts(
+        input,
+        folder,
+        new AbortController().signal,
+        !failBuild && !signal.aborted && buildResult?.exitCode === 0,
+      );
+    } catch (artifactError) {
+      logger.emit("ARTIFACTS", "STDERR", cleanError(artifactError));
+    }
+    const reports: GeneratedBuildReport[] = [];
+    const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(input.action);
+    if (testAction && input.advancedSettings.parseTestResults) {
+      const report = await writeJsonReport(
+        input,
+        "TEST_RESULTS",
+        Math.min(timeoutMs, 120_000),
+        new AbortController().signal,
+      );
+      reports.push(report);
+      if (report.artifact) artifacts.push(report.artifact);
+      if (report.error) logger.emit("REPORTS", "STDERR", report.error);
+    }
+    if (testAction && input.worktreeCoverage) {
+      let report = await writeJsonReport(
+        input,
+        "CODE_COVERAGE",
+        Math.min(timeoutMs, 120_000),
+        new AbortController().signal,
+      );
       try {
-        artifacts = await captureArtifacts(input, folder, signal);
-      } catch (artifactError) {
-        logger.emit("ARTIFACTS", "STDERR", cleanError(artifactError));
+        report = await addChangedCoverage(
+          report,
+          coverageChanges,
+          input,
+          folder,
+          Math.min(timeoutMs, 120_000),
+          new AbortController().signal,
+        );
+      } catch (coverageError) {
+        logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
       }
+      reports.push(report);
+      if (report.artifact) artifacts.push(report.artifact);
+      if (report.additionalArtifacts) {
+        artifacts.push(...report.additionalArtifacts);
+      }
+      if (report.error) logger.emit("REPORTS", "STDERR", report.error);
     }
     await logger.close();
     if (await pathExists(rawLog)) {
@@ -1733,6 +2276,7 @@ export const runIosBuild: AgentJobHandler = async (
       error,
       commandSummary: commandSummary("xcrun", args),
       artifacts,
+      reports,
       scriptExecutions,
       sourceStateHash,
       finalStateHash,
@@ -1741,6 +2285,42 @@ export const runIosBuild: AgentJobHandler = async (
   } finally {
     await logger.close();
   }
+};
+
+export const generateIosBuildReport: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  onLog,
+) => {
+  const input = parseBuildReportPayload(payload);
+  if (
+    !isAbsolute(input.artifactDirectory) ||
+    basename(input.artifactDirectory) !== input.buildId
+  ) {
+    throw new Error("Build artifact directory is invalid");
+  }
+  if (signal.aborted) return { ...successfulProcess, cancelled: true };
+  const report = await writeJsonReport(
+    input,
+    input.reportKind,
+    Math.min(timeoutMs, 180_000),
+    signal,
+  );
+  await onLog({
+    sequence: 0,
+    stream: report.status === "READY" ? "SYSTEM" : "STDERR",
+    message:
+      report.status === "READY"
+        ? `Generated ${report.kind.toLocaleLowerCase()} report`
+        : report.error || "Report generation failed",
+    createdAt: new Date().toISOString(),
+  });
+  return {
+    ...successfulProcess,
+    report,
+    artifacts: report.artifact ? [report.artifact] : [],
+  };
 };
 
 export const deleteIosBuild: AgentJobHandler = async (

@@ -29,6 +29,8 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
@@ -43,6 +45,8 @@ import {
 import { applySkills, readSkills, scanSkills } from "./skills.js";
 import {
   inspectWorktree,
+  inspectWorktreeDiff,
+  downloadWorktreeDiffAsset,
   branchWorktree,
   deleteWorktree,
   checkoutMovedWorktree,
@@ -56,6 +60,7 @@ import {
   downloadIosBuildArtifact,
   discoverBuildSources,
   exportIosArchive,
+  generateIosBuildReport,
   inspectBuildDestinations,
   inspectBuildRunDestinations,
   parseBuildSourceMetadata,
@@ -69,6 +74,8 @@ import {
   IOS_DESTINATIONS_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
+  IOS_TEST_RESULTS_JOB_KIND,
+  IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
@@ -130,6 +137,8 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [WORKTREE_DELETE_JOB_KIND]: deleteWorktree,
   [WORKTREE_OPERATION_JOB_KIND]: operateWorktree,
   [WORKTREE_WATCH_JOB_KIND]: watchWorktree,
+  [WORKTREE_DIFF_JOB_KIND]: inspectWorktreeDiff,
+  [WORKTREE_DIFF_ASSET_JOB_KIND]: downloadWorktreeDiffAsset,
   [SKILL_SCAN_JOB_KIND]: scanSkills,
   [SKILL_READ_JOB_KIND]: readSkills,
   [SKILL_APPLY_JOB_KIND]: applySkills,
@@ -142,4 +151,6 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_ARTIFACT_DOWNLOAD_JOB_KIND]: downloadIosBuildArtifact,
   [IOS_DEPLOY_JOB_KIND]: deployIosBuild,
   [IOS_EXPORT_JOB_KIND]: exportIosArchive,
+  [IOS_TEST_RESULTS_JOB_KIND]: generateIosBuildReport,
+  [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,
 };

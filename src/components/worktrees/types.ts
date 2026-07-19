@@ -132,6 +132,8 @@ export type WorktreeDetail = {
   }>;
   changes: Array<{
     path: string;
+    previousPath?: string | null;
+    changeType?: string;
     staged: boolean;
     unstaged: boolean;
     untracked: boolean;
@@ -141,6 +143,28 @@ export type WorktreeDetail = {
     unstagedAdditions: number | null;
     unstagedDeletions: number | null;
   }>;
+  branchChanges?: WorktreeDiffFile[];
   commitsTruncated: boolean;
   changesTruncated: boolean;
+  branchChangesTruncated?: boolean;
+};
+
+export type WorktreeDiffFile = {
+  path: string;
+  previousPath: string | null;
+  changeType: string;
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+  image: boolean;
+};
+
+export type WorktreeFileDiff = {
+  files: WorktreeDiffFile[];
+  patch?: string | null;
+  image?: boolean | null;
+  binary?: boolean | null;
+  truncated: boolean;
+  beforeAvailable?: boolean | null;
+  afterAvailable?: boolean | null;
 };

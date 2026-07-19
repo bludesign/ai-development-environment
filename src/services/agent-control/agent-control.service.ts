@@ -13,6 +13,8 @@ import {
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
+  IOS_TEST_RESULTS_JOB_KIND,
+  IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
@@ -21,6 +23,7 @@ import {
   parseBuildArtifactDownloadPayload,
   parseBuildExportPayload,
   parseBuildJobPayload,
+  parseBuildReportPayload,
   parseBuildDeletePayload,
   parseBuildRunDestinationsPayload,
   parseBuildSourceDiscoverPayload,
@@ -54,6 +57,8 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_JOB_KINDS,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
@@ -62,6 +67,7 @@ import {
   worktreeJobPayload,
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
+  worktreeDiffPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
@@ -198,6 +204,13 @@ export function validateJob(kind: string, payload: unknown): void {
     return;
   }
   if (
+    kind === WORKTREE_DIFF_JOB_KIND ||
+    kind === WORKTREE_DIFF_ASSET_JOB_KIND
+  ) {
+    worktreeDiffPayload(value);
+    return;
+  }
+  if (
     kind === WORKTREE_INSPECT_JOB_KIND ||
     kind === WORKTREE_OPERATION_JOB_KIND
   ) {
@@ -254,6 +267,13 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === IOS_EXPORT_JOB_KIND) {
     parseBuildExportPayload(payload);
+    return;
+  }
+  if (
+    kind === IOS_TEST_RESULTS_JOB_KIND ||
+    kind === IOS_COVERAGE_REPORT_JOB_KIND
+  ) {
+    parseBuildReportPayload(payload);
     return;
   }
   if (kind === CCUSAGE_REPORT_JOB_KIND) {

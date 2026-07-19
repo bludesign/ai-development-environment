@@ -8,6 +8,8 @@ import {
   Check,
   Copy,
   Download,
+  FileJson,
+  ChartNoAxesColumn,
   Square,
   Trash2,
 } from "lucide-react";
@@ -49,6 +51,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
 import { copyText, createClientId } from "@/lib/browser-utils";
 import {
@@ -58,7 +68,7 @@ import {
 
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
-import type { BuildLogEvent, BuildRecord } from "./types";
+import type { BuildLogEvent, BuildRecord, BuildReport } from "./types";
 
 const BUILD_DETAIL_FIELDS = `
   id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
@@ -68,6 +78,10 @@ const BUILD_DETAIL_FIELDS = `
     source { id kind relativePath }
   }
   artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
+  reports {
+    id kind source status summary data error createdAt updatedAt finishedAt
+    artifact { id kind relativePath sizeBytes checksum metadata createdAt }
+  }
   scriptExecutions { id phase position nameSnapshot status exitCode durationMs causedBuildFailure outputRelativePath error }
   deployments { id batchId destination status commandSummary outputRelativePath error createdAt startedAt finishedAt }
   exports { id status settings commandSummary outputRelativePath error createdAt startedAt finishedAt }
@@ -93,6 +107,9 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reportBusy, setReportBusy] = useState<
+    "TEST_RESULTS" | "CODE_COVERAGE" | null
+  >(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
@@ -232,6 +249,24 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   const archive = build?.artifacts.some(
     (artifact) => artifact.kind === "ARCHIVE",
   );
+  const testReport = build?.reports?.find(
+    (report) => report.kind === "TEST_RESULTS",
+  );
+  const coverageReport = build?.reports?.find(
+    (report) => report.kind === "CODE_COVERAGE",
+  );
+  const resultBundle = build?.artifacts.find(
+    (artifact) => artifact.kind === "RESULT_BUNDLE",
+  );
+  const testAction = build
+    ? ["TEST", "TEST_WITHOUT_BUILDING"].includes(build.action)
+    : false;
+  const coverageAvailable =
+    resultBundle?.metadata.coverageAvailable === true ||
+    (
+      build?.snapshot.configuration as
+        { advancedSettings?: { codeCoverage?: boolean } } | undefined
+    )?.advancedSettings?.codeCoverage === true;
   const snapshot = build?.snapshot ?? {};
   const repository = snapshot.repository as { name?: string } | undefined;
   const worktree = snapshot.worktree as
@@ -248,6 +283,28 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
       setCommandCopied(true);
     } catch {
       setError(t("copyFailed"));
+    }
+  };
+
+  const generateReport = async (kind: "TEST_RESULTS" | "CODE_COVERAGE") => {
+    setReportBusy(kind);
+    setError(null);
+    try {
+      const field =
+        kind === "TEST_RESULTS"
+          ? "parseBuildTestResults"
+          : "generateBuildCoverageReport";
+      await controlPlaneRequest(
+        `mutation GenerateBuildReport($buildId: ID!, $requestId: ID!) {
+          ${field}(buildId: $buildId, requestId: $requestId) { id status error }
+        }`,
+        { buildId, requestId: createClientId() },
+      );
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setReportBusy(null);
     }
   };
 
@@ -372,6 +429,47 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               <Archive /> {t("exportArchive")}
             </Button>
           )}
+          {!activeOperation &&
+            testAction &&
+            resultBundle &&
+            testReport?.status !== "READY" && (
+              <Button
+                disabled={reportBusy !== null}
+                onClick={() => void generateReport("TEST_RESULTS")}
+                variant="outline"
+              >
+                {reportBusy === "TEST_RESULTS" ? <Spinner /> : <FileJson />}
+                {testReport?.status === "FAILED"
+                  ? t("retryParseTestResults")
+                  : t("parseTestResultsAction")}
+              </Button>
+            )}
+          {!activeOperation &&
+            resultBundle &&
+            coverageAvailable &&
+            coverageReport?.status !== "READY" && (
+              <Button
+                disabled={reportBusy !== null}
+                onClick={() => void generateReport("CODE_COVERAGE")}
+                variant="outline"
+              >
+                {reportBusy === "CODE_COVERAGE" ? (
+                  <Spinner />
+                ) : (
+                  <ChartNoAxesColumn />
+                )}
+                {coverageReport?.status === "FAILED"
+                  ? t("retryCoverageReport")
+                  : t("generateCoverageReport")}
+              </Button>
+            )}
+          {coverageReport?.status === "READY" && (
+            <Button asChild variant="outline">
+              <Link href={`/builds/${build.id}/coverage`}>
+                <ChartNoAxesColumn /> {t("viewCoverageReport")}
+              </Link>
+            </Button>
+          )}
           <Button
             disabled={
               busy || ["QUEUED", "PREPARING", "RUNNING"].includes(build.status)
@@ -383,6 +481,8 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
           </Button>
         </div>
       </div>
+
+      {testReport && <TestResultsCard report={testReport} />}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="space-y-5">
@@ -652,6 +752,121 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
         title={t("deleteBuildTitle")}
       />
     </section>
+  );
+}
+
+function TestResultsCard({ report }: { report: BuildReport }) {
+  const t = useTranslations("builds");
+  const tests = Array.isArray(report.data.tests)
+    ? (report.data.tests as Array<Record<string, unknown>>)
+    : [];
+  const devices = Array.isArray(report.data.devices)
+    ? (report.data.devices as Array<Record<string, unknown>>)
+    : [];
+  const number = (key: string) =>
+    typeof report.summary[key] === "number" ? Number(report.summary[key]) : 0;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("testResults")}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {report.status === "FAILED" ? (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {report.error ?? t("testResultsFailed")}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">
+                {t("testTotal", { count: number("total") })}
+              </Badge>
+              <Badge>{t("testPassed", { count: number("passed") })}</Badge>
+              <Badge variant={number("failed") ? "destructive" : "outline"}>
+                {t("testFailed", { count: number("failed") })}
+              </Badge>
+              <Badge variant="secondary">
+                {t("testSkipped", { count: number("skipped") })}
+              </Badge>
+              {devices.map((device, index) => (
+                <Badge key={index} variant="outline">
+                  {String(device.deviceName ?? device.modelName ?? "Device")} ·{" "}
+                  {String(device.osVersion ?? "—")}
+                </Badge>
+              ))}
+            </div>
+            <div className="overflow-auto rounded-md border">
+              <Table className="min-w-[54rem]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("testStatus")}</TableHead>
+                    <TableHead>{t("testName")}</TableHead>
+                    <TableHead>{t("testSuite")}</TableHead>
+                    <TableHead>{t("testBundle")}</TableHead>
+                    <TableHead>{t("testPlan")}</TableHead>
+                    <TableHead className="text-right">
+                      {t("testDuration")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tests.map((test, index) => {
+                    const result = String(test.result ?? "unknown");
+                    const details = Array.isArray(test.details)
+                      ? test.details.filter(
+                          (value): value is string => typeof value === "string",
+                        )
+                      : [];
+                    return (
+                      <TableRow
+                        key={`${String(test.identifier ?? test.name)}:${index}`}
+                      >
+                        <TableCell>
+                          <Badge
+                            variant={
+                              result === "Failed"
+                                ? "destructive"
+                                : result === "Passed"
+                                  ? "default"
+                                  : "secondary"
+                            }
+                          >
+                            {result}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-md whitespace-normal">
+                          <p className="font-mono text-xs font-medium">
+                            {String(test.name ?? "—")}
+                          </p>
+                          {details.map((detail, detailIndex) => (
+                            <p
+                              className="mt-1 text-xs text-destructive"
+                              key={detailIndex}
+                            >
+                              {detail}
+                            </p>
+                          ))}
+                        </TableCell>
+                        <TableCell>{String(test.suite ?? "—")}</TableCell>
+                        <TableCell>{String(test.bundle ?? "—")}</TableCell>
+                        <TableCell>{String(test.plan ?? "—")}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {typeof test.durationSeconds === "number"
+                            ? `${test.durationSeconds.toFixed(3)}s`
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

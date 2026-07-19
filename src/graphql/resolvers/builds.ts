@@ -65,6 +65,44 @@ export const createBuildResolvers = (service: BuildsService) => ({
     metadata: (value: { metadataJson: string }) => json(value.metadataJson, {}),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
   },
+  BuildReport: {
+    summary: (value: { summaryJson: string }) => json(value.summaryJson, {}),
+    data: (value: { dataJson: string }) => json(value.dataJson, {}),
+    testSummary: (value: {
+      kind: string;
+      status: string;
+      summaryJson: string;
+    }) =>
+      value.kind === "TEST_RESULTS" && value.status === "READY"
+        ? json(value.summaryJson, {})
+        : null,
+    tests: (value: { kind: string; dataJson: string }) => {
+      if (value.kind !== "TEST_RESULTS") return [];
+      const data = json(value.dataJson, {}) as { tests?: unknown };
+      return Array.isArray(data.tests) ? data.tests : [];
+    },
+    coverageSummary: (value: {
+      kind: string;
+      status: string;
+      summaryJson: string;
+    }) =>
+      value.kind === "CODE_COVERAGE" && value.status === "READY"
+        ? json(value.summaryJson, {})
+        : null,
+    coverageFiles: (value: { kind: string; dataJson: string }) => {
+      if (value.kind !== "CODE_COVERAGE") return [];
+      const data = json(value.dataJson, {}) as { files?: unknown };
+      return Array.isArray(data.files) ? data.files : [];
+    },
+    changedCoverageFiles: (value: { kind: string; dataJson: string }) => {
+      if (value.kind !== "CODE_COVERAGE") return [];
+      const data = json(value.dataJson, {}) as { changedFiles?: unknown };
+      return Array.isArray(data.changedFiles) ? data.changedFiles : [];
+    },
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+    finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
+  },
   BuildDeployment: {
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
@@ -131,6 +169,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => {
       requireControlPlane(context);
       return service.logs(args.buildId, args.after, args.first);
+    },
+    worktreeCoverageReports: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.coverageHistory(worktreeId);
     },
   },
   Mutation: {
@@ -273,6 +319,38 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => {
       requireControlPlane(context);
       return service.exportArchive(input);
+    },
+    parseBuildTestResults: (
+      _root: unknown,
+      args: { buildId: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.generateReport(
+        args.buildId,
+        "TEST_RESULTS",
+        args.requestId,
+      );
+    },
+    generateBuildCoverageReport: (
+      _root: unknown,
+      args: { buildId: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.generateReport(
+        args.buildId,
+        "CODE_COVERAGE",
+        args.requestId,
+      );
+    },
+    startWorktreeCoverage: (
+      _root: unknown,
+      { input }: { input: never },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.startWorktreeCoverage(input);
     },
     reportBuildProgress: (
       _root: unknown,

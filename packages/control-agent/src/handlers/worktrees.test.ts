@@ -262,6 +262,13 @@ describe("worktree inventory and inspection", () => {
       subject: "Committed change",
       additions: 1,
     });
+    expect(detail.branchChanges).toContainEqual(
+      expect.objectContaining({
+        path: "committed.txt",
+        changeType: "A",
+        additions: 1,
+      }),
+    );
     expect(detail.changes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: "staged.txt", staged: true }),

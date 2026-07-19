@@ -7,6 +7,8 @@ export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
 export const WORKTREE_MOVE_CHECKOUT_JOB_KIND = "worktree.move.checkout";
 export const WORKTREE_DELETE_JOB_KIND = "worktree.delete";
+export const WORKTREE_DIFF_JOB_KIND = "worktree.diff.inspect";
+export const WORKTREE_DIFF_ASSET_JOB_KIND = "worktree.diff.asset";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
@@ -15,6 +17,8 @@ export const WORKTREE_JOB_KINDS = [
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_DIFF_JOB_KIND,
+  WORKTREE_DIFF_ASSET_JOB_KIND,
 ] as const;
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
@@ -131,6 +135,8 @@ export type WorktreeCommit = {
 
 export type WorktreeChange = {
   path: string;
+  previousPath?: string | null;
+  changeType?: string;
   staged: boolean;
   unstaged: boolean;
   untracked: boolean;
@@ -141,11 +147,45 @@ export type WorktreeChange = {
   unstagedDeletions: number | null;
 };
 
+export type WorktreeDiffFile = {
+  path: string;
+  previousPath: string | null;
+  changeType: string;
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+  image: boolean;
+};
+
 export type WorktreeDetail = {
   commits: WorktreeCommit[];
   changes: WorktreeChange[];
+  branchChanges: WorktreeDiffFile[];
   commitsTruncated: boolean;
   changesTruncated: boolean;
+  branchChangesTruncated: boolean;
+};
+
+export const WORKTREE_DIFF_SCOPES = [
+  "STAGED",
+  "UNSTAGED",
+  "UNTRACKED",
+  "COMMIT",
+  "BRANCH",
+] as const;
+export type WorktreeDiffScope = (typeof WORKTREE_DIFF_SCOPES)[number];
+
+export type WorktreeDiffPayload = {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string;
+  scope: WorktreeDiffScope;
+  path: string | null;
+  commitSha: string | null;
+  uploadId: string | null;
+  side: "BEFORE" | "AFTER" | null;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -167,6 +207,19 @@ function stringValue(value: unknown, name: string): string {
 function nullableString(value: unknown, name: string): string | null {
   if (value === null || value === undefined) return null;
   return stringValue(value, name);
+}
+
+function safeRelativePath(value: unknown, name: string): string {
+  const path = stringValue(value, name).replaceAll("\\", "/");
+  if (
+    path.startsWith("/") ||
+    /^[A-Za-z]:\//.test(path) ||
+    path.split("/").includes("..") ||
+    path.includes("\0")
+  ) {
+    throw new Error(`${name} must stay within the worktree`);
+  }
+  return path;
 }
 
 function nullableCount(value: unknown, name: string): number | null {
@@ -728,6 +781,76 @@ export function worktreeJobPayload(value: unknown): {
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
+  };
+}
+
+export function worktreeDiffPayload(value: unknown): WorktreeDiffPayload {
+  const payload = objectValue(value, "worktree diff payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "scope",
+    "path",
+    "commitSha",
+    "uploadId",
+    "side",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Unexpected worktree diff payload field: ${unexpected}`);
+  }
+  if (!WORKTREE_DIFF_SCOPES.includes(payload.scope as WorktreeDiffScope)) {
+    throw new Error("worktree diff payload.scope is invalid");
+  }
+  if (
+    payload.side !== null &&
+    payload.side !== undefined &&
+    payload.side !== "BEFORE" &&
+    payload.side !== "AFTER"
+  ) {
+    throw new Error("worktree diff payload.side is invalid");
+  }
+  const path =
+    payload.path === null || payload.path === undefined
+      ? null
+      : safeRelativePath(payload.path, "worktree diff payload.path");
+  const scope = payload.scope as WorktreeDiffScope;
+  const commitSha = nullableString(
+    payload.commitSha,
+    "worktree diff payload.commitSha",
+  );
+  if (scope === "COMMIT" && !commitSha) {
+    throw new Error("Commit diffs require a commit SHA");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree diff payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree diff payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree diff payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree diff payload.expectedOrigin",
+    ),
+    baseBranch: stringValue(
+      payload.baseBranch,
+      "worktree diff payload.baseBranch",
+    ),
+    scope,
+    path,
+    commitSha,
+    uploadId: nullableString(
+      payload.uploadId,
+      "worktree diff payload.uploadId",
+    ),
+    side: (payload.side ?? null) as WorktreeDiffPayload["side"],
   };
 }
 

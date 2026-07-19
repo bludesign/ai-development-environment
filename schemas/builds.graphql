@@ -116,6 +116,94 @@ type BuildArtifact {
   createdAt: String!
 }
 
+enum BuildReportKind {
+  TEST_RESULTS
+  CODE_COVERAGE
+}
+
+enum BuildReportSource {
+  AUTOMATIC
+  MANUAL
+  WORKTREE
+}
+
+enum BuildReportStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+type BuildTestSummary {
+  total: Int!
+  passed: Int!
+  failed: Int!
+  skipped: Int!
+  expectedFailures: Int!
+  unknown: Int!
+  durationSeconds: Float!
+}
+
+type BuildTestCase {
+  identifier: String!
+  name: String!
+  plan: String
+  configuration: String
+  bundle: String
+  suite: String
+  result: String!
+  durationSeconds: Float
+  tags: [String!]!
+  details: [String!]!
+}
+
+type BuildCoverageSummary {
+  coveredLines: Int!
+  executableLines: Int!
+  lineCoverage: Float!
+  targetCount: Int!
+  fileCount: Int!
+  changedCoveredLines: Int
+  changedExecutableLines: Int
+  changedLineCoverage: Float
+}
+
+type BuildCoverageFile {
+  target: String!
+  name: String!
+  path: String!
+  coveredLines: Int!
+  executableLines: Int!
+  lineCoverage: Float!
+}
+
+type BuildChangedCoverageFile {
+  path: String!
+  changeType: String!
+  changedCoveredLines: Int!
+  changedExecutableLines: Int!
+  changedLineCoverage: Float
+}
+
+type BuildReport {
+  id: ID!
+  kind: BuildReportKind!
+  source: BuildReportSource!
+  status: BuildReportStatus!
+  summary: JSON!
+  data: JSON!
+  testSummary: BuildTestSummary
+  tests: [BuildTestCase!]!
+  coverageSummary: BuildCoverageSummary
+  coverageFiles: [BuildCoverageFile!]!
+  changedCoverageFiles: [BuildChangedCoverageFile!]!
+  error: String
+  artifact: BuildArtifact
+  build: Build!
+  createdAt: String!
+  updatedAt: String!
+  finishedAt: String
+}
+
 type BuildScriptExecution {
   id: ID!
   phase: String!
@@ -176,6 +264,7 @@ type Build {
   worktree: Worktree
   configuration: BuildConfiguration
   artifacts: [BuildArtifact!]!
+  reports: [BuildReport!]!
   scriptExecutions: [BuildScriptExecution!]!
   deployments: [BuildDeployment!]!
   exports: [BuildExport!]!
@@ -312,6 +401,7 @@ extend type Query {
   ): BuildPage!
   build(id: ID!): Build
   buildLogs(buildId: ID!, after: ID, first: Int = 1000): [BuildLogEvent!]!
+  worktreeCoverageReports(worktreeId: ID!): [BuildReport!]!
 }
 
 extend type Mutation {
@@ -341,6 +431,9 @@ extend type Mutation {
   deleteBuilds(ids: [ID!]!): Int!
   runBuild(input: RunBuildInput!): [BuildDeployment!]!
   exportBuildArchive(input: ExportBuildArchiveInput!): BuildExport!
+  parseBuildTestResults(buildId: ID!, requestId: ID!): BuildReport!
+  generateBuildCoverageReport(buildId: ID!, requestId: ID!): BuildReport!
+  startWorktreeCoverage(input: StartBuildInput!): Build!
   reportBuildProgress(input: BuildProgressInput!): Build!
   appendBuildLogEvents(
     buildId: ID!

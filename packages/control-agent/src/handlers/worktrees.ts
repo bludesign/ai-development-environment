@@ -1,11 +1,14 @@
-import { watch, type FSWatcher } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { createWriteStream, watch, type FSWatcher } from "node:fs";
+import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
+import { spawn } from "node:child_process";
 
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
+  worktreeDiffPayload,
   worktreeJobPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
@@ -14,6 +17,7 @@ import {
   type WorktreeChange,
   type WorktreeCommit,
   type WorktreeDetail,
+  type WorktreeDiffFile,
   type WorktreeInventoryItem,
   type WorktreePushStatus,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -29,6 +33,15 @@ const successfulProcess = {
   cancelled: false,
 } as const;
 const WATCH_DEBOUNCE_MS = 500;
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".bmp",
+]);
 
 type ActiveWorktreeWatch = {
   watchId: string;
@@ -667,7 +680,11 @@ async function inspectChanges(
     const value = values[index]!;
     const code = value.slice(0, 2);
     const path = value.slice(3);
-    if ((code[0] === "R" || code[0] === "C") && values[index + 1]) index += 1;
+    const previousPath =
+      (code[0] === "R" || code[0] === "C") && values[index + 1]
+        ? values[index + 1]!
+        : null;
+    if (previousPath) index += 1;
     const untracked = code === "??";
     const conflicted = ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(
       code,
@@ -681,6 +698,8 @@ async function inspectChanges(
       : null;
     changes.push({
       path,
+      previousPath,
+      changeType: untracked ? "ADDED" : conflicted ? "CONFLICTED" : code,
       staged,
       unstaged,
       untracked,
@@ -692,6 +711,87 @@ async function inspectChanges(
     });
   }
   return { changes: changes.slice(0, 500), truncated: changes.length > 500 };
+}
+
+function imagePath(path: string): boolean {
+  const extension = path.slice(path.lastIndexOf(".")).toLocaleLowerCase();
+  return IMAGE_EXTENSIONS.has(extension);
+}
+
+function parseNameStatus(value: string): Array<{
+  path: string;
+  previousPath: string | null;
+  changeType: string;
+}> {
+  const entries = value.split("\0").filter(Boolean);
+  const files: Array<{
+    path: string;
+    previousPath: string | null;
+    changeType: string;
+  }> = [];
+  for (let index = 0; index < entries.length;) {
+    const status = entries[index++] ?? "M";
+    const renamed = status.startsWith("R") || status.startsWith("C");
+    const first = entries[index++] ?? "";
+    const second = renamed ? (entries[index++] ?? "") : null;
+    const path = second ?? first;
+    if (!path) continue;
+    files.push({
+      path,
+      previousPath: renamed ? first : null,
+      changeType: status[0] ?? "M",
+    });
+  }
+  return files;
+}
+
+async function diffFiles(
+  folder: string,
+  range: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<WorktreeDiffFile[]> {
+  const [status, counts] = await Promise.all([
+    git(folder, ["diff", "--name-status", "-z", range], timeoutMs, signal),
+    git(folder, ["diff", "--numstat", "-z", range], timeoutMs, signal),
+  ]);
+  requireSuccess(status, "Could not inspect changed files");
+  requireSuccess(counts, "Could not inspect changed line counts");
+  const numstat = parseNumstat(counts.stdout);
+  return parseNameStatus(status.stdout).map((file) => {
+    const [additions, deletions] = numstat.get(file.path) ?? [null, null];
+    return {
+      ...file,
+      additions,
+      deletions,
+      binary: additions === null && deletions === null,
+      image: imagePath(file.path),
+    };
+  });
+}
+
+async function inspectBranchChanges(
+  folder: string,
+  baseBranch: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ changes: WorktreeDiffFile[]; truncated: boolean }> {
+  const mergeBase = requireSuccess(
+    await git(
+      folder,
+      ["merge-base", `refs/remotes/origin/${baseBranch}`, "HEAD"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not determine the base-branch merge base",
+  ).stdout.trim();
+  const files = await diffFiles(
+    folder,
+    `${mergeBase}..HEAD`,
+    timeoutMs,
+    signal,
+  );
+  return { changes: files.slice(0, 500), truncated: files.length > 500 };
 }
 
 async function inspectCommits(
@@ -741,17 +841,489 @@ export async function inspectWorktreeDetail(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<WorktreeDetail> {
-  const [commitResult, changeResult] = await Promise.all([
+  const [commitResult, changeResult, branchResult] = await Promise.all([
     inspectCommits(folder, baseBranch, timeoutMs, signal),
     inspectChanges(folder, timeoutMs, signal),
+    inspectBranchChanges(folder, baseBranch, timeoutMs, signal),
   ]);
   return {
     commits: commitResult.commits,
     changes: changeResult.changes,
+    branchChanges: branchResult.changes,
     commitsTruncated: commitResult.truncated,
     changesTruncated: changeResult.truncated,
+    branchChangesTruncated: branchResult.truncated,
   };
 }
+
+type DiffSide =
+  | { kind: "GIT"; specification: string }
+  | { kind: "FILE"; path: string }
+  | null;
+
+async function baseMergeCommit(
+  folder: string,
+  baseBranch: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  return requireSuccess(
+    await git(
+      folder,
+      ["merge-base", `refs/remotes/origin/${baseBranch}`, "HEAD"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not determine the base-branch merge base",
+  ).stdout.trim();
+}
+
+async function validateDisplayedCommit(
+  folder: string,
+  baseBranch: string,
+  commitSha: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!/^[0-9a-f]{7,64}$/i.test(commitSha)) {
+    throw new Error("Commit SHA is invalid");
+  }
+  const base = await baseMergeCommit(folder, baseBranch, timeoutMs, signal);
+  const [afterBase, beforeHead] = await Promise.all([
+    git(
+      folder,
+      ["merge-base", "--is-ancestor", base, commitSha],
+      timeoutMs,
+      signal,
+    ),
+    git(
+      folder,
+      ["merge-base", "--is-ancestor", commitSha, "HEAD"],
+      timeoutMs,
+      signal,
+    ),
+  ]);
+  if (afterBase.exitCode !== 0 || beforeHead.exitCode !== 0) {
+    throw new Error("Commit is outside the displayed branch history");
+  }
+}
+
+async function parentCommit(
+  folder: string,
+  commitSha: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const result = await git(
+    folder,
+    ["rev-parse", `${commitSha}^`],
+    timeoutMs,
+    signal,
+  );
+  return result.exitCode === 0 ? result.stdout.trim() : null;
+}
+
+async function gitObjectExists(
+  folder: string,
+  specification: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  return (
+    (await git(folder, ["cat-file", "-e", specification], timeoutMs, signal))
+      .exitCode === 0
+  );
+}
+
+async function comparisonSides(
+  input: ReturnType<typeof worktreeDiffPayload>,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ before: DiffSide; after: DiffSide }> {
+  if (!input.path) return { before: null, after: null };
+  const path = input.path;
+  const currentPath = join(folder, path);
+  if (input.scope === "UNTRACKED") {
+    return { before: null, after: { kind: "FILE", path: currentPath } };
+  }
+  if (input.scope === "STAGED") {
+    return {
+      before: { kind: "GIT", specification: `HEAD:${path}` },
+      after: { kind: "GIT", specification: `:${path}` },
+    };
+  }
+  if (input.scope === "UNSTAGED") {
+    return {
+      before: { kind: "GIT", specification: `:${path}` },
+      after: { kind: "FILE", path: currentPath },
+    };
+  }
+  if (input.scope === "COMMIT") {
+    const commitSha = input.commitSha!;
+    await validateDisplayedCommit(
+      folder,
+      input.baseBranch,
+      commitSha,
+      timeoutMs,
+      signal,
+    );
+    const parent = await parentCommit(folder, commitSha, timeoutMs, signal);
+    return {
+      before: parent
+        ? { kind: "GIT", specification: `${parent}:${path}` }
+        : null,
+      after: { kind: "GIT", specification: `${commitSha}:${path}` },
+    };
+  }
+  const base = await baseMergeCommit(
+    folder,
+    input.baseBranch,
+    timeoutMs,
+    signal,
+  );
+  return {
+    before: { kind: "GIT", specification: `${base}:${path}` },
+    after: { kind: "GIT", specification: `HEAD:${path}` },
+  };
+}
+
+async function availableSide(
+  side: DiffSide,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (!side) return false;
+  if (side.kind === "GIT") {
+    return gitObjectExists(folder, side.specification, timeoutMs, signal);
+  }
+  try {
+    const resolved = await realpath(side.path);
+    const difference = relative(folder, resolved);
+    return (
+      difference !== ".." &&
+      !difference.startsWith("../") &&
+      (await stat(resolved)).isFile()
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function inspectRequestedDiff(
+  input: ReturnType<typeof worktreeDiffPayload>,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  if (!input.path) {
+    if (input.scope === "COMMIT") {
+      await validateDisplayedCommit(
+        folder,
+        input.baseBranch,
+        input.commitSha!,
+        timeoutMs,
+        signal,
+      );
+      const parent = await parentCommit(
+        folder,
+        input.commitSha!,
+        timeoutMs,
+        signal,
+      );
+      const files = await diffFiles(
+        folder,
+        parent ? `${parent}..${input.commitSha}` : input.commitSha!,
+        timeoutMs,
+        signal,
+      );
+      return { files: files.slice(0, 500), truncated: files.length > 500 };
+    }
+    if (input.scope === "BRANCH") {
+      const result = await inspectBranchChanges(
+        folder,
+        input.baseBranch,
+        timeoutMs,
+        signal,
+      );
+      return { files: result.changes, truncated: result.truncated };
+    }
+    throw new Error("A file path is required for this diff scope");
+  }
+  if (input.scope === "COMMIT") {
+    await validateDisplayedCommit(
+      folder,
+      input.baseBranch,
+      input.commitSha!,
+      timeoutMs,
+      signal,
+    );
+  }
+  await validateChangedPath(input, folder, timeoutMs, signal);
+  const args = ["diff", "--no-color", "--no-ext-diff", "--unified=3"];
+  let oversized = false;
+  if (input.scope === "STAGED") args.push("--cached");
+  if (input.scope === "COMMIT") {
+    const parent = await parentCommit(
+      folder,
+      input.commitSha!,
+      timeoutMs,
+      signal,
+    );
+    args.push(parent ?? `${input.commitSha}^`, input.commitSha!);
+  } else if (input.scope === "BRANCH") {
+    args.push(
+      await baseMergeCommit(folder, input.baseBranch, timeoutMs, signal),
+      "HEAD",
+    );
+  }
+  args.push("--", input.path);
+  let patch: string;
+  if (input.scope === "UNTRACKED") {
+    const contents = await readFile(join(folder, input.path));
+    if (contents.length > 2 * 1024 * 1024 || contents.includes(0)) {
+      oversized = contents.length > 2 * 1024 * 1024;
+      patch = "";
+    } else {
+      patch = [
+        `diff --git a/${input.path} b/${input.path}`,
+        "new file mode 100644",
+        "--- /dev/null",
+        `+++ b/${input.path}`,
+        ...contents
+          .toString("utf8")
+          .split("\n")
+          .map((line) => `+${line}`),
+      ].join("\n");
+    }
+  } else {
+    patch = requireSuccess(
+      await git(folder, args, timeoutMs, signal),
+      "Could not load the file diff",
+    ).stdout;
+  }
+  const sides = await comparisonSides(input, folder, timeoutMs, signal);
+  const [beforeAvailable, afterAvailable] = await Promise.all([
+    availableSide(sides.before, folder, timeoutMs, signal),
+    availableSide(sides.after, folder, timeoutMs, signal),
+  ]);
+  return {
+    files: [],
+    patch,
+    image: imagePath(input.path),
+    binary: !patch && !imagePath(input.path) && !oversized,
+    truncated: oversized || Buffer.byteLength(patch) >= 2 * 1024 * 1024,
+    beforeAvailable,
+    afterAvailable,
+  };
+}
+
+async function validateChangedPath(
+  input: ReturnType<typeof worktreeDiffPayload>,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!input.path) throw new Error("A changed file path is required");
+  let result: CaptureResult;
+  if (input.scope === "UNTRACKED") {
+    result = await git(
+      folder,
+      ["ls-files", "--others", "--exclude-standard", "-z", "--", input.path],
+      timeoutMs,
+      signal,
+    );
+  } else {
+    const args = ["diff", "--name-only", "-z"];
+    if (input.scope === "STAGED") args.push("--cached");
+    if (input.scope === "COMMIT") {
+      await validateDisplayedCommit(
+        folder,
+        input.baseBranch,
+        input.commitSha!,
+        timeoutMs,
+        signal,
+      );
+      const parent = await parentCommit(
+        folder,
+        input.commitSha!,
+        timeoutMs,
+        signal,
+      );
+      args.push(parent ?? `${input.commitSha}^`, input.commitSha!);
+    } else if (input.scope === "BRANCH") {
+      args.push(
+        await baseMergeCommit(folder, input.baseBranch, timeoutMs, signal),
+        "HEAD",
+      );
+    }
+    args.push("--", input.path);
+    result = await git(folder, args, timeoutMs, signal);
+  }
+  requireSuccess(result, "Could not validate the changed file");
+  if (!result.stdout.split("\0").filter(Boolean).includes(input.path)) {
+    throw new Error("The requested file is outside the displayed diff");
+  }
+}
+
+export const inspectWorktreeDiff: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeDiffPayload(payload);
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  return {
+    ...successfulProcess,
+    diff: await inspectRequestedDiff(input, folder, timeoutMs, signal),
+  };
+};
+
+function imageContentType(path: string): string {
+  const extension = path.slice(path.lastIndexOf(".")).toLocaleLowerCase();
+  return (
+    {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".avif": "image/avif",
+      ".bmp": "image/bmp",
+    }[extension] ?? "application/octet-stream"
+  );
+}
+
+async function writeGitObject(
+  folder: string,
+  specification: string,
+  destination: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn(
+      "git",
+      ["-C", folder, "cat-file", "blob", specification],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const output = createWriteStream(destination, { mode: 0o600 });
+    let stderr = "";
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(error instanceof Error ? error : new Error(String(error)));
+    };
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${String(chunk)}`.slice(0, 4_000);
+    });
+    child.stdout.pipe(output);
+    child.once("error", fail);
+    output.once("error", fail);
+    const terminate = () => child.kill("SIGTERM");
+    const timer = setTimeout(() => {
+      terminate();
+      fail(new Error("Image extraction timed out"));
+    }, timeoutMs);
+    timer.unref();
+    const abort = () => {
+      terminate();
+      fail(new Error("Image extraction was cancelled"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      if (settled) return;
+      if (code !== 0) {
+        fail(new Error(cleanError(stderr || "Could not extract image")));
+        return;
+      }
+      output.end(() => {
+        if (settled) return;
+        settled = true;
+        resolvePromise();
+      });
+    });
+  });
+}
+
+export const downloadWorktreeDiffAsset: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  _onLog,
+  context,
+) => {
+  const input = worktreeDiffPayload(payload);
+  if (!input.path || !input.uploadId || !input.side) {
+    throw new Error("Diff image path, side, and upload ID are required");
+  }
+  if (!imagePath(input.path)) throw new Error("Diff asset is not an image");
+  if (!context?.uploadBuildArtifact) {
+    throw new Error("This agent cannot upload diff images");
+  }
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  await validateChangedPath(input, folder, timeoutMs, signal);
+  const sides = await comparisonSides(input, folder, timeoutMs, signal);
+  const selected = input.side === "BEFORE" ? sides.before : sides.after;
+  if (
+    !selected ||
+    !(await availableSide(selected, folder, timeoutMs, signal))
+  ) {
+    throw new Error("The requested image side is unavailable");
+  }
+  let uploadPath: string;
+  let temporaryDirectory: string | null = null;
+  try {
+    if (selected.kind === "FILE") {
+      uploadPath = await realpath(selected.path);
+      const difference = relative(folder, uploadPath);
+      if (difference === ".." || difference.startsWith("../")) {
+        throw new Error("Diff image resolves outside the worktree");
+      }
+    } else {
+      const size = requireSuccess(
+        await git(
+          folder,
+          ["cat-file", "-s", selected.specification],
+          timeoutMs,
+          signal,
+        ),
+        "Could not inspect diff image",
+      ).stdout.trim();
+      if (!/^\d+$/.test(size) || Number(size) > 20 * 1024 * 1024) {
+        throw new Error("Diff image exceeds the 20 MiB limit");
+      }
+      temporaryDirectory = await mkdtemp(join(tmpdir(), "ade-diff-image-"));
+      uploadPath = join(temporaryDirectory, basename(input.path));
+      await writeGitObject(
+        folder,
+        selected.specification,
+        uploadPath,
+        timeoutMs,
+        signal,
+      );
+    }
+    const information = await stat(uploadPath);
+    if (!information.isFile() || information.size > 20 * 1024 * 1024) {
+      throw new Error("Diff image exceeds the 20 MiB limit");
+    }
+    await context.uploadBuildArtifact({
+      uploadId: input.uploadId,
+      path: uploadPath,
+      filename: basename(input.path),
+      contentType: imageContentType(input.path),
+    });
+    return successfulProcess;
+  } finally {
+    if (temporaryDirectory) {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+};
 
 export const watchWorktree: AgentJobHandler = async (
   payload,

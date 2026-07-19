@@ -6,6 +6,7 @@ import {
   parseBuildArtifactDownloadPayload,
   parseBuildDeletePayload,
   parseBuildJobPayload,
+  parseBuildReportPayload,
   parseBuildSource,
 } from "./builds.js";
 
@@ -39,6 +40,34 @@ function buildPayload() {
 }
 
 describe("iOS build agent contract", () => {
+  test("defaults test-result parsing on for saved and legacy settings", () => {
+    expect(parseBuildAdvancedSettings({}).parseTestResults).toBe(true);
+    expect(
+      parseBuildAdvancedSettings({ parseTestResults: false }).parseTestResults,
+    ).toBe(false);
+  });
+
+  test("validates build report jobs and their build-folder containment", () => {
+    expect(
+      parseBuildReportPayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/build-1",
+        codebaseId: "codebase-1",
+        reportKind: "TEST_RESULTS",
+        source: "MANUAL",
+      }),
+    ).toMatchObject({ reportKind: "TEST_RESULTS", source: "MANUAL" });
+    expect(() =>
+      parseBuildReportPayload({
+        buildId: "build-1",
+        artifactDirectory: "/tmp/builds/other",
+        codebaseId: "codebase-1",
+        reportKind: "CODE_COVERAGE",
+        source: "MANUAL",
+      }),
+    ).toThrow("must end with the build ID");
+  });
+
   test("limits build deletion to the folder named by the build ID", () => {
     expect(
       parseBuildDeletePayload({

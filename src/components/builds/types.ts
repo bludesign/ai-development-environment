@@ -76,6 +76,20 @@ export type BuildArtifact = {
   createdAt: string;
 };
 
+export type BuildReport = {
+  id: string;
+  kind: "TEST_RESULTS" | "CODE_COVERAGE";
+  source: "AUTOMATIC" | "MANUAL" | "WORKTREE";
+  status: "PENDING" | "READY" | "FAILED";
+  summary: Record<string, unknown>;
+  data: Record<string, unknown>;
+  error: string | null;
+  artifact: BuildArtifact | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+};
+
 export type BuildRecord = {
   id: string;
   requestId: string;
@@ -92,6 +106,7 @@ export type BuildRecord = {
   error: string | null;
   outOfDate: boolean;
   artifacts: BuildArtifact[];
+  reports?: BuildReport[];
   scriptExecutions: Array<{
     id: string;
     phase: string;
