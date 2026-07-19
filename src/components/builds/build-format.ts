@@ -21,8 +21,13 @@ export function buildSnapshotName(build: BuildRecord): {
   };
 }
 
-export function relativeBuildAge(value: string, locale: string) {
-  const seconds = Math.round((Date.parse(value) - Date.now()) / 1_000);
+export function relativeBuildAge(
+  value: string,
+  locale: string,
+  now: number | null = Date.now(),
+) {
+  if (now === null) return "—";
+  const seconds = Math.round((Date.parse(value) - now) / 1_000);
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ["year", 365 * 24 * 60 * 60],
@@ -40,12 +45,16 @@ export function relativeBuildAge(value: string, locale: string) {
   return formatter.format(seconds, "second");
 }
 
-export function buildDuration(build: BuildRecord): string {
+export function buildDuration(
+  build: BuildRecord,
+  now: number | null = Date.now(),
+): string {
   const durationMs =
     build.durationMs ??
     (build.startedAt &&
+    now !== null &&
     ["QUEUED", "PREPARING", "RUNNING"].includes(build.status)
-      ? Date.now() - Date.parse(build.startedAt)
+      ? now - Date.parse(build.startedAt)
       : null);
   if (durationMs === null || !Number.isFinite(durationMs)) return "—";
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1_000));

@@ -14,6 +14,24 @@ function gitEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function remainingTimeoutMs(deadline: number): number {
+  return Math.max(1, deadline - Date.now());
+}
+
+function containedPath(folder: string, path: string): string | null {
+  const absolutePath = resolve(folder, path);
+  const difference = relative(folder, absolutePath);
+  if (
+    !difference ||
+    difference === ".." ||
+    difference.startsWith(`..${sep}`) ||
+    isAbsolute(difference)
+  ) {
+    return null;
+  }
+  return absolutePath;
+}
+
 function hashGitDiff(
   hash: Hash,
   folder: string,
@@ -32,6 +50,7 @@ function hashGitDiff(
         "diff",
         "--binary",
         "--no-ext-diff",
+        "--no-textconv",
         "HEAD",
         "--",
       ],
@@ -76,13 +95,22 @@ export async function worktreeCodeStateHash(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  const operation = new AbortController();
+  const abort = () => operation.abort(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  const timeout = setTimeout(() => operation.abort(), Math.max(0, timeoutMs));
+  timeout.unref();
+
   try {
-    const [head, untracked] = await Promise.all([
+    operation.signal.throwIfAborted();
+    const [head, untracked, submodules] = await Promise.all([
       captureCommand({
         command: "git",
         args: ["-C", folder, "rev-parse", "HEAD"],
-        timeoutMs,
-        signal,
+        timeoutMs: remainingTimeoutMs(deadline),
+        signal: operation.signal,
         env: gitEnvironment(),
       }),
       captureCommand({
@@ -96,46 +124,95 @@ export async function worktreeCodeStateHash(
           "--exclude-standard",
           "-z",
         ],
-        timeoutMs,
-        signal,
+        timeoutMs: remainingTimeoutMs(deadline),
+        signal: operation.signal,
+        env: gitEnvironment(),
+      }),
+      captureCommand({
+        command: "git",
+        args: [
+          "-C",
+          folder,
+          "--no-optional-locks",
+          "submodule",
+          "foreach",
+          "--quiet",
+          'printf "%s\\0" "$sm_path"',
+        ],
+        timeoutMs: remainingTimeoutMs(deadline),
+        signal: operation.signal,
         env: gitEnvironment(),
       }),
     ]);
-    if (head.exitCode !== 0 || untracked.exitCode !== 0) return null;
+    if (
+      head.exitCode !== 0 ||
+      untracked.exitCode !== 0 ||
+      submodules.exitCode !== 0 ||
+      operation.signal.aborted
+    ) {
+      return null;
+    }
     const hash = createHash("sha256");
     hash.update("head\0");
     hash.update(head.stdout.trim());
     hash.update("\0diff\0");
-    if (!(await hashGitDiff(hash, folder, timeoutMs, signal))) return null;
+    if (
+      !(await hashGitDiff(
+        hash,
+        folder,
+        remainingTimeoutMs(deadline),
+        operation.signal,
+      ))
+    ) {
+      return null;
+    }
     hash.update("\0untracked\0");
     const paths = untracked.stdout.split("\0").filter(Boolean).sort();
     for (const path of paths) {
-      const absolutePath = resolve(folder, path);
-      const difference = relative(folder, absolutePath);
-      if (
-        !difference ||
-        difference === ".." ||
-        difference.startsWith(`..${sep}`) ||
-        isAbsolute(difference)
-      ) {
-        return null;
-      }
+      operation.signal.throwIfAborted();
+      const absolutePath = containedPath(folder, path);
+      if (!absolutePath) return null;
       hash.update(path);
       hash.update("\0");
       const information = await lstat(absolutePath);
+      operation.signal.throwIfAborted();
       if (information.isSymbolicLink()) {
         hash.update("symlink\0");
         hash.update(await readlink(absolutePath));
       } else if (information.isFile()) {
         hash.update("file\0");
-        for await (const chunk of createReadStream(absolutePath)) {
+        hash.update((information.mode & 0o777).toString(8).padStart(3, "0"));
+        hash.update("\0");
+        for await (const chunk of createReadStream(absolutePath, {
+          signal: operation.signal,
+        })) {
           hash.update(chunk as Buffer);
         }
       }
       hash.update("\0");
     }
+    hash.update("submodules\0");
+    const submodulePaths = submodules.stdout.split("\0").filter(Boolean).sort();
+    for (const path of submodulePaths) {
+      operation.signal.throwIfAborted();
+      const absolutePath = containedPath(folder, path);
+      if (!absolutePath) return null;
+      const submoduleHash = await worktreeCodeStateHash(
+        absolutePath,
+        remainingTimeoutMs(deadline),
+        operation.signal,
+      );
+      if (!submoduleHash) return null;
+      hash.update(path);
+      hash.update("\0");
+      hash.update(submoduleHash);
+      hash.update("\0");
+    }
     return hash.digest("hex");
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
   }
 }

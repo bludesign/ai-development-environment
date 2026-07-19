@@ -18,6 +18,7 @@ import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
 import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import type { BuildRecord } from "@/components/builds/types";
+import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -680,6 +681,7 @@ function WorktreeBuildTable({
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
+  const buildTime = useBuildTimeTicker();
 
   return (
     <Card className="gap-0 py-0">
@@ -766,11 +768,11 @@ function WorktreeBuildTable({
                         dateTime={startedAt}
                         title={new Date(startedAt).toLocaleString(locale)}
                       >
-                        {relativeBuildAge(startedAt, locale)}
+                        {relativeBuildAge(startedAt, locale, buildTime)}
                       </time>
                       <span className="text-xs">
                         {t("durationValue", {
-                          duration: buildDuration(build),
+                          duration: buildDuration(build, buildTime),
                         })}
                       </span>
                     </div>

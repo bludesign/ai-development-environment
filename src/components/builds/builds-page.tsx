@@ -61,6 +61,7 @@ import { BUILD_LIST_FIELDS } from "./graphql-fields";
 import { RebuildButton } from "./rebuild-button";
 import type { BuildRecord, BuildScript } from "./types";
 import { RunBuildControls } from "./run-build-controls";
+import { useBuildTimeTicker } from "./use-build-time-ticker";
 
 const SCRIPT_FIELDS = `
   id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
@@ -103,6 +104,7 @@ export function BuildsPage() {
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
+  const buildTime = useBuildTimeTicker();
   const [builds, setBuilds] = useState<BuildRecord[]>([]);
   const [scripts, setScripts] = useState<BuildScript[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
@@ -449,11 +451,18 @@ export function BuildsPage() {
                                         locale,
                                       )}
                                     >
-                                      {relativeBuildAge(startedAt, locale)}
+                                      {relativeBuildAge(
+                                        startedAt,
+                                        locale,
+                                        buildTime,
+                                      )}
                                     </time>
                                     <span className="text-xs">
                                       {t("durationValue", {
-                                        duration: buildDuration(build),
+                                        duration: buildDuration(
+                                          build,
+                                          buildTime,
+                                        ),
                                       })}
                                     </span>
                                   </div>

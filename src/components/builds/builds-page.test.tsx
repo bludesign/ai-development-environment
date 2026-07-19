@@ -148,10 +148,28 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe("BuildsPage", () => {
+  test("updates running durations on the clock ticker", async () => {
+    const startedAt = Date.parse(now);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const interval = vi.spyOn(window, "setInterval");
+
+    render(<BuildsPage />);
+
+    expect(await screen.findByText("Duration 0s")).toBeDefined();
+    dateNow.mockReturnValue(startedAt + 65_000);
+    const update = interval.mock.calls.find(
+      ([, delay]) => delay === 1_000,
+    )?.[0];
+    expect(typeof update).toBe("function");
+    act(() => (update as () => void)());
+    expect(screen.getByText("Duration 1m 5s")).toBeDefined();
+  });
+
   test("updates history from subscriptions and edits reusable scripts", async () => {
     render(<BuildsPage />);
 
