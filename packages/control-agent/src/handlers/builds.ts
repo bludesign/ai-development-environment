@@ -1407,6 +1407,28 @@ function testDetails(node: Record<string, unknown>): string[] {
   ];
 }
 
+function testSourceFile(
+  node: Record<string, unknown>,
+  suite: string | null,
+): { file: string | null; filePath: string | null } {
+  const explicit = [
+    node.filePath,
+    node.sourceFilePath,
+    node.fileName,
+    node.sourceFile,
+  ].find((value): value is string => typeof value === "string" && !!value);
+  if (explicit) {
+    return { file: basename(explicit), filePath: explicit };
+  }
+  const identifier =
+    typeof node.nodeIdentifier === "string" ? node.nodeIdentifier : "";
+  const identifierOwner = identifier.split("/")[0]?.trim();
+  return {
+    file: identifierOwner || suite,
+    filePath: null,
+  };
+}
+
 function normalizeTestResults(value: unknown): {
   summary: Record<string, unknown>;
   data: Record<string, unknown>;
@@ -1438,11 +1460,13 @@ function normalizeTestResults(value: unknown): {
     };
     if (nodeType === "Test Case") {
       const result = typeof node.result === "string" ? node.result : "unknown";
+      const sourceFile = testSourceFile(node, next.suite);
       tests.push({
         identifier:
           typeof node.nodeIdentifier === "string" ? node.nodeIdentifier : name,
         name,
         ...next,
+        ...sourceFile,
         result,
         durationSeconds:
           typeof node.durationInSeconds === "number"

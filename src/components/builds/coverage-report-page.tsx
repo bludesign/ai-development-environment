@@ -1,6 +1,14 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+  Search,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -46,6 +54,17 @@ type ChangedCoverageFile = {
   changeType?: string;
 };
 
+type CoverageSortKey =
+  "filename" | "target" | "lineCoverage" | "uncoveredLines";
+type CoverageSort = {
+  key: CoverageSortKey;
+  direction: "asc" | "desc";
+};
+
+function uncoveredLines(file: CoverageFile): number {
+  return Math.max(0, file.executableLines - file.coveredLines);
+}
+
 export function CoverageReportPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
@@ -55,6 +74,10 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [allFilesOpen, setAllFilesOpen] = useState(false);
+  const [sort, setSort] = useState<CoverageSort>({
+    key: "filename",
+    direction: "asc",
+  });
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -94,18 +117,42 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const files = useMemo(
+  const rawFiles = useMemo(
     () =>
-      (Array.isArray(report?.data.files)
+      Array.isArray(report?.data.files)
         ? (report.data.files as CoverageFile[])
-        : []
-      ).filter((file) =>
-        `${file.target} ${file.name} ${file.path}`
-          .toLocaleLowerCase()
-          .includes(search.trim().toLocaleLowerCase()),
-      ),
-    [report, search],
+        : [],
+    [report],
   );
+  const files = useMemo(() => {
+    const filtered = rawFiles.filter((file) =>
+      `${file.target} ${file.name} ${file.path}`
+        .toLocaleLowerCase()
+        .includes(search.trim().toLocaleLowerCase()),
+    );
+    const stringCompare = (left: string, right: string) =>
+      left.localeCompare(right, locale, { numeric: true, sensitivity: "base" });
+    return filtered.toSorted((left, right) => {
+      let comparison = 0;
+      if (sort.key === "filename") {
+        comparison = stringCompare(left.name, right.name);
+      } else if (sort.key === "target") {
+        comparison = stringCompare(left.target, right.target);
+      } else if (sort.key === "lineCoverage") {
+        comparison = left.lineCoverage - right.lineCoverage;
+      } else {
+        comparison = uncoveredLines(left) - uncoveredLines(right);
+      }
+      if (comparison !== 0) {
+        return sort.direction === "asc" ? comparison : -comparison;
+      }
+      return (
+        stringCompare(left.name, right.name) ||
+        stringCompare(left.target, right.target) ||
+        stringCompare(left.path, right.path)
+      );
+    });
+  }, [locale, rawFiles, search, sort]);
   const changedFiles = Array.isArray(report?.data.changedFiles)
     ? (report.data.changedFiles as ChangedCoverageFile[])
     : [];
@@ -116,6 +163,22 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
           maximumFractionDigits: 1,
         }).format(value)
       : "—";
+  const selectSort = (key: CoverageSortKey) => {
+    setSort((current) =>
+      current.key === key
+        ? {
+            key,
+            direction: current.direction === "asc" ? "desc" : "asc",
+          }
+        : {
+            key,
+            direction:
+              key === "lineCoverage" || key === "uncoveredLines"
+                ? "desc"
+                : "asc",
+          },
+    );
+  };
 
   if (loading) {
     return (
@@ -211,7 +274,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
               </span>
             </Button>
             <div className="ml-auto flex items-center gap-2">
-              <Badge>{files.length}</Badge>
+              <Badge>{rawFiles.length}</Badge>
               <Button
                 aria-expanded={allFilesOpen}
                 aria-label={t(
@@ -257,21 +320,47 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
               >
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="h-8 px-2">
-                      {t("coverageTarget")}
-                    </TableHead>
-                    <TableHead className="h-8 px-2">
-                      {t("coverageFile")}
-                    </TableHead>
+                    <SortableCoverageHead
+                      activeSort={sort}
+                      ariaLabel={t("sortCoverageFiles", {
+                        column: t("coverageTarget"),
+                      })}
+                      label={t("coverageTarget")}
+                      onSort={selectSort}
+                      sortKey="target"
+                    />
+                    <SortableCoverageHead
+                      activeSort={sort}
+                      ariaLabel={t("sortCoverageFiles", {
+                        column: t("coverageFile"),
+                      })}
+                      label={t("coverageFile")}
+                      onSort={selectSort}
+                      sortKey="filename"
+                    />
                     <TableHead className="h-8 px-2 text-right">
                       {t("coveredLines")}
                     </TableHead>
-                    <TableHead className="h-8 px-2 text-right">
-                      {t("uncoveredLines")}
-                    </TableHead>
-                    <TableHead className="h-8 px-2 text-right">
-                      {t("coverage")}
-                    </TableHead>
+                    <SortableCoverageHead
+                      activeSort={sort}
+                      align="right"
+                      ariaLabel={t("sortCoverageFiles", {
+                        column: t("uncoveredLines"),
+                      })}
+                      label={t("uncoveredLines")}
+                      onSort={selectSort}
+                      sortKey="uncoveredLines"
+                    />
+                    <SortableCoverageHead
+                      activeSort={sort}
+                      align="right"
+                      ariaLabel={t("sortCoverageFiles", {
+                        column: t("coverage"),
+                      })}
+                      label={t("coverage")}
+                      onSort={selectSort}
+                      sortKey="lineCoverage"
+                    />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -297,10 +386,13 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
                         {file.coveredLines} / {file.executableLines}
                       </TableCell>
                       <TableCell className="px-2 py-1.5 text-right tabular-nums">
-                        {Math.max(0, file.executableLines - file.coveredLines)}
+                        {uncoveredLines(file)}
                       </TableCell>
                       <TableCell className="px-2 py-1.5 text-right font-medium">
-                        {percent(file.lineCoverage)}
+                        <CoverageValue
+                          percent={percent}
+                          value={file.lineCoverage}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -311,6 +403,87 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         )}
       </Card>
     </section>
+  );
+}
+
+function SortableCoverageHead({
+  activeSort,
+  align = "left",
+  ariaLabel,
+  label,
+  onSort,
+  sortKey,
+}: {
+  activeSort: CoverageSort;
+  align?: "left" | "right";
+  ariaLabel: string;
+  label: string;
+  onSort: (key: CoverageSortKey) => void;
+  sortKey: CoverageSortKey;
+}) {
+  const active = activeSort.key === sortKey;
+  return (
+    <TableHead
+      aria-sort={
+        active
+          ? activeSort.direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+      className="h-8 px-2"
+    >
+      <Button
+        aria-label={ariaLabel}
+        className={`-mx-2 h-7 px-2 text-xs ${align === "right" ? "w-[calc(100%+1rem)] justify-end" : "justify-start"}`}
+        onClick={() => onSort(sortKey)}
+        size="sm"
+        title={ariaLabel}
+        type="button"
+        variant="ghost"
+      >
+        {label}
+        {active ? (
+          activeSort.direction === "asc" ? (
+            <ArrowUp />
+          ) : (
+            <ArrowDown />
+          )
+        ) : (
+          <ArrowUpDown />
+        )}
+      </Button>
+    </TableHead>
+  );
+}
+
+function CoverageValue({
+  value,
+  percent,
+}: {
+  value: number | null;
+  percent: (value: unknown) => string;
+}) {
+  if (typeof value !== "number") return <>—</>;
+  const normalized = Math.max(0, Math.min(1, value));
+  const color =
+    normalized >= 0.8
+      ? "text-emerald-500"
+      : normalized >= 0.5
+        ? "text-amber-500"
+        : "text-red-500";
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
+      {percent(value)}
+      <span
+        aria-hidden="true"
+        className={`size-3.5 shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
+        data-coverage-indicator
+        style={{
+          background: `conic-gradient(currentColor ${normalized * 360}deg, var(--muted) 0deg)`,
+        }}
+      />
+    </span>
   );
 }
 
@@ -361,7 +534,10 @@ function CoverageChangedTable({
                 {file.changedCoveredLines} / {file.changedExecutableLines}
               </TableCell>
               <TableCell className="px-2 py-1.5 text-right">
-                {percent(file.changedLineCoverage)}
+                <CoverageValue
+                  percent={percent}
+                  value={file.changedLineCoverage}
+                />
               </TableCell>
             </TableRow>
           ))}

@@ -408,11 +408,24 @@ esac
         new AbortController().signal,
         async () => undefined,
       )) as ProcessResult & {
-        report: { status: string; summary: Record<string, unknown> };
+        report: {
+          status: string;
+          summary: Record<string, unknown>;
+          data: Record<string, unknown>;
+        };
       };
       expect(testResult.report).toMatchObject({
         status: "READY",
         summary: { total: 1, passed: 1, failed: 0 },
+        data: {
+          tests: [
+            expect.objectContaining({
+              bundle: "AppTests",
+              suite: "LoginTests",
+              file: "LoginTests",
+            }),
+          ],
+        },
       });
       expect(
         JSON.parse(

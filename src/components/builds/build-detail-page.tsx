@@ -10,6 +10,8 @@ import {
   Download,
   FileJson,
   ChartNoAxesColumn,
+  ChevronDown,
+  ChevronRight,
   Square,
   Trash2,
 } from "lucide-react";
@@ -51,6 +53,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -607,7 +610,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
                           : "outline"
                       }
                     >
-                      {execution.status}
+                      {humanizeConstant(execution.status)}
                     </Badge>
                   </div>
                 ))
@@ -892,16 +895,94 @@ function AdvancedSettingValue({ value }: { value: unknown }) {
   return <span className="break-words font-mono text-xs">{String(value)}</span>;
 }
 
+type TestCaseResult = {
+  identifier?: unknown;
+  name?: unknown;
+  plan?: unknown;
+  configuration?: unknown;
+  bundle?: unknown;
+  suite?: unknown;
+  file?: unknown;
+  filePath?: unknown;
+  result?: unknown;
+  durationSeconds?: unknown;
+  tags?: unknown;
+  details?: unknown;
+};
+
+type TestResultFilter = "ALL" | "PASSED" | "FAILED" | "SKIPPED";
+
+type TestSuiteGroup = {
+  key: string;
+  name: string | null;
+  bundle: string | null;
+  plan: string | null;
+  configuration: string | null;
+  tests: TestCaseResult[];
+};
+
+function optionalTestString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function matchesTestFilter(
+  test: TestCaseResult,
+  filter: TestResultFilter,
+): boolean {
+  if (filter === "ALL") return true;
+  return String(test.result ?? "unknown").toLocaleUpperCase() === filter;
+}
+
+function groupTestSuites(tests: TestCaseResult[]): TestSuiteGroup[] {
+  const groups = new Map<string, TestSuiteGroup>();
+  for (const test of tests) {
+    const bundle = optionalTestString(test.bundle);
+    const suite = optionalTestString(test.suite);
+    const plan = optionalTestString(test.plan);
+    const configuration = optionalTestString(test.configuration);
+    const name = suite ?? bundle;
+    const key = JSON.stringify([plan, configuration, bundle, name]);
+    const group = groups.get(key) ?? {
+      key,
+      name,
+      bundle,
+      plan,
+      configuration,
+      tests: [],
+    };
+    group.tests.push(test);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((left, right) =>
+    (left.name ?? "").localeCompare(right.name ?? "", undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
+function testFileName(test: TestCaseResult): string | null {
+  const explicit = optionalTestString(test.file);
+  if (explicit) return explicit;
+  const suite = optionalTestString(test.suite);
+  if (suite) return suite;
+  return optionalTestString(test.identifier)?.split("/")[0] ?? null;
+}
+
 function TestResultsCard({ report }: { report: BuildReport }) {
   const t = useTranslations("builds");
+  const [filter, setFilter] = useState<TestResultFilter>("ALL");
   const tests = Array.isArray(report.data.tests)
-    ? (report.data.tests as Array<Record<string, unknown>>)
+    ? (report.data.tests as TestCaseResult[])
     : [];
   const devices = Array.isArray(report.data.devices)
     ? (report.data.devices as Array<Record<string, unknown>>)
     : [];
   const number = (key: string) =>
     typeof report.summary[key] === "number" ? Number(report.summary[key]) : 0;
+  const suites = groupTestSuites(tests).filter((suite) =>
+    suite.tests.some((test) => matchesTestFilter(test, filter)),
+  );
   return (
     <Card>
       <CardHeader>
@@ -920,11 +1001,16 @@ function TestResultsCard({ report }: { report: BuildReport }) {
               <Badge variant="outline">
                 {t("testTotal", { count: number("total") })}
               </Badge>
-              <Badge>{t("testPassed", { count: number("passed") })}</Badge>
+              <Badge className="bg-emerald-600 text-white dark:bg-emerald-700">
+                {t("testPassed", { count: number("passed") })}
+              </Badge>
               <Badge variant={number("failed") ? "destructive" : "outline"}>
                 {t("testFailed", { count: number("failed") })}
               </Badge>
-              <Badge variant="secondary">
+              <Badge
+                className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                variant="outline"
+              >
                 {t("testSkipped", { count: number("skipped") })}
               </Badge>
               {devices.map((device, index) => (
@@ -934,76 +1020,254 @@ function TestResultsCard({ report }: { report: BuildReport }) {
                 </Badge>
               ))}
             </div>
-            <div className="overflow-auto rounded-md border">
-              <Table className="min-w-[54rem]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("testStatus")}</TableHead>
-                    <TableHead>{t("testName")}</TableHead>
-                    <TableHead>{t("testSuite")}</TableHead>
-                    <TableHead>{t("testBundle")}</TableHead>
-                    <TableHead>{t("testPlan")}</TableHead>
-                    <TableHead className="text-right">
-                      {t("testDuration")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tests.map((test, index) => {
-                    const result = String(test.result ?? "unknown");
-                    const details = Array.isArray(test.details)
-                      ? test.details.filter(
-                          (value): value is string => typeof value === "string",
-                        )
-                      : [];
-                    return (
-                      <TableRow
-                        key={`${String(test.identifier ?? test.name)}:${index}`}
-                      >
-                        <TableCell>
-                          <Badge
-                            variant={
-                              result === "Failed"
-                                ? "destructive"
-                                : result === "Passed"
-                                  ? "default"
-                                  : "secondary"
-                            }
-                          >
-                            {result}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-md whitespace-normal">
-                          <p className="font-mono text-xs font-medium">
-                            {String(test.name ?? "—")}
-                          </p>
-                          {details.map((detail, detailIndex) => (
-                            <p
-                              className="mt-1 text-xs text-destructive"
-                              key={detailIndex}
-                            >
-                              {detail}
-                            </p>
-                          ))}
-                        </TableCell>
-                        <TableCell>{String(test.suite ?? "—")}</TableCell>
-                        <TableCell>{String(test.bundle ?? "—")}</TableCell>
-                        <TableCell>{String(test.plan ?? "—")}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {typeof test.durationSeconds === "number"
-                            ? `${test.durationSeconds.toFixed(3)}s`
-                            : "—"}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+            <div className="overflow-x-auto pb-1">
+              <Tabs
+                onValueChange={(value) => setFilter(value as TestResultFilter)}
+                value={filter}
+              >
+                <TabsList aria-label={t("testResultFilters")}>
+                  <TabsTrigger value="ALL">
+                    {t("testFilterAll", { count: tests.length })}
+                  </TabsTrigger>
+                  <TabsTrigger value="PASSED">
+                    {t("testFilterPassed", { count: number("passed") })}
+                  </TabsTrigger>
+                  <TabsTrigger value="FAILED">
+                    {t("testFilterFailed", { count: number("failed") })}
+                  </TabsTrigger>
+                  <TabsTrigger value="SKIPPED">
+                    {t("testFilterSkipped", { count: number("skipped") })}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            <div className="divide-y rounded-md border">
+              {suites.map((suite) => (
+                <TestSuiteResultGroup
+                  filter={filter}
+                  group={suite}
+                  key={suite.key}
+                />
+              ))}
             </div>
           </>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function TestSuiteResultGroup({
+  filter,
+  group,
+}: {
+  filter: TestResultFilter;
+  group: TestSuiteGroup;
+}) {
+  const t = useTranslations("builds");
+  const locale = useLocale();
+  const [open, setOpen] = useState(false);
+  const suiteName = group.name ?? t("testsWithoutSuite");
+  const passed = group.tests.filter((test) => test.result === "Passed").length;
+  const passRate = group.tests.length ? passed / group.tests.length : 0;
+  const formattedRate = new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(passRate);
+  const filteredTests = group.tests.filter((test) =>
+    matchesTestFilter(test, filter),
+  );
+  const fileGroups = new Map<string, TestCaseResult[]>();
+  for (const test of filteredTests) {
+    const file = testFileName(test) ?? t("testsWithoutFile");
+    fileGroups.set(file, [...(fileGroups.get(file) ?? []), test]);
+  }
+  const metadata = [group.bundle, group.configuration, group.plan]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div>
+      <button
+        aria-expanded={open}
+        aria-label={t(open ? "collapseTestSuite" : "expandTestSuite", {
+          suite: suiteName,
+        })}
+        className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/40"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        {open ? (
+          <ChevronDown className="size-3.5 shrink-0" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">
+          {suiteName}
+        </span>
+        {metadata && (
+          <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+            {metadata}
+          </span>
+        )}
+        <Badge
+          className={
+            passRate === 1
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : passRate >= 0.5
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : ""
+          }
+          variant={passRate < 0.5 ? "destructive" : "outline"}
+        >
+          {t("testSuitePassed", {
+            passed,
+            total: group.tests.length,
+            percent: formattedRate,
+          })}
+        </Badge>
+      </button>
+      {open && (
+        <div className="border-t bg-muted/10 p-2">
+          <div className="divide-y rounded-md border bg-background">
+            {[...fileGroups.entries()]
+              .sort(([left], [right]) =>
+                left.localeCompare(right, locale, {
+                  numeric: true,
+                  sensitivity: "base",
+                }),
+              )
+              .map(([file, fileTests]) => (
+                <TestFileResultGroup file={file} key={file} tests={fileTests} />
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestFileResultGroup({
+  file,
+  tests,
+}: {
+  file: string;
+  tests: TestCaseResult[];
+}) {
+  const t = useTranslations("builds");
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        aria-expanded={open}
+        aria-label={t(open ? "collapseTestFile" : "expandTestFile", { file })}
+        className="flex min-h-8 w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/40"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        {open ? (
+          <ChevronDown className="size-3.5 shrink-0" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0" />
+        )}
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-xs"
+          title={file}
+        >
+          {file}
+        </span>
+        <Badge variant="outline">
+          {t("testTotal", { count: tests.length })}
+        </Badge>
+      </button>
+      {open && (
+        <div className="border-t overflow-auto">
+          <Table aria-label={file} className="min-w-[38rem] text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="h-8 px-2">{t("testStatus")}</TableHead>
+                <TableHead className="h-8 px-2">{t("testName")}</TableHead>
+                <TableHead className="h-8 px-2 text-right">
+                  {t("testDuration")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tests.map((test, index) => {
+                const details = Array.isArray(test.details)
+                  ? test.details.filter(
+                      (value): value is string => typeof value === "string",
+                    )
+                  : [];
+                const tags = Array.isArray(test.tags)
+                  ? test.tags.filter(
+                      (value): value is string => typeof value === "string",
+                    )
+                  : [];
+                const name = String(test.name ?? "—");
+                const identifier = optionalTestString(test.identifier);
+                return (
+                  <TableRow key={`${identifier ?? name}:${index}`}>
+                    <TableCell className="px-2 py-1.5">
+                      <TestResultBadge
+                        result={String(test.result ?? "unknown")}
+                      />
+                    </TableCell>
+                    <TableCell className="max-w-xl px-2 py-1.5 whitespace-normal">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono font-medium">{name}</span>
+                        {tags.map((tag) => (
+                          <Badge key={tag} variant="outline">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                      {identifier && identifier !== name && (
+                        <p
+                          className="truncate font-mono text-muted-foreground"
+                          title={identifier}
+                        >
+                          {identifier}
+                        </p>
+                      )}
+                      {details.map((detail, detailIndex) => (
+                        <p className="mt-1 text-destructive" key={detailIndex}>
+                          {detail}
+                        </p>
+                      ))}
+                    </TableCell>
+                    <TableCell className="px-2 py-1.5 text-right tabular-nums">
+                      {typeof test.durationSeconds === "number"
+                        ? `${test.durationSeconds.toFixed(3)}s`
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestResultBadge({ result }: { result: string }) {
+  const normalized = result.toLocaleLowerCase();
+  const className =
+    normalized === "passed"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      : normalized === "skipped"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        : normalized === "expected failure"
+          ? "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+          : "";
+  return (
+    <Badge
+      className={className}
+      variant={normalized === "failed" ? "destructive" : "outline"}
+    >
+      {result}
+    </Badge>
   );
 }
 

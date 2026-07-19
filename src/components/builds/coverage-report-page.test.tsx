@@ -60,8 +60,8 @@ describe("CoverageReportPage", () => {
                 },
                 {
                   target: "AppTests",
-                  name: "Shared.swift",
-                  path: "/repo/Sources/Shared.swift",
+                  name: "Widget.swift",
+                  path: "/repo/Sources/Widget.swift",
                   coveredLines: 7,
                   executableLines: 10,
                   lineCoverage: 0.7,
@@ -104,9 +104,46 @@ describe("CoverageReportPage", () => {
     });
     expect(within(allFilesTable).getByText("80%")).toBeDefined();
     expect(within(allFilesTable).getByText("70%")).toBeDefined();
+    expect(
+      allFilesTable.querySelectorAll("[data-coverage-indicator]"),
+    ).toHaveLength(2);
+    expect(
+      allFilesTable
+        .querySelector<HTMLElement>("[data-coverage-indicator]")
+        ?.style.background.includes("conic-gradient"),
+    ).toBe(true);
     expect(allFilesTable.querySelector("tbody td")?.className).toContain(
       "py-1.5",
     );
+
+    const firstDataRow = () =>
+      within(allFilesTable).getAllByRole("row").slice(1)[0]!;
+    const fileSort = within(allFilesTable).getByRole("button", {
+      name: "Sort coverage files by File",
+    });
+    fireEvent.click(fileSort);
+    expect(within(firstDataRow()).getByText("Widget.swift")).toBeDefined();
+
+    fireEvent.click(
+      within(allFilesTable).getByRole("button", {
+        name: "Sort coverage files by Target",
+      }),
+    );
+    expect(within(firstDataRow()).getByText("Shared.swift")).toBeDefined();
+
+    fireEvent.click(
+      within(allFilesTable).getByRole("button", {
+        name: "Sort coverage files by Coverage",
+      }),
+    );
+    expect(within(firstDataRow()).getByText("Shared.swift")).toBeDefined();
+
+    fireEvent.click(
+      within(allFilesTable).getByRole("button", {
+        name: "Sort coverage files by Uncovered lines",
+      }),
+    );
+    expect(within(firstDataRow()).getByText("Widget.swift")).toBeDefined();
 
     fireEvent.change(
       screen.getByRole("textbox", {
