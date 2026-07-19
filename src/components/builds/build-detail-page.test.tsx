@@ -244,9 +244,14 @@ describe("BuildDetailPage", () => {
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
-    expect(screen.getByText(/Compile Swift sources/).className).toContain(
-      "max-h-[48rem]",
-    );
+    const logViewport = screen.getByText(/Compile Swift sources/);
+    expect(logViewport.className).toContain("max-h-[48rem]");
+    expect(logViewport.className).toContain("max-w-full");
+    expect(logViewport.className).toContain("[overflow-wrap:anywhere]");
+    const detailGrid =
+      logViewport.closest('[data-slot="card"]')?.parentElement?.parentElement;
+    expect(detailGrid?.className).toContain("min-w-0");
+    expect(detailGrid?.firstElementChild?.className).toContain("min-w-0");
     const advancedSettingsCard = screen
       .getByText("Advanced settings")
       .closest<HTMLElement>('[data-slot="card"]');

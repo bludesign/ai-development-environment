@@ -418,7 +418,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+    <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
       <div>
         <Button asChild className="-ml-2" size="sm" variant="ghost">
           <Link href="/builds">
@@ -561,8 +561,8 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
 
       {testReport && <TestResultsCard report={testReport} />}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <div className="space-y-5">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <div className="min-w-0 space-y-5">
           <Card>
             <CardHeader>
               <CardTitle>{t("logs")}</CardTitle>
@@ -589,7 +589,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </CardHeader>
             <CardContent>
               <pre
-                className="max-h-[48rem] overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100"
+                className="max-h-[48rem] w-full min-w-0 max-w-full overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100 [overflow-wrap:anywhere]"
                 ref={logRef}
               >
                 {logs.length
@@ -618,7 +618,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               </CardAction>
             </CardHeader>
             <CardContent>
-              <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+              <pre className="w-full min-w-0 max-w-full overflow-x-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
                 {build.commandSummary}
               </pre>
             </CardContent>
@@ -663,7 +663,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </CardContent>
           </Card>
         </div>
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <Card>
             <CardHeader>
               <CardTitle>{t("overview")}</CardTitle>
