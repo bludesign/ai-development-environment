@@ -665,7 +665,8 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
                   >
                     <div>
                       <p className="text-sm font-medium">
-                        {execution.nameSnapshot} · {humanizeConstant(execution.phase)}
+                        {execution.nameSnapshot} ·{" "}
+                        {humanizeConstant(execution.phase)}
                       </p>
                       {execution.error && (
                         <p className="text-xs text-destructive">
