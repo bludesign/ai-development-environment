@@ -221,6 +221,14 @@ export type BuildExportSettings = {
   testFlightInternalTestingOnly: boolean;
 };
 
+export type BuildArtifactSnapshot = {
+  kind: string;
+  relativePath: string;
+  sizeBytes: number | null;
+  checksum: string | null;
+  metadata: Record<string, unknown>;
+};
+
 export type BuildExportPayload = BuildWorktreeIdentity & {
   buildId: string;
   exportId: string;
@@ -811,4 +819,44 @@ export function parseBuildExportPayload(value: unknown): BuildExportPayload {
     ),
     settings: parseBuildExportSettings(input.settings),
   };
+}
+
+/**
+ * An artifact reported back by an agent in a job result. Job results are not
+ * schema-validated on receipt, so the control plane parses them defensively:
+ * invalid entries are skipped rather than failing the whole projection, and an
+ * older agent that reports no artifacts at all yields an empty list.
+ */
+export function parseBuildArtifactSnapshots(
+  value: unknown,
+): BuildArtifactSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  const snapshots: BuildArtifactSnapshot[] = [];
+  for (const entry of value) {
+    try {
+      const input = objectValue(entry, "build artifact");
+      snapshots.push({
+        kind: stringValue(input.kind, "build artifact.kind"),
+        relativePath: safeRelativePath(
+          input.relativePath,
+          "build artifact.relativePath",
+        ),
+        sizeBytes:
+          typeof input.sizeBytes === "number" &&
+          Number.isFinite(input.sizeBytes)
+            ? input.sizeBytes
+            : null,
+        checksum: nullableString(input.checksum, "build artifact.checksum"),
+        metadata:
+          input.metadata &&
+          typeof input.metadata === "object" &&
+          !Array.isArray(input.metadata)
+            ? (input.metadata as Record<string, unknown>)
+            : {},
+      });
+    } catch {
+      continue;
+    }
+  }
+  return snapshots;
 }

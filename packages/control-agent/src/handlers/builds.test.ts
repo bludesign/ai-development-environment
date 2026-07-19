@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -34,6 +35,8 @@ import {
   physicalDestinations,
   runIosBuild,
   simulatorAppArguments,
+  archiveApplicationProperties,
+  exportedArtifacts,
   simulatorDestinations,
   testPlanNames,
   workspaceProjectPaths,
@@ -732,5 +735,152 @@ export default async function hook(build) {
       if (originalSecret === undefined) delete process.env.TEST_API_TOKEN;
       else process.env.TEST_API_TOKEN = originalSecret;
     }
+  });
+});
+
+describe("iOS archive export artifacts", () => {
+  const roots: string[] = [];
+  // Bundle metadata is read with plutil, which only exists on macOS. The agent
+  // only ever runs there, but the suite itself should stay portable.
+  const withPlutil = existsSync("/usr/bin/plutil") ? test : test.skip;
+
+  afterEach(async () => {
+    await Promise.all(
+      roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    );
+  });
+
+  async function workspace(): Promise<{
+    artifactDirectory: string;
+    archivePath: string;
+    exportDirectory: string;
+  }> {
+    const root = await mkdtemp(join(tmpdir(), "ade-export-test-"));
+    roots.push(root);
+    const artifactDirectory = join(root, "artifacts");
+    const archivePath = join(artifactDirectory, "archive.xcarchive");
+    const exportDirectory = join(artifactDirectory, "exports", "export-1");
+    await mkdir(archivePath, { recursive: true });
+    await mkdir(exportDirectory, { recursive: true });
+    return { artifactDirectory, archivePath, exportDirectory };
+  }
+
+  async function writeArchivePlist(
+    archivePath: string,
+    properties: Record<string, string>,
+  ): Promise<void> {
+    const entries = Object.entries(properties)
+      .map(([key, value]) => `<key>${key}</key><string>${value}</string>`)
+      .join("");
+    await writeFile(
+      join(archivePath, "Info.plist"),
+      `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>ApplicationProperties</key><dict>${entries}</dict></dict></plist>\n`,
+    );
+  }
+
+  function payload(artifactDirectory: string) {
+    return {
+      buildId: "build-1",
+      exportId: "export-1",
+      artifactDirectory,
+      archiveRelativePath: "archive.xcarchive",
+      settings: { method: "RELEASE_TESTING" },
+    } as unknown as Parameters<typeof exportedArtifacts>[0];
+  }
+
+  withPlutil(
+    "reads application identity from the archive Info.plist",
+    async () => {
+      const { archivePath } = await workspace();
+      await writeArchivePlist(archivePath, {
+        CFBundleIdentifier: "com.example.App",
+        CFBundleShortVersionString: "2.1.0",
+        CFBundleVersion: "417",
+        ApplicationPath: "Applications/Example.app",
+      });
+
+      await expect(
+        archiveApplicationProperties(
+          archivePath,
+          5_000,
+          AbortSignal.timeout(10_000),
+        ),
+      ).resolves.toEqual({
+        bundleIdentifier: "com.example.App",
+        bundleShortVersion: "2.1.0",
+        bundleVersion: "417",
+        applicationName: "Example",
+      });
+    },
+  );
+
+  withPlutil("returns nulls when the archive has no Info.plist", async () => {
+    const { archivePath } = await workspace();
+
+    await expect(
+      archiveApplicationProperties(
+        archivePath,
+        5_000,
+        AbortSignal.timeout(10_000),
+      ),
+    ).resolves.toEqual({
+      bundleIdentifier: null,
+      bundleShortVersion: null,
+      bundleVersion: null,
+      applicationName: null,
+    });
+  });
+
+  withPlutil(
+    "registers the exported IPA with its bundle metadata",
+    async () => {
+      const { artifactDirectory, archivePath, exportDirectory } =
+        await workspace();
+      await writeArchivePlist(archivePath, {
+        CFBundleIdentifier: "com.example.App",
+        CFBundleShortVersionString: "2.1.0",
+        CFBundleVersion: "417",
+        ApplicationPath: "Applications/Example.app",
+      });
+      await writeFile(join(exportDirectory, "Example.ipa"), "package-bytes");
+      await writeFile(join(exportDirectory, "ExportOptions.plist"), "<plist/>");
+
+      const artifacts = await exportedArtifacts(
+        payload(artifactDirectory),
+        exportDirectory,
+        archivePath,
+        AbortSignal.timeout(10_000),
+      );
+
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]).toMatchObject({
+        kind: "IPA",
+        relativePath: "exports/export-1/Example.ipa",
+        sizeBytes: "package-bytes".length,
+      });
+      expect(artifacts[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
+      expect(artifacts[0]?.metadata).toMatchObject({
+        exportId: "export-1",
+        exportMethod: "RELEASE_TESTING",
+        bundleIdentifier: "com.example.App",
+        bundleShortVersion: "2.1.0",
+        applicationName: "Example",
+      });
+    },
+  );
+
+  test("reports no artifacts when the export produced no IPA", async () => {
+    const { artifactDirectory, archivePath, exportDirectory } =
+      await workspace();
+    await writeFile(join(exportDirectory, "ExportOptions.plist"), "<plist/>");
+
+    await expect(
+      exportedArtifacts(
+        payload(artifactDirectory),
+        exportDirectory,
+        archivePath,
+        AbortSignal.timeout(10_000),
+      ),
+    ).resolves.toEqual([]);
   });
 });

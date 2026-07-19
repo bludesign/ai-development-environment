@@ -8,6 +8,7 @@
     "./build-data": "./src/build-data.ts",
     "./builds": "./src/builds.ts",
     "./codebases": "./src/codebases.ts",
+    "./plist": "./src/plist.ts",
     "./skills": "./src/skills.ts",
     "./worktrees": "./src/worktrees.ts"
   },

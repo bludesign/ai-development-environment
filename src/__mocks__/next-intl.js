@@ -1765,6 +1765,21 @@ const mockTranslations = {
     deleteBuildTitle: "Delete this build?",
     deleteBuildDescription: "Delete this build.",
     downloadArtifact: "Download",
+    downloadIpa: "Download IPA",
+    installOnDevice: "Install on device",
+    installPreparing: "Preparing download…",
+    installRequiresHttps:
+      "Over-the-air installation requires a public HTTPS address. Open this page over HTTPS or set PUBLIC_BASE_URL.",
+    installNotSupportedForAppStore:
+      "App Store Connect builds cannot be installed over the air. Export with Debugging, Release Testing, or Enterprise instead.",
+    installMissingBundleIdentifier:
+      "The bundle identifier is unavailable. Export the archive again to enable installation.",
+    installOpenOnDevice: "Open this page on an iPhone or iPad to install.",
+    installFailed: "Could not start the installation.",
+    copyInstallLink: "Copy install link",
+    installLinkCopied: "Install link copied",
+    ipaBundleIdentifier: "Bundle identifier",
+    ipaBundleVersion: "Version",
     cancelBuild: "Cancel build",
     rebuild: "Rebuild",
     outOfDate: "Out of date",

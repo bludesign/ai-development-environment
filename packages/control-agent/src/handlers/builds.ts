@@ -12,8 +12,9 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
+import { pipeline } from "node:stream/promises";
 import {
   basename,
   dirname,
@@ -40,12 +41,14 @@ import {
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
+  type BuildExportPayload,
   type BuildExportSettings,
   type BuildJobPayload,
   type BuildReportKind,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
+import { plistDocument } from "@ai-development-environment/agent-contract/plist";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
@@ -1374,14 +1377,71 @@ async function pathSize(path: string): Promise<number> {
 async function fileChecksum(path: string): Promise<string | null> {
   try {
     const information = await stat(path);
-    if (!information.isFile() || information.size > 256 * 1024 * 1024)
-      return null;
-    return createHash("sha256")
-      .update(await readFile(path))
-      .digest("hex");
+    if (!information.isFile()) return null;
+    const hash = createHash("sha256");
+    await pipeline(createReadStream(path), hash);
+    return hash.digest("hex");
   } catch {
     return null;
   }
+}
+
+async function plistString(
+  plistPath: string,
+  keyPath: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  try {
+    const result = await command(
+      "/usr/bin/plutil",
+      ["-extract", keyPath, "raw", "-o", "-", plistPath],
+      Math.min(timeoutMs, 5_000),
+      signal,
+    );
+    const value = result.stdout.trim();
+    return result.exitCode === 0 && value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+type ArchiveApplicationProperties = {
+  bundleIdentifier: string | null;
+  bundleShortVersion: string | null;
+  bundleVersion: string | null;
+  applicationName: string | null;
+};
+
+/**
+ * Reads the app's identity from the archive's Info.plist. `ApplicationProperties`
+ * holds exactly the keys an over-the-air install manifest needs, and the archive
+ * is already on disk — reading them back out of the exported IPA would mean
+ * globbing an unknown app name out of a multi-hundred-megabyte zip.
+ */
+export async function archiveApplicationProperties(
+  archivePath: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<ArchiveApplicationProperties> {
+  const plistPath = join(archivePath, "Info.plist");
+  const read = (key: string) =>
+    plistString(plistPath, `ApplicationProperties.${key}`, timeoutMs, signal);
+  const [bundleIdentifier, bundleShortVersion, bundleVersion, applicationPath] =
+    await Promise.all([
+      read("CFBundleIdentifier"),
+      read("CFBundleShortVersionString"),
+      read("CFBundleVersion"),
+      read("ApplicationPath"),
+    ]);
+  return {
+    bundleIdentifier,
+    bundleShortVersion,
+    bundleVersion,
+    applicationName: applicationPath
+      ? basename(applicationPath).replace(/\.app$/, "")
+      : null,
+  };
 }
 
 async function artifact(
@@ -2723,26 +2783,6 @@ export const deployIosBuild: AgentJobHandler = async (
   }
 };
 
-function xml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function plistValue(value: unknown): string {
-  if (typeof value === "boolean") return value ? "<true/>" : "<false/>";
-  if (typeof value === "string") return `<string>${xml(value)}</string>`;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return `<dict>${Object.entries(value as Record<string, unknown>)
-      .map(([key, entry]) => `<key>${xml(key)}</key>${plistValue(entry)}`)
-      .join("")}</dict>`;
-  }
-  throw new Error("Unsupported export plist value");
-}
-
 function exportPlist(settings: BuildExportSettings): string {
   const method = {
     DEBUGGING: "debugging",
@@ -2764,7 +2804,7 @@ function exportPlist(settings: BuildExportSettings): string {
   if (Object.keys(settings.provisioningProfiles).length) {
     values.provisioningProfiles = settings.provisioningProfiles;
   }
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">${plistValue(values)}</plist>\n`;
+  return plistDocument(values);
 }
 
 export const exportIosArchive: AgentJobHandler = async (
@@ -2829,8 +2869,38 @@ export const exportIosArchive: AgentJobHandler = async (
       outputRelativePath: relative(input.artifactDirectory, exportDirectory),
       sizeBytes: result.exitCode === 0 ? await pathSize(exportDirectory) : null,
       error: result.exitCode === 0 ? null : cleanError(result.output),
+      artifacts:
+        result.exitCode === 0
+          ? await exportedArtifacts(input, exportDirectory, archivePath, signal)
+          : [],
     };
   } finally {
     await logger.close();
   }
 };
+
+/**
+ * Registers the exported `.ipa` as its own artifact so it can be downloaded
+ * byte-for-byte. Without this it is only reachable inside the export directory
+ * artifact, which the download handler tars before upload.
+ */
+export async function exportedArtifacts(
+  input: BuildExportPayload,
+  exportDirectory: string,
+  archivePath: string,
+  signal: AbortSignal,
+): Promise<Artifact[]> {
+  const [ipaPath] = await findFiles(
+    exportDirectory,
+    (name) => name.endsWith(".ipa"),
+    5,
+  );
+  if (!ipaPath) return [];
+  return [
+    await artifact(input.artifactDirectory, "IPA", ipaPath, {
+      exportId: input.exportId,
+      exportMethod: input.settings.method,
+      ...(await archiveApplicationProperties(archivePath, 10_000, signal)),
+    }),
+  ];
+}
