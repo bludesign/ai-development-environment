@@ -1613,6 +1613,8 @@
     "run": "Ejecutar",
     "exportArchive": "Exportar archivo",
     "logs": "Registros",
+    "expandLogs": "Expandir registros",
+    "collapseLogs": "Contraer registros",
     "noLogs": "No se han recibido eventos de registro.",
     "scrollLogsToTop": "Ir al inicio de los registros",
     "scrollLogsToBottom": "Ir al final de los registros",

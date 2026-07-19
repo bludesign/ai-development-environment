@@ -187,6 +187,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(true);
   const logRef = useRef<HTMLPreElement>(null);
 
   const load = useCallback(async () => {
@@ -563,42 +564,77 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0 space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("logs")}</CardTitle>
-              <CardAction className="flex gap-1">
+          <Card className="gap-0 py-0">
+            <CardHeader
+              className={
+                logsOpen ? "border-b bg-muted/40 py-3" : "bg-muted/40 py-3"
+              }
+            >
+              <div className="flex items-center justify-between gap-3">
                 <Button
-                  aria-label={t("scrollLogsToTop")}
-                  onClick={() => scrollLogs("top")}
-                  size="icon-sm"
+                  aria-expanded={logsOpen}
+                  className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+                  onClick={() => setLogsOpen((current) => !current)}
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                 >
-                  <ArrowUpToLine />
+                  <span className="truncate font-medium">{t("logs")}</span>
                 </Button>
-                <Button
-                  aria-label={t("scrollLogsToBottom")}
-                  onClick={() => scrollLogs("bottom")}
-                  size="icon-sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <ArrowDownToLine />
-                </Button>
-              </CardAction>
+                <div className="ml-auto flex items-center gap-1">
+                  {logsOpen && (
+                    <>
+                      <Button
+                        aria-label={t("scrollLogsToTop")}
+                        onClick={() => scrollLogs("top")}
+                        size="icon-xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        <ArrowUpToLine />
+                      </Button>
+                      <Button
+                        aria-label={t("scrollLogsToBottom")}
+                        onClick={() => scrollLogs("bottom")}
+                        size="icon-xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        <ArrowDownToLine />
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    aria-expanded={logsOpen}
+                    aria-label={t(logsOpen ? "collapseLogs" : "expandLogs")}
+                    onClick={() => setLogsOpen((current) => !current)}
+                    size="icon-sm"
+                    title={t(logsOpen ? "collapseLogs" : "expandLogs")}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {logsOpen ? (
+                      <ChevronDown className="size-5" />
+                    ) : (
+                      <ChevronRight className="size-5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
-              <pre
-                className="max-h-[48rem] w-full min-w-0 max-w-full overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100 [overflow-wrap:anywhere]"
-                ref={logRef}
-              >
-                {logs.length
-                  ? logs
-                      .map((log) => `[${log.phase}] ${log.message}`)
-                      .join("\n")
-                  : t("noLogs")}
-              </pre>
-            </CardContent>
+            {logsOpen && (
+              <CardContent className="py-4">
+                <pre
+                  className="max-h-[calc(100svh-8rem)] w-full min-w-0 max-w-full overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100 [overflow-wrap:anywhere] sm:max-h-[48rem]"
+                  ref={logRef}
+                >
+                  {logs.length
+                    ? logs
+                        .map((log) => `[${log.phase}] ${log.message}`)
+                        .join("\n")
+                    : t("noLogs")}
+                </pre>
+              </CardContent>
+            )}
           </Card>
           <Card>
             <CardHeader>

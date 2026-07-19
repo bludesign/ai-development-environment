@@ -1613,6 +1613,8 @@
     "run": "Ausführen",
     "exportArchive": "Archiv exportieren",
     "logs": "Protokolle",
+    "expandLogs": "Protokolle aufklappen",
+    "collapseLogs": "Protokolle zuklappen",
     "noLogs": "Es wurden keine Protokollereignisse gemeldet.",
     "scrollLogsToTop": "Zum Anfang der Protokolle scrollen",
     "scrollLogsToBottom": "Zum Ende der Protokolle scrollen",

@@ -1613,6 +1613,8 @@
     "run": "Exécuter",
     "exportArchive": "Exporter l’archive",
     "logs": "Journaux",
+    "expandLogs": "Développer les journaux",
+    "collapseLogs": "Réduire les journaux",
     "noLogs": "Aucun événement de journal n’a été signalé.",
     "scrollLogsToTop": "Aller au début des journaux",
     "scrollLogsToBottom": "Aller à la fin des journaux",

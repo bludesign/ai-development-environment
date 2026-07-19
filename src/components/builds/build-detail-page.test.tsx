@@ -245,13 +245,36 @@ describe("BuildDetailPage", () => {
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
     const logViewport = screen.getByText(/Compile Swift sources/);
-    expect(logViewport.className).toContain("max-h-[48rem]");
+    expect(logViewport.className).toContain("max-h-[calc(100svh-8rem)]");
+    expect(logViewport.className).toContain("sm:max-h-[48rem]");
     expect(logViewport.className).toContain("max-w-full");
     expect(logViewport.className).toContain("[overflow-wrap:anywhere]");
     const detailGrid =
       logViewport.closest('[data-slot="card"]')?.parentElement?.parentElement;
     expect(detailGrid?.className).toContain("min-w-0");
     expect(detailGrid?.firstElementChild?.className).toContain("min-w-0");
+    const collapseLogs = screen.getByRole("button", {
+      name: "Collapse logs",
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "Scroll logs to top" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(
+      screen
+        .getByRole("button", { name: "Scroll logs to bottom" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(collapseLogs.getAttribute("data-size")).toBe("icon-sm");
+    expect(collapseLogs.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(collapseLogs);
+    expect(screen.queryByText(/Compile Swift sources/)).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Expand logs" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
     const advancedSettingsCard = screen
       .getByText("Advanced settings")
       .closest<HTMLElement>('[data-slot="card"]');

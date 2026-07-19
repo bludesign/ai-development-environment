@@ -1774,6 +1774,8 @@ const mockTranslations = {
     run: "Run",
     exportArchive: "Export archive",
     logs: "Logs",
+    expandLogs: "Expand logs",
+    collapseLogs: "Collapse logs",
     noLogs: "No log events have been reported.",
     scrollLogsToTop: "Scroll logs to top",
     scrollLogsToBottom: "Scroll logs to bottom",
