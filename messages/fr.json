@@ -1584,6 +1584,7 @@
     "expandCoverageFiles": "Développer tous les fichiers de couverture",
     "collapseCoverageFiles": "Réduire tous les fichiers de couverture",
     "searchCoverageFiles": "Rechercher des cibles, fichiers ou chemins",
+    "searchChangedCoverageFiles": "Rechercher des fichiers modifiés ou des chemins",
     "sortCoverageFiles": "Trier les fichiers de couverture par {column}",
     "coverageTarget": "Cible",
     "coverageFile": "Fichier",

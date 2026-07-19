@@ -27,7 +27,10 @@ describe("CoverageReportPage", () => {
     request.mockResolvedValue({
       build: {
         id: "build-1",
-        snapshot: { configuration: { name: "Tests" } },
+        snapshot: {
+          configuration: { name: "Tests" },
+          worktree: { folder: "/repo" },
+        },
         reports: [
           {
             id: "report-1",
@@ -38,6 +41,7 @@ describe("CoverageReportPage", () => {
               coveredLines: 15,
               executableLines: 20,
               lineCoverage: 0.75,
+              changedLineCoverage: 0.8,
             },
             data: {
               changedFiles: [
@@ -48,20 +52,27 @@ describe("CoverageReportPage", () => {
                   changedLineCoverage: 0.8,
                   changeType: "MODIFIED",
                 },
+                {
+                  path: "Sources/New.swift",
+                  changedCoveredLines: 1,
+                  changedExecutableLines: 5,
+                  changedLineCoverage: 0.2,
+                  changeType: "ADDED",
+                },
               ],
               files: [
                 {
                   target: "App",
-                  name: "Shared.swift",
-                  path: "/repo/Sources/Shared.swift",
+                  name: "Changed.swift",
+                  path: "/repo/Sources/Changed.swift",
                   coveredLines: 8,
                   executableLines: 10,
                   lineCoverage: 0.8,
                 },
                 {
                   target: "AppTests",
-                  name: "Widget.swift",
-                  path: "/repo/Sources/Widget.swift",
+                  name: "New.swift",
+                  path: "/repo/Sources/New.swift",
                   coveredLines: 7,
                   executableLines: 10,
                   lineCoverage: 0.7,
@@ -79,12 +90,71 @@ describe("CoverageReportPage", () => {
     } as never);
 
     render(<CoverageReportPage buildId="build-1" />);
+    const overallCard = (await screen.findByText("Overall coverage")).closest(
+      '[data-slot="card"]',
+    );
+    const changedCoverageCard = screen
+      .getByText("Changed coverage")
+      .closest('[data-slot="card"]');
+    expect(
+      overallCard?.querySelector("[data-coverage-indicator]")?.className,
+    ).toContain("size-7");
+    expect(
+      changedCoverageCard?.querySelector("[data-coverage-indicator]")
+        ?.className,
+    ).toContain("size-7");
     const changedTable = await screen.findByRole("table", {
       name: "Coverage of changed files",
     });
+    expect(within(changedTable).getByText("Changed.swift")).toBeDefined();
+    expect(
+      within(changedTable).getByText("Sources/Changed.swift"),
+    ).toBeDefined();
+    expect(within(changedTable).queryByText("App")).toBeNull();
     expect(changedTable.querySelector("tbody td")?.className).toContain(
       "py-1.5",
     );
+    const firstChangedRow = () =>
+      within(changedTable).getAllByRole("row").slice(1)[0]!;
+    fireEvent.click(
+      within(changedTable).getByRole("button", {
+        name: "Sort coverage files by File",
+      }),
+    );
+    expect(
+      within(firstChangedRow()).getByText("Sources/New.swift"),
+    ).toBeDefined();
+    fireEvent.click(
+      within(changedTable).getByRole("button", {
+        name: "Sort coverage files by Change",
+      }),
+    );
+    expect(
+      within(firstChangedRow()).getByText("Sources/New.swift"),
+    ).toBeDefined();
+    fireEvent.click(
+      within(changedTable).getByRole("button", {
+        name: "Sort coverage files by Covered lines",
+      }),
+    );
+    expect(
+      within(firstChangedRow()).getByText("Sources/Changed.swift"),
+    ).toBeDefined();
+    const changedSearch = screen.getByRole("textbox", {
+      name: "Search changed files or paths",
+    });
+    fireEvent.change(changedSearch, { target: { value: "New.swift" } });
+    expect(within(changedTable).queryByText("Changed.swift")).toBeNull();
+    expect(within(changedTable).getByText("New.swift")).toBeDefined();
+    fireEvent.change(changedSearch, { target: { value: "" } });
+    fireEvent.click(
+      within(changedTable).getByRole("button", {
+        name: "Sort coverage files by Coverage",
+      }),
+    );
+    expect(
+      within(firstChangedRow()).getByText("Sources/Changed.swift"),
+    ).toBeDefined();
     const expand = await screen.findByRole("button", {
       name: "Expand all coverage files",
     });
@@ -105,6 +175,17 @@ describe("CoverageReportPage", () => {
     expect(within(allFilesTable).getByText("80%")).toBeDefined();
     expect(within(allFilesTable).getByText("70%")).toBeDefined();
     expect(
+      within(allFilesTable).getByText("Sources/Changed.swift"),
+    ).toBeDefined();
+    expect(
+      within(allFilesTable)
+        .getByText("Sources/Changed.swift")
+        .getAttribute("title"),
+    ).toBe("/repo/Sources/Changed.swift");
+    expect(
+      within(allFilesTable).queryByText("/repo/Sources/Changed.swift"),
+    ).toBeNull();
+    expect(
       allFilesTable.querySelectorAll("[data-coverage-indicator]"),
     ).toHaveLength(2);
     expect(
@@ -122,28 +203,28 @@ describe("CoverageReportPage", () => {
       name: "Sort coverage files by File",
     });
     fireEvent.click(fileSort);
-    expect(within(firstDataRow()).getByText("Widget.swift")).toBeDefined();
+    expect(within(firstDataRow()).getByText("New.swift")).toBeDefined();
 
     fireEvent.click(
       within(allFilesTable).getByRole("button", {
         name: "Sort coverage files by Target",
       }),
     );
-    expect(within(firstDataRow()).getByText("Shared.swift")).toBeDefined();
+    expect(within(firstDataRow()).getByText("Changed.swift")).toBeDefined();
 
     fireEvent.click(
       within(allFilesTable).getByRole("button", {
         name: "Sort coverage files by Coverage",
       }),
     );
-    expect(within(firstDataRow()).getByText("Shared.swift")).toBeDefined();
+    expect(within(firstDataRow()).getByText("Changed.swift")).toBeDefined();
 
     fireEvent.click(
       within(allFilesTable).getByRole("button", {
         name: "Sort coverage files by Uncovered lines",
       }),
     );
-    expect(within(firstDataRow()).getByText("Widget.swift")).toBeDefined();
+    expect(within(firstDataRow()).getByText("New.swift")).toBeDefined();
 
     fireEvent.change(
       screen.getByRole("textbox", {

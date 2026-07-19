@@ -1584,6 +1584,7 @@
     "expandCoverageFiles": "Expandir todos los archivos de cobertura",
     "collapseCoverageFiles": "Contraer todos los archivos de cobertura",
     "searchCoverageFiles": "Buscar objetivos, archivos o rutas",
+    "searchChangedCoverageFiles": "Buscar archivos modificados o rutas",
     "sortCoverageFiles": "Ordenar archivos de cobertura por {column}",
     "coverageTarget": "Objetivo",
     "coverageFile": "Archivo",

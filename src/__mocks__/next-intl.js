@@ -1744,6 +1744,7 @@ const mockTranslations = {
     expandCoverageFiles: "Expand all coverage files",
     collapseCoverageFiles: "Collapse all coverage files",
     searchCoverageFiles: "Search targets, files, or paths",
+    searchChangedCoverageFiles: "Search changed files or paths",
     sortCoverageFiles: "Sort coverage files by {column}",
     coverageTarget: "Target",
     coverageFile: "File",

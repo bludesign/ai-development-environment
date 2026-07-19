@@ -54,6 +54,11 @@ type ChangedCoverageFile = {
   changeType?: string;
 };
 
+type DisplayChangedCoverageFile = ChangedCoverageFile & {
+  displayName: string;
+  displayPath: string;
+};
+
 type CoverageSortKey =
   "filename" | "target" | "lineCoverage" | "uncoveredLines";
 type CoverageSort = {
@@ -61,8 +66,31 @@ type CoverageSort = {
   direction: "asc" | "desc";
 };
 
+type ChangedCoverageSortKey =
+  "filename" | "changeType" | "coveredLines" | "lineCoverage";
+type ChangedCoverageSort = {
+  key: ChangedCoverageSortKey;
+  direction: "asc" | "desc";
+};
+
 function uncoveredLines(file: CoverageFile): number {
   return Math.max(0, file.executableLines - file.coveredLines);
+}
+
+function relativeCoveragePath(path: string, worktreeFolder: string | null) {
+  const normalizedPath = path.replaceAll("\\", "/");
+  const normalizedRoot = worktreeFolder
+    ?.replaceAll("\\", "/")
+    .replace(/\/$/, "");
+  if (!normalizedRoot) return normalizedPath;
+  if (normalizedPath === normalizedRoot) return ".";
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : normalizedPath;
+}
+
+function coverageFileName(path: string) {
+  return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? path;
 }
 
 export function CoverageReportPage({ buildId }: { buildId: string }) {
@@ -70,6 +98,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   const locale = useLocale();
   const [report, setReport] = useState<BuildReport | null>(null);
   const [buildName, setBuildName] = useState(buildId);
+  const [worktreeFolder, setWorktreeFolder] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -104,7 +133,10 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
       setReport(coverage ?? null);
       const configuration = data.build?.snapshot.configuration as
         { name?: string } | undefined;
+      const worktree = data.build?.snapshot.worktree as
+        { folder?: string } | undefined;
       setBuildName(configuration?.name ?? buildId);
+      setWorktreeFolder(worktree?.folder ?? null);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -126,7 +158,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   );
   const files = useMemo(() => {
     const filtered = rawFiles.filter((file) =>
-      `${file.target} ${file.name} ${file.path}`
+      `${file.target} ${file.name} ${relativeCoveragePath(file.path, worktreeFolder)}`
         .toLocaleLowerCase()
         .includes(search.trim().toLocaleLowerCase()),
     );
@@ -152,7 +184,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         stringCompare(left.path, right.path)
       );
     });
-  }, [locale, rawFiles, search, sort]);
+  }, [locale, rawFiles, search, sort, worktreeFolder]);
   const changedFiles = Array.isArray(report?.data.changedFiles)
     ? (report.data.changedFiles as ChangedCoverageFile[])
     : [];
@@ -230,6 +262,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric
           label={t("overallCoverage")}
+          percentage={report.summary.lineCoverage}
           value={percent(report.summary.lineCoverage)}
         />
         <Metric
@@ -242,6 +275,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         />
         <Metric
           label={t("changedCoverage")}
+          percentage={report.summary.changedLineCoverage}
           value={percent(report.summary.changedLineCoverage)}
         />
       </div>
@@ -251,7 +285,12 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
             <CardTitle>{t("changedFilesCoverage")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <CoverageChangedTable files={changedFiles} percent={percent} />
+            <CoverageChangedTable
+              coverageFiles={rawFiles}
+              files={changedFiles}
+              percent={percent}
+              worktreeFolder={worktreeFolder}
+            />
           </CardContent>
         </Card>
       )}
@@ -378,7 +417,7 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
                             className="min-w-0 truncate font-mono text-muted-foreground"
                             title={file.path}
                           >
-                            {file.path}
+                            {relativeCoveragePath(file.path, worktreeFolder)}
                           </span>
                         </div>
                       </TableCell>
@@ -423,20 +462,43 @@ function SortableCoverageHead({
 }) {
   const active = activeSort.key === sortKey;
   return (
+    <SortableTableHead
+      active={active}
+      align={align}
+      ariaLabel={ariaLabel}
+      direction={activeSort.direction}
+      label={label}
+      onSort={() => onSort(sortKey)}
+    />
+  );
+}
+
+function SortableTableHead({
+  active,
+  align,
+  ariaLabel,
+  direction,
+  label,
+  onSort,
+}: {
+  active: boolean;
+  align: "left" | "right";
+  ariaLabel: string;
+  direction: "asc" | "desc";
+  label: string;
+  onSort: () => void;
+}) {
+  return (
     <TableHead
       aria-sort={
-        active
-          ? activeSort.direction === "asc"
-            ? "ascending"
-            : "descending"
-          : "none"
+        active ? (direction === "asc" ? "ascending" : "descending") : "none"
       }
       className="h-8 px-2"
     >
       <Button
         aria-label={ariaLabel}
         className={`-mx-2 h-7 px-2 text-xs ${align === "right" ? "w-[calc(100%+1rem)] justify-end" : "justify-start"}`}
-        onClick={() => onSort(sortKey)}
+        onClick={onSort}
         size="sm"
         title={ariaLabel}
         type="button"
@@ -444,7 +506,7 @@ function SortableCoverageHead({
       >
         {label}
         {active ? (
-          activeSort.direction === "asc" ? (
+          direction === "asc" ? (
             <ArrowUp />
           ) : (
             <ArrowDown />
@@ -460,9 +522,11 @@ function SortableCoverageHead({
 function CoverageValue({
   value,
   percent,
+  size = "compact",
 }: {
   value: number | null;
   percent: (value: unknown) => string;
+  size?: "compact" | "metric";
 }) {
   if (typeof value !== "number") return <>—</>;
   const normalized = Math.max(0, Math.min(1, value));
@@ -473,11 +537,13 @@ function CoverageValue({
         ? "text-amber-500"
         : "text-red-500";
   return (
-    <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
+    <span
+      className={`inline-flex items-center justify-end tabular-nums ${size === "metric" ? "gap-2 text-2xl font-semibold" : "gap-1.5"}`}
+    >
       {percent(value)}
       <span
         aria-hidden="true"
-        className={`size-3.5 shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
+        className={`${size === "metric" ? "size-7" : "size-3.5"} shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
         data-coverage-indicator
         style={{
           background: `conic-gradient(currentColor ${normalized * 360}deg, var(--muted) 0deg)`,
@@ -487,62 +553,229 @@ function CoverageValue({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  percentage,
+  value,
+}: {
+  label: string;
+  percentage?: unknown;
+  value: string;
+}) {
   return (
     <Card>
       <CardContent>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+        <div className="mt-1">
+          {typeof percentage === "number" ? (
+            <CoverageValue
+              percent={() => value}
+              size="metric"
+              value={percentage}
+            />
+          ) : (
+            <p className="text-2xl font-semibold tabular-nums">{value}</p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
 function CoverageChangedTable({
+  coverageFiles,
   files,
   percent,
+  worktreeFolder,
 }: {
+  coverageFiles: CoverageFile[];
   files: ChangedCoverageFile[];
   percent: (value: unknown) => string;
+  worktreeFolder: string | null;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ChangedCoverageSort>({
+    key: "filename",
+    direction: "asc",
+  });
+  const displayFiles: DisplayChangedCoverageFile[] = files.map((file) => {
+    const displayPath = relativeCoveragePath(file.path, worktreeFolder);
+    const matches = coverageFiles.filter(
+      (coverageFile) =>
+        relativeCoveragePath(coverageFile.path, worktreeFolder) === displayPath,
+    );
+    return {
+      ...file,
+      displayName: matches[0]?.name ?? coverageFileName(displayPath),
+      displayPath,
+    };
+  });
+  const sortedFiles = displayFiles
+    .filter((file) =>
+      `${file.displayName} ${file.displayPath} ${file.changeType ?? ""}`
+        .toLocaleLowerCase()
+        .includes(search.trim().toLocaleLowerCase()),
+    )
+    .toSorted((left, right) => {
+      const stringCompare = (leftValue: string, rightValue: string) =>
+        leftValue.localeCompare(rightValue, locale, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      let comparison = 0;
+      if (sort.key === "filename") {
+        comparison =
+          stringCompare(left.displayName, right.displayName) ||
+          stringCompare(left.displayPath, right.displayPath);
+      } else if (sort.key === "changeType") {
+        comparison = stringCompare(
+          left.changeType ?? "",
+          right.changeType ?? "",
+        );
+      } else if (sort.key === "coveredLines") {
+        comparison = left.changedCoveredLines - right.changedCoveredLines;
+      } else {
+        comparison =
+          (left.changedLineCoverage ?? -1) - (right.changedLineCoverage ?? -1);
+      }
+      if (comparison !== 0) {
+        return sort.direction === "asc" ? comparison : -comparison;
+      }
+      return stringCompare(left.displayPath, right.displayPath);
+    });
+  const selectSort = (key: ChangedCoverageSortKey) => {
+    setSort((current) =>
+      current.key === key
+        ? {
+            key,
+            direction: current.direction === "asc" ? "desc" : "asc",
+          }
+        : {
+            key,
+            direction:
+              key === "coveredLines" || key === "lineCoverage" ? "desc" : "asc",
+          },
+    );
+  };
   return (
-    <div className="overflow-auto rounded-md border">
-      <Table aria-label={t("changedFilesCoverage")} className="text-xs">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="h-8 px-2">{t("coverageFile")}</TableHead>
-            <TableHead className="h-8 px-2">{t("changeType")}</TableHead>
-            <TableHead className="h-8 px-2 text-right">
-              {t("coveredLines")}
-            </TableHead>
-            <TableHead className="h-8 px-2 text-right">
-              {t("coverage")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {files.map((file) => (
-            <TableRow key={file.path}>
-              <TableCell className="px-2 py-1.5 font-mono">
-                {file.path}
-              </TableCell>
-              <TableCell className="px-2 py-1.5">
-                {file.changeType ?? "—"}
-              </TableCell>
-              <TableCell className="px-2 py-1.5 text-right">
-                {file.changedCoveredLines} / {file.changedExecutableLines}
-              </TableCell>
-              <TableCell className="px-2 py-1.5 text-right">
-                <CoverageValue
-                  percent={percent}
-                  value={file.changedLineCoverage}
-                />
-              </TableCell>
+    <div className="space-y-4">
+      <div className="relative max-w-xl">
+        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label={t("searchChangedCoverageFiles")}
+          className="pl-9"
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("searchChangedCoverageFiles")}
+          value={search}
+        />
+      </div>
+      <div className="overflow-auto rounded-md border">
+        <Table aria-label={t("changedFilesCoverage")} className="text-xs">
+          <TableHeader>
+            <TableRow>
+              <SortableChangedCoverageHead
+                activeSort={sort}
+                ariaLabel={t("sortCoverageFiles", {
+                  column: t("coverageFile"),
+                })}
+                label={t("coverageFile")}
+                onSort={selectSort}
+                sortKey="filename"
+              />
+              <SortableChangedCoverageHead
+                activeSort={sort}
+                ariaLabel={t("sortCoverageFiles", {
+                  column: t("changeType"),
+                })}
+                label={t("changeType")}
+                onSort={selectSort}
+                sortKey="changeType"
+              />
+              <SortableChangedCoverageHead
+                activeSort={sort}
+                align="right"
+                ariaLabel={t("sortCoverageFiles", {
+                  column: t("coveredLines"),
+                })}
+                label={t("coveredLines")}
+                onSort={selectSort}
+                sortKey="coveredLines"
+              />
+              <SortableChangedCoverageHead
+                activeSort={sort}
+                align="right"
+                ariaLabel={t("sortCoverageFiles", {
+                  column: t("coverage"),
+                })}
+                label={t("coverage")}
+                onSort={selectSort}
+                sortKey="lineCoverage"
+              />
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {sortedFiles.map((file) => (
+              <TableRow key={file.path}>
+                <TableCell className="max-w-xl px-2 py-1.5">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 font-medium">
+                      {file.displayName}
+                    </span>
+                    <span
+                      className="min-w-0 truncate font-mono text-muted-foreground"
+                      title={file.path}
+                    >
+                      {file.displayPath}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="px-2 py-1.5">
+                  {file.changeType ?? "—"}
+                </TableCell>
+                <TableCell className="px-2 py-1.5 text-right">
+                  {file.changedCoveredLines} / {file.changedExecutableLines}
+                </TableCell>
+                <TableCell className="px-2 py-1.5 text-right">
+                  <CoverageValue
+                    percent={percent}
+                    value={file.changedLineCoverage}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
+  );
+}
+
+function SortableChangedCoverageHead({
+  activeSort,
+  align = "left",
+  ariaLabel,
+  label,
+  onSort,
+  sortKey,
+}: {
+  activeSort: ChangedCoverageSort;
+  align?: "left" | "right";
+  ariaLabel: string;
+  label: string;
+  onSort: (key: ChangedCoverageSortKey) => void;
+  sortKey: ChangedCoverageSortKey;
+}) {
+  const active = activeSort.key === sortKey;
+  return (
+    <SortableTableHead
+      active={active}
+      align={align}
+      ariaLabel={ariaLabel}
+      direction={activeSort.direction}
+      label={label}
+      onSort={() => onSort(sortKey)}
+    />
   );
 }

@@ -1584,6 +1584,7 @@
     "expandCoverageFiles": "Alle Abdeckungsdateien aufklappen",
     "collapseCoverageFiles": "Alle Abdeckungsdateien zuklappen",
     "searchCoverageFiles": "Ziele, Dateien oder Pfade durchsuchen",
+    "searchChangedCoverageFiles": "Geänderte Dateien oder Pfade durchsuchen",
     "sortCoverageFiles": "Abdeckungsdateien nach {column} sortieren",
     "coverageTarget": "Ziel",
     "coverageFile": "Datei",
