@@ -34,9 +34,11 @@ import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
 import type { SkillsService } from "@/services/skills";
+import { buildOutOfDate } from "@/services/builds/build-freshness";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
+const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 const ACTIVE_MOVE_STATUSES = [
   "PUSHING",
   "CHECKING_OUT",
@@ -87,6 +89,26 @@ const worktreeInclude = {
     },
   },
   tags: { include: { tag: true } },
+  builds: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: {
+      id: true,
+      status: true,
+      action: true,
+      destinationType: true,
+      destinationJson: true,
+      snapshotJson: true,
+      createdAt: true,
+      finishedAt: true,
+      artifacts: { select: { id: true, kind: true } },
+    },
+  },
+  _count: {
+    select: {
+      builds: { where: { status: { in: ACTIVE_BUILD_STATUSES } } },
+    },
+  },
 } as const;
 
 type WorktreeRecord = Prisma.WorktreeGetPayload<{
@@ -327,6 +349,15 @@ export class WorktreesService {
       pullRequest: null as
         | Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>[number]
         | null,
+      latestBuild: worktree.builds?.[0]
+        ? {
+            ...worktree.builds[0],
+            outOfDate: buildOutOfDate({
+              ...worktree.builds[0],
+              worktree,
+            }),
+          }
+        : null,
     };
   }
 
@@ -628,6 +659,7 @@ export class WorktreesService {
       hasCommitStatus ||
       report.hasStagedChanges !== undefined ||
       report.hasUnstagedChanges !== undefined ||
+      report.codeStateHash !== undefined ||
       report.pushStatus !== undefined;
     if (hasState) {
       const updated = await prisma.worktree.updateMany({
@@ -662,6 +694,9 @@ export class WorktreesService {
           ...(report.hasUnstagedChanges === undefined
             ? {}
             : { hasUnstagedChanges: report.hasUnstagedChanges }),
+          ...(report.codeStateHash === undefined
+            ? {}
+            : { codeStateHash: report.codeStateHash }),
           ...(report.pushStatus === undefined
             ? {}
             : { pushStatus: report.pushStatus }),
@@ -714,6 +749,7 @@ export class WorktreesService {
       primary: item.primary,
       branch: item.branch,
       headSha: item.headSha,
+      codeStateHash: item.codeStateHash ?? null,
       upstream: item.upstream,
       ahead: item.ahead,
       behind: item.behind,

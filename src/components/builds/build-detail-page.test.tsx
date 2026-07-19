@@ -25,17 +25,19 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const now = new Date().toISOString();
 let nextLog: ((log: Record<string, unknown>) => void) | null = null;
+const writeText = vi.fn();
 
 const build = {
   id: "build-1",
   requestId: "request-1",
   jobId: "job-1",
   status: "SUCCEEDED",
+  outOfDate: true,
   action: "BUILD",
   destinationType: "SIMULATOR",
   destination: {
     type: "SIMULATOR",
-    id: "SIM-ORIGINAL",
+    id: "SIM-1",
     name: "iPhone 17 Pro",
     platform: "iOS Simulator",
     osVersion: "26.0",
@@ -79,10 +81,51 @@ const build = {
       metadata: {},
       createdAt: now,
     },
+    {
+      id: "raw-log-artifact",
+      kind: "RAW_LOG",
+      relativePath: "logs/raw.log",
+      sizeBytes: 512,
+      checksum: null,
+      metadata: {},
+      createdAt: now,
+    },
   ],
   scriptExecutions: [],
-  deployments: [],
-  exports: [],
+  deployments: [
+    {
+      id: "deployment-complete",
+      batchId: "batch-1",
+      destination: {
+        type: "SIMULATOR",
+        id: "SIM-2",
+        name: "iPad Pro",
+        platform: "iOS Simulator",
+        osVersion: "26.0",
+        state: "Booted",
+      },
+      status: "SUCCEEDED",
+      commandSummary: "install and launch",
+      outputRelativePath: null,
+      error: null,
+      createdAt: now,
+      startedAt: now,
+      finishedAt: now,
+    },
+  ],
+  exports: [
+    {
+      id: "export-complete",
+      status: "FAILED",
+      settings: {},
+      commandSummary: "export archive",
+      outputRelativePath: null,
+      error: "Export failed",
+      createdAt: now,
+      startedAt: now,
+      finishedAt: now,
+    },
+  ],
   configuration: null,
   createdAt: now,
   startedAt: now,
@@ -96,6 +139,15 @@ beforeEach(() => {
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
   Element.prototype.scrollIntoView = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  writeText.mockReset();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
   nextLog = null;
   subscriptions.mockReturnValue({
     subscribe: vi.fn((operation, sink) => {
@@ -150,6 +202,11 @@ beforeEach(() => {
     if (operation.includes("mutation RunCompletedBuild")) {
       return { runBuild: [] } as never;
     }
+    if (operation.includes("mutation RebuildBuild")) {
+      return {
+        rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
+      } as never;
+    }
     if (operation.includes("mutation ExportArchive")) {
       return {
         exportBuildArchive: { id: "export-1", status: "QUEUED" },
@@ -173,9 +230,29 @@ describe("BuildDetailPage", () => {
 
     expect(await screen.findByText("Development")).toBeDefined();
     expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Out of date")).toBeDefined();
     const downloads = screen.getAllByRole("link", { name: "Download" });
     expect(downloads[0]?.getAttribute("href")).toBe(
       "/api/builds/build-1/artifacts/app-artifact",
+    );
+    expect(screen.getByText("Runnable App")).toBeDefined();
+    expect(screen.getByText("Raw Log")).toBeDefined();
+    const runsCard = screen
+      .getByText("Runs and exports")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(runsCard).not.toBeNull();
+    expect(within(runsCard!).getByText("Succeeded")).toBeDefined();
+    expect(within(runsCard!).getByText("Failed")).toBeDefined();
+    expect(
+      within(runsCard!).getAllByText(new Date(now).toLocaleString("en")).length,
+    ).toBe(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RebuildBuild"),
+        { id: "build-1", requestId: expect.any(String) },
+      ),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Delete build" }));
@@ -247,8 +324,24 @@ describe("BuildDetailPage", () => {
     });
     expect(screen.getByText(/Link App/)).toBeDefined();
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Scroll logs to bottom" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Scroll logs to top" }));
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy command summary" }),
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(build.commandSummary),
+    );
+    expect(
+      screen.getByRole("button", { name: "Command summary copied" }),
+    ).toBeDefined();
+
     const destinationTrigger = screen.getByRole("button", {
-      name: /Select run devices/,
+      name: /1 devices/,
     });
     fireEvent.pointerDown(destinationTrigger, { button: 0, ctrlKey: false });
     await waitFor(() =>
@@ -263,12 +356,6 @@ describe("BuildDetailPage", () => {
     expect(
       await screen.findByRole("menuitemcheckbox", { name: /iPad Pro/ }),
     ).toBeDefined();
-    fireEvent.click(
-      screen.getByRole("menuitemcheckbox", { name: /iPhone 17 Pro/ }),
-    );
-    if (destinationTrigger.getAttribute("aria-expanded") !== "true") {
-      fireEvent.pointerDown(destinationTrigger, { button: 0, ctrlKey: false });
-    }
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /iPad Pro/ }),
     );

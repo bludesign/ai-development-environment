@@ -349,6 +349,9 @@ describe("AgentDetail", () => {
     const secondJob = await screen.findByRole("button", {
       name: /cloudflared\.second/i,
     });
+    expect(
+      secondJob.closest("table")?.closest('[data-slot="card"]'),
+    ).not.toBeNull();
     secondJob.focus();
     expect(document.activeElement).toBe(secondJob);
     fireEvent.click(secondJob);

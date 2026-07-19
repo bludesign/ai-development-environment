@@ -44,6 +44,7 @@ import {
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
+import { worktreeCodeStateHash } from "../git-code-state.js";
 import type { ProcessResult } from "../process-runner.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
 
@@ -673,12 +674,6 @@ export const inspectBuildDestinations: AgentJobHandler = async (
     folder,
   );
   requireSuccess(preflight, "The saved scheme or configuration is unavailable");
-  if (GENERIC_BUILD_DESTINATION_ACTIONS.includes(input.action)) {
-    return {
-      ...successfulProcess,
-      destinations: genericBuildDestinations(input.action),
-    };
-  }
   const [simulators, physical] = await Promise.all([
     command(
       "xcrun",
@@ -692,6 +687,7 @@ export const inspectBuildDestinations: AgentJobHandler = async (
   return {
     ...successfulProcess,
     destinations: [
+      ...genericBuildDestinations(input.action),
       ...(simulators.exitCode === 0
         ? simulatorDestinations(JSON.parse(simulators.stdout))
         : []),
@@ -1552,6 +1548,11 @@ export const runIosBuild: AgentJobHandler = async (
   ) {
     throw new Error("Build artifact directory is invalid");
   }
+  const sourceStateHash = await worktreeCodeStateHash(
+    folder,
+    Math.min(timeoutMs, 60_000),
+    signal,
+  );
   await mkdir(input.artifactDirectory, { recursive: true, mode: 0o700 });
   const rawLog = join(input.artifactDirectory, "build.log");
   const logger = new BuildLogger(input.buildId, context, rawLog, process.env);
@@ -1717,6 +1718,12 @@ export const runIosBuild: AgentJobHandler = async (
         ? 1
         : buildResult.exitCode;
     const args = xcodeBuildArguments(input);
+    const finalStateHash = await worktreeCodeStateHash(
+      folder,
+      Math.min(timeoutMs, 60_000),
+      new AbortController().signal,
+    );
+    const codeStateObservedAt = new Date().toISOString();
     return {
       exitCode,
       signal: buildResult?.signal ?? null,
@@ -1727,6 +1734,9 @@ export const runIosBuild: AgentJobHandler = async (
       commandSummary: commandSummary("xcrun", args),
       artifacts,
       scriptExecutions,
+      sourceStateHash,
+      finalStateHash,
+      codeStateObservedAt,
     };
   } finally {
     await logger.close();

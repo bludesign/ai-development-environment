@@ -19,6 +19,7 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
+import { worktreeCodeStateHash } from "../git-code-state.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
 
 const successfulProcess = {
@@ -93,27 +94,30 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   entry.pending = false;
   try {
     const signal = new AbortController().signal;
-    const [status, branchResult, headResult] = await Promise.all([
-      git(
-        entry.folder,
-        [
-          "--no-optional-locks",
-          "status",
-          "--porcelain=v1",
-          "-z",
-          "--untracked-files=all",
-        ],
-        entry.timeoutMs,
-        signal,
-      ),
-      git(
-        entry.folder,
-        ["symbolic-ref", "--short", "-q", "HEAD"],
-        entry.timeoutMs,
-        signal,
-      ),
-      git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
-    ]);
+    const [status, branchResult, headResult, codeStateHash] = await Promise.all(
+      [
+        git(
+          entry.folder,
+          [
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+          ],
+          entry.timeoutMs,
+          signal,
+        ),
+        git(
+          entry.folder,
+          ["symbolic-ref", "--short", "-q", "HEAD"],
+          entry.timeoutMs,
+          signal,
+        ),
+        git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
+        worktreeCodeStateHash(entry.folder, entry.timeoutMs, signal),
+      ],
+    );
     const branch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
     const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
@@ -125,6 +129,7 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
+      codeStateHash,
       ...changes,
       pushStatus: await worktreePushStatus(
         entry.folder,
@@ -450,6 +455,7 @@ export async function inspectWorktreeItem(
       primary,
       branch,
       headSha: headResult.exitCode === 0 ? headResult.stdout.trim() : null,
+      codeStateHash: await worktreeCodeStateHash(folder, timeoutMs, signal),
       upstream,
       ahead: upstreamCounts.ahead,
       behind: upstreamCounts.behind,
@@ -476,6 +482,7 @@ export async function inspectWorktreeItem(
       primary,
       branch: null,
       headSha: null,
+      codeStateHash: null,
       upstream: null,
       ahead: null,
       behind: null,

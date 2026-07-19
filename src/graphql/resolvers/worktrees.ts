@@ -27,6 +27,11 @@ function requireControlPlane(context: GraphQLContext): void {
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
 export const createWorktreeResolvers = (service: WorktreesService) => ({
+  WorktreeLatestBuild: {
+    destination: (value: { destinationJson: string }) =>
+      JSON.parse(value.destinationJson) as unknown,
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+  },
   Worktree: {
     lastCheckedAt: (value: { lastCheckedAt: Date | null }) =>
       iso(value.lastCheckedAt),

@@ -320,7 +320,15 @@ function commandPreview(input: {
 const buildInclude = {
   agent: true,
   codebase: { include: { repository: true } },
-  worktree: true,
+  worktree: {
+    include: {
+      _count: {
+        select: {
+          builds: { where: { status: { in: ACTIVE_BUILD_STATUSES } } },
+        },
+      },
+    },
+  },
   configuration: { include: { source: true, project: true } },
   artifacts: { orderBy: { createdAt: "asc" as const } },
   scriptExecutions: {
@@ -912,7 +920,7 @@ export class BuildsService {
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
     const genericDestinations = genericBuildDestinations(action);
-    if (genericDestinations.length) return genericDestinations;
+    if (action === "ARCHIVE") return genericDestinations;
     const job = await this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -1254,6 +1262,9 @@ export class BuildsService {
         folder: worktree.folder,
         branch: worktree.branch,
         headSha: worktree.headSha,
+        codeStateHash: worktree.codeStateHash,
+        hasStagedChanges: worktree.hasStagedChanges,
+        hasUnstagedChanges: worktree.hasUnstagedChanges,
       },
       agent: {
         id: worktree.codebase.agent.id,
@@ -1383,6 +1394,64 @@ export class BuildsService {
     return prisma.build.findUniqueOrThrow({
       where: { id: buildId },
       include: buildInclude,
+    });
+  }
+
+  async rebuildBuild(id: string, requestId: string) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { id },
+      select: {
+        worktreeId: true,
+        configurationId: true,
+        destinationJson: true,
+        action: true,
+        snapshotJson: true,
+      },
+    });
+    if (!build) throw new Error("Build not found");
+
+    const snapshot = objectValue(
+      parseJson(build.snapshotJson, {}),
+      "build snapshot",
+    );
+    const snapshotWorktree = objectValue(
+      snapshot.worktree ?? {},
+      "build worktree snapshot",
+    );
+    const snapshotConfiguration = objectValue(
+      snapshot.configuration ?? {},
+      "build configuration snapshot",
+    );
+    const snapshotScripts = Array.isArray(snapshot.scripts)
+      ? snapshot.scripts
+      : [];
+    const worktreeId =
+      build.worktreeId ??
+      (typeof snapshotWorktree.id === "string" ? snapshotWorktree.id : null);
+    const configurationId =
+      build.configurationId ??
+      (typeof snapshotConfiguration.id === "string"
+        ? snapshotConfiguration.id
+        : null);
+    if (!worktreeId || !configurationId) {
+      throw new Error("The original build settings are unavailable");
+    }
+
+    return this.startBuild({
+      worktreeId,
+      configurationId,
+      destination: parseJson(build.destinationJson, {}),
+      scriptIds: snapshotScripts.flatMap((script) => {
+        if (!script || typeof script !== "object" || Array.isArray(script)) {
+          return [];
+        }
+        const scriptId = (script as JsonObject).id;
+        return typeof scriptId === "string" ? [scriptId] : [];
+      }),
+      action: build.action as BuildAction,
+      advancedSettings: snapshotConfiguration.advancedSettings,
+      requestId,
     });
   }
 
@@ -1882,6 +1951,36 @@ export class BuildsService {
       build.status === "CANCELLED"
         ? "CANCELLED"
         : buildStatusFromJob(job.status);
+    const sourceStateHash =
+      typeof result.sourceStateHash === "string"
+        ? result.sourceStateHash
+        : null;
+    const finalStateHash =
+      typeof result.finalStateHash === "string" ? result.finalStateHash : null;
+    const observedAt =
+      typeof result.codeStateObservedAt === "string" &&
+      Number.isFinite(Date.parse(result.codeStateObservedAt))
+        ? new Date(result.codeStateObservedAt)
+        : new Date();
+    const completedAt = finalStateHash ? observedAt : new Date();
+    let snapshotJson = build.snapshotJson;
+    if (sourceStateHash) {
+      const snapshot = objectValue(
+        parseJson(build.snapshotJson, {}),
+        "build snapshot",
+      );
+      const worktreeSnapshot = objectValue(
+        snapshot.worktree ?? {},
+        "build worktree snapshot",
+      );
+      snapshotJson = JSON.stringify({
+        ...snapshot,
+        worktree: {
+          ...worktreeSnapshot,
+          codeStateHash: sourceStateHash,
+        },
+      });
+    }
     await prisma.$transaction(async (transaction) => {
       await transaction.build.update({
         where: { id: build.id },
@@ -1899,9 +1998,22 @@ export class BuildsService {
             job.error ??
             (typeof result.error === "string" ? result.error : build.error),
           startedAt: build.startedAt ?? new Date(),
-          finishedAt: new Date(),
+          finishedAt: completedAt,
+          snapshotJson,
         },
       });
+      if (build.worktreeId && finalStateHash) {
+        await transaction.worktree.updateMany({
+          where: {
+            id: build.worktreeId,
+            OR: [
+              { lastCheckedAt: null },
+              { lastCheckedAt: { lt: observedAt } },
+            ],
+          },
+          data: { codeStateHash: finalStateHash, lastCheckedAt: observedAt },
+        });
+      }
       if (Array.isArray(result.artifacts)) {
         for (const raw of result.artifacts) {
           const artifact = objectValue(raw, "build artifact");

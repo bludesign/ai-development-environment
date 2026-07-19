@@ -9,6 +9,15 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import {
+  buildDuration,
+  buildStatusVariant,
+  relativeBuildAge,
+} from "@/components/builds/build-format";
+import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
+import { RebuildButton } from "@/components/builds/rebuild-button";
+import { RunBuildControls } from "@/components/builds/run-build-controls";
+import type { BuildRecord } from "@/components/builds/types";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +31,14 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -55,7 +72,7 @@ import {
   type WorktreeItemProps,
 } from "./worktrees-page";
 
-const OVERVIEW_QUERY = `query WorktreeDetailOverview {
+const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
   worktreeOverview {
     hiddenCount
     settings { editorVariant updatedAt }
@@ -75,6 +92,10 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview {
       }
     }
   }
+  builds(first: 50, worktreeId: $worktreeId) {
+    items { ${BUILD_LIST_FIELDS} }
+    nextCursor
+  }
 }`;
 
 function replaceIssueParam(issueKey: string | null) {
@@ -92,6 +113,9 @@ function replaceIssueParam(issueKey: string | null) {
 export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const t = useTranslations("worktreeDetail");
   const [overview, setOverview] = useState<WorktreeOverview | null>(null);
+  const [builds, setBuilds] = useState<BuildRecord[]>([]);
+  const [buildsNextCursor, setBuildsNextCursor] = useState<string | null>(null);
+  const [buildsLoadingMore, setBuildsLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const latestLoad = useRef(0);
@@ -102,12 +126,15 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     try {
       const data = await controlPlaneRequest<{
         worktreeOverview: WorktreeOverview;
-      }>(OVERVIEW_QUERY);
+        builds?: { items: BuildRecord[]; nextCursor: string | null };
+      }>(OVERVIEW_QUERY, { worktreeId });
       if (requestId !== latestLoad.current) return;
       displayedCodebaseId.current =
         findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
           .codebase.id ?? null;
       setOverview(data.worktreeOverview);
+      setBuilds(data.builds?.items ?? []);
+      setBuildsNextCursor(data.builds?.nextCursor ?? null);
       setError(null);
     } catch (value) {
       if (requestId === latestLoad.current) {
@@ -118,11 +145,43 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     }
   }, [worktreeId]);
 
+  const loadMoreBuilds = useCallback(async () => {
+    if (!buildsNextCursor) return;
+    setBuildsLoadingMore(true);
+    try {
+      const data = await controlPlaneRequest<{
+        builds: { items: BuildRecord[]; nextCursor: string | null };
+      }>(
+        `query WorktreeDetailBuilds($worktreeId: ID!, $after: ID!) {
+          builds(first: 50, after: $after, worktreeId: $worktreeId) {
+            items { ${BUILD_LIST_FIELDS} }
+            nextCursor
+          }
+        }`,
+        { worktreeId, after: buildsNextCursor },
+      );
+      setBuilds((current) => {
+        const currentIds = new Set(current.map((build) => build.id));
+        return [
+          ...current,
+          ...data.builds.items.filter((build) => !currentIds.has(build.id)),
+        ];
+      });
+      setBuildsNextCursor(data.builds.nextCursor);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBuildsLoadingMore(false);
+    }
+  }, [buildsNextCursor, worktreeId]);
+
   useEffect(() => {
     displayedCodebaseId.current = null;
     const initial = window.setTimeout(() => void load(), 0);
     const poll = window.setInterval(() => void load(), 30_000);
-    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+    const subscriptions = controlPlaneSubscriptions();
+    const unsubscribeWorktrees = subscriptions.subscribe<{
       worktreeOverviewChanged: {
         worktreeId: string | null;
         codebaseId: string | null;
@@ -149,11 +208,25 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeBuilds = subscriptions.subscribe<{
+      buildsChanged: { id: string };
+    }>(
+      {
+        query:
+          "subscription WorktreeDetailBuildsChanged { buildsChanged { id } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
       latestLoad.current += 1;
-      unsubscribe();
+      unsubscribeWorktrees();
+      unsubscribeBuilds();
     };
   }, [load, worktreeId]);
 
@@ -227,9 +300,13 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
 
   return (
     <LoadedWorktreeDetail
+      builds={builds}
+      buildsLoadingMore={buildsLoadingMore}
+      buildsNextCursor={buildsNextCursor}
       entry={entry}
       key={entry.worktree.id}
       loadError={error}
+      onLoadMoreBuilds={loadMoreBuilds}
       onReload={load}
       onUpdate={updateWorktree}
       overview={overview}
@@ -238,15 +315,23 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
 }
 
 function LoadedWorktreeDetail({
+  builds,
+  buildsLoadingMore,
+  buildsNextCursor,
   entry,
   overview,
   loadError,
+  onLoadMoreBuilds,
   onReload,
   onUpdate,
 }: {
+  builds: BuildRecord[];
+  buildsLoadingMore: boolean;
+  buildsNextCursor: string | null;
   entry: WorktreeOverviewEntry;
   overview: WorktreeOverview;
   loadError: string | null;
+  onLoadMoreBuilds: () => Promise<void>;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
 }) {
@@ -476,6 +561,15 @@ function LoadedWorktreeDetail({
         </CardContent>
       </Card>
 
+      <WorktreeBuildTable
+        builds={builds}
+        loadingMore={buildsLoadingMore}
+        nextCursor={buildsNextCursor}
+        onError={setOperationError}
+        onLoadMore={onLoadMoreBuilds}
+        onReload={onReload}
+      />
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <Card className="min-w-0">
           <CardHeader className="border-b">
@@ -565,6 +659,160 @@ function LoadedWorktreeDetail({
         tags={overview.tags}
       />
     </section>
+  );
+}
+
+function WorktreeBuildTable({
+  builds,
+  loadingMore,
+  nextCursor,
+  onError,
+  onLoadMore,
+  onReload,
+}: {
+  builds: BuildRecord[];
+  loadingMore: boolean;
+  nextCursor: string | null;
+  onError: (error: string | null) => void;
+  onLoadMore: () => Promise<void>;
+  onReload: () => Promise<void>;
+}) {
+  const t = useTranslations("builds");
+  const locale = useLocale();
+  const router = useRouter();
+
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{t("title")}</CardTitle>
+      </CardHeader>
+      {!builds.length ? (
+        <CardContent className="py-6 text-sm text-muted-foreground">
+          {t("emptyTitle")}
+        </CardContent>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>{t("build")}</TableHead>
+              <TableHead>{t("status")}</TableHead>
+              <TableHead>{t("action")}</TableHead>
+              <TableHead>{t("destination")}</TableHead>
+              <TableHead>{t("startedAt")}</TableHead>
+              <TableHead className="text-right">{t("actionsLabel")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {builds.map((build) => {
+              const configuration = build.snapshot.configuration as
+                { name?: string } | undefined;
+              const startedAt = build.startedAt ?? build.createdAt;
+              const runnable =
+                build.status === "SUCCEEDED" &&
+                build.artifacts.some(
+                  (artifact) => artifact.kind === "RUNNABLE_APP",
+                );
+              return (
+                <TableRow
+                  aria-label={t("viewBuild")}
+                  className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  key={build.id}
+                  onClick={() => router.push(`/builds/${build.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      router.push(`/builds/${build.id}`);
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                >
+                  <TableCell className="min-w-52 whitespace-normal">
+                    <Link
+                      className="font-medium hover:underline"
+                      href={`/builds/${build.id}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {configuration?.name ?? build.id}
+                    </Link>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {build.id}
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant={buildStatusVariant(build.status)}>
+                        {t(`statuses.${build.status}`)}
+                      </Badge>
+                      {build.outOfDate && (
+                        <Badge
+                          className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                          variant="outline"
+                        >
+                          {t("outOfDate")}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {t(`actions.${build.action}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{build.destination.name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    <div className="flex flex-col gap-0.5">
+                      <time
+                        dateTime={startedAt}
+                        title={new Date(startedAt).toLocaleString(locale)}
+                      >
+                        {relativeBuildAge(startedAt, locale)}
+                      </time>
+                      <span className="text-xs">
+                        {t("durationValue", {
+                          duration: buildDuration(build),
+                        })}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <RebuildButton
+                        buildId={build.id}
+                        onCompleted={() => onReload()}
+                        onError={onError}
+                        size="sm"
+                      />
+                      {runnable && (
+                        <RunBuildControls
+                          buildId={build.id}
+                          destinationType={build.destinationType}
+                          onCompleted={onReload}
+                          onError={onError}
+                          preferredDestination={build.destination}
+                          size="sm"
+                        />
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      {nextCursor && (
+        <div className="flex justify-center border-t p-3">
+          <Button
+            disabled={loadingMore}
+            onClick={() => void onLoadMore()}
+            variant="outline"
+          >
+            {loadingMore && <Spinner />} {t("loadMore")}
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

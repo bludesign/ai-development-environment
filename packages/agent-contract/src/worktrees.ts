@@ -54,6 +54,7 @@ export type WorktreeActivityReport = {
   gitDirectory: string;
   branch?: string | null;
   headSha?: string | null;
+  codeStateHash?: string | null;
   upstream?: string | null;
   ahead?: number | null;
   behind?: number | null;
@@ -73,6 +74,7 @@ export type WorktreeInventoryItem = {
   primary: boolean;
   branch: string | null;
   headSha: string | null;
+  codeStateHash?: string | null;
   upstream: string | null;
   ahead: number | null;
   behind: number | null;
@@ -280,6 +282,10 @@ export function parseWorktreeInventoryItem(
     primary: item.primary,
     branch: nullableString(item.branch, `${name}.branch`),
     headSha: nullableString(item.headSha, `${name}.headSha`),
+    codeStateHash: optionalNullableString(
+      item.codeStateHash,
+      `${name}.codeStateHash`,
+    ),
     upstream: nullableString(item.upstream, `${name}.upstream`),
     ahead: nullableCount(item.ahead, `${name}.ahead`),
     behind: nullableCount(item.behind, `${name}.behind`),
@@ -783,6 +789,7 @@ export function parseWorktreeActivityReport(
     "gitDirectory",
     "branch",
     "headSha",
+    "codeStateHash",
     "upstream",
     "ahead",
     "behind",
@@ -814,6 +821,10 @@ export function parseWorktreeActivityReport(
     headSha: optionalNullableString(
       report.headSha,
       "worktree activity report.headSha",
+    ),
+    codeStateHash: optionalNullableString(
+      report.codeStateHash,
+      "worktree activity report.codeStateHash",
     ),
     upstream: optionalNullableString(
       report.upstream,

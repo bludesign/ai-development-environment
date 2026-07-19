@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -162,6 +163,23 @@ function overview(
                 ticketTitle: "Worktree Details Page",
                 ticketStatus: "In Progress",
                 pullRequest: null,
+                latestBuild: {
+                  id: "build-1",
+                  status: "SUCCEEDED",
+                  outOfDate: false,
+                  action: "BUILD",
+                  destinationType: "SIMULATOR",
+                  destination: {
+                    type: "SIMULATOR",
+                    id: "SIM-1",
+                    name: "iPhone 17 Pro",
+                    platform: "iOS Simulator",
+                    osVersion: "26.0",
+                    state: "Booted",
+                  },
+                  artifacts: [{ id: "app-artifact", kind: "RUNNABLE_APP" }],
+                  createdAt: now,
+                },
                 tags: [
                   {
                     id: "tag-1",
@@ -213,6 +231,28 @@ const initialDetail: WorktreeDetail = {
   commitsTruncated: false,
 };
 
+const buildHistoryItem = {
+  id: "build-1",
+  status: "SUCCEEDED",
+  outOfDate: true,
+  action: "BUILD",
+  destinationType: "SIMULATOR",
+  destination: {
+    type: "SIMULATOR",
+    id: "SIM-1",
+    name: "iPhone 17 Pro",
+    platform: "iOS Simulator",
+    osVersion: "26.0",
+    state: "Booted",
+  },
+  snapshot: { configuration: { name: "Development" } },
+  artifacts: [{ id: "app-artifact", kind: "RUNNABLE_APP" }],
+  createdAt: new Date(0).toISOString(),
+  startedAt: new Date(0).toISOString(),
+  finishedAt: new Date(1_000).toISOString(),
+  durationMs: 1_000,
+};
+
 describe("WorktreeDetailPage", () => {
   beforeEach(() => {
     global.ResizeObserver = ResizeObserverMock;
@@ -231,10 +271,18 @@ describe("WorktreeDetailPage", () => {
   test("renders management metadata and live commits and changes", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {
-        return { worktreeOverview: overview() } as never;
+        return {
+          worktreeOverview: overview(),
+          builds: { items: [buildHistoryItem], nextCursor: null },
+        } as never;
       }
       if (query.includes("InspectWorktree")) {
         return { inspectWorktree: initialDetail } as never;
+      }
+      if (query.includes("RebuildBuild")) {
+        return {
+          rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
+        } as never;
       }
       throw new Error(`Unexpected request: ${query}`);
     });
@@ -255,6 +303,38 @@ describe("WorktreeDetailPage", () => {
     expect(screen.getByText("Studio Mac · studio.local")).toBeDefined();
     expect(screen.getByText("/workspaces/repo-aide-43")).toBeDefined();
     expect(screen.getByText("1234567890abcdef")).toBeDefined();
+    expect(screen.getByText("Latest build")).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
+    ).toBe("/builds/build-1");
+    expect(screen.getAllByText("Succeeded")).toHaveLength(2);
+    const buildsCard = screen
+      .getByText("Builds")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(buildsCard).not.toBeNull();
+    expect(
+      within(buildsCard!).getByRole("link", { name: "Development" }),
+    ).toBeDefined();
+    expect(within(buildsCard!).getByText("Out of date")).toBeDefined();
+    expect(
+      within(buildsCard!).getByRole("button", { name: /1 devices/ }),
+    ).toBeDefined();
+    expect(
+      (
+        within(buildsCard!).getByRole("button", {
+          name: "Run",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    fireEvent.click(
+      within(buildsCard!).getByRole("button", { name: "Rebuild" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RebuildBuild"),
+        { id: "build-1", requestId: expect.any(String) },
+      ),
+    );
     expect(await screen.findByText("src/worktree-details.tsx")).toBeDefined();
     expect(screen.getByText("Add worktree details")).toBeDefined();
     expect(

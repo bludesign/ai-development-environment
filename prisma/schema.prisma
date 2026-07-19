@@ -170,6 +170,7 @@ model Worktree {
   primary                  Boolean                    @default(false)
   branch                   String?
   headSha                  String?
+  codeStateHash            String?
   upstream                 String?
   ahead                    Int?
   behind                   Int?

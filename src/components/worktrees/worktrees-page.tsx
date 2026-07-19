@@ -39,6 +39,8 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { RebuildButton } from "@/components/builds/rebuild-button";
+import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
@@ -153,6 +155,7 @@ import type {
   WorktreeAgentGroup,
   WorktreeCodebaseGroup,
   WorktreeDetail,
+  WorktreeLatestBuild,
   WorktreeMove,
   WorktreeOverview,
   WorktreeTag,
@@ -486,7 +489,8 @@ export function WorktreesPage() {
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
     const poll = window.setInterval(() => void load(), 30_000);
-    const unsubscribe = controlPlaneSubscriptions().subscribe(
+    const subscriptions = controlPlaneSubscriptions();
+    const unsubscribeWorktrees = subscriptions.subscribe(
       {
         query:
           "subscription WorktreesChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
@@ -497,11 +501,20 @@ export function WorktreesPage() {
         complete: () => undefined,
       },
     );
+    const unsubscribeBuilds = subscriptions.subscribe(
+      { query: "subscription WorktreeBuildsChanged { buildsChanged { id } }" },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
       latestLoad.current += 1;
-      unsubscribe();
+      unsubscribeWorktrees();
+      unsubscribeBuilds();
     };
   }, [load]);
 
@@ -1462,6 +1475,13 @@ export function WorktreeMetadata(
           worktree={worktree}
         />
       </MetadataRow>
+      {worktree.latestBuild && (
+        <LatestBuildRow
+          build={worktree.latestBuild}
+          onCompleted={props.onReload}
+          onError={props.onError}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {worktree.statusError && (
           <span className="text-xs text-destructive">
@@ -1475,6 +1495,66 @@ export function WorktreeMetadata(
         )}
       </div>
     </div>
+  );
+}
+
+function LatestBuildRow({
+  build,
+  onCompleted,
+  onError,
+}: {
+  build: WorktreeLatestBuild;
+  onCompleted: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("worktrees");
+  const buildsT = useTranslations("builds");
+  const runnable =
+    build.status === "SUCCEEDED" &&
+    build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP");
+  return (
+    <MetadataRow label={t("latestBuild")}>
+      <Badge asChild variant="outline">
+        <Link href={`/builds/${build.id}`}>
+          {buildsT(`actions.${build.action}`)}
+        </Link>
+      </Badge>
+      <Badge
+        variant={
+          build.status === "FAILED"
+            ? "destructive"
+            : build.status === "SUCCEEDED"
+              ? "default"
+              : "secondary"
+        }
+      >
+        {buildsT(`statuses.${build.status}`)}
+      </Badge>
+      {build.outOfDate && (
+        <Badge
+          className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+          variant="outline"
+        >
+          {buildsT("outOfDate")}
+        </Badge>
+      )}
+      <RebuildButton
+        buildId={build.id}
+        onCompleted={() => onCompleted()}
+        onError={onError}
+        size="sm"
+      />
+      {runnable && (
+        <RunBuildControls
+          buildId={build.id}
+          destinationType={build.destinationType}
+          onCompleted={onCompleted}
+          onError={onError}
+          preferredDestination={build.destination}
+          size="sm"
+        />
+      )}
+    </MetadataRow>
   );
 }
 
@@ -2617,6 +2697,10 @@ export function ActionRow(
       (codebase) => codebase.codebase.id === props.group.codebase.id,
     ),
   )?.agent;
+  const buildDisabledForSettings =
+    agent?.connectionStatus === "ONLINE" &&
+    agent.capabilities.includes("ios.build.run") &&
+    props.group.iosBuildConfigured === false;
   const buildUnavailable =
     worktree.availability !== "AVAILABLE" ||
     !agent ||
@@ -2626,6 +2710,11 @@ export function ActionRow(
   return (
     <div className="flex flex-wrap gap-2">
       <StartBuildButton
+        buildSettingsHref={
+          buildDisabledForSettings
+            ? `/codebases/repositories/${props.group.repository.id}`
+            : undefined
+        }
         codebaseId={props.group.codebase.id}
         disabled={buildUnavailable}
         disabledReason={

@@ -104,9 +104,34 @@ describe("WorktreesService", () => {
     const worktree = {
       id: "worktree-1",
       branch: "feature/AIDE-24",
+      headSha: "head-2",
+      codeStateHash: "state-2",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
       folder: "/repo",
       baseBranchOverride: null,
       tags: [],
+      builds: [
+        {
+          id: "build-latest",
+          status: "SUCCEEDED",
+          action: "BUILD",
+          destinationType: "SIMULATOR",
+          snapshotJson: JSON.stringify({
+            worktree: { headSha: "head-1", codeStateHash: "state-1" },
+          }),
+          destinationJson: JSON.stringify({
+            type: "SIMULATOR",
+            id: "SIM-1",
+            name: "iPhone 17 Pro",
+            platform: "iOS Simulator",
+            osVersion: "26.0",
+            state: "Booted",
+          }),
+          createdAt: new Date(4),
+          artifacts: [{ id: "artifact-1", kind: "RUNNABLE_APP" }],
+        },
+      ],
       codebase: {
         id: "codebase-1",
         defaultBranch: "main",
@@ -119,10 +144,11 @@ describe("WorktreesService", () => {
         },
       },
     };
+    const findMany = vi.fn().mockResolvedValue([worktree]);
     getPrismaClient.mockResolvedValue({
       worktree: {
         deleteMany: vi.fn(),
-        findMany: vi.fn().mockResolvedValue([worktree]),
+        findMany,
         count: vi.fn().mockResolvedValue(0),
       },
       worktreeTag: { findMany: vi.fn().mockResolvedValue([]) },
@@ -144,6 +170,24 @@ describe("WorktreesService", () => {
     );
 
     const initial = await worktrees.overview();
+    expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.latestBuild).toEqual({
+      ...worktree.builds[0],
+      outOfDate: true,
+    });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          builds: expect.objectContaining({
+            orderBy: { createdAt: "desc" },
+            select: expect.objectContaining({
+              destinationJson: true,
+              artifacts: { select: { id: true, kind: true } },
+            }),
+            take: 1,
+          }),
+        }),
+      }),
+    );
     expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.pullRequest).toEqual(
       pullRequest,
     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
+import { Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -45,19 +45,22 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import {
+  buildDuration,
+  buildSnapshotName,
+  buildStatusVariant,
+  relativeBuildAge,
+} from "./build-format";
+import { BUILD_LIST_FIELDS } from "./graphql-fields";
+import { RebuildButton } from "./rebuild-button";
 import type { BuildRecord, BuildScript } from "./types";
-
-const BUILD_LIST_FIELDS = `
-  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error
-  createdAt startedAt finishedAt durationMs updatedAt
-  artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
-`;
+import { RunBuildControls } from "./run-build-controls";
 
 const SCRIPT_FIELDS = `
   id name preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior createdAt updatedAt
@@ -96,30 +99,10 @@ const STATUSES = [
   "CANCELLED",
 ] as const;
 
-function statusVariant(status: BuildRecord["status"]) {
-  return status === "FAILED"
-    ? ("destructive" as const)
-    : status === "SUCCEEDED"
-      ? ("default" as const)
-      : ("secondary" as const);
-}
-
-function snapshotName(build: BuildRecord): {
-  repository: string;
-  worktree: string;
-} {
-  const repository = build.snapshot.repository as { name?: string } | undefined;
-  const worktree = build.snapshot.worktree as
-    { branch?: string | null; folder?: string } | undefined;
-  return {
-    repository: repository?.name ?? "—",
-    worktree: worktree?.branch ?? worktree?.folder ?? "—",
-  };
-}
-
 export function BuildsPage() {
   const t = useTranslations("builds");
   const locale = useLocale();
+  const router = useRouter();
   const [builds, setBuilds] = useState<BuildRecord[]>([]);
   const [scripts, setScripts] = useState<BuildScript[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
@@ -197,8 +180,6 @@ export function BuildsPage() {
     }
   };
 
-  const date = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : "—";
   const groupedBuilds = useMemo(() => {
     const groups: Array<{
       key: string;
@@ -245,7 +226,7 @@ export function BuildsPage() {
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -319,7 +300,7 @@ export function BuildsPage() {
             </Empty>
           ) : (
             <div className="space-y-3">
-              <div className="overflow-x-auto rounded-lg border">
+              <Card className="gap-0 py-0">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
@@ -331,10 +312,8 @@ export function BuildsPage() {
                       <TableHead>{t("action")}</TableHead>
                       <TableHead>{t("destination")}</TableHead>
                       <TableHead>{t("startedAt")}</TableHead>
-                      <TableHead>{t("duration")}</TableHead>
-                      <TableHead>{t("artifacts")}</TableHead>
                       <TableHead className="text-right">
-                        <span className="sr-only">{t("actionsLabel")}</span>
+                        {t("actionsLabel")}
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -373,16 +352,44 @@ export function BuildsPage() {
                             </TableCell>
                             <TableCell
                               className="py-1.5 text-xs font-normal text-muted-foreground"
-                              colSpan={8}
+                              colSpan={6}
                             >
                               {group.label}
                             </TableCell>
                           </TableRow>
                           {group.items.map((build) => {
-                            const names = snapshotName(build);
+                            const names = buildSnapshotName(build);
+                            const startedAt =
+                              build.startedAt ?? build.createdAt;
+                            const runnable =
+                              build.status === "SUCCEEDED" &&
+                              build.artifacts.some(
+                                (artifact) => artifact.kind === "RUNNABLE_APP",
+                              );
                             return (
-                              <TableRow key={build.id}>
-                                <TableCell>
+                              <TableRow
+                                aria-label={t("viewBuild")}
+                                className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                key={build.id}
+                                onClick={() =>
+                                  router.push(`/builds/${build.id}`)
+                                }
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === "Enter" ||
+                                    event.key === " "
+                                  ) {
+                                    event.preventDefault();
+                                    router.push(`/builds/${build.id}`);
+                                  }
+                                }}
+                                role="link"
+                                tabIndex={0}
+                              >
+                                <TableCell
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
                                   <Checkbox
                                     aria-label={t("selectBuild", {
                                       id: build.id,
@@ -403,6 +410,7 @@ export function BuildsPage() {
                                   <Link
                                     className="font-medium hover:underline"
                                     href={`/builds/${build.id}`}
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     {names.repository}
                                   </Link>
@@ -411,9 +419,21 @@ export function BuildsPage() {
                                   </p>
                                 </TableCell>
                                 <TableCell>
-                                  <Badge variant={statusVariant(build.status)}>
-                                    {t(`statuses.${build.status}`)}
-                                  </Badge>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    <Badge
+                                      variant={buildStatusVariant(build.status)}
+                                    >
+                                      {t(`statuses.${build.status}`)}
+                                    </Badge>
+                                    {build.outOfDate && (
+                                      <Badge
+                                        className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                                        variant="outline"
+                                      >
+                                        {t("outOfDate")}
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </TableCell>
                                 <TableCell>
                                   <Badge variant="outline">
@@ -421,38 +441,42 @@ export function BuildsPage() {
                                   </Badge>
                                 </TableCell>
                                 <TableCell>{build.destination.name}</TableCell>
-                                <TableCell className="whitespace-nowrap text-xs">
-                                  {date(build.startedAt ?? build.createdAt)}
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap">
-                                  {build.durationMs === null
-                                    ? "—"
-                                    : t("durationSeconds", {
-                                        count: Math.round(
-                                          build.durationMs / 1000,
-                                        ),
+                                <TableCell className="text-muted-foreground">
+                                  <div className="flex flex-col gap-0.5">
+                                    <time
+                                      dateTime={startedAt}
+                                      title={new Date(startedAt).toLocaleString(
+                                        locale,
+                                      )}
+                                    >
+                                      {relativeBuildAge(startedAt, locale)}
+                                    </time>
+                                    <span className="text-xs">
+                                      {t("durationValue", {
+                                        duration: buildDuration(build),
                                       })}
-                                </TableCell>
-                                <TableCell>
-                                  {build.artifacts.length
-                                    ? t("artifactCount", {
-                                        count: build.artifacts.length,
-                                      })
-                                    : "—"}
+                                    </span>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <Button
-                                    asChild
-                                    size="icon-sm"
-                                    variant="ghost"
-                                  >
-                                    <Link
-                                      aria-label={t("viewBuild")}
-                                      href={`/builds/${build.id}`}
-                                    >
-                                      <ArrowRight />
-                                    </Link>
-                                  </Button>
+                                  <div className="flex items-center justify-end gap-2">
+                                    <RebuildButton
+                                      buildId={build.id}
+                                      onCompleted={() => load()}
+                                      onError={setError}
+                                      size="sm"
+                                    />
+                                    {runnable && (
+                                      <RunBuildControls
+                                        buildId={build.id}
+                                        destinationType={build.destinationType}
+                                        onCompleted={load}
+                                        onError={setError}
+                                        preferredDestination={build.destination}
+                                        size="sm"
+                                      />
+                                    )}
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             );
@@ -462,7 +486,7 @@ export function BuildsPage() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+              </Card>
               {nextCursor && (
                 <div className="flex justify-center">
                   <Button

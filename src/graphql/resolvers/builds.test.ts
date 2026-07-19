@@ -12,6 +12,7 @@ describe("build resolver authorization", () => {
     const service = {
       builds: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
       startBuild: vi.fn().mockResolvedValue({ id: "build-1" }),
+      rebuildBuild: vi.fn().mockResolvedValue({ id: "build-2" }),
     } as unknown as BuildsService;
     const resolvers = createBuildResolvers(service);
 
@@ -32,6 +33,20 @@ describe("build resolver authorization", () => {
         context(null),
       ),
     ).resolves.toEqual({ id: "build-1" });
+    expect(() =>
+      resolvers.Mutation.rebuildBuild(
+        {},
+        { id: "build-1", requestId: "request-2" },
+        context("agent-1"),
+      ),
+    ).toThrow("cannot perform control-plane operations");
+    await expect(
+      resolvers.Mutation.rebuildBuild(
+        {},
+        { id: "build-1", requestId: "request-2" },
+        context(null),
+      ),
+    ).resolves.toEqual({ id: "build-2" });
   });
 
   test("accepts progress and sanitized log reports only from authenticated agents", async () => {
