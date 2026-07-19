@@ -5,6 +5,7 @@ import {
   parseWorktreeActivityReport,
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
+  worktreeDiffPayload,
   worktreeJobPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
@@ -12,6 +13,47 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 
 describe("worktree agent contract", () => {
+  test("restricts lazy diffs to safe paths and commit-scoped SHAs", () => {
+    const base = {
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      expectedOrigin: "github.com/openai/codex",
+      baseBranch: "main",
+      uploadId: null,
+      side: null,
+    };
+    expect(
+      worktreeDiffPayload({
+        ...base,
+        scope: "BRANCH",
+        path: "src/app.ts",
+        previousPath: "src/old-app.ts",
+        commitSha: null,
+      }),
+    ).toMatchObject({
+      scope: "BRANCH",
+      path: "src/app.ts",
+      previousPath: "src/old-app.ts",
+    });
+    expect(() =>
+      worktreeDiffPayload({
+        ...base,
+        scope: "BRANCH",
+        path: "../secret",
+        commitSha: null,
+      }),
+    ).toThrow("stay within the worktree");
+    expect(() =>
+      worktreeDiffPayload({
+        ...base,
+        scope: "COMMIT",
+        path: null,
+        commitSha: null,
+      }),
+    ).toThrow("require a commit SHA");
+  });
+
   test("parses authoritative inventory reports", () => {
     expect(
       parseCodebaseWorktreeReport({

@@ -543,6 +543,7 @@ model Build {
   logs              BuildLogEvent[]
   deployments       BuildDeployment[]
   exports           BuildExport[]
+  reports           BuildReport[]
 
   @@index([status, createdAt])
   @@index([agentId, createdAt])
@@ -561,9 +562,31 @@ model BuildArtifact {
   metadataJson String   @default("{}")
   createdAt    DateTime @default(now())
   build        Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  report       BuildReport?
 
   @@unique([buildId, relativePath])
   @@index([buildId, kind])
+}
+
+model BuildReport {
+  id                   String         @id
+  buildId              String
+  artifactId           String?        @unique
+  kind                 String
+  source               String
+  status               String         @default("PENDING")
+  summaryJson          String         @default("{}")
+  dataJson             String         @default("{}")
+  error                String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  finishedAt           DateTime?
+  build                Build          @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  artifact             BuildArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, kind])
+  @@index([kind, status, createdAt])
+  @@index([buildId, createdAt])
 }
 
 model BuildScriptExecution {

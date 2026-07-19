@@ -17,7 +17,8 @@ import {
 import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
 import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
-import type { BuildRecord } from "@/components/builds/types";
+import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
+import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -46,7 +47,10 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import { WorktreeDetailPanel } from "./worktree-detail-panel";
+import {
+  BranchChangesPanel,
+  WorktreeDetailPanel,
+} from "./worktree-detail-panel";
 import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
 import {
   inspectWorktree,
@@ -97,7 +101,17 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
     items { ${BUILD_LIST_FIELDS} }
     nextCursor
   }
+  worktreeCoverageReports(worktreeId: $worktreeId) {
+    id kind source status summary error createdAt updatedAt finishedAt
+    artifact { id kind relativePath sizeBytes checksum metadata createdAt }
+    build {
+      id status action destinationType destination snapshot createdAt startedAt finishedAt durationMs updatedAt outOfDate
+      artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
+    }
+  }
 }`;
+
+type CoverageHistoryReport = BuildReport & { build: BuildRecord };
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -117,6 +131,9 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const [builds, setBuilds] = useState<BuildRecord[]>([]);
   const [buildsNextCursor, setBuildsNextCursor] = useState<string | null>(null);
   const [buildsLoadingMore, setBuildsLoadingMore] = useState(false);
+  const [coverageReports, setCoverageReports] = useState<
+    CoverageHistoryReport[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const latestLoad = useRef(0);
@@ -128,6 +145,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       const data = await controlPlaneRequest<{
         worktreeOverview: WorktreeOverview;
         builds?: { items: BuildRecord[]; nextCursor: string | null };
+        worktreeCoverageReports?: CoverageHistoryReport[];
       }>(OVERVIEW_QUERY, { worktreeId });
       if (requestId !== latestLoad.current) return;
       displayedCodebaseId.current =
@@ -136,6 +154,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       setOverview(data.worktreeOverview);
       setBuilds(data.builds?.items ?? []);
       setBuildsNextCursor(data.builds?.nextCursor ?? null);
+      setCoverageReports(data.worktreeCoverageReports ?? []);
       setError(null);
     } catch (value) {
       if (requestId === latestLoad.current) {
@@ -302,6 +321,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   return (
     <LoadedWorktreeDetail
       builds={builds}
+      coverageReports={coverageReports}
       buildsLoadingMore={buildsLoadingMore}
       buildsNextCursor={buildsNextCursor}
       entry={entry}
@@ -317,6 +337,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
 
 function LoadedWorktreeDetail({
   builds,
+  coverageReports,
   buildsLoadingMore,
   buildsNextCursor,
   entry,
@@ -327,6 +348,7 @@ function LoadedWorktreeDetail({
   onUpdate,
 }: {
   builds: BuildRecord[];
+  coverageReports: CoverageHistoryReport[];
   buildsLoadingMore: boolean;
   buildsNextCursor: string | null;
   entry: WorktreeOverviewEntry;
@@ -562,6 +584,73 @@ function LoadedWorktreeDetail({
         </CardContent>
       </Card>
 
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle>{t("overview")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              <DetailValue label={t("repository")}>
+                <Link
+                  className="text-primary hover:underline"
+                  href={`/codebases/${entry.group.codebase.id}`}
+                >
+                  {entry.group.repository.name}
+                </Link>
+              </DetailValue>
+              <DetailValue label={t("origin")} mono>
+                {entry.group.repository.displayOrigin}
+              </DetailValue>
+              <DetailValue label={t("agent")}>
+                {entry.agentGroup.agent.name} ·{" "}
+                {entry.agentGroup.agent.hostname}
+              </DetailValue>
+              <DetailValue label={t("folder")} mono>
+                {worktree.folder}
+              </DetailValue>
+              <DetailValue label={t("head")} mono>
+                {worktree.headSha ?? "—"}
+              </DetailValue>
+              <DetailValue label={t("upstream")} mono>
+                {worktree.upstream ?? "—"}
+              </DetailValue>
+              <DetailValue label={t("originStatus")}>
+                <OriginStatusBadges worktree={worktree} />
+              </DetailValue>
+              <DetailValue label={t("baseStatus")}>
+                <BaseFreshnessBadge worktree={worktree} />
+              </DetailValue>
+              <DetailValue label={t("lastChecked")}>
+                {formatDate(worktree.lastCheckedAt)}
+              </DetailValue>
+              <DetailValue label={t("lastFetched")}>
+                {formatDate(entry.group.codebase.lastFetchedAt)}
+              </DetailValue>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle>{t("management")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <WorktreeMetadata {...managementProps} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {entry.group.iosBuildConfigured && (
+        <WorktreeCoverageCard
+          codebaseId={entry.group.codebase.id}
+          disabled={!canInspect}
+          onReload={onReload}
+          reports={coverageReports}
+          worktreeId={worktree.id}
+        />
+      )}
+
       <WorktreeBuildTable
         builds={builds}
         loadingMore={buildsLoadingMore}
@@ -571,83 +660,41 @@ function LoadedWorktreeDetail({
         onReload={onReload}
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <Card className="min-w-0">
-          <CardHeader className="border-b">
-            <CardTitle>{t("workingTree")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {inspectionLoading && !detail ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner /> {wt("loadingDetails")}
-              </p>
-            ) : detail ? (
-              <WorktreeDetailPanel detail={detail} />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {canInspect ? t("inspectionFailed") : "—"}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <Card className="min-w-0">
+        <CardHeader className="border-b">
+          <CardTitle>{t("workingTree")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {inspectionLoading && !detail ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner /> {wt("loadingDetails")}
+            </p>
+          ) : detail ? (
+            <WorktreeDetailPanel detail={detail} worktreeId={worktree.id} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {canInspect ? t("inspectionFailed") : "—"}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
-        <div className="space-y-5">
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle>{t("overview")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="space-y-3 text-sm">
-                <DetailValue label={t("repository")}>
-                  <Link
-                    className="text-primary hover:underline"
-                    href={`/codebases/${entry.group.codebase.id}`}
-                  >
-                    {entry.group.repository.name}
-                  </Link>
-                </DetailValue>
-                <DetailValue label={t("origin")} mono>
-                  {entry.group.repository.displayOrigin}
-                </DetailValue>
-                <DetailValue label={t("agent")}>
-                  {entry.agentGroup.agent.name} ·{" "}
-                  {entry.agentGroup.agent.hostname}
-                </DetailValue>
-                <DetailValue label={t("folder")} mono>
-                  {worktree.folder}
-                </DetailValue>
-                <DetailValue label={t("head")} mono>
-                  {worktree.headSha ?? "—"}
-                </DetailValue>
-                <DetailValue label={t("upstream")} mono>
-                  {worktree.upstream ?? "—"}
-                </DetailValue>
-                <DetailValue label={t("originStatus")}>
-                  <OriginStatusBadges worktree={worktree} />
-                </DetailValue>
-                <DetailValue label={t("baseStatus")}>
-                  <BaseFreshnessBadge worktree={worktree} />
-                </DetailValue>
-                <DetailValue label={t("lastChecked")}>
-                  {formatDate(worktree.lastCheckedAt)}
-                </DetailValue>
-                <DetailValue label={t("lastFetched")}>
-                  {formatDate(entry.group.codebase.lastFetchedAt)}
-                </DetailValue>
-              </dl>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle>{t("management")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <WorktreeMetadata {...managementProps} />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <Card className="min-w-0">
+        <CardHeader className="border-b">
+          <CardTitle>{t("branchChanges")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {detail ? (
+            <BranchChangesPanel
+              files={detail.branchChanges ?? []}
+              truncated={detail.branchChangesTruncated === true}
+              worktreeId={worktree.id}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">—</p>
+          )}
+        </CardContent>
+      </Card>
 
       <JiraTicketDrawer
         issueKey={jiraIssueKey}
@@ -660,6 +707,148 @@ function LoadedWorktreeDetail({
         tags={overview.tags}
       />
     </section>
+  );
+}
+
+function WorktreeCoverageCard({
+  codebaseId,
+  worktreeId,
+  reports,
+  disabled,
+  onReload,
+}: {
+  codebaseId: string;
+  worktreeId: string;
+  reports: CoverageHistoryReport[];
+  disabled: boolean;
+  onReload: () => Promise<void>;
+}) {
+  const t = useTranslations("worktreeDetail");
+  const locale = useLocale();
+  const percent = (value: unknown) =>
+    typeof value === "number"
+      ? new Intl.NumberFormat(locale, {
+          style: "percent",
+          maximumFractionDigits: 1,
+        }).format(value)
+      : "—";
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>{t("codeCoverage")}</CardTitle>
+          <div className="sm:ml-auto">
+            <WorktreeCoverageButton
+              codebaseId={codebaseId}
+              disabled={disabled}
+              onStarted={() => void onReload()}
+              worktreeId={worktreeId}
+            />
+          </div>
+        </div>
+      </CardHeader>
+      {!reports.length ? (
+        <CardContent className="py-6 text-sm text-muted-foreground">
+          {t("noCoverageReports")}
+        </CardContent>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("coverageBuild")}</TableHead>
+              <TableHead>{t("coverageStatus")}</TableHead>
+              <TableHead>{t("overallCoverage")}</TableHead>
+              <TableHead>{t("changedCoverage")}</TableHead>
+              <TableHead>{t("generated")}</TableHead>
+              <TableHead className="text-right">{t("viewReport")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {reports.map((report) => {
+              const configuration = report.build.snapshot.configuration as
+                { name?: string } | undefined;
+              return (
+                <TableRow key={report.id}>
+                  <TableCell>
+                    <p className="font-medium">
+                      {configuration?.name ?? report.build.id}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {report.build.id.slice(0, 8)}
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        report.status === "FAILED" ? "destructive" : "outline"
+                      }
+                    >
+                      {t(`coverageStatuses.${report.status}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <WorktreeCoverageValue
+                      percent={percent}
+                      value={report.summary.lineCoverage}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <WorktreeCoverageValue
+                      percent={percent}
+                      value={report.summary.changedLineCoverage}
+                    />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(
+                      report.finishedAt ?? report.createdAt,
+                    ).toLocaleString(locale)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {report.status === "READY" && (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/builds/${report.build.id}/coverage`}>
+                          {t("viewReport")}
+                        </Link>
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </Card>
+  );
+}
+
+function WorktreeCoverageValue({
+  percent,
+  value,
+}: {
+  percent: (value: unknown) => string;
+  value: unknown;
+}) {
+  if (typeof value !== "number") return <>—</>;
+  const normalized = Math.max(0, Math.min(1, value));
+  const color =
+    normalized >= 0.8
+      ? "text-emerald-500"
+      : normalized >= 0.5
+        ? "text-amber-500"
+        : "text-red-500";
+  return (
+    <span className="inline-flex items-center gap-1.5 tabular-nums">
+      {percent(value)}
+      <span
+        aria-hidden="true"
+        className={`size-3.5 shrink-0 rounded-full ring-1 ring-foreground/10 ${color}`}
+        data-coverage-indicator
+        style={{
+          background: `conic-gradient(currentColor ${normalized * 360}deg, var(--muted) 0deg)`,
+        }}
+      />
+    </span>
   );
 }
 

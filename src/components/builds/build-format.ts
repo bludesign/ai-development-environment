@@ -4,7 +4,7 @@ export function buildStatusVariant(status: BuildRecord["status"]) {
   return status === "FAILED"
     ? ("destructive" as const)
     : status === "SUCCEEDED"
-      ? ("default" as const)
+      ? ("success" as const)
       : ("secondary" as const);
 }
 

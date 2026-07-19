@@ -23,7 +23,15 @@ export const CODEBASE_FIELDS = `
 export const INSPECT_WORKTREE_MUTATION = `mutation InspectWorktree($id: ID!, $requestId: ID!) {
   inspectWorktree(id: $id, requestId: $requestId) {
     commits { sha subject authorName authoredAt additions deletions }
-    changes { path staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
-    commitsTruncated changesTruncated
+    changes { path previousPath changeType staged unstaged untracked conflicted stagedAdditions stagedDeletions unstagedAdditions unstagedDeletions }
+    branchChanges { path previousPath changeType additions deletions binary image }
+    commitsTruncated changesTruncated branchChangesTruncated
+  }
+}`;
+
+export const INSPECT_WORKTREE_DIFF_MUTATION = `mutation InspectWorktreeDiff($input: WorktreeDiffInput!) {
+  inspectWorktreeDiff(input: $input) {
+    files { path previousPath changeType additions deletions binary image }
+    patch image binary truncated beforeAvailable afterAvailable
   }
 }`;

@@ -2,14 +2,20 @@
 
 import {
   ArrowDownToLine,
+  Bot,
   Check,
+  Code2,
   Database,
   FolderTree,
+  MousePointer2,
   Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldAlert,
+  Sparkles,
+  SquareTerminal,
+  type LucideIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,6 +43,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -62,6 +75,14 @@ const TOOL_LABELS: Record<SkillTool, string> = {
   CODEX: "OpenAI Codex",
   CLAUDE: "Claude Code",
   OPENCODE: "OpenCode",
+};
+
+const TOOL_ICONS: Record<SkillTool, LucideIcon> = {
+  CURSOR: MousePointer2,
+  GITHUB_COPILOT: Sparkles,
+  CODEX: SquareTerminal,
+  CLAUDE: Bot,
+  OPENCODE: Code2,
 };
 
 const OVERVIEW_QUERY = `
@@ -228,16 +249,40 @@ export function SkillsPage() {
         />
       </div>
 
-      <Tabs onValueChange={setTab} value={activeTab}>
+      <div className="sm:hidden">
+        <Select onValueChange={setTab} value={activeTab}>
+          <SelectTrigger aria-label={t("skillSource")} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="DATABASE">
+              <Database /> {t("database")}
+            </SelectItem>
+            {configuredTools.map((tool) => {
+              const ToolIcon = TOOL_ICONS[tool];
+              return (
+                <SelectItem key={tool} value={tool}>
+                  <ToolIcon /> {TOOL_LABELS[tool]}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Tabs className="hidden sm:flex" onValueChange={setTab} value={activeTab}>
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="DATABASE">
             <Database /> {t("database")}
           </TabsTrigger>
-          {configuredTools.map((tool) => (
-            <TabsTrigger key={tool} value={tool}>
-              {TOOL_LABELS[tool]}
-            </TabsTrigger>
-          ))}
+          {configuredTools.map((tool) => {
+            const ToolIcon = TOOL_ICONS[tool];
+            return (
+              <TabsTrigger key={tool} value={tool}>
+                <ToolIcon /> {TOOL_LABELS[tool]}
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
       </Tabs>
 

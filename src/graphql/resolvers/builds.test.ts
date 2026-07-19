@@ -8,6 +8,30 @@ import { createBuildResolvers } from "./builds";
 const context = (agentId: string | null) => ({ agentId }) as GraphQLContext;
 
 describe("build resolver authorization", () => {
+  test("resolves report relations and lazily selected report data", async () => {
+    const service = {
+      getBuild: vi.fn().mockResolvedValue({ id: "build-1" }),
+      reportsForBuild: vi.fn().mockResolvedValue([{ id: "report-1" }]),
+      reportData: vi.fn().mockResolvedValue('{"files":[{"path":"App.swift"}]}'),
+    } as unknown as BuildsService;
+    const resolvers = createBuildResolvers(service);
+
+    await expect(
+      resolvers.BuildReport.build({ buildId: "build-1" }),
+    ).resolves.toEqual({ id: "build-1" });
+    await expect(resolvers.Build.reports({ id: "build-1" })).resolves.toEqual([
+      { id: "report-1" },
+    ]);
+    await expect(
+      resolvers.BuildReport.coverageFiles({
+        id: "report-1",
+        kind: "CODE_COVERAGE",
+      }),
+    ).resolves.toEqual([{ path: "App.swift" }]);
+    expect(service.getBuild).toHaveBeenCalledWith("build-1");
+    expect(service.reportData).toHaveBeenCalledWith("report-1");
+  });
+
   test("keeps build configuration and execution operations on the control plane", async () => {
     const service = {
       builds: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),

@@ -247,6 +247,61 @@ describe("BuildsService", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  test("requires a report-capable agent for worktree coverage", async () => {
+    const legacyWorktree = {
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: { ...worktree().codebase, defaultBranch: "main" },
+    };
+    getPrismaClient.mockResolvedValue({
+      build: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktree: { findUnique: vi.fn().mockResolvedValue(legacyWorktree) },
+    });
+    const createJob = vi.fn();
+
+    await expect(
+      new BuildsService(control(createJob)).startWorktreeCoverage({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        destination,
+        requestId: "coverage-1",
+      }),
+    ).rejects.toThrow("updated for worktree coverage");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  test("bounds worktree coverage history and excludes report payloads", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    getPrismaClient.mockResolvedValue({ buildReport: { findMany } });
+
+    await new BuildsService(control()).coverageHistory("worktree-1");
+
+    const query = findMany.mock.calls[0]![0];
+    expect(query).toMatchObject({
+      where: {
+        kind: "CODE_COVERAGE",
+        source: "WORKTREE",
+        build: { worktreeId: "worktree-1" },
+      },
+      take: 50,
+      select: {
+        summaryJson: true,
+        build: { select: { artifacts: expect.any(Object) } },
+      },
+    });
+    expect(query.select).not.toHaveProperty("dataJson");
+    expect(query).not.toHaveProperty("include");
+  });
+
+  test("does not materialize reports for build-list queries", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    getPrismaClient.mockResolvedValue({ build: { findMany } });
+
+    await new BuildsService(control()).builds();
+
+    expect(findMany.mock.calls[0]![0].include).not.toHaveProperty("reports");
+  });
+
   test("rebuilds with the original destination and selected settings", async () => {
     getPrismaClient.mockResolvedValue({
       build: {

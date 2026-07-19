@@ -163,6 +163,8 @@ type WorktreeCommit {
 
 type WorktreeChange {
   path: String!
+  previousPath: String
+  changeType: String!
   staged: Boolean!
   unstaged: Boolean!
   untracked: Boolean!
@@ -173,11 +175,50 @@ type WorktreeChange {
   unstagedDeletions: Int
 }
 
+type WorktreeDiffFile {
+  path: String!
+  previousPath: String
+  changeType: String!
+  additions: Int
+  deletions: Int
+  binary: Boolean!
+  image: Boolean!
+}
+
+type WorktreeFileDiff {
+  files: [WorktreeDiffFile!]!
+  patch: String
+  image: Boolean
+  binary: Boolean
+  truncated: Boolean!
+  beforeAvailable: Boolean
+  afterAvailable: Boolean
+}
+
+enum WorktreeDiffScope {
+  STAGED
+  UNSTAGED
+  UNTRACKED
+  COMMIT
+  BRANCH
+}
+
+input WorktreeDiffInput {
+  worktreeId: ID!
+  scope: WorktreeDiffScope!
+  path: String
+  previousPath: String
+  commitSha: String
+  requestId: ID!
+}
+
 type WorktreeDetail {
   commits: [WorktreeCommit!]!
   changes: [WorktreeChange!]!
+  branchChanges: [WorktreeDiffFile!]!
   commitsTruncated: Boolean!
   changesTruncated: Boolean!
+  branchChangesTruncated: Boolean!
 }
 
 type WorktreeOverviewChange {
@@ -328,6 +369,7 @@ extend type Mutation {
   reportWorktrees(reports: [CodebaseWorktreeReportInput!]!): [Worktree!]!
   reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
   inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!
+  inspectWorktreeDiff(input: WorktreeDiffInput!): WorktreeFileDiff!
   runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
   createWorktree(input: CreateWorktreeInput!): AgentJob!
   changeWorktreeBranch(input: ChangeWorktreeBranchInput!): AgentJob!

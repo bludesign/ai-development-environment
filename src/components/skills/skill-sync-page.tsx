@@ -502,7 +502,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
                           }
                           variant={online ? "outline" : "secondary"}
                         >
-                          {displayEnum(tStatus(online ? "online" : "offline"))}
+                          {tStatus(online ? "online" : "offline")}
                         </Badge>
                       </TableCell>
                       <TableCell>

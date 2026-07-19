@@ -499,6 +499,9 @@ function BuildConfigurationDialog({
   const [advanced, setAdvanced] = useState(
     JSON.stringify(configuration?.advancedSettings ?? {}, null, 2),
   );
+  const [parseTestResults, setParseTestResults] = useState(
+    configuration?.advancedSettings?.parseTestResults !== false,
+  );
   const [testPlan, setTestPlan] = useState(
     typeof configuration?.advancedSettings?.testPlan === "string"
       ? configuration.advancedSettings.testPlan
@@ -599,6 +602,7 @@ function BuildConfigurationDialog({
       advancedSettings = {
         ...(advancedSettings as Record<string, unknown>),
         testPlan: testPlan === "__SCHEME_DEFAULT__" ? null : testPlan,
+        parseTestResults,
       };
       const data = await controlPlaneRequest<{
         saveBuildConfiguration: { id: string };
@@ -876,6 +880,15 @@ function BuildConfigurationDialog({
               {t("advancedSettings")}
             </summary>
             <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2 pb-2">
+                <Checkbox
+                  checked={parseTestResults}
+                  onCheckedChange={(checked) =>
+                    setParseTestResults(Boolean(checked))
+                  }
+                />
+                {t("parseTestResults")}
+              </label>
               <Label htmlFor="configuration-advanced-json">
                 {t("advancedJson")}
               </Label>

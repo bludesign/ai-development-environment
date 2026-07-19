@@ -1,6 +1,6 @@
 "use client";
 
-import { Hammer, RefreshCw } from "lucide-react";
+import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -36,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Link, useRouter } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import type {
   BuildAction,
@@ -200,18 +201,56 @@ export function StartBuildButton({
   );
 }
 
+export function WorktreeCoverageButton({
+  codebaseId,
+  worktreeId,
+  disabled,
+  onStarted,
+}: {
+  codebaseId: string;
+  worktreeId: string;
+  disabled?: boolean;
+  onStarted?: (buildId: string) => void;
+}) {
+  const t = useTranslations("builds");
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button disabled={disabled} onClick={() => setOpen(true)} type="button">
+        <TestTube2 /> {t("generateWorktreeCoverage")}
+      </Button>
+      {open && (
+        <StartBuildDialog
+          codebaseId={codebaseId}
+          coverageMode
+          onOpenChange={setOpen}
+          onStarted={(id) => {
+            onStarted?.(id);
+            router.push(`/builds/${id}`);
+          }}
+          open={open}
+          worktreeId={worktreeId}
+        />
+      )}
+    </>
+  );
+}
+
 function StartBuildDialog({
   codebaseId,
   worktreeId,
   open,
   onOpenChange,
   onStarted,
+  coverageMode = false,
 }: {
   codebaseId: string;
   worktreeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (buildId: string) => void;
+  coverageMode?: boolean;
 }) {
   const t = useTranslations("builds");
   const [project, setProject] = useState<IosAppProject | null>(null);
@@ -261,7 +300,7 @@ function StartBuildDialog({
         const first = data.iosAppProject?.configurations[0];
         if (first) {
           setConfigurationId(first.id);
-          setAction(first.defaultAction);
+          setAction(coverageMode ? "TEST" : first.defaultAction);
           setAdvanced(first.advancedSettings ?? {});
           setScriptIds(
             new Set(
@@ -283,7 +322,7 @@ function StartBuildDialog({
     return () => {
       disposed = true;
     };
-  }, [codebaseId, worktreeId]);
+  }, [codebaseId, coverageMode, worktreeId]);
 
   const compatiblePriorBuilds = useMemo(
     () =>
@@ -430,9 +469,12 @@ function StartBuildDialog({
       } catch {
         throw new Error(t("overridesInvalid"));
       }
-      const data = await controlPlaneRequest<{ startBuild: { id: string } }>(
+      const data = await controlPlaneRequest<{
+        startBuild?: { id: string };
+        startWorktreeCoverage?: { id: string };
+      }>(
         `mutation StartIosBuild($input: StartBuildInput!) {
-          startBuild(input: $input) { id }
+          ${coverageMode ? "startWorktreeCoverage" : "startBuild"}(input: $input) { id }
         }`,
         {
           input: {
@@ -444,6 +486,9 @@ function StartBuildDialog({
             advancedSettings: {
               ...advanced,
               buildSettingOverrides,
+              ...(coverageMode
+                ? { codeCoverage: true, parseTestResults: true }
+                : {}),
               ...(action === "TEST_WITHOUT_BUILDING"
                 ? {
                     priorBuildForTestingId: selectedPriorBuildId,
@@ -457,7 +502,9 @@ function StartBuildDialog({
         },
       );
       onOpenChange(false);
-      onStarted(data.startBuild.id);
+      const started = data.startBuild ?? data.startWorktreeCoverage;
+      if (!started) throw new Error(t("startBuildFailed"));
+      onStarted(started.id);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -469,8 +516,16 @@ function StartBuildDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{t("startBuild")}</DialogTitle>
-          <DialogDescription>{t("startBuildDescription")}</DialogDescription>
+          <DialogTitle>
+            {t(coverageMode ? "startWorktreeCoverage" : "startBuild")}
+          </DialogTitle>
+          <DialogDescription>
+            {t(
+              coverageMode
+                ? "startWorktreeCoverageDescription"
+                : "startBuildDescription",
+            )}
+          </DialogDescription>
         </DialogHeader>
         {error && (
           <Alert variant="destructive">
@@ -496,7 +551,7 @@ function StartBuildDialog({
                     key={entry.id}
                     onClick={() => {
                       setConfigurationId(entry.id);
-                      setAction(entry.defaultAction);
+                      setAction(coverageMode ? "TEST" : entry.defaultAction);
                       setAdvanced(entry.advancedSettings ?? {});
                     }}
                     type="button"
@@ -554,7 +609,7 @@ function StartBuildDialog({
             )}
 
             <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
+              <div className={cn("space-y-2", coverageMode && "hidden")}>
                 <Label>{t("action")}</Label>
                 <Select
                   onValueChange={(value) => setAction(value as BuildAction)}
@@ -786,7 +841,8 @@ function StartBuildDialog({
                 </div>
                 <label className="flex items-center gap-2">
                   <Checkbox
-                    checked={Boolean(advanced.codeCoverage)}
+                    checked={coverageMode || Boolean(advanced.codeCoverage)}
+                    disabled={coverageMode}
                     onCheckedChange={(checked) =>
                       setAdvanced((current) => ({
                         ...current,
@@ -796,6 +852,23 @@ function StartBuildDialog({
                   />
                   {t("codeCoverage")}
                 </label>
+                {["TEST", "TEST_WITHOUT_BUILDING"].includes(action) && (
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={
+                        coverageMode || advanced.parseTestResults !== false
+                      }
+                      disabled={coverageMode}
+                      onCheckedChange={(checked) =>
+                        setAdvanced((current) => ({
+                          ...current,
+                          parseTestResults: Boolean(checked),
+                        }))
+                      }
+                    />
+                    {t("parseTestResults")}
+                  </label>
+                )}
                 <label className="flex items-center gap-2">
                   <Checkbox
                     checked={Boolean(advanced.allowProvisioningUpdates)}

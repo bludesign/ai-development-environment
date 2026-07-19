@@ -56,6 +56,13 @@ const build = {
       name: "Development",
       scheme: "App",
       buildConfiguration: "Debug",
+      advancedSettings: {
+        packageResolution: "SKIP_UPDATES",
+        codeCoverage: true,
+        parseTestResults: false,
+        onlyTesting: ["AppTests/LoginTests"],
+        buildSettingOverrides: { SWIFT_VERSION: "6.0" },
+      },
     },
   },
   commandSummary: "xcrun xcodebuild -workspace App.xcworkspace build",
@@ -237,6 +244,64 @@ describe("BuildDetailPage", () => {
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
+    const logViewport = screen.getByText(/Compile Swift sources/);
+    expect(logViewport.className).toContain("max-h-[calc(100svh-8rem)]");
+    expect(logViewport.className).toContain("sm:max-h-[48rem]");
+    expect(logViewport.className).toContain("max-w-full");
+    expect(logViewport.className).toContain("[overflow-wrap:anywhere]");
+    const detailGrid =
+      logViewport.closest('[data-slot="card"]')?.parentElement?.parentElement;
+    expect(detailGrid?.className).toContain("min-w-0");
+    expect(detailGrid?.firstElementChild?.className).toContain("min-w-0");
+    const collapseLogs = screen.getByRole("button", {
+      name: "Collapse logs",
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "Scroll logs to top" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(
+      screen
+        .getByRole("button", { name: "Scroll logs to bottom" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
+    expect(collapseLogs.getAttribute("data-size")).toBe("icon-sm");
+    expect(collapseLogs.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(collapseLogs);
+    expect(screen.queryByText(/Compile Swift sources/)).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Expand logs" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+    const advancedSettingsCard = screen
+      .getByText("Advanced settings")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(advancedSettingsCard).not.toBeNull();
+    const overviewCard = screen
+      .getByText("Overview")
+      .closest<HTMLElement>('[data-slot="card"]');
+    const commandCard = screen
+      .getByText("Command summary")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(advancedSettingsCard!.parentElement).toBe(
+      overviewCard!.parentElement,
+    );
+    expect(advancedSettingsCard!.parentElement).not.toBe(
+      commandCard!.parentElement,
+    );
+    expect(
+      within(advancedSettingsCard!).getByText("Skip Updates"),
+    ).toBeDefined();
+    expect(
+      within(advancedSettingsCard!).getByText("AppTests/LoginTests"),
+    ).toBeDefined();
+    expect(
+      within(advancedSettingsCard!).getByText('{"SWIFT_VERSION":"6.0"}'),
+    ).toBeDefined();
+    expect(within(advancedSettingsCard!).getByText("Enabled")).toBeDefined();
+    expect(within(advancedSettingsCard!).getByText("Disabled")).toBeDefined();
     const runsCard = screen
       .getByText("Runs and exports")
       .closest<HTMLElement>('[data-slot="card"]');
@@ -266,6 +331,171 @@ describe("BuildDetailPage", () => {
         { ids: ["build-1"] },
       ),
     );
+  });
+
+  test("filters compact test results grouped by suite and file", async () => {
+    request.mockImplementation(async (query) => {
+      if (!String(query).includes("query BuildDetail")) {
+        throw new Error(`Unexpected request: ${query}`);
+      }
+      return {
+        build: {
+          ...build,
+          action: "TEST",
+          reports: [
+            {
+              id: "test-report",
+              kind: "TEST_RESULTS",
+              source: "AUTOMATIC",
+              status: "READY",
+              summary: { total: 4, passed: 2, failed: 1, skipped: 1 },
+              data: {
+                devices: [{ deviceName: "iPhone 17 Pro", osVersion: "26.0" }],
+                tests: [
+                  {
+                    identifier: "LoginTests/testValidLogin()",
+                    name: "testValidLogin()",
+                    bundle: "AppTests",
+                    suite: "LoginTests",
+                    file: "LoginTests.swift",
+                    plan: "Unit Tests",
+                    configuration: "Debug",
+                    result: "Passed",
+                    durationSeconds: 0.125,
+                    tags: ["smoke"],
+                    details: [],
+                  },
+                  {
+                    identifier: "LoginTests/testInvalidLogin()",
+                    name: "testInvalidLogin()",
+                    bundle: "AppTests",
+                    suite: "LoginTests",
+                    file: "LoginTests.swift",
+                    plan: "Unit Tests",
+                    configuration: "Debug",
+                    result: "Failed",
+                    durationSeconds: 0.25,
+                    tags: [],
+                    details: ["Expected login error"],
+                  },
+                  {
+                    identifier: "SettingsTests/testDefaults()",
+                    name: "testDefaults()",
+                    bundle: "AppTests",
+                    suite: "SettingsTests",
+                    file: "SettingsTests.swift",
+                    plan: "Unit Tests",
+                    configuration: "Debug",
+                    result: "Passed",
+                    durationSeconds: 0.05,
+                    tags: [],
+                    details: [],
+                  },
+                  {
+                    identifier: "SettingsTests/testRemoteSettings()",
+                    name: "testRemoteSettings()",
+                    bundle: "AppTests",
+                    suite: "SettingsTests",
+                    file: "SettingsTests.swift",
+                    plan: "Unit Tests",
+                    configuration: "Debug",
+                    result: "Skipped",
+                    durationSeconds: 0,
+                    tags: [],
+                    details: [],
+                  },
+                ],
+              },
+              error: null,
+              artifact: null,
+              createdAt: now,
+              updatedAt: now,
+              finishedAt: now,
+            },
+          ],
+          artifacts: [
+            ...build.artifacts,
+            {
+              id: "result-bundle",
+              kind: "RESULT_BUNDLE",
+              relativePath: "result.xcresult",
+              sizeBytes: 4096,
+              checksum: null,
+              metadata: { coverageAvailable: true },
+              createdAt: now,
+            },
+          ],
+        },
+        buildLogs: [],
+      } as never;
+    });
+
+    render(<BuildDetailPage buildId="build-1" />);
+
+    expect(
+      await screen.findByRole("tablist", { name: "Test result filters" }),
+    ).toBeDefined();
+    expect(screen.getByRole("tab", { name: "All (4)" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Passed (2)" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Failed (1)" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Skipped (1)" })).toBeDefined();
+    expect(screen.queryByText("testValidLogin()")).toBeNull();
+
+    const suite = screen.getByRole("button", {
+      name: "Expand test suite LoginTests",
+    });
+    expect(suite.className).toContain("py-1.5");
+    expect(within(suite).getByText("1 of 2 passed (50%)")).toBeDefined();
+    fireEvent.click(suite);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand test file LoginTests.swift",
+      }),
+    );
+    const loginTable = screen.getByRole("table", {
+      name: "LoginTests.swift",
+    });
+    expect(within(loginTable).getByText("testValidLogin()")).toBeDefined();
+    expect(within(loginTable).getByText("testInvalidLogin()")).toBeDefined();
+    expect(loginTable.querySelector("tbody td")?.className).toContain("py-1.5");
+    expect(
+      within(loginTable).getByText("Passed").closest('[data-slot="badge"]')
+        ?.className,
+    ).toContain("text-emerald-700");
+    expect(
+      within(loginTable)
+        .getByText("Failed")
+        .closest('[data-slot="badge"]')
+        ?.getAttribute("data-variant"),
+    ).toBe("destructive");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Failed (1)" }));
+    expect(screen.queryByText("testValidLogin()")).toBeNull();
+    expect(screen.getByText("testInvalidLogin()")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Skipped (1)" }));
+    expect(screen.queryByText("LoginTests.swift")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand test suite SettingsTests",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand test file SettingsTests.swift",
+      }),
+    );
+    const settingsTable = screen.getByRole("table", {
+      name: "SettingsTests.swift",
+    });
+    expect(
+      within(settingsTable).getByText("testRemoteSettings()"),
+    ).toBeDefined();
+    expect(
+      within(settingsTable).getByText("Skipped").closest('[data-slot="badge"]')
+        ?.className,
+    ).toContain("text-amber-700");
   });
 
   test("polls while a build or deployment is still active", async () => {

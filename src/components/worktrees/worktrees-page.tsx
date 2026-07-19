@@ -39,6 +39,7 @@ import {
 } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
+import { buildStatusVariant } from "@/components/builds/build-format";
 import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
@@ -1118,7 +1119,13 @@ function AgentSection({
     <section className="space-y-4">
       <div className="flex items-center gap-2 border-b pb-2">
         <h2 className="text-lg font-semibold">{agentGroup.agent.name}</h2>
-        <Badge>
+        <Badge
+          variant={
+            agentGroup.agent.connectionStatus === "ONLINE"
+              ? "success"
+              : "secondary"
+          }
+        >
           {agentGroup.agent.connectionStatus === "ONLINE"
             ? t("online")
             : t("offline")}
@@ -1519,15 +1526,7 @@ function LatestBuildRow({
           {buildsT(`actions.${build.action}`)}
         </Link>
       </Badge>
-      <Badge
-        variant={
-          build.status === "FAILED"
-            ? "destructive"
-            : build.status === "SUCCEEDED"
-              ? "default"
-              : "secondary"
-        }
-      >
+      <Badge variant={buildStatusVariant(build.status)}>
         {buildsT(`statuses.${build.status}`)}
       </Badge>
       {build.outOfDate && (

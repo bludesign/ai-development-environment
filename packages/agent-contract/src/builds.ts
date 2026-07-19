@@ -7,6 +7,8 @@ export const IOS_BUILD_DELETE_JOB_KIND = "ios.build.delete";
 export const IOS_ARTIFACT_DOWNLOAD_JOB_KIND = "ios.artifact.download";
 export const IOS_DEPLOY_JOB_KIND = "ios.build.deploy";
 export const IOS_EXPORT_JOB_KIND = "ios.archive.export";
+export const IOS_TEST_RESULTS_JOB_KIND = "ios.test-results.parse";
+export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
 
 export const IOS_BUILD_JOB_KINDS = [
   IOS_SOURCE_DISCOVER_JOB_KIND,
@@ -18,6 +20,8 @@ export const IOS_BUILD_JOB_KINDS = [
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
   IOS_DEPLOY_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
+  IOS_TEST_RESULTS_JOB_KIND,
+  IOS_COVERAGE_REPORT_JOB_KIND,
 ] as const;
 
 export const BUILD_ACTIONS = [
@@ -96,6 +100,7 @@ export type BuildAdvancedSettings = {
   allowProvisioningDeviceRegistration: boolean;
   testPlan: string | null;
   codeCoverage: boolean;
+  parseTestResults: boolean;
   parallelTesting: boolean | null;
   parallelTestingWorkers: number | null;
   onlyTesting: string[];
@@ -118,6 +123,7 @@ export const DEFAULT_BUILD_ADVANCED_SETTINGS: BuildAdvancedSettings = {
   allowProvisioningDeviceRegistration: false,
   testPlan: null,
   codeCoverage: false,
+  parseTestResults: true,
   parallelTesting: null,
   parallelTestingWorkers: null,
   onlyTesting: [],
@@ -146,6 +152,7 @@ export type BuildWorktreeIdentity = {
   gitDirectory: string;
   expectedOrigin: string;
   headSha: string | null;
+  baseBranch?: string | null;
 };
 
 export type BuildSourceDiscoverPayload = BuildWorktreeIdentity;
@@ -173,6 +180,15 @@ export type BuildJobPayload = BuildWorktreeIdentity & {
   destination: BuildDestination;
   advancedSettings: BuildAdvancedSettings;
   scripts: BuildScriptSnapshot[];
+  worktreeCoverage?: boolean;
+};
+
+export const BUILD_REPORT_KINDS = ["TEST_RESULTS", "CODE_COVERAGE"] as const;
+export type BuildReportKind = (typeof BUILD_REPORT_KINDS)[number];
+
+export type BuildReportPayload = BuildDeletePayload & {
+  reportKind: BuildReportKind;
+  source: "MANUAL" | "WORKTREE";
 };
 
 export type BuildDeploymentPayload = BuildWorktreeIdentity & {
@@ -288,6 +304,7 @@ function worktreeIdentity(value: JsonObject): BuildWorktreeIdentity {
       "build payload.expectedOrigin",
     ),
     headSha: nullableString(value.headSha, "build payload.headSha"),
+    baseBranch: nullableString(value.baseBranch, "build payload.baseBranch"),
   };
 }
 
@@ -430,6 +447,10 @@ export function parseBuildAdvancedSettings(
     codeCoverage: booleanValue(
       input.codeCoverage,
       "advanced settings.codeCoverage",
+    ),
+    parseTestResults: booleanValue(
+      input.parseTestResults,
+      "advanced settings.parseTestResults",
     ),
     parallelTesting: parallel as boolean | null,
     parallelTestingWorkers: (workers ?? null) as number | null,
@@ -611,6 +632,30 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
     destination,
     advancedSettings,
     scripts,
+    worktreeCoverage:
+      input.worktreeCoverage === undefined
+        ? false
+        : booleanValue(
+            input.worktreeCoverage,
+            "build job payload.worktreeCoverage",
+          ),
+  };
+}
+
+export function parseBuildReportPayload(value: unknown): BuildReportPayload {
+  const input = objectValue(value, "build report payload");
+  return {
+    ...parseBuildDeletePayload(input),
+    reportKind: enumValue(
+      input.reportKind,
+      BUILD_REPORT_KINDS,
+      "build report payload.reportKind",
+    ),
+    source: enumValue(
+      input.source,
+      ["MANUAL", "WORKTREE"] as const,
+      "build report payload.source",
+    ),
   };
 }
 

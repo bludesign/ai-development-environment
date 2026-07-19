@@ -13,6 +13,8 @@ import {
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
+  IOS_TEST_RESULTS_JOB_KIND,
+  IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
@@ -23,6 +25,7 @@ import {
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
+  type BuildReportKind,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
 
@@ -372,6 +375,14 @@ export class BuildsService {
     this.agentControl.registerCompletionHandler(IOS_EXPORT_JOB_KIND, (job) =>
       this.projectExportCompletion(job),
     );
+    this.agentControl.registerCompletionHandler(
+      IOS_TEST_RESULTS_JOB_KIND,
+      (job) => this.projectGeneratedReportCompletion(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      IOS_COVERAGE_REPORT_JOB_KIND,
+      (job) => this.projectGeneratedReportCompletion(job),
+    );
   }
 
   private publish(buildId: string): void {
@@ -416,6 +427,8 @@ export class BuildsService {
       gitDirectory: worktree.gitDirectory,
       expectedOrigin: worktree.codebase.repository.canonicalOrigin,
       headSha: worktree.headSha,
+      baseBranch:
+        worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
     };
   }
 
@@ -1009,6 +1022,7 @@ export class BuildsService {
     scriptIds?: string[] | null;
     action?: BuildAction | null;
     advancedSettings?: unknown;
+    worktreeCoverage?: boolean;
     requestId: string;
   }) {
     const requestId = cleanName(input.requestId, "Request ID", 200);
@@ -1023,6 +1037,14 @@ export class BuildsService {
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
     );
+    if (
+      input.worktreeCoverage &&
+      !capabilities(worktree.codebase.agent).includes(
+        IOS_COVERAGE_REPORT_JOB_KIND,
+      )
+    ) {
+      throw new Error("Build agent must be updated for worktree coverage");
+    }
     const configuration = await prisma.buildConfiguration.findUnique({
       where: { id: input.configurationId },
       include: { source: { include: { project: true } } },
@@ -1302,6 +1324,7 @@ export class BuildsService {
       },
       destination,
       scripts,
+      worktreeCoverage: input.worktreeCoverage === true,
     };
     await prisma.build.create({
       data: {
@@ -1370,6 +1393,7 @@ export class BuildsService {
           destination,
           advancedSettings,
           scripts,
+          worktreeCoverage: input.worktreeCoverage === true,
         },
         idempotencyKey: `ios:build:${requestId}:${worktree.id}`,
         timeoutSeconds: 7 * 24 * 60 * 60,
@@ -1453,6 +1477,210 @@ export class BuildsService {
       advancedSettings: snapshotConfiguration.advancedSettings,
       requestId,
     });
+  }
+
+  async startWorktreeCoverage(input: {
+    worktreeId: string;
+    configurationId: string;
+    destination: unknown;
+    scriptIds?: string[] | null;
+    advancedSettings?: unknown;
+    requestId: string;
+  }) {
+    const prisma = await getPrismaClient();
+    const coverageWorktree = await prisma.worktree.findUnique({
+      where: { id: input.worktreeId },
+      select: {
+        baseBranchOverride: true,
+        codebase: { select: { defaultBranch: true } },
+      },
+    });
+    if (
+      !coverageWorktree ||
+      !(
+        coverageWorktree.baseBranchOverride ??
+        coverageWorktree.codebase.defaultBranch
+      )
+    ) {
+      throw new Error("A base branch is required for worktree coverage");
+    }
+    const advanced = objectValue(
+      input.advancedSettings ?? {},
+      "coverage advanced settings",
+    );
+    return this.startBuild({
+      ...input,
+      action: "TEST",
+      advancedSettings: {
+        ...advanced,
+        codeCoverage: true,
+        parseTestResults: true,
+      },
+      worktreeCoverage: true,
+    });
+  }
+
+  async generateReport(
+    buildId: string,
+    kind: BuildReportKind,
+    requestId: string,
+  ) {
+    const prisma = await getPrismaClient();
+    const existing = await prisma.buildReport.findUnique({
+      where: { buildId_kind: { buildId, kind } },
+      include: { artifact: true },
+    });
+    if (existing?.status === "READY") return existing;
+    const build = await prisma.build.findUnique({
+      where: { id: buildId },
+      include: { agent: true, artifacts: true },
+    });
+    if (!build) throw new Error("Build not found");
+    if (ACTIVE_BUILD_STATUSES.includes(build.status)) {
+      throw new Error("Wait for the build to finish before generating reports");
+    }
+    if (!build.agentId || !build.agent || !online(build.agent)) {
+      throw new Error("Build agent is offline");
+    }
+    const capability =
+      kind === "TEST_RESULTS"
+        ? IOS_TEST_RESULTS_JOB_KIND
+        : IOS_COVERAGE_REPORT_JOB_KIND;
+    if (!capabilities(build.agent).includes(capability)) {
+      throw new Error("Build agent must be updated to generate reports");
+    }
+    if (
+      !build.artifacts.some((artifact) => artifact.kind === "RESULT_BUNDLE")
+    ) {
+      throw new Error("The build result bundle is unavailable");
+    }
+    if (
+      kind === "TEST_RESULTS" &&
+      !["TEST", "TEST_WITHOUT_BUILDING"].includes(build.action)
+    ) {
+      throw new Error("This build did not run tests");
+    }
+    const report = await prisma.buildReport.upsert({
+      where: { buildId_kind: { buildId, kind } },
+      create: {
+        id: randomUUID(),
+        buildId,
+        kind,
+        source: "MANUAL",
+        status: "PENDING",
+      },
+      update: {
+        source: "MANUAL",
+        status: "PENDING",
+        error: null,
+        finishedAt: null,
+      },
+    });
+    this.publish(buildId);
+    const codebaseId = coordinationCodebaseId(build);
+    const job = await this.agentControl.createJob({
+      agentId: build.agentId,
+      codebaseId,
+      worktreeId: build.worktreeId,
+      kind: capability,
+      payload: {
+        buildId,
+        artifactDirectory: build.artifactDirectory,
+        codebaseId,
+        reportKind: kind,
+        source: "MANUAL",
+      },
+      idempotencyKey: `ios:report:${kind}:${cleanName(requestId, "Request ID", 200)}:${buildId}`,
+      timeoutSeconds: 180,
+      visibility: "SYSTEM",
+    });
+    try {
+      await this.waitForJob(job.id, 170_000);
+      return prisma.buildReport.findUniqueOrThrow({
+        where: { id: report.id },
+        include: { artifact: true },
+      });
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async coverageHistory(worktreeId: string) {
+    const prisma = await getPrismaClient();
+    return prisma.buildReport.findMany({
+      where: {
+        kind: "CODE_COVERAGE",
+        source: "WORKTREE",
+        build: { worktreeId },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        buildId: true,
+        artifactId: true,
+        kind: true,
+        source: true,
+        status: true,
+        summaryJson: true,
+        error: true,
+        createdAt: true,
+        updatedAt: true,
+        finishedAt: true,
+        artifact: true,
+        build: {
+          select: {
+            id: true,
+            status: true,
+            action: true,
+            destinationType: true,
+            destinationJson: true,
+            snapshotJson: true,
+            createdAt: true,
+            startedAt: true,
+            finishedAt: true,
+            updatedAt: true,
+            worktree: {
+              select: {
+                headSha: true,
+                codeStateHash: true,
+                hasStagedChanges: true,
+                hasUnstagedChanges: true,
+                lastCheckedAt: true,
+                _count: {
+                  select: {
+                    builds: {
+                      where: { status: { in: ACTIVE_BUILD_STATUSES } },
+                    },
+                  },
+                },
+              },
+            },
+            artifacts: { orderBy: { createdAt: "asc" } },
+          },
+        },
+      },
+    });
+  }
+
+  async reportsForBuild(buildId: string) {
+    const prisma = await getPrismaClient();
+    return prisma.buildReport.findMany({
+      where: { buildId },
+      orderBy: { createdAt: "asc" },
+      include: { artifact: true },
+    });
+  }
+
+  async reportData(id: string): Promise<string> {
+    const prisma = await getPrismaClient();
+    const report = await prisma.buildReport.findUnique({
+      where: { id },
+      select: { dataJson: true },
+    });
+    return report?.dataJson ?? "{}";
   }
 
   async builds(
@@ -1937,6 +2165,71 @@ export class BuildsService {
     return updated;
   }
 
+  private async upsertReportProjection(
+    transaction: Prisma.TransactionClient,
+    buildId: string,
+    raw: unknown,
+    source: "AUTOMATIC" | "MANUAL" | "WORKTREE",
+  ) {
+    const report = objectValue(raw, "build report");
+    if (report.kind !== "TEST_RESULTS" && report.kind !== "CODE_COVERAGE") {
+      return;
+    }
+    const kind = report.kind;
+    const artifactValue =
+      report.artifact && typeof report.artifact === "object"
+        ? objectValue(report.artifact, "build report artifact")
+        : null;
+    const artifact =
+      artifactValue && typeof artifactValue.relativePath === "string"
+        ? await transaction.buildArtifact.findUnique({
+            where: {
+              buildId_relativePath: {
+                buildId,
+                relativePath: artifactValue.relativePath,
+              },
+            },
+          })
+        : null;
+    const status = report.status === "READY" ? "READY" : "FAILED";
+    await transaction.buildReport.upsert({
+      where: { buildId_kind: { buildId, kind } },
+      create: {
+        id: randomUUID(),
+        buildId,
+        artifactId: artifact?.id ?? null,
+        kind,
+        source,
+        status,
+        summaryJson: JSON.stringify(
+          report.summary && typeof report.summary === "object"
+            ? report.summary
+            : {},
+        ),
+        dataJson: JSON.stringify(
+          report.data && typeof report.data === "object" ? report.data : {},
+        ),
+        error: typeof report.error === "string" ? report.error : null,
+        finishedAt: new Date(),
+      },
+      update: {
+        artifactId: artifact?.id ?? null,
+        source,
+        status,
+        summaryJson: JSON.stringify(
+          report.summary && typeof report.summary === "object"
+            ? report.summary
+            : {},
+        ),
+        dataJson: JSON.stringify(
+          report.data && typeof report.data === "object" ? report.data : {},
+        ),
+        error: typeof report.error === "string" ? report.error : null,
+        finishedAt: new Date(),
+      },
+    });
+  }
+
   private async projectBuildCompletion(job: {
     id: string;
     status: string;
@@ -2090,8 +2383,114 @@ export class BuildsService {
           });
         }
       }
+      if (Array.isArray(result.reports)) {
+        for (const raw of result.reports) {
+          const candidate =
+            raw && typeof raw === "object" && !Array.isArray(raw)
+              ? (raw as JsonObject)
+              : {};
+          await this.upsertReportProjection(
+            transaction,
+            build.id,
+            raw,
+            candidate.kind === "CODE_COVERAGE" ? "WORKTREE" : "AUTOMATIC",
+          );
+        }
+      }
     });
     this.publish(build.id);
+  }
+
+  private async projectGeneratedReportCompletion(job: {
+    id: string;
+    status: string;
+    payloadJson: string;
+    resultJson: string | null;
+    error: string | null;
+  }) {
+    const payload = objectValue(
+      parseJson(job.payloadJson, {}),
+      "build report payload",
+    );
+    if (typeof payload.buildId !== "string") return;
+    const buildId = payload.buildId;
+    const result = objectValue(
+      parseJson(job.resultJson, {}),
+      "build report result",
+    );
+    const prisma = await getPrismaClient();
+    await prisma.$transaction(async (transaction) => {
+      if (Array.isArray(result.artifacts)) {
+        for (const raw of result.artifacts) {
+          const artifact = objectValue(raw, "build report artifact");
+          if (
+            typeof artifact.relativePath !== "string" ||
+            typeof artifact.kind !== "string"
+          ) {
+            continue;
+          }
+          await transaction.buildArtifact.upsert({
+            where: {
+              buildId_relativePath: {
+                buildId,
+                relativePath: artifact.relativePath,
+              },
+            },
+            create: {
+              id: randomUUID(),
+              buildId,
+              kind: artifact.kind,
+              relativePath: artifact.relativePath,
+              sizeBytes:
+                typeof artifact.sizeBytes === "number"
+                  ? artifact.sizeBytes
+                  : null,
+              checksum:
+                typeof artifact.checksum === "string"
+                  ? artifact.checksum
+                  : null,
+              metadataJson: JSON.stringify(
+                artifact.metadata && typeof artifact.metadata === "object"
+                  ? artifact.metadata
+                  : {},
+              ),
+            },
+            update: {},
+          });
+        }
+      }
+      if (result.report && typeof result.report === "object") {
+        await this.upsertReportProjection(
+          transaction,
+          buildId,
+          result.report,
+          payload.source === "WORKTREE" ? "WORKTREE" : "MANUAL",
+        );
+      } else {
+        const kind =
+          payload.reportKind === "CODE_COVERAGE"
+            ? "CODE_COVERAGE"
+            : "TEST_RESULTS";
+        await transaction.buildReport.upsert({
+          where: { buildId_kind: { buildId, kind } },
+          create: {
+            id: randomUUID(),
+            buildId,
+            kind,
+            source: payload.source === "WORKTREE" ? "WORKTREE" : "MANUAL",
+            status: "FAILED",
+            error: job.error || "Report generation failed",
+            finishedAt: new Date(),
+          },
+          update: {
+            status: "FAILED",
+            error: job.error || "Report generation failed",
+            finishedAt: new Date(),
+          },
+        });
+      }
+    });
+    this.publish(buildId);
   }
 
   private async projectDeploymentCompletion(job: {
