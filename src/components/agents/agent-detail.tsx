@@ -420,12 +420,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="gap-0 py-0">
+        <CardHeader className="border-b py-4">
           <CardTitle>{t("capabilities")}</CardTitle>
           <CardDescription>{t("capabilitiesDescription")}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <div className="border-b p-4">
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -437,33 +437,33 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               value={capabilityQuery}
             />
           </div>
-          {visibleCapabilities.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("noMatchingCapabilities")}
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10" />
-                  <TableHead>{t("capability")}</TableHead>
-                  <TableHead>{t("kind")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleCapabilities.map((capability) => (
-                  <CapabilityRow
-                    agentId={agent.id}
-                    capability={capability}
-                    key={capability}
-                    offline={agent.connectionStatus !== "ONLINE"}
-                    onJobChanged={handleJobChanged}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
+        </div>
+        {visibleCapabilities.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {t("noMatchingCapabilities")}
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead>{t("capability")}</TableHead>
+                <TableHead>{t("kind")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleCapabilities.map((capability) => (
+                <CapabilityRow
+                  agentId={agent.id}
+                  capability={capability}
+                  key={capability}
+                  offline={agent.connectionStatus !== "ONLINE"}
+                  onJobChanged={handleJobChanged}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       <AgentCodebasesCard codebases={codebases} locale={locale} />
@@ -544,7 +544,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="overflow-hidden rounded-xl border">
+          <Card className="gap-0 py-0">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -592,7 +592,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </Card>
         )}
       </section>
     </div>
@@ -1179,74 +1179,72 @@ function AgentCodebasesCard({
   const t = useTranslations("agentDetail");
   const codebaseT = useTranslations("codebases");
   return (
-    <Card>
-      <CardHeader>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
         <CardTitle>{t("codebases")}</CardTitle>
         <CardDescription>{t("codebasesDescription")}</CardDescription>
       </CardHeader>
-      <CardContent>
-        {codebases.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noCodebases")}</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("repository")}</TableHead>
-                <TableHead>{codebaseT("folder")}</TableHead>
-                <TableHead>{codebaseT("branch")}</TableHead>
-                <TableHead>{t("status")}</TableHead>
-                <TableHead>{codebaseT("lastChecked")}</TableHead>
-                <TableHead className="w-20" />
+      {codebases.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">{t("noCodebases")}</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("repository")}</TableHead>
+              <TableHead>{codebaseT("folder")}</TableHead>
+              <TableHead>{codebaseT("branch")}</TableHead>
+              <TableHead>{t("status")}</TableHead>
+              <TableHead>{codebaseT("lastChecked")}</TableHead>
+              <TableHead className="w-20" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {codebases.map((codebase) => (
+              <TableRow key={codebase.id}>
+                <TableCell>
+                  <p className="font-medium">{codebase.repository.name}</p>
+                  <p className="max-w-sm truncate font-mono text-xs text-muted-foreground">
+                    {codebase.repository.displayOrigin}
+                  </p>
+                </TableCell>
+                <TableCell className="max-w-sm truncate font-mono text-xs">
+                  {codebase.folder}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {codebase.branch ??
+                    codebase.headSha?.slice(0, 10) ??
+                    codebaseT("unknown")}
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    className={cn(
+                      codebase.syncState === "IN_SYNC" &&
+                        "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                    )}
+                    variant="outline"
+                  >
+                    {codebase.availability === "AVAILABLE"
+                      ? codebaseT(`sync.${codebase.syncState}`)
+                      : codebaseT(`availability.${codebase.availability}`)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {codebase.lastCheckedAt
+                    ? new Date(codebase.lastCheckedAt).toLocaleString(locale)
+                    : codebaseT("never")}
+                </TableCell>
+                <TableCell>
+                  <Button asChild size="sm" variant="ghost">
+                    <Link href={`/codebases/${codebase.id}`}>
+                      {codebaseT("view")}
+                    </Link>
+                  </Button>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {codebases.map((codebase) => (
-                <TableRow key={codebase.id}>
-                  <TableCell>
-                    <p className="font-medium">{codebase.repository.name}</p>
-                    <p className="max-w-sm truncate font-mono text-xs text-muted-foreground">
-                      {codebase.repository.displayOrigin}
-                    </p>
-                  </TableCell>
-                  <TableCell className="max-w-sm truncate font-mono text-xs">
-                    {codebase.folder}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {codebase.branch ??
-                      codebase.headSha?.slice(0, 10) ??
-                      codebaseT("unknown")}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      className={cn(
-                        codebase.syncState === "IN_SYNC" &&
-                          "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-                      )}
-                      variant="outline"
-                    >
-                      {codebase.availability === "AVAILABLE"
-                        ? codebaseT(`sync.${codebase.syncState}`)
-                        : codebaseT(`availability.${codebase.availability}`)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {codebase.lastCheckedAt
-                      ? new Date(codebase.lastCheckedAt).toLocaleString(locale)
-                      : codebaseT("never")}
-                  </TableCell>
-                  <TableCell>
-                    <Button asChild size="sm" variant="ghost">
-                      <Link href={`/codebases/${codebase.id}`}>
-                        {codebaseT("view")}
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </Card>
   );
 }

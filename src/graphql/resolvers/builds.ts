@@ -1,4 +1,5 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import { buildOutOfDate } from "@/services/builds/build-freshness";
 import {
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
@@ -90,6 +91,7 @@ export const createBuildResolvers = (service: BuildsService) => ({
       value.startedAt && value.finishedAt
         ? Math.max(0, value.finishedAt.getTime() - value.startedAt.getTime())
         : null,
+    outOfDate: buildOutOfDate,
   },
   BuildLogEvent: {
     createdAt: (value: { createdAt: Date | string }) =>
@@ -231,6 +233,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => {
       requireControlPlane(context);
       return service.startBuild(input);
+    },
+    rebuildBuild: (
+      _root: unknown,
+      { id, requestId }: { id: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.rebuildBuild(id, requestId);
     },
     cancelBuild: (
       _root: unknown,

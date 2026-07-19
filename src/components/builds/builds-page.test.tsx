@@ -52,6 +52,7 @@ beforeEach(() => {
               requestId: "request-1",
               jobId: "job-1",
               status: buildStatus,
+              outOfDate: buildStatus === "SUCCEEDED",
               action: "BUILD",
               destinationType: "SIMULATOR",
               destination: {
@@ -70,7 +71,17 @@ beforeEach(() => {
               artifactDirectory: "/agent/builds/build-1",
               errorCode: null,
               error: null,
-              artifacts: [],
+              artifacts: [
+                {
+                  id: "app-artifact",
+                  kind: "RUNNABLE_APP",
+                  relativePath: "products/App.app",
+                  sizeBytes: 1024,
+                  checksum: null,
+                  metadata: {},
+                  createdAt: now,
+                },
+              ],
               createdAt: now,
               startedAt: now,
               finishedAt: null,
@@ -101,16 +112,64 @@ beforeEach(() => {
     if (operation.includes("mutation DeleteBuilds")) {
       return { deleteBuilds: 1 } as never;
     }
+    if (operation.includes("mutation BuildRunDestinations")) {
+      return {
+        inspectBuildRunDestinations: [
+          {
+            type: "SIMULATOR",
+            id: "SIM-1",
+            name: "iPhone 17 Pro",
+            platform: "iOS Simulator",
+            osVersion: "26.0",
+            state: "Booted",
+          },
+          {
+            type: "SIMULATOR",
+            id: "SIM-2",
+            name: "iPad Pro",
+            platform: "iOS Simulator",
+            osVersion: "26.0",
+            state: "Shutdown",
+          },
+        ],
+      } as never;
+    }
+    if (operation.includes("mutation RunCompletedBuild")) {
+      return { runBuild: [] } as never;
+    }
+    if (operation.includes("mutation RebuildBuild")) {
+      return {
+        rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
+      } as never;
+    }
     throw new Error(`Unexpected request: ${operation}`);
   });
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe("BuildsPage", () => {
+  test("updates running durations on the clock ticker", async () => {
+    const startedAt = Date.parse(now);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const interval = vi.spyOn(window, "setInterval");
+
+    render(<BuildsPage />);
+
+    expect(await screen.findByText("Duration 0s")).toBeDefined();
+    dateNow.mockReturnValue(startedAt + 65_000);
+    const update = interval.mock.calls.find(
+      ([, delay]) => delay === 1_000,
+    )?.[0];
+    expect(typeof update).toBe("function");
+    act(() => (update as () => void)());
+    expect(screen.getByText("Duration 1m 5s")).toBeDefined();
+  });
+
   test("updates history from subscriptions and edits reusable scripts", async () => {
     render(<BuildsPage />);
 
@@ -119,6 +178,7 @@ describe("BuildsPage", () => {
     buildStatus = "SUCCEEDED";
     await act(async () => nextBuild?.());
     expect(await screen.findByText("Succeeded")).toBeDefined();
+    expect(screen.getByText("Out of date")).toBeDefined();
 
     fireEvent.click(screen.getByRole("tab", { name: /Build Scripts/ }));
     expect(await screen.findByText("Generate Sources")).toBeDefined();
@@ -185,5 +245,55 @@ describe("BuildsPage", () => {
         ) as HTMLTextAreaElement
       ).value,
     ).toContain("buildFolder");
+  });
+
+  test("opens builds from the full row and runs a captured app without an artifacts column", async () => {
+    buildStatus = "SUCCEEDED";
+    render(<BuildsPage />);
+
+    expect(
+      await screen.findByRole("link", { name: "View build" }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("columnheader", { name: "Artifacts" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RebuildBuild"),
+        { id: "build-1", requestId: expect.any(String) },
+      ),
+    );
+
+    const destinationTrigger = screen.getByRole("button", {
+      name: /1 devices/,
+    });
+    fireEvent.pointerDown(destinationTrigger, { button: 0, ctrlKey: false });
+    const destination = await screen.findByRole("menuitemcheckbox", {
+      name: /iPad Pro/,
+    });
+    fireEvent.click(destination);
+    expect(screen.getByRole("button", { name: /2 devices/ })).toBeDefined();
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RunCompletedBuild"),
+        {
+          input: {
+            buildId: "build-1",
+            destinations: [
+              expect.objectContaining({ id: "SIM-1" }),
+              expect.objectContaining({ id: "SIM-2" }),
+            ],
+            requestId: expect.any(String),
+          },
+        },
+      ),
+    );
   });
 });

@@ -3,20 +3,28 @@
 import {
   Archive,
   ArrowLeft,
-  ChevronDown,
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Check,
+  Copy,
   Download,
-  Play,
   Square,
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -25,12 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -48,16 +50,18 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Link, useRouter } from "@/i18n/navigation";
-import { createClientId } from "@/lib/browser-utils";
+import { copyText, createClientId } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import type { BuildDestination, BuildLogEvent, BuildRecord } from "./types";
+import { RebuildButton } from "./rebuild-button";
+import { RunBuildControls } from "./run-build-controls";
+import type { BuildLogEvent, BuildRecord } from "./types";
 
 const BUILD_DETAIL_FIELDS = `
-  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error
+  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
   createdAt startedAt finishedAt durationMs updatedAt
   configuration {
     id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
@@ -71,6 +75,15 @@ const BUILD_DETAIL_FIELDS = `
 
 const LOG_FIELDS = `id scope scopeId sequence phase level stream message createdAt`;
 
+function humanizeConstant(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
 export function BuildDetailPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
@@ -80,13 +93,9 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [destinations, setDestinations] = useState<BuildDestination[]>([]);
-  const [selectedDestinations, setSelectedDestinations] = useState<Set<string>>(
-    new Set(),
-  );
-  const [loadingDestinations, setLoadingDestinations] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
 
   const load = useCallback(async () => {
@@ -179,6 +188,12 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [activeOperation, logs]);
 
+  useEffect(() => {
+    if (!commandCopied) return;
+    const timer = window.setTimeout(() => setCommandCopied(false), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [commandCopied]);
+
   const cancel = async () => {
     setBusy(true);
     try {
@@ -211,63 +226,6 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
     }
   };
 
-  const loadRunDestinations = async () => {
-    if (!build) return;
-    setLoadingDestinations(true);
-    setError(null);
-    try {
-      const data = await controlPlaneRequest<{
-        inspectBuildRunDestinations: BuildDestination[];
-      }>(
-        `mutation BuildRunDestinations($buildId: ID!, $requestId: ID!) {
-          inspectBuildRunDestinations(buildId: $buildId, requestId: $requestId)
-        }`,
-        {
-          buildId: build.id,
-          requestId: createClientId(),
-        },
-      );
-      const compatible = data.inspectBuildRunDestinations.filter(
-        (destination) =>
-          destination.type === build.destinationType && !destination.generic,
-      );
-      setDestinations(compatible);
-      setSelectedDestinations(new Set());
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setLoadingDestinations(false);
-    }
-  };
-
-  const run = async () => {
-    if (!build) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await controlPlaneRequest(
-        `mutation RunCompletedBuild($input: RunBuildInput!) {
-          runBuild(input: $input) { id status }
-        }`,
-        {
-          input: {
-            buildId: build.id,
-            destinations: destinations.filter((destination) =>
-              selectedDestinations.has(destination.id),
-            ),
-            requestId: createClientId(),
-          },
-        },
-      );
-      setSelectedDestinations(new Set());
-      await load();
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const runnable = build?.artifacts.some(
     (artifact) => artifact.kind === "RUNNABLE_APP",
   );
@@ -281,15 +239,26 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
     | undefined;
   const configuration = snapshot.configuration as
     { name?: string; scheme?: string; buildConfiguration?: string } | undefined;
-  const selectedNames = useMemo(
-    () =>
-      destinations
-        .filter((destination) => selectedDestinations.has(destination.id))
-        .map((destination) => destination.name),
-    [destinations, selectedDestinations],
-  );
   const date = (value: string | null) =>
     value ? new Date(value).toLocaleString(locale) : "—";
+
+  const copyCommandSummary = async (commandSummary: string) => {
+    try {
+      await copyText(commandSummary);
+      setCommandCopied(true);
+    } catch {
+      setError(t("copyFailed"));
+    }
+  };
+
+  const scrollLogs = (position: "top" | "bottom") => {
+    const element = logRef.current;
+    if (!element) return;
+    element.scrollTo({
+      behavior: "smooth",
+      top: position === "top" ? 0 : element.scrollHeight,
+    });
+  };
 
   if (loading) {
     return (
@@ -357,6 +326,14 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               {t(`statuses.${build.status}`)}
             </Badge>
             <Badge variant="outline">{t(`actions.${build.action}`)}</Badge>
+            {build.outOfDate && (
+              <Badge
+                className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                variant="outline"
+              >
+                {t("outOfDate")}
+              </Badge>
+            )}
           </div>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
             {worktree?.branch ?? worktree?.folder ?? "—"} ·{" "}
@@ -367,6 +344,11 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <RebuildButton
+            buildId={build.id}
+            onCompleted={(rebuilt) => router.push(`/builds/${rebuilt.id}`)}
+            onError={setError}
+          />
           {["QUEUED", "PREPARING", "RUNNING"].includes(build.status) && (
             <Button
               disabled={busy}
@@ -377,56 +359,13 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </Button>
           )}
           {build.status === "SUCCEEDED" && runnable && (
-            <>
-              <DropdownMenu
-                onOpenChange={(nextOpen) => {
-                  if (nextOpen && !destinations.length)
-                    void loadRunDestinations();
-                }}
-              >
-                <DropdownMenuTrigger asChild>
-                  <Button disabled={loadingDestinations} variant="outline">
-                    {loadingDestinations ? <Spinner /> : <Play />}
-                    {selectedNames.length
-                      ? t("selectedDevices", { count: selectedNames.length })
-                      : t("selectRunDevices")}
-                    <ChevronDown />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
-                  {destinations.map((destination) => (
-                    <DropdownMenuCheckboxItem
-                      checked={selectedDestinations.has(destination.id)}
-                      key={destination.id}
-                      onCheckedChange={(checked) =>
-                        setSelectedDestinations((current) => {
-                          const next = new Set(current);
-                          if (checked) next.add(destination.id);
-                          else next.delete(destination.id);
-                          return next;
-                        })
-                      }
-                    >
-                      {destination.name}
-                      {destination.osVersion
-                        ? ` · ${destination.osVersion}`
-                        : ""}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                  {!destinations.length && (
-                    <p className="p-2 text-xs text-muted-foreground">
-                      {t("noCompatibleDevices")}
-                    </p>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                disabled={busy || selectedDestinations.size === 0}
-                onClick={() => void run()}
-              >
-                {busy ? <Spinner /> : <Play />} {t("run")}
-              </Button>
-            </>
+            <RunBuildControls
+              buildId={build.id}
+              destinationType={build.destinationType}
+              onCompleted={load}
+              onError={setError}
+              preferredDestination={build.destination}
+            />
           )}
           {build.status === "SUCCEEDED" && archive && (
             <Button onClick={() => setExportOpen(true)} variant="outline">
@@ -450,6 +389,26 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
           <Card>
             <CardHeader>
               <CardTitle>{t("logs")}</CardTitle>
+              <CardAction className="flex gap-1">
+                <Button
+                  aria-label={t("scrollLogsToTop")}
+                  onClick={() => scrollLogs("top")}
+                  size="icon-sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <ArrowUpToLine />
+                </Button>
+                <Button
+                  aria-label={t("scrollLogsToBottom")}
+                  onClick={() => scrollLogs("bottom")}
+                  size="icon-sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <ArrowDownToLine />
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent>
               <pre
@@ -467,6 +426,19 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
           <Card>
             <CardHeader>
               <CardTitle>{t("commandSummary")}</CardTitle>
+              <CardAction>
+                <Button
+                  aria-label={
+                    commandCopied ? t("commandCopied") : t("copyCommand")
+                  }
+                  onClick={() => void copyCommandSummary(build.commandSummary)}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {commandCopied ? <Check /> : <Copy />}
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent>
               <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
@@ -559,7 +531,9 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
                 build.artifacts.map((artifact) => (
                   <div className="rounded-lg border p-2" key={artifact.id}>
                     <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{artifact.kind}</Badge>
+                      <Badge variant="outline">
+                        {humanizeConstant(artifact.kind)}
+                      </Badge>
                       <Button asChild size="sm" variant="outline">
                         <a
                           download
@@ -588,16 +562,29 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             <CardContent className="space-y-2">
               {build.deployments.map((deployment) => (
                 <div className="rounded-lg border p-2" key={deployment.id}>
-                  <p className="text-sm font-medium">
-                    {deployment.destination.name}
-                  </p>
-                  <Badge
-                    variant={
-                      deployment.status === "FAILED" ? "destructive" : "outline"
-                    }
-                  >
-                    {deployment.status}
-                  </Badge>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium">
+                      {deployment.destination.name}
+                    </p>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge
+                        variant={
+                          deployment.status === "FAILED"
+                            ? "destructive"
+                            : "outline"
+                        }
+                      >
+                        {humanizeConstant(deployment.status)}
+                      </Badge>
+                      <time className="text-xs text-muted-foreground">
+                        {date(
+                          deployment.finishedAt ??
+                            deployment.startedAt ??
+                            deployment.createdAt,
+                        )}
+                      </time>
+                    </div>
+                  </div>
                   {deployment.error && (
                     <p className="mt-1 text-xs text-destructive">
                       {deployment.error}
@@ -607,14 +594,25 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               ))}
               {build.exports.map((entry) => (
                 <div className="rounded-lg border p-2" key={entry.id}>
-                  <p className="text-sm font-medium">{t("archiveExport")}</p>
-                  <Badge
-                    variant={
-                      entry.status === "FAILED" ? "destructive" : "outline"
-                    }
-                  >
-                    {entry.status}
-                  </Badge>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium">{t("archiveExport")}</p>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge
+                        variant={
+                          entry.status === "FAILED" ? "destructive" : "outline"
+                        }
+                      >
+                        {humanizeConstant(entry.status)}
+                      </Badge>
+                      <time className="text-xs text-muted-foreground">
+                        {date(
+                          entry.finishedAt ??
+                            entry.startedAt ??
+                            entry.createdAt,
+                        )}
+                      </time>
+                    </div>
+                  </div>
                   {entry.outputRelativePath && (
                     <p className="mt-1 font-mono text-xs">
                       {entry.outputRelativePath}

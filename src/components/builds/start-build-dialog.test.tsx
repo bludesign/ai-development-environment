@@ -18,6 +18,15 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("@/i18n/navigation", () => ({
+  Link: ({
+    children,
+    href,
+    ...props
+  }: React.ComponentProps<"a"> & { href: string }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
   useRouter: () => ({ push: navigation.push }),
 }));
 
@@ -26,7 +35,7 @@ const now = new Date().toISOString();
 const observation = {
   id: "observation-1",
   scopeKey: "worktree:worktree-1",
-  status: "UNPARSED" as const,
+  status: "VALID" as const,
   schemes: ["App"],
   configurations: ["Debug", "Release"],
   testPlans: [],
@@ -112,6 +121,22 @@ beforeEach(() => {
             state: null,
             generic: true,
           },
+          {
+            type: "SIMULATOR",
+            id: "SIM-1",
+            name: "iPhone 17 Pro",
+            platform: "iOS Simulator",
+            osVersion: "26.0",
+            state: "Booted",
+          },
+          {
+            type: "PHYSICAL_DEVICE",
+            id: "DEVICE-1",
+            name: "Chandler's iPhone",
+            platform: "iOS",
+            osVersion: "26.0",
+            state: "connected",
+          },
         ],
       } as never;
     }
@@ -128,12 +153,56 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("links to repository settings when builds are not configured", async () => {
+    render(
+      <StartBuildButton
+        buildSettingsHref="/codebases/repositories/repository-1"
+        codebaseId="codebase-1"
+        disabled
+        disabledReason="Build settings are missing"
+        worktreeId="worktree-1"
+      />,
+    );
+
+    const buildButton = screen.getByRole("button", { name: "Build" });
+    expect(buildButton.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      screen.queryByRole("button", {
+        name: "Go to repository settings to configure builds",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(buildButton);
+    let settingsLink = await screen.findByRole("link", {
+      name: "Go to repository settings to configure builds",
+    });
+    expect(settingsLink.getAttribute("href")).toBe(
+      "/codebases/repositories/repository-1",
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", {
+          name: "Go to repository settings to configure builds",
+        }),
+      ).toBeNull(),
+    );
+    fireEvent.mouseEnter(buildButton);
+    settingsLink = await screen.findByRole("link", {
+      name: "Go to repository settings to configure builds",
+    });
+    expect(settingsLink).toBeDefined();
+  });
+
   test("shows the test plan with primary settings for test actions", async () => {
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Build" }));
     expect(await screen.findByText("Development")).toBeDefined();
+    expect(screen.getByText("Valid")).toBeDefined();
+    expect(screen.queryByText("VALID")).toBeNull();
 
     const dialog = screen.getByRole("dialog");
     const action = within(dialog).getAllByRole("combobox")[0]!;
@@ -182,6 +251,57 @@ describe("StartBuildDialog", () => {
         .getAttribute("data-state"),
     ).toBe("checked");
 
+    const device = screen.getAllByRole("combobox")[2]!;
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(
+      await screen.findByRole("option", { name: "Any iOS Simulator" }),
+    ).toBeDefined();
+    expect(screen.getByRole("option", { name: /iPhone 17 Pro/ })).toBeDefined();
+    fireEvent.click(
+      await screen.findByRole("option", { name: /iPhone 17 Pro/ }),
+    );
+
+    const destinationType = screen.getAllByRole("combobox")[1]!;
+    fireEvent.pointerDown(destinationType, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Physical Device" }),
+    );
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(
+      await screen.findByRole("option", { name: "Any Physical iOS Device" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("option", { name: /Chandler's iPhone/ }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("option", { name: /Chandler's iPhone/ }));
+
+    fireEvent.pointerDown(destinationType, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Simulator" }));
+    fireEvent.pointerDown(device, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", { name: /iPhone 17 Pro/ }),
+    );
+
     fireEvent.change(
       screen.getByLabelText(/Approved build-setting overrides/),
       {
@@ -208,8 +328,7 @@ describe("StartBuildDialog", () => {
             worktreeId: "worktree-1",
             configurationId: "configuration-1",
             destination: expect.objectContaining({
-              id: "generic-ios-simulator",
-              generic: true,
+              id: "SIM-1",
             }),
             scriptIds: ["script-1"],
             action: "BUILD",

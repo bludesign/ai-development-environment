@@ -170,6 +170,7 @@ type Build {
   artifactDirectory: String!
   errorCode: String
   error: String
+  outOfDate: Boolean!
   agent: Agent
   codebase: Codebase
   worktree: Worktree
@@ -335,6 +336,7 @@ extend type Mutation {
   deleteBuildScript(id: ID!): Boolean!
   setCodebaseBuildScripts(codebaseId: ID!, scriptIds: [ID!]!): CodebaseProject!
   startBuild(input: StartBuildInput!): Build!
+  rebuildBuild(id: ID!, requestId: ID!): Build!
   cancelBuild(id: ID!): Build!
   deleteBuilds(ids: [ID!]!): Int!
   runBuild(input: RunBuildInput!): [BuildDeployment!]!

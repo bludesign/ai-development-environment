@@ -328,6 +328,23 @@ describe("WorktreesPage", () => {
                       unresolvedReviewThreadCount: 0,
                       createdAt: new Date(0).toISOString(),
                     },
+                    latestBuild: {
+                      id: "build-1",
+                      status: "SUCCEEDED",
+                      outOfDate: true,
+                      action: "BUILD",
+                      destinationType: "SIMULATOR",
+                      destination: {
+                        type: "SIMULATOR",
+                        id: "SIM-1",
+                        name: "iPhone 17 Pro",
+                        platform: "iOS Simulator",
+                        osVersion: "26.0",
+                        state: "Booted",
+                      },
+                      artifacts: [{ id: "app-artifact", kind: "RUNNABLE_APP" }],
+                      createdAt: new Date(0).toISOString(),
+                    },
                     tags: [
                       {
                         id: "tag-1",
@@ -377,6 +394,27 @@ describe("WorktreesPage", () => {
     );
     expect(screen.getByText("Commits: 1")).toBeDefined();
     expect(screen.getByText("In sync")).toBeDefined();
+    expect(screen.getByText("Latest build")).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Build" }).getAttribute("href"),
+    ).toBe("/builds/build-1");
+    expect(screen.getByText("Succeeded")).toBeDefined();
+    expect(screen.getByText("Out of date")).toBeDefined();
+    expect(screen.getByRole("button", { name: /1 devices/ })).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: "Run" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    request.mockResolvedValueOnce({
+      rebuildBuild: { id: "build-rebuilt", status: "QUEUED" },
+    } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RebuildBuild"),
+        { id: "build-1", requestId: expect.any(String) },
+      ),
+    );
     expect(
       (screen.getByRole("button", { name: "Sync" }) as HTMLButtonElement)
         .disabled,

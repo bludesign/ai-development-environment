@@ -9,6 +9,10 @@ export const WORKTREE_FIELDS = `
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
+  latestBuild {
+    id status action destinationType destination outOfDate createdAt
+    artifacts { id kind }
+  }
 `;
 
 export const CODEBASE_FIELDS = `

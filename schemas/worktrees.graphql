@@ -59,6 +59,22 @@ type WorktreeSettings {
   updatedAt: String!
 }
 
+type WorktreeLatestBuildArtifact {
+  id: ID!
+  kind: String!
+}
+
+type WorktreeLatestBuild {
+  id: ID!
+  status: BuildStatus!
+  action: BuildAction!
+  destinationType: BuildDestinationType!
+  destination: JSON!
+  outOfDate: Boolean!
+  artifacts: [WorktreeLatestBuildArtifact!]!
+  createdAt: String!
+}
+
 type Worktree {
   id: ID!
   codebaseId: ID!
@@ -86,6 +102,7 @@ type Worktree {
   ticketTitle: String
   ticketStatus: String
   pullRequest: GitHubPullRequest
+  latestBuild: WorktreeLatestBuild
   tags: [WorktreeTag!]!
   activeJob: AgentJob
   lastCheckedAt: String
@@ -199,6 +216,7 @@ input WorktreeInventoryInput {
   primary: Boolean!
   branch: String
   headSha: String
+  codeStateHash: String
   upstream: String
   ahead: Int
   behind: Int
@@ -230,6 +248,7 @@ input WorktreeActivityReportInput {
   gitDirectory: String!
   branch: String
   headSha: String
+  codeStateHash: String
   upstream: String
   ahead: Int
   behind: Int

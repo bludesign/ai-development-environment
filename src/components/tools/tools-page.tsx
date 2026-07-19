@@ -28,7 +28,7 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -279,88 +279,88 @@ export function ToolsPage() {
         </Alert>
       )}
 
-      <Card>
-        <CardContent className="space-y-4">
+      <Card className="gap-0 py-0">
+        <div className="border-b p-4">
           <div>
             <h2 className="font-semibold">{t("serversTitle")}</h2>
             <p className="text-xs text-muted-foreground">
               {t("serversDescription")}
             </p>
           </div>
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> {t("loadingServers")}
-            </div>
-          ) : servers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("noServers")}</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("name")}</TableHead>
-                  <TableHead>{t("url")}</TableHead>
-                  <TableHead>{t("transport")}</TableHead>
-                  <TableHead>{t("prefix")}</TableHead>
-                  <TableHead className="text-right">{t("actions")}</TableHead>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+            <Spinner /> {t("loadingServers")}
+          </div>
+        ) : servers.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">{t("noServers")}</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("name")}</TableHead>
+                <TableHead>{t("url")}</TableHead>
+                <TableHead>{t("transport")}</TableHead>
+                <TableHead>{t("prefix")}</TableHead>
+                <TableHead className="text-right">{t("actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {servers.map((server) => (
+                <TableRow key={server.id}>
+                  <TableCell className="font-medium">{server.name}</TableCell>
+                  <TableCell className="max-w-md truncate font-mono text-xs">
+                    {server.url}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {server.transport === "STREAMABLE_HTTP"
+                        ? t("http")
+                        : t("sse")}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {server.toolNamePrefix || "—"}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        aria-label={t("editServer", { name: server.name })}
+                        onClick={() => openEdit(server)}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Pencil />
+                      </Button>
+                      <ConfirmationDialog
+                        actionLabel={t("delete")}
+                        cancelLabel={tc("cancel")}
+                        description={t("confirmDeleteDescription", {
+                          name: server.name,
+                        })}
+                        onConfirm={() => deleteServer(server.id)}
+                        title={t("confirmDelete")}
+                        trigger={
+                          <Button
+                            aria-label={t("deleteServer", {
+                              name: server.name,
+                            })}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                          </Button>
+                        }
+                      />
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {servers.map((server) => (
-                  <TableRow key={server.id}>
-                    <TableCell className="font-medium">{server.name}</TableCell>
-                    <TableCell className="max-w-md truncate font-mono text-xs">
-                      {server.url}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {server.transport === "STREAMABLE_HTTP"
-                          ? t("http")
-                          : t("sse")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {server.toolNamePrefix || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          aria-label={t("editServer", { name: server.name })}
-                          onClick={() => openEdit(server)}
-                          size="icon-sm"
-                          type="button"
-                          variant="ghost"
-                        >
-                          <Pencil />
-                        </Button>
-                        <ConfirmationDialog
-                          actionLabel={t("delete")}
-                          cancelLabel={tc("cancel")}
-                          description={t("confirmDeleteDescription", {
-                            name: server.name,
-                          })}
-                          onConfirm={() => deleteServer(server.id)}
-                          title={t("confirmDelete")}
-                          trigger={
-                            <Button
-                              aria-label={t("deleteServer", {
-                                name: server.name,
-                              })}
-                              size="icon-sm"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 />
-                            </Button>
-                          }
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       <div className="flex items-center justify-between gap-3">
@@ -633,50 +633,50 @@ function Field({
 function ToolGroup({ group }: { group: ToolCatalogGroup }) {
   const t = useTranslations("tools");
   return (
-    <Card>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {group.source === "BUILTIN" ? (
-              <Wrench className="size-5" />
-            ) : (
-              <Server className="size-5" />
+    <Card className="gap-0 py-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
+        <div className="flex items-center gap-2">
+          {group.source === "BUILTIN" ? (
+            <Wrench className="size-5" />
+          ) : (
+            <Server className="size-5" />
+          )}
+          <div>
+            <h3 className="font-semibold">{group.name}</h3>
+            {group.url && (
+              <p className="font-mono text-xs text-muted-foreground">
+                {group.url}
+              </p>
             )}
-            <div>
-              <h3 className="font-semibold">{group.name}</h3>
-              {group.url && (
-                <p className="font-mono text-xs text-muted-foreground">
-                  {group.url}
-                </p>
-              )}
-            </div>
           </div>
-          <Badge variant="outline">
-            {t("toolCount", { count: group.tools.length })}
-          </Badge>
         </div>
-        {group.error && (
+        <Badge variant="outline">
+          {t("toolCount", { count: group.tools.length })}
+        </Badge>
+      </div>
+      {group.error && (
+        <div className="border-b p-4">
           <Alert variant="destructive">
             <AlertDescription>{group.error}</AlertDescription>
           </Alert>
-        )}
-        {group.tools.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10" />
-                <TableHead>{t("tool")}</TableHead>
-                <TableHead>{t("toolDescription")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {group.tools.map((tool) => (
-                <ToolRow groupId={group.id} key={tool.name} tool={tool} />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
+        </div>
+      )}
+      {group.tools.length > 0 && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10" />
+              <TableHead>{t("tool")}</TableHead>
+              <TableHead>{t("toolDescription")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {group.tools.map((tool) => (
+              <ToolRow groupId={group.id} key={tool.name} tool={tool} />
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </Card>
   );
 }

@@ -37,6 +37,9 @@ function worktree() {
     gitDirectory: "/agent/repository/.git",
     branch: "main",
     headSha: "abc123",
+    codeStateHash: "state-before-build",
+    hasStagedChanges: false,
+    hasUnstagedChanges: false,
     missingAt: null,
     availability: "AVAILABLE",
     codebase: {
@@ -244,6 +247,50 @@ describe("BuildsService", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  test("rebuilds with the original destination and selected settings", async () => {
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          worktreeId: "worktree-1",
+          configurationId: "configuration-1",
+          destinationJson: JSON.stringify(destination),
+          action: "TEST",
+          snapshotJson: JSON.stringify({
+            worktree: { id: "worktree-snapshot" },
+            configuration: {
+              id: "configuration-snapshot",
+              advancedSettings: {
+                testPlan: "Integration",
+                enableCodeCoverage: true,
+              },
+            },
+            scripts: [{ id: "script-1" }, { id: "script-2" }],
+          }),
+        }),
+      },
+    });
+    const service = new BuildsService(control());
+    const startBuild = vi
+      .spyOn(service, "startBuild")
+      .mockResolvedValue({ id: "build-rebuilt" } as never);
+
+    await expect(
+      service.rebuildBuild("build-1", "rebuild-request"),
+    ).resolves.toEqual({ id: "build-rebuilt" });
+    expect(startBuild).toHaveBeenCalledWith({
+      worktreeId: "worktree-1",
+      configurationId: "configuration-1",
+      destination,
+      scriptIds: ["script-1", "script-2"],
+      action: "TEST",
+      advancedSettings: {
+        testPlan: "Integration",
+        enableCodeCoverage: true,
+      },
+      requestId: "rebuild-request",
+    });
+  });
+
   test("queues a generic simulator build from saved settings without reparsing", async () => {
     const buildCreate = vi.fn().mockResolvedValue({ id: "build-1" });
     const buildUpdate = vi.fn().mockResolvedValue({ id: "build-1" });
@@ -308,6 +355,86 @@ describe("BuildsService", () => {
     expect(JSON.parse(data.snapshotJson).configuration.parse.status).toBe(
       "UNPARSED",
     );
+    expect(JSON.parse(data.snapshotJson).worktree).toMatchObject({
+      codeStateHash: "state-before-build",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+    });
+  });
+
+  test("captures the pre-hook code state and restores the final worktree state on completion", async () => {
+    let completeBuild:
+      | ((job: {
+          id: string;
+          status: string;
+          resultJson: string | null;
+          error: string | null;
+        }) => Promise<void>)
+      | undefined;
+    const buildUpdate = vi.fn();
+    const worktreeUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const transaction = {
+      build: { update: buildUpdate },
+      worktree: { updateMany: worktreeUpdate },
+      buildArtifact: { upsert: vi.fn() },
+      buildScriptExecution: { updateMany: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "RUNNING",
+          errorCode: null,
+          error: null,
+          startedAt: new Date(0),
+          worktreeId: "worktree-1",
+          snapshotJson: JSON.stringify({
+            worktree: { id: "worktree-1", codeStateHash: "queued-state" },
+          }),
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    new BuildsService({
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === IOS_BUILD_JOB_KIND) completeBuild = handler as never;
+      }),
+    } as unknown as AgentControlService);
+
+    await completeBuild!({
+      id: "job-1",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        sourceStateHash: "state-before-hooks",
+        finalStateHash: "state-after-post-hooks",
+        codeStateObservedAt: "2026-07-18T20:00:00.000Z",
+        artifacts: [],
+        scriptExecutions: [],
+      }),
+      error: null,
+    });
+
+    expect(buildUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          snapshotJson: expect.stringContaining("state-before-hooks"),
+          status: "SUCCEEDED",
+        }),
+      }),
+    );
+    expect(worktreeUpdate).toHaveBeenCalledWith({
+      where: {
+        id: "worktree-1",
+        OR: [
+          { lastCheckedAt: null },
+          { lastCheckedAt: { lt: new Date("2026-07-18T20:00:00.000Z") } },
+        ],
+      },
+      data: {
+        codeStateHash: "state-after-post-hooks",
+        lastCheckedAt: new Date("2026-07-18T20:00:00.000Z"),
+      },
+    });
   });
 
   test("resolves Xcode 26 test products from a compatible prior build", async () => {
@@ -572,15 +699,45 @@ describe("BuildsService", () => {
     );
   });
 
-  test("returns generic build targets without queueing an agent preflight", async () => {
-    const createJob = vi.fn();
+  test("returns generic and connected build targets from the agent preflight", async () => {
+    const createJob = vi.fn().mockResolvedValue({ id: "destinations-job" });
+    const genericSimulator = {
+      type: "SIMULATOR",
+      id: "generic-ios-simulator",
+      name: "Any iOS Simulator",
+      platform: "iOS Simulator",
+      osVersion: null,
+      state: null,
+      generic: true,
+    };
+    const genericPhysical = {
+      type: "PHYSICAL_DEVICE",
+      id: "generic-ios",
+      name: "Any Physical iOS Device",
+      platform: "iOS",
+      osVersion: null,
+      state: null,
+      generic: true,
+    };
     getPrismaClient.mockResolvedValue({
       worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
       buildConfiguration: {
         findUnique: vi.fn().mockResolvedValue(configuration()),
       },
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     });
-    const service = new BuildsService(control(createJob));
+    const service = new BuildsService({
+      registerCompletionHandler: vi.fn(),
+      createJob,
+      getJob: vi.fn().mockResolvedValue({
+        id: "destinations-job",
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({
+          destinations: [genericSimulator, genericPhysical, destination],
+        }),
+        error: null,
+      }),
+    } as unknown as AgentControlService);
 
     await expect(
       service.destinations({
@@ -589,11 +746,13 @@ describe("BuildsService", () => {
         action: "BUILD",
         requestId: "generic-destinations",
       }),
-    ).resolves.toEqual([
-      expect.objectContaining({ type: "SIMULATOR", generic: true }),
-      expect.objectContaining({ type: "PHYSICAL_DEVICE", generic: true }),
-    ]);
-    expect(createJob).not.toHaveBeenCalled();
+    ).resolves.toEqual([genericSimulator, genericPhysical, destination]);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: IOS_DESTINATIONS_JOB_KIND,
+        payload: expect.objectContaining({ action: "BUILD" }),
+      }),
+    );
   });
 
   test("orders and paginates build-wide logs by timestamp and ID", async () => {

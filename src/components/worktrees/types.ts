@@ -1,5 +1,10 @@
 import type { Agent, AgentJob } from "@/components/agents/types";
 import type {
+  BuildArtifact,
+  BuildDestination,
+  BuildRecord,
+} from "@/components/builds/types";
+import type {
   Codebase,
   CodebaseRepository,
 } from "@/components/codebases/types";
@@ -11,6 +16,14 @@ export type WorktreeTag = {
   color: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorktreeLatestBuild = Pick<
+  BuildRecord,
+  "id" | "status" | "action" | "destinationType" | "createdAt" | "outOfDate"
+> & {
+  destination: BuildDestination;
+  artifacts: Array<Pick<BuildArtifact, "id" | "kind">>;
 };
 
 export type Worktree = {
@@ -41,6 +54,7 @@ export type Worktree = {
   ticketTitle: string | null;
   ticketStatus: string | null;
   pullRequest: GitHubPullRequestView | null;
+  latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];
   activeJob: AgentJob | null;
   lastCheckedAt: string | null;

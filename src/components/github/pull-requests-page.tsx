@@ -38,6 +38,7 @@ import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -726,7 +727,7 @@ function PullRequestTable({
   }, [items, locale]);
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <Card className="gap-0 py-0">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -885,7 +886,7 @@ function PullRequestTable({
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Card>
   );
 }
 

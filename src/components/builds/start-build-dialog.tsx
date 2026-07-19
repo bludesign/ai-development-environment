@@ -2,7 +2,7 @@
 
 import { Hammer, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -28,7 +33,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { useRouter } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
@@ -75,33 +80,113 @@ const ACTIONS: BuildAction[] = [
   "TEST_WITHOUT_BUILDING",
 ];
 
+function humanizeConstant(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
 export function StartBuildButton({
   codebaseId,
   worktreeId,
   disabled,
   disabledReason,
+  buildSettingsHref,
   size = "sm",
 }: {
   codebaseId: string;
   worktreeId: string;
   disabled?: boolean;
   disabledReason?: string | null;
+  buildSettingsHref?: string;
   size?: "sm" | "default";
 }) {
   const t = useTranslations("builds");
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsCloseTimer = useRef<number | null>(null);
+
+  const cancelSettingsClose = () => {
+    if (settingsCloseTimer.current !== null) {
+      window.clearTimeout(settingsCloseTimer.current);
+      settingsCloseTimer.current = null;
+    }
+  };
+  const showSettings = () => {
+    cancelSettingsClose();
+    setSettingsOpen(true);
+  };
+  const scheduleSettingsClose = () => {
+    cancelSettingsClose();
+    settingsCloseTimer.current = window.setTimeout(
+      () => setSettingsOpen(false),
+      150,
+    );
+  };
+
+  useEffect(
+    () => () => {
+      if (settingsCloseTimer.current !== null) {
+        window.clearTimeout(settingsCloseTimer.current);
+      }
+    },
+    [],
+  );
+
   return (
     <>
-      <Button
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-        size={size}
-        title={disabledReason ?? undefined}
-        type="button"
-      >
-        <Hammer /> {t("build")}
-      </Button>
+      {disabled && buildSettingsHref ? (
+        <Popover onOpenChange={setSettingsOpen} open={settingsOpen}>
+          <PopoverAnchor asChild>
+            <Button
+              aria-disabled="true"
+              aria-expanded={settingsOpen}
+              aria-haspopup="dialog"
+              className="cursor-not-allowed opacity-50"
+              onClick={showSettings}
+              onFocus={showSettings}
+              onMouseEnter={showSettings}
+              onMouseLeave={scheduleSettingsClose}
+              size={size}
+              title={disabledReason ?? undefined}
+              type="button"
+            >
+              <Hammer /> {t("build")}
+            </Button>
+          </PopoverAnchor>
+          <PopoverContent
+            align="start"
+            className="w-auto max-w-64 p-2 text-xs"
+            onBlurCapture={scheduleSettingsClose}
+            onFocusCapture={cancelSettingsClose}
+            onMouseEnter={cancelSettingsClose}
+            onMouseLeave={scheduleSettingsClose}
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            side="top"
+          >
+            <Link
+              className="font-medium underline-offset-4 hover:underline"
+              href={buildSettingsHref}
+            >
+              {t("configureBuilds")}
+            </Link>
+          </PopoverContent>
+        </Popover>
+      ) : (
+        <Button
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+          size={size}
+          title={disabledReason ?? undefined}
+          type="button"
+        >
+          <Hammer /> {t("build")}
+        </Button>
+      )}
       {open && (
         <StartBuildDialog
           codebaseId={codebaseId}
@@ -422,8 +507,10 @@ function StartBuildDialog({
                         {entry.name}
                       </span>
                       <Badge variant="outline">
-                        {(observations[entry.id] ?? entry.observation)
-                          ?.status ?? "UNPARSED"}
+                        {humanizeConstant(
+                          (observations[entry.id] ?? entry.observation)
+                            ?.status ?? "UNPARSED",
+                        )}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">

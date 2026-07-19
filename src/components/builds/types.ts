@@ -90,6 +90,7 @@ export type BuildRecord = {
   artifactDirectory: string;
   errorCode: string | null;
   error: string | null;
+  outOfDate: boolean;
   artifacts: BuildArtifact[];
   scriptExecutions: Array<{
     id: string;
