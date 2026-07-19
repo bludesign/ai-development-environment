@@ -3,6 +3,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
@@ -114,6 +115,31 @@ function command(
     cwd,
     env,
   });
+}
+
+async function commandToFile(
+  executable: string,
+  args: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  destination: string,
+): Promise<CaptureResult> {
+  const output = await open(destination, "wx", 0o600);
+  try {
+    return await captureCommand({
+      command: executable,
+      args,
+      timeoutMs,
+      signal,
+      cwd,
+      env,
+      stdoutFileDescriptor: output.fd,
+    });
+  } finally {
+    await output.close();
+  }
 }
 
 function requireSuccess(
@@ -1593,23 +1619,24 @@ async function writeJsonReport(
             "json",
           ]
         : ["xccov", "view", "--report", "--json", "result.xcresult"];
-    const result = requireSuccess(
-      await command(
+    requireSuccess(
+      await commandToFile(
         "xcrun",
         args,
         timeoutMs,
         signal,
         input.artifactDirectory,
         xcodeEnvironment(),
+        temporary,
       ),
       `Could not generate ${filename}`,
     );
-    const parsed: unknown = JSON.parse(result.stdout);
+    const serialized = await readFile(temporary, "utf8");
+    const parsed: unknown = JSON.parse(serialized);
     const normalized =
       kind === "TEST_RESULTS"
         ? normalizeTestResults(parsed)
         : normalizeCoverage(parsed);
-    await writeFile(temporary, result.stdout, { mode: 0o600 });
     await rename(temporary, destination);
     return {
       kind,
@@ -1781,44 +1808,55 @@ async function addChangedCoverage(
     let covered = 0;
     let executable = 0;
     if (coveragePath && change.lines.length) {
-      const result = await command(
-        "xcrun",
-        [
-          "xccov",
-          "view",
-          "--archive",
-          "--file",
-          coveragePath,
-          "--json",
-          "result.xcresult",
-        ],
-        timeoutMs,
-        signal,
+      const temporary = join(
         input.artifactDirectory,
-        xcodeEnvironment(),
+        `.changed-coverage-${randomUUID()}.json`,
       );
-      if (result.exitCode === 0) {
-        const parsed = jsonObject(JSON.parse(result.stdout));
-        const lineData = parsed?.[coveragePath];
-        if (Array.isArray(lineData)) {
-          const changed = new Set(change.lines);
-          for (const rawLine of lineData) {
-            const line = jsonObject(rawLine);
-            if (
-              line?.isExecutable === true &&
-              typeof line.line === "number" &&
-              changed.has(line.line)
-            ) {
-              executable += 1;
+      try {
+        const result = await commandToFile(
+          "xcrun",
+          [
+            "xccov",
+            "view",
+            "--archive",
+            "--file",
+            coveragePath,
+            "--json",
+            "result.xcresult",
+          ],
+          timeoutMs,
+          signal,
+          input.artifactDirectory,
+          xcodeEnvironment(),
+          temporary,
+        );
+        if (result.exitCode === 0 && !result.cancelled && !result.timedOut) {
+          const parsed = jsonObject(
+            JSON.parse(await readFile(temporary, "utf8")),
+          );
+          const lineData = parsed?.[coveragePath];
+          if (Array.isArray(lineData)) {
+            const changed = new Set(change.lines);
+            for (const rawLine of lineData) {
+              const line = jsonObject(rawLine);
               if (
-                typeof line.executionCount === "number" &&
-                line.executionCount > 0
+                line?.isExecutable === true &&
+                typeof line.line === "number" &&
+                changed.has(line.line)
               ) {
-                covered += 1;
+                executable += 1;
+                if (
+                  typeof line.executionCount === "number" &&
+                  line.executionCount > 0
+                ) {
+                  covered += 1;
+                }
               }
             }
           }
         }
+      } finally {
+        await rm(temporary, { force: true });
       }
     }
     changedCoveredLines += covered;
@@ -2234,23 +2272,31 @@ export const runIosBuild: AgentJobHandler = async (
     }
     const reports: GeneratedBuildReport[] = [];
     const testAction = ["TEST", "TEST_WITHOUT_BUILDING"].includes(input.action);
-    if (testAction && input.advancedSettings.parseTestResults) {
+    const canGenerateReports = () =>
+      !signal.aborted &&
+      buildResult?.cancelled !== true &&
+      buildResult?.timedOut !== true;
+    if (
+      canGenerateReports() &&
+      testAction &&
+      input.advancedSettings.parseTestResults
+    ) {
       const report = await writeJsonReport(
         input,
         "TEST_RESULTS",
         Math.min(timeoutMs, 120_000),
-        new AbortController().signal,
+        signal,
       );
       reports.push(report);
       if (report.artifact) artifacts.push(report.artifact);
       if (report.error) logger.emit("REPORTS", "STDERR", report.error);
     }
-    if (testAction && input.worktreeCoverage) {
+    if (canGenerateReports() && testAction && input.worktreeCoverage) {
       let report = await writeJsonReport(
         input,
         "CODE_COVERAGE",
         Math.min(timeoutMs, 120_000),
-        new AbortController().signal,
+        signal,
       );
       try {
         report = await addChangedCoverage(
@@ -2259,7 +2305,7 @@ export const runIosBuild: AgentJobHandler = async (
           input,
           folder,
           Math.min(timeoutMs, 120_000),
-          new AbortController().signal,
+          signal,
         );
       } catch (coverageError) {
         logger.emit("COVERAGE", "STDERR", cleanError(coverageError));

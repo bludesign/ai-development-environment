@@ -86,6 +86,7 @@ export function WorktreeDetailPanel({
                       <DiffBlock
                         label={t("staged")}
                         path={change.path}
+                        previousPath={change.previousPath}
                         scope="STAGED"
                         worktreeId={worktreeId}
                       />
@@ -365,6 +366,7 @@ function CommitFiles({
     worktreeId,
     "COMMIT",
     null,
+    null,
     commitSha,
   );
   if (loading) return <LoadingDiff />;
@@ -413,6 +415,7 @@ function ExpandableDiffFile({
       <DiffBlock
         commitSha={commitSha}
         path={file.path}
+        previousPath={file.previousPath}
         scope={scope}
         worktreeId={worktreeId}
       />
@@ -424,12 +427,14 @@ function DiffBlock({
   label,
   worktreeId,
   path,
+  previousPath,
   scope,
   commitSha,
 }: {
   label?: string;
   worktreeId: string;
   path: string;
+  previousPath?: string | null;
   scope: DiffScope;
   commitSha?: string;
 }) {
@@ -438,6 +443,7 @@ function DiffBlock({
     worktreeId,
     scope,
     path,
+    previousPath ?? null,
     commitSha ?? null,
   );
   return (
@@ -456,6 +462,7 @@ function DiffBlock({
           commitSha={commitSha}
           diff={value}
           path={path}
+          previousPath={previousPath}
           scope={scope}
           worktreeId={worktreeId}
         />
@@ -478,6 +485,7 @@ function useDiff(
   worktreeId: string,
   scope: DiffScope,
   path: string | null,
+  previousPath: string | null,
   commitSha: string | null,
 ) {
   const [value, setValue] = useState<WorktreeFileDiff | null>(null);
@@ -492,6 +500,7 @@ function useDiff(
           worktreeId,
           scope,
           path,
+          previousPath,
           commitSha,
           requestId: createClientId(),
         },
@@ -510,7 +519,7 @@ function useDiff(
     return () => {
       disposed = true;
     };
-  }, [commitSha, path, scope, worktreeId]);
+  }, [commitSha, path, previousPath, scope, worktreeId]);
   return { value, loading, error };
 }
 
@@ -551,12 +560,14 @@ function PatchView({
 function ImageComparison({
   worktreeId,
   path,
+  previousPath,
   scope,
   commitSha,
   diff,
 }: {
   worktreeId: string;
   path: string;
+  previousPath?: string | null;
   scope: DiffScope;
   commitSha?: string;
   diff: WorktreeFileDiff;
@@ -566,6 +577,7 @@ function ImageComparison({
   const [opacity, setOpacity] = useState(50);
   const url = (side: "BEFORE" | "AFTER") => {
     const params = new URLSearchParams({ scope, path, side });
+    if (previousPath) params.set("previousPath", previousPath);
     if (commitSha) params.set("commitSha", commitSha);
     return `/api/worktrees/${encodeURIComponent(worktreeId)}/diff-image?${params}`;
   };

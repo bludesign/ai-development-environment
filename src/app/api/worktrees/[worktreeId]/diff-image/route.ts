@@ -24,6 +24,7 @@ export async function GET(
     const url = new URL(request.url);
     const scope = url.searchParams.get("scope");
     const path = url.searchParams.get("path");
+    const previousPath = url.searchParams.get("previousPath");
     const side = url.searchParams.get("side");
     const commitSha = url.searchParams.get("commitSha");
     if (
@@ -46,6 +47,7 @@ export async function GET(
         {
           scope: scope as never,
           path,
+          previousPath,
           commitSha,
           side,
         },

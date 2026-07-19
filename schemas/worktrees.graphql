@@ -207,6 +207,7 @@ input WorktreeDiffInput {
   worktreeId: ID!
   scope: WorktreeDiffScope!
   path: String
+  previousPath: String
   commitSha: String
   requestId: ID!
 }

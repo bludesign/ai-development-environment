@@ -1402,6 +1402,7 @@ export class WorktreesService {
     input: {
       scope: WorktreeDiffScope;
       path?: string | null;
+      previousPath?: string | null;
       commitSha?: string | null;
     },
     requestId: string,
@@ -1423,6 +1424,7 @@ export class WorktreesService {
         baseBranch: identity.baseBranch,
         scope: input.scope,
         path: input.path ?? null,
+        previousPath: input.previousPath ?? null,
         commitSha: input.commitSha ?? null,
         uploadId: null,
         side: null,
@@ -1451,6 +1453,7 @@ export class WorktreesService {
     input: {
       scope: WorktreeDiffScope;
       path: string;
+      previousPath?: string | null;
       commitSha?: string | null;
       side: "BEFORE" | "AFTER";
     },
@@ -1463,7 +1466,7 @@ export class WorktreesService {
     );
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
-    const job = await this.agentControl.createJob({
+    const job = await this.createSerializedDiffJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1473,6 +1476,7 @@ export class WorktreesService {
         baseBranch: identity.baseBranch,
         scope: input.scope,
         path: input.path,
+        previousPath: input.previousPath ?? null,
         commitSha: input.commitSha ?? null,
         uploadId,
         side: input.side,

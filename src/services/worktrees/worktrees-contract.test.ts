@@ -28,9 +28,14 @@ describe("worktree agent contract", () => {
         ...base,
         scope: "BRANCH",
         path: "src/app.ts",
+        previousPath: "src/old-app.ts",
         commitSha: null,
       }),
-    ).toMatchObject({ scope: "BRANCH", path: "src/app.ts" });
+    ).toMatchObject({
+      scope: "BRANCH",
+      path: "src/app.ts",
+      previousPath: "src/old-app.ts",
+    });
     expect(() =>
       worktreeDiffPayload({
         ...base,

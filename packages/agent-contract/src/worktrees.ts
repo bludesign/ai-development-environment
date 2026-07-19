@@ -183,6 +183,7 @@ export type WorktreeDiffPayload = {
   baseBranch: string;
   scope: WorktreeDiffScope;
   path: string | null;
+  previousPath: string | null;
   commitSha: string | null;
   uploadId: string | null;
   side: "BEFORE" | "AFTER" | null;
@@ -794,6 +795,7 @@ export function worktreeDiffPayload(value: unknown): WorktreeDiffPayload {
     "baseBranch",
     "scope",
     "path",
+    "previousPath",
     "commitSha",
     "uploadId",
     "side",
@@ -817,6 +819,13 @@ export function worktreeDiffPayload(value: unknown): WorktreeDiffPayload {
     payload.path === null || payload.path === undefined
       ? null
       : safeRelativePath(payload.path, "worktree diff payload.path");
+  const previousPath =
+    payload.previousPath === null || payload.previousPath === undefined
+      ? null
+      : safeRelativePath(
+          payload.previousPath,
+          "worktree diff payload.previousPath",
+        );
   const scope = payload.scope as WorktreeDiffScope;
   const commitSha = nullableString(
     payload.commitSha,
@@ -845,6 +854,7 @@ export function worktreeDiffPayload(value: unknown): WorktreeDiffPayload {
     ),
     scope,
     path,
+    previousPath,
     commitSha,
     uploadId: nullableString(
       payload.uploadId,

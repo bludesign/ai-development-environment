@@ -1,5 +1,5 @@
 import { createWriteStream, watch, type FSWatcher } from "node:fs";
-import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { spawn } from "node:child_process";
@@ -33,6 +33,7 @@ const successfulProcess = {
   cancelled: false,
 } as const;
 const WATCH_DEBOUNCE_MS = 500;
+const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -943,13 +944,14 @@ async function comparisonSides(
 ): Promise<{ before: DiffSide; after: DiffSide }> {
   if (!input.path) return { before: null, after: null };
   const path = input.path;
+  const previousPath = input.previousPath ?? path;
   const currentPath = join(folder, path);
   if (input.scope === "UNTRACKED") {
     return { before: null, after: { kind: "FILE", path: currentPath } };
   }
   if (input.scope === "STAGED") {
     return {
-      before: { kind: "GIT", specification: `HEAD:${path}` },
+      before: { kind: "GIT", specification: `HEAD:${previousPath}` },
       after: { kind: "GIT", specification: `:${path}` },
     };
   }
@@ -971,7 +973,7 @@ async function comparisonSides(
     const parent = await parentCommit(folder, commitSha, timeoutMs, signal);
     return {
       before: parent
-        ? { kind: "GIT", specification: `${parent}:${path}` }
+        ? { kind: "GIT", specification: `${parent}:${previousPath}` }
         : null,
       after: { kind: "GIT", specification: `${commitSha}:${path}` },
     };
@@ -983,9 +985,54 @@ async function comparisonSides(
     signal,
   );
   return {
-    before: { kind: "GIT", specification: `${base}:${path}` },
+    before: { kind: "GIT", specification: `${base}:${previousPath}` },
     after: { kind: "GIT", specification: `HEAD:${path}` },
   };
+}
+
+function requestedDiffPaths(
+  input: ReturnType<typeof worktreeDiffPayload>,
+): string[] {
+  if (!input.path) return [];
+  if (
+    input.previousPath &&
+    ["STAGED", "COMMIT", "BRANCH"].includes(input.scope)
+  ) {
+    return [input.previousPath, input.path];
+  }
+  return [input.path];
+}
+
+async function readBoundedFile(
+  path: string,
+  limit: number,
+): Promise<{ contents: Buffer; oversized: boolean }> {
+  const file = await open(path, "r");
+  try {
+    const metadata = await file.stat();
+    if (!metadata.isFile()) throw new Error("Changed path is not a file");
+    if (metadata.size > limit) {
+      return { contents: Buffer.alloc(0), oversized: true };
+    }
+    const buffer = Buffer.allocUnsafe(limit + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await file.read(
+        buffer,
+        length,
+        buffer.length - length,
+        length,
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    return {
+      contents: buffer.subarray(0, Math.min(length, limit)),
+      oversized: length > limit,
+    };
+  } finally {
+    await file.close();
+  }
 }
 
 async function availableSide(
@@ -1078,12 +1125,16 @@ async function inspectRequestedDiff(
       "HEAD",
     );
   }
-  args.push("--", input.path);
+  args.push("--", ...requestedDiffPaths(input));
   let patch: string;
   if (input.scope === "UNTRACKED") {
-    const contents = await readFile(join(folder, input.path));
-    if (contents.length > 2 * 1024 * 1024 || contents.includes(0)) {
-      oversized = contents.length > 2 * 1024 * 1024;
+    const bounded = await readBoundedFile(
+      join(folder, input.path),
+      MAX_DIFF_BYTES,
+    );
+    const contents = bounded.contents;
+    if (bounded.oversized || contents.includes(0)) {
+      oversized = bounded.oversized;
       patch = "";
     } else {
       patch = [
@@ -1113,7 +1164,7 @@ async function inspectRequestedDiff(
     patch,
     image: imagePath(input.path),
     binary: !patch && !imagePath(input.path) && !oversized,
-    truncated: oversized || Buffer.byteLength(patch) >= 2 * 1024 * 1024,
+    truncated: oversized || Buffer.byteLength(patch) >= MAX_DIFF_BYTES,
     beforeAvailable,
     afterAvailable,
   };
@@ -1135,7 +1186,7 @@ async function validateChangedPath(
       signal,
     );
   } else {
-    const args = ["diff", "--name-only", "-z"];
+    const args = ["diff", "--name-status", "-z"];
     if (input.scope === "STAGED") args.push("--cached");
     if (input.scope === "COMMIT") {
       await validateDisplayedCommit(
@@ -1158,11 +1209,19 @@ async function validateChangedPath(
         "HEAD",
       );
     }
-    args.push("--", input.path);
+    args.push("--", ...requestedDiffPaths(input));
     result = await git(folder, args, timeoutMs, signal);
   }
   requireSuccess(result, "Could not validate the changed file");
-  if (!result.stdout.split("\0").filter(Boolean).includes(input.path)) {
+  const requested =
+    input.scope === "UNTRACKED"
+      ? result.stdout.split("\0").filter(Boolean).includes(input.path)
+      : parseNameStatus(result.stdout).some(
+          (file) =>
+            file.path === input.path &&
+            (!input.previousPath || file.previousPath === input.previousPath),
+        );
+  if (!requested) {
     throw new Error("The requested file is outside the displayed diff");
   }
 }

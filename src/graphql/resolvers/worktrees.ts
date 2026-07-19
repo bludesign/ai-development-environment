@@ -137,6 +137,7 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
           worktreeId: string;
           scope: never;
           path?: string | null;
+          previousPath?: string | null;
           commitSha?: string | null;
           requestId: string;
         };
@@ -149,6 +150,7 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
         {
           scope: input.scope,
           path: input.path,
+          previousPath: input.previousPath,
           commitSha: input.commitSha,
         },
         input.requestId,

@@ -16,6 +16,7 @@ export function captureCommand(options: {
   signal: AbortSignal;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  stdoutFileDescriptor?: number;
 }): Promise<CaptureResult> {
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -25,16 +26,22 @@ export function captureCommand(options: {
     let settled = false;
     const child = spawn(options.command, options.args, {
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [
+        "ignore",
+        options.stdoutFileDescriptor === undefined
+          ? "pipe"
+          : options.stdoutFileDescriptor,
+        "pipe",
+      ],
       env: options.env ?? process.env,
       cwd: options.cwd,
     });
     const append = (current: string, chunk: Buffer | string) =>
       `${current}${String(chunk)}`.slice(0, MAX_OUTPUT_BYTES);
-    child.stdout.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk) => {
       stdout = append(stdout, chunk);
     });
-    child.stderr.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk) => {
       stderr = append(stderr, chunk);
     });
     const terminate = () => {

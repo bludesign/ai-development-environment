@@ -67,7 +67,13 @@ export const createBuildResolvers = (service: BuildsService) => ({
   },
   BuildReport: {
     summary: (value: { summaryJson: string }) => json(value.summaryJson, {}),
-    data: (value: { dataJson: string }) => json(value.dataJson, {}),
+    data: async (value: { id: string; dataJson?: string }) =>
+      json(
+        typeof value.dataJson === "string"
+          ? value.dataJson
+          : await service.reportData(value.id),
+        {},
+      ),
     testSummary: (value: {
       kind: string;
       status: string;
@@ -76,9 +82,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
       value.kind === "TEST_RESULTS" && value.status === "READY"
         ? json(value.summaryJson, {})
         : null,
-    tests: (value: { kind: string; dataJson: string }) => {
+    tests: async (value: { id: string; kind: string; dataJson?: string }) => {
       if (value.kind !== "TEST_RESULTS") return [];
-      const data = json(value.dataJson, {}) as { tests?: unknown };
+      const data = json(
+        typeof value.dataJson === "string"
+          ? value.dataJson
+          : await service.reportData(value.id),
+        {},
+      ) as { tests?: unknown };
       return Array.isArray(data.tests) ? data.tests : [];
     },
     coverageSummary: (value: {
@@ -89,16 +100,36 @@ export const createBuildResolvers = (service: BuildsService) => ({
       value.kind === "CODE_COVERAGE" && value.status === "READY"
         ? json(value.summaryJson, {})
         : null,
-    coverageFiles: (value: { kind: string; dataJson: string }) => {
+    coverageFiles: async (value: {
+      id: string;
+      kind: string;
+      dataJson?: string;
+    }) => {
       if (value.kind !== "CODE_COVERAGE") return [];
-      const data = json(value.dataJson, {}) as { files?: unknown };
+      const data = json(
+        typeof value.dataJson === "string"
+          ? value.dataJson
+          : await service.reportData(value.id),
+        {},
+      ) as { files?: unknown };
       return Array.isArray(data.files) ? data.files : [];
     },
-    changedCoverageFiles: (value: { kind: string; dataJson: string }) => {
+    changedCoverageFiles: async (value: {
+      id: string;
+      kind: string;
+      dataJson?: string;
+    }) => {
       if (value.kind !== "CODE_COVERAGE") return [];
-      const data = json(value.dataJson, {}) as { changedFiles?: unknown };
+      const data = json(
+        typeof value.dataJson === "string"
+          ? value.dataJson
+          : await service.reportData(value.id),
+        {},
+      ) as { changedFiles?: unknown };
       return Array.isArray(data.changedFiles) ? data.changedFiles : [];
     },
+    build: (value: { buildId: string; build?: unknown }) =>
+      value.build ?? service.getBuild(value.buildId),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
@@ -118,6 +149,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
   },
   Build: {
+    reports: (value: { id: string; reports?: unknown[] }) =>
+      value.reports ?? service.reportsForBuild(value.id),
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
     snapshot: (value: { snapshotJson: string }) => json(value.snapshotJson, {}),

@@ -15,6 +15,7 @@ import {
   deleteWorktree,
   discoverWorktrees,
   inspectWorktreeDetail,
+  inspectWorktreeDiff,
   operateWorktree,
   pushMovedWorktree,
   watchWorktree,
@@ -309,6 +310,78 @@ describe("worktree inventory and inspection", () => {
         stagedDeletions: 0,
       }),
     );
+  });
+
+  test("preserves staged rename paths for text and before-side comparisons", async () => {
+    const folder = await repository();
+    await writeFile(join(folder, "before.png"), "image contents");
+    await git(folder, "add", "before.png");
+    await git(folder, "commit", "-m", "Add image");
+    await git(folder, "mv", "before.png", "after.png");
+    await git(folder, "add", "after.png");
+    const gitDirectory = await realpath(join(folder, ".git"));
+
+    const result = (await inspectWorktreeDiff(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        scope: "STAGED",
+        path: "after.png",
+        previousPath: "before.png",
+        commitSha: null,
+        uploadId: null,
+        side: null,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    )) as unknown as {
+      diff: {
+        patch: string;
+        beforeAvailable: boolean;
+        afterAvailable: boolean;
+      };
+    };
+
+    expect(result.diff.patch).toContain("rename from before.png");
+    expect(result.diff.patch).toContain("rename to after.png");
+    expect(result.diff).toMatchObject({
+      beforeAvailable: true,
+      afterAvailable: true,
+    });
+  });
+
+  test("does not read oversized untracked files into the diff", async () => {
+    const folder = await repository();
+    await writeFile(
+      join(folder, "large.bin"),
+      Buffer.alloc(2 * 1024 * 1024 + 1),
+    );
+    const gitDirectory = await realpath(join(folder, ".git"));
+
+    const result = (await inspectWorktreeDiff(
+      {
+        codebaseId: "codebase-1",
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        baseBranch: "main",
+        scope: "UNTRACKED",
+        path: "large.bin",
+        previousPath: null,
+        commitSha: null,
+        uploadId: null,
+        side: null,
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    )) as unknown as { diff: { patch: string; truncated: boolean } };
+
+    expect(result.diff).toMatchObject({ patch: "", truncated: true });
   });
 
   test("stages changes through the allow-listed operation handler", async () => {

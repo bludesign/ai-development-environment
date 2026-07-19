@@ -339,10 +339,6 @@ const buildInclude = {
   },
   deployments: { orderBy: { createdAt: "desc" as const } },
   exports: { orderBy: { createdAt: "desc" as const } },
-  reports: {
-    orderBy: { createdAt: "asc" as const },
-    include: { artifact: true },
-  },
 } satisfies Prisma.BuildInclude;
 
 export type SaveBuildConfigurationInput = {
@@ -1041,6 +1037,14 @@ export class BuildsService {
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
     );
+    if (
+      input.worktreeCoverage &&
+      !capabilities(worktree.codebase.agent).includes(
+        IOS_COVERAGE_REPORT_JOB_KIND,
+      )
+    ) {
+      throw new Error("Build agent must be updated for worktree coverage");
+    }
     const configuration = await prisma.buildConfiguration.findUnique({
       where: { id: input.configurationId },
       include: { source: { include: { project: true } } },
@@ -1612,8 +1616,71 @@ export class BuildsService {
         build: { worktreeId },
       },
       orderBy: { createdAt: "desc" },
-      include: { artifact: true, build: { include: buildInclude } },
+      take: 50,
+      select: {
+        id: true,
+        buildId: true,
+        artifactId: true,
+        kind: true,
+        source: true,
+        status: true,
+        summaryJson: true,
+        error: true,
+        createdAt: true,
+        updatedAt: true,
+        finishedAt: true,
+        artifact: true,
+        build: {
+          select: {
+            id: true,
+            status: true,
+            action: true,
+            destinationType: true,
+            destinationJson: true,
+            snapshotJson: true,
+            createdAt: true,
+            startedAt: true,
+            finishedAt: true,
+            updatedAt: true,
+            worktree: {
+              select: {
+                headSha: true,
+                codeStateHash: true,
+                hasStagedChanges: true,
+                hasUnstagedChanges: true,
+                lastCheckedAt: true,
+                _count: {
+                  select: {
+                    builds: {
+                      where: { status: { in: ACTIVE_BUILD_STATUSES } },
+                    },
+                  },
+                },
+              },
+            },
+            artifacts: { orderBy: { createdAt: "asc" } },
+          },
+        },
+      },
     });
+  }
+
+  async reportsForBuild(buildId: string) {
+    const prisma = await getPrismaClient();
+    return prisma.buildReport.findMany({
+      where: { buildId },
+      orderBy: { createdAt: "asc" },
+      include: { artifact: true },
+    });
+  }
+
+  async reportData(id: string): Promise<string> {
+    const prisma = await getPrismaClient();
+    const report = await prisma.buildReport.findUnique({
+      where: { id },
+      select: { dataJson: true },
+    });
+    return report?.dataJson ?? "{}";
   }
 
   async builds(
