@@ -251,18 +251,25 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
               />
             </div>
             <div className="overflow-auto rounded-md border">
-              <Table className="min-w-[60rem]">
+              <Table
+                aria-label={t("allCoverageFiles")}
+                className="min-w-[60rem] text-xs"
+              >
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{t("coverageTarget")}</TableHead>
-                    <TableHead>{t("coverageFile")}</TableHead>
-                    <TableHead className="text-right">
+                    <TableHead className="h-8 px-2">
+                      {t("coverageTarget")}
+                    </TableHead>
+                    <TableHead className="h-8 px-2">
+                      {t("coverageFile")}
+                    </TableHead>
+                    <TableHead className="h-8 px-2 text-right">
                       {t("coveredLines")}
                     </TableHead>
-                    <TableHead className="text-right">
+                    <TableHead className="h-8 px-2 text-right">
                       {t("uncoveredLines")}
                     </TableHead>
-                    <TableHead className="text-right">
+                    <TableHead className="h-8 px-2 text-right">
                       {t("coverage")}
                     </TableHead>
                   </TableRow>
@@ -270,22 +277,29 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
                 <TableBody>
                   {files.map((file, index) => (
                     <TableRow key={`${file.target}:${file.path}:${index}`}>
-                      <TableCell>
+                      <TableCell className="px-2 py-1.5">
                         <Badge variant="outline">{file.target}</Badge>
                       </TableCell>
-                      <TableCell className="max-w-xl whitespace-normal">
-                        <p className="font-medium">{file.name}</p>
-                        <p className="break-all font-mono text-xs text-muted-foreground">
-                          {file.path}
-                        </p>
+                      <TableCell className="max-w-xl px-2 py-1.5">
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <span className="shrink-0 font-medium">
+                            {file.name}
+                          </span>
+                          <span
+                            className="min-w-0 truncate font-mono text-muted-foreground"
+                            title={file.path}
+                          >
+                            {file.path}
+                          </span>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="px-2 py-1.5 text-right tabular-nums">
                         {file.coveredLines} / {file.executableLines}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="px-2 py-1.5 text-right tabular-nums">
                         {Math.max(0, file.executableLines - file.coveredLines)}
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="px-2 py-1.5 text-right font-medium">
                         {percent(file.lineCoverage)}
                       </TableCell>
                     </TableRow>
@@ -321,24 +335,32 @@ function CoverageChangedTable({
   const t = useTranslations("builds");
   return (
     <div className="overflow-auto rounded-md border">
-      <Table>
+      <Table aria-label={t("changedFilesCoverage")} className="text-xs">
         <TableHeader>
           <TableRow>
-            <TableHead>{t("coverageFile")}</TableHead>
-            <TableHead>{t("changeType")}</TableHead>
-            <TableHead className="text-right">{t("coveredLines")}</TableHead>
-            <TableHead className="text-right">{t("coverage")}</TableHead>
+            <TableHead className="h-8 px-2">{t("coverageFile")}</TableHead>
+            <TableHead className="h-8 px-2">{t("changeType")}</TableHead>
+            <TableHead className="h-8 px-2 text-right">
+              {t("coveredLines")}
+            </TableHead>
+            <TableHead className="h-8 px-2 text-right">
+              {t("coverage")}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {files.map((file) => (
             <TableRow key={file.path}>
-              <TableCell className="font-mono text-xs">{file.path}</TableCell>
-              <TableCell>{file.changeType ?? "—"}</TableCell>
-              <TableCell className="text-right">
+              <TableCell className="px-2 py-1.5 font-mono">
+                {file.path}
+              </TableCell>
+              <TableCell className="px-2 py-1.5">
+                {file.changeType ?? "—"}
+              </TableCell>
+              <TableCell className="px-2 py-1.5 text-right">
                 {file.changedCoveredLines} / {file.changedExecutableLines}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="px-2 py-1.5 text-right">
                 {percent(file.changedLineCoverage)}
               </TableCell>
             </TableRow>

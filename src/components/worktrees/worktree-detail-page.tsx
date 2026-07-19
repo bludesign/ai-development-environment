@@ -783,7 +783,7 @@ function WorktreeCoverageCard({
                         report.status === "FAILED" ? "destructive" : "outline"
                       }
                     >
-                      {report.status}
+                      {t(`coverageStatuses.${report.status}`)}
                     </Badge>
                   </TableCell>
                   <TableCell>{percent(report.summary.lineCoverage)}</TableCell>

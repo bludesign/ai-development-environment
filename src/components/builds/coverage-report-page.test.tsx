@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -34,6 +40,15 @@ describe("CoverageReportPage", () => {
               lineCoverage: 0.75,
             },
             data: {
+              changedFiles: [
+                {
+                  path: "Sources/Changed.swift",
+                  changedCoveredLines: 4,
+                  changedExecutableLines: 5,
+                  changedLineCoverage: 0.8,
+                  changeType: "MODIFIED",
+                },
+              ],
               files: [
                 {
                   target: "App",
@@ -64,11 +79,19 @@ describe("CoverageReportPage", () => {
     } as never);
 
     render(<CoverageReportPage buildId="build-1" />);
+    const changedTable = await screen.findByRole("table", {
+      name: "Coverage of changed files",
+    });
+    expect(changedTable.querySelector("tbody td")?.className).toContain(
+      "py-1.5",
+    );
     const expand = await screen.findByRole("button", {
       name: "Expand all coverage files",
     });
     expect(expand.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("80%")).toBeNull();
+    expect(
+      screen.queryByRole("table", { name: "All coverage files" }),
+    ).toBeNull();
     expect(
       screen.queryByRole("textbox", {
         name: "Search targets, files, or paths",
@@ -76,8 +99,14 @@ describe("CoverageReportPage", () => {
     ).toBeNull();
 
     fireEvent.click(expand);
-    expect(await screen.findByText("80%")).toBeDefined();
-    expect(screen.getByText("70%")).toBeDefined();
+    const allFilesTable = await screen.findByRole("table", {
+      name: "All coverage files",
+    });
+    expect(within(allFilesTable).getByText("80%")).toBeDefined();
+    expect(within(allFilesTable).getByText("70%")).toBeDefined();
+    expect(allFilesTable.querySelector("tbody td")?.className).toContain(
+      "py-1.5",
+    );
 
     fireEvent.change(
       screen.getByRole("textbox", {
@@ -85,7 +114,7 @@ describe("CoverageReportPage", () => {
       }),
       { target: { value: "AppTests" } },
     );
-    expect(screen.queryByText("80%")).toBeNull();
-    expect(screen.getByText("70%")).toBeDefined();
+    expect(within(allFilesTable).queryByText("80%")).toBeNull();
+    expect(within(allFilesTable).getByText("70%")).toBeDefined();
   });
 });

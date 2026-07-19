@@ -1362,6 +1362,11 @@ const mockTranslations = {
     noCoverageReports: "No worktree coverage reports have been generated.",
     coverageBuild: "Build",
     coverageStatus: "Status",
+    coverageStatuses: {
+      PENDING: "Pending",
+      READY: "Ready",
+      FAILED: "Failed",
+    },
     overallCoverage: "Overall coverage",
     changedCoverage: "Changed coverage",
     generated: "Generated",

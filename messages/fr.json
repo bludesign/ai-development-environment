@@ -1235,6 +1235,11 @@
     "noCoverageReports": "Aucun rapport de couverture n’a été généré pour cet arbre de travail.",
     "coverageBuild": "Compilation",
     "coverageStatus": "État du rapport",
+    "coverageStatuses": {
+      "PENDING": "En attente",
+      "READY": "Prêt",
+      "FAILED": "Échoué"
+    },
     "overallCoverage": "Couverture globale",
     "changedCoverage": "Couverture des modifications",
     "generated": "Généré",

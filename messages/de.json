@@ -1235,6 +1235,11 @@
     "noCoverageReports": "Es wurden noch keine Abdeckungsberichte für diesen Arbeitsbaum erstellt.",
     "coverageBuild": "Erstellung",
     "coverageStatus": "Berichtsstatus",
+    "coverageStatuses": {
+      "PENDING": "Ausstehend",
+      "READY": "Bereit",
+      "FAILED": "Fehlgeschlagen"
+    },
     "overallCoverage": "Gesamtabdeckung",
     "changedCoverage": "Abdeckung der Änderungen",
     "generated": "Erstellt",
