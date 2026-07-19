@@ -130,6 +130,48 @@ const ADVANCED_SETTING_ORDER = [
   "priorXctestrunPath",
 ] as const;
 
+const ADVANCED_SETTING_DEFAULTS: Record<string, unknown> = {
+  packageResolution: "DEFAULT",
+  disablePackageRepositoryCache: false,
+  signingStyle: "PROJECT_DEFAULT",
+  developmentTeam: null,
+  codeSignIdentity: null,
+  provisioningProfileSpecifier: null,
+  productBundleIdentifier: null,
+  allowProvisioningUpdates: false,
+  allowProvisioningDeviceRegistration: false,
+  testPlan: null,
+  codeCoverage: false,
+  parseTestResults: true,
+  parallelTesting: null,
+  parallelTestingWorkers: null,
+  onlyTesting: [],
+  skipTesting: [],
+  buildSettingOverrides: {},
+  priorBuildForTestingId: null,
+  priorTestProductsPath: null,
+  priorXctestrunPath: null,
+};
+
+function advancedSettingHasValue(key: string, value: unknown) {
+  if (Object.hasOwn(ADVANCED_SETTING_DEFAULTS, key)) {
+    return (
+      JSON.stringify(value) !== JSON.stringify(ADVANCED_SETTING_DEFAULTS[key])
+    );
+  }
+  if (
+    value === null ||
+    value === undefined ||
+    value === "" ||
+    value === false
+  ) {
+    return false;
+  }
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
 export function BuildDetailPage({ buildId }: { buildId: string }) {
   const t = useTranslations("builds");
   const locale = useLocale();
@@ -547,7 +589,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </CardHeader>
             <CardContent>
               <pre
-                className="max-h-[36rem] overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100"
+                className="max-h-[48rem] overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100"
                 ref={logRef}
               >
                 {logs.length
@@ -558,7 +600,6 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               </pre>
             </CardContent>
           </Card>
-          <AdvancedSettingsCard settings={configuration?.advancedSettings} />
           <Card>
             <CardHeader>
               <CardTitle>{t("commandSummary")}</CardTitle>
@@ -658,6 +699,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
               </dl>
             </CardContent>
           </Card>
+          <AdvancedSettingsCard settings={configuration?.advancedSettings} />
           <Card>
             <CardHeader>
               <CardTitle>{t("artifacts")}</CardTitle>
@@ -828,35 +870,27 @@ function AdvancedSettingsCard({
         ...Object.keys(settings)
           .filter((key) => !known.has(key))
           .sort(),
-      ]
+      ].filter((key) => advancedSettingHasValue(key, settings[key]))
     : [];
+  if (!settings || !keys.length) return null;
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("advancedSettings")}</CardTitle>
       </CardHeader>
       <CardContent>
-        {settings && keys.length ? (
-          <dl className="divide-y text-sm">
-            {keys.map((key) => (
-              <div
-                className="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0"
-                key={key}
-              >
-                <dt className="min-w-0 text-muted-foreground">
-                  {labels[key] ?? humanizeIdentifier(key)}
-                </dt>
-                <dd className="max-w-[60%] min-w-0 text-right">
-                  <AdvancedSettingValue value={settings[key]} />
-                </dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("advancedSettingsNotCaptured")}
-          </p>
-        )}
+        <dl className="space-y-3 text-sm">
+          {keys.map((key) => (
+            <div key={key}>
+              <dt className="text-xs text-muted-foreground">
+                {labels[key] ?? humanizeIdentifier(key)}
+              </dt>
+              <dd className="mt-0.5 min-w-0">
+                <AdvancedSettingValue value={settings[key]} />
+              </dd>
+            </div>
+          ))}
+        </dl>
       </CardContent>
     </Card>
   );

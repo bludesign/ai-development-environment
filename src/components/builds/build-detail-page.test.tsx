@@ -244,10 +244,25 @@ describe("BuildDetailPage", () => {
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
+    expect(screen.getByText(/Compile Swift sources/).className).toContain(
+      "max-h-[48rem]",
+    );
     const advancedSettingsCard = screen
       .getByText("Advanced settings")
       .closest<HTMLElement>('[data-slot="card"]');
     expect(advancedSettingsCard).not.toBeNull();
+    const overviewCard = screen
+      .getByText("Overview")
+      .closest<HTMLElement>('[data-slot="card"]');
+    const commandCard = screen
+      .getByText("Command summary")
+      .closest<HTMLElement>('[data-slot="card"]');
+    expect(advancedSettingsCard!.parentElement).toBe(
+      overviewCard!.parentElement,
+    );
+    expect(advancedSettingsCard!.parentElement).not.toBe(
+      commandCard!.parentElement,
+    );
     expect(
       within(advancedSettingsCard!).getByText("Skip Updates"),
     ).toBeDefined();
