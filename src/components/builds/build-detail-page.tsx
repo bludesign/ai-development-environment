@@ -69,6 +69,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import { buildStatusVariant } from "./build-format";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogEvent, BuildRecord, BuildReport } from "./types";
@@ -449,15 +450,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             <h1 className="text-2xl font-semibold">
               {configuration?.name ?? build.id}
             </h1>
-            <Badge
-              variant={
-                build.status === "FAILED"
-                  ? "destructive"
-                  : build.status === "SUCCEEDED"
-                    ? "default"
-                    : "secondary"
-              }
-            >
+            <Badge variant={buildStatusVariant(build.status)}>
               {t(`statuses.${build.status}`)}
             </Badge>
             <Badge variant="outline">{t(`actions.${build.action}`)}</Badge>
