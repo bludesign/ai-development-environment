@@ -255,6 +255,21 @@ const buildHistoryItem = {
   durationMs: 1_000,
 };
 
+const coverageHistoryReport = {
+  id: "coverage-report-1",
+  kind: "CODE_COVERAGE",
+  source: "WORKTREE",
+  status: "READY",
+  summary: { lineCoverage: 0.75, changedLineCoverage: 0.5 },
+  data: {},
+  error: null,
+  artifact: null,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString(),
+  finishedAt: new Date(1_000).toISOString(),
+  build: buildHistoryItem,
+};
+
 describe("WorktreeDetailPage", () => {
   beforeEach(() => {
     global.ResizeObserver = ResizeObserverMock;
@@ -276,6 +291,7 @@ describe("WorktreeDetailPage", () => {
         return {
           worktreeOverview: overview({ iosBuildConfigured: true }),
           builds: { items: [buildHistoryItem], nextCursor: null },
+          worktreeCoverageReports: [coverageHistoryReport],
         } as never;
       }
       if (query.includes("InspectWorktree")) {
@@ -356,6 +372,14 @@ describe("WorktreeDetailPage", () => {
         name: "Generate code coverage",
       }),
     ).toBeDefined();
+    const coverageCard =
+      coverageHeader!.closest<HTMLElement>('[data-slot="card"]');
+    expect(coverageCard).not.toBeNull();
+    expect(
+      coverageCard!.querySelectorAll("[data-coverage-indicator]"),
+    ).toHaveLength(2);
+    expect(within(coverageCard!).getByText("75%")).toBeDefined();
+    expect(within(coverageCard!).getByText("50%")).toBeDefined();
     expect(
       screen.getByRole("button", { name: "Open in VS Code" }),
     ).toBeDefined();
