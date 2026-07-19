@@ -452,6 +452,11 @@
     "time": "Time",
     "fetched": "What was fetched",
     "source": "Source",
+    "sources": {
+      "LIVE": "Live",
+      "CACHE": "Cache",
+      "ERROR": "Error"
+    },
     "duration": "Duration",
     "error": "Error",
     "stale": "Stale",
@@ -1688,13 +1693,13 @@
     }
   },
   "status": {
-    "online": "online",
-    "offline": "offline",
-    "queued": "queued",
-    "running": "running",
-    "succeeded": "succeeded",
-    "failed": "failed",
-    "cancelled": "cancelled",
-    "timed_out": "timed out"
+    "online": "Online",
+    "offline": "Offline",
+    "queued": "Queued",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "timed_out": "Timed out"
   }
 }

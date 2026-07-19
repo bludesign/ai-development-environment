@@ -313,7 +313,7 @@ export function JiraCachePage() {
                           </TableCell>
                           <TableCell>
                             <Badge className={sourceClass(call.source)}>
-                              {call.source}
+                              {t(`sources.${call.source}`)}
                               {call.servedStale ? ` · ${t("stale")}` : ""}
                             </Badge>
                           </TableCell>

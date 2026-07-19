@@ -449,6 +449,11 @@
     "time": "Heure",
     "fetched": "Éléments récupérés",
     "source": "Origine",
+    "sources": {
+      "LIVE": "Direct",
+      "CACHE": "Cache",
+      "ERROR": "Erreur"
+    },
     "duration": "Durée",
     "error": "Erreur",
     "stale": "Expiré",
@@ -1685,13 +1690,13 @@
     }
   },
   "status": {
-    "online": "en ligne",
-    "offline": "hors ligne",
-    "queued": "en file",
-    "running": "en cours",
-    "succeeded": "réussie",
-    "failed": "échouée",
-    "cancelled": "annulée",
-    "timed_out": "délai dépassé"
+    "online": "En ligne",
+    "offline": "Hors ligne",
+    "queued": "En file",
+    "running": "En cours",
+    "succeeded": "Réussie",
+    "failed": "Échouée",
+    "cancelled": "Annulée",
+    "timed_out": "Délai dépassé"
   }
 }
