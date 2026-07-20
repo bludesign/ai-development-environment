@@ -1897,6 +1897,7 @@
     "unifiedTitle": "Vista unificada",
     "unifiedDescription": "Revisa registros de consola y eventos de analítica en una única cronología en vivo.",
     "separator": "Separador",
+    "deleteSeparator": "Eliminar separador {name}",
     "settings": "Configuración",
     "refresh": "Actualizar",
     "search": "Buscar telemetría",

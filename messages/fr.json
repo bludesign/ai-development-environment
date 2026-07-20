@@ -1897,6 +1897,7 @@
     "unifiedTitle": "Vue unifiée",
     "unifiedDescription": "Consultez les journaux et événements analytiques dans une seule chronologie en direct.",
     "separator": "Séparateur",
+    "deleteSeparator": "Supprimer le séparateur {name}",
     "settings": "Réglages",
     "refresh": "Actualiser",
     "search": "Rechercher dans la télémétrie",

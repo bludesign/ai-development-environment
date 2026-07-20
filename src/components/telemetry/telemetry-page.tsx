@@ -356,6 +356,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmBefore, setConfirmBefore] = useState(false);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const initializedConfiguration = useRef(false);
 
   const columns =
@@ -681,6 +682,27 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
         item.id === entry.id ? data.updateTelemetryHighlight : item,
       ),
     );
+  };
+
+  const deleteEntry = async (id: string) => {
+    setDeletingIds((current) => new Set(current).add(id));
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteTelemetryEntry($selection: JSON!) {
+          clearSelectedTelemetry(selection: $selection)
+        }`,
+        { selection: { ids: [id] } },
+      );
+      await refresh();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const clearSelected = async () => {
@@ -1125,7 +1147,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                             }
                           />
                         )}
-                        <TableRow className="bg-muted/40 hover:bg-muted/50">
+                        <TableRow className="group bg-muted/40 hover:bg-muted/50">
                           {editMode && (
                             <TableCell className="px-2 py-1.5">
                               <Checkbox
@@ -1153,6 +1175,22 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                               entry.buildId ? (
                                 <Badge>{entry.buildId}</Badge>
                               ) : null}
+                              <Button
+                                aria-label={t("deleteSeparator", {
+                                  name: entry.separatorName || t("separator"),
+                                })}
+                                className="ml-auto size-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                                disabled={deletingIds.has(entry.id)}
+                                onClick={() => void deleteEntry(entry.id)}
+                                size="icon-sm"
+                                variant="ghost"
+                              >
+                                {deletingIds.has(entry.id) ? (
+                                  <Spinner />
+                                ) : (
+                                  <Trash2 className="size-3" />
+                                )}
+                              </Button>
                             </span>
                           </TableCell>
                         </TableRow>
@@ -1190,11 +1228,13 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                         onHighlight={(color) =>
                           void updateHighlight(entry, color)
                         }
+                        onDelete={() => void deleteEntry(entry.id)}
                         onSelected={(value) =>
                           toggleSelected([entry.id], value)
                         }
                         onToggle={() => toggleExpanded(entry.id)}
                         selected={isSelected(entry)}
+                        deleting={deletingIds.has(entry.id)}
                         t={t}
                         timeFormat={timeFormat}
                         view={view}
@@ -1425,6 +1465,7 @@ function TelemetryRow({
   columns,
   expanded,
   selected,
+  deleting,
   editMode,
   locale,
   timeFormat,
@@ -1432,6 +1473,7 @@ function TelemetryRow({
   onToggle,
   onSelected,
   onHighlight,
+  onDelete,
   addColumn,
   filterByValue,
   t,
@@ -1440,6 +1482,7 @@ function TelemetryRow({
   columns: string[];
   expanded: boolean;
   selected: boolean;
+  deleting: boolean;
   editMode: boolean;
   locale: string;
   timeFormat: "12" | "24";
@@ -1447,6 +1490,7 @@ function TelemetryRow({
   onToggle: () => void;
   onSelected: (value: boolean) => void;
   onHighlight: (color: string | null) => void;
+  onDelete: () => void;
   addColumn: (column: string) => void;
   filterByValue: (field: string, value: string) => void;
   t: ReturnType<typeof useTranslations>;
@@ -1554,6 +1598,8 @@ function TelemetryRow({
               filterByValue={filterByValue}
               locale={locale}
               onHighlight={onHighlight}
+              onDelete={onDelete}
+              deleting={deleting}
               t={t}
               timeFormat={timeFormat}
               view={view}
@@ -1630,6 +1676,8 @@ function ExpandedEntry({
   locale,
   timeFormat,
   onHighlight,
+  onDelete,
+  deleting,
   addColumn,
   filterByValue,
   t,
@@ -1639,6 +1687,8 @@ function ExpandedEntry({
   timeFormat: "12" | "24";
   view: TelemetryView;
   onHighlight: (color: string | null) => void;
+  onDelete: () => void;
+  deleting: boolean;
   addColumn: (column: string) => void;
   filterByValue: (field: string, value: string) => void;
   t: ReturnType<typeof useTranslations>;
@@ -1711,37 +1761,51 @@ function ExpandedEntry({
           />
         </div>
       )}
-      <div className="flex items-center gap-2 overflow-x-auto">
-        <span className="shrink-0 text-xs font-medium text-muted-foreground">
-          {t("highlight")}
-        </span>
-        <ToggleGroup
-          className="flex-nowrap justify-start"
-          onValueChange={(value) =>
-            value && onHighlight(value === "none" ? null : value)
-          }
-          size="sm"
-          spacing={1}
-          type="single"
-          value={entry.highlightColor ?? "none"}
-          variant="outline"
-        >
-          <ToggleGroupItem
-            aria-label={t("clearHighlight")}
-            className="size-5 rounded-sm p-0"
-            value="none"
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {t("highlight")}
+          </span>
+          <ToggleGroup
+            className="flex-nowrap justify-start"
+            onValueChange={(value) =>
+              value && onHighlight(value === "none" ? null : value)
+            }
+            size="sm"
+            spacing={1}
+            type="single"
+            value={entry.highlightColor ?? "none"}
+            variant="outline"
           >
-            <X className="size-2.5" />
-          </ToggleGroupItem>
-          {TELEMETRY_COLORS.map((color) => (
             <ToggleGroupItem
-              aria-label={color}
-              className={cn("size-5 rounded-sm p-0", SWATCH_CLASSES[color])}
-              key={color}
-              value={color}
-            />
-          ))}
-        </ToggleGroup>
+              aria-label={t("clearHighlight")}
+              className="size-5 min-w-5 rounded-sm p-0"
+              value="none"
+            >
+              <X className="size-2.5" />
+            </ToggleGroupItem>
+            {TELEMETRY_COLORS.map((color) => (
+              <ToggleGroupItem
+                aria-label={color}
+                className={cn(
+                  "size-5 min-w-5 rounded-sm p-0",
+                  SWATCH_CLASSES[color],
+                )}
+                key={color}
+                value={color}
+              />
+            ))}
+          </ToggleGroup>
+        </div>
+        <Button
+          disabled={deleting}
+          onClick={onDelete}
+          size="sm"
+          variant="destructive"
+        >
+          {deleting ? <Spinner /> : <Trash2 />}
+          {t("delete")}
+        </Button>
       </div>
     </div>
   );
@@ -1803,7 +1867,7 @@ function DictionaryBlock({
                     >
                       <Filter className="size-3" />
                     </Button>
-                    <dt className="min-w-0 break-all font-mono text-muted-foreground">
+                    <dt className="min-w-0 break-all pl-0.5 font-mono text-muted-foreground">
                       {displayKey}
                     </dt>
                     <dd className="min-w-0 break-all pl-2 text-left">{text}</dd>

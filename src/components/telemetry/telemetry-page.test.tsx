@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import type { TelemetryEntryView } from "@/services/telemetry/types";
+
 const request = vi.hoisted(() => vi.fn());
 const subscribe = vi.hoisted(() => vi.fn(() => vi.fn()));
 const copyText = vi.hoisted(() => vi.fn());
@@ -32,7 +34,7 @@ const settings = {
   updatedAt: "2026-07-20T16:00:00.000Z",
 };
 
-const log = {
+const log: TelemetryEntryView = {
   id: "log-1",
   entryType: "CONSOLE",
   clientTime: "2026-07-20T16:30:00.000Z",
@@ -54,7 +56,23 @@ const log = {
   separatorName: null,
 };
 
-let timelineItems = [log];
+const separator: TelemetryEntryView = {
+  ...log,
+  id: "separator-1",
+  entryType: "SEPARATOR",
+  clientTime: "2026-07-20T16:29:00.000Z",
+  receivedAt: "2026-07-20T16:29:00.000Z",
+  message: null,
+  level: null,
+  category: null,
+  deviceIp: null,
+  buildId: null,
+  sessionId: null,
+  separatorKind: "MANUAL",
+  separatorName: "Deploy",
+};
+
+let timelineItems: TelemetryEntryView[] = [log];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -69,6 +87,7 @@ beforeEach(() => {
       operation: string,
       variables?: {
         input?: { columns?: string[]; timeFormat?: "12" | "24" };
+        selection?: { ids?: string[] };
       },
     ) => {
       if (operation.includes("query TelemetryConfiguration")) {
@@ -135,6 +154,11 @@ beforeEach(() => {
           },
         };
       }
+      if (operation.includes("mutation DeleteTelemetryEntry")) {
+        const ids = new Set(variables?.selection?.ids ?? []);
+        timelineItems = timelineItems.filter((item) => !ids.has(item.id));
+        return { clearSelectedTelemetry: ids.size };
+      }
       throw new Error(`Unexpected operation: ${operation}`);
     },
   );
@@ -162,7 +186,10 @@ describe("TelemetryPage", () => {
     expect(
       screen.getByRole("radio", { name: "Clear highlight" }).className,
     ).toContain("size-5");
-    expect(screen.getByText("device.model")).toBeTruthy();
+    expect(
+      screen.getByRole("radio", { name: "Clear highlight" }).className,
+    ).toContain("min-w-5");
+    expect(screen.getByText("device.model").className).toContain("pl-0.5");
     const addColumn = screen.getByRole("button", {
       name: "Add device.model column",
     });
@@ -180,6 +207,30 @@ describe("TelemetryPage", () => {
           name: "Remove device.model column",
         }),
       ).toBeNull(),
+    );
+  });
+
+  test("deletes one expanded entry and a persisted separator", async () => {
+    timelineItems = [log, separator];
+    render(<TelemetryPage view="CONSOLE" />);
+
+    fireEvent.click(await screen.findByText("Checkout completed"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Checkout completed")).toBeNull(),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation DeleteTelemetryEntry"),
+      { selection: { ids: [log.id] } },
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete separator Deploy" }),
+    );
+    await waitFor(() => expect(screen.queryByText("Deploy")).toBeNull());
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation DeleteTelemetryEntry"),
+      { selection: { ids: [separator.id] } },
     );
   });
 

@@ -18,7 +18,9 @@ describe("locale proxy", () => {
     expect(proxy).toBe(mocks.handler);
   });
 
-  test("excludes APIs, Next.js internals, and static files", () => {
-    expect(config.matcher).toEqual(["/((?!api|trpc|_next|_vercel|.*\\..*).*)"]);
+  test("excludes APIs, GraphQL, Next.js internals, and static files", () => {
+    expect(config.matcher).toEqual([
+      "/((?!api|graphql|trpc|_next|_vercel|.*\\..*).*)",
+    ]);
   });
 });

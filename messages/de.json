@@ -1897,6 +1897,7 @@
     "unifiedTitle": "Zusammengeführte Ansicht",
     "unifiedDescription": "Prüfen Sie Konsolenprotokolle und Analyseereignisse in einer gemeinsamen Live-Zeitleiste.",
     "separator": "Trennlinie",
+    "deleteSeparator": "Trennlinie {name} löschen",
     "settings": "Einstellungen",
     "refresh": "Aktualisieren",
     "search": "Telemetrie durchsuchen",

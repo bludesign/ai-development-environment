@@ -2087,6 +2087,7 @@ const mockTranslations = {
     unifiedDescription:
       "Review console logs and analytics events in one live timeline.",
     separator: "Separator",
+    deleteSeparator: "Delete separator {name}",
     settings: "Settings",
     refresh: "Refresh",
     search: "Search telemetry",
