@@ -2208,6 +2208,7 @@ const mockTranslations = {
       "Export every row matching the current search and filters.",
     format: "Format",
     exportFields: "Fields",
+    exportFailed: "Export failed. Try again.",
     columns: {
       time: "Time",
       source: "Source",

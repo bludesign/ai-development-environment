@@ -2016,6 +2016,7 @@
     "exportAllDescription": "Exportez toutes les lignes correspondant à la recherche et aux filtres actuels.",
     "format": "Format du fichier",
     "exportFields": "Champs",
+    "exportFailed": "L’exportation a échoué. Réessayez.",
     "columns": {
       "time": "Heure",
       "source": "Provenance",

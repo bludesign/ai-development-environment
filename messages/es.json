@@ -2016,6 +2016,7 @@
     "exportAllDescription": "Exporta todas las filas que coinciden con la búsqueda y los filtros actuales.",
     "format": "Formato del archivo",
     "exportFields": "Campos",
+    "exportFailed": "La exportación falló. Inténtalo de nuevo.",
     "columns": {
       "time": "Hora",
       "source": "Origen",

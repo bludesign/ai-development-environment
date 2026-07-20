@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins,
   output: "standalone",
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
+  serverExternalPackages: ["pdfkit"],
   async rewrites() {
     return [
       {

@@ -3087,11 +3087,13 @@ function ExportDialog({
   const [format, setFormat] = useState("CSV");
   const [fields, setFields] = useState(columns);
   const [busy, setBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const available = [
     ...new Set([...BASE_COLUMNS[view], ...availableFields, ...columns]),
   ];
   const run = async () => {
     setBusy(true);
+    setExportError(null);
     try {
       const response = await fetch("/api/telemetry/export", {
         method: "POST",
@@ -3124,12 +3126,20 @@ function ExportDialog({
       anchor.click();
       URL.revokeObjectURL(url);
       onOpenChange(false);
+    } catch {
+      setExportError(t("exportFailed"));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setExportError(null);
+        onOpenChange(nextOpen);
+      }}
+      open={open}
+    >
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("exportTitle")}</DialogTitle>
@@ -3140,6 +3150,11 @@ function ExportDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          {exportError && (
+            <Alert variant="destructive">
+              <AlertDescription>{exportError}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label>{t("format")}</Label>
             <Select onValueChange={setFormat} value={format}>

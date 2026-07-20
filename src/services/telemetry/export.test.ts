@@ -2,7 +2,12 @@
 import { describe, expect, test } from "vitest";
 
 import type { TelemetryEntryView } from "./types";
-import { telemetryCsv, telemetryMarkdown, telemetryPdf } from "./export";
+import {
+  telemetryCsv,
+  telemetryFilterLines,
+  telemetryMarkdown,
+  telemetryPdf,
+} from "./export";
 
 const records: TelemetryEntryView[] = [
   {
@@ -63,6 +68,41 @@ describe("telemetry exports", () => {
     const output = telemetryCsv(records, input);
     expect(output).toContain("[Separator] Build · Debug · iPhone");
     expect(output).toContain("'=unsafe spreadsheet value");
+    expect(
+      telemetryCsv(records, {
+        ...input,
+        fields: ["attributes.cache.hit"],
+      }).split("\r\n")[0],
+    ).toBe('"cache.hit"');
+  });
+
+  test("formats filter metadata as readable lines", () => {
+    expect(
+      telemetryFilterLines(
+        JSON.stringify({
+          search: "checkout.*",
+          searchMode: "REGEX",
+          caseSensitive: true,
+          quickFilters: { level: ["error", "warning"] },
+          advancedFilter: {
+            mode: "ALL",
+            conditions: [
+              {
+                field: "category",
+                operator: "CONTAINS",
+                value: "network",
+                sources: ["CONSOLE"],
+              },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([
+      "Search - Regex, case-sensitive: checkout.*",
+      "Quick filter - Level: error, warning",
+      "Advanced filters - match all:",
+      'Category contains "network" [Console only]',
+    ]);
   });
 
   test("formats Markdown with day and separator headings", () => {

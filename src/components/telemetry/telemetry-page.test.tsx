@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -164,7 +165,10 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("TelemetryPage", () => {
   test("renders the console timeline, facets, counts, and expanded dictionaries", async () => {
@@ -366,5 +370,24 @@ describe("TelemetryPage", () => {
     expect((await screen.findByRole("dialog")).textContent).toContain(
       "Manage columns",
     );
+  });
+
+  test("shows export failures inline instead of rejecting the click handler", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { error: { message: "PDF generation failed" } },
+        { status: 500 },
+      ),
+    );
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Export" }));
+
+    expect(
+      await within(dialog).findByText("Export failed. Try again."),
+    ).toBeTruthy();
   });
 });

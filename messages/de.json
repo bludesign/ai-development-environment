@@ -2016,6 +2016,7 @@
     "exportAllDescription": "Alle Zeilen exportieren, die der aktuellen Suche und den Filtern entsprechen.",
     "format": "Dateiformat",
     "exportFields": "Felder",
+    "exportFailed": "Export fehlgeschlagen. Versuchen Sie es erneut.",
     "columns": {
       "time": "Zeit",
       "source": "Quelle",
