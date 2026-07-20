@@ -27,7 +27,11 @@ export async function POST(request: Request): Promise<Response> {
     );
     const origin = resolvePublicOrigin(request.headers)?.origin ?? url.origin;
     return new Response(null, {
-      status: 303,
+      // iOS Profile Service uses a permanent redirect as the browser hand-off
+      // after posting device attributes. A 303 is followed inside the profile
+      // installer, which then tries to parse the HTML landing page as another
+      // profile and reports "Invalid Profile" despite a successful callback.
+      status: 301,
       headers: {
         location: new URL("/api/ios/enrollment-complete", origin).toString(),
         "cache-control": "no-store",

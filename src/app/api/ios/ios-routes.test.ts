@@ -163,7 +163,7 @@ describe("iOS enrollment routes", () => {
       ),
     );
 
-    expect(response.status).toBe(303);
+    expect(response.status).toBe(301);
     expect(response.headers.get("location")).toBe(
       "https://devices.example.com/api/ios/enrollment-complete",
     );
