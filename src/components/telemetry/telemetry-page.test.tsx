@@ -87,8 +87,17 @@ beforeEach(() => {
     (
       operation: string,
       variables?: {
-        input?: { columns?: string[]; timeFormat?: "12" | "24" };
-        selection?: { ids?: string[] };
+        input?: {
+          columns?: string[];
+          timeFormat?: "12" | "24";
+          search?: string | null;
+        };
+        selection?: {
+          ids?: string[];
+          excludedIds?: string[];
+          query?: unknown;
+          includeSeparators?: boolean;
+        };
       },
     ) => {
       if (operation.includes("query TelemetryConfiguration")) {
@@ -159,6 +168,9 @@ beforeEach(() => {
         const ids = new Set(variables?.selection?.ids ?? []);
         timelineItems = timelineItems.filter((item) => !ids.has(item.id));
         return { clearSelectedTelemetry: ids.size };
+      }
+      if (operation.includes("mutation ClearSelectedTelemetry")) {
+        return { clearSelectedTelemetry: 1 };
       }
       throw new Error(`Unexpected operation: ${operation}`);
     },
@@ -322,6 +334,101 @@ describe("TelemetryPage", () => {
             searchMode: "TEXT",
           }),
         }),
+      ),
+    );
+  });
+
+  test("ignores a stale timeline response after the query changes", async () => {
+    const originalRequest = request.getMockImplementation()!;
+    const staleLog = { ...log, id: "stale-log", message: "Stale telemetry" };
+    const currentLog = {
+      ...log,
+      id: "current-log",
+      message: "Current telemetry",
+    };
+    type TimelineResponse = {
+      telemetryTimeline: {
+        items: TelemetryEntryView[];
+        nextCursor: null;
+        matchingCount: number;
+        totalCount: number;
+      };
+    };
+    let resolveStale!: (value: TimelineResponse) => void;
+    const staleResponse = new Promise<TimelineResponse>((resolve) => {
+      resolveStale = resolve;
+    });
+    request.mockImplementation((operation: string, variables?: unknown) => {
+      if (operation.includes("query TelemetryTimeline")) {
+        const search = (
+          variables as { input?: { search?: string | null } } | undefined
+        )?.input?.search;
+        if (search === "stale") return staleResponse;
+        if (search === "current") {
+          return {
+            telemetryTimeline: {
+              items: [currentLog],
+              nextCursor: null,
+              matchingCount: 1,
+              totalCount: 1,
+            },
+          };
+        }
+      }
+      return originalRequest(operation, variables);
+    });
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+    const search = screen.getByRole("textbox", { name: "Search telemetry" });
+
+    fireEvent.change(search, { target: { value: "stale" } });
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query TelemetryTimeline"),
+        expect.objectContaining({
+          input: expect.objectContaining({ search: "stale" }),
+        }),
+      ),
+    );
+    fireEvent.change(search, { target: { value: "current" } });
+    expect(await screen.findByText("Current telemetry")).toBeTruthy();
+    await act(async () => {
+      resolveStale({
+        telemetryTimeline: {
+          items: [staleLog],
+          nextCursor: null,
+          matchingCount: 1,
+          totalCount: 1,
+        },
+      });
+    });
+
+    expect(screen.queryByText("Stale telemetry")).toBeNull();
+    expect(screen.getByText("Current telemetry")).toBeTruthy();
+  });
+
+  test("keeps query-wide selection when one loaded row is excluded", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select all matching rows" }),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select row" }));
+
+    expect(screen.getByText("All matching rows selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear selected" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation ClearSelectedTelemetry"),
+        {
+          selection: expect.objectContaining({
+            excludedIds: [log.id],
+            includeSeparators: true,
+            query: expect.objectContaining({ view: "CONSOLE" }),
+          }),
+        },
       ),
     );
   });

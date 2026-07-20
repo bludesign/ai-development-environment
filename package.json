@@ -55,6 +55,8 @@
     "upgrade:check": "ncu"
   },
   "dependencies": {
+    "@expo-google-fonts/noto-emoji": "^0.4.6",
+    "@fontpkg/unifont": "^15.0.1",
     "@ai-development-environment/agent-contract": "*",
     "@apollo/server": "5.5.1",
     "@apollo/subgraph": "2.14.2",
@@ -88,6 +90,7 @@
     "pdfkit": "^0.19.1",
     "pkijs": "^3.3.3",
     "quickjs-emscripten": "^0.32.0",
+    "re2-wasm": "^1.0.2",
     "radix-ui": "1.6.2",
     "react": "19.2.7",
     "react-day-picker": "^10.0.1",

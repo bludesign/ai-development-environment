@@ -140,4 +140,24 @@ describe("telemetry matching", () => {
       validateTelemetryQuery(query({ search: "x".repeat(1_025) })),
     ).toThrow("1024");
   });
+
+  test("evaluates catastrophic patterns in the linear-time regex engine", () => {
+    expect(
+      matchesTelemetryQuery(
+        { ...entry, message: `${"a".repeat(64 * 1024)}!` },
+        query({
+          advancedFilter: {
+            mode: "ALL",
+            conditions: [
+              {
+                field: "message",
+                operator: "MATCHES_REGEX",
+                value: "^(a+)+$",
+              },
+            ],
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
 });

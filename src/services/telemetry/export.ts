@@ -1,6 +1,8 @@
+import { join } from "node:path";
+
 import PDFDocument from "pdfkit";
 
-import { telemetryFields } from "./matching";
+import { telemetryFields } from "./fields";
 import {
   DEFAULT_TELEMETRY_COLUMNS,
   type TelemetryEntryView,
@@ -18,6 +20,171 @@ export type TelemetryExportInput = {
   timeFormat?: "12" | "24" | null;
   filterSummary?: string | null;
 };
+
+const PDF_FONT = "TelemetryUnicode";
+const PDF_EMOJI_FONT = "TelemetryEmoji";
+const PDF_FONT_PATH = join(
+  process.cwd(),
+  "node_modules",
+  "@fontpkg",
+  "unifont",
+  "unifont-15.0.01.ttf",
+);
+const PDF_EMOJI_FONT_PATH = join(
+  process.cwd(),
+  "node_modules",
+  "@expo-google-fonts",
+  "noto-emoji",
+  "400Regular",
+  "NotoEmoji_400Regular.ttf",
+);
+const MAX_PDF_CELL_GRAPHEMES = 4_000;
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
+const EMOJI_GRAPHEME =
+  /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3|\ufe0f/u;
+
+function truncatePdfCell(value: string): string {
+  let output = "";
+  let count = 0;
+  for (const { segment } of graphemeSegmenter.segment(value)) {
+    if (count === MAX_PDF_CELL_GRAPHEMES) return `${output}…`;
+    output += segment;
+    count += 1;
+  }
+  return output;
+}
+
+type PdfGlyph = {
+  emoji: boolean;
+  value: string;
+  width: number;
+};
+
+type PdfLine = {
+  glyphs: PdfGlyph[];
+  width: number;
+};
+
+function pdfGlyph(document: PDFKit.PDFDocument, value: string): PdfGlyph {
+  const emoji = EMOJI_GRAPHEME.test(value);
+  document.font(emoji ? PDF_EMOJI_FONT : PDF_FONT);
+  return { emoji, value, width: document.widthOfString(value) };
+}
+
+function pdfLineHeight(document: PDFKit.PDFDocument): number {
+  document.font(PDF_FONT);
+  const textHeight = document.currentLineHeight(true);
+  document.font(PDF_EMOJI_FONT);
+  const emojiHeight = document.currentLineHeight(true);
+  return Math.max(textHeight, emojiHeight);
+}
+
+function layoutPdfText(
+  document: PDFKit.PDFDocument,
+  value: string,
+  width: number,
+  maxLines = Number.POSITIVE_INFINITY,
+): PdfLine[] {
+  const availableWidth = Math.max(1, width);
+  const lines: PdfLine[] = [{ glyphs: [], width: 0 }];
+  let truncated = false;
+
+  for (const { segment } of graphemeSegmenter.segment(value)) {
+    if (/^[\r\n]+$/.test(segment)) {
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+      lines.push({ glyphs: [], width: 0 });
+      continue;
+    }
+
+    const glyph = pdfGlyph(document, segment);
+    let line = lines.at(-1)!;
+    if (line.glyphs.length && line.width + glyph.width > availableWidth) {
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+      line = { glyphs: [], width: 0 };
+      lines.push(line);
+    }
+    line.glyphs.push(glyph);
+    line.width += glyph.width;
+  }
+
+  if (truncated) {
+    const line = lines.at(-1)!;
+    const ellipsis = pdfGlyph(document, "…");
+    while (line.glyphs.length && line.width + ellipsis.width > availableWidth) {
+      line.width -= line.glyphs.pop()!.width;
+    }
+    line.glyphs.push(ellipsis);
+    line.width += ellipsis.width;
+  }
+
+  return lines;
+}
+
+function pdfTextHeight(
+  document: PDFKit.PDFDocument,
+  value: string,
+  width: number,
+): number {
+  const lineHeight = pdfLineHeight(document);
+  return layoutPdfText(document, value, width).length * lineHeight;
+}
+
+function writePdfText(
+  document: PDFKit.PDFDocument,
+  value: string,
+  x: number,
+  y: number,
+  options: PDFKit.Mixins.TextOptions,
+): void {
+  const width = Math.max(
+    1,
+    options.width ?? document.page.width - x - document.page.margins.right,
+  );
+  const lineHeight = pdfLineHeight(document);
+  const maxLines =
+    options.lineBreak === false
+      ? 1
+      : options.height
+        ? Math.max(1, Math.floor(options.height / lineHeight))
+        : Number.POSITIVE_INFINITY;
+  const lines = layoutPdfText(document, value, width, maxLines);
+
+  lines.forEach((line, lineIndex) => {
+    const lineX =
+      options.align === "center"
+        ? x + (width - line.width) / 2
+        : options.align === "right"
+          ? x + width - line.width
+          : x;
+    let runX = lineX;
+    const runs: Array<{ emoji: boolean; value: string; width: number }> = [];
+    for (const glyph of line.glyphs) {
+      const last = runs.at(-1);
+      if (last?.emoji === glyph.emoji) {
+        last.value += glyph.value;
+        last.width += glyph.width;
+      } else {
+        runs.push({ ...glyph });
+      }
+    }
+    for (const run of runs) {
+      document
+        .font(run.emoji ? PDF_EMOJI_FONT : PDF_FONT)
+        .text(run.value, runX, y + lineIndex * lineHeight, {
+          lineBreak: false,
+        });
+      runX += run.width;
+    }
+  });
+}
 
 const LABELS: Record<string, string> = {
   time: "Time",
@@ -345,6 +512,8 @@ export async function telemetryPdf(
     margin: 32,
     bufferPages: true,
   });
+  document.registerFont(PDF_FONT, PDF_FONT_PATH);
+  document.registerFont(PDF_EMOJI_FONT, PDF_EMOJI_FONT_PATH);
   const chunks: Uint8Array[] = [];
   document.on("data", (chunk: Uint8Array) => chunks.push(chunk));
   const completed = new Promise<Uint8Array>((resolve, reject) => {
@@ -382,10 +551,10 @@ export async function telemetryPdf(
     return x;
   });
   const header = () => {
-    document.font("Helvetica-Bold").fontSize(8).fillColor("#111111");
+    document.font(PDF_FONT).fontSize(8).fillColor("#111111");
     const y = document.y;
     fields.forEach((field, index) => {
-      document.text(label(field), columnXs[index], y, {
+      writePdfText(document, label(field), columnXs[index]!, y, {
         width: columnWidths[index] - 6,
         lineBreak: false,
         ellipsis: true,
@@ -402,16 +571,13 @@ export async function telemetryPdf(
   };
   const timelineDivider = (text: string) => {
     const textY = document.y + 5;
-    document
-      .font("Helvetica-Bold")
-      .fontSize(8)
-      .fillColor("#3f3f46")
-      .text(text, document.page.margins.left, textY, {
-        width,
-        align: "center",
-        lineBreak: false,
-        ellipsis: true,
-      });
+    document.fontSize(8).fillColor("#3f3f46");
+    writePdfText(document, text, document.page.margins.left, textY, {
+      width,
+      align: "center",
+      lineBreak: false,
+      ellipsis: true,
+    });
     const dividerY = textY + 14;
     document
       .save()
@@ -423,9 +589,9 @@ export async function telemetryPdf(
     document.x = document.page.margins.left;
     document.y = dividerY + 7;
   };
-  document.font("Helvetica-Bold").fontSize(16).text("Observability export");
+  document.font(PDF_FONT).fontSize(16).text("Observability export");
   document
-    .font("Helvetica")
+    .font(PDF_FONT)
     .fontSize(8)
     .fillColor("#555555")
     .text(
@@ -446,16 +612,17 @@ export async function telemetryPdf(
     .fillAndStroke("#f7f7f8", "#dddddd")
     .restore();
   document
-    .font("Helvetica-Bold")
+    .font(PDF_FONT)
     .fontSize(8)
     .fillColor("#333333")
     .text("Filters", document.page.margins.left + 8, filterY + 6, {
       width: width - 16,
       lineBreak: false,
     });
-  document.font("Helvetica").fontSize(7).fillColor("#555555");
+  document.font(PDF_FONT).fontSize(7).fillColor("#555555");
   filterLines.forEach((line, index) => {
-    document.text(
+    writePdfText(
+      document,
       `- ${line}`,
       document.page.margins.left + 8,
       filterY + 18 + index * 10,
@@ -477,22 +644,30 @@ export async function telemetryPdf(
       entry.entryType === "SEPARATOR"
         ? (entry.separatorName || "Separator").replace(/[·—–‑]/g, "-")
         : null;
-    document.font("Helvetica").fontSize(7);
+    document.font(PDF_FONT).fontSize(7);
     const values = separator
       ? []
-      : fields.map((field) => fieldValue(entry, field, input));
-    const rowHeight = separator
+      : fields.map((field) => truncatePdfCell(fieldValue(entry, field, input)));
+    const naturalRowHeight = separator
       ? 0
       : Math.max(
           14,
           ...values.map((value, index) =>
-            document.heightOfString(value || " ", {
-              width: columnWidths[index] - 6,
-            }),
+            pdfTextHeight(document, value || " ", columnWidths[index] - 6),
           ),
         ) + 4;
+    const freshRowCapacity =
+      document.page.height -
+      60 -
+      document.page.margins.top -
+      22 -
+      (dayChanged ? 26 : 0);
+    const boundedRowHeight = Math.min(
+      naturalRowHeight,
+      Math.max(14, freshRowCapacity),
+    );
     const requiredHeight =
-      (dayChanged ? 26 : 0) + (separator ? 26 : rowHeight + 3);
+      (dayChanged ? 26 : 0) + (separator ? 26 : boundedRowHeight + 3);
     if (document.y + requiredHeight > document.page.height - 60) {
       document.addPage();
       header();
@@ -506,10 +681,16 @@ export async function telemetryPdf(
       continue;
     }
     const y = document.y;
-    document.font("Helvetica").fontSize(7).fillColor("#111111");
+    const rowHeight = Math.min(
+      naturalRowHeight,
+      Math.max(14, document.page.height - 60 - y),
+    );
+    document.font(PDF_FONT).fontSize(7).fillColor("#111111");
     values.forEach((value, index) => {
-      document.text(value, columnXs[index], y, {
+      const height = Math.max(1, rowHeight - 4);
+      writePdfText(document, value, columnXs[index]!, y, {
         width: columnWidths[index] - 6,
+        height,
       });
     });
     document.x = document.page.margins.left;
@@ -525,7 +706,7 @@ export async function telemetryPdf(
   for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     document.switchToPage(index);
     document
-      .font("Helvetica")
+      .font(PDF_FONT)
       .fontSize(7)
       .fillColor("#666666")
       .text(

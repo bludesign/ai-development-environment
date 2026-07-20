@@ -1,118 +1,31 @@
+import { RE2 } from "re2-wasm";
+
+import {
+  telemetryDisplay,
+  telemetryFields,
+  telemetrySearchText,
+} from "./fields";
 import {
   TELEMETRY_FILTER_OPERATORS,
   TELEMETRY_SEARCH_MODES,
   type TelemetryEntryView,
   type TelemetryFilterCondition,
   type TelemetryFilterDefinition,
-  type TelemetryJsonObject,
   type TelemetryQueryInput,
   type TelemetrySearchMode,
   type TelemetryView,
 } from "./types";
 
-const SAFE_SEGMENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+export {
+  flattenTelemetryObject,
+  stableJson,
+  telemetryFields,
+  telemetrySearchText,
+} from "./fields";
+
 const MAX_PATTERN_LENGTH = 1024;
-
-function stable(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export function stableJson(value: unknown): string {
-  return stable(value);
-}
-
-function segment(key: string): string {
-  return SAFE_SEGMENT.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
-}
-
-export function flattenTelemetryObject(
-  prefix: string,
-  value: TelemetryJsonObject,
-): Record<string, unknown> {
-  const output: Record<string, unknown> = {};
-  const visit = (path: string, item: unknown) => {
-    if (
-      item &&
-      typeof item === "object" &&
-      !Array.isArray(item) &&
-      Object.getPrototypeOf(item) === Object.prototype
-    ) {
-      const entries = Object.entries(item as Record<string, unknown>);
-      if (entries.length === 0) output[path] = item;
-      else
-        for (const [key, nested] of entries)
-          visit(`${path}${segment(key)}`, nested);
-    } else {
-      output[path] = item;
-    }
-  };
-  for (const [key, item] of Object.entries(value))
-    visit(`${prefix}${segment(key)}`, item);
-  return output;
-}
-
-export function telemetryFields(
-  entry: TelemetryEntryView,
-): Record<string, unknown> {
-  const parameters = {
-    default: entry.defaultParameters,
-    additional: entry.additionalParameters,
-  };
-  const fields: Record<string, unknown> = {
-    source: entry.entryType,
-    time: entry.clientTime,
-    receivedAt: entry.receivedAt,
-    deviceIp: entry.deviceIp,
-    message: entry.message,
-    level: entry.level,
-    category: entry.category,
-    eventName: entry.eventName,
-    eventKind: entry.eventKind,
-    levelKind: entry.level ?? entry.eventKind,
-    screenName: entry.screenName,
-    buildId: entry.buildId,
-    sessionId: entry.sessionId,
-    attributes: entry.attributes,
-    defaultParameters: entry.defaultParameters,
-    additionalParameters: entry.additionalParameters,
-    parameters,
-    detail:
-      entry.entryType === "CONSOLE"
-        ? entry.message
-        : `${entry.eventName ?? ""}${entry.screenName ? ` (${entry.screenName})` : ""}`,
-  };
-  return {
-    ...fields,
-    ...flattenTelemetryObject("attributes", entry.attributes),
-    ...flattenTelemetryObject("defaultParameters", entry.defaultParameters),
-    ...flattenTelemetryObject(
-      "additionalParameters",
-      entry.additionalParameters,
-    ),
-  };
-}
-
-function display(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
-  return stableJson(value);
-}
-
-export function telemetrySearchText(entry: TelemetryEntryView): string {
-  return Object.entries(telemetryFields(entry))
-    .flatMap(([key, value]) => [key, display(value)])
-    .join("\n");
-}
+const MAX_MATCHER_CACHE_SIZE = 100;
+const matcherCache = new Map<string, (value: string) => boolean>();
 
 function assertPattern(pattern: string): void {
   if (pattern.length > MAX_PATTERN_LENGTH) {
@@ -147,14 +60,26 @@ function matcher(
   assertPattern(pattern);
   if (!TELEMETRY_SEARCH_MODES.includes(mode))
     throw new Error("Unknown search mode");
+  const cacheKey = `${mode}\u0000${caseSensitive ? "1" : "0"}\u0000${pattern}`;
+  const cached = matcherCache.get(cacheKey);
+  if (cached) return cached;
+  let match: (value: string) => boolean;
   if (mode === "TEXT") {
     const needle = caseSensitive ? pattern : pattern.toLocaleLowerCase();
-    return (value) =>
+    match = (value) =>
       (caseSensitive ? value : value.toLocaleLowerCase()).includes(needle);
+  } else {
+    const source = mode === "GLOB" ? `^${globSource(pattern)}$` : pattern;
+    const flags = caseSensitive ? "su" : "isu";
+    const regex =
+      mode === "REGEX" ? new RE2(source, flags) : new RegExp(source, flags);
+    match = (value) => regex.test(value);
   }
-  const source = mode === "GLOB" ? `^${globSource(pattern)}$` : pattern;
-  const regex = new RegExp(source, caseSensitive ? "su" : "isu");
-  return (value) => regex.test(value);
+  matcherCache.set(cacheKey, match);
+  if (matcherCache.size > MAX_MATCHER_CACHE_SIZE) {
+    matcherCache.delete(matcherCache.keys().next().value!);
+  }
+  return match;
 }
 
 function empty(value: unknown): boolean {
@@ -189,7 +114,7 @@ function matchesCondition(
   const raw = fields[condition.field];
   if (condition.operator === "IS_EMPTY") return empty(raw);
   if (condition.operator === "IS_NOT_EMPTY") return !empty(raw);
-  const value = display(raw);
+  const value = telemetryDisplay(raw);
   const expected = condition.value ?? "";
   const sensitive = condition.caseSensitive === true;
   const actualComparison = sensitive ? value : value.toLocaleLowerCase();
@@ -236,7 +161,7 @@ function matchesQuick(
   const fields = telemetryFields(entry);
   return Object.entries(quick).every(([field, selected]) => {
     if (selected.length === 0) return true;
-    return selected.includes(display(fields[field]));
+    return selected.includes(telemetryDisplay(fields[field]));
   });
 }
 

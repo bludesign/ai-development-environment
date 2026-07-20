@@ -117,4 +117,22 @@ describe("telemetry exports", () => {
     expect(new TextDecoder().decode(output.slice(0, 5))).toBe("%PDF-");
     expect(output.byteLength).toBeGreaterThan(1_000);
   });
+
+  test("embeds Unicode telemetry and bounds an oversized PDF row", async () => {
+    const output = await telemetryPdf(
+      [
+        {
+          ...records[1]!,
+          message: "測試 telemetry 🚀 ".repeat(10_000),
+        },
+      ],
+      { ...input, format: "PDF" },
+    );
+    const pdfSource = Buffer.from(output).toString("latin1");
+    const pageCount = pdfSource.match(/\/Type\s*\/Page\b/g)?.length ?? 0;
+
+    expect(pdfSource).toContain("/FontFile");
+    expect(pageCount).toBeLessThanOrEqual(2);
+    expect(output.byteLength).toBeGreaterThan(1_000);
+  });
 });

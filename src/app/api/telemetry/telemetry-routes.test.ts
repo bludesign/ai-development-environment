@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   ingestConsole: vi.fn(),
   ingestAnalytics: vi.fn(),
+  exportEntries: vi.fn(),
 }));
 
 vi.mock("@/services/server-services", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/services/server-services", () => ({
 
 import { POST as consolePost } from "./console-logs/route";
 import { POST as analyticsPost } from "./analytics-events/route";
+import { POST as exportPost } from "./export/route";
 
 const consoleLog = {
   message: "Ready",
@@ -48,6 +50,7 @@ beforeEach(() => {
     ],
   });
   mocks.ingestAnalytics.mockResolvedValue({ collected: false, items: [] });
+  mocks.exportEntries.mockResolvedValue([]);
 });
 
 describe("telemetry REST routes", () => {
@@ -122,5 +125,22 @@ describe("telemetry REST routes", () => {
     );
     expect(oversized.status).toBe(413);
     expect(mocks.ingestConsole).not.toHaveBeenCalled();
+  });
+
+  test("rejects an oversized streamed export body without Content-Length", async () => {
+    const request = new Request("http://localhost/api/telemetry/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: " ".repeat(256 * 1024 + 1),
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await exportPost(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "PAYLOAD_TOO_LARGE" },
+    });
+    expect(mocks.exportEntries).not.toHaveBeenCalled();
   });
 });

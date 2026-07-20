@@ -1,16 +1,21 @@
 import { getServerServices } from "@/services/server-services";
 import {
   TELEMETRY_VIEWS,
+  type TelemetryQueryInput,
+  type TelemetryView,
+} from "@/services/telemetry";
+import {
   telemetryCsv,
   telemetryMarkdown,
   telemetryPdf,
   type TelemetryExportFormat,
-  type TelemetryQueryInput,
-  type TelemetryView,
-} from "@/services/telemetry";
+} from "@/services/telemetry/export";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+const MAX_EXPORT_BODY_BYTES = 256 * 1024;
+
+class ExportPayloadTooLargeError extends Error {}
 
 type ExportRequest = {
   format?: unknown;
@@ -35,11 +40,41 @@ function bad(message: string, status = 400) {
   );
 }
 
+async function readLimitedJson(request: Request): Promise<unknown> {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_EXPORT_BODY_BYTES) {
+    throw new ExportPayloadTooLargeError();
+  }
+  if (!request.body) throw new Error("Export request body is required");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_EXPORT_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new ExportPayloadTooLargeError();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
-    const length = Number(request.headers.get("content-length") ?? "0");
-    if (length > 256 * 1024) return bad("Export request is too large", 413);
-    const body = (await request.json()) as ExportRequest;
+    const body = (await readLimitedJson(request)) as ExportRequest;
     if (!body || typeof body !== "object")
       return bad("Export request must be an object");
     if (!["CSV", "MARKDOWN", "PDF"].includes(String(body.format)))
@@ -120,6 +155,9 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
   } catch (error) {
+    if (error instanceof ExportPayloadTooLargeError) {
+      return bad("Export request is too large", 413);
+    }
     console.error("Telemetry export failed:", error);
     return Response.json(
       {

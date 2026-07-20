@@ -22,8 +22,14 @@ const agentWebSocketPort = process.env.AGENT_WS_PORT ?? "3091";
 const nextConfig: NextConfig = {
   allowedDevOrigins,
   output: "standalone",
+  outputFileTracingIncludes: {
+    "/api/telemetry/export": [
+      "node_modules/@expo-google-fonts/noto-emoji/400Regular/NotoEmoji_400Regular.ttf",
+      "node_modules/@fontpkg/unifont/unifont-15.0.01.ttf",
+    ],
+  },
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
-  serverExternalPackages: ["pdfkit"],
+  serverExternalPackages: ["pdfkit", "re2-wasm"],
   async rewrites() {
     return [
       {

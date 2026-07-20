@@ -216,7 +216,9 @@ function cursor(value: string | null | undefined): Cursor | null {
       typeof parsed === "object" &&
       typeof (parsed as Cursor).clientTime === "string" &&
       typeof (parsed as Cursor).receivedAt === "string" &&
-      typeof (parsed as Cursor).id === "string"
+      typeof (parsed as Cursor).id === "string" &&
+      Number.isFinite(Date.parse((parsed as Cursor).clientTime)) &&
+      Number.isFinite(Date.parse((parsed as Cursor).receivedAt))
     ) {
       return parsed as Cursor;
     }
@@ -224,6 +226,18 @@ function cursor(value: string | null | undefined): Cursor | null {
     // Mapped to a stable validation error below.
   }
   throw new Error("Invalid telemetry cursor");
+}
+
+function olderThanCursorWhere(value: Cursor): Record<string, unknown> {
+  const clientTime = new Date(value.clientTime);
+  const receivedAt = new Date(value.receivedAt);
+  return {
+    OR: [
+      { clientTime: { lt: clientTime } },
+      { clientTime, receivedAt: { lt: receivedAt } },
+      { clientTime, receivedAt, id: { lt: value.id } },
+    ],
+  };
 }
 
 function encodeCursor(entry: TelemetryEntryView): string {
@@ -254,6 +268,73 @@ function hasActiveFilters(input: TelemetryQueryInput): boolean {
 
 function sourceWhere(view: TelemetryView) {
   return { entryType: { in: sourcesForView(view) } };
+}
+
+const DATABASE_FIELDS: Record<string, { name: string; nullable: boolean }> = {
+  source: { name: "entryType", nullable: false },
+  deviceIp: { name: "deviceIp", nullable: true },
+  message: { name: "message", nullable: true },
+  level: { name: "level", nullable: true },
+  category: { name: "category", nullable: true },
+  eventName: { name: "eventName", nullable: true },
+  eventKind: { name: "eventKind", nullable: true },
+  screenName: { name: "screenName", nullable: true },
+  buildId: { name: "buildId", nullable: true },
+  sessionId: { name: "sessionId", nullable: true },
+};
+
+function databaseValueFilter(
+  field: { name: string; nullable: boolean },
+  values: string[],
+): Record<string, unknown> | null {
+  const unique = [...new Set(values)];
+  const nonEmpty = unique.filter(Boolean);
+  const alternatives: Record<string, unknown>[] = [];
+  if (nonEmpty.length) {
+    alternatives.push({ [field.name]: { in: nonEmpty } });
+  }
+  if (unique.includes("")) {
+    alternatives.push({ [field.name]: "" });
+    if (field.nullable) alternatives.push({ [field.name]: null });
+  }
+  if (alternatives.length === 0) return null;
+  return alternatives.length === 1 ? alternatives[0]! : { OR: alternatives };
+}
+
+function databasePrefilter(
+  input: TelemetryQueryInput,
+): Record<string, unknown> | null {
+  const conditions: Record<string, unknown>[] = [];
+  if (
+    input.search &&
+    (input.searchMode ?? "TEXT") === "TEXT" &&
+    input.caseSensitive === true
+  ) {
+    conditions.push({ searchText: { contains: input.search } });
+  }
+  for (const [name, values] of Object.entries(input.quickFilters ?? {})) {
+    if (!values.length) continue;
+    const field = DATABASE_FIELDS[name];
+    if (!field) continue;
+    const condition = databaseValueFilter(field, values);
+    if (condition) conditions.push(condition);
+  }
+  if (input.advancedFilter?.mode === "ALL") {
+    for (const condition of input.advancedFilter.conditions) {
+      if (condition.sources?.length || condition.caseSensitive !== true)
+        continue;
+      const field = DATABASE_FIELDS[condition.field];
+      const value = condition.value ?? "";
+      if (!field || !value) continue;
+      if (condition.operator === "IS") {
+        conditions.push({ [field.name]: value });
+      } else if (condition.operator === "CONTAINS") {
+        conditions.push({ [field.name]: { contains: value } });
+      }
+    }
+  }
+  if (!conditions.length) return null;
+  return conditions.length === 1 ? conditions[0]! : { AND: conditions };
 }
 
 function serializeColumns(columns: string[]): string {
@@ -505,7 +586,10 @@ export class TelemetryService {
 
   private async scan(
     where: Record<string, unknown>,
-    visit: (entry: TelemetryEntryView) => void | Promise<void>,
+    visit: (
+      entry: TelemetryEntryView,
+    ) => void | boolean | Promise<void | boolean>,
+    batchSize = SCAN_SIZE,
   ): Promise<void> {
     const prisma = await getPrismaClient();
     let last: RawEntry | null = null;
@@ -537,10 +621,12 @@ export class TelemetryService {
           { receivedAt: "desc" },
           { id: "desc" },
         ],
-        take: SCAN_SIZE,
+        take: batchSize,
       });
-      for (const entry of batch) await visit(viewEntry(entry));
-      if (batch.length < SCAN_SIZE) break;
+      for (const entry of batch) {
+        if ((await visit(viewEntry(entry))) === false) return;
+      }
+      if (batch.length < batchSize) break;
       last = batch.at(-1)!;
     }
   }
@@ -557,6 +643,51 @@ export class TelemetryService {
     const totalCount = await prisma.telemetryEntry.count({
       where: sourceWhere(view),
     });
+    const filtersActive = hasActiveFilters(input);
+    if (!filtersActive) {
+      const items: TelemetryEntryView[] = [];
+      let collected = 0;
+      let hasMore = false;
+      let lastEntry: TelemetryEntryView | null = null;
+      let segmentHasCollectedEntry = false;
+      const entryTypes = {
+        entryType: { in: [...sourcesForView(view), "SEPARATOR"] },
+      };
+      await this.scan(
+        after ? { AND: [entryTypes, olderThanCursorWhere(after)] } : entryTypes,
+        (entry) => {
+          if (entry.entryType === "SEPARATOR") {
+            if (segmentHasCollectedEntry) items.push(entry);
+            segmentHasCollectedEntry = false;
+            return;
+          }
+          if (collected < first) {
+            items.push(entry);
+            collected += 1;
+            lastEntry = entry;
+            segmentHasCollectedEntry = true;
+            return;
+          }
+          hasMore = true;
+          return false;
+        },
+        Math.min(SCAN_SIZE, first + 1),
+      );
+      if (!lastEntry) {
+        return {
+          items: [],
+          nextCursor: null,
+          matchingCount: totalCount,
+          totalCount,
+        };
+      }
+      return {
+        items,
+        nextCursor: hasMore ? encodeCursor(lastEntry) : null,
+        matchingCount: totalCount,
+        totalCount,
+      };
+    }
     const items: TelemetryEntryView[] = [];
     let matchingCount = 0;
     let hasMore = false;
@@ -564,9 +695,16 @@ export class TelemetryService {
     let lastEntry: TelemetryEntryView | null = null;
     let segmentHasCollectedEntry = false;
     let segmentHasOverflowEntry = false;
-    const filtersActive = hasActiveFilters(input);
+    const prefilter = databasePrefilter(input);
     await this.scan(
-      { entryType: { in: [...sourcesForView(view), "SEPARATOR"] } },
+      prefilter
+        ? {
+            OR: [
+              { entryType: "SEPARATOR" },
+              { AND: [sourceWhere(view), prefilter] },
+            ],
+          }
+        : { entryType: { in: [...sourcesForView(view), "SEPARATOR"] } },
       (entry) => {
         if (entry.entryType === "SEPARATOR") {
           const afterCursor = !after || olderThan(entry, after);

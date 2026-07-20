@@ -96,7 +96,7 @@ import { cn } from "@/lib/utils";
 import {
   flattenTelemetryObject,
   telemetryFields,
-} from "@/services/telemetry/matching";
+} from "@/services/telemetry/fields";
 import {
   DEFAULT_TELEMETRY_COLUMNS,
   TELEMETRY_COLORS,
@@ -362,6 +362,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const [arrivingIds, setArrivingIds] = useState<Set<string>>(new Set());
   const initializedConfiguration = useRef(false);
   const arrivalTimers = useRef<Map<string, number>>(new Map());
+  const timelineRequestGeneration = useRef(0);
 
   const columns =
     configuration?.viewSettings.columns ?? DEFAULT_TELEMETRY_COLUMNS[view];
@@ -450,7 +451,12 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   }, []);
 
   const loadTimeline = useCallback(
-    async (append = false, reconcile = false) => {
+    async (
+      append = false,
+      reconcile = false,
+      generation = ++timelineRequestGeneration.current,
+    ) => {
+      if (generation !== timelineRequestGeneration.current) return;
       if (append) setLoadingMore(true);
       else setLoading(true);
       try {
@@ -466,6 +472,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
           }`,
           { input },
         );
+        if (generation !== timelineRequestGeneration.current) return;
         const page = data.telemetryTimeline;
         setEntries((current) => {
           if (append) {
@@ -493,10 +500,14 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
         setTotalCount(page.totalCount);
         setError(null);
       } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
+        if (generation === timelineRequestGeneration.current) {
+          setError(value instanceof Error ? value.message : String(value));
+        }
       } finally {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+        if (generation === timelineRequestGeneration.current) {
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
     },
     [nextCursor, queryInput],
@@ -512,7 +523,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   }, [loadConfiguration]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadTimeline(false), 180);
+    const generation = ++timelineRequestGeneration.current;
+    const timer = window.setTimeout(
+      () => void loadTimeline(false, false, generation),
+      180,
+    );
     return () => window.clearTimeout(timer);
   }, [queryInput]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -601,7 +616,6 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   };
 
   const toggleSelected = (ids: string[], checked: boolean) => {
-    setSelectAll(false);
     setSelected((current) => {
       const next = new Set(current);
       for (const id of ids) {
@@ -758,7 +772,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       }`,
       {
         selection: selectAll
-          ? { query: queryInput, includeSeparators: true }
+          ? {
+              query: queryInput,
+              includeSeparators: true,
+              excludedIds: [...excluded],
+            }
           : selectionRanges.length
             ? rangedSelection
             : { ids: [...selected] },
@@ -807,7 +825,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
         : "unifiedDescription";
   const loadedSelectedCount = entries.filter(isSelected).length;
   const exportSelection: TelemetrySelection | null = selectAll
-    ? { query: queryInput, includeSeparators: true }
+    ? {
+        query: queryInput,
+        includeSeparators: true,
+        excludedIds: [...excluded],
+      }
     : selectionRanges.length
       ? {
           ids: [...selected],
@@ -1079,9 +1101,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                     <Checkbox
                       aria-label={t("selectAll")}
                       checked={
-                        selectAll ||
-                        (entries.length > 0 &&
-                          entries.every((entry) => isSelected(entry)))
+                        selectAll && excluded.size
+                          ? "indeterminate"
+                          : selectAll ||
+                            (entries.length > 0 &&
+                              entries.every((entry) => isSelected(entry)))
                       }
                       onCheckedChange={(checked) => {
                         const value = Boolean(checked);
