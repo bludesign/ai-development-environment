@@ -145,9 +145,9 @@ beforeEach(() => {
         signingAgents: [{ supported: true }],
         signingCertificates: [
           {
-            sha1: "CERT123",
-            name: "Apple Development: Example",
-            teamId: "TEAM123",
+            sha1: "API-CERT",
+            name: "Apple Development: Created via API (API123)",
+            teamId: "API123",
             hasPrivateKey: true,
             installedAgents: [{ id: "agent-1" }],
           },
@@ -162,7 +162,19 @@ beforeEach(() => {
             platforms: ["iOS"],
             expiresAt: "2030-01-01T00:00:00.000Z",
             expired: false,
-            certificateSha1s: ["CERT123"],
+            certificateSha1s: ["API-CERT"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+          {
+            uuid: "PROFILE-WATCH",
+            name: "Example Watch Development",
+            profileType: "DEVELOPMENT",
+            bundleId: "com.example.app.WatchKitApp",
+            teamId: "TEAM123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["API-CERT"],
             installedAgents: [{ id: "agent-1" }],
           },
         ],
@@ -179,6 +191,14 @@ beforeEach(() => {
               platform: "iOS",
               teamId: "TEAM123",
               provisioningProfileSpecifier: "Example Development",
+            },
+            {
+              bundleId: "com.example.app.WatchKitApp",
+              name: "Example Watch",
+              target: "Example watchOS App",
+              platform: "watchOS",
+              teamId: "TEAM123",
+              provisioningProfileSpecifier: "Example Watch Development",
             },
           ],
         },
@@ -237,7 +257,23 @@ describe("StartBuildDialog", () => {
     fireEvent.click(parse);
 
     expect(await screen.findByText("com.example.app")).toBeDefined();
+    expect(screen.getByText("com.example.app.WatchKitApp")).toBeDefined();
     expect(screen.getByText(/Example Development/)).toBeDefined();
+    expect(screen.getByText(/Example Watch Development/)).toBeDefined();
+
+    const certificateField = within(dialog).getByText(
+      "Signing certificate",
+    ).parentElement!;
+    fireEvent.pointerDown(within(certificateField).getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const apiCertificate = await screen.findByRole("option", {
+      name: /Apple Development: Created via API/,
+    });
+    expect(apiCertificate).toBeDefined();
+    fireEvent.click(apiCertificate);
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("InspectStartBuildSigningRequirements"),
@@ -263,6 +299,7 @@ describe("StartBuildDialog", () => {
             exportSettings: expect.objectContaining({
               provisioningProfiles: {
                 "com.example.app": "PROFILE-APP",
+                "com.example.app.WatchKitApp": "PROFILE-WATCH",
               },
             }),
           }),

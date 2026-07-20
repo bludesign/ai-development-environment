@@ -28,6 +28,7 @@ import type { ProcessResult } from "../process-runner.js";
 import {
   classifyFailure,
   createRedactor,
+  dependentSigningTargetNamesFromPbxProject,
   deleteIosBuild,
   downloadIosBuildArtifact,
   generateIosBuildReport,
@@ -223,6 +224,48 @@ describe("iOS build command construction", () => {
 });
 
 describe("iOS destination and error parsing", () => {
+  test("follows signable Xcode target dependencies", () => {
+    expect(
+      dependentSigningTargetNamesFromPbxProject(
+        {
+          objects: {
+            APP: {
+              isa: "PBXNativeTarget",
+              name: "Server iOS",
+              productType: "com.apple.product-type.application",
+              dependencies: ["WATCH_DEP", "LIB_DEP"],
+            },
+            WATCH_DEP: { isa: "PBXTargetDependency", target: "WATCH" },
+            LIB_DEP: { isa: "PBXTargetDependency", target: "LIB" },
+            WATCH: {
+              isa: "PBXNativeTarget",
+              name: "Server watchOS App",
+              productType: "com.apple.product-type.application",
+              dependencies: ["EXTENSION_DEP"],
+            },
+            EXTENSION_DEP: {
+              isa: "PBXTargetDependency",
+              target: "EXTENSION",
+            },
+            EXTENSION: {
+              isa: "PBXNativeTarget",
+              name: "Server Widget",
+              productType: "com.apple.product-type.app-extension",
+              dependencies: [],
+            },
+            LIB: {
+              isa: "PBXNativeTarget",
+              name: "ServerCore",
+              productType: "com.apple.product-type.framework",
+              dependencies: [],
+            },
+          },
+        },
+        ["Server iOS"],
+      ),
+    ).toEqual(["Server watchOS App", "Server Widget"]);
+  });
+
   test("extracts signable application and extension requirements", () => {
     expect(
       signingRequirementsFromBuildSettings([

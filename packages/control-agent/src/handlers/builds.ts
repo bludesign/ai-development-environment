@@ -503,6 +503,85 @@ function signingPlatform(settings: Record<string, unknown>): string | null {
   return platform;
 }
 
+function requiresProvisioningProfile(productType: unknown): boolean {
+  return (
+    typeof productType === "string" &&
+    (productType.includes("application") ||
+      productType.includes("app-extension") ||
+      productType.includes("watchkit"))
+  );
+}
+
+function pbxObject(
+  objects: Record<string, unknown>,
+  id: unknown,
+): Record<string, unknown> | null {
+  if (typeof id !== "string") return null;
+  const value = objects[id];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Follows target dependencies while returning only products that need profiles. */
+export function dependentSigningTargetNamesFromPbxProject(
+  value: unknown,
+  rootTargetNames: string[],
+): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const rawObjects = (value as Record<string, unknown>).objects;
+  if (
+    !rawObjects ||
+    typeof rawObjects !== "object" ||
+    Array.isArray(rawObjects)
+  )
+    return [];
+  const objects = rawObjects as Record<string, unknown>;
+  const roots = new Set(rootTargetNames);
+  const targetEntries = Object.entries(objects).filter(([, target]) => {
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
+      return false;
+    }
+    const record = target as Record<string, unknown>;
+    return (
+      (record.isa === "PBXNativeTarget" ||
+        record.isa === "PBXAggregateTarget") &&
+      typeof record.name === "string"
+    );
+  });
+  const queue = targetEntries
+    .filter(([, target]) =>
+      roots.has((target as Record<string, unknown>).name as string),
+    )
+    .map(([id]) => id);
+  const visited = new Set(queue);
+  const signingTargets: string[] = [];
+  while (queue.length) {
+    const target = pbxObject(objects, queue.shift());
+    if (!target || !Array.isArray(target.dependencies)) continue;
+    for (const dependencyId of target.dependencies) {
+      const dependency = pbxObject(objects, dependencyId);
+      const dependentTargetId = dependency?.target;
+      if (typeof dependentTargetId !== "string") continue;
+      const dependentTarget = pbxObject(objects, dependentTargetId);
+      if (!dependentTarget) continue;
+      if (!visited.has(dependentTargetId)) {
+        visited.add(dependentTargetId);
+        queue.push(dependentTargetId);
+      }
+      const name = dependentTarget.name;
+      if (
+        typeof name === "string" &&
+        !roots.has(name) &&
+        requiresProvisioningProfile(dependentTarget.productType)
+      ) {
+        signingTargets.push(name);
+      }
+    }
+  }
+  return uniqueSorted(signingTargets);
+}
+
 /** Extracts signable app and extension targets from `xcodebuild -showBuildSettings -json`. */
 export function signingRequirementsFromBuildSettings(
   value: unknown,
@@ -526,10 +605,7 @@ export function signingRequirementsFromBuildSettings(
       continue;
     }
     const productType = buildSetting(settings, "PRODUCT_TYPE") ?? "";
-    if (
-      productType.includes("unit-test") ||
-      productType.includes("ui-testing")
-    ) {
+    if (productType && !requiresProvisioningProfile(productType)) {
       continue;
     }
     const target =
@@ -559,6 +635,87 @@ export function signingRequirementsFromBuildSettings(
   return [...requirements.values()].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
+}
+
+function mergeSigningRequirements(
+  requirements: BuildSigningRequirement[],
+): BuildSigningRequirement[] {
+  const merged = new Map<string, BuildSigningRequirement>();
+  for (const requirement of requirements) {
+    const existing = merged.get(requirement.bundleId);
+    if (
+      !existing ||
+      (!existing.provisioningProfileSpecifier &&
+        requirement.provisioningProfileSpecifier)
+    ) {
+      merged.set(requirement.bundleId, requirement);
+    }
+  }
+  return [...merged.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+async function dependentSigningRequirements(
+  source: BuildSourceSnapshot,
+  absolutePath: string,
+  folder: string,
+  rootTargetNames: string[],
+  configuration: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<BuildSigningRequirement[]> {
+  const projects =
+    source.kind === "PROJECT"
+      ? [absolutePath]
+      : source.kind === "WORKSPACE"
+        ? await workspaceProjectPaths(absolutePath, folder)
+        : [];
+  const targets: Array<{ project: string; name: string }> = [];
+  for (const project of projects.slice(0, 50)) {
+    const converted = await command(
+      "plutil",
+      ["-convert", "json", "-o", "-", join(project, "project.pbxproj")],
+      Math.min(timeoutMs, 15_000),
+      signal,
+      folder,
+    );
+    if (converted.exitCode !== 0) continue;
+    const names = dependentSigningTargetNamesFromPbxProject(
+      parseJson(converted.stdout, "Xcode project graph"),
+      rootTargetNames,
+    );
+    targets.push(...names.map((name) => ({ project, name })));
+  }
+  const requirements: BuildSigningRequirement[] = [];
+  for (const target of targets.slice(0, 50)) {
+    const result = await command(
+      "xcrun",
+      [
+        "xcodebuild",
+        "-project",
+        target.project,
+        "-target",
+        target.name,
+        "-configuration",
+        configuration,
+        "-showBuildSettings",
+        "-json",
+      ],
+      Math.min(timeoutMs, 60_000),
+      signal,
+      folder,
+    );
+    if (result.exitCode !== 0) continue;
+    try {
+      requirements.push(
+        ...signingRequirementsFromBuildSettings(JSON.parse(result.stdout)),
+      );
+    } catch {
+      // Preserve the scheme-level requirements when one dependency is stale.
+    }
+  }
+  return requirements;
 }
 
 async function inspectSigningRequirements(
@@ -593,7 +750,19 @@ async function inspectSigningRequirements(
     "Could not inspect signing requirements",
   );
   try {
-    return signingRequirementsFromBuildSettings(JSON.parse(result.stdout));
+    const direct = signingRequirementsFromBuildSettings(
+      JSON.parse(result.stdout),
+    );
+    const dependent = await dependentSigningRequirements(
+      source,
+      absolutePath,
+      folder,
+      direct.map((requirement) => requirement.target),
+      configuration,
+      timeoutMs,
+      signal,
+    );
+    return mergeSigningRequirements([...direct, ...dependent]);
   } catch (error) {
     throw new Error(
       `Could not parse Xcode signing requirements: ${cleanError(error)}`,

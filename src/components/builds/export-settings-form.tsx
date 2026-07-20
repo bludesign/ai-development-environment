@@ -55,6 +55,20 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettingsValue = {
   distributionBundleIdentifier: null,
 };
 
+function profileSupportsPlatform(
+  profilePlatforms: string[],
+  requirementPlatform: string | null,
+): boolean {
+  if (!requirementPlatform || profilePlatforms.length === 0) return true;
+  const aliases =
+    requirementPlatform === "watchOS"
+      ? ["watchOS", "iOS"]
+      : requirementPlatform === "visionOS"
+        ? ["visionOS", "xrOS"]
+        : [requirementPlatform];
+  return aliases.some((platform) => profilePlatforms.includes(platform));
+}
+
 export function ExportSettingsForm({
   value,
   onChange,
@@ -169,6 +183,26 @@ export function ExportSettingsForm({
   const selectedCertificate = inventory?.certificates.find(
     (certificate) => certificate.sha1 === value.signingCertificate,
   );
+  const selectedProfiles = Object.values(value.provisioningProfiles).flatMap(
+    (uuid) => {
+      const profile = inventory?.profiles.find((entry) => entry.uuid === uuid);
+      return profile ? [profile] : [];
+    },
+  );
+  const knowsAcceptedCertificates =
+    selectedProfiles.length > 0 &&
+    selectedProfiles.every((profile) => profile.certificateSha1s.length > 0);
+  const availableCertificates = (inventory?.certificates ?? []).filter(
+    (certificate) =>
+      certificate.hasPrivateKey &&
+      (knowsAcceptedCertificates
+        ? selectedProfiles.every((profile) =>
+            profile.certificateSha1s
+              .map((sha1) => sha1.toUpperCase())
+              .includes(certificate.sha1.toUpperCase()),
+          )
+        : !value.teamId || certificate.teamId === value.teamId),
+  );
   const update = <K extends keyof ExportSettingsValue>(
     key: K,
     next: ExportSettingsValue[K],
@@ -184,9 +218,7 @@ export function ExportSettingsForm({
           profile.profileType === EXPORT_METHOD_PROFILE_TYPES[value.method] &&
           !profile.expired &&
           profileCoversBundle(profile.bundleId, requirement.bundleId) &&
-          (!requirement.platform ||
-            profile.platforms.length === 0 ||
-            profile.platforms.includes(requirement.platform)) &&
+          profileSupportsPlatform(profile.platforms, requirement.platform) &&
           (!teamId || !profile.teamId || profile.teamId === teamId),
       )
       .sort((left, right) =>
@@ -332,17 +364,11 @@ export function ExportSettingsForm({
               <SelectItem value="AUTOMATIC">
                 {t("certificateAutomatic")}
               </SelectItem>
-              {inventory.certificates
-                .filter(
-                  (certificate) =>
-                    certificate.hasPrivateKey &&
-                    (!value.teamId || certificate.teamId === value.teamId),
-                )
-                .map((certificate) => (
-                  <SelectItem key={certificate.sha1} value={certificate.sha1}>
-                    {certificate.name} · {certificate.sha1.slice(0, 10)}…
-                  </SelectItem>
-                ))}
+              {availableCertificates.map((certificate) => (
+                <SelectItem key={certificate.sha1} value={certificate.sha1}>
+                  {certificate.name} · {certificate.sha1.slice(0, 10)}…
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         ) : (
