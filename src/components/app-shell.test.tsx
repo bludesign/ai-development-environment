@@ -79,6 +79,9 @@ describe("AppShell", () => {
     expect(
       screen.getByRole("link", { name: "Actions" }).getAttribute("href"),
     ).toBe("/actions");
+    expect(
+      screen.getByRole("link", { name: "Devices" }).getAttribute("href"),
+    ).toBe("/devices");
 
     const leftToggle = screen.getByRole("button", {
       name: "Hide navigation",

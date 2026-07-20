@@ -7,6 +7,7 @@ import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import { GitHubService } from "@/services/github";
 import { JiraService } from "@/services/jira";
+import { IosDevicesService } from "@/services/ios-devices";
 import { PrismaService } from "@/services/prisma";
 import { ToolsService } from "@/services/tools";
 import { WorktreesService } from "@/services/worktrees";
@@ -21,6 +22,7 @@ export type ServerServices = {
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
   jiraService: JiraService;
+  iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
   toolsService: ToolsService;
   worktreesService: WorktreesService;
@@ -40,6 +42,7 @@ function createServerServices(): ServerServices {
   );
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService();
+  const iosDevicesService = new IosDevicesService();
   const gitHubService = new GitHubService();
   const worktreesService = new WorktreesService(
     agentControlService,
@@ -56,6 +59,7 @@ function createServerServices(): ServerServices {
     codebasesService,
     codebaseToolsService,
     jiraService,
+    iosDevicesService,
     gitHubService,
     worktreesService,
     skillsService,

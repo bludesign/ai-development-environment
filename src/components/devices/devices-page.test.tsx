@@ -1,0 +1,295 @@
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
+
+import { DeviceDetailPage } from "./device-detail-page";
+import { DevicesPage } from "./devices-page";
+import type { IosDeviceRecord, IosDeviceSettings } from "./types";
+
+vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: vi.fn(),
+}));
+
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/i18n/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: navigation.push }),
+  };
+});
+
+const request = vi.mocked(controlPlaneRequest);
+const subscriptions = vi.mocked(controlPlaneSubscriptions);
+const udid = "00008030-001C2D3E4F50002E";
+const firmwareUrl =
+  "https://updates.cdn-apple.com/iPhone12,1_26.5.2_23F84_Restore.ipsw";
+let notify: (() => void) | null = null;
+
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  configurable: true,
+  value: () => undefined,
+});
+
+function device(overrides: Partial<IosDeviceRecord> = {}): IosDeviceRecord {
+  return {
+    id: "device-1",
+    udid,
+    maskedUdid: "0000••••002E",
+    displayName: "Test iPhone",
+    product: "iPhone16,1",
+    osVersion: "19.0",
+    platform: "IOS",
+    status: "PENDING",
+    appleDeviceId: null,
+    appleStatus: null,
+    registrationError: null,
+    registeredAt: null,
+    lastSeenAt: "2026-07-20T02:00:00.000Z",
+    lastIpAddress: "203.0.113.9",
+    createdAt: "2026-07-20T01:00:00.000Z",
+    updatedAt: "2026-07-20T02:00:00.000Z",
+    enrollments: [
+      {
+        id: "enrollment-1",
+        status: "COMPLETED",
+        displayName: "Submitted label",
+        expiresAt: "2026-07-20T01:30:00.000Z",
+        downloadedAt: "2026-07-20T01:01:00.000Z",
+        consumedAt: "2026-07-20T01:02:00.000Z",
+        failureCode: null,
+        createdAt: "2026-07-20T01:00:00.000Z",
+        updatedAt: "2026-07-20T01:02:00.000Z",
+      },
+    ],
+    ipObservations: [
+      {
+        id: "ip-1",
+        ipAddress: "203.0.113.9",
+        source: "PROFILE_RESPONSE",
+        headerSource: "CLOUDFLARE",
+        observedAt: "2026-07-20T01:02:00.000Z",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function settings(
+  overrides: Partial<IosDeviceSettings> = {},
+): IosDeviceSettings {
+  return {
+    organizationName: "Test",
+    profileIdentifier: "com.example.device-enrollment",
+    signerConfigured: true,
+    signerFingerprint: "signer",
+    signerCreatedAt: null,
+    signerExpiresAt: null,
+    appStoreConnectConfigured: false,
+    appStoreConnectIssuerId: null,
+    appStoreConnectKeyId: null,
+    appStoreConnectPrivateKeyConfigured: false,
+    appStoreConnectPrivateKeyFingerprint: null,
+    appStoreConnectVerifiedAt: null,
+    appStoreConnectLastTestedAt: null,
+    appStoreConnectVerificationError: null,
+    updatedAt: "2026-07-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  notify = null;
+  subscriptions.mockReturnValue({
+    subscribe: vi.fn((_operation, sink) => {
+      notify = () =>
+        sink.next({
+          data: { iosDevicesChanged: { id: "device-1" } },
+        } as never);
+      return vi.fn();
+    }),
+  } as never);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  request.mockReset();
+  subscriptions.mockReset();
+});
+
+describe("DevicesPage", () => {
+  test("lists masked devices, lifecycle dates, exports, and refreshes from the subscription", async () => {
+    request.mockResolvedValue({ iosDevices: [device()] } as never);
+    render(<DevicesPage />);
+
+    const link = await screen.findByRole("link", { name: "Test iPhone" });
+    expect(link.getAttribute("href")).toBe("/devices/device-1");
+    expect(screen.getByText("0000••••002E")).toBeDefined();
+    expect(screen.queryByText(udid)).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Export Apple TSV" })
+        .getAttribute("href"),
+    ).toBe("/api/ios/devices/export.tsv");
+    expect(screen.getByText("Pending")).toBeDefined();
+    const row = screen.getByRole("link", { name: "View Test iPhone" });
+    expect(row.getAttribute("tabindex")).toBe("0");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "Enter" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(navigation.push).toHaveBeenCalledTimes(3);
+    expect(navigation.push).toHaveBeenCalledWith("/devices/device-1");
+    expect(
+      screen.getByRole("columnheader", { name: "Enrolled" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("columnheader", { name: "Apple registration" }),
+    ).toBeDefined();
+    expect(String(request.mock.calls[0]?.[0])).not.toMatch(/\sudid\s/);
+
+    await act(async () => notify?.());
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  });
+
+  test("does not apply a response from a previously selected status", async () => {
+    let resolveAll!: (value: unknown) => void;
+    let resolvePending!: (value: unknown) => void;
+    request.mockImplementation((_query, variables) => {
+      return new Promise((resolve) => {
+        if (variables?.status === "PENDING") resolvePending = resolve;
+        else resolveAll = resolve;
+      }) as never;
+    });
+    render(<DevicesPage />);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+
+    const statusFilter = screen.getByRole("combobox", {
+      name: "Filter devices by status",
+    });
+    statusFilter.focus();
+    fireEvent.keyDown(statusFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Pending" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolvePending({
+        iosDevices: [
+          device({
+            id: "pending-device",
+            displayName: "Pending iPhone",
+            maskedUdid: "0000••••003F",
+          }),
+        ],
+      });
+    });
+    expect(await screen.findByText("Pending iPhone")).toBeDefined();
+
+    await act(async () => {
+      resolveAll({
+        iosDevices: [
+          device({ id: "stale-device", displayName: "Stale iPhone" }),
+        ],
+      });
+    });
+    expect(screen.getByText("Pending iPhone")).toBeDefined();
+    expect(screen.queryByText("Stale iPhone")).toBeNull();
+  });
+});
+
+describe("DeviceDetailPage", () => {
+  test("shows resolved firmware details while keeping sensitive controls explicit", async () => {
+    request.mockImplementation((query) => {
+      if (String(query).includes("query IosDeviceFirmware")) {
+        return Promise.resolve({
+          iosDeviceFirmware: {
+            name: "iPhone 11",
+            identifier: "iPhone12,1",
+            firmwares: [
+              {
+                version: "26.5.2",
+                buildId: "23F84",
+                fileSize: 9_750_283_647,
+                url: firmwareUrl,
+                releaseDate: "2026-06-29T17:41:13.000Z",
+                signed: true,
+              },
+              {
+                version: "26.5",
+                buildId: "23F77",
+                fileSize: 9_750_215_662,
+                url: "https://updates.cdn-apple.com/iPhone12,1_26.5_23F77_Restore.ipsw",
+                releaseDate: "2026-05-11T17:47:45.000Z",
+                signed: false,
+              },
+            ],
+          },
+        } as never);
+      }
+      return Promise.resolve({
+        iosDevice: device({
+          product: "iPhone12,1",
+          osVersion: "23F84",
+        }),
+        iosDeviceSettings: settings(),
+      } as never);
+    });
+    render(<DeviceDetailPage id="device-1" />);
+
+    expect(await screen.findAllByText("0000••••002E")).toHaveLength(2);
+    expect(await screen.findAllByText("iPhone 11")).toHaveLength(2);
+    expect(screen.getAllByText("26.5.2 (23F84)")).toHaveLength(2);
+    expect(screen.queryByText("23F84")).toBeNull();
+    expect(screen.getByText("Signed")).toBeDefined();
+    expect(screen.getByText("Unsigned")).toBeDefined();
+    expect(screen.getAllByText("9.1 GiB")).toHaveLength(2);
+    expect(
+      screen
+        .getAllByRole("link", { name: "Download" })[0]
+        ?.getAttribute("href"),
+    ).toBe(firmwareUrl);
+    expect(screen.queryByText(udid)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reveal device UDID" }));
+    expect(screen.getByText(udid)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Copy device UDID" }));
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(udid),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Copy download URL for iOS 26.5.2 (23F84)",
+      }),
+    );
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(firmwareUrl),
+    );
+    expect(screen.getByText("Cloudflare (CF-Connecting-IP)")).toBeDefined();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Register with Apple",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      screen.getByText(/Configure and verify App Store Connect/),
+    ).toBeDefined();
+  });
+});

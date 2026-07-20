@@ -1,0 +1,158 @@
+enum IosDeviceStatus {
+  PENDING
+  REGISTERING
+  REGISTERED
+  REGISTRATION_FAILED
+  REJECTED
+}
+
+enum IosDeviceEnrollmentStatus {
+  ISSUED
+  DOWNLOADED
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+enum IosDeviceIpSource {
+  PROFILE_DOWNLOAD
+  PROFILE_RESPONSE
+}
+
+enum IosDeviceIpHeaderSource {
+  CLOUDFLARE
+  FORWARDED
+  REAL_IP
+}
+
+type IosDeviceEnrollment {
+  id: ID!
+  status: IosDeviceEnrollmentStatus!
+  displayName: String!
+  expiresAt: String!
+  downloadedAt: String
+  consumedAt: String
+  failureCode: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type IosDeviceIpObservation {
+  id: ID!
+  ipAddress: String!
+  source: IosDeviceIpSource!
+  headerSource: IosDeviceIpHeaderSource!
+  observedAt: String!
+}
+
+type IosDevice {
+  id: ID!
+  udid: String!
+  maskedUdid: String!
+  displayName: String!
+  product: String
+  osVersion: String
+  platform: String!
+  status: IosDeviceStatus!
+  appleDeviceId: ID
+  appleStatus: String
+  registrationError: String
+  registeredAt: String
+  lastSeenAt: String
+  lastIpAddress: String
+  createdAt: String!
+  updatedAt: String!
+  enrollments: [IosDeviceEnrollment!]!
+  ipObservations: [IosDeviceIpObservation!]!
+}
+
+type IosDeviceSummary {
+  id: ID!
+  maskedUdid: String!
+  displayName: String!
+  product: String
+  osVersion: String
+  platform: String!
+  status: IosDeviceStatus!
+  appleStatus: String
+  registeredAt: String
+  lastSeenAt: String
+  lastIpAddress: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type IosFirmwareVersion {
+  version: String!
+  buildId: String!
+  fileSize: Float!
+  url: String!
+  releaseDate: String!
+  signed: Boolean!
+}
+
+type IosDeviceFirmware {
+  name: String!
+  identifier: String!
+  firmwares: [IosFirmwareVersion!]!
+}
+
+type IosDeviceSettings {
+  organizationName: String!
+  profileIdentifier: String!
+  signerConfigured: Boolean!
+  signerFingerprint: String
+  signerCreatedAt: String
+  signerExpiresAt: String
+  appStoreConnectConfigured: Boolean!
+  appStoreConnectIssuerId: String
+  appStoreConnectKeyId: String
+  appStoreConnectPrivateKeyConfigured: Boolean!
+  appStoreConnectPrivateKeyFingerprint: String
+  appStoreConnectVerifiedAt: String
+  appStoreConnectLastTestedAt: String
+  appStoreConnectVerificationError: String
+  updatedAt: String!
+}
+
+type IosDeviceChange {
+  id: ID
+}
+
+input SaveIosProfileSettingsInput {
+  organizationName: String!
+  profileIdentifier: String!
+}
+
+input SaveAppStoreConnectSettingsInput {
+  issuerId: String!
+  keyId: String!
+  privateKey: String
+}
+
+extend type Query {
+  iosDevices(status: IosDeviceStatus): [IosDeviceSummary!]!
+  iosDevice(id: ID!): IosDevice
+  iosDeviceFirmware(id: ID!): IosDeviceFirmware
+  iosDeviceSettings: IosDeviceSettings!
+}
+
+extend type Mutation {
+  renameIosDevice(id: ID!, displayName: String!): IosDevice!
+  rejectIosDevice(id: ID!): IosDevice!
+  deleteIosDevice(id: ID!): Boolean!
+  registerIosDevice(id: ID!): IosDevice!
+  saveIosProfileSettings(
+    input: SaveIosProfileSettingsInput!
+  ): IosDeviceSettings!
+  regenerateIosProfileSigner: IosDeviceSettings!
+  saveAppStoreConnectSettings(
+    input: SaveAppStoreConnectSettingsInput!
+  ): IosDeviceSettings!
+  testAppStoreConnectSettings: IosDeviceSettings!
+  clearAppStoreConnectSettings: IosDeviceSettings!
+}
+
+extend type Subscription {
+  iosDevicesChanged: IosDeviceChange!
+}

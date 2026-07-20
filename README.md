@@ -64,6 +64,33 @@ The SDL lives in `schemas/**/*.graphql` and is bundled into the app by `scripts/
 }
 ```
 
+## iOS device enrollment
+
+The localized **Devices** area enrolls iPhones and iPads through Apple’s Profile Service flow. A user first opens the authenticated `/en/devices/enroll` page (or the equivalent locale), supplies a recognizable device label, consents to the disclosed collection, and installs a temporary profile. The profile requests only `UDID`, `PRODUCT`, and `VERSION`; iOS returns those values to a short-lived, token-authenticated callback. The server also records the IP address observed at profile download and response time.
+
+Each enrollment token contains 256 bits of randomness, expires after 30 minutes, is stored only as a SHA-256 hash, and is consumed atomically. Identical iOS callback retries are idempotent; a different replay is rejected. Expired, unattached enrollments are retained for seven days before cleanup. Deleting a local device also deletes its enrollment and IP history, but does not remove the device from Apple’s annual registration list.
+
+The first enrollment automatically creates a ten-year RSA-2048/SHA-256 self-signed profile signer. Its certificate, private key, device UDIDs, IP history, and any App Store Connect `.p8` key are stored in the configured SQLite database. They are intentionally excluded from ordinary logs and list views, but the database file must be treated as sensitive. A self-signed enrollment profile appears as **Unverified** in iOS; users should confirm the displayed organization before installation.
+
+App Store Connect registration is optional. In Settings, provide an issuer ID, key ID, and ES256 PKCS#8 `.p8` key that has Certificates, Identifiers & Profiles access. Saving verifies the credentials against `GET /v1/devices?limit=1`. Registration first reconciles the UDID with Apple, then calls the Devices API only when needed. It does not regenerate a provisioning profile or rebuild an IPA; after adding a device, create a new provisioning profile and export a new IPA from **Builds**.
+
+### Cloudflare Access paths
+
+When the dashboard is behind Cloudflare Access, create narrowly scoped, more-specific Access applications for the following paths and attach a **Bypass / Everyone** policy. Configure paths without query strings because Access path matching does not support them.
+
+| Access application path        | Route method  | Why it must bypass login                                                               |
+| ------------------------------ | ------------- | -------------------------------------------------------------------------------------- |
+| `/api/ios/enrollment-profile`  | `GET`         | Safari and the profile installation process retrieve the signed profile.               |
+| `/api/ios/profile-response`    | `POST`        | iOS Settings posts the CMS-signed device response and cannot complete an Access login. |
+| `/api/ios/enrollment-complete` | `GET`         | The validated callback redirects to this generic, script-free landing page.            |
+| `/api/builds/*/artifacts/*`    | `GET`, `HEAD` | Apple’s manifest and package installer fetch artifacts outside the dashboard session.  |
+
+Do **not** bypass `/en/devices*` (or another locale), `/api/ios/enrollment/start`, `/api/ios/devices/export.tsv`, or `/api/graphql`. Those remain behind Cloudflare Access. Access applications are path-scoped rather than method-scoped; the route handlers themselves expose only the methods listed above. Avoid JavaScript or CAPTCHA challenges on the callback. Add a WAF skip for the exact `/api/ios/profile-response` path only if production logs show that a managed rule blocks genuine iOS callbacks.
+
+Cloudflare Tunnel keeps the origin private, so IP observations trust headers in this order: a valid `CF-Connecting-IP`, the first valid `X-Forwarded-For` entry, then `X-Real-IP`. The selected header source is saved with every observation. In direct mode this same behavior assumes the existing trusted localhost/LAN deployment boundary; do not expose an unprotected origin to untrusted networks.
+
+Without Cloudflare, enrollment works behind any reverse proxy that provides publicly trusted HTTPS and correct `X-Forwarded-Proto`/`X-Forwarded-Host` values, or when `PUBLIC_BASE_URL` specifies the public HTTPS origin. Direct HTTP localhost/LAN dashboard access remains available, but the enrollment form and profile download are disabled because iOS requires a trusted HTTPS callback.
+
 ## Codebase REST and MCP APIs
 
 Read-only codebase data is also available through REST and the Model Context Protocol:

@@ -132,7 +132,7 @@ beforeEach(() => {
           {
             type: "PHYSICAL_DEVICE",
             id: "DEVICE-1",
-            name: "Chandler's iPhone",
+            name: "iPhone",
             platform: "iOS",
             osVersion: "26.0",
             state: "connected",
@@ -282,10 +282,8 @@ describe("StartBuildDialog", () => {
     expect(
       await screen.findByRole("option", { name: "Any Physical iOS Device" }),
     ).toBeDefined();
-    expect(
-      screen.getByRole("option", { name: /Chandler's iPhone/ }),
-    ).toBeDefined();
-    fireEvent.click(screen.getByRole("option", { name: /Chandler's iPhone/ }));
+    expect(screen.getByRole("option", { name: /iPhone/ })).toBeDefined();
+    fireEvent.click(screen.getByRole("option", { name: /iPhone/ }));
 
     fireEvent.pointerDown(destinationType, {
       button: 0,
