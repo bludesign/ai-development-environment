@@ -350,7 +350,7 @@ function DatabaseTable({ overview }: { overview: SkillsOverview }) {
                 </TableCell>
                 <TableCell>
                   <Badge variant={skill.syncGlobally ? "default" : "secondary"}>
-                    {skill.syncGlobally ? t("global") : t("projectOnly")}
+                    {skill.syncGlobally ? t("global") : t("groupOnly")}
                   </Badge>
                 </TableCell>
                 <TableCell>

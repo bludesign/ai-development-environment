@@ -9,14 +9,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const request = vi.hoisted(() => vi.fn());
 const subscribe = vi.hoisted(() => vi.fn(() => vi.fn()));
+const copyText = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: request,
   controlPlaneSubscriptions: () => ({ subscribe }),
 }));
-vi.mock("@/lib/browser-utils", () => ({ copyText: vi.fn() }));
+vi.mock("@/lib/browser-utils", () => ({ copyText }));
 
-import { TelemetryPage } from "./telemetry-page";
+import { TelemetryPage, telemetryApiDocumentation } from "./telemetry-page";
 
 const settings = {
   localBaseUrlOverride: null,
@@ -169,6 +170,36 @@ describe("TelemetryPage", () => {
         }),
       ),
     );
+  });
+
+  test("shows and copies page-specific REST API documentation", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+
+    fireEvent.click(screen.getByRole("button", { name: "API help" }));
+    expect(
+      await screen.findByRole("heading", { name: "Send console logs" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /http:\/\/127\.0\.0\.1:3000\/api\/telemetry\/console-logs/,
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Markdown docs" }));
+    expect(copyText).toHaveBeenCalledWith(
+      expect.stringContaining("# Console logs API"),
+    );
+    expect(copyText).toHaveBeenCalledWith(
+      expect.stringContaining('"attributes"'),
+    );
+    expect(
+      telemetryApiDocumentation(
+        "ANALYTICS",
+        "http://127.0.0.1:3000",
+        "https://events.example.com",
+      ),
+    ).toContain('"defaultParameters"');
   });
 
   test("opens the shadcn advanced-filter Sheet and column manager", async () => {

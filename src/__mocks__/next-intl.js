@@ -1486,7 +1486,7 @@ const mockTranslations = {
     updated: "Updated",
     global: "Global",
     project: "Project",
-    projectOnly: "Project only",
+    groupOnly: "Group only",
     noSkills: "No database skills match this search.",
     agent: "Agent",
     location: "Location",
@@ -2166,6 +2166,13 @@ const mockTranslations = {
     saveAs: "Save as",
     applyColumns: "Apply columns",
     telemetrySettings: "Observability settings",
+    apiHelp: "API help",
+    consoleApiHelpTitle: "Send console logs",
+    analyticsApiHelpTitle: "Send analytics events",
+    apiHelpDescription:
+      "Review the REST ingestion contract and copy a ready-to-use Markdown reference.",
+    copyMarkdownDocs: "Copy Markdown docs",
+    markdownDocsCopied: "Markdown copied",
     settingsDescription:
       "Configure auto-detected and overridden ingestion origins shared by every view.",
     localBaseUrl: "Local base URL",

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  CircleHelp,
   Columns3,
   Download,
   Filter,
@@ -352,6 +353,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const [error, setError] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [separatorOpen, setSeparatorOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -770,6 +772,17 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
               settings={configuration.settings}
               view={view}
             />
+          )}
+          {configuration && view !== "UNIFIED" && (
+            <Button
+              aria-label={t("apiHelp")}
+              onClick={() => setHelpOpen(true)}
+              size="icon-sm"
+              title={t("apiHelp")}
+              variant="outline"
+            >
+              <CircleHelp />
+            </Button>
           )}
           <Button
             onClick={() => setSeparatorOpen(true)}
@@ -1221,6 +1234,14 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
             open={settingsOpen}
             settings={configuration.settings}
           />
+          {view !== "UNIFIED" && (
+            <ApiHelpDialog
+              onOpenChange={setHelpOpen}
+              open={helpOpen}
+              settings={configuration.settings}
+              view={view}
+            />
+          )}
           <SeparatorDialog
             onAdded={() => void refresh()}
             onOpenChange={setSeparatorOpen}
@@ -2520,6 +2541,134 @@ function ColumnsDialog({
             {t("applyColumns")}
           </Button>
           <Button onClick={() => onOpenChange(false)} variant="outline">
+            {t("cancel")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type IngestionView = Exclude<TelemetryView, "UNIFIED">;
+
+export function telemetryApiDocumentation(
+  view: IngestionView,
+  localBaseUrl: string,
+  remoteBaseUrl: string,
+): string {
+  const isConsole = view === "CONSOLE";
+  const path = isConsole
+    ? "/api/telemetry/console-logs"
+    : "/api/telemetry/analytics-events";
+  const title = isConsole ? "Console logs API" : "Analytics events API";
+  const payload = isConsole
+    ? {
+        message: "Checkout completed",
+        time: "2026-07-20T18:30:00.000Z",
+        level: "info",
+        category: "checkout",
+        buildId: "build-123",
+        sessionId: "session-456",
+        attributes: { durationMs: 412, cacheHit: true },
+      }
+    : {
+        eventName: "checkout_completed",
+        kind: "product",
+        screenName: "Checkout",
+        time: "2026-07-20T18:30:00.000Z",
+        defaultParameters: { appVersion: "1.0", platform: "iOS" },
+        additionalParameters: { cartItems: 3, coupon: "SUMMER" },
+        buildId: "build-123",
+        sessionId: "session-456",
+      };
+  const localEndpoint = `${localBaseUrl}${path}`;
+  const remoteEndpoint = `${remoteBaseUrl}${path}`;
+  const json = JSON.stringify(payload, null, 2);
+  const curlJson = JSON.stringify(payload);
+  return `# ${title}
+
+Send one JSON record directly, or send an atomic batch as \`{ "items": [...] }\`. Batches may contain up to 500 records and the request body may be up to 2 MiB. Authentication is not required.
+
+- Local endpoint: \`${localEndpoint}\`
+- Remote endpoint: \`${remoteEndpoint}\`
+- Method: \`POST\`
+- Content-Type: \`application/json\`
+
+## Example request
+
+\`\`\`bash
+curl --request POST '${localEndpoint}' \\
+  --header 'content-type: application/json' \\
+  --data '${curlJson}'
+\`\`\`
+
+## JSON body
+
+\`\`\`json
+${json}
+\`\`\`
+
+The client timestamp must be ISO-8601 with a UTC offset. The server assigns the record ID, received time, and device IP. A successful collection returns HTTP 201; valid input returns HTTP 202 when collection is disabled.
+`;
+}
+
+function ApiHelpDialog({
+  open,
+  onOpenChange,
+  settings,
+  view,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  settings: TelemetrySettingsView;
+  view: IngestionView;
+}) {
+  const t = useTranslations("telemetry");
+  const [copied, setCopied] = useState(false);
+  const documentation = telemetryApiDocumentation(
+    view,
+    settings.effectiveLocalBaseUrl,
+    settings.effectiveRemoteBaseUrl,
+  );
+  return (
+    <Dialog
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        if (!next) setCopied(false);
+      }}
+      open={open}
+    >
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>
+            {t(
+              view === "CONSOLE"
+                ? "consoleApiHelpTitle"
+                : "analyticsApiHelpTitle",
+            )}
+          </DialogTitle>
+          <DialogDescription>{t("apiHelpDescription")}</DialogDescription>
+        </DialogHeader>
+        <pre className="max-h-[65vh] overflow-auto rounded-lg border bg-muted/40 p-4 text-xs leading-relaxed whitespace-pre-wrap">
+          <code>{documentation}</code>
+        </pre>
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              void copyText(documentation);
+              setCopied(true);
+            }}
+          >
+            <Clipboard />
+            {copied ? t("markdownDocsCopied") : t("copyMarkdownDocs")}
+          </Button>
+          <Button
+            onClick={() => {
+              setCopied(false);
+              onOpenChange(false);
+            }}
+            variant="outline"
+          >
             {t("cancel")}
           </Button>
         </DialogFooter>
