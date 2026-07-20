@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { copyText } from "@/lib/browser-utils";
 
 type InstallEnvironment = {
@@ -61,7 +60,7 @@ export function IosInstallButton({
     readEnvironment,
     () => null,
   );
-  const [busy, setBusy] = useState(false);
+  const [warmed, setWarmed] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const artifactPath = `/api/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
@@ -82,20 +81,23 @@ export function IosInstallButton({
   };
 
   const reason = blocked();
-  const disabled = !environment || reason !== null || busy;
+  const disabled = !environment || reason !== null;
 
-  const install = async () => {
-    if (!manifestUrl) return;
-    setBusy(true);
-    try {
-      // Warm the download cache first. The agent holds the only copy, so a cold
-      // fetch inside the install daemon's own budget shows up as an unhelpful
-      // "Unable to Download App" instead of progress.
-      await fetch(artifactPath, { method: "HEAD" }).catch(() => {});
-      window.location.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
-    } finally {
-      setBusy(false);
-    }
+  const installUrl = manifestUrl
+    ? `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`
+    : null;
+
+  /**
+   * Starts the artifact transfer before the install daemon asks for it. This is
+   * deliberately not awaited: iOS only follows a link to another scheme while a
+   * user gesture is active, and waiting here would lose it. The download cache
+   * collapses concurrent requests for one artifact into a single transfer, so
+   * the daemon joins this one rather than starting a second.
+   */
+  const warm = () => {
+    if (warmed) return;
+    setWarmed(true);
+    void fetch(artifactPath, { method: "HEAD" }).catch(() => {});
   };
 
   const copyLink = async () => {
@@ -117,16 +119,22 @@ export function IosInstallButton({
             <Link /> {copied ? t("installLinkCopied") : t("copyInstallLink")}
           </Button>
         )}
-        <Button
-          disabled={disabled}
-          onClick={() => void install()}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {busy ? <Spinner /> : <Smartphone />}
-          {busy ? t("installPreparing") : t("installOnDevice")}
-        </Button>
+        {disabled || !installUrl ? (
+          <Button disabled size="sm" type="button" variant="outline">
+            <Smartphone /> {t("installOnDevice")}
+          </Button>
+        ) : (
+          /*
+           * A real link rather than a scripted navigation: iOS hands the
+           * itms-services scheme to the installer only when it is following a
+           * genuine activation, and anything asynchronous beforehand loses it.
+           */
+          <Button asChild size="sm" variant="outline">
+            <a href={installUrl} onPointerDown={warm}>
+              <Smartphone /> {t("installOnDevice")}
+            </a>
+          </Button>
+        )}
       </div>
       {reason && (
         <p className="text-right text-xs text-muted-foreground">{reason}</p>
