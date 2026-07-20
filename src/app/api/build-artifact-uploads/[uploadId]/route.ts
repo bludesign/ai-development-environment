@@ -2,7 +2,7 @@ import { receiveArtifactTransfer } from "@/services/builds/artifact-transfer";
 import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 1800;
 
 export async function POST(
   request: Request,

@@ -278,7 +278,7 @@ afterEach(() => {
 
 describe("BuildDetailPage", () => {
   test("shows the build ID, downloads artifacts, and deletes the build", async () => {
-    render(<BuildDetailPage buildId="build-1" />);
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(await screen.findByText("Development")).toBeDefined();
     expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
@@ -475,7 +475,7 @@ describe("BuildDetailPage", () => {
       } as never;
     });
 
-    render(<BuildDetailPage buildId="build-1" />);
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(
       await screen.findByRole("tablist", { name: "Test result filters" }),
@@ -571,7 +571,7 @@ describe("BuildDetailPage", () => {
       throw new Error(`Unexpected request: ${query}`);
     });
 
-    render(<BuildDetailPage buildId="build-1" />);
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
     expect(await screen.findByText("Development")).toBeDefined();
     await waitFor(() =>
       expect(interval).toHaveBeenCalledWith(expect.any(Function), 2_000),
@@ -580,7 +580,7 @@ describe("BuildDetailPage", () => {
   });
 
   test("streams logs, runs a captured app on multiple destinations, and exports an archive after configuration deletion", async () => {
-    render(<BuildDetailPage buildId="build-1" />);
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(await screen.findByText("Development")).toBeDefined();
     expect(screen.getByText(/Compile Swift sources/)).toBeDefined();

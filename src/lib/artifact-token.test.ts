@@ -15,6 +15,10 @@ afterEach(() => {
 });
 
 describe("artifact tokens", () => {
+  test("stays valid for the artifact cache and resume window", () => {
+    expect(ARTIFACT_TOKEN_TTL_MS).toBe(6 * 60 * 60_000);
+  });
+
   test("verifies a token it just signed", () => {
     const { token, expires } = signArtifactToken("artifact-1");
     expect(verifyArtifactToken("artifact-1", token, String(expires))).toBe(
