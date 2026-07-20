@@ -123,6 +123,8 @@ const ENTRY_FIELDS = `
   additionalParameters highlightColor separatorKind separatorName
 `;
 
+const ARRIVAL_HIGHLIGHT_MS = 1_400;
+
 const BASE_COLUMNS: Record<TelemetryView, string[]> = {
   CONSOLE: [
     ...DEFAULT_TELEMETRY_COLUMNS.CONSOLE,
@@ -357,7 +359,9 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmBefore, setConfirmBefore] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [arrivingIds, setArrivingIds] = useState<Set<string>>(new Set());
   const initializedConfiguration = useRef(false);
+  const arrivalTimers = useRef<Map<string, number>>(new Map());
 
   const columns =
     configuration?.viewSettings.columns ?? DEFAULT_TELEMETRY_COLUMNS[view];
@@ -422,6 +426,28 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       if (active) setAdvancedFilter(active.definition);
     }
   }, [view]);
+
+  const markArriving = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    setArrivingIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    for (const id of ids) {
+      const currentTimer = arrivalTimers.current.get(id);
+      if (currentTimer) window.clearTimeout(currentTimer);
+      const timer = window.setTimeout(() => {
+        setArrivingIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+        arrivalTimers.current.delete(id);
+      }, ARRIVAL_HIGHLIGHT_MS);
+      arrivalTimers.current.set(id, timer);
+    }
+  }, []);
 
   const loadTimeline = useCallback(
     async (append = false, reconcile = false) => {
@@ -499,6 +525,12 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       {
         next: (payload) => {
           const change = payload.data?.telemetryEntriesChanged;
+          if (
+            change?.ids.length &&
+            (change.reason === "INGESTED" || change.reason.endsWith("_ADDED"))
+          ) {
+            markArriving(change.ids);
+          }
           void loadTimeline(false, !change?.reason.startsWith("CLEARED"));
         },
         error: () => undefined,
@@ -525,7 +557,15 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
       unsubscribeSettings();
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [loadConfiguration, loadTimeline]);
+  }, [loadConfiguration, loadTimeline, markArriving]);
+
+  useEffect(() => {
+    const timers = arrivalTimers.current;
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   const refresh = async () => {
     await Promise.all([loadTimeline(false), loadConfiguration()]);
@@ -848,11 +888,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
 
       <Card className="gap-3 p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-64 flex-1 items-center gap-1 rounded-lg border bg-background pl-2">
+          <div className="flex min-w-64 flex-1 items-center gap-1 rounded-lg border bg-background pl-2 dark:bg-input/30">
             <Search className="size-4 text-muted-foreground" />
             <Input
               aria-label={t("search")}
-              className="border-0 shadow-none focus-visible:ring-0"
+              className="border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("searchPlaceholder")}
               value={search}
@@ -865,7 +905,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
             >
               <SelectTrigger
                 aria-label={t("searchMode")}
-                className="w-28 border-0 shadow-none"
+                className="w-28 border-0 bg-transparent shadow-none dark:bg-transparent dark:hover:bg-transparent"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -1147,7 +1187,13 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                             }
                           />
                         )}
-                        <TableRow className="group bg-muted/40 hover:bg-muted/50">
+                        <TableRow
+                          className={cn(
+                            "group bg-muted/40 transition-colors duration-700 hover:bg-muted/50",
+                            arrivingIds.has(entry.id) &&
+                              "animate-in fade-in-0 bg-primary/10",
+                          )}
+                        >
                           {editMode && (
                             <TableCell className="px-2 py-1.5">
                               <Checkbox
@@ -1219,6 +1265,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                       )}
                       <TelemetryRow
                         addColumn={addColumn}
+                        arriving={arrivingIds.has(entry.id)}
                         columns={columns}
                         editMode={editMode}
                         entry={entry}
@@ -1465,6 +1512,7 @@ function TelemetryRow({
   columns,
   expanded,
   selected,
+  arriving,
   deleting,
   editMode,
   locale,
@@ -1482,6 +1530,7 @@ function TelemetryRow({
   columns: string[];
   expanded: boolean;
   selected: boolean;
+  arriving: boolean;
   deleting: boolean;
   editMode: boolean;
   locale: string;
@@ -1499,8 +1548,9 @@ function TelemetryRow({
     <>
       <TableRow
         className={cn(
-          "cursor-pointer",
+          "cursor-pointer transition-colors duration-700",
           entry.highlightColor && HIGHLIGHT_CLASSES[entry.highlightColor],
+          arriving && "animate-in fade-in-0 bg-primary/10",
         )}
         onClick={(event) => {
           if (
@@ -1715,7 +1765,7 @@ function ExpandedEntry({
   ];
   return (
     <div className="space-y-4 border-t bg-muted/15 p-4">
-      <div className="min-w-0">
+      <div className="min-w-0 px-3">
         <p className="text-xs font-medium text-muted-foreground">
           {entry.entryType === "CONSOLE"
             ? t("columns.message")
@@ -1761,7 +1811,7 @@ function ExpandedEntry({
           />
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3">
         <div className="flex items-center gap-2 overflow-x-auto">
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {t("highlight")}

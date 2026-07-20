@@ -189,6 +189,12 @@ describe("TelemetryPage", () => {
     expect(
       screen.getByRole("radio", { name: "Clear highlight" }).className,
     ).toContain("min-w-5");
+    expect(
+      screen.getByText("Message", { selector: "p" }).parentElement?.className,
+    ).toContain("px-3");
+    expect(
+      screen.getByText("Highlight").parentElement?.parentElement?.className,
+    ).toContain("px-3");
     expect(screen.getByText("device.model").className).toContain("pl-0.5");
     const addColumn = screen.getByRole("button", {
       name: "Add device.model column",
@@ -286,7 +292,9 @@ describe("TelemetryPage", () => {
       });
     });
 
-    expect(await screen.findByText("Live telemetry arrived")).toBeTruthy();
+    const liveMessage = await screen.findByText("Live telemetry arrived");
+    expect(liveMessage.closest("tr")?.className).toContain("animate-in");
+    expect(liveMessage.closest("tr")?.className).toContain("bg-primary/10");
     expect(screen.getByText("2 of 2")).toBeTruthy();
   });
 
@@ -295,6 +303,11 @@ describe("TelemetryPage", () => {
     const search = await screen.findByRole("textbox", {
       name: "Search telemetry",
     });
+    expect(search.className).toContain("dark:bg-transparent");
+    expect(search.parentElement?.className).toContain("dark:bg-input/30");
+    expect(
+      screen.getByRole("combobox", { name: "Search mode" }).className,
+    ).toContain("dark:bg-transparent");
     fireEvent.change(search, { target: { value: "Checkout" } });
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
