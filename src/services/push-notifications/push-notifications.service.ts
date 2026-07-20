@@ -90,25 +90,15 @@ function clean(value: string, name: string, max = 200): string {
 
 export class PushNotificationsService {
   private recoveryStarted = false;
-  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
   private readonly activeBatchIds = new Set<string>();
 
-  constructor(private readonly client = new ApnsClient()) {}
-
-  startBackgroundRecovery(): void {
-    if (this.recoveryTimer) return;
+  constructor(private readonly client = new ApnsClient()) {
     queueMicrotask(() => void this.recover().catch(() => undefined));
-    this.recoveryTimer = setInterval(
+    const timer = setInterval(
       () => void this.recover().catch(() => undefined),
       RECOVERY_INTERVAL_MS,
     );
-    this.recoveryTimer.unref();
-  }
-
-  stopBackgroundRecovery(): void {
-    if (!this.recoveryTimer) return;
-    clearInterval(this.recoveryTimer);
-    this.recoveryTimer = null;
+    timer.unref();
   }
 
   private changed(): void {
