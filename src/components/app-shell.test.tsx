@@ -156,5 +156,14 @@ describe("AppShell", () => {
     expect(
       screen.getByRole("button", { name: "Close notifications" }),
     ).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close notifications" }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Notifications" }),
+      ).toBeNull();
+    });
   });
 });
