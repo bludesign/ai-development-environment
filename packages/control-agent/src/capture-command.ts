@@ -18,6 +18,16 @@ export function captureCommand(options: {
   cwd?: string;
   stdoutFileDescriptor?: number;
 }): Promise<CaptureResult> {
+  if (options.signal.aborted || options.timeoutMs <= 0) {
+    return Promise.resolve({
+      exitCode: null,
+      signal: null,
+      timedOut: !options.signal.aborted,
+      cancelled: options.signal.aborted,
+      stdout: "",
+      stderr: "",
+    });
+  }
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
