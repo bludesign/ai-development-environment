@@ -394,9 +394,14 @@ export class SigningAssetsService {
   }
 
   async profileDevices(deviceUdids: string[]) {
-    const normalized = [
-      ...new Set(deviceUdids.map((udid) => udid.toUpperCase())),
-    ];
+    const seen = new Set<string>();
+    const uniqueUdids = deviceUdids.filter((udid) => {
+      const normalized = udid.toUpperCase();
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+    const normalized = uniqueUdids.map((udid) => udid.toUpperCase());
     if (!normalized.length) return [];
     const prisma = await getPrismaClient();
     const devices = await prisma.iosDevice.findMany({
@@ -413,7 +418,7 @@ export class SigningAssetsService {
     const byUdid = new Map(
       devices.map((device) => [device.udid.toUpperCase(), device]),
     );
-    return deviceUdids.map((udid) => {
+    return uniqueUdids.map((udid) => {
       const device = byUdid.get(udid.toUpperCase());
       return {
         udid,

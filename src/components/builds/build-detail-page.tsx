@@ -413,14 +413,14 @@ export function BuildDetailPage({
 
   if (loading) {
     return (
-      <p className="mx-auto flex max-w-6xl items-center gap-2 text-muted-foreground">
+      <p className="mx-auto flex w-full max-w-[1500px] items-center gap-2 text-muted-foreground">
         <Spinner /> {t("loading")}
       </p>
     );
   }
   if (!build) {
     return (
-      <Empty className="mx-auto max-w-6xl border py-12">
+      <Empty className="mx-auto w-full max-w-[1500px] border py-12">
         <EmptyHeader>
           <EmptyTitle>{t("buildNotFound")}</EmptyTitle>
           <EmptyDescription>{t("buildNotFoundDescription")}</EmptyDescription>
@@ -435,7 +435,7 @@ export function BuildDetailPage({
   }
 
   return (
-    <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
+    <section className="mx-auto flex min-w-0 w-full max-w-[1500px] flex-col gap-5">
       <div>
         <Button asChild className="-ml-2" size="sm" variant="ghost">
           <Link href="/builds">

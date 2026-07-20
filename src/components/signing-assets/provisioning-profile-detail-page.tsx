@@ -132,6 +132,14 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
     );
   }
 
+  const seenDeviceUdids = new Set<string>();
+  const provisionedDevices = profile.provisionedDevices.filter((device) => {
+    const normalized = device.udid.toUpperCase();
+    if (seenDeviceUdids.has(normalized)) return false;
+    seenDeviceUdids.add(normalized);
+    return true;
+  });
+
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
@@ -207,7 +215,9 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
             <Smartphone /> {t("provisionedDevices")}
           </CardTitle>
           <CardDescription>
-            {t("provisionedDevicesDescription", { count: profile.deviceCount })}
+            {t("provisionedDevicesDescription", {
+              count: provisionedDevices.length,
+            })}
           </CardDescription>
         </CardHeader>
         {profile.deviceUdids.length === 0 ? (
@@ -226,8 +236,8 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {profile.provisionedDevices.map((device) => (
-                <TableRow key={device.udid}>
+              {provisionedDevices.map((device, index) => (
+                <TableRow key={`${device.udid}:${index}`}>
                   <TableCell>
                     {device.deviceId && device.displayName ? (
                       <Link

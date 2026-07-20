@@ -31,6 +31,7 @@ describe("SigningAssetsService profile devices", () => {
     const devices = await service.profileDevices([
       "a".repeat(40),
       "B".repeat(40),
+      "A".repeat(40),
     ]);
 
     expect(findMany).toHaveBeenCalledWith({
