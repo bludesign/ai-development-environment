@@ -20,12 +20,16 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
     const url = new URL(request.url);
-    await getServerServices().iosDevicesService.completeEnrollment(
-      url.searchParams.get("token") ?? "",
-      raw,
-      resolveClientIp(request.headers),
-    );
+    const device =
+      await getServerServices().iosDevicesService.completeEnrollment(
+        url.searchParams.get("token") ?? "",
+        raw,
+        resolveClientIp(request.headers),
+      );
+    if (!device) throw new Error("Completed enrollment device is unavailable");
     const origin = resolvePublicOrigin(request.headers)?.origin ?? url.origin;
+    const completionUrl = new URL("/api/ios/enrollment-complete", origin);
+    completionUrl.searchParams.set("deviceId", device.id);
     return new Response(null, {
       // iOS Profile Service uses a permanent redirect as the browser hand-off
       // after posting device attributes. A 303 is followed inside the profile
@@ -33,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
       // profile and reports "Invalid Profile" despite a successful callback.
       status: 301,
       headers: {
-        location: new URL("/api/ios/enrollment-complete", origin).toString(),
+        location: completionUrl.toString(),
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
       },

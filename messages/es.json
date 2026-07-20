@@ -1745,6 +1745,7 @@
     "enrolled": "Inscrito",
     "registered": "Registro en Apple",
     "lastSeen": "Última conexión",
+    "viewDevice": "Ver {name}",
     "unavailable": "No disponible",
     "status": {
       "PENDING": "Pendiente",
@@ -1800,6 +1801,7 @@
       "REAL_IP": "Proxy de origen (cabecera X-Real-IP)"
     },
     "enrollmentHistory": "Historial de inscripciones",
+    "noEnrollmentHistory": "No hay intentos de inscripción guardados para este dispositivo.",
     "created": "Creada",
     "completed": "Completada",
     "failure": "Fallo",

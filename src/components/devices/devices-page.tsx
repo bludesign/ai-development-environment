@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Empty,
   EmptyDescription,
@@ -29,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -53,6 +54,7 @@ const SORTS = ["NEWEST", "NAME", "LAST_SEEN"] as const;
 export function DevicesPage() {
   const t = useTranslations("devices");
   const locale = useLocale();
+  const router = useRouter();
   const [devices, setDevices] = useState<IosDeviceSummary[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
   const [sort, setSort] = useState<(typeof SORTS)[number]>("NEWEST");
@@ -119,15 +121,10 @@ export function DevicesPage() {
   );
 
   const formatDate = (value: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(value))
-      : t("unavailable");
+    value ? new Date(value).toLocaleString(locale) : "—";
 
   return (
-    <section className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -205,56 +202,78 @@ export function DevicesPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("device")}</TableHead>
-              <TableHead>{t("statusLabel")}</TableHead>
-              <TableHead>{t("hardware")}</TableHead>
-              <TableHead>{t("lastIp")}</TableHead>
-              <TableHead>{t("enrolled")}</TableHead>
-              <TableHead>{t("registered")}</TableHead>
-              <TableHead>{t("lastSeen")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sorted.map((device) => (
-              <TableRow key={device.id}>
-                <TableCell>
-                  <Link
-                    className="font-medium text-primary hover:underline"
-                    href={`/devices/${device.id}`}
-                  >
-                    {device.displayName}
-                  </Link>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {device.maskedUdid}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <IosDeviceStatusBadge
-                    label={t(`status.${device.status}`)}
-                    status={device.status}
-                  />
-                </TableCell>
-                <TableCell>
-                  <div>{device.product ?? t("unavailable")}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {device.osVersion
-                      ? `iOS ${device.osVersion}`
-                      : t("unavailable")}
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {device.lastIpAddress ?? t("unavailable")}
-                </TableCell>
-                <TableCell>{formatDate(device.createdAt)}</TableCell>
-                <TableCell>{formatDate(device.registeredAt)}</TableCell>
-                <TableCell>{formatDate(device.lastSeenAt)}</TableCell>
+        <Card className="gap-0 py-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t("device")}</TableHead>
+                <TableHead>{t("statusLabel")}</TableHead>
+                <TableHead>{t("hardware")}</TableHead>
+                <TableHead>{t("lastIp")}</TableHead>
+                <TableHead>{t("enrolled")}</TableHead>
+                <TableHead>{t("registered")}</TableHead>
+                <TableHead>{t("lastSeen")}</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((device) => (
+                <TableRow
+                  aria-label={t("viewDevice", { name: device.displayName })}
+                  className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  key={device.id}
+                  onClick={() => router.push(`/devices/${device.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      router.push(`/devices/${device.id}`);
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                >
+                  <TableCell className="min-w-52 whitespace-normal">
+                    <Link
+                      className="font-medium hover:underline"
+                      href={`/devices/${device.id}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {device.displayName}
+                    </Link>
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {device.maskedUdid}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <IosDeviceStatusBadge
+                      label={t(`status.${device.status}`)}
+                      status={device.status}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div>{device.product ?? t("unavailable")}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {device.osVersion
+                        ? `iOS ${device.osVersion}`
+                        : t("unavailable")}
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {device.lastIpAddress ?? t("unavailable")}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(device.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(device.registeredAt)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(device.lastSeenAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </section>
   );

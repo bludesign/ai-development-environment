@@ -1912,6 +1912,7 @@ const mockTranslations = {
     enrolled: "Enrolled",
     registered: "Apple registration",
     lastSeen: "Last seen",
+    viewDevice: "View {name}",
     unavailable: "Unavailable",
     status: {
       PENDING: "Pending",
@@ -1974,6 +1975,7 @@ const mockTranslations = {
       REAL_IP: "Origin proxy (X-Real-IP)",
     },
     enrollmentHistory: "Enrollment history",
+    noEnrollmentHistory: "No enrollment attempts are stored for this device.",
     created: "Created",
     completed: "Completed",
     failure: "Failure",

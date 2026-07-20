@@ -1745,6 +1745,7 @@
     "enrolled": "Registriert",
     "registered": "Apple-Anmeldung",
     "lastSeen": "Zuletzt gesehen",
+    "viewDevice": "{name} anzeigen",
     "unavailable": "Nicht verfügbar",
     "status": {
       "PENDING": "Ausstehend",
@@ -1800,6 +1801,7 @@
       "REAL_IP": "Ursprungsproxy (Header X-Real-IP)"
     },
     "enrollmentHistory": "Registrierungsverlauf",
+    "noEnrollmentHistory": "Für dieses Gerät sind keine Registrierungsversuche gespeichert.",
     "created": "Erstellt",
     "completed": "Abgeschlossen",
     "failure": "Fehler",

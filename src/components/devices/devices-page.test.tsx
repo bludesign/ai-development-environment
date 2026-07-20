@@ -22,6 +22,16 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: vi.fn(),
 }));
 
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("@/i18n/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/i18n/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: navigation.push }),
+  };
+});
+
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const udid = "00008030-001C2D3E4F50002E";
@@ -133,6 +143,13 @@ describe("DevicesPage", () => {
         .getAttribute("href"),
     ).toBe("/api/ios/devices/export.tsv");
     expect(screen.getByText("Pending")).toBeDefined();
+    const row = screen.getByRole("link", { name: "View Test iPhone" });
+    expect(row.getAttribute("tabindex")).toBe("0");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "Enter" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(navigation.push).toHaveBeenCalledTimes(3);
+    expect(navigation.push).toHaveBeenCalledWith("/devices/device-1");
     expect(
       screen.getByRole("columnheader", { name: "Enrolled" }),
     ).toBeDefined();
@@ -154,7 +171,7 @@ describe("DeviceDetailPage", () => {
     } as never);
     render(<DeviceDetailPage id="device-1" />);
 
-    await screen.findByText("0000••••002E");
+    expect(await screen.findAllByText("0000••••002E")).toHaveLength(2);
     expect(screen.queryByText(udid)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reveal device UDID" }));
     expect(screen.getByText(udid)).toBeDefined();

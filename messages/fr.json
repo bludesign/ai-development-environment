@@ -1745,6 +1745,7 @@
     "enrolled": "Enrôlé",
     "registered": "Enregistrement Apple",
     "lastSeen": "Dernière activité",
+    "viewDevice": "Voir {name}",
     "unavailable": "Indisponible",
     "status": {
       "PENDING": "En attente",
@@ -1800,6 +1801,7 @@
       "REAL_IP": "Proxy d’origine (en-tête X-Real-IP)"
     },
     "enrollmentHistory": "Historique des enrôlements",
+    "noEnrollmentHistory": "Aucune tentative d’enrôlement n’est conservée pour cet appareil.",
     "created": "Créé",
     "completed": "Terminé",
     "failure": "Échec",

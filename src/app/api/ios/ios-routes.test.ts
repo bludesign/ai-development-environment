@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   enrollmentProfile: vi.fn(),
 }));
 
+const deviceId = "8bb37dd2-6e24-4ac8-8c53-c391f6c642c7";
+
 vi.mock("@/services/server-services", () => ({
   getServerServices: () => ({
     iosDevicesService: mocks,
@@ -28,6 +30,7 @@ function proxyHeaders(extra: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.completeEnrollment.mockResolvedValue({ id: deviceId });
   mocks.enrollmentProfile.mockResolvedValue(new Uint8Array([1, 2, 3]));
   mocks.createEnrollment.mockResolvedValue({
     id: "enrollment-1",
@@ -165,7 +168,7 @@ describe("iOS enrollment routes", () => {
 
     expect(response.status).toBe(301);
     expect(response.headers.get("location")).toBe(
-      "https://devices.example.com/api/ios/enrollment-complete",
+      `https://devices.example.com/api/ios/enrollment-complete?deviceId=${deviceId}`,
     );
     expect(mocks.completeEnrollment).toHaveBeenCalledWith(
       "test-token",
@@ -175,11 +178,18 @@ describe("iOS enrollment routes", () => {
   });
 
   test("serves a script-free completion page with restrictive headers", async () => {
-    const response = completion();
+    const response = completion(
+      new Request(
+        `https://devices.example.com/api/ios/enrollment-complete?deviceId=${deviceId}`,
+      ),
+    );
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("content-security-policy")).toContain(
       "default-src 'none'",
     );
-    await expect(response.text()).resolves.toContain("Device received");
+    const html = await response.text();
+    expect(html).toContain("Device received");
+    expect(html).toContain(`href="/devices/${deviceId}"`);
+    expect(html).toContain("View device");
   });
 });

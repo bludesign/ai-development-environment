@@ -2,6 +2,7 @@
 
 import {
   Apple,
+  ArrowLeft,
   Check,
   Copy,
   Eye,
@@ -21,6 +22,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -109,12 +116,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
   );
 
   const formatDate = (value: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(value))
-      : t("unavailable");
+    value ? new Date(value).toLocaleString(locale) : "—";
 
   const rename = async (event: FormEvent) => {
     event.preventDefault();
@@ -191,19 +193,25 @@ export function DeviceDetailPage({ id }: { id: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <p className="mx-auto flex max-w-6xl items-center gap-2 text-muted-foreground">
         <Spinner /> {t("loading")}
-      </div>
+      </p>
     );
   }
 
   if (!device) {
     return (
-      <section className="mx-auto max-w-3xl">
-        <Alert variant="destructive">
-          <AlertDescription>{error ?? t("notFound")}</AlertDescription>
-        </Alert>
-      </section>
+      <Empty className="mx-auto max-w-6xl border py-12">
+        <EmptyHeader>
+          <EmptyTitle>{t("notFound")}</EmptyTitle>
+          {error && <EmptyDescription>{error}</EmptyDescription>}
+        </EmptyHeader>
+        <Button asChild variant="outline">
+          <Link href="/devices">
+            <ArrowLeft /> {t("back")}
+          </Link>
+        </Button>
+      </Empty>
     );
   }
 
@@ -212,20 +220,13 @@ export function DeviceDetailPage({ id }: { id: string }) {
     ["PENDING", "REGISTRATION_FAILED"].includes(device.status);
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
       <div>
-        <Link className="text-sm text-primary hover:underline" href="/devices">
-          {t("back")}
-        </Link>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {device.displayName}
-          </h1>
-          <IosDeviceStatusBadge
-            label={t(`status.${device.status}`)}
-            status={device.status}
-          />
-        </div>
+        <Button asChild className="-ml-2" size="sm" variant="ghost">
+          <Link href="/devices">
+            <ArrowLeft /> {t("back")}
+          </Link>
+        </Button>
       </div>
 
       {error && (
@@ -260,6 +261,52 @@ export function DeviceDetailPage({ id }: { id: string }) {
           </AlertDescription>
         </Alert>
       )}
+
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {device.product ?? t("unavailable")}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold">{device.displayName}</h1>
+            <IosDeviceStatusBadge
+              label={t(`status.${device.status}`)}
+              status={device.status}
+            />
+          </div>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {device.maskedUdid}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={!canRegister || busy}
+            onClick={() => setRegisterOpen(true)}
+          >
+            {busy && device.status === "REGISTERING" ? <Spinner /> : <Apple />}{" "}
+            {device.status === "REGISTRATION_FAILED"
+              ? t("retryRegistration")
+              : t("registerWithApple")}
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              !["PENDING", "REGISTRATION_FAILED"].includes(device.status)
+            }
+            onClick={() => setRejectOpen(true)}
+            variant="outline"
+          >
+            <XCircle /> {t("reject")}
+          </Button>
+          <Button
+            disabled={busy || device.status === "REGISTERING"}
+            onClick={() => setDeleteOpen(true)}
+            variant="destructive"
+          >
+            <Trash2 /> {t("delete")}
+          </Button>
+        </div>
+      </div>
 
       <Card>
         <CardHeader>
@@ -343,90 +390,59 @@ export function DeviceDetailPage({ id }: { id: string }) {
               </dd>
             </div>
           </dl>
-
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            <Button
-              disabled={!canRegister || busy}
-              onClick={() => setRegisterOpen(true)}
-            >
-              {busy && device.status === "REGISTERING" ? (
-                <Spinner />
-              ) : (
-                <Apple />
-              )}{" "}
-              {device.status === "REGISTRATION_FAILED"
-                ? t("retryRegistration")
-                : t("registerWithApple")}
-            </Button>
-            <Button
-              disabled={
-                busy ||
-                !["PENDING", "REGISTRATION_FAILED"].includes(device.status)
-              }
-              onClick={() => setRejectOpen(true)}
-              variant="outline"
-            >
-              <XCircle /> {t("reject")}
-            </Button>
-            <Button
-              disabled={busy || device.status === "REGISTERING"}
-              onClick={() => setDeleteOpen(true)}
-              variant="destructive"
-            >
-              <Trash2 /> {t("delete")}
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="gap-0 py-0">
+        <CardHeader className="border-b py-4">
           <CardTitle>{t("ipHistory")}</CardTitle>
         </CardHeader>
-        <CardContent>
-          {device.ipObservations.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("ipAddress")}</TableHead>
-                  <TableHead>{t("source")}</TableHead>
-                  <TableHead>{t("forwardedBy")}</TableHead>
-                  <TableHead>{t("observed")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {device.ipObservations.map((observation) => (
-                  <TableRow key={observation.id}>
-                    <TableCell className="font-mono text-xs">
-                      {observation.ipAddress}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {t(`ipSource.${observation.source}`)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {t(`ipHeaderSource.${observation.headerSource}`)}
-                    </TableCell>
-                    <TableCell>{formatDate(observation.observedAt)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("noIpHistory")}</p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("enrollmentHistory")}</CardTitle>
-        </CardHeader>
-        <CardContent>
+        {device.ipObservations.length ? (
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t("ipAddress")}</TableHead>
+                <TableHead>{t("source")}</TableHead>
+                <TableHead>{t("forwardedBy")}</TableHead>
+                <TableHead>{t("observed")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {device.ipObservations.map((observation) => (
+                <TableRow key={observation.id}>
+                  <TableCell className="font-mono text-xs">
+                    {observation.ipAddress}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {t(`ipSource.${observation.source}`)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {t(`ipHeaderSource.${observation.headerSource}`)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(observation.observedAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            {t("noIpHistory")}
+          </CardContent>
+        )}
+      </Card>
+
+      <Card className="gap-0 py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle>{t("enrollmentHistory")}</CardTitle>
+        </CardHeader>
+        {device.enrollments.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
                 <TableHead>{t("statusLabel")}</TableHead>
                 <TableHead>{t("created")}</TableHead>
                 <TableHead>{t("completed")}</TableHead>
@@ -441,8 +457,12 @@ export function DeviceDetailPage({ id }: { id: string }) {
                       {t(`enrollmentStatus.${enrollment.status}`)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{formatDate(enrollment.createdAt)}</TableCell>
-                  <TableCell>{formatDate(enrollment.consumedAt)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(enrollment.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(enrollment.consumedAt)}
+                  </TableCell>
                   <TableCell>
                     {enrollment.failureCode ?? t("unavailable")}
                   </TableCell>
@@ -450,7 +470,11 @@ export function DeviceDetailPage({ id }: { id: string }) {
               ))}
             </TableBody>
           </Table>
-        </CardContent>
+        ) : (
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            {t("noEnrollmentHistory")}
+          </CardContent>
+        )}
       </Card>
 
       <ConfirmationDialog
