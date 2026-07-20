@@ -41,7 +41,7 @@
     "system": "Sistema",
     "skills": "Habilidades",
     "tools": "Herramientas",
-    "observability": "Observabilidad",
+    "debugging": "Depuración",
     "consoleLogs": "Registros de consola",
     "analyticsEvents": "Eventos analíticos",
     "unifiedEvents": "Vista unificada",

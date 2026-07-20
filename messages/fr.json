@@ -41,7 +41,7 @@
     "system": "Système",
     "skills": "Compétences",
     "tools": "Outils",
-    "observability": "Observabilité",
+    "debugging": "Débogage",
     "consoleLogs": "Journaux de console",
     "analyticsEvents": "Événements analytiques",
     "unifiedEvents": "Vue unifiée",

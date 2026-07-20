@@ -145,7 +145,7 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 shrink-0 border-b bg-background/90 backdrop-blur-xl backdrop-saturate-150 supports-backdrop-filter:bg-background/70">
       <div aria-hidden="true" className="h-[env(safe-area-inset-top)]" />
-      <div className="grid h-14 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
+      <div className="flex h-14 items-center justify-between pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
         <SidebarToggle
           expanded={leftOpen}
           hideLabel={t("hideNavigation")}
@@ -153,9 +153,6 @@ function AppHeader({
           showLabel={t("showNavigation")}
           side="left"
         />
-        <p className="truncate px-3 text-center text-sm font-medium">
-          {t("welcome")}
-        </p>
         <SidebarToggle
           expanded={rightOpen}
           hideLabel={t("hideNotifications")}
@@ -264,22 +261,6 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/build-data")}
-                >
-                  <Link
-                    href="/build-data"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <HardDrive />
-                    <span>{t("buildData")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
                   isActive={pathname.startsWith("/builds")}
                 >
                   <Link
@@ -290,54 +271,6 @@ function NavigationSidebar() {
                   >
                     <Hammer />
                     <span>{t("builds")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/provisioning-profiles")}
-                >
-                  <Link
-                    href="/provisioning-profiles"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ShieldCheck />
-                    <span>{t("provisioningProfiles")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/devices")}
-                >
-                  <Link
-                    href="/devices"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Smartphone />
-                    <span>{t("devices")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/push-notifications")}
-                >
-                  <Link
-                    href="/push-notifications"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <BellRing />
-                    <span>{t("pushNotifications")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -412,9 +345,25 @@ function NavigationSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>{t("observability")}</SidebarGroupLabel>
+          <SidebarGroupLabel>{t("debugging")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/push-notifications")}
+                >
+                  <Link
+                    href="/push-notifications"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <BellRing />
+                    <span>{t("pushNotifications")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
@@ -564,6 +513,54 @@ function NavigationSidebar() {
           <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/build-data")}
+                >
+                  <Link
+                    href="/build-data"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <HardDrive />
+                    <span>{t("buildData")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/provisioning-profiles")}
+                >
+                  <Link
+                    href="/provisioning-profiles"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ShieldCheck />
+                    <span>{t("provisioningProfiles")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/devices")}
+                >
+                  <Link
+                    href="/devices"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Smartphone />
+                    <span>{t("devices")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
