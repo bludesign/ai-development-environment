@@ -38,6 +38,14 @@ type Profile = {
   platforms: string[];
   deviceCount: number;
   deviceUdids: string[];
+  provisionedDevices: Array<{
+    udid: string;
+    deviceId: string | null;
+    displayName: string | null;
+    product: string | null;
+    osVersion: string | null;
+    status: string | null;
+  }>;
   certificateSha1s: string[];
   createdAt: string | null;
   expiresAt: string | null;
@@ -63,6 +71,9 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
             id uuid contentHash name profileType bundleId teamId teamName
             platforms deviceCount deviceUdids certificateSha1s createdAt expiresAt
             expired xcodeManaged installedAgents { id name }
+            provisionedDevices {
+              udid deviceId displayName product osVersion status
+            }
           }
         }`,
         { id },
@@ -91,7 +102,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
 
   if (error) {
     return (
-      <section className="mx-auto w-full max-w-[1200px] space-y-4">
+      <section className="mx-auto w-full max-w-[1500px] space-y-4">
         <Button asChild variant="ghost">
           <Link href="/provisioning-profiles">
             <ArrowLeft /> {t("backToProfiles")}
@@ -106,7 +117,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
 
   if (!profile) {
     return (
-      <section className="mx-auto w-full max-w-[1200px] space-y-4">
+      <section className="mx-auto w-full max-w-[1500px] space-y-4">
         <Button asChild variant="ghost">
           <Link href="/provisioning-profiles">
             <ArrowLeft /> {t("backToProfiles")}
@@ -122,7 +133,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
         <Button asChild className="-ml-2" size="sm" variant="ghost">
           <Link href="/provisioning-profiles">
@@ -209,17 +220,45 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-20">#</TableHead>
+                <TableHead>{t("device")}</TableHead>
                 <TableHead>{t("udid")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {profile.deviceUdids.map((udid, index) => (
-                <TableRow key={udid}>
-                  <TableCell className="text-muted-foreground">
-                    {index + 1}
+              {profile.provisionedDevices.map((device) => (
+                <TableRow key={device.udid}>
+                  <TableCell>
+                    {device.deviceId && device.displayName ? (
+                      <Link
+                        className="font-medium hover:underline"
+                        href={`/devices/${device.deviceId}`}
+                      >
+                        {device.displayName}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {t("unknownDevice")}
+                      </span>
+                    )}
+                    {(device.product || device.osVersion) && (
+                      <p className="text-xs text-muted-foreground">
+                        {[device.product, device.osVersion]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    )}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{udid}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {device.udid}
+                  </TableCell>
+                  <TableCell>
+                    {device.status ? (
+                      <Badge variant="secondary">{device.status}</Badge>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

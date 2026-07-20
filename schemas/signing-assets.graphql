@@ -11,6 +11,15 @@ type SigningInstallationAgent {
   name: String!
 }
 
+type SigningProfileDevice {
+  udid: String!
+  deviceId: ID
+  displayName: String
+  product: String
+  osVersion: String
+  status: String
+}
+
 type LocalSigningProfile {
   id: ID!
   uuid: String!
@@ -23,6 +32,7 @@ type LocalSigningProfile {
   platforms: [String!]!
   deviceCount: Int!
   deviceUdids: [String!]!
+  provisionedDevices: [SigningProfileDevice!]!
   certificateSha1s: [String!]!
   createdAt: String
   expiresAt: String

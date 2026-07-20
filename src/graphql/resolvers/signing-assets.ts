@@ -12,6 +12,10 @@ const iso = (value: Date | null) => value?.toISOString() ?? null;
 export const createSigningAssetsResolvers = (
   service: SigningAssetsService,
 ) => ({
+  LocalSigningProfile: {
+    provisionedDevices: (value: { deviceUdids: string[] }) =>
+      service.profileDevices(value.deviceUdids),
+  },
   SigningOperation: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),

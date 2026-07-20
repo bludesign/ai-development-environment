@@ -43,8 +43,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
 
 type Agent = { id: string; name: string; hostname: string; supported: boolean };
 type Profile = {
@@ -93,6 +96,20 @@ type Operation = {
     agent: { id: string; name: string };
   }>;
 };
+type RefreshJob = {
+  id: string;
+  agentId: string;
+  status:
+    "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+  error: string | null;
+};
+
+const TERMINAL_JOB_STATUSES = new Set<RefreshJob["status"]>([
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "TIMED_OUT",
+]);
 
 const LOCAL_QUERY = `query SigningAssetsPage {
   signingAgents { id name hostname supported lastSeenAt }
@@ -138,6 +155,7 @@ function downloadBase64(contentBase64: string, filename: string) {
 export function ProvisioningProfilesPage() {
   const t = useTranslations("provisioningProfiles");
   const tc = useTranslations("common");
+  const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
@@ -158,6 +176,7 @@ export function ProvisioningProfilesPage() {
   const [portalBundleId, setPortalBundleId] = useState("");
   const [portalCertificateId, setPortalCertificateId] = useState("");
   const [assetTab, setAssetTab] = useState("profiles");
+  const [refreshJobs, setRefreshJobs] = useState<RefreshJob[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -237,6 +256,119 @@ export function ProvisioningProfilesPage() {
     }
   };
 
+  const applyRefreshJob = useCallback((job: RefreshJob) => {
+    setRefreshJobs((current) => {
+      const index = current.findIndex((item) => item.id === job.id);
+      if (index < 0) return [...current, job];
+      const previous = current[index]!;
+      if (
+        previous.status === job.status &&
+        previous.error === job.error &&
+        previous.agentId === job.agentId
+      ) {
+        return current;
+      }
+      const next = [...current];
+      next[index] = job;
+      return next;
+    });
+  }, []);
+
+  const refreshJobIds = refreshJobs
+    .map((job) => job.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    if (!refreshJobIds) return;
+    const ids = refreshJobIds.split(",");
+    const unsubscribers = ids.map((id) =>
+      controlPlaneSubscriptions().subscribe<{
+        agentJobChanged: RefreshJob;
+      }>(
+        {
+          query: `subscription SigningInventoryJobChanged($id: ID!) {
+            agentJobChanged(jobId: $id) { id agentId status error }
+          }`,
+          variables: { id },
+        },
+        {
+          next: (value) => {
+            if (value.data?.agentJobChanged) {
+              applyRefreshJob(value.data.agentJobChanged);
+            }
+          },
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+    );
+    const reconcile = async () => {
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const data = await controlPlaneRequest<{
+              agentJob: RefreshJob | null;
+            }>(
+              `query SigningInventoryJob($id: ID!) {
+                agentJob(id: $id) { id agentId status error }
+              }`,
+              { id },
+            );
+            if (data.agentJob) applyRefreshJob(data.agentJob);
+          } catch {
+            // The subscription remains the primary progress channel.
+          }
+        }),
+      );
+    };
+    void reconcile();
+    const timer = window.setInterval(() => void reconcile(), 2_000);
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      window.clearInterval(timer);
+    };
+  }, [applyRefreshJob, refreshJobIds]);
+
+  useEffect(() => {
+    if (
+      !refreshJobs.length ||
+      !refreshJobs.every((job) => TERMINAL_JOB_STATUSES.has(job.status))
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void load().then(() => {
+        if (refreshJobs.every((job) => job.status === "SUCCEEDED")) {
+          setRefreshJobs([]);
+        }
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load, refreshJobs]);
+
+  const refreshInventory = async () => {
+    setError(null);
+    setRefreshJobs([]);
+    try {
+      const data = await controlPlaneRequest<{
+        refreshSigningAssets: RefreshJob[];
+      }>(`mutation RefreshSigningAssets {
+        refreshSigningAssets { id agentId status error }
+      }`);
+      setRefreshJobs(data.refreshSigningAssets);
+      if (!data.refreshSigningAssets.length) {
+        setError(t("noRefreshAgents"));
+      }
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  const refreshing = refreshJobs.some(
+    (job) => !TERMINAL_JOB_STATUSES.has(job.status),
+  );
+
   const uploadProfile = async (file: File | null) => {
     if (!file) return;
     await mutate(
@@ -301,13 +433,13 @@ export function ProvisioningProfilesPage() {
           </p>
         </div>
         <Button
-          disabled={busy || loading}
-          onClick={() =>
-            void mutate(`mutation { refreshSigningAssets { id } }`)
-          }
+          disabled={busy || loading || refreshing}
+          onClick={() => void refreshInventory()}
           variant="outline"
         >
-          <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
+          <RefreshCw
+            className={loading || refreshing ? "animate-spin" : undefined}
+          />{" "}
           {t("refresh")}
         </Button>
       </div>
@@ -315,6 +447,9 @@ export function ProvisioningProfilesPage() {
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+      {refreshJobs.length > 0 && (
+        <InventoryRefreshStatus agents={agents} jobs={refreshJobs} />
       )}
 
       <Card>
@@ -468,12 +603,28 @@ export function ProvisioningProfilesPage() {
                     const missing = agents.filter(
                       (agent) => agent.supported && !installed.has(agent.id),
                     );
+                    const profileHref = `/provisioning-profiles/${encodeURIComponent(profile.id)}`;
                     return (
-                      <TableRow key={profile.id}>
+                      <TableRow
+                        aria-label={t("viewProfile", { name: profile.name })}
+                        className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        key={profile.id}
+                        onClick={() => router.push(profileHref)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(profileHref);
+                          }
+                        }}
+                        role="link"
+                        tabIndex={0}
+                      >
                         <TableCell>
                           <Link
                             className="font-medium hover:underline"
-                            href={`/provisioning-profiles/${encodeURIComponent(profile.id)}`}
+                            href={profileHref}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
                           >
                             {profile.name}
                           </Link>
@@ -509,7 +660,11 @@ export function ProvisioningProfilesPage() {
                             .map((agent) => agent.name)
                             .join(", ")}
                         </TableCell>
-                        <TableCell className="space-x-1 text-right">
+                        <TableCell
+                          className="space-x-1 text-right"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
                           {missing.length > 0 && profile.installedAgents[0] && (
                             <Button
                               disabled={busy}
@@ -849,6 +1004,53 @@ export function ProvisioningProfilesPage() {
         </Card>
       )}
     </section>
+  );
+}
+
+function InventoryRefreshStatus({
+  jobs,
+  agents,
+}: {
+  jobs: RefreshJob[];
+  agents: Agent[];
+}) {
+  const t = useTranslations("provisioningProfiles");
+  const finished = jobs.filter((job) =>
+    TERMINAL_JOB_STATUSES.has(job.status),
+  ).length;
+  const active = finished < jobs.length;
+  const failed = jobs.some((job) =>
+    ["FAILED", "CANCELLED", "TIMED_OUT"].includes(job.status),
+  );
+  const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
+  return (
+    <Alert variant={failed ? "destructive" : "default"}>
+      <AlertDescription className="space-y-2">
+        <p className="flex items-center gap-2 font-medium">
+          {active && <Spinner />}
+          {t("refreshProgress", { complete: finished, total: jobs.length })}
+        </p>
+        <div className="space-y-1">
+          {jobs.map((job) => (
+            <p className="flex flex-wrap items-center gap-2" key={job.id}>
+              <span>{agentNames.get(job.agentId) ?? job.agentId}</span>
+              <Badge
+                variant={
+                  job.status === "SUCCEEDED"
+                    ? "default"
+                    : TERMINAL_JOB_STATUSES.has(job.status)
+                      ? "destructive"
+                      : "secondary"
+                }
+              >
+                {t(`refreshStatus.${job.status}`)}
+              </Badge>
+              {job.error && <span className="break-words">{job.error}</span>}
+            </p>
+          ))}
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 

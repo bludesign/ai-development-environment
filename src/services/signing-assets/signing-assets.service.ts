@@ -393,6 +393,39 @@ export class SigningAssetsService {
     return (await this.profiles()).find((profile) => profile.id === id) ?? null;
   }
 
+  async profileDevices(deviceUdids: string[]) {
+    const normalized = [
+      ...new Set(deviceUdids.map((udid) => udid.toUpperCase())),
+    ];
+    if (!normalized.length) return [];
+    const prisma = await getPrismaClient();
+    const devices = await prisma.iosDevice.findMany({
+      where: { udid: { in: normalized } },
+      select: {
+        id: true,
+        udid: true,
+        displayName: true,
+        product: true,
+        osVersion: true,
+        status: true,
+      },
+    });
+    const byUdid = new Map(
+      devices.map((device) => [device.udid.toUpperCase(), device]),
+    );
+    return deviceUdids.map((udid) => {
+      const device = byUdid.get(udid.toUpperCase());
+      return {
+        udid,
+        deviceId: device?.id ?? null,
+        displayName: device?.displayName ?? null,
+        product: device?.product ?? null,
+        osVersion: device?.osVersion ?? null,
+        status: device?.status ?? null,
+      };
+    });
+  }
+
   async certificates() {
     const prisma = await getPrismaClient();
     const rows = await prisma.signingCertificateAsset.findMany({
