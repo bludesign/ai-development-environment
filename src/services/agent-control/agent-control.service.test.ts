@@ -267,3 +267,43 @@ describe("AgentControlService.updateDerivedDataSettings", () => {
     ).rejects.toThrow("absolute path");
   });
 });
+
+describe("validateJob covers every advertised job kind", () => {
+  // SUPPORTED_AGENT_JOBS is derived from the contract, but validateJob is a
+  // hand-maintained chain. Adding a job kind without a matching branch here
+  // dispatches fine from the agent's side and then fails at the control plane
+  // with "Unsupported agent job kind", so the two must be checked together.
+  test.each([...SUPPORTED_AGENT_JOBS])("%s is recognised", (kind) => {
+    try {
+      validateJob(kind, {});
+    } catch (error) {
+      // A payload complaint is expected for an empty payload; only an unknown
+      // kind indicates a missing branch.
+      expect(String(error)).not.toContain("Unsupported agent job kind");
+    }
+  });
+});
+
+describe("signing inspection payload", () => {
+  test("accepts the payload the builds service dispatches", () => {
+    expect(() =>
+      validateJob("ios.signing.inspect", {
+        buildId: "build-1",
+        codebaseId: "codebase-1",
+        artifactDirectory: "/Users/example/Builds/build-1",
+        archiveRelativePath: "archive.xcarchive",
+      }),
+    ).not.toThrow();
+  });
+
+  test("rejects an archive path that escapes the build folder", () => {
+    expect(() =>
+      validateJob("ios.signing.inspect", {
+        buildId: "build-1",
+        codebaseId: "codebase-1",
+        artifactDirectory: "/Users/example/Builds/build-1",
+        archiveRelativePath: "../../etc/passwd",
+      }),
+    ).toThrow();
+  });
+});

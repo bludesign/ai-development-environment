@@ -250,7 +250,7 @@ export function ExportArchiveDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("exportArchive")}</DialogTitle>
           <DialogDescription>{t("exportArchiveDescription")}</DialogDescription>
@@ -274,7 +274,7 @@ export function ExportArchiveDialog({
               onValueChange={(value) => setMethod(value as BuildExportMethod)}
               value={method}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -294,7 +294,7 @@ export function ExportArchiveDialog({
               onValueChange={setTeamId}
               value={teamId}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 {loading ? (
                   <Spinner />
                 ) : (
@@ -317,7 +317,7 @@ export function ExportArchiveDialog({
           <div className="space-y-2">
             <Label>{t("signingStyle")}</Label>
             <Select onValueChange={setSigningStyle} value={signingStyle}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -336,7 +336,7 @@ export function ExportArchiveDialog({
                   onValueChange={setCertificateOverride}
                   value={certificate}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder={t("certificateAutomatic")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -397,7 +397,7 @@ export function ExportArchiveDialog({
                         }
                         value={profiles[bundle.bundleId] ?? ""}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder={t("selectProfile")} />
                         </SelectTrigger>
                         <SelectContent>
