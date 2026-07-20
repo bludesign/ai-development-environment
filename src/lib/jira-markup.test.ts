@@ -20,11 +20,11 @@ describe("Jira markup helpers", () => {
 
   test("converts Jira Wiki headings, formatting, references, lists, and tables", () => {
     const markdown = jiraWikiToMarkdown(
-      "h2. Release\n\n*Owner:* [~chandler]\n\n* Item\n\n||Name||Status||\n|API|Done|",
+      "h2. Release\n\n*Owner:* [~user]\n\n* Item\n\n||Name||Status||\n|API|Done|",
       "https://example.atlassian.net",
     );
     expect(markdown).toContain("## Release");
-    expect(markdown).toContain("**Owner:** @chandler");
+    expect(markdown).toContain("**Owner:** @user");
     expect(markdown).toContain("* Item");
     expect(markdown).toContain("|Name|Status|");
   });

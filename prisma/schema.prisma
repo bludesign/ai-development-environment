@@ -61,6 +61,84 @@ model AgentEnrollmentToken {
   createdAt DateTime  @default(now())
 }
 
+model IosDevice {
+  id                String                   @id
+  udid              String                   @unique
+  displayName       String
+  product           String?
+  osVersion         String?
+  platform          String                   @default("IOS")
+  status            String                   @default("PENDING")
+  appleDeviceId     String?                  @unique
+  appleStatus       String?
+  registrationError String?
+  registeredAt      DateTime?
+  lastSeenAt        DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  enrollments       IosDeviceEnrollment[]
+  ipObservations    IosDeviceIpObservation[]
+
+  @@index([status, createdAt])
+  @@index([lastSeenAt])
+}
+
+model IosDeviceEnrollment {
+  id             String                   @id
+  deviceId       String?
+  tokenHash      String                   @unique
+  displayName    String
+  status         String                   @default("ISSUED")
+  expiresAt      DateTime
+  downloadedAt   DateTime?
+  consumedAt     DateTime?
+  responseDigest String?
+  failureCode    String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  device         IosDevice?               @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ipObservations IosDeviceIpObservation[]
+
+  @@index([deviceId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model IosDeviceIpObservation {
+  id           String              @id
+  deviceId     String?
+  enrollmentId String
+  ipAddress    String
+  source       String
+  headerSource String
+  observedAt   DateTime            @default(now())
+  device       IosDevice?          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  enrollment   IosDeviceEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, source, ipAddress])
+  @@index([deviceId, observedAt])
+  @@index([enrollmentId, observedAt])
+}
+
+model IosDeviceSettings {
+  id                                  String    @id
+  organizationName                    String    @default("AI Development Environment")
+  profileIdentifier                   String    @default("com.ai-development-environment.device-enrollment")
+  signerCertificatePem                String?
+  signerPrivateKeyPem                 String?
+  signerFingerprint                   String?
+  signerCreatedAt                     DateTime?
+  signerExpiresAt                     DateTime?
+  appStoreConnectIssuerId             String?
+  appStoreConnectKeyId                String?
+  appStoreConnectPrivateKey           String?
+  appStoreConnectPrivateKeyFingerprint String?
+  appStoreConnectVerifiedAt           DateTime?
+  appStoreConnectLastTestedAt         DateTime?
+  appStoreConnectVerificationError    String?
+  createdAt                           DateTime  @default(now())
+  updatedAt                           DateTime  @updatedAt
+}
+
 model AgentJob {
   id                    String               @id
   agentId               String

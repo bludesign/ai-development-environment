@@ -17,6 +17,7 @@ import {
   PanelRight,
   PlayCircle,
   Settings,
+  Smartphone,
   Sparkles,
   TicketCheck,
   Wrench,
@@ -284,6 +285,22 @@ function NavigationSidebar() {
                   >
                     <Hammer />
                     <span>{t("builds")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/devices")}
+                >
+                  <Link
+                    href="/devices"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Smartphone />
+                    <span>{t("devices")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

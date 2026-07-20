@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl";
 import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ export function SettingsPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
       <EditorSettingsCard />
+      <IosDeviceSettingsCard />
       <JiraSettingsPage embedded />
       <GitHubSettingsCard />
       <GitHubAppSettingsCard />
