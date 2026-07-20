@@ -544,7 +544,13 @@
   },
   "settings": {
     "title": "Configuración",
-    "description": "Configura las integraciones utilizadas por esta aplicación."
+    "description": "Configura las herramientas de desarrollo, los servicios de Apple y las integraciones externas.",
+    "developmentGroup": "Desarrollo",
+    "developmentGroupDescription": "Elige las herramientas utilizadas con los checkouts locales y los worktrees.",
+    "appleGroup": "Servicios de Apple",
+    "appleGroupDescription": "Administra la inscripción de iOS y las credenciales de App Store Connect y APNs.",
+    "integrationsGroup": "Integraciones",
+    "integrationsGroupDescription": "Conecta las cuentas de Jira y GitHub utilizadas en toda la aplicación."
   },
   "editorSettings": {
     "title": "Editor de worktrees",
@@ -759,7 +765,6 @@
     "credentialsRequired": "Conecta GitHub para ver comentarios",
     "credentialsDescription": "Añade en Configuración un token personal con acceso de lectura y escritura a solicitudes.",
     "openSettings": "Abrir Configuración",
-    "pullRequestFilter": "Solicitud de extracción abierta",
     "allPullRequests": "Todas las solicitudes abiertas",
     "searchPullRequests": "Buscar solicitudes abiertas",
     "noPullRequestMatches": "Ninguna solicitud abierta coincide con la búsqueda.",
@@ -770,6 +775,8 @@
     "loading": "Cargando comentarios de revisión…",
     "empty": "No hay comentarios de revisión",
     "emptyDescription": "Ningún hilo coincide con la solicitud y los filtros seleccionados.",
+    "reviewThreads": "Comentarios de revisión",
+    "reviewThreadsDescription": "{count, plural, =0 {Ningún hilo de revisión coincide con los filtros actuales.} one {# hilo de revisión coincide con los filtros actuales.} other {# hilos de revisión coinciden con los filtros actuales.}}",
     "author": "Autor",
     "pullRequest": "Solicitud de extracción",
     "comment": "Comentario",

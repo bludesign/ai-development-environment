@@ -544,7 +544,13 @@
   },
   "settings": {
     "title": "Settings",
-    "description": "Configure the integrations used by this application."
+    "description": "Configure development tools, Apple services, and external integrations.",
+    "developmentGroup": "Development",
+    "developmentGroupDescription": "Choose the tools used with local checkouts and worktrees.",
+    "appleGroup": "Apple services",
+    "appleGroupDescription": "Manage iOS enrollment, App Store Connect, and APNs credentials.",
+    "integrationsGroup": "Integrations",
+    "integrationsGroupDescription": "Connect the Jira and GitHub accounts used throughout the application."
   },
   "editorSettings": {
     "title": "Worktree editor",
@@ -759,7 +765,6 @@
     "credentialsRequired": "Connect GitHub to view comments",
     "credentialsDescription": "Add a personal access token with pull-request read and write access in Settings.",
     "openSettings": "Open Settings",
-    "pullRequestFilter": "Open pull request",
     "allPullRequests": "All open pull requests",
     "searchPullRequests": "Search open pull requests",
     "noPullRequestMatches": "No open pull requests match your search.",
@@ -770,6 +775,8 @@
     "loading": "Loading review comments…",
     "empty": "No review comments",
     "emptyDescription": "No review threads match the selected pull request and filters.",
+    "reviewThreads": "Review comments",
+    "reviewThreadsDescription": "{count, plural, =0 {No review threads match the current filters.} one {# review thread matches the current filters.} other {# review threads match the current filters.}}",
     "author": "Author",
     "pullRequest": "Pull request",
     "comment": "Comment",

@@ -544,7 +544,13 @@
   },
   "settings": {
     "title": "Paramètres",
-    "description": "Configurez les intégrations utilisées par cette application."
+    "description": "Configurez les outils de développement, les services Apple et les intégrations externes.",
+    "developmentGroup": "Développement",
+    "developmentGroupDescription": "Choisissez les outils utilisés avec les extractions locales et les worktrees.",
+    "appleGroup": "Services Apple",
+    "appleGroupDescription": "Gérez l’inscription iOS et les identifiants App Store Connect et APNs.",
+    "integrationsGroup": "Intégrations",
+    "integrationsGroupDescription": "Connectez les comptes Jira et GitHub utilisés dans toute l’application."
   },
   "editorSettings": {
     "title": "Éditeur des worktrees",
@@ -759,7 +765,6 @@
     "credentialsRequired": "Connectez GitHub pour voir les commentaires",
     "credentialsDescription": "Ajoutez dans Paramètres un jeton personnel autorisé à lire et modifier les demandes.",
     "openSettings": "Ouvrir les paramètres",
-    "pullRequestFilter": "Demande de tirage ouverte",
     "allPullRequests": "Toutes les demandes ouvertes",
     "searchPullRequests": "Rechercher des demandes ouvertes",
     "noPullRequestMatches": "Aucune demande ouverte ne correspond à la recherche.",
@@ -770,6 +775,8 @@
     "loading": "Chargement des commentaires de révision…",
     "empty": "Aucun commentaire de révision",
     "emptyDescription": "Aucun fil ne correspond à la demande et aux filtres sélectionnés.",
+    "reviewThreads": "Commentaires de révision",
+    "reviewThreadsDescription": "{count, plural, =0 {Aucun fil de révision ne correspond aux filtres actuels.} one {# fil de révision correspond aux filtres actuels.} other {# fils de révision correspondent aux filtres actuels.}}",
     "author": "Auteur",
     "pullRequest": "Demande de tirage",
     "comment": "Commentaire",

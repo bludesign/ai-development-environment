@@ -544,7 +544,13 @@
   },
   "settings": {
     "title": "Einstellungen",
-    "description": "Konfiguriere die von dieser Anwendung verwendeten Integrationen."
+    "description": "Entwicklungstools, Apple-Dienste und externe Integrationen konfigurieren.",
+    "developmentGroup": "Entwicklung",
+    "developmentGroupDescription": "Tools für lokale Checkouts und Worktrees auswählen.",
+    "appleGroup": "Apple-Dienste",
+    "appleGroupDescription": "iOS-Registrierung sowie App-Store-Connect- und APNs-Zugangsdaten verwalten.",
+    "integrationsGroup": "Integrationen",
+    "integrationsGroupDescription": "Die in der Anwendung verwendeten Jira- und GitHub-Konten verbinden."
   },
   "editorSettings": {
     "title": "Worktree-Editor",
@@ -759,7 +765,6 @@
     "credentialsRequired": "GitHub verbinden, um Kommentare anzuzeigen",
     "credentialsDescription": "Fügen Sie in den Einstellungen ein persönliches Token mit Lese- und Schreibzugriff auf Pull Requests hinzu.",
     "openSettings": "Einstellungen öffnen",
-    "pullRequestFilter": "Offener Pull Request",
     "allPullRequests": "Alle offenen Pull Requests",
     "searchPullRequests": "Offene Pull Requests durchsuchen",
     "noPullRequestMatches": "Keine offenen Pull Requests entsprechen der Suche.",
@@ -770,6 +775,8 @@
     "loading": "Review-Kommentare werden geladen…",
     "empty": "Keine Review-Kommentare",
     "emptyDescription": "Keine Threads entsprechen dem ausgewählten Pull Request und den Filtern.",
+    "reviewThreads": "Review-Kommentare",
+    "reviewThreadsDescription": "{count, plural, =0 {Keine Review-Threads entsprechen den aktuellen Filtern.} one {# Review-Thread entspricht den aktuellen Filtern.} other {# Review-Threads entsprechen den aktuellen Filtern.}}",
     "author": "Verfasser",
     "pullRequest": "Pull-Request-Verweis",
     "comment": "Kommentartext",

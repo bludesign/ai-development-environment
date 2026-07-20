@@ -14,7 +14,14 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  DragEvent,
+  FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
@@ -55,17 +62,59 @@ export function SettingsPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
       <div className="grid items-start gap-6 xl:grid-cols-2">
-        <div className="flex min-w-0 flex-col gap-6">
-          <EditorSettingsCard />
-          <IosDeviceSettingsCard />
-          <PushNotificationSettingsCard />
+        <div className="flex min-w-0 flex-col gap-8">
+          <SettingsGroup
+            description={t("developmentGroupDescription")}
+            id="settings-development"
+            title={t("developmentGroup")}
+          >
+            <EditorSettingsCard />
+          </SettingsGroup>
+          <SettingsGroup
+            description={t("appleGroupDescription")}
+            id="settings-apple"
+            title={t("appleGroup")}
+          >
+            <IosDeviceSettingsCard />
+            <PushNotificationSettingsCard />
+          </SettingsGroup>
         </div>
-        <div className="flex min-w-0 flex-col gap-6">
-          <JiraSettingsPage embedded />
-          <GitHubSettingsCard />
-          <GitHubAppSettingsCard />
+        <div className="min-w-0">
+          <SettingsGroup
+            description={t("integrationsGroupDescription")}
+            id="settings-integrations"
+            title={t("integrationsGroup")}
+          >
+            <JiraSettingsPage embedded />
+            <GitHubSettingsCard />
+            <GitHubAppSettingsCard />
+          </SettingsGroup>
         </div>
       </div>
+    </section>
+  );
+}
+
+function SettingsGroup({
+  children,
+  description,
+  id,
+  title,
+}: {
+  children: ReactNode;
+  description: string;
+  id: string;
+  title: string;
+}) {
+  return (
+    <section aria-labelledby={id} className="min-w-0 space-y-4">
+      <div className="space-y-1 border-b pb-3">
+        <h2 className="text-lg font-semibold tracking-tight" id={id}>
+          {title}
+        </h2>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex min-w-0 flex-col gap-6">{children}</div>
     </section>
   );
 }
