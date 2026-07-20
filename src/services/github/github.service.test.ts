@@ -75,6 +75,7 @@ const state = vi.hoisted(() => ({
 }));
 
 const appClient = vi.hoisted(() => ({
+  cancel: vi.fn(),
   clearTokenCache: vi.fn(),
   graphql: vi.fn(),
   listJobs: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     await importOriginal<typeof import("@/server/github/github-app")>();
   return {
     ...original,
+    cancelGitHubActionsWorkflow: appClient.cancel,
     clearGitHubAppTokenCache: appClient.clearTokenCache,
     githubAppGraphql: appClient.graphql,
     listGitHubActionsWorkflowJobs: appClient.listJobs,
@@ -455,6 +457,8 @@ beforeEach(() => {
   appClient.rerun.mockResolvedValue({ githubRequestId: "REST-1" });
   appClient.rerunJob.mockReset();
   appClient.rerunJob.mockResolvedValue({ githubRequestId: "REST-JOB-1" });
+  appClient.cancel.mockReset();
+  appClient.cancel.mockResolvedValue({ githubRequestId: "REST-CANCEL-1" });
   appClient.verify.mockReset();
   appClient.verify.mockImplementation(async (credentials) => ({
     appId: credentials.appId.trim(),
@@ -1569,6 +1573,41 @@ describe("GitHub service", () => {
       }),
     );
   });
+
+  test.each([
+    [false, "GITHUB_ACTIONS_WORKFLOW_CANCEL"],
+    [true, "GITHUB_ACTIONS_WORKFLOW_FORCE_CANCEL"],
+  ])(
+    "cancels an Actions workflow with force=%s and audits %s",
+    async (force, operation) => {
+      await expect(
+        new GitHubService().cancelActionsWorkflowRun(
+          "codebase-repository-1",
+          "987",
+          force,
+          { actor: "control-plane", ipAddress: "127.0.0.1" },
+        ),
+      ).resolves.toBe(true);
+
+      expect(appClient.cancel).toHaveBeenCalledWith(
+        expect.objectContaining({ appId: "123", installationId: "456" }),
+        {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          force,
+        },
+      );
+      expect(state.auditEvents).toContainEqual(
+        expect.objectContaining({
+          operation,
+          repositoryId: "codebase-repository-1",
+          githubRequestId: "REST-CANCEL-1",
+          outcome: "SUCCESS",
+        }),
+      );
+    },
+  );
 
   test("links pull requests to worktrees in the normalized head repository", async () => {
     let headRepository: { nameWithOwner: string } | null = {

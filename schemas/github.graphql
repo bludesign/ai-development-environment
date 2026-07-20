@@ -415,6 +415,11 @@ extend type Mutation {
     checkSuiteId: ID!
     jobId: ID!
   ): Boolean!
+  cancelGitHubActionsWorkflowRun(
+    codebaseRepositoryId: ID!
+    workflowRunId: ID!
+    force: Boolean! = false
+  ): Boolean!
   replyToGitHubReviewThread(threadId: ID!, body: String!): GitHubReviewComment!
   setGitHubReviewThreadResolved(
     threadId: ID!

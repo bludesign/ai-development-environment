@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
+  cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
   githubAppGraphql,
   GitHubAppError,
@@ -1133,7 +1134,7 @@ export class GitHubService {
     if (!settings) {
       throw new GitHubAppError(
         "GITHUB_APP_NOT_CONFIGURED",
-        "A verified GitHub App is required to rerun GitHub Actions workflows",
+        "A verified GitHub App is required to manage GitHub Actions workflows",
       );
     }
     return this.appCredentials(settings);
@@ -1659,6 +1660,60 @@ export class GitHubService {
       token,
     );
     return this.workflowJobViews(jobs, appSettings !== null);
+  }
+
+  async cancelActionsWorkflowRun(
+    codebaseRepositoryId: string,
+    workflowRunId: string,
+    force: boolean,
+    auditContext: GitHubAuditContext,
+  ): Promise<boolean> {
+    if (!codebaseRepositoryId.trim() || !workflowRunId.trim()) {
+      throw new Error("Codebase repository and workflow run IDs are required");
+    }
+    const operation = force
+      ? "GITHUB_ACTIONS_WORKFLOW_FORCE_CANCEL"
+      : "GITHUB_ACTIONS_WORKFLOW_CANCEL";
+    try {
+      const prisma = await getPrismaClient();
+      const repository = await prisma.codebaseRepository.findUnique({
+        where: { id: codebaseRepositoryId },
+        select: {
+          id: true,
+          canonicalOrigin: true,
+          jiraBranchRegex: true,
+        },
+      });
+      const target = repository ? actionsRepositoryTarget(repository) : null;
+      if (!target) throw new Error("GitHub codebase repository was not found");
+      const credentials = await this.requireAppCredentials();
+      const result = await cancelGitHubActionsWorkflow(credentials, {
+        owner: target.owner,
+        repository: target.name,
+        workflowRunId,
+        force,
+      });
+      await this.audit(auditContext, {
+        operation,
+        repositoryId: codebaseRepositoryId,
+        githubRequestId: result.githubRequestId,
+        outcome: "SUCCESS",
+      });
+      return true;
+    } catch (error) {
+      await this.audit(auditContext, {
+        operation,
+        repositoryId: codebaseRepositoryId,
+        githubRequestId:
+          error instanceof GitHubAppError ? error.githubRequestId : null,
+        outcome: "FAILURE",
+        errorCode:
+          error instanceof GitHubAppError
+            ? error.code
+            : "GITHUB_APP_REQUEST_FAILED",
+      });
+      throw error;
+    }
   }
 
   async addRepository(input: {

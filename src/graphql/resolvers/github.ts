@@ -356,6 +356,27 @@ export const createGitHubResolvers = (
         auditContext(context),
       );
     },
+    cancelGitHubActionsWorkflowRun: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        workflowRunId,
+        force,
+      }: {
+        codebaseRepositoryId: string;
+        workflowRunId: string;
+        force: boolean;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cancelActionsWorkflowRun(
+        codebaseRepositoryId,
+        workflowRunId,
+        force,
+        auditContext(context),
+      );
+    },
     replyToGitHubReviewThread: (
       _root: unknown,
       { threadId, body }: { threadId: string; body: string },

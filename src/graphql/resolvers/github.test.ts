@@ -96,6 +96,7 @@ describe("GitHub resolvers", () => {
       mergePullRequest: vi.fn().mockResolvedValue({ state: "MERGED" }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
+      cancelActionsWorkflowRun: vi.fn().mockResolvedValue(true),
       reviewThreads: vi.fn().mockResolvedValue({ threads: [] }),
       replyToReviewThread: vi.fn().mockResolvedValue({ id: "comment-1" }),
       setReviewThreadResolved: vi
@@ -202,6 +203,15 @@ describe("GitHub resolvers", () => {
       },
       context(null),
     );
+    await resolvers.Mutation.cancelGitHubActionsWorkflowRun(
+      {},
+      {
+        codebaseRepositoryId: "codebase-repository-1",
+        workflowRunId: "44",
+        force: true,
+      },
+      context(null),
+    );
     await resolvers.Query.githubReviewThreads({}, {}, context(null));
     await resolvers.Mutation.replyToGitHubReviewThread(
       {},
@@ -241,6 +251,12 @@ describe("GitHub resolvers", () => {
       "repository-1",
       "check-suite-1",
       "job-11",
+      { actor: "control-plane", ipAddress: "127.0.0.1" },
+    );
+    expect(service.cancelActionsWorkflowRun).toHaveBeenCalledWith(
+      "codebase-repository-1",
+      "44",
+      true,
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.reviewThreads).toHaveBeenCalledOnce();
