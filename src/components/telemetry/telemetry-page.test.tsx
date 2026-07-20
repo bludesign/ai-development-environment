@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -53,8 +54,11 @@ const log = {
   separatorName: null,
 };
 
+let timelineItems = [log];
+
 beforeEach(() => {
   vi.clearAllMocks();
+  timelineItems = [log];
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -106,10 +110,10 @@ beforeEach(() => {
       if (operation.includes("query TelemetryTimeline")) {
         return {
           telemetryTimeline: {
-            items: [log],
+            items: timelineItems,
             nextCursor: null,
-            matchingCount: 1,
-            totalCount: 1,
+            matchingCount: timelineItems.length,
+            totalCount: timelineItems.length,
           },
         };
       }
@@ -150,9 +154,7 @@ describe("TelemetryPage", () => {
       screen.getByText("Checkout completed").closest("td")?.className,
     ).toContain("py-1.5");
     expect(screen.getByText("1 of 1")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Level", exact: true }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Level$/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /^Message/ })).toBeTruthy();
 
     fireEvent.click(screen.getByText("Checkout completed"));
@@ -192,6 +194,49 @@ describe("TelemetryPage", () => {
 
     expect(copyText).toHaveBeenCalledWith("Checkout completed");
     expect(screen.queryByText("203.0.113.4")).toBeNull();
+  });
+
+  test("reconciles newly ingested entries from the live subscription", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+    const liveLog = {
+      ...log,
+      id: "log-2",
+      clientTime: "2026-07-20T16:31:00.000Z",
+      receivedAt: "2026-07-20T16:31:01.000Z",
+      message: "Live telemetry arrived",
+    };
+    timelineItems = [liveLog, log];
+    const subscriptionCalls = subscribe.mock.calls as unknown as Array<
+      [
+        { query: string },
+        {
+          next: (payload: {
+            data: {
+              telemetryEntriesChanged: { ids: string[]; reason: string };
+            };
+          }) => void;
+        },
+      ]
+    >;
+    const call = subscriptionCalls.find(([operation]) =>
+      String((operation as { query?: string }).query).includes(
+        "telemetryEntriesChanged",
+      ),
+    );
+    expect(call).toBeTruthy();
+    const sink = call![1];
+
+    await act(async () => {
+      sink.next({
+        data: {
+          telemetryEntriesChanged: { ids: [liveLog.id], reason: "INGESTED" },
+        },
+      });
+    });
+
+    expect(await screen.findByText("Live telemetry arrived")).toBeTruthy();
+    expect(screen.getByText("2 of 2")).toBeTruthy();
   });
 
   test("sends text, glob, or regex search through the shared timeline input", async () => {

@@ -200,12 +200,14 @@ export const createTelemetryResolvers = (service: TelemetryService) => ({
         requireControlPlane(context);
         return service.subscribe();
       },
+      resolve: (payload: { ids: string[]; reason: string }) => payload,
     },
     telemetrySettingsChanged: {
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);
         return service.subscribeSettings();
       },
+      resolve: (payload: { updatedAt: string }) => payload,
     },
   },
 });

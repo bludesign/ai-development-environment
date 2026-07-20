@@ -1148,13 +1148,11 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                             className="px-2 py-1.5 text-xs font-medium text-muted-foreground"
                           >
                             <span className="flex items-center gap-2">
-                              <span className="h-px flex-1 bg-border" />
                               {entry.separatorName || t("separator")}
                               {entry.separatorKind === "BUILD" &&
                               entry.buildId ? (
                                 <Badge>{entry.buildId}</Badge>
                               ) : null}
-                              <span className="h-px flex-1 bg-border" />
                             </span>
                           </TableCell>
                         </TableRow>
@@ -1505,7 +1503,7 @@ function TelemetryRow({
               className={cn(
                 "px-2 py-1.5",
                 ["message", "detail", "parameters"].includes(column) &&
-                  "max-w-[36rem]",
+                  "min-w-80 max-w-[36rem] whitespace-normal",
               )}
               key={column}
             >
@@ -1528,7 +1526,7 @@ function TelemetryRow({
                   <span
                     className={cn(
                       ["message", "detail", "parameters"].includes(column) &&
-                        "block truncate",
+                        "line-clamp-3 break-words whitespace-normal",
                     )}
                   >
                     {value || "—"}
@@ -1713,7 +1711,7 @@ function ExpandedEntry({
           />
         </div>
       )}
-      <div className="flex items-center gap-2 overflow-x-auto border-t pt-3">
+      <div className="flex items-center gap-2 overflow-x-auto">
         <span className="shrink-0 text-xs font-medium text-muted-foreground">
           {t("highlight")}
         </span>
@@ -1847,7 +1845,7 @@ function ParameterContext({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="group grid grid-cols-[1.25rem_1.25rem_minmax(0,max-content)_minmax(0,1fr)] items-start gap-x-0.5">
+        <div className="group grid grid-cols-[1.25rem_1.25rem_minmax(0,max-content)_minmax(0,1fr)] items-start gap-x-0">
           {children}
         </div>
       </ContextMenuTrigger>
