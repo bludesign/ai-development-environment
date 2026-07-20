@@ -91,6 +91,51 @@ describe("iOS device persistence lifecycle", () => {
     }
   });
 
+  test("adds and backfills the registration claim timestamp", () => {
+    const database = new Database(":memory:");
+    try {
+      database.exec(
+        readFileSync(
+          join(
+            process.cwd(),
+            "prisma/migrations/20260720010000_add_ios_device_enrollment/migration.sql",
+          ),
+          "utf8",
+        ),
+      );
+      database
+        .prepare(
+          `INSERT INTO IosDevice
+            (id, udid, displayName, status, updatedAt)
+           VALUES (?, ?, ?, 'REGISTERING', ?)`,
+        )
+        .run(
+          "device-1",
+          "00008030-001C2D3E4F50002E",
+          "Test iPhone",
+          "2026-07-20T12:00:00.000Z",
+        );
+
+      database.exec(
+        readFileSync(
+          join(
+            process.cwd(),
+            "prisma/migrations/20260720020000_add_ios_registration_claim_timestamp/migration.sql",
+          ),
+          "utf8",
+        ),
+      );
+
+      expect(
+        database
+          .prepare("SELECT registrationClaimedAt FROM IosDevice WHERE id = ?")
+          .get("device-1"),
+      ).toEqual({ registrationClaimedAt: "2026-07-20T12:00:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
   test("expires active tokens and purges only unattached records after seven days", async () => {
     const now = new Date("2026-07-20T12:00:00.000Z");
     await new IosDevicesService().purgeExpiredEnrollments(now);

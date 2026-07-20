@@ -2,7 +2,7 @@
 
 import { Download, Plus, Smartphone } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -60,8 +60,10 @@ export function DevicesPage() {
   const [sort, setSort] = useState<(typeof SORTS)[number]>("NEWEST");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++requestSequence.current;
     setLoading(true);
     try {
       const data = await controlPlaneRequest<{
@@ -72,18 +74,25 @@ export function DevicesPage() {
         }`,
         { status: status === "ALL" ? null : status },
       );
-      setDevices(data.iosDevices);
-      setError(null);
+      if (requestId === requestSequence.current) {
+        setDevices(data.iosDevices);
+        setError(null);
+      }
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (requestId === requestSequence.current) {
+        setError(value instanceof Error ? value.message : String(value));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === requestSequence.current) setLoading(false);
     }
   }, [status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+    };
   }, [load]);
 
   useEffect(

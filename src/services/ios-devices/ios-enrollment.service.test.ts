@@ -48,6 +48,7 @@ type DeviceState = {
   appleDeviceId: string | null;
   appleStatus: string | null;
   registrationError: string | null;
+  registrationClaimedAt: Date | null;
   registeredAt: Date | null;
   lastSeenAt: Date | null;
   createdAt: Date;
@@ -81,6 +82,7 @@ function makeDevice(overrides: Partial<DeviceState> = {}): DeviceState {
     appleDeviceId: null,
     appleStatus: null,
     registrationError: null,
+    registrationClaimedAt: null,
     registeredAt: null,
     lastSeenAt: new Date(0),
     createdAt: new Date(0),
@@ -91,8 +93,30 @@ function makeDevice(overrides: Partial<DeviceState> = {}): DeviceState {
 
 function setupPrisma() {
   const iosDeviceEnrollment = {
-    findUnique: vi.fn(async ({ where }: { where: { tokenHash: string } }) =>
-      where.tokenHash === enrollment.tokenHash ? enrollment : null,
+    findUnique: vi.fn(
+      async ({ where }: { where: { id?: string; tokenHash?: string } }) =>
+        (where.id && where.id === enrollment.id) ||
+        (where.tokenHash && where.tokenHash === enrollment.tokenHash)
+          ? enrollment
+          : null,
+    ),
+    updateMany: vi.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: string; consumedAt?: null };
+        data: Partial<EnrollmentState>;
+      }) => {
+        if (
+          where.id !== enrollment.id ||
+          (where.consumedAt === null && enrollment.consumedAt !== null)
+        ) {
+          return { count: 0 };
+        }
+        Object.assign(enrollment, data, { updatedAt: new Date() });
+        return { count: 1 };
+      },
     ),
     update: vi.fn(async ({ data }: { data: Partial<EnrollmentState> }) => {
       Object.assign(enrollment, data, { updatedAt: new Date() });
@@ -133,6 +157,7 @@ function setupPrisma() {
         return device;
       },
     ),
+    updateMany: vi.fn(async () => ({ count: 0 })),
   };
   const iosDeviceIpObservation = {
     updateMany: vi.fn(async ({ data }: { data: { deviceId: string } }) => {
@@ -293,6 +318,61 @@ describe("IosDevicesService enrollment completion", () => {
         null,
       ),
     ).rejects.toMatchObject({ status: 409, code: "TOKEN_CONSUMED" });
+  });
+
+  test("allows only one overlapping response to claim an enrollment", async () => {
+    let verificationCount = 0;
+    let releaseVerification!: () => void;
+    const bothVerifying = new Promise<void>((resolve) => {
+      releaseVerification = resolve;
+    });
+    mocks.verifyResponse.mockImplementation(async (cmsBytes: Uint8Array) => {
+      verificationCount += 1;
+      if (verificationCount === 2) releaseVerification();
+      await bothVerifying;
+      const first = new TextDecoder().decode(cmsBytes).endsWith("one");
+      return plistDocument({
+        UDID: first ? "00008030-001C2D3E4F50002E" : "00008030-001C2D3E4F50003F",
+        PRODUCT: first ? "iPhone16,1" : "iPhone16,2",
+        VERSION: "19.0",
+        CHALLENGE: token,
+      });
+    });
+
+    const results = await Promise.allSettled([
+      new IosDevicesService().completeEnrollment(
+        token,
+        new TextEncoder().encode("signed-response-one"),
+        null,
+      ),
+      new IosDevicesService().completeEnrollment(
+        token,
+        new TextEncoder().encode("signed-response-two"),
+        null,
+      ),
+    ]);
+
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(rejected?.reason).toMatchObject({
+      status: 409,
+      code: "TOKEN_CONSUMED",
+    });
+    expect(devices).toHaveLength(1);
+    expect(enrollment.deviceId).toBe(devices[0]?.id);
+    expect(enrollment.responseDigest).toBe(
+      sha256(
+        new TextEncoder().encode(
+          devices[0]?.udid.endsWith("002E")
+            ? "signed-response-one"
+            : "signed-response-two",
+        ),
+      ),
+    );
   });
 
   test("marks malformed device attributes failed before persisting a device", async () => {

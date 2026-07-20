@@ -39,6 +39,11 @@ const firmwareUrl =
   "https://updates.cdn-apple.com/iPhone12,1_26.5.2_23F84_Restore.ipsw";
 let notify: (() => void) | null = null;
 
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  configurable: true,
+  value: () => undefined,
+});
+
 function device(overrides: Partial<IosDeviceRecord> = {}): IosDeviceRecord {
   return {
     id: "device-1",
@@ -162,6 +167,50 @@ describe("DevicesPage", () => {
 
     await act(async () => notify?.());
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  });
+
+  test("does not apply a response from a previously selected status", async () => {
+    let resolveAll!: (value: unknown) => void;
+    let resolvePending!: (value: unknown) => void;
+    request.mockImplementation((_query, variables) => {
+      return new Promise((resolve) => {
+        if (variables?.status === "PENDING") resolvePending = resolve;
+        else resolveAll = resolve;
+      }) as never;
+    });
+    render(<DevicesPage />);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+
+    const statusFilter = screen.getByRole("combobox", {
+      name: "Filter devices by status",
+    });
+    statusFilter.focus();
+    fireEvent.keyDown(statusFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Pending" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolvePending({
+        iosDevices: [
+          device({
+            id: "pending-device",
+            displayName: "Pending iPhone",
+            maskedUdid: "0000••••003F",
+          }),
+        ],
+      });
+    });
+    expect(await screen.findByText("Pending iPhone")).toBeDefined();
+
+    await act(async () => {
+      resolveAll({
+        iosDevices: [
+          device({ id: "stale-device", displayName: "Stale iPhone" }),
+        ],
+      });
+    });
+    expect(screen.getByText("Pending iPhone")).toBeDefined();
+    expect(screen.queryByText("Stale iPhone")).toBeNull();
   });
 });
 

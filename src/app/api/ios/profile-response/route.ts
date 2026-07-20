@@ -7,17 +7,48 @@ export const maxDuration = 30;
 
 const MAX_RESPONSE_BYTES = 128 * 1024;
 
+async function readLimitedBody(request: Request): Promise<Uint8Array | null> {
+  if (!request.body) return new Uint8Array();
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const contentLength = Number(request.headers.get("content-length") ?? "0");
     if (contentLength > MAX_RESPONSE_BYTES) {
       return new Response("Device response is too large", { status: 413 });
     }
-    const raw = new Uint8Array(await request.arrayBuffer());
-    if (!raw.byteLength || raw.byteLength > MAX_RESPONSE_BYTES) {
-      return new Response("Device response is empty or too large", {
-        status: raw.byteLength ? 413 : 400,
-      });
+    const raw = await readLimitedBody(request);
+    if (!raw || !raw.byteLength) {
+      return new Response(
+        raw ? "Device response is empty" : "Device response is too large",
+        { status: raw ? 400 : 413 },
+      );
     }
     const url = new URL(request.url);
     const device =

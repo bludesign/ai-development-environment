@@ -33,6 +33,9 @@ const ENROLLMENT_TTL_MS = 30 * 60_000;
 const EXPIRED_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const APP_STORE_CONNECT_API = "https://api.appstoreconnect.apple.com";
 const IPSW_CACHE_TTL_MS = 15 * 60_000;
+const REGISTRATION_CLAIM_TTL_MS = 5 * 60_000;
+const INTERRUPTED_REGISTRATION_ERROR =
+  "The previous Apple registration attempt was interrupted; retry registration";
 
 type FetchLike = typeof fetch;
 
@@ -467,10 +470,17 @@ export class IosDevicesService {
       );
     } catch (error) {
       const prisma = await getPrismaClient();
-      await prisma.iosDeviceEnrollment.update({
-        where: { id: enrollment.id },
+      const failed = await prisma.iosDeviceEnrollment.updateMany({
+        where: { id: enrollment.id, consumedAt: null },
         data: { status: "FAILED", failureCode: "INVALID_DEVICE_RESPONSE" },
       });
+      if (failed.count !== 1) {
+        throw new IosEnrollmentError(
+          "Enrollment token has already been consumed",
+          409,
+          "TOKEN_CONSUMED",
+        );
+      }
       throw new IosEnrollmentError(
         error instanceof Error ? error.message : "Device response is invalid",
         400,
@@ -481,6 +491,32 @@ export class IosDevicesService {
     const now = new Date();
     const prisma = await getPrismaClient();
     const device = await prisma.$transaction(async (tx) => {
+      const claim = await tx.iosDeviceEnrollment.updateMany({
+        where: { id: enrollment.id, consumedAt: null },
+        data: {
+          status: "PROCESSING",
+          consumedAt: now,
+          responseDigest,
+          failureCode: null,
+        },
+      });
+      if (claim.count !== 1) {
+        const consumed = await tx.iosDeviceEnrollment.findUnique({
+          where: { id: enrollment.id },
+        });
+        if (consumed?.responseDigest === responseDigest && consumed.deviceId) {
+          const retried = await tx.iosDevice.findUnique({
+            where: { id: consumed.deviceId },
+          });
+          if (retried) return retried;
+        }
+        throw new IosEnrollmentError(
+          "Enrollment token has already been consumed",
+          409,
+          "TOKEN_CONSUMED",
+        );
+      }
+
       const existing = await tx.iosDevice.findUnique({ where: { udid } });
       const stored = existing
         ? await tx.iosDevice.update({
@@ -502,8 +538,6 @@ export class IosDevicesService {
         data: {
           deviceId: stored.id,
           status: "COMPLETED",
-          consumedAt: now,
-          responseDigest,
           failureCode: null,
         },
       });
@@ -539,6 +573,7 @@ export class IosDevicesService {
 
   async devices(status?: IosDeviceStatus | null) {
     await this.purgeExpiredEnrollments();
+    await this.recoverStaleRegistrationClaims();
     const prisma = await getPrismaClient();
     return prisma.iosDevice.findMany({
       where: status ? { status } : undefined,
@@ -550,6 +585,7 @@ export class IosDevicesService {
   }
 
   async device(id: string) {
+    await this.recoverStaleRegistrationClaims();
     const prisma = await getPrismaClient();
     return prisma.iosDevice.findUnique({
       where: { id },
@@ -605,13 +641,19 @@ export class IosDevicesService {
   }
 
   async deleteDevice(id: string): Promise<boolean> {
+    await this.recoverStaleRegistrationClaims();
     const prisma = await getPrismaClient();
     const device = await prisma.iosDevice.findUnique({ where: { id } });
     if (!device) throw new Error("Device not found");
     if (device.status === "REGISTERING") {
       throw new Error("Wait for Apple registration to finish before deleting");
     }
-    await prisma.iosDevice.delete({ where: { id } });
+    const deleted = await prisma.iosDevice.deleteMany({
+      where: { id, status: { not: "REGISTERING" } },
+    });
+    if (deleted.count !== 1) {
+      throw new Error("Wait for Apple registration to finish before deleting");
+    }
     this.changed(id);
     return true;
   }
@@ -835,6 +877,7 @@ export class IosDevicesService {
   }
 
   async registerDevice(id: string) {
+    await this.recoverStaleRegistrationClaims();
     const current = await this.rawSettings();
     if (
       !current.appStoreConnectIssuerId ||
@@ -849,15 +892,17 @@ export class IosDevicesService {
     const prisma = await getPrismaClient();
     const device = await prisma.iosDevice.findUnique({ where: { id } });
     if (!device) throw new Error("Device not found");
-    if (!["PENDING", "REGISTRATION_FAILED"].includes(device.status)) {
-      throw new Error("This device cannot be registered in its current state");
-    }
+    const claimedAt = new Date();
     const claim = await prisma.iosDevice.updateMany({
       where: {
         id,
         status: { in: ["PENDING", "REGISTRATION_FAILED"] },
       },
-      data: { status: "REGISTERING", registrationError: null },
+      data: {
+        status: "REGISTERING",
+        registrationClaimedAt: claimedAt,
+        registrationError: null,
+      },
     });
     if (claim.count !== 1) {
       throw new Error("This device cannot be registered in its current state");
@@ -893,10 +938,11 @@ export class IosDevicesService {
             device.udid,
           )
         ).data;
-      await prisma.iosDevice.update({
-        where: { id },
+      await prisma.iosDevice.updateMany({
+        where: { id, status: "REGISTERING", registrationClaimedAt: claimedAt },
         data: {
           status: "REGISTERED",
+          registrationClaimedAt: null,
           appleDeviceId: resource.id,
           appleStatus: resource.attributes.status ?? "ENABLED",
           registeredAt: new Date(),
@@ -906,9 +952,13 @@ export class IosDevicesService {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Apple registration failed";
-      await prisma.iosDevice.update({
-        where: { id },
-        data: { status: "REGISTRATION_FAILED", registrationError: message },
+      await prisma.iosDevice.updateMany({
+        where: { id, status: "REGISTERING", registrationClaimedAt: claimedAt },
+        data: {
+          status: "REGISTRATION_FAILED",
+          registrationClaimedAt: null,
+          registrationError: message,
+        },
       });
       this.changed(id);
       throw new Error(message);
@@ -920,6 +970,7 @@ export class IosDevicesService {
   async exportTsv(): Promise<string> {
     const prisma = await getPrismaClient();
     const devices = await prisma.iosDevice.findMany({
+      where: { status: { not: "REJECTED" } },
       orderBy: { displayName: "asc" },
     });
     return [
@@ -929,5 +980,28 @@ export class IosDevicesService {
           `${safeTsv(device.udid)}\t${safeTsv(device.displayName)}\tios`,
       ),
     ].join("\n");
+  }
+
+  private async recoverStaleRegistrationClaims(now = new Date()) {
+    const prisma = await getPrismaClient();
+    const recovered = await prisma.iosDevice.updateMany({
+      where: {
+        status: "REGISTERING",
+        OR: [
+          { registrationClaimedAt: null },
+          {
+            registrationClaimedAt: {
+              lt: new Date(now.getTime() - REGISTRATION_CLAIM_TTL_MS),
+            },
+          },
+        ],
+      },
+      data: {
+        status: "REGISTRATION_FAILED",
+        registrationClaimedAt: null,
+        registrationError: INTERRUPTED_REGISTRATION_ERROR,
+      },
+    });
+    if (recovered.count) this.changed();
   }
 }

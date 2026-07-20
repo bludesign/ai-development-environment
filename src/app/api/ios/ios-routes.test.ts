@@ -154,6 +154,31 @@ describe("iOS enrollment routes", () => {
     expect(mocks.completeEnrollment).not.toHaveBeenCalled();
   });
 
+  test("cancels a streamed callback as soon as it exceeds the body limit", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(96 * 1024));
+        controller.enqueue(new Uint8Array(40 * 1024));
+      },
+      cancel,
+    });
+    const response = await callback(
+      new Request(
+        "https://devices.example.com/api/ios/profile-response?token=test-token",
+        {
+          method: "POST",
+          body,
+          duplex: "half",
+        } as RequestInit & { duplex: "half" },
+      ),
+    );
+
+    expect(response.status).toBe(413);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.completeEnrollment).not.toHaveBeenCalled();
+  });
+
   test("passes raw callback bytes and redirects to the generic completion page", async () => {
     const response = await callback(
       new Request(
