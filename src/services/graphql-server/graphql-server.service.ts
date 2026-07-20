@@ -81,6 +81,8 @@ class GraphQLServerService {
       this.services.buildsService,
       this.services.iosDevicesService,
       this.services.telemetryService,
+      this.services.signingAssetsService,
+      this.services.pushNotificationsService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when

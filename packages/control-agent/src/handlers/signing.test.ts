@@ -4,7 +4,11 @@ import { describe, expect, test } from "vitest";
 
 import type { SigningProfile } from "@ai-development-environment/agent-contract/builds";
 
-import { certificateFingerprints, dedupeProfiles } from "./signing.js";
+import {
+  certificateFingerprints,
+  dedupeProfiles,
+  scanSigningAssets,
+} from "./signing.js";
 
 const DER = Buffer.from("a pretend DER encoded certificate");
 const SHA1 = createHash("sha1").update(DER).digest("hex").toUpperCase();
@@ -86,5 +90,13 @@ describe("dedupeProfiles", () => {
     ]);
 
     expect(profiles.map(({ uuid }) => uuid)).toEqual(["newer"]);
+  });
+});
+
+describe("scanSigningAssets", () => {
+  test("fails a cancelled scan instead of returning an empty inventory", async () => {
+    await expect(
+      scanSigningAssets({}, 10_000, AbortSignal.abort(), async () => undefined),
+    ).rejects.toThrow();
   });
 });

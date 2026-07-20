@@ -232,6 +232,15 @@ export const createAgentResolvers = (
       { jobId }: { jobId: string },
       context: GraphQLContext,
     ) => agentControlService.claimJob(requireAgent(context), jobId),
+    claimSigningSecretTransfer: (
+      _root: unknown,
+      { transferId }: { transferId: string },
+      context: GraphQLContext,
+    ) =>
+      agentControlService.claimSigningSecretTransfer(
+        requireAgent(context),
+        transferId,
+      ),
     appendAgentJobLogs: (
       _root: unknown,
       { jobId, logs }: { jobId: string; logs: never[] },

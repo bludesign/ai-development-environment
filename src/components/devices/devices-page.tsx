@@ -39,6 +39,11 @@ import {
 import { IosDeviceStatusBadge } from "./status-badge";
 import type { IosDeviceSummary } from "./types";
 import { IOS_DEVICE_LIST_FIELDS } from "./types";
+import {
+  APNS_REGISTRATION_FIELDS,
+  ApnsDevicesCard,
+  type ApnsRegistrationSummary,
+} from "./apns-devices-card";
 
 const STATUSES = [
   "ALL",
@@ -56,6 +61,9 @@ export function DevicesPage() {
   const locale = useLocale();
   const router = useRouter();
   const [devices, setDevices] = useState<IosDeviceSummary[]>([]);
+  const [apnsRegistrations, setApnsRegistrations] = useState<
+    ApnsRegistrationSummary[]
+  >([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
   const [sort, setSort] = useState<(typeof SORTS)[number]>("NEWEST");
   const [loading, setLoading] = useState(true);
@@ -68,14 +76,17 @@ export function DevicesPage() {
     try {
       const data = await controlPlaneRequest<{
         iosDevices: IosDeviceSummary[];
+        apnsRegistrations?: ApnsRegistrationSummary[];
       }>(
         `query IosDevices($status: IosDeviceStatus) {
           iosDevices(status: $status) { ${IOS_DEVICE_LIST_FIELDS} }
+          apnsRegistrations { ${APNS_REGISTRATION_FIELDS} }
         }`,
         { status: status === "ALL" ? null : status },
       );
       if (requestId === requestSequence.current) {
         setDevices(data.iosDevices);
+        setApnsRegistrations(data.apnsRegistrations ?? []);
         setError(null);
       }
     } catch (value) {
@@ -284,6 +295,7 @@ export function DevicesPage() {
           </Table>
         </Card>
       )}
+      <ApnsDevicesCard registrations={apnsRegistrations} onChanged={load} />
     </section>
   );
 }

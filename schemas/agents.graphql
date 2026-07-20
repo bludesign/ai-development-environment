@@ -64,6 +64,11 @@ type AgentEnrollmentToken {
   expiresAt: String!
 }
 
+type SigningSecretTransfer {
+  p12Base64: String!
+  passphrase: String!
+}
+
 type EnrolledAgent {
   agent: Agent!
   credential: String!
@@ -164,6 +169,7 @@ type Mutation {
   heartbeatAgent(input: AgentHeartbeatInput!): Agent!
   createAgentJob(input: CreateAgentJobInput!): AgentJob!
   claimAgentJob(jobId: ID!): AgentJob!
+  claimSigningSecretTransfer(transferId: ID!): SigningSecretTransfer!
   appendAgentJobLogs(jobId: ID!, logs: [AgentJobLogInput!]!): [AgentJobLog!]!
   completeAgentJob(
     jobId: ID!

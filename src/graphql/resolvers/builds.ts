@@ -41,6 +41,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
   BuildConfiguration: {
     advancedSettings: (value: { advancedSettingsJson: string }) =>
       json(value.advancedSettingsJson, {}),
+    exportSettings: (value: { exportSettingsJson: string | null }) =>
+      value.exportSettingsJson ? json(value.exportSettingsJson, null) : null,
     observation: (value: { source?: { observations?: unknown[] } }) =>
       value.source?.observations?.[0] ?? null,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),

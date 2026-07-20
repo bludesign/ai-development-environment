@@ -17,7 +17,8 @@ export const DERIVED_DATA_LOCATION_MODES = [
 export type DerivedDataLocationMode =
   (typeof DERIVED_DATA_LOCATION_MODES)[number];
 
-export type BuildDataScanEntryKind = "PROJECT" | "PENDING" | "SHARED_CACHE";
+export type BuildDataScanEntryKind =
+  "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
 
 export type BuildDataWorktreeRoot = {
   id: string;
@@ -167,7 +168,9 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
       const entry = objectValue(raw, `build data entries[${index}]`);
       const kind = entry.kind;
       if (
-        !(["PROJECT", "PENDING", "SHARED_CACHE"] as unknown[]).includes(kind)
+        !(
+          ["PROJECT", "PENDING", "SHARED_CACHE", "DEVICE_SUPPORT"] as unknown[]
+        ).includes(kind)
       ) {
         throw new Error(`build data entries[${index}].kind is invalid`);
       }

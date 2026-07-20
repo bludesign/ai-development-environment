@@ -202,6 +202,9 @@ beforeEach(() => {
         },
       } as never;
     }
+    if (query.includes("CancelGitHubActionsWorkflowRun")) {
+      return { cancelGitHubActionsWorkflowRun: true } as never;
+    }
     if (query.includes("query JiraTicket")) {
       throw new Error("Jira is not configured in this test");
     }
@@ -478,5 +481,75 @@ describe("ActionsPage", () => {
       screen.queryByRole("button", { name: "Show steps for test" }),
     ).toBeNull();
     expect(within(runRow).getByText("Queued")).toBeDefined();
+  });
+
+  test.each([
+    ["Cancel", false],
+    ["Force cancel", true],
+  ])("%s stops an active workflow run", async (label, force) => {
+    const defaultRequest = requestMock.getMockImplementation();
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query GitHubActionsWorkflowRuns")) {
+        return {
+          githubActionsWorkflowRuns: {
+            items: [
+              {
+                ...run,
+                status: "IN_PROGRESS",
+                canRetry: false,
+                retryUnavailableReason: "NOT_COMPLETED",
+              },
+            ],
+            repositories: [
+              {
+                id: "codebase-repository-1",
+                nameWithOwner: "acme/widgets",
+                url: "https://github.com/acme/widgets",
+              },
+            ],
+            repositoryErrors: [],
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      if (query.includes("CancelGitHubActionsWorkflowRun")) {
+        return { cancelGitHubActionsWorkflowRun: true } as never;
+      }
+      if (!defaultRequest) throw new Error("Missing default request mock");
+      return defaultRequest(query, variables);
+    });
+
+    render(<ActionsPage />);
+    const runRow = await screen.findByRole("row", {
+      name: /APP-42 Ship widgets/,
+    });
+    fireEvent.pointerDown(
+      within(runRow).getByRole("button", {
+        name: "Actions: APP-42 Ship widgets",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+    if (force) {
+      expect(
+        screen.getByRole("heading", {
+          name: "Force cancel this workflow run?",
+        }),
+      ).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Force cancel" }));
+    }
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("CancelGitHubActionsWorkflowRun"),
+        {
+          codebaseRepositoryId: "codebase-repository-1",
+          workflowRunId: "44",
+          force,
+        },
+      ),
+    );
+    expect(within(runRow).getByText("Cancelled")).toBeDefined();
   });
 });

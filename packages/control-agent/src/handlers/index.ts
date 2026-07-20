@@ -81,6 +81,23 @@ import {
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
+import {
+  SIGNING_ASSET_JOB_KINDS,
+  SIGNING_ASSETS_SCAN_JOB_KIND,
+  SIGNING_IDENTITY_DELETE_JOB_KIND,
+  SIGNING_IDENTITY_IMPORT_JOB_KIND,
+  SIGNING_PROFILE_DELETE_JOB_KIND,
+  SIGNING_PROFILE_INSTALL_JOB_KIND,
+  SIGNING_PROFILE_READ_JOB_KIND,
+} from "@ai-development-environment/agent-contract/signing-assets";
+import {
+  deleteSigningIdentity,
+  deleteSigningProfile,
+  importSigningIdentity,
+  installSigningProfile,
+  readSigningProfile,
+  scanSigningAssets,
+} from "./signing.js";
 
 export type AgentJobHandlerContext = {
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
@@ -110,6 +127,10 @@ export type AgentJobHandlerContext = {
     filename: string;
     contentType: string;
   }) => Promise<unknown>;
+  claimSigningSecretTransfer?: (transferId: string) => Promise<{
+    p12Base64: string;
+    passphrase: string;
+  }>;
 };
 
 export type AgentJobHandler = (
@@ -156,4 +177,12 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_TEST_RESULTS_JOB_KIND]: generateIosBuildReport,
   [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,
   [IOS_SIGNING_INSPECT_JOB_KIND]: inspectIosSigning,
+  [SIGNING_ASSETS_SCAN_JOB_KIND]: scanSigningAssets,
+  [SIGNING_PROFILE_READ_JOB_KIND]: readSigningProfile,
+  [SIGNING_PROFILE_INSTALL_JOB_KIND]: installSigningProfile,
+  [SIGNING_PROFILE_DELETE_JOB_KIND]: deleteSigningProfile,
+  [SIGNING_IDENTITY_IMPORT_JOB_KIND]: importSigningIdentity,
+  [SIGNING_IDENTITY_DELETE_JOB_KIND]: deleteSigningIdentity,
 };
+
+export { SIGNING_ASSET_JOB_KINDS };

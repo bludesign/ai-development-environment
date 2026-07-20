@@ -21,6 +21,13 @@ import {
 } from "@/components/github/review-thread-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
@@ -318,40 +325,41 @@ export function CommentsPage({
         </Empty>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-5 rounded-lg border p-4">
-            <div className="min-w-64 flex-1">
-              <Label className="mb-2 block">{t("pullRequestFilter")}</Label>
-              <SearchableSelect
-                ariaLabel={t("pullRequestFilter")}
-                emptyMessage={t("noPullRequestMatches")}
-                onValueChange={selectPullRequest}
-                options={pullRequestOptions}
-                placeholder={t("allPullRequests")}
-                searchPlaceholder={t("searchPullRequests")}
-                value={validSelectedPullRequest || ALL_PULL_REQUESTS}
-              />
-            </div>
-            <div className="flex flex-wrap gap-5 pb-2">
-              <FilterCheckbox
-                checked={currentUser}
-                id="comments-current-user"
-                label={t("currentUser")}
-                onCheckedChange={setCurrentUser}
-              />
-              <FilterCheckbox
-                checked={otherUsers}
-                id="comments-other-users"
-                label={t("otherUsers")}
-                onCheckedChange={setOtherUsers}
-              />
-              <FilterCheckbox
-                checked={unresolved}
-                id="comments-unresolved"
-                label={t("unresolved")}
-                onCheckedChange={setUnresolved}
-              />
-            </div>
-          </div>
+          <Card className="py-0">
+            <CardContent className="flex flex-wrap items-center gap-5 py-4">
+              <div className="min-w-64 flex-1">
+                <SearchableSelect
+                  ariaLabel={t("allPullRequests")}
+                  emptyMessage={t("noPullRequestMatches")}
+                  onValueChange={selectPullRequest}
+                  options={pullRequestOptions}
+                  placeholder={t("allPullRequests")}
+                  searchPlaceholder={t("searchPullRequests")}
+                  value={validSelectedPullRequest || ALL_PULL_REQUESTS}
+                />
+              </div>
+              <div className="flex flex-wrap gap-5">
+                <FilterCheckbox
+                  checked={currentUser}
+                  id="comments-current-user"
+                  label={t("currentUser")}
+                  onCheckedChange={setCurrentUser}
+                />
+                <FilterCheckbox
+                  checked={otherUsers}
+                  id="comments-other-users"
+                  label={t("otherUsers")}
+                  onCheckedChange={setOtherUsers}
+                />
+                <FilterCheckbox
+                  checked={unresolved}
+                  id="comments-unresolved"
+                  label={t("unresolved")}
+                  onCheckedChange={setUnresolved}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
           {page?.truncated && (
             <Alert>
@@ -363,34 +371,43 @@ export function CommentsPage({
             <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
               <Spinner /> {t("loading")}
             </div>
-          ) : filteredThreads.length === 0 ? (
-            <Empty className="border py-12">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <MessageSquareText />
-                </EmptyMedia>
-                <EmptyTitle>{t("empty")}</EmptyTitle>
-                <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
           ) : layout === "cards" ? (
-            <div className="space-y-5">
-              {filteredThreads.map((thread) => (
-                <ReviewThreadCard
-                  key={thread.id}
-                  locale={locale}
-                  onReplyAdded={replyAdded}
-                  onStateChanged={stateChanged}
-                  thread={thread}
-                />
-              ))}
-            </div>
+            filteredThreads.length === 0 ? (
+              <ReviewThreadsEmpty />
+            ) : (
+              <div className="space-y-5">
+                {filteredThreads.map((thread) => (
+                  <ReviewThreadCard
+                    key={thread.id}
+                    locale={locale}
+                    onReplyAdded={replyAdded}
+                    onStateChanged={stateChanged}
+                    thread={thread}
+                  />
+                ))}
+              </div>
+            )
           ) : (
             <ReviewThreadTable locale={locale} threads={filteredThreads} />
           )}
         </>
       )}
     </section>
+  );
+}
+
+function ReviewThreadsEmpty({ className }: { className?: string }) {
+  const t = useTranslations("githubComments");
+  return (
+    <Empty className={className ?? "border py-12"}>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <MessageSquareText />
+        </EmptyMedia>
+        <EmptyTitle>{t("empty")}</EmptyTitle>
+        <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
@@ -426,66 +443,76 @@ function ReviewThreadTable({
 }) {
   const t = useTranslations("githubComments");
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead>{t("author")}</TableHead>
-            <TableHead>{t("pullRequest")}</TableHead>
-            <TableHead>{t("comment")}</TableHead>
-            <TableHead>{t("date")}</TableHead>
-            <TableHead>{t("replies")}</TableHead>
-            <TableHead className="text-right">{t("github")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {threads.map((thread) => (
-            <TableRow key={thread.id}>
-              <TableCell className="min-w-40">
-                <ReviewAuthor actor={thread.rootComment.author} compact />
-              </TableCell>
-              <TableCell className="min-w-64 whitespace-normal">
-                <div className="flex flex-col">
-                  <Link
-                    className="font-semibold text-primary hover:underline"
-                    href={pullRequestDetailHref(thread.pullRequest)}
-                  >
-                    {thread.pullRequest.repositoryNameWithOwner} #
-                    {thread.pullRequest.number}
-                  </Link>
-                  <Link
-                    className="text-sm hover:underline"
-                    href={pullRequestDetailHref(thread.pullRequest)}
-                  >
-                    {thread.pullRequest.title}
-                  </Link>
-                </div>
-              </TableCell>
-              <TableCell className="min-w-80 whitespace-pre-wrap">
-                {thread.rootComment.bodyText}
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">
-                <time dateTime={thread.rootComment.createdAt}>
-                  {relativeAge(thread.rootComment.createdAt, locale)}
-                </time>
-              </TableCell>
-              <TableCell>{thread.replies.length}</TableCell>
-              <TableCell className="text-right">
-                <Button asChild size="icon-sm" variant="ghost">
-                  <a
-                    aria-label={t("openInGitHub")}
-                    href={thread.rootComment.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <ExternalLink />
-                  </a>
-                </Button>
-              </TableCell>
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>{t("reviewThreads")}</CardTitle>
+        <CardDescription>
+          {t("reviewThreadsDescription", { count: threads.length })}
+        </CardDescription>
+      </CardHeader>
+      {threads.length === 0 ? (
+        <ReviewThreadsEmpty className="border-0 py-12" />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>{t("author")}</TableHead>
+              <TableHead>{t("pullRequest")}</TableHead>
+              <TableHead>{t("comment")}</TableHead>
+              <TableHead>{t("date")}</TableHead>
+              <TableHead>{t("replies")}</TableHead>
+              <TableHead className="text-right">{t("github")}</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {threads.map((thread) => (
+              <TableRow key={thread.id}>
+                <TableCell className="min-w-40">
+                  <ReviewAuthor actor={thread.rootComment.author} compact />
+                </TableCell>
+                <TableCell className="min-w-64 whitespace-normal">
+                  <div className="flex flex-col">
+                    <Link
+                      className="font-semibold text-primary hover:underline"
+                      href={pullRequestDetailHref(thread.pullRequest)}
+                    >
+                      {thread.pullRequest.repositoryNameWithOwner} #
+                      {thread.pullRequest.number}
+                    </Link>
+                    <Link
+                      className="text-sm hover:underline"
+                      href={pullRequestDetailHref(thread.pullRequest)}
+                    >
+                      {thread.pullRequest.title}
+                    </Link>
+                  </div>
+                </TableCell>
+                <TableCell className="min-w-80 whitespace-pre-wrap">
+                  {thread.rootComment.bodyText}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  <time dateTime={thread.rootComment.createdAt}>
+                    {relativeAge(thread.rootComment.createdAt, locale)}
+                  </time>
+                </TableCell>
+                <TableCell>{thread.replies.length}</TableCell>
+                <TableCell className="text-right">
+                  <Button asChild size="icon-sm" variant="ghost">
+                    <a
+                      aria-label={t("openInGitHub")}
+                      href={thread.rootComment.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <ExternalLink />
+                    </a>
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Card>
   );
 }

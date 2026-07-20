@@ -177,6 +177,27 @@ export class AgentGraphQLClient {
     return data.claimAgentJob;
   }
 
+  async claimSigningSecretTransfer(transferId: string): Promise<{
+    p12Base64: string;
+    passphrase: string;
+  }> {
+    const data = await this.request<{
+      claimSigningSecretTransfer: {
+        p12Base64: string;
+        passphrase: string;
+      };
+    }>(
+      `mutation ClaimSigningSecretTransfer($transferId: ID!) {
+        claimSigningSecretTransfer(transferId: $transferId) {
+          p12Base64
+          passphrase
+        }
+      }`,
+      { transferId },
+    );
+    return data.claimSigningSecretTransfer;
+  }
+
   appendLog(jobId: string, log: ProcessLog) {
     return this.request<{ appendAgentJobLogs: Array<{ id: string }> }>(
       `mutation AppendLog($jobId: ID!, $logs: [AgentJobLogInput!]!) {

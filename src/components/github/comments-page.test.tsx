@@ -226,7 +226,13 @@ describe("CommentsPage", () => {
       "/comments?pullRequest=acme%2Fwidgets%2322",
     );
     render(<CommentsPage initialPullRequest="acme/widgets#22" />);
-    await screen.findByRole("combobox", { name: "Open pull request" });
+    const pullRequestFilter = await screen.findByRole("combobox", {
+      name: "All open pull requests",
+    });
+    expect(screen.queryByText("Open pull request")).toBeNull();
+    expect(
+      pullRequestFilter.closest('[data-slot="card"]')?.className,
+    ).toContain("bg-card");
     fireEvent.click(screen.getByRole("checkbox", { name: "Unresolved" }));
     expect(await screen.findByText("Root resolved")).toBeDefined();
     expect(screen.queryByText("Root mine")).toBeNull();

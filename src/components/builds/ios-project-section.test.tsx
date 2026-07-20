@@ -100,6 +100,34 @@ afterEach(() => {
 });
 
 describe("iOS project source card", () => {
+  test("uses a wide configuration dialog with labeled icon previews", async () => {
+    render(<IosProjectSection codebaseId="codebase-1" />);
+
+    expect(await screen.findByText("Legacy Development")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("sm:max-w-5xl");
+
+    const iconSelect = within(dialog).getByRole("button", {
+      name: "Icon: Build",
+    });
+    fireEvent.pointerDown(iconSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const terminalOption = await screen.findByRole("menuitemradio", {
+      name: "Command line",
+    });
+    expect(terminalOption.querySelector("svg")).not.toBeNull();
+    expect(
+      screen.getByRole("menuitemradio", { name: "Security" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("menuitemradio", { name: "Feature" }),
+    ).toBeDefined();
+  });
+
   test("retains unavailable saved selections and stale metadata after reparse failure", async () => {
     render(<IosProjectSection codebaseId="codebase-1" />);
 
@@ -118,7 +146,7 @@ describe("iOS project source card", () => {
       ),
     );
     const selects = within(dialog).getAllByRole("combobox");
-    fireEvent.click(selects[2]!);
+    fireEvent.click(selects[1]!);
     expect(
       await screen.findAllByText("RemovedScheme · saved value unavailable"),
     ).toHaveLength(2);
@@ -131,9 +159,9 @@ describe("iOS project source card", () => {
       await within(dialog).findByText("Xcode metadata is unavailable"),
     ).toBeDefined();
     expect(within(dialog).getByText("stale metadata")).toBeDefined();
-    expect(within(dialog).getByText("ERROR")).toBeDefined();
+    expect(within(dialog).getByText("Error")).toBeDefined();
     expect(
-      (within(dialog).getAllByRole("combobox")[2] as HTMLButtonElement)
+      (within(dialog).getAllByRole("combobox")[1] as HTMLButtonElement)
         .textContent,
     ).toContain("RemovedScheme");
   });

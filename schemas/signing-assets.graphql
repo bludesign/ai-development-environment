@@ -1,0 +1,148 @@
+type SigningAgentSummary {
+  id: ID!
+  name: String!
+  hostname: String
+  supported: Boolean
+  lastSeenAt: String
+}
+
+type SigningInstallationAgent {
+  id: ID!
+  name: String!
+}
+
+type SigningProfileDevice {
+  udid: String!
+  deviceId: ID
+  displayName: String
+  product: String
+  osVersion: String
+  status: String
+}
+
+type LocalSigningProfile {
+  id: ID!
+  uuid: String!
+  contentHash: String!
+  name: String!
+  profileType: String!
+  bundleId: String!
+  teamId: String
+  teamName: String
+  platforms: [String!]!
+  deviceCount: Int!
+  deviceUdids: [String!]!
+  provisionedDevices: [SigningProfileDevice!]!
+  certificateSha1s: [String!]!
+  createdAt: String
+  expiresAt: String
+  expired: Boolean!
+  xcodeManaged: Boolean!
+  installedAgents: [SigningInstallationAgent!]!
+}
+
+type LocalSigningCertificate {
+  id: ID!
+  sha1: String!
+  sha256: String
+  name: String!
+  teamId: String
+  certificateType: String
+  notBefore: String
+  expiresAt: String
+  expired: Boolean!
+  hasPrivateKey: Boolean!
+  installedAgents: [SigningInstallationAgent!]!
+  privateKeyAgents: [SigningInstallationAgent!]!
+}
+
+type SigningOperationItem {
+  id: ID!
+  agentId: ID!
+  status: String!
+  error: String
+  createdAt: String!
+  finishedAt: String
+  agent: SigningInstallationAgent!
+}
+
+type SigningOperation {
+  id: ID!
+  kind: String!
+  assetKey: String
+  sourceAgentId: ID
+  status: String!
+  error: String
+  createdAt: String!
+  updatedAt: String!
+  finishedAt: String
+  items: [SigningOperationItem!]!
+}
+
+type AppleDeveloperResource {
+  id: ID!
+  type: String!
+  attributes: JSON!
+  relationships: JSON
+}
+
+type AppleDeveloperInventory {
+  profiles: [AppleDeveloperResource!]!
+  certificates: [AppleDeveloperResource!]!
+  bundleIds: [AppleDeveloperResource!]!
+  devices: [AppleDeveloperResource!]!
+}
+
+type SigningProfileDownload {
+  uuid: ID!
+  filename: String!
+  contentBase64: String!
+}
+
+input CreateApplePortalProfileInput {
+  name: String!
+  profileType: String!
+  bundleIdId: ID!
+  certificateIds: [ID!]!
+  deviceIds: [ID!]
+}
+
+extend type Query {
+  signingAgents: [SigningAgentSummary!]!
+  signingProfiles: [LocalSigningProfile!]!
+  signingProfile(id: ID!): LocalSigningProfile
+  signingCertificates: [LocalSigningCertificate!]!
+  signingOperations(limit: Int = 50): [SigningOperation!]!
+  appleDeveloperInventory: AppleDeveloperInventory!
+}
+
+extend type Mutation {
+  refreshSigningAssets(agentIds: [ID!]): [AgentJob!]!
+  uploadSigningProfile(
+    contentBase64: String!
+    targetAgentIds: [ID!]!
+  ): SigningOperation!
+  downloadSigningProfile(uuid: String!, agentId: ID!): SigningProfileDownload!
+  syncSigningProfile(
+    uuid: String!
+    sourceAgentId: ID!
+    targetAgentIds: [ID!]!
+  ): SigningOperation!
+  deleteSigningProfile(uuid: String!, agentIds: [ID!]!): SigningOperation!
+  deleteExpiredSigningProfiles(agentIds: [ID!]): [SigningOperation!]!
+  importSigningIdentity(
+    p12Base64: String!
+    passphrase: String!
+    targetAgentIds: [ID!]!
+  ): SigningOperation!
+  deleteSigningIdentity(sha1: String!, agentIds: [ID!]!): SigningOperation!
+  createApplePortalProfile(
+    input: CreateApplePortalProfileInput!
+  ): AppleDeveloperResource!
+  deleteApplePortalProfile(id: ID!): Boolean!
+  revokeApplePortalCertificate(id: ID!): Boolean!
+}
+
+extend type Subscription {
+  signingAssetsChanged: Boolean!
+}

@@ -520,6 +520,54 @@ export async function rerunGitHubActionsWorkflow(
   return { githubRequestId };
 }
 
+export async function cancelGitHubActionsWorkflow(
+  credentials: GitHubAppCredentials,
+  input: {
+    owner: string;
+    repository: string;
+    workflowRunId: string;
+    force: boolean;
+  },
+): Promise<{ githubRequestId: string | null }> {
+  const operation = input.force ? "force-cancel" : "cancel";
+  const url = `${credentials.apiBaseUrl}/repos/${encodeURIComponent(
+    input.owner,
+  )}/${encodeURIComponent(input.repository)}/actions/runs/${encodeURIComponent(
+    input.workflowRunId,
+  )}/${operation}`;
+  const requestResult = await withInstallationToken(credentials, (token) =>
+    githubFetch(url, {
+      method: "POST",
+      headers: githubHeaders(`Bearer ${token}`),
+    }),
+  );
+  const { response, token } = requestResult;
+  const githubRequestId = requestId(response);
+  if (response.status === 401) {
+    throw new GitHubAppError(
+      "GITHUB_APP_UNAUTHORIZED",
+      "GitHub rejected the installation access token",
+      githubRequestId,
+    );
+  }
+  if (!response.ok) {
+    const body = await responseBody(response);
+    throw new GitHubAppError(
+      response.status === 404
+        ? "REPOSITORY_NOT_INSTALLED"
+        : "GITHUB_APP_REQUEST_FAILED",
+      response.status === 404
+        ? "The repository or workflow run is not available to this installation"
+        : responseMessage(body, response.status, [
+            token,
+            credentials.privateKey,
+          ]),
+      githubRequestId,
+    );
+  }
+  return { githubRequestId };
+}
+
 export async function listGitHubActionsWorkflowJobs(
   credentials: GitHubAppCredentials,
   input: { owner: string; repository: string; workflowRunId: string },

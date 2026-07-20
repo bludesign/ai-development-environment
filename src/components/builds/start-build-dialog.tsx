@@ -1,5 +1,6 @@
 "use client";
 
+import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
 import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -46,6 +47,11 @@ import type {
   IosAppProject,
 } from "./types";
 import { ConfigurationIcon } from "./configuration-icon";
+import {
+  DEFAULT_EXPORT_SETTINGS,
+  ExportSettingsForm,
+  type ExportSettingsValue,
+} from "./export-settings-form";
 
 type PriorBuildForTesting = {
   id: string;
@@ -58,7 +64,7 @@ type PriorBuildForTesting = {
 const PROJECT_FIELDS = `
   id type
   configurations {
-    id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
+  id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
@@ -80,15 +86,6 @@ const ACTIONS: BuildAction[] = [
   "BUILD_FOR_TESTING",
   "TEST_WITHOUT_BUILDING",
 ];
-
-function humanizeConstant(value: string): string {
-  return value
-    .toLocaleLowerCase()
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
 
 export function StartBuildButton({
   codebaseId,
@@ -266,6 +263,10 @@ function StartBuildDialog({
   const [destinationId, setDestinationId] = useState("");
   const [scriptIds, setScriptIds] = useState<Set<string>>(new Set());
   const [advanced, setAdvanced] = useState<Record<string, unknown>>({});
+  const [exportWhenComplete, setExportWhenComplete] = useState(false);
+  const [exportSettings, setExportSettings] = useState<ExportSettingsValue>(
+    DEFAULT_EXPORT_SETTINGS,
+  );
   const [overrides, setOverrides] = useState("{}");
   const [loading, setLoading] = useState(true);
   const [preparing, setPreparing] = useState(false);
@@ -302,6 +303,17 @@ function StartBuildDialog({
           setConfigurationId(first.id);
           setAction(coverageMode ? "TEST" : first.defaultAction);
           setAdvanced(first.advancedSettings ?? {});
+          setExportWhenComplete(
+            Boolean(
+              !coverageMode &&
+              first.defaultAction === "ARCHIVE" &&
+              first.autoExport,
+            ),
+          );
+          setExportSettings({
+            ...DEFAULT_EXPORT_SETTINGS,
+            ...(first.exportSettings ?? {}),
+          } as ExportSettingsValue);
           setScriptIds(
             new Set(
               data
@@ -431,6 +443,34 @@ function StartBuildDialog({
     }
   };
 
+  const parseSigningRequirements = async () => {
+    if (!configuration) throw new Error(t("selectSigningSourceFirst"));
+    const data = await controlPlaneRequest<{
+      inspectBuildSource: {
+        signingRequirements: BuildSigningRequirement[];
+      };
+    }>(
+      `mutation InspectStartBuildSigningRequirements($input: InspectBuildSourceInput!) {
+        inspectBuildSource(input: $input) {
+          signingRequirements {
+            bundleId name target platform teamId provisioningProfileSpecifier
+          }
+        }
+      }`,
+      {
+        input: {
+          worktreeId,
+          sourceKind: configuration.source.kind,
+          sourcePath: configuration.source.relativePath,
+          scheme: configuration.scheme,
+          configuration: configuration.buildConfiguration,
+          requestId: createClientId(),
+        },
+      },
+    );
+    return data.inspectBuildSource.signingRequirements;
+  };
+
   useEffect(() => {
     if (!configuration || loading) return;
     const timer = window.setTimeout(
@@ -497,6 +537,9 @@ function StartBuildDialog({
                   }
                 : {}),
             },
+            exportWhenComplete:
+              !coverageMode && action === "ARCHIVE" && exportWhenComplete,
+            exportSettings: action === "ARCHIVE" ? exportSettings : null,
             requestId: createClientId(),
           },
         },
@@ -514,7 +557,7 @@ function StartBuildDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>
             {t(coverageMode ? "startWorktreeCoverage" : "startBuild")}
@@ -553,6 +596,17 @@ function StartBuildDialog({
                       setConfigurationId(entry.id);
                       setAction(coverageMode ? "TEST" : entry.defaultAction);
                       setAdvanced(entry.advancedSettings ?? {});
+                      setExportWhenComplete(
+                        Boolean(
+                          !coverageMode &&
+                          entry.defaultAction === "ARCHIVE" &&
+                          entry.autoExport,
+                        ),
+                      );
+                      setExportSettings({
+                        ...DEFAULT_EXPORT_SETTINGS,
+                        ...(entry.exportSettings ?? {}),
+                      } as ExportSettingsValue);
                     }}
                     type="button"
                   >
@@ -562,9 +616,8 @@ function StartBuildDialog({
                         {entry.name}
                       </span>
                       <Badge variant="outline">
-                        {humanizeConstant(
-                          (observations[entry.id] ?? entry.observation)
-                            ?.status ?? "UNPARSED",
+                        {t(
+                          `parseStatuses.${(observations[entry.id] ?? entry.observation)?.status ?? "UNPARSED"}`,
                         )}
                       </Badge>
                     </div>
@@ -612,7 +665,10 @@ function StartBuildDialog({
               <div className={cn("space-y-2", coverageMode && "hidden")}>
                 <Label>{t("action")}</Label>
                 <Select
-                  onValueChange={(value) => setAction(value as BuildAction)}
+                  onValueChange={(value) => {
+                    setAction(value as BuildAction);
+                    if (value !== "ARCHIVE") setExportWhenComplete(false);
+                  }}
                   value={action}
                 >
                   <SelectTrigger>
@@ -677,6 +733,28 @@ function StartBuildDialog({
                 </Select>
               </div>
             </div>
+
+            {!coverageMode && action === "ARCHIVE" && (
+              <section className="space-y-3">
+                <label className="flex items-center gap-2 font-medium">
+                  <Checkbox
+                    checked={exportWhenComplete}
+                    onCheckedChange={(checked) =>
+                      setExportWhenComplete(Boolean(checked))
+                    }
+                  />
+                  {t("exportWhenComplete")}
+                </label>
+                {exportWhenComplete && (
+                  <ExportSettingsForm
+                    key={configurationId}
+                    onChange={setExportSettings}
+                    onParseSigningRequirements={parseSigningRequirements}
+                    value={exportSettings}
+                  />
+                )}
+              </section>
+            )}
 
             {action === "TEST_WITHOUT_BUILDING" && (
               <div className="space-y-2">

@@ -61,6 +61,11 @@ describe("SettingsPage", () => {
     const tokenInput = (await screen.findByLabelText(
       "GitHub personal access token",
     )) as HTMLInputElement;
+    expect(screen.getByRole("region", { name: "Development" })).toBeDefined();
+    expect(
+      screen.getByRole("region", { name: "Apple services" }),
+    ).toBeDefined();
+    expect(screen.getByRole("region", { name: "Integrations" })).toBeDefined();
     expect(tokenInput.type).toBe("password");
     expect(tokenInput.value).toBe("");
 

@@ -1878,6 +1878,13 @@ const mockTranslations = {
       FAILED: "Failed",
       CANCELLED: "Canceled",
     },
+    parseStatuses: {
+      UNPARSED: "Not parsed",
+      PARSING: "Parsing",
+      VALID: "Valid",
+      INVALID: "Invalid",
+      ERROR: "Error",
+    },
     actions: {
       BUILD: "Build",
       TEST: "Test",
@@ -2294,6 +2301,11 @@ const useTranslations = (namespace) => {
     return translation;
   };
 };
+
+// Keep the test dictionary structurally identical to the English catalog.
+// Individual tests still receive plain strings, while new production keys no
+// longer require duplicating the entire catalog in this CommonJS fixture.
+Object.assign(mockTranslations, require("../../messages/en.json"));
 
 const NextIntlClientProvider = ({ children }) => children;
 const useLocale = () => "en";

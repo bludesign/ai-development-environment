@@ -71,6 +71,8 @@ export class JobExecutor {
               this.client.appendBuildLogs(buildId, events),
             uploadBuildArtifact: (input) =>
               this.client.uploadBuildArtifact(input),
+            claimSigningSecretTransfer: (transferId) =>
+              this.client.claimSigningSecretTransfer(transferId),
           },
         );
       const codebaseId =

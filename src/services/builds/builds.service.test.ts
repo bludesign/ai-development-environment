@@ -342,6 +342,7 @@ describe("BuildsService", () => {
         testPlan: "Integration",
         enableCodeCoverage: true,
       },
+      exportWhenComplete: false,
       requestId: "rebuild-request",
     });
   });
@@ -489,6 +490,83 @@ describe("BuildsService", () => {
         codeStateHash: "state-after-post-hooks",
         lastCheckedAt: new Date("2026-07-18T20:00:00.000Z"),
       },
+    });
+  });
+
+  test("queues one automatic export from the immutable build snapshot", async () => {
+    let completeBuild:
+      | Parameters<AgentControlService["registerCompletionHandler"]>[1]
+      | undefined;
+    const transaction = {
+      build: { update: vi.fn() },
+      worktree: { updateMany: vi.fn() },
+      buildArtifact: { upsert: vi.fn() },
+      buildScriptExecution: { updateMany: vi.fn() },
+    };
+    const exportSettings = {
+      method: "DEBUGGING",
+      signingStyle: "AUTOMATIC",
+      teamId: "ABCDE12345",
+      signingCertificate: null,
+      provisioningProfiles: {},
+      uploadSymbols: true,
+      manageAppVersionAndBuildNumber: true,
+      testFlightInternalTestingOnly: false,
+      stripSwiftSymbols: true,
+      thinning: null,
+      iCloudContainerEnvironment: null,
+      distributionBundleIdentifier: null,
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "archive-build",
+          status: "RUNNING",
+          errorCode: null,
+          error: null,
+          startedAt: new Date(0),
+          worktreeId: "worktree-1",
+          snapshotJson: JSON.stringify({
+            worktree: { id: "worktree-1" },
+            configuration: {
+              autoExport: true,
+              exportSettings,
+            },
+          }),
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const service = new BuildsService({
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === IOS_BUILD_JOB_KIND) completeBuild = handler;
+      }),
+    } as unknown as AgentControlService);
+    const exportArchive = vi
+      .spyOn(service, "exportArchive")
+      .mockResolvedValue({ id: "automatic-export" } as never);
+
+    await completeBuild!({
+      id: "job-1",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        artifacts: [
+          {
+            kind: "ARCHIVE",
+            relativePath: "App.xcarchive",
+            metadata: {},
+          },
+        ],
+        scriptExecutions: [],
+      }),
+      error: null,
+    } as never);
+
+    expect(exportArchive).toHaveBeenCalledOnce();
+    expect(exportArchive).toHaveBeenCalledWith({
+      buildId: "archive-build",
+      requestId: "automatic",
+      settings: exportSettings,
     });
   });
 

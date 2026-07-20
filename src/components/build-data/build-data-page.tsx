@@ -80,6 +80,7 @@ type AgentProgress = {
 type DerivedDataEntry = {
   id: string;
   name: string;
+  kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
   worktreeId: string | null;
@@ -113,6 +114,7 @@ type HistoryItem = {
   worktreeId: string | null;
   worktreePath: string | null;
   source: "USER" | "AUTOMATIC";
+  entryKind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
   deletedAt: string;
 };
 
@@ -123,7 +125,7 @@ const COLLECTION_FIELDS = `
     agents { agent { ${AGENT_FIELDS} } status jobId error warnings }
   }
   entries {
-    id name status workspacePath worktreeId worktreePath sizeBytes operation error
+    id name kind status workspacePath worktreeId worktreePath sizeBytes operation error
     agent { ${AGENT_FIELDS} }
   }
 `;
@@ -254,7 +256,7 @@ export function BuildDataPage() {
       }>(
         `query DerivedDataDeletionHistory($after: ID) {
           derivedDataDeletionHistory(first: 100, after: $after) {
-            items { id agentId agentName folderName worktreeId worktreePath source deletedAt }
+            items { id agentId agentName folderName worktreeId worktreePath source entryKind deletedAt }
             nextCursor
           }
         }`,
@@ -297,11 +299,17 @@ export function BuildDataPage() {
     };
   }, []);
 
-  const entries = collection?.entries ?? [];
-  const activeOperation = entries.some((entry) => entry.operation !== "IDLE");
-  const selectedEntries = entries.filter((entry) => selected.has(entry.id));
+  const allEntries = collection?.entries ?? [];
+  const entries = allEntries.filter((entry) => entry.kind !== "DEVICE_SUPPORT");
+  const deviceSupportEntries = allEntries.filter(
+    (entry) => entry.kind === "DEVICE_SUPPORT",
+  );
+  const activeOperation = allEntries.some(
+    (entry) => entry.operation !== "IDLE",
+  );
+  const selectedEntries = allEntries.filter((entry) => selected.has(entry.id));
   const allSelected =
-    entries.length > 0 && selectedEntries.length === entries.length;
+    allEntries.length > 0 && selectedEntries.length === allEntries.length;
   const someSelected = selectedEntries.length > 0 && !allSelected;
 
   const runOperation = async (
@@ -334,7 +342,10 @@ export function BuildDataPage() {
     }
   };
 
-  const previousEntryCount = useMemo(() => entries.length, [entries.length]);
+  const previousEntryCount = useMemo(
+    () => allEntries.length,
+    [allEntries.length],
+  );
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (!activeOperation && !loading) {
@@ -407,12 +418,12 @@ export function BuildDataPage() {
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={
-              !entries.length || loading || activeOperation || operationBusy
+              !allEntries.length || loading || activeOperation || operationBusy
             }
             onClick={() =>
               void runOperation(
                 "calculateDerivedDataSizes",
-                entries.map((entry) => entry.id),
+                allEntries.map((entry) => entry.id),
               )
             }
             variant="outline"
@@ -442,7 +453,7 @@ export function BuildDataPage() {
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>
-      ) : entries.length === 0 ? (
+      ) : allEntries.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
@@ -450,184 +461,215 @@ export function BuildDataPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <Card className="gap-0 py-0">
-          {selectedEntries.length > 0 && (
-            <div className="flex items-center justify-between gap-3 border-b p-3">
-              <p className="text-sm">
-                {t("selected", { count: selectedEntries.length })}
-              </p>
-              <Button
-                className="w-40"
-                disabled={activeOperation || operationBusy}
-                onClick={() =>
-                  inlineDelete(
-                    bulkDeleteKey,
-                    selectedEntries.map((entry) => entry.id),
-                  )
-                }
-                size="sm"
-                variant={bulkDeleteArmed ? "destructive" : "outline"}
-              >
-                {bulkDeleteArmed ? <Check /> : <Trash2 />}
-                {bulkDeleteArmed ? t("confirmDelete") : t("deleteSelected")}
-              </Button>
-            </div>
-          )}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
-                  <Checkbox
-                    aria-label={t("selectAll")}
-                    checked={
-                      allSelected
-                        ? true
-                        : someSelected
-                          ? "indeterminate"
-                          : false
+        <>
+          {entries.length > 0 && (
+            <Card className="gap-0 py-0">
+              <CardHeader className="border-b py-4">
+                <CardTitle>{t("derivedDataTitle")}</CardTitle>
+                <CardDescription>{t("derivedDataDescription")}</CardDescription>
+              </CardHeader>
+              {selectedEntries.length > 0 && (
+                <div className="flex items-center justify-between gap-3 border-b p-3">
+                  <p className="text-sm">
+                    {t("selected", { count: selectedEntries.length })}
+                  </p>
+                  <Button
+                    className="w-40"
+                    disabled={activeOperation || operationBusy}
+                    onClick={() =>
+                      inlineDelete(
+                        bulkDeleteKey,
+                        selectedEntries.map((entry) => entry.id),
+                      )
                     }
-                    onCheckedChange={(checked) => {
-                      setArmedDeleteKey(null);
-                      setSelected(
-                        checked === true
-                          ? new Set(entries.map((entry) => entry.id))
-                          : new Set(),
-                      );
-                    }}
-                  />
-                </TableHead>
-                <TableHead>{t("folder")}</TableHead>
-                <TableHead>{t("worktree")}</TableHead>
-                <TableHead>{t("size")}</TableHead>
-                <TableHead>{t("agent")}</TableHead>
-                <TableHead className="w-12 text-right">
-                  <span className="sr-only">{t("actions")}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell>
-                    <Checkbox
-                      aria-label={t("selectEntry", { name: entry.name })}
-                      checked={selected.has(entry.id)}
-                      onCheckedChange={(checked) => {
-                        setArmedDeleteKey(null);
-                        setSelected((current) => {
-                          const next = new Set(current);
-                          if (checked === true) next.add(entry.id);
-                          else next.delete(entry.id);
-                          return next;
-                        });
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="break-all font-mono text-xs">
-                        {entry.name}
-                      </span>
-                      {entry.status !== "READY" && (
-                        <Badge variant="secondary">
-                          {t(`status.${entry.status}`)}
-                        </Badge>
-                      )}
-                      {entry.operation !== "IDLE" && <Spinner />}
-                    </div>
-                    {entry.error && (
-                      <p className="mt-1 text-xs text-destructive">
-                        {entry.error}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {entry.worktreeId && entry.worktreePath ? (
-                      <Link
-                        className="underline-offset-4 hover:underline"
-                        href={`/worktrees/${entry.worktreeId}`}
-                      >
-                        {entry.worktreePath}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {entry.sizeBytes === null
-                      ? "—"
-                      : formatBytes(entry.sizeBytes, locale)}
-                  </TableCell>
-                  <TableCell>
-                    <Link
-                      className="underline-offset-4 hover:underline"
-                      href={`/agents/${entry.agent.id}`}
-                    >
-                      {entry.agent.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="w-12 text-right">
-                    <DropdownMenu
-                      onOpenChange={(open) => {
-                        if (!open && armedDeleteKey === `row:${entry.id}`) {
-                          if (armedDeleteTimer.current) {
-                            window.clearTimeout(armedDeleteTimer.current);
-                            armedDeleteTimer.current = null;
-                          }
-                          setArmedDeleteKey(null);
+                    size="sm"
+                    variant={bulkDeleteArmed ? "destructive" : "outline"}
+                  >
+                    {bulkDeleteArmed ? <Check /> : <Trash2 />}
+                    {bulkDeleteArmed ? t("confirmDelete") : t("deleteSelected")}
+                  </Button>
+                </div>
+              )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">
+                      <Checkbox
+                        aria-label={t("selectAll")}
+                        checked={
+                          allSelected
+                            ? true
+                            : someSelected
+                              ? "indeterminate"
+                              : false
                         }
-                      }}
-                    >
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          aria-label={t("entryActions", { name: entry.name })}
-                          className="ml-auto"
-                          disabled={activeOperation || operationBusy}
-                          size="icon-sm"
-                          variant="ghost"
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem
-                          onSelect={(event) => {
-                            if (armedDeleteKey !== `row:${entry.id}`) {
-                              event.preventDefault();
-                            }
-                            inlineDelete(`row:${entry.id}`, [entry.id]);
+                        onCheckedChange={(checked) => {
+                          setArmedDeleteKey(null);
+                          setSelected(
+                            checked === true
+                              ? new Set(allEntries.map((entry) => entry.id))
+                              : new Set(),
+                          );
+                        }}
+                      />
+                    </TableHead>
+                    <TableHead>{t("folder")}</TableHead>
+                    <TableHead>{t("worktree")}</TableHead>
+                    <TableHead>{t("size")}</TableHead>
+                    <TableHead>{t("agent")}</TableHead>
+                    <TableHead className="w-12 text-right">
+                      <span className="sr-only">{t("actions")}</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {entries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell>
+                        <Checkbox
+                          aria-label={t("selectEntry", { name: entry.name })}
+                          checked={selected.has(entry.id)}
+                          onCheckedChange={(checked) => {
+                            setArmedDeleteKey(null);
+                            setSelected((current) => {
+                              const next = new Set(current);
+                              if (checked === true) next.add(entry.id);
+                              else next.delete(entry.id);
+                              return next;
+                            });
                           }}
-                          variant={
-                            armedDeleteKey === `row:${entry.id}`
-                              ? "destructive"
-                              : "default"
-                          }
-                        >
-                          {armedDeleteKey === `row:${entry.id}` ? (
-                            <Check />
-                          ) : (
-                            <Trash2 />
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="break-all font-mono text-xs">
+                            {entry.name}
+                          </span>
+                          {entry.status !== "READY" && (
+                            <Badge variant="secondary">
+                              {t(`status.${entry.status}`)}
+                            </Badge>
                           )}
-                          {armedDeleteKey === `row:${entry.id}`
-                            ? t("confirmDelete")
-                            : t("delete")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+                          {entry.operation !== "IDLE" && <Spinner />}
+                        </div>
+                        {entry.error && (
+                          <p className="mt-1 text-xs text-destructive">
+                            {entry.error}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {entry.worktreeId && entry.worktreePath ? (
+                          <Link
+                            className="underline-offset-4 hover:underline"
+                            href={`/worktrees/${entry.worktreeId}`}
+                          >
+                            {entry.worktreePath}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {entry.sizeBytes === null
+                          ? "—"
+                          : formatBytes(entry.sizeBytes, locale)}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          className="underline-offset-4 hover:underline"
+                          href={`/agents/${entry.agent.id}`}
+                        >
+                          {entry.agent.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="w-12 text-right">
+                        <DropdownMenu
+                          onOpenChange={(open) => {
+                            if (!open && armedDeleteKey === `row:${entry.id}`) {
+                              if (armedDeleteTimer.current) {
+                                window.clearTimeout(armedDeleteTimer.current);
+                                armedDeleteTimer.current = null;
+                              }
+                              setArmedDeleteKey(null);
+                            }
+                          }}
+                        >
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              aria-label={t("entryActions", {
+                                name: entry.name,
+                              })}
+                              className="ml-auto"
+                              disabled={activeOperation || operationBusy}
+                              size="icon-sm"
+                              variant="ghost"
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem
+                              onSelect={(event) => {
+                                if (armedDeleteKey !== `row:${entry.id}`) {
+                                  event.preventDefault();
+                                }
+                                inlineDelete(`row:${entry.id}`, [entry.id]);
+                              }}
+                              variant={
+                                armedDeleteKey === `row:${entry.id}`
+                                  ? "destructive"
+                                  : "default"
+                              }
+                            >
+                              {armedDeleteKey === `row:${entry.id}` ? (
+                                <Check />
+                              ) : (
+                                <Trash2 />
+                              )}
+                              {armedDeleteKey === `row:${entry.id}`
+                                ? t("confirmDelete")
+                                : t("delete")}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+          <DeviceSupportCard
+            activeOperation={activeOperation || operationBusy}
+            entries={deviceSupportEntries}
+            locale={locale}
+            onDelete={(entryId) =>
+              void runOperation("deleteDerivedDataEntries", [entryId])
+            }
+            onDeleteMany={(entryIds) =>
+              void runOperation("deleteDerivedDataEntries", entryIds)
+            }
+            onSelectionChange={(entryId, checked) => {
+              setArmedDeleteKey(null);
+              setSelected((current) => {
+                const next = new Set(current);
+                if (checked) next.add(entryId);
+                else next.delete(entryId);
+                return next;
+              });
+            }}
+            selected={selected}
+          />
+        </>
       )}
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
           <CardTitle>{t("history")}</CardTitle>
           <CardDescription>{t("historyDescription")}</CardDescription>
           {history.length > 0 && (
-            <CardAction>
+            <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
               <ConfirmationDialog
                 actionLabel={t("clearHistory")}
                 cancelLabel={tc("cancel")}
@@ -727,6 +769,150 @@ export function BuildDataPage() {
         )}
       </Card>
     </section>
+  );
+}
+
+function DeviceSupportCard({
+  entries,
+  selected,
+  activeOperation,
+  locale,
+  onSelectionChange,
+  onDelete,
+  onDeleteMany,
+}: {
+  entries: DerivedDataEntry[];
+  selected: Set<string>;
+  activeOperation: boolean;
+  locale: string;
+  onSelectionChange: (entryId: string, checked: boolean) => void;
+  onDelete: (entryId: string) => void;
+  onDeleteMany: (entryIds: string[]) => void;
+}) {
+  const t = useTranslations("buildData");
+  const tc = useTranslations("common");
+  const selectedEntries = entries.filter((entry) => selected.has(entry.id));
+  const allSelected =
+    entries.length > 0 && selectedEntries.length === entries.length;
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+        <CardTitle>{t("deviceSupportTitle")}</CardTitle>
+        <CardDescription>{t("deviceSupportDescription")}</CardDescription>
+        {selectedEntries.length > 0 && (
+          <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
+            <ConfirmationDialog
+              actionLabel={t("deleteSelected")}
+              cancelLabel={tc("cancel")}
+              description={t("deleteDeviceSupportDescription", {
+                count: selectedEntries.length,
+              })}
+              onConfirm={() =>
+                onDeleteMany(selectedEntries.map((entry) => entry.id))
+              }
+              title={t("deleteDeviceSupportTitle")}
+              trigger={
+                <Button disabled={activeOperation} size="sm" variant="outline">
+                  <Trash2 /> {t("deleteSelected")}
+                </Button>
+              }
+            />
+          </CardAction>
+        )}
+      </CardHeader>
+      {entries.length === 0 ? (
+        <Empty className="py-8">
+          <EmptyHeader>
+            <EmptyDescription>{t("noDeviceSupport")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  aria-label={t("selectAllDeviceSupport")}
+                  checked={
+                    allSelected
+                      ? true
+                      : selectedEntries.length
+                        ? "indeterminate"
+                        : false
+                  }
+                  onCheckedChange={(checked) => {
+                    for (const entry of entries) {
+                      onSelectionChange(entry.id, checked === true);
+                    }
+                  }}
+                />
+              </TableHead>
+              <TableHead>{t("deviceSupportVersion")}</TableHead>
+              <TableHead>{t("size")}</TableHead>
+              <TableHead>{t("agent")}</TableHead>
+              <TableHead className="w-12">
+                <span className="sr-only">{t("actions")}</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {entries.map((entry) => (
+              <TableRow key={entry.id}>
+                <TableCell>
+                  <Checkbox
+                    aria-label={t("selectEntry", { name: entry.name })}
+                    checked={selected.has(entry.id)}
+                    onCheckedChange={(checked) =>
+                      onSelectionChange(entry.id, checked === true)
+                    }
+                  />
+                </TableCell>
+                <TableCell>
+                  <span className="font-mono text-xs">{entry.name}</span>
+                  {entry.operation !== "IDLE" && <Spinner className="ml-2" />}
+                  {entry.error && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {entry.error}
+                    </p>
+                  )}
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  {entry.sizeBytes === null
+                    ? "—"
+                    : formatBytes(entry.sizeBytes, locale)}
+                </TableCell>
+                <TableCell>
+                  <Link href={`/agents/${entry.agent.id}`}>
+                    {entry.agent.name}
+                  </Link>
+                </TableCell>
+                <TableCell>
+                  <ConfirmationDialog
+                    actionLabel={t("delete")}
+                    cancelLabel={tc("cancel")}
+                    description={t("deleteDeviceSupportDescription", {
+                      count: 1,
+                    })}
+                    onConfirm={() => onDelete(entry.id)}
+                    title={t("deleteDeviceSupportTitle")}
+                    trigger={
+                      <Button
+                        aria-label={t("entryActions", { name: entry.name })}
+                        disabled={activeOperation}
+                        size="icon-sm"
+                        variant="ghost"
+                      >
+                        <Trash2 />
+                      </Button>
+                    }
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Card>
   );
 }
 

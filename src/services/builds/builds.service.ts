@@ -3,6 +3,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BUILD_ACTIONS,
+  BUILD_CONFIGURATION_ICON_KEYS,
   BUILD_DESTINATION_TYPES,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
@@ -28,6 +29,7 @@ import {
   type BuildAdvancedSettings,
   type BuildDestination,
   type BuildReportKind,
+  type BuildSigningRequirement,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
 
@@ -46,14 +48,7 @@ import type { TelemetryService } from "@/services/telemetry";
 
 import { effectiveBuildsDirectory } from "./build-directory";
 
-const ICON_KEYS = new Set([
-  "smartphone",
-  "hammer",
-  "play",
-  "test-tube",
-  "archive",
-  "rocket",
-]);
+const ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
 const FINAL_JOB_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -84,6 +79,38 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+function signingRequirements(value: unknown): BuildSigningRequirement[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): BuildSigningRequirement[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const requirement = entry as JsonObject;
+    if (
+      typeof requirement.bundleId !== "string" ||
+      typeof requirement.name !== "string" ||
+      typeof requirement.target !== "string"
+    ) {
+      return [];
+    }
+    return [
+      {
+        bundleId: requirement.bundleId,
+        name: requirement.name,
+        target: requirement.target,
+        platform:
+          typeof requirement.platform === "string"
+            ? requirement.platform
+            : null,
+        teamId:
+          typeof requirement.teamId === "string" ? requirement.teamId : null,
+        provisioningProfileSpecifier:
+          typeof requirement.provisioningProfileSpecifier === "string"
+            ? requirement.provisioningProfileSpecifier
+            : null,
+      },
+    ];
+  });
 }
 
 function online(agent: {
@@ -355,6 +382,8 @@ export type SaveBuildConfigurationInput = {
   buildConfiguration: string;
   defaultAction: BuildAction;
   advancedSettings?: unknown;
+  autoExport?: boolean;
+  exportSettings?: unknown;
 };
 
 export type SaveBuildScriptInput = {
@@ -540,6 +569,18 @@ export class BuildsService {
     const advanced = parseBuildAdvancedSettings(
       input.advancedSettings ?? DEFAULT_BUILD_ADVANCED_SETTINGS,
     );
+    const autoExport = input.autoExport === true;
+    if (autoExport && input.defaultAction !== "ARCHIVE") {
+      throw new Error(
+        "Auto Export is available only for Archive configurations",
+      );
+    }
+    const exportSettings = input.exportSettings
+      ? parseBuildExportSettings(input.exportSettings)
+      : null;
+    if (autoExport && !exportSettings) {
+      throw new Error("Auto Export settings are required");
+    }
     const prisma = await getPrismaClient();
     const existing = input.id
       ? await prisma.buildConfiguration.findUnique({ where: { id: input.id } })
@@ -575,6 +616,10 @@ export class BuildsService {
         buildConfiguration,
         defaultAction: input.defaultAction,
         advancedSettingsJson: JSON.stringify(advanced),
+        autoExport,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       },
       update: {
         sourceId: savedSource.id,
@@ -584,6 +629,10 @@ export class BuildsService {
         buildConfiguration,
         defaultAction: input.defaultAction,
         advancedSettingsJson: JSON.stringify(advanced),
+        autoExport,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       },
       include: { source: true },
     });
@@ -867,6 +916,7 @@ export class BuildsService {
     sourceKind: BuildSourceKind;
     sourcePath: string;
     scheme?: string | null;
+    configuration?: string | null;
     requestId: string;
   }) {
     const worktree = await this.requireWorktree(
@@ -886,8 +936,9 @@ export class BuildsService {
         ...this.identity(worktree),
         source,
         scheme: input.scheme?.trim() || null,
+        configuration: input.configuration?.trim() || null,
       },
-      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}`,
+      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}:${input.configuration ?? ""}`,
       timeoutSeconds: 120,
       visibility: "SYSTEM",
     });
@@ -898,6 +949,7 @@ export class BuildsService {
         schemes: stringArray(result.schemes),
         configurations: stringArray(result.configurations),
         testPlans: stringArray(result.testPlans),
+        signingRequirements: signingRequirements(result.signingRequirements),
         headSha:
           typeof result.headSha === "string"
             ? result.headSha
@@ -1079,6 +1131,8 @@ export class BuildsService {
     scriptIds?: string[] | null;
     action?: BuildAction | null;
     advancedSettings?: unknown;
+    exportWhenComplete?: boolean | null;
+    exportSettings?: unknown;
     worktreeCoverage?: boolean;
     requestId: string;
     telemetryRequestOrigin?: string | null;
@@ -1143,6 +1197,26 @@ export class BuildsService {
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
+    if (input.exportWhenComplete && action !== "ARCHIVE") {
+      throw new Error(
+        "Export when complete is available only for Archive builds",
+      );
+    }
+    const exportWhenComplete =
+      action === "ARCHIVE" &&
+      (input.exportWhenComplete ?? configuration.autoExport);
+    const rawExportSettings =
+      input.exportSettings ?? parseJson(configuration.exportSettingsJson, null);
+    const exportSettings = exportWhenComplete
+      ? parseBuildExportSettings(rawExportSettings)
+      : rawExportSettings
+        ? parseBuildExportSettings(rawExportSettings)
+        : null;
+    if (exportWhenComplete && !exportSettings) {
+      throw new Error(
+        "Export settings are required when automatic export is enabled",
+      );
+    }
     const destination = parseBuildDestination(input.destination);
     if (!BUILD_DESTINATION_TYPES.includes(destination.type)) {
       throw new Error("Destination is invalid");
@@ -1381,6 +1455,8 @@ export class BuildsService {
         buildConfiguration: configuration.buildConfiguration,
         action,
         advancedSettings,
+        autoExport: exportWhenComplete,
+        exportSettings,
         parse: observation
           ? {
               status: observation.status,
@@ -1586,8 +1662,12 @@ export class BuildsService {
       }),
       action: build.action as BuildAction,
       advancedSettings: snapshotConfiguration.advancedSettings,
+      exportWhenComplete: snapshotConfiguration.autoExport === true,
+      ...(Object.hasOwn(snapshotConfiguration, "exportSettings")
+        ? { exportSettings: snapshotConfiguration.exportSettings }
+        : {}),
       requestId,
-      telemetryRequestOrigin,
+      ...(telemetryRequestOrigin ? { telemetryRequestOrigin } : {}),
     });
   }
 
@@ -2280,28 +2360,41 @@ export class BuildsService {
         commandSummary: `xcrun xcodebuild -exportArchive -archivePath ${JSON.stringify(archive.relativePath)} -exportPath exports/${exportId}`,
       },
     });
-    const job = await this.agentControl.createJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: IOS_EXPORT_JOB_KIND,
-      payload: {
-        ...this.identity(worktree),
-        buildId: build.id,
-        exportId,
-        artifactDirectory: build.artifactDirectory,
-        archiveRelativePath: archive.relativePath,
-        settings,
-      },
-      idempotencyKey: `ios:export:${build.id}:${input.requestId}`,
-      timeoutSeconds: 3_600,
-    });
-    const updated = await prisma.buildExport.update({
-      where: { id: row.id },
-      data: { jobId: job.id },
-    });
-    this.publish(build.id);
-    return updated;
+    try {
+      const job = await this.agentControl.createJob({
+        agentId: worktree.codebase.agentId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        kind: IOS_EXPORT_JOB_KIND,
+        payload: {
+          ...this.identity(worktree),
+          buildId: build.id,
+          exportId,
+          artifactDirectory: build.artifactDirectory,
+          archiveRelativePath: archive.relativePath,
+          settings,
+        },
+        idempotencyKey: `ios:export:${build.id}:${input.requestId}`,
+        timeoutSeconds: 3_600,
+      });
+      const updated = await prisma.buildExport.update({
+        where: { id: row.id },
+        data: { jobId: job.id },
+      });
+      this.publish(build.id);
+      return updated;
+    } catch (error) {
+      const failed = await prisma.buildExport.update({
+        where: { id: row.id },
+        data: {
+          status: "FAILED",
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: new Date(),
+        },
+      });
+      this.publish(build.id);
+      return failed;
+    }
   }
 
   /**
@@ -2574,6 +2667,50 @@ export class BuildsService {
       }
     });
     this.publish(build.id);
+    if (status === "SUCCEEDED") {
+      await this.queueAutomaticExport(build.id, snapshotJson);
+    }
+  }
+
+  private async queueAutomaticExport(buildId: string, snapshotJson: string) {
+    const snapshot = objectValue(parseJson(snapshotJson, {}), "build snapshot");
+    const configuration = objectValue(
+      snapshot.configuration ?? {},
+      "build configuration snapshot",
+    );
+    if (configuration.autoExport !== true) return;
+    const settings = configuration.exportSettings;
+    try {
+      await this.exportArchive({
+        buildId,
+        requestId: "automatic",
+        settings,
+      });
+    } catch (error) {
+      const prisma = await getPrismaClient();
+      const message = error instanceof Error ? error.message : String(error);
+      await prisma.buildExport.upsert({
+        where: {
+          buildId_requestId: { buildId, requestId: "automatic" },
+        },
+        create: {
+          id: randomUUID(),
+          buildId,
+          requestId: "automatic",
+          status: "FAILED",
+          settingsSnapshotJson: JSON.stringify(settings ?? {}),
+          commandSummary: "Automatic archive export",
+          error: message,
+          finishedAt: new Date(),
+        },
+        update: {
+          status: "FAILED",
+          error: message,
+          finishedAt: new Date(),
+        },
+      });
+      this.publish(buildId);
+    }
   }
 
   private async projectGeneratedReportCompletion(job: {

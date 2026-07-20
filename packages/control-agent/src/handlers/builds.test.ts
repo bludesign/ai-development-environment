@@ -28,6 +28,7 @@ import type { ProcessResult } from "../process-runner.js";
 import {
   classifyFailure,
   createRedactor,
+  dependentSigningTargetNamesFromPbxProject,
   deleteIosBuild,
   downloadIosBuildArtifact,
   generateIosBuildReport,
@@ -38,6 +39,7 @@ import {
   archiveApplicationProperties,
   exportedArtifacts,
   simulatorDestinations,
+  signingRequirementsFromBuildSettings,
   testPlanNames,
   workspaceProjectPaths,
   xcodeBuildArguments,
@@ -222,6 +224,99 @@ describe("iOS build command construction", () => {
 });
 
 describe("iOS destination and error parsing", () => {
+  test("follows signable Xcode target dependencies", () => {
+    expect(
+      dependentSigningTargetNamesFromPbxProject(
+        {
+          objects: {
+            APP: {
+              isa: "PBXNativeTarget",
+              name: "Server iOS",
+              productType: "com.apple.product-type.application",
+              dependencies: ["WATCH_DEP", "LIB_DEP"],
+            },
+            WATCH_DEP: { isa: "PBXTargetDependency", target: "WATCH" },
+            LIB_DEP: { isa: "PBXTargetDependency", target: "LIB" },
+            WATCH: {
+              isa: "PBXNativeTarget",
+              name: "Server watchOS App",
+              productType: "com.apple.product-type.application",
+              dependencies: ["EXTENSION_DEP"],
+            },
+            EXTENSION_DEP: {
+              isa: "PBXTargetDependency",
+              target: "EXTENSION",
+            },
+            EXTENSION: {
+              isa: "PBXNativeTarget",
+              name: "Server Widget",
+              productType: "com.apple.product-type.app-extension",
+              dependencies: [],
+            },
+            LIB: {
+              isa: "PBXNativeTarget",
+              name: "ServerCore",
+              productType: "com.apple.product-type.framework",
+              dependencies: [],
+            },
+          },
+        },
+        ["Server iOS"],
+      ),
+    ).toEqual(["Server watchOS App", "Server Widget"]);
+  });
+
+  test("extracts signable application and extension requirements", () => {
+    expect(
+      signingRequirementsFromBuildSettings([
+        {
+          target: "App",
+          buildSettings: {
+            PRODUCT_BUNDLE_IDENTIFIER: "com.example.app",
+            PRODUCT_NAME: "Example",
+            PRODUCT_TYPE: "com.apple.product-type.application",
+            PLATFORM_NAME: "iphoneos",
+            DEVELOPMENT_TEAM: "TEAM123",
+            PROVISIONING_PROFILE_SPECIFIER: "Example Development",
+          },
+        },
+        {
+          target: "Widget",
+          buildSettings: {
+            PRODUCT_BUNDLE_IDENTIFIER: "com.example.app.widget",
+            PRODUCT_NAME: "Example Widget",
+            PRODUCT_TYPE: "com.apple.product-type.app-extension",
+            PLATFORM_NAME: "iphoneos",
+          },
+        },
+        {
+          target: "AppTests",
+          buildSettings: {
+            PRODUCT_BUNDLE_IDENTIFIER: "com.example.app.tests",
+            PRODUCT_TYPE: "com.apple.product-type.bundle.unit-test",
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        bundleId: "com.example.app",
+        name: "Example",
+        target: "App",
+        platform: "iOS",
+        teamId: "TEAM123",
+        provisioningProfileSpecifier: "Example Development",
+      },
+      {
+        bundleId: "com.example.app.widget",
+        name: "Example Widget",
+        target: "Widget",
+        platform: "iOS",
+        teamId: null,
+        provisioningProfileSpecifier: null,
+      },
+    ]);
+  });
+
   test("parses Xcode test-plan objects", () => {
     expect(
       testPlanNames([{ name: "TestPlan" }, { name: "Integration" }]),

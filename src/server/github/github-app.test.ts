@@ -6,6 +6,7 @@ import { decodeJwt, decodeProtectedHeader } from "jose";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
   githubAppGraphql,
   GitHubAppError,
@@ -226,6 +227,36 @@ describe("GitHub App authentication", () => {
     expect((caught as Error).message).not.toContain("secret-token");
     expect((caught as Error).message).not.toContain("BEGIN RSA PRIVATE KEY");
   });
+
+  test.each([
+    [false, "cancel"],
+    [true, "force-cancel"],
+  ])(
+    "sends force=%s workflow cancellation to the %s endpoint",
+    async (force, operation) => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/access_tokens")) return tokenResponse();
+        if (url.endsWith(`/actions/runs/987/${operation}`)) {
+          expect(init?.method).toBe("POST");
+          expect((init?.headers as Record<string, string>).authorization).toBe(
+            "Bearer installation-token",
+          );
+          return response(null, 202, "CANCEL-1");
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        cancelGitHubActionsWorkflow(credentials, {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          force,
+        }),
+      ).resolves.toEqual({ githubRequestId: "CANCEL-1" });
+    },
+  );
 
   test("lists workflow jobs with the installation token", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

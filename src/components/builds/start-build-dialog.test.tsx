@@ -140,6 +140,89 @@ beforeEach(() => {
         ],
       } as never;
     }
+    if (operation.includes("query ExportSigningInventory")) {
+      return {
+        signingAgents: [{ supported: true }],
+        signingCertificates: [
+          {
+            sha1: "API-CERT",
+            name: "Apple Development: Created via API (API123)",
+            teamId: "API123",
+            hasPrivateKey: true,
+            installedAgents: [{ id: "agent-1" }],
+          },
+          {
+            sha1: "OTHER-CERT",
+            name: "Apple Distribution: Other Team (OTHER123)",
+            teamId: "OTHER123",
+            hasPrivateKey: true,
+            installedAgents: [{ id: "agent-1" }],
+          },
+        ],
+        signingProfiles: [
+          {
+            uuid: "PROFILE-APP",
+            name: "Example Development",
+            profileType: "DEVELOPMENT",
+            bundleId: "com.example.app",
+            teamId: "TEAM123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["API-CERT"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+          {
+            uuid: "PROFILE-WATCH",
+            name: "Example Watch Development",
+            profileType: "DEVELOPMENT",
+            bundleId: "com.example.app.WatchKitApp",
+            teamId: "TEAM123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["API-CERT"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+          {
+            uuid: "PROFILE-OTHER",
+            name: "Other Enterprise Profile",
+            profileType: "ENTERPRISE",
+            bundleId: "com.example.other",
+            teamId: "OTHER123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["OTHER-CERT"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+        ],
+      } as never;
+    }
+    if (operation.includes("mutation InspectStartBuildSigningRequirements")) {
+      return {
+        inspectBuildSource: {
+          signingRequirements: [
+            {
+              bundleId: "com.example.app",
+              name: "Example",
+              target: "App",
+              platform: "iOS",
+              teamId: "TEAM123",
+              provisioningProfileSpecifier: "Example Development",
+            },
+            {
+              bundleId: "com.example.app.WatchKitApp",
+              name: "Example Watch",
+              target: "Example watchOS App",
+              platform: "watchOS",
+              teamId: "TEAM123",
+              provisioningProfileSpecifier: "Example Watch Development",
+            },
+          ],
+        },
+      } as never;
+    }
     if (operation.includes("mutation StartIosBuild")) {
       return { startBuild: { id: "build-1" } } as never;
     }
@@ -153,6 +236,147 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("parses signing requirements while keeping manual signing overrides available", async () => {
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("sm:max-w-5xl");
+    expect(await screen.findByText("Development")).toBeDefined();
+
+    const actionField = within(dialog).getByText("Action").parentElement!;
+    const actionSelect = within(actionField).getByRole("combobox");
+    fireEvent.pointerDown(actionSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Archive" }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Export when complete" }),
+    );
+
+    const signingStyleField =
+      within(dialog).getByText("Signing style").parentElement!;
+    const signingStyleSelect = within(signingStyleField).getByRole("combobox");
+    fireEvent.pointerDown(signingStyleSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Manual" }));
+
+    const parse = await screen.findByRole("button", {
+      name: "Parse project",
+    });
+    await waitFor(() =>
+      expect((parse as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(parse);
+
+    expect(await screen.findByText("com.example.app")).toBeDefined();
+    expect(screen.getByText("com.example.app.WatchKitApp")).toBeDefined();
+    expect(screen.getByText(/Example Development/)).toBeDefined();
+    expect(screen.getByText(/Example Watch Development/)).toBeDefined();
+
+    const certificateField = within(dialog).getByText(
+      "Signing certificate",
+    ).parentElement!;
+    fireEvent.pointerDown(within(certificateField).getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const apiCertificate = await screen.findByRole("option", {
+      name: /Apple Development: Created via API/,
+    });
+    expect(apiCertificate).toBeDefined();
+    const otherCertificate = screen.getByRole("option", {
+      name: /Apple Distribution: Other Team.*May not match selected profiles/,
+    });
+    expect(otherCertificate.className).toContain("text-muted-foreground");
+    expect(otherCertificate.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(otherCertificate);
+
+    fireEvent.change(screen.getByLabelText("Bundle identifier to add"), {
+      target: { value: "com.example.app.MissingExtension" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add bundle identifier" }),
+    );
+    const [manualBundleId] = await screen.findAllByText(
+      "com.example.app.MissingExtension",
+    );
+    const manualBundleCard = manualBundleId.closest(
+      "div.rounded-lg",
+    ) as HTMLElement;
+    fireEvent.pointerDown(within(manualBundleCard).getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const otherProfile = await screen.findByRole("option", {
+      name: /Other Enterprise Profile.*May not match this bundle/,
+    });
+    expect(otherProfile.className).toContain("text-muted-foreground");
+    expect(otherProfile.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(otherProfile);
+
+    fireEvent.click(screen.getByRole("button", { name: "Parse again" }));
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          String(query).includes(
+            "mutation InspectStartBuildSigningRequirements",
+          ),
+        ),
+      ).toHaveLength(2),
+    );
+    expect(
+      await screen.findAllByText("com.example.app.MissingExtension"),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", {
+        name: "Remove com.example.app.MissingExtension",
+      }),
+    ).toBeDefined();
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("InspectStartBuildSigningRequirements"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            scheme: "App",
+            configuration: "Debug",
+          }),
+        }),
+      ),
+    );
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Start Build" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation StartIosBuild"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            action: "ARCHIVE",
+            exportWhenComplete: true,
+            exportSettings: expect.objectContaining({
+              provisioningProfiles: {
+                "com.example.app": "PROFILE-APP",
+                "com.example.app.WatchKitApp": "PROFILE-WATCH",
+                "com.example.app.MissingExtension": "PROFILE-OTHER",
+              },
+              signingCertificate: "OTHER-CERT",
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
   test("links to repository settings when builds are not configured", async () => {
     render(
       <StartBuildButton

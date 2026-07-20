@@ -1,6 +1,15 @@
 "use client";
 
-import { Hammer, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
+import {
+  CircleOff,
+  ChevronDown,
+  Hammer,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -9,6 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -44,12 +60,20 @@ import type {
   BuildScript,
   IosAppProject,
 } from "./types";
-import { ConfigurationIcon } from "./configuration-icon";
+import {
+  BUILD_CONFIGURATION_ICON_KEYS,
+  ConfigurationIcon,
+} from "./configuration-icon";
+import {
+  DEFAULT_EXPORT_SETTINGS,
+  ExportSettingsForm,
+  type ExportSettingsValue,
+} from "./export-settings-form";
 
 const PROJECT_FIELDS = `
   id type
   configurations {
-    id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
+  id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
@@ -69,6 +93,7 @@ type SourceInspection = {
   schemes: string[];
   configurations: string[];
   testPlans: string[];
+  signingRequirements: BuildSigningRequirement[];
   headSha: string | null;
   xcodeVersion: string | null;
 };
@@ -247,7 +272,10 @@ export function IosProjectSection({
               }}
               value={activeCodebaseId}
             >
-              <SelectTrigger aria-label={t("parseCheckout")}>
+              <SelectTrigger
+                aria-label={t("parseCheckout")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -333,7 +361,9 @@ export function IosProjectSection({
                                 : "outline"
                             }
                           >
-                            {configuration.observation?.status ?? "UNPARSED"}
+                            {t(
+                              `parseStatuses.${configuration.observation?.status ?? "UNPARSED"}`,
+                            )}
                           </Badge>
                         </div>
                         <div className="rounded-lg border bg-muted/20 p-3 text-sm">
@@ -478,6 +508,7 @@ function BuildConfigurationDialog({
           schemes: configuration.observation.schemes,
           configurations: configuration.observation.configurations,
           testPlans: configuration.observation.testPlans,
+          signingRequirements: [],
           headSha: configuration.observation.headSha,
           xcodeVersion: configuration.observation.xcodeVersion,
         }
@@ -496,6 +527,13 @@ function BuildConfigurationDialog({
   const [action, setAction] = useState<BuildAction>(
     configuration?.defaultAction ?? "BUILD",
   );
+  const [autoExport, setAutoExport] = useState(
+    configuration?.defaultAction === "ARCHIVE" && configuration.autoExport,
+  );
+  const [exportSettings, setExportSettings] = useState<ExportSettingsValue>({
+    ...DEFAULT_EXPORT_SETTINGS,
+    ...(configuration?.exportSettings ?? {}),
+  } as ExportSettingsValue);
   const [advanced, setAdvanced] = useState(
     JSON.stringify(configuration?.advancedSettings ?? {}, null, 2),
   );
@@ -550,6 +588,9 @@ function BuildConfigurationDialog({
           inspectBuildSource(input: $input) {
             source { kind relativePath }
             schemes configurations testPlans headSha xcodeVersion
+            signingRequirements {
+              bundleId name target platform teamId provisioningProfileSpecifier
+            }
           }
         }`,
         {
@@ -558,6 +599,7 @@ function BuildConfigurationDialog({
             sourceKind: candidate.kind,
             sourcePath: candidate.relativePath,
             scheme: selectedScheme || null,
+            configuration: null,
             requestId: createClientId(),
           },
         },
@@ -580,6 +622,36 @@ function BuildConfigurationDialog({
     } finally {
       setInspecting(false);
     }
+  };
+
+  const parseSigningRequirements = async () => {
+    if (!sourcePath || !scheme || !buildConfiguration) {
+      throw new Error(t("selectSigningSourceFirst"));
+    }
+    const data = await controlPlaneRequest<{
+      inspectBuildSource: {
+        signingRequirements: BuildSigningRequirement[];
+      };
+    }>(
+      `mutation InspectBuildSigningRequirements($input: InspectBuildSourceInput!) {
+        inspectBuildSource(input: $input) {
+          signingRequirements {
+            bundleId name target platform teamId provisioningProfileSpecifier
+          }
+        }
+      }`,
+      {
+        input: {
+          worktreeId,
+          sourceKind,
+          sourcePath,
+          scheme,
+          configuration: buildConfiguration,
+          requestId: createClientId(),
+        },
+      },
+    );
+    return data.inspectBuildSource.signingRequirements;
   };
 
   const save = async () => {
@@ -622,6 +694,8 @@ function BuildConfigurationDialog({
             buildConfiguration,
             defaultAction: action,
             advancedSettings,
+            autoExport: action === "ARCHIVE" && autoExport,
+            exportSettings,
           },
         },
       );
@@ -646,7 +720,7 @@ function BuildConfigurationDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>
             {configuration ? t("editConfiguration") : t("newConfiguration")}
@@ -669,27 +743,47 @@ function BuildConfigurationDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>{t("icon")}</Label>
-              <Select onValueChange={setIconKey} value={iconKey}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[
-                    "none",
-                    "smartphone",
-                    "hammer",
-                    "play",
-                    "test-tube",
-                    "archive",
-                    "rocket",
-                  ].map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="configuration-icon">{t("icon")}</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`${t("icon")}: ${t(`configurationIcons.${iconKey}`)}`}
+                    className="justify-between"
+                    id="configuration-icon"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {iconKey === "none" ? (
+                        <CircleOff className="size-4 shrink-0" />
+                      ) : (
+                        <ConfigurationIcon iconKey={iconKey} />
+                      )}
+                      <span className="truncate">
+                        {t(`configurationIcons.${iconKey}`)}
+                      </span>
+                    </span>
+                    <ChevronDown className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-56">
+                  <DropdownMenuRadioGroup
+                    onValueChange={setIconKey}
+                    value={iconKey}
+                  >
+                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
+                        {value === "none" ? (
+                          <CircleOff className="size-4" />
+                        ) : (
+                          <ConfigurationIcon iconKey={value} />
+                        )}
+                        {t(`configurationIcons.${value}`)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
           <Card>
@@ -713,7 +807,7 @@ function BuildConfigurationDialog({
                         parseStatus === "VALID" ? "outline" : "destructive"
                       }
                     >
-                      {parseStatus}
+                      {t(`parseStatuses.${parseStatus}`)}
                     </Badge>
                   </div>
                 )}
@@ -825,7 +919,10 @@ function BuildConfigurationDialog({
           <div className="space-y-2">
             <Label>{t("defaultAction")}</Label>
             <Select
-              onValueChange={(value) => setAction(value as BuildAction)}
+              onValueChange={(value) => {
+                setAction(value as BuildAction);
+                if (value !== "ARCHIVE") setAutoExport(false);
+              }}
               value={action}
             >
               <SelectTrigger>
@@ -847,6 +944,25 @@ function BuildConfigurationDialog({
               </SelectContent>
             </Select>
           </div>
+          {action === "ARCHIVE" && (
+            <section className="space-y-3">
+              <label className="flex items-center gap-2 font-medium">
+                <Checkbox
+                  checked={autoExport}
+                  onCheckedChange={(checked) => setAutoExport(Boolean(checked))}
+                />
+                {t("autoExport")}
+              </label>
+              {autoExport && (
+                <ExportSettingsForm
+                  key={`${sourceKind}:${sourcePath}:${scheme}:${buildConfiguration}`}
+                  onChange={setExportSettings}
+                  onParseSigningRequirements={parseSigningRequirements}
+                  value={exportSettings}
+                />
+              )}
+            </section>
+          )}
           {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
             action,
           ) && (
