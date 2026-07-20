@@ -1308,6 +1308,21 @@ if (typeof hookModule.default === "function") {
         BUILD_PHASE: options.phase,
         BUILD_CONTEXT_PATH: options.contextPath,
         BUILD_ARTIFACT_DIRECTORY: options.input.artifactDirectory,
+        ...(options.input.telemetry
+          ? {
+              TELEMETRY_LOCAL_BASE_URL: options.input.telemetry.localBaseUrl,
+              TELEMETRY_REMOTE_BASE_URL: options.input.telemetry.remoteBaseUrl,
+              TELEMETRY_BASE_URL: options.input.telemetry.selectedBaseUrl,
+              CONSOLE_LOGS_URL: options.input.telemetry.consoleLogsUrl,
+              ANALYTICS_EVENTS_URL: options.input.telemetry.analyticsEventsUrl,
+              CONSOLE_LOG_COLLECTION_ENABLED: String(
+                options.input.telemetry.consoleCollectionEnabled,
+              ),
+              ANALYTICS_EVENT_COLLECTION_ENABLED: String(
+                options.input.telemetry.analyticsCollectionEnabled,
+              ),
+            }
+          : {}),
       }),
       timeoutMs: options.script.timeoutSeconds * 1_000,
       signal: options.signal,
@@ -2183,6 +2198,7 @@ export const runIosBuild: AgentJobHandler = async (
       source: input.source,
       scheme: input.scheme,
       configuration: input.configuration,
+      telemetry: input.telemetry ?? null,
     };
     let buildResult: CommandResult | null = null;
     let coverageChanges: CoverageChange[] = [];

@@ -72,8 +72,11 @@ const PRE_BUILD_TEMPLATE = `export default async function preBuild({
   branch,
   destination,
   action,
+  telemetry,
 }) {
   // Runs before the build from the worktree root.
+    // telemetry includes localBaseUrl, remoteBaseUrl, selectedBaseUrl,
+    // consoleLogsUrl, analyticsEventsUrl, and both collection-enabled flags.
 }`;
 
 const POST_BUILD_TEMPLATE = `export default async function postBuild({
@@ -86,9 +89,11 @@ const POST_BUILD_TEMPLATE = `export default async function postBuild({
   cancelled,
   errorCode,
   error,
-}) {
-  // Runs after every build attempt from the worktree root.
-}`;
+  telemetry,
+  }) {
+    // Runs after every build attempt from the worktree root.
+    // telemetry is the same immutable URL and collection-settings snapshot.
+  }`;
 
 const STATUSES = [
   "ALL",

@@ -30,6 +30,8 @@ import type { BuildsService } from "@/services/builds";
 import { createBuildResolvers } from "./resolvers/builds";
 import { createIosDeviceResolvers } from "./resolvers/devices";
 import type { IosDevicesService } from "@/services/ios-devices";
+import type { TelemetryService } from "@/services/telemetry";
+import { createTelemetryResolvers } from "./resolvers/telemetry";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -49,6 +51,7 @@ export const createSchema = (
   skillsService: SkillsService,
   buildsService: BuildsService,
   iosDevicesService: IosDevicesService,
+  telemetryService: TelemetryService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -63,6 +66,7 @@ export const createSchema = (
     createSkillResolvers(skillsService),
     createBuildResolvers(buildsService),
     createIosDeviceResolvers(iosDevicesService),
+    createTelemetryResolvers(telemetryService),
   ]);
 
   return buildSubgraphSchema({

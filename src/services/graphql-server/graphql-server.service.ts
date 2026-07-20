@@ -12,12 +12,14 @@ import {
   getServerServices,
   type ServerServices,
 } from "@/services/server-services";
+import { resolvePublicOrigin } from "@/lib/public-origin";
 
 export interface GraphQLContext {
   prismaService: PrismaService;
   agentControlService: AgentControlService;
   agentId: string | null;
   ipAddress: string | null;
+  requestOrigin: string | null;
 }
 
 export type HeaderSource =
@@ -78,6 +80,7 @@ class GraphQLServerService {
       this.services.skillsService,
       this.services.buildsService,
       this.services.iosDevicesService,
+      this.services.telemetryService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when
@@ -113,6 +116,7 @@ class GraphQLServerService {
       agentControlService: this.services.agentControlService,
       agentId,
       ipAddress: requestIpAddress(headers),
+      requestOrigin: resolvePublicOrigin(headers)?.origin ?? null,
     };
   }
 

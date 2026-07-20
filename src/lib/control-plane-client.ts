@@ -25,13 +25,30 @@ export async function controlPlaneRequest<T>(
 
 let subscriptionClient: Client | null = null;
 
-function websocketUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_AGENT_WS_URL;
-  if (configured) return configured;
-  if (window.location.protocol === "https:") {
-    return `wss://${window.location.host}/graphql`;
+export function resolveControlPlaneWebSocketUrl(
+  configured: string | undefined,
+  pageProtocol: "http:" | "https:",
+  pageHost: string,
+): string {
+  const sameOrigin = `${pageProtocol === "https:" ? "wss" : "ws"}://${pageHost}/graphql`;
+  if (!configured) return sameOrigin;
+  try {
+    const configuredUrl = new URL(configured);
+    if (pageProtocol === "https:" && configuredUrl.protocol !== "wss:") {
+      return sameOrigin;
+    }
+  } catch {
+    // Let graphql-ws report malformed explicitly configured URLs.
   }
-  return `ws://${window.location.hostname}:3091/graphql`;
+  return configured;
+}
+
+function websocketUrl(): string {
+  return resolveControlPlaneWebSocketUrl(
+    process.env.NEXT_PUBLIC_AGENT_WS_URL,
+    window.location.protocol as "http:" | "https:",
+    window.location.host,
+  );
 }
 
 export function controlPlaneSubscriptions(): Client {

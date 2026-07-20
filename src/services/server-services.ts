@@ -12,6 +12,7 @@ import { PrismaService } from "@/services/prisma";
 import { ToolsService } from "@/services/tools";
 import { WorktreesService } from "@/services/worktrees";
 import { SkillsService } from "@/services/skills";
+import { TelemetryService } from "@/services/telemetry";
 
 export type ServerServices = {
   prismaService: PrismaService;
@@ -27,6 +28,7 @@ export type ServerServices = {
   toolsService: ToolsService;
   worktreesService: WorktreesService;
   skillsService: SkillsService;
+  telemetryService: TelemetryService;
 };
 
 function createServerServices(): ServerServices {
@@ -34,7 +36,11 @@ function createServerServices(): ServerServices {
   const agentControlService = new AgentControlService();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
-  const buildsService = new BuildsService(agentControlService);
+  const telemetryService = new TelemetryService();
+  const buildsService = new BuildsService(
+    agentControlService,
+    telemetryService,
+  );
   const skillsService = new SkillsService(agentControlService);
   const codebasesService = new CodebasesService(
     agentControlService,
@@ -63,6 +69,7 @@ function createServerServices(): ServerServices {
     gitHubService,
     worktreesService,
     skillsService,
+    telemetryService,
     toolsService: new ToolsService(codebaseToolsService, buildsService),
   };
 }

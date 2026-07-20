@@ -42,6 +42,7 @@ import {
   buildLogTopic,
   buildTopic,
 } from "@/services/agent-control";
+import type { TelemetryService } from "@/services/telemetry";
 
 import { effectiveBuildsDirectory } from "./build-directory";
 
@@ -367,7 +368,10 @@ export type SaveBuildScriptInput = {
 };
 
 export class BuildsService {
-  constructor(private readonly agentControl: AgentControlService) {
+  constructor(
+    private readonly agentControl: AgentControlService,
+    private readonly telemetry?: TelemetryService,
+  ) {
     this.agentControl.registerCompletionHandler(IOS_BUILD_JOB_KIND, (job) =>
       this.projectBuildCompletion(job),
     );
@@ -1077,6 +1081,7 @@ export class BuildsService {
     advancedSettings?: unknown;
     worktreeCoverage?: boolean;
     requestId: string;
+    telemetryRequestOrigin?: string | null;
   }) {
     const requestId = cleanName(input.requestId, "Request ID", 200);
     const requestKey = `${input.worktreeId}:${requestId}`;
@@ -1085,7 +1090,25 @@ export class BuildsService {
       where: { requestKey },
       include: buildInclude,
     });
-    if (existing) return existing;
+    if (existing) {
+      if (this.telemetry) {
+        const snapshot = parseJson(existing.snapshotJson, {}) as JsonObject;
+        const configurationSnapshot = objectValue(
+          snapshot.configuration ?? {},
+          "build configuration snapshot",
+        );
+        const destinationSnapshot = objectValue(
+          snapshot.destination ?? {},
+          "build destination snapshot",
+        );
+        await this.telemetry.addBuildSeparator({
+          buildId: existing.id,
+          name: `Build · ${String(configurationSnapshot.name ?? "iOS")} · ${String(destinationSnapshot.name ?? "Destination")}`,
+          clientTime: existing.createdAt,
+        });
+      }
+      return existing;
+    }
     const worktree = await this.requireWorktree(
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
@@ -1325,6 +1348,9 @@ export class BuildsService {
       failureBehavior: script.failureBehavior as "FAIL_BUILD" | "CONTINUE",
       position,
     }));
+    const telemetry = await this.telemetry?.buildSettings(destination.type, {
+      requestOrigin: input.telemetryRequestOrigin,
+    });
     const snapshot = {
       repository: {
         id: worktree.codebase.repository.id,
@@ -1377,9 +1403,11 @@ export class BuildsService {
       },
       destination,
       scripts,
+      ...(telemetry ? { telemetry } : {}),
       worktreeCoverage: input.worktreeCoverage === true,
     };
-    await prisma.build.create({
+    const buildCreatedAt = new Date();
+    const buildCreation = prisma.build.create({
       data: {
         id: buildId,
         requestKey,
@@ -1395,6 +1423,7 @@ export class BuildsService {
         snapshotJson: JSON.stringify(snapshot),
         commandSummary,
         artifactDirectory,
+        createdAt: buildCreatedAt,
         scriptExecutions: {
           create: scripts.flatMap((script) => [
             ...(script.preBuildScript
@@ -1429,6 +1458,30 @@ export class BuildsService {
         },
       },
     });
+    if (this.telemetry) {
+      const separatorId = randomUUID();
+      await prisma.$transaction([
+        buildCreation,
+        prisma.telemetryEntry.create({
+          data: {
+            id: separatorId,
+            entryType: "SEPARATOR",
+            clientTime: buildCreatedAt,
+            receivedAt: buildCreatedAt,
+            separatorKind: "BUILD",
+            separatorName:
+              `Build · ${configuration.name} · ${destination.name}`.slice(
+                0,
+                100,
+              ),
+            buildId,
+          },
+        }),
+      ]);
+      this.telemetry.notifyChange([separatorId], "BUILD_SEPARATOR_ADDED");
+    } else {
+      await buildCreation;
+    }
     try {
       const job = await this.agentControl.createJob({
         agentId: worktree.codebase.agentId,
@@ -1446,6 +1499,7 @@ export class BuildsService {
           destination,
           advancedSettings,
           scripts,
+          ...(telemetry ? { telemetry } : {}),
           worktreeCoverage: input.worktreeCoverage === true,
         },
         idempotencyKey: `ios:build:${requestId}:${worktree.id}`,
@@ -1474,7 +1528,11 @@ export class BuildsService {
     });
   }
 
-  async rebuildBuild(id: string, requestId: string) {
+  async rebuildBuild(
+    id: string,
+    requestId: string,
+    telemetryRequestOrigin?: string | null,
+  ) {
     const prisma = await getPrismaClient();
     const build = await prisma.build.findUnique({
       where: { id },
@@ -1529,6 +1587,7 @@ export class BuildsService {
       action: build.action as BuildAction,
       advancedSettings: snapshotConfiguration.advancedSettings,
       requestId,
+      telemetryRequestOrigin,
     });
   }
 
@@ -1539,6 +1598,7 @@ export class BuildsService {
     scriptIds?: string[] | null;
     advancedSettings?: unknown;
     requestId: string;
+    telemetryRequestOrigin?: string | null;
   }) {
     const prisma = await getPrismaClient();
     const coverageWorktree = await prisma.worktree.findUnique({
