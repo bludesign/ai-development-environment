@@ -47,13 +47,21 @@ jobs:
       - name: Type check
         run: npm run type-check
 
-      - name: Test
-        timeout-minutes: 2
-        run: npm run test:run
+      - name: Test (10 runs)
+        timeout-minutes: 25
+        run: |
+          for run in {1..10}; do
+            echo "Root test run ${run}/10"
+            timeout 2m npm run test:run
+          done
 
-      - name: Test agent
-        timeout-minutes: 2
-        run: npm run agent:test:run
+      - name: Test agent (10 runs)
+        timeout-minutes: 25
+        run: |
+          for run in {1..10}; do
+            echo "Agent test run ${run}/10"
+            timeout 2m npm run agent:test:run
+          done
 
       - name: Build
         run: npm run build
