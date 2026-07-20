@@ -11,6 +11,11 @@ describe("iOS device resolver authorization", () => {
   test("allows control-plane reads and mutations", async () => {
     const service = {
       devices: vi.fn().mockResolvedValue([]),
+      deviceFirmware: vi.fn().mockResolvedValue({
+        name: "iPhone 11",
+        identifier: "iPhone12,1",
+        firmwares: [],
+      }),
       renameDevice: vi.fn().mockResolvedValue({ id: "device-1" }),
     } as unknown as IosDevicesService;
     const resolvers = createIosDeviceResolvers(service);
@@ -18,6 +23,10 @@ describe("iOS device resolver authorization", () => {
     await expect(
       resolvers.Query.iosDevices({}, {}, context(null)),
     ).resolves.toEqual([]);
+    await expect(
+      resolvers.Query.iosDeviceFirmware({}, { id: "device-1" }, context(null)),
+    ).resolves.toMatchObject({ name: "iPhone 11" });
+    expect(service.deviceFirmware).toHaveBeenCalledWith("device-1");
     await expect(
       resolvers.Mutation.renameIosDevice(
         {},
@@ -31,6 +40,7 @@ describe("iOS device resolver authorization", () => {
   test("rejects reads, secret settings, mutations, and subscriptions from agents", () => {
     const service = {
       devices: vi.fn(),
+      deviceFirmware: vi.fn(),
       getSettings: vi.fn(),
       deleteDevice: vi.fn(),
       subscribe: vi.fn(),
@@ -41,6 +51,9 @@ describe("iOS device resolver authorization", () => {
     expect(() => resolvers.Query.iosDevices({}, {}, agent)).toThrow(
       /cannot perform control-plane operations/,
     );
+    expect(() =>
+      resolvers.Query.iosDeviceFirmware({}, { id: "device-1" }, agent),
+    ).toThrow(/cannot perform control-plane operations/);
     expect(() => resolvers.Query.iosDeviceSettings({}, {}, agent)).toThrow(
       /cannot perform control-plane operations/,
     );

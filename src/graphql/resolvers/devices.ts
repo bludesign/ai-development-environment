@@ -60,6 +60,14 @@ export const createIosDeviceResolvers = (service: IosDevicesService) => ({
       requireControlPlane(context);
       return service.device(id);
     },
+    iosDeviceFirmware: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deviceFirmware(id);
+    },
     iosDeviceSettings: (
       _root: unknown,
       _args: unknown,

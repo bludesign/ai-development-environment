@@ -35,6 +35,8 @@ vi.mock("@/i18n/navigation", async (importOriginal) => {
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const udid = "00008030-001C2D3E4F50002E";
+const firmwareUrl =
+  "https://updates.cdn-apple.com/iPhone12,1_26.5.2_23F84_Restore.ipsw";
 let notify: (() => void) | null = null;
 
 function device(overrides: Partial<IosDeviceRecord> = {}): IosDeviceRecord {
@@ -164,20 +166,69 @@ describe("DevicesPage", () => {
 });
 
 describe("DeviceDetailPage", () => {
-  test("keeps the UDID masked until reveal, copies explicitly, and shows IP provenance", async () => {
-    request.mockResolvedValue({
-      iosDevice: device(),
-      iosDeviceSettings: settings(),
-    } as never);
+  test("shows resolved firmware details while keeping sensitive controls explicit", async () => {
+    request.mockImplementation((query) => {
+      if (String(query).includes("query IosDeviceFirmware")) {
+        return Promise.resolve({
+          iosDeviceFirmware: {
+            name: "iPhone 11",
+            identifier: "iPhone12,1",
+            firmwares: [
+              {
+                version: "26.5.2",
+                buildId: "23F84",
+                fileSize: 9_750_283_647,
+                url: firmwareUrl,
+                releaseDate: "2026-06-29T17:41:13.000Z",
+                signed: true,
+              },
+              {
+                version: "26.5",
+                buildId: "23F77",
+                fileSize: 9_750_215_662,
+                url: "https://updates.cdn-apple.com/iPhone12,1_26.5_23F77_Restore.ipsw",
+                releaseDate: "2026-05-11T17:47:45.000Z",
+                signed: false,
+              },
+            ],
+          },
+        } as never);
+      }
+      return Promise.resolve({
+        iosDevice: device({
+          product: "iPhone12,1",
+          osVersion: "26.5.2",
+        }),
+        iosDeviceSettings: settings(),
+      } as never);
+    });
     render(<DeviceDetailPage id="device-1" />);
 
     expect(await screen.findAllByText("0000••••002E")).toHaveLength(2);
+    expect(await screen.findAllByText("iPhone 11")).toHaveLength(2);
+    expect(screen.getAllByText("26.5.2 (23F84)")).toHaveLength(2);
+    expect(screen.getByText("Signed")).toBeDefined();
+    expect(screen.getByText("Unsigned")).toBeDefined();
+    expect(screen.getAllByText("9.1 GiB")).toHaveLength(2);
+    expect(
+      screen
+        .getAllByRole("link", { name: "Download" })[0]
+        ?.getAttribute("href"),
+    ).toBe(firmwareUrl);
     expect(screen.queryByText(udid)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reveal device UDID" }));
     expect(screen.getByText(udid)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Copy device UDID" }));
     await waitFor(() =>
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(udid),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Copy download URL for iOS 26.5.2 (23F84)",
+      }),
+    );
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(firmwareUrl),
     );
     expect(screen.getByText("Cloudflare (CF-Connecting-IP)")).toBeDefined();
     expect(

@@ -22,14 +22,17 @@ import {
 } from "./crypto";
 import type {
   AppStoreConnectSettingsInput,
+  IosDeviceFirmware,
   IosDeviceSettingsView,
   IosDeviceStatus,
 } from "./types";
+import { fetchIpswDevice } from "./ipsw";
 
 const SETTINGS_ID = "default";
 const ENROLLMENT_TTL_MS = 30 * 60_000;
 const EXPIRED_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const APP_STORE_CONNECT_API = "https://api.appstoreconnect.apple.com";
+const IPSW_CACHE_TTL_MS = 15 * 60_000;
 
 type FetchLike = typeof fetch;
 
@@ -185,6 +188,11 @@ function safeTsv(value: string): string {
 }
 
 export class IosDevicesService {
+  private readonly firmwareCache = new Map<
+    string,
+    { expiresAt: number; value: IosDeviceFirmware }
+  >();
+
   constructor(private readonly fetcher: FetchLike = fetch) {}
 
   private changed(id: string | null = null): void {
@@ -550,6 +558,24 @@ export class IosDevicesService {
         ipObservations: { orderBy: { observedAt: "desc" } },
       },
     });
+  }
+
+  async deviceFirmware(id: string): Promise<IosDeviceFirmware | null> {
+    const prisma = await getPrismaClient();
+    const device = await prisma.iosDevice.findUnique({
+      where: { id },
+      select: { product: true },
+    });
+    if (!device) throw new Error("Device not found");
+    if (!device.product) return null;
+    const cached = this.firmwareCache.get(device.product);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const value = await fetchIpswDevice(device.product, this.fetcher);
+    this.firmwareCache.set(device.product, {
+      expiresAt: Date.now() + IPSW_CACHE_TTL_MS,
+      value,
+    });
+    return value;
   }
 
   async renameDevice(id: string, displayName: string) {

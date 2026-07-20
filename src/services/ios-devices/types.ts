@@ -31,3 +31,18 @@ export type AppStoreConnectSettingsInput = {
   keyId: string;
   privateKey?: string | null;
 };
+
+export type IosFirmwareVersion = {
+  version: string;
+  buildId: string;
+  fileSize: number;
+  url: string;
+  releaseDate: string;
+  signed: boolean;
+};
+
+export type IosDeviceFirmware = {
+  name: string;
+  identifier: string;
+  firmwares: IosFirmwareVersion[];
+};

@@ -82,6 +82,21 @@ type IosDeviceSummary {
   updatedAt: String!
 }
 
+type IosFirmwareVersion {
+  version: String!
+  buildId: String!
+  fileSize: Float!
+  url: String!
+  releaseDate: String!
+  signed: Boolean!
+}
+
+type IosDeviceFirmware {
+  name: String!
+  identifier: String!
+  firmwares: [IosFirmwareVersion!]!
+}
+
 type IosDeviceSettings {
   organizationName: String!
   profileIdentifier: String!
@@ -118,6 +133,7 @@ input SaveAppStoreConnectSettingsInput {
 extend type Query {
   iosDevices(status: IosDeviceStatus): [IosDeviceSummary!]!
   iosDevice(id: ID!): IosDevice
+  iosDeviceFirmware(id: ID!): IosDeviceFirmware
   iosDeviceSettings: IosDeviceSettings!
 }
 

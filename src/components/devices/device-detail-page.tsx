@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  Download,
   Eye,
   EyeOff,
   Save,
@@ -19,7 +20,13 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -45,8 +52,27 @@ import {
 } from "@/lib/control-plane-client";
 
 import { IosDeviceStatusBadge } from "./status-badge";
-import type { IosDeviceRecord, IosDeviceSettings } from "./types";
-import { IOS_DEVICE_FIELDS, IOS_DEVICE_SETTINGS_FIELDS } from "./types";
+import type {
+  IosDeviceFirmware,
+  IosDeviceRecord,
+  IosDeviceSettings,
+} from "./types";
+import {
+  IOS_DEVICE_FIELDS,
+  IOS_DEVICE_FIRMWARE_FIELDS,
+  IOS_DEVICE_SETTINGS_FIELDS,
+} from "./types";
+
+function formatBytes(value: number, locale: string): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const unitIndex = Math.min(
+    Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
+    value / 1024 ** unitIndex,
+  )} ${units[unitIndex]}`;
+}
 
 export function DeviceDetailPage({ id }: { id: string }) {
   const t = useTranslations("devices");
@@ -55,9 +81,15 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const router = useRouter();
   const [device, setDevice] = useState<IosDeviceRecord | null>(null);
   const [settings, setSettings] = useState<IosDeviceSettings | null>(null);
+  const [firmware, setFirmware] = useState<IosDeviceFirmware | null>(null);
+  const [firmwareLoading, setFirmwareLoading] = useState(false);
+  const [firmwareError, setFirmwareError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedFirmwareUrl, setCopiedFirmwareUrl] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,8 +147,56 @@ export function DeviceDetailPage({ id }: { id: string }) {
     [id, load],
   );
 
+  const firmwareDeviceId = device?.id ?? null;
+  const firmwareProduct = device?.product ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (!firmwareDeviceId || !firmwareProduct) {
+        setFirmware(null);
+        setFirmwareError(null);
+        setFirmwareLoading(false);
+        return;
+      }
+      setFirmware(null);
+      setFirmwareError(null);
+      setFirmwareLoading(true);
+      void controlPlaneRequest<{
+        iosDeviceFirmware: IosDeviceFirmware | null;
+      }>(
+        `query IosDeviceFirmware($id: ID!) {
+          iosDeviceFirmware(id: $id) { ${IOS_DEVICE_FIRMWARE_FIELDS} }
+        }`,
+        { id: firmwareDeviceId },
+      )
+        .then((data) => {
+          if (!cancelled) setFirmware(data.iosDeviceFirmware);
+        })
+        .catch((value) => {
+          if (!cancelled) {
+            setFirmwareError(
+              value instanceof Error ? value.message : String(value),
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setFirmwareLoading(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [firmwareDeviceId, firmwareProduct]);
+
   const formatDate = (value: string | null) =>
     value ? new Date(value).toLocaleString(locale) : "—";
+
+  const formatReleaseDate = (value: string) =>
+    new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
+      new Date(value),
+    );
 
   const rename = async (event: FormEvent) => {
     event.preventDefault();
@@ -191,6 +271,12 @@ export function DeviceDetailPage({ id }: { id: string }) {
     window.setTimeout(() => setCopied(false), 2_000);
   };
 
+  const copyFirmwareUrl = async (url: string) => {
+    await copyText(url);
+    setCopiedFirmwareUrl(url);
+    window.setTimeout(() => setCopiedFirmwareUrl(null), 2_000);
+  };
+
   if (loading) {
     return (
       <p className="mx-auto flex max-w-6xl items-center gap-2 text-muted-foreground">
@@ -218,6 +304,17 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const canRegister =
     settings?.appStoreConnectConfigured &&
     ["PENDING", "REGISTRATION_FAILED"].includes(device.status);
+  const installedFirmware = device.osVersion
+    ? (firmware?.firmwares.find(
+        (entry) => entry.version === device.osVersion && entry.signed,
+      ) ??
+      firmware?.firmwares.find((entry) => entry.version === device.osVersion))
+    : null;
+  const installedVersion = device.osVersion
+    ? installedFirmware
+      ? `${installedFirmware.version} (${installedFirmware.buildId})`
+      : device.osVersion
+    : t("unavailable");
 
   return (
     <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
@@ -265,7 +362,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm text-muted-foreground">
-            {device.product ?? t("unavailable")}
+            {firmware?.name ?? device.product ?? t("unavailable")}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">{device.displayName}</h1>
@@ -362,14 +459,23 @@ export function DeviceDetailPage({ id }: { id: string }) {
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">{t("hardware")}</dt>
-              <dd className="mt-1">{device.product ?? t("unavailable")}</dd>
+              <dt className="text-xs text-muted-foreground">
+                {t("deviceModel")}
+              </dt>
+              <dd className="mt-1">
+                {firmware?.name ?? device.product ?? t("unavailable")}
+                {firmware && (
+                  <span className="ml-2 font-mono text-xs text-muted-foreground">
+                    {firmware.identifier}
+                  </span>
+                )}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">
                 {t("osVersion")}
               </dt>
-              <dd className="mt-1">{device.osVersion ?? t("unavailable")}</dd>
+              <dd className="mt-1">{installedVersion}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">{t("lastIp")}</dt>
@@ -473,6 +579,101 @@ export function DeviceDetailPage({ id }: { id: string }) {
         ) : (
           <CardContent className="py-6 text-sm text-muted-foreground">
             {t("noEnrollmentHistory")}
+          </CardContent>
+        )}
+      </Card>
+
+      <Card className="gap-0 py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle>{t("firmwareTitle")}</CardTitle>
+          <CardDescription>{t("firmwareDescription")}</CardDescription>
+        </CardHeader>
+        {firmwareLoading ? (
+          <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Spinner /> {t("firmwareLoading")}
+          </CardContent>
+        ) : firmwareError ? (
+          <CardContent className="py-4">
+            <Alert variant="destructive">
+              <AlertDescription>
+                {t("firmwareLoadFailed", { error: firmwareError })}
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        ) : firmware?.firmwares.length ? (
+          <Table className="min-w-[52rem]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t("signingStatus")}</TableHead>
+                <TableHead>{t("firmwareVersion")}</TableHead>
+                <TableHead>{t("releaseDate")}</TableHead>
+                <TableHead>{t("fileSize")}</TableHead>
+                <TableHead className="text-right">
+                  {t("firmwareDownload")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {firmware.firmwares.map((version) => {
+                const versionLabel = `${version.version} (${version.buildId})`;
+                return (
+                  <TableRow key={`${version.buildId}:${version.url}`}>
+                    <TableCell>
+                      <Badge
+                        variant={version.signed ? "success" : "destructive"}
+                      >
+                        {t(version.signed ? "signed" : "unsigned")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {versionLabel}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <time dateTime={version.releaseDate}>
+                        {formatReleaseDate(version.releaseDate)}
+                      </time>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground tabular-nums">
+                      {formatBytes(version.fileSize, locale)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button asChild size="sm" variant="outline">
+                          <a
+                            href={version.url}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <Download /> {t("downloadFirmware")}
+                          </a>
+                        </Button>
+                        <Button
+                          aria-label={t("copyFirmwareUrl", {
+                            version: versionLabel,
+                          })}
+                          onClick={() => void copyFirmwareUrl(version.url)}
+                          size="icon-sm"
+                          title={t("copyFirmwareUrl", {
+                            version: versionLabel,
+                          })}
+                          variant="ghost"
+                        >
+                          {copiedFirmwareUrl === version.url ? (
+                            <Check />
+                          ) : (
+                            <Copy />
+                          )}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            {t("noFirmware")}
           </CardContent>
         )}
       </Card>

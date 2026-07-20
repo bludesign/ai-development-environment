@@ -59,6 +59,21 @@ export type IosDeviceSummary = Pick<
   | "updatedAt"
 >;
 
+export type IosFirmwareVersion = {
+  version: string;
+  buildId: string;
+  fileSize: number;
+  url: string;
+  releaseDate: string;
+  signed: boolean;
+};
+
+export type IosDeviceFirmware = {
+  name: string;
+  identifier: string;
+  firmwares: IosFirmwareVersion[];
+};
+
 export const IOS_DEVICE_LIST_FIELDS = `
   id maskedUdid displayName product osVersion platform status appleStatus
   registeredAt lastSeenAt lastIpAddress createdAt updatedAt
@@ -90,6 +105,11 @@ export const IOS_DEVICE_FIELDS = `
     id status displayName expiresAt downloadedAt consumedAt failureCode createdAt updatedAt
   }
   ipObservations { id ipAddress source headerSource observedAt }
+`;
+
+export const IOS_DEVICE_FIRMWARE_FIELDS = `
+  name identifier
+  firmwares { version buildId fileSize url releaseDate signed }
 `;
 
 export const IOS_DEVICE_SETTINGS_FIELDS = `
