@@ -206,6 +206,43 @@ beforeEach(() => {
         ],
       } as never;
     }
+    if (operation.includes("query BuildSigningOptions")) {
+      return {
+        buildSigningOptions: {
+          teams: [{ id: "TEAM123", name: "Example, LLC" }],
+          identities: [
+            {
+              sha1: "A".repeat(40),
+              name: "Apple Development: Example (TEAM123)",
+              teamId: "TEAM123",
+            },
+          ],
+          profiles: [
+            {
+              uuid: "profile-development",
+              name: "match Development com.example.App",
+              teamId: "TEAM123",
+              teamName: "Example, LLC",
+              bundleId: "com.example.App",
+              type: "DEVELOPMENT",
+              platforms: ["iOS"],
+              expiresAt: "2027-07-06T00:51:24Z",
+              expired: false,
+              xcodeManaged: false,
+            },
+          ],
+          bundles: [
+            {
+              bundleId: "com.example.App",
+              name: "Example",
+              relativePath: "Products/Applications/Example.app",
+              embeddedProfileUuid: "profile-development",
+              embeddedProfileName: "match Development com.example.App",
+            },
+          ],
+        },
+      } as never;
+    }
     if (operation.includes("mutation RunCompletedBuild")) {
       return { runBuild: [] } as never;
     }
@@ -611,9 +648,9 @@ describe("BuildDetailPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Export archive" }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Development team"), {
-      target: { value: "TEAM123" },
-    });
+    // The team is read from the agent and defaults to whichever one signed the
+    // archive, so no selection is needed for the common case.
+    await within(dialog).findByText("Example, LLC (TEAM123)");
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Export archive" }),
     );

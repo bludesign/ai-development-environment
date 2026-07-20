@@ -59,6 +59,8 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["shell.jira", "Jira"],
   ["shell.github", "GitHub"],
   ["pullRequests.jira", "Jira"],
+  // Apple ships this product name untranslated in every locale.
+  ["builds.exportMethod.APP_STORE_CONNECT", "App Store Connect"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {

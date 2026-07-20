@@ -16,6 +16,7 @@ import {
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
+  IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
   parseBuildAdvancedSettings,
@@ -957,6 +958,57 @@ export class BuildsService {
     try {
       const result = this.result(await this.waitForJob(job.id));
       return Array.isArray(result.destinations) ? result.destinations : [];
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  /**
+   * Lists the teams, certificates, and profiles installed on the build's agent,
+   * along with the bundles inside the archive that manual signing must map.
+   */
+  async signingOptionsForBuild(buildId: string) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { id: buildId },
+      include: { artifacts: true },
+    });
+    const archive = build?.artifacts.find(
+      (artifact) => artifact.kind === "ARCHIVE",
+    );
+    if (!build || build.status !== "SUCCEEDED" || !build.worktreeId) {
+      throw new Error("A successful archive build is required");
+    }
+    if (!archive) throw new Error("Build does not contain an archive");
+    const worktree = await this.requireWorktree(
+      build.worktreeId,
+      IOS_SIGNING_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: IOS_SIGNING_INSPECT_JOB_KIND,
+      payload: {
+        buildId: build.id,
+        codebaseId: worktree.codebaseId,
+        artifactDirectory: build.artifactDirectory,
+        archiveRelativePath: archive.relativePath,
+      },
+      idempotencyKey: `ios:signing:${build.id}:${archive.id}`,
+      timeoutSeconds: 120,
+      visibility: "SYSTEM",
+    });
+    try {
+      const result = this.result(await this.waitForJob(job.id));
+      return {
+        teams: Array.isArray(result.teams) ? result.teams : [],
+        identities: Array.isArray(result.identities) ? result.identities : [],
+        profiles: Array.isArray(result.profiles) ? result.profiles : [],
+        bundles: Array.isArray(result.bundles) ? result.bundles : [],
+      };
     } finally {
       await prisma.agentJob.deleteMany({
         where: { id: job.id, visibility: "SYSTEM" },

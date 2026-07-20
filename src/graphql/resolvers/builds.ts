@@ -179,6 +179,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
       requireControlPlane(context);
       return service.project(codebaseId);
     },
+    buildSigningOptions: (
+      _root: unknown,
+      { buildId }: { buildId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.signingOptionsForBuild(buildId);
+    },
     buildScripts: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       requireControlPlane(context);
       return service.scripts();

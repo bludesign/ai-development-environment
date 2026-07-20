@@ -70,6 +70,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { buildStatusVariant } from "./build-format";
+import { ExportArchiveDialog } from "./export-archive-dialog";
 import { IosInstallButton } from "./ios-install-button";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
@@ -1396,121 +1397,5 @@ function Detail({
         {value}
       </dd>
     </div>
-  );
-}
-
-function ExportArchiveDialog({
-  buildId,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  buildId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  const t = useTranslations("builds");
-  const [method, setMethod] = useState("DEBUGGING");
-  const [signingStyle, setSigningStyle] = useState("AUTOMATIC");
-  const [teamId, setTeamId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation ExportArchive($input: ExportBuildArchiveInput!) {
-          exportBuildArchive(input: $input) { id status }
-        }`,
-        {
-          input: {
-            buildId,
-            requestId: createClientId(),
-            settings: {
-              method,
-              signingStyle,
-              teamId: teamId || null,
-              signingCertificate: null,
-              provisioningProfiles: {},
-              uploadSymbols: true,
-              manageAppVersionAndBuildNumber: true,
-              testFlightInternalTestingOnly: false,
-            },
-          },
-        },
-      );
-      await onSaved();
-      onOpenChange(false);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("exportArchive")}</DialogTitle>
-          <DialogDescription>{t("exportArchiveDescription")}</DialogDescription>
-        </DialogHeader>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t("distributionMethod")}</Label>
-            <Select onValueChange={setMethod} value={method}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[
-                  "DEBUGGING",
-                  "RELEASE_TESTING",
-                  "ENTERPRISE",
-                  "APP_STORE_CONNECT",
-                ].map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>{t("signingStyle")}</Label>
-            <Select onValueChange={setSigningStyle} value={signingStyle}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AUTOMATIC">{t("automatic")}</SelectItem>
-                <SelectItem value="MANUAL">{t("manual")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="export-team-id">{t("developmentTeam")}</Label>
-            <Input
-              id="export-team-id"
-              onChange={(event) => setTeamId(event.target.value)}
-              value={teamId}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t("cancel")}
-          </Button>
-          <Button disabled={busy} onClick={() => void submit()}>
-            {busy && <Spinner />} {t("exportArchive")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

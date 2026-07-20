@@ -14,6 +14,7 @@ import {
 } from "@ai-development-environment/agent-contract/codebases";
 
 import { runCloudflared } from "./cloudflared.js";
+import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
 import type { ProcessLog, ProcessResult } from "../process-runner.js";
@@ -76,6 +77,7 @@ import {
   IOS_EXPORT_JOB_KIND,
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
+  IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
@@ -153,4 +155,5 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [IOS_EXPORT_JOB_KIND]: exportIosArchive,
   [IOS_TEST_RESULTS_JOB_KIND]: generateIosBuildReport,
   [IOS_COVERAGE_REPORT_JOB_KIND]: generateIosBuildReport,
+  [IOS_SIGNING_INSPECT_JOB_KIND]: inspectIosSigning,
 };

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  BUILD_EXPORT_METHODS,
+  EXPORT_METHOD_PROFILE_TYPES,
+  PROVISIONING_PROFILE_TYPES,
+  profileCoversBundle,
+  provisioningProfileType,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   parseBuildAdvancedSettings,
   parseBuildArtifactDownloadPayload,
@@ -241,5 +246,78 @@ describe("iOS build agent contract", () => {
         action: "TEST_WITHOUT_BUILDING",
       }),
     ).toThrow("captured Build for Testing result");
+  });
+});
+
+describe("provisioning profile classification", () => {
+  test("separates development from distribution by get-task-allow", () => {
+    expect(
+      provisioningProfileType({
+        getTaskAllow: true,
+        hasProvisionedDevices: true,
+        provisionsAllDevices: false,
+      }),
+    ).toBe("DEVELOPMENT");
+  });
+
+  test("separates ad hoc from app store by the device list", () => {
+    expect(
+      provisioningProfileType({
+        getTaskAllow: false,
+        hasProvisionedDevices: true,
+        provisionsAllDevices: false,
+      }),
+    ).toBe("AD_HOC");
+    expect(
+      provisioningProfileType({
+        getTaskAllow: false,
+        hasProvisionedDevices: false,
+        provisionsAllDevices: false,
+      }),
+    ).toBe("APP_STORE");
+  });
+
+  test("treats an all-device claim as enterprise", () => {
+    expect(
+      provisioningProfileType({
+        getTaskAllow: false,
+        hasProvisionedDevices: false,
+        provisionsAllDevices: true,
+      }),
+    ).toBe("ENTERPRISE");
+  });
+
+  test("maps every distribution method to a profile type", () => {
+    for (const method of BUILD_EXPORT_METHODS) {
+      expect(PROVISIONING_PROFILE_TYPES).toContain(
+        EXPORT_METHOD_PROFILE_TYPES[method],
+      );
+    }
+  });
+});
+
+describe("profileCoversBundle", () => {
+  test("matches an exact bundle identifier", () => {
+    expect(profileCoversBundle("com.example.App", "com.example.App")).toBe(
+      true,
+    );
+    expect(profileCoversBundle("com.example.App", "com.example.Other")).toBe(
+      false,
+    );
+  });
+
+  test("does not treat a prefix as a match without a wildcard", () => {
+    expect(
+      profileCoversBundle("com.example.App", "com.example.App.Watch"),
+    ).toBe(false);
+  });
+
+  test("honours a trailing wildcard", () => {
+    expect(profileCoversBundle("com.example.*", "com.example.App")).toBe(true);
+    expect(profileCoversBundle("com.example.*", "com.other.App")).toBe(false);
+  });
+
+  test("treats a bare wildcard as covering everything", () => {
+    expect(profileCoversBundle("*", "com.anything.At.All")).toBe(true);
   });
 });
