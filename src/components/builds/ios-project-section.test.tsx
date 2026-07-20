@@ -126,6 +126,9 @@ describe("iOS project source card", () => {
     expect(
       screen.getByRole("menuitemradio", { name: "Feature" }),
     ).toBeDefined();
+    fireEvent.click(terminalOption);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   test("retains unavailable saved selections and stale metadata after reparse failure", async () => {
@@ -164,5 +167,7 @@ describe("iOS project source card", () => {
       (within(dialog).getAllByRole("combobox")[1] as HTMLButtonElement)
         .textContent,
     ).toContain("RemovedScheme");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
