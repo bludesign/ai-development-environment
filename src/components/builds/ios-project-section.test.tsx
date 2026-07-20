@@ -159,7 +159,7 @@ describe("iOS project source card", () => {
       await within(dialog).findByText("Xcode metadata is unavailable"),
     ).toBeDefined();
     expect(within(dialog).getByText("stale metadata")).toBeDefined();
-    expect(within(dialog).getByText("ERROR")).toBeDefined();
+    expect(within(dialog).getByText("Error")).toBeDefined();
     expect(
       (within(dialog).getAllByRole("combobox")[1] as HTMLButtonElement)
         .textContent,

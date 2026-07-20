@@ -87,15 +87,6 @@ const ACTIONS: BuildAction[] = [
   "TEST_WITHOUT_BUILDING",
 ];
 
-function humanizeConstant(value: string): string {
-  return value
-    .toLocaleLowerCase()
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
 export function StartBuildButton({
   codebaseId,
   worktreeId,
@@ -625,9 +616,8 @@ function StartBuildDialog({
                         {entry.name}
                       </span>
                       <Badge variant="outline">
-                        {humanizeConstant(
-                          (observations[entry.id] ?? entry.observation)
-                            ?.status ?? "UNPARSED",
+                        {t(
+                          `parseStatuses.${(observations[entry.id] ?? entry.observation)?.status ?? "UNPARSED"}`,
                         )}
                       </Badge>
                     </div>

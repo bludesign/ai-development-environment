@@ -1777,6 +1777,13 @@
       "FAILED": "Fallida",
       "CANCELLED": "Cancelada"
     },
+    "parseStatuses": {
+      "UNPARSED": "Sin analizar",
+      "PARSING": "Analizando",
+      "VALID": "Válido",
+      "INVALID": "No válido",
+      "ERROR": "Error"
+    },
     "actions": {
       "BUILD": "Compilar",
       "TEST": "Probar",

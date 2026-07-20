@@ -1878,6 +1878,13 @@ const mockTranslations = {
       FAILED: "Failed",
       CANCELLED: "Canceled",
     },
+    parseStatuses: {
+      UNPARSED: "Not parsed",
+      PARSING: "Parsing",
+      VALID: "Valid",
+      INVALID: "Invalid",
+      ERROR: "Error",
+    },
     actions: {
       BUILD: "Build",
       TEST: "Test",

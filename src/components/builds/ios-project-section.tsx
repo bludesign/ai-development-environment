@@ -361,7 +361,9 @@ export function IosProjectSection({
                                 : "outline"
                             }
                           >
-                            {configuration.observation?.status ?? "UNPARSED"}
+                            {t(
+                              `parseStatuses.${configuration.observation?.status ?? "UNPARSED"}`,
+                            )}
                           </Badge>
                         </div>
                         <div className="rounded-lg border bg-muted/20 p-3 text-sm">
@@ -805,7 +807,7 @@ function BuildConfigurationDialog({
                         parseStatus === "VALID" ? "outline" : "destructive"
                       }
                     >
-                      {parseStatus}
+                      {t(`parseStatuses.${parseStatus}`)}
                     </Badge>
                   </div>
                 )}
