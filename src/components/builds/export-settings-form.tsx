@@ -1,10 +1,17 @@
 "use client";
 
-import { BUILD_EXPORT_METHODS } from "@ai-development-environment/agent-contract/builds";
+import {
+  BUILD_EXPORT_METHODS,
+  EXPORT_METHOD_PROFILE_TYPES,
+  profileCoversBundle,
+  type BuildSigningRequirement,
+} from "@ai-development-environment/agent-contract/builds";
+import { ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 export type ExportSettingsValue = {
@@ -51,13 +58,31 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettingsValue = {
 export function ExportSettingsForm({
   value,
   onChange,
+  onParseSigningRequirements,
   disabled = false,
 }: {
   value: ExportSettingsValue;
   onChange: (value: ExportSettingsValue) => void;
+  onParseSigningRequirements?: () => Promise<BuildSigningRequirement[]>;
   disabled?: boolean;
 }) {
   const t = useTranslations("builds");
+  const [requirements, setRequirements] = useState<BuildSigningRequirement[]>(
+    () =>
+      Object.keys(value.provisioningProfiles).map((bundleId) => ({
+        bundleId,
+        name: bundleId,
+        target: bundleId,
+        platform: null,
+        teamId: null,
+        provisioningProfileSpecifier: null,
+      })),
+  );
+  const [requirementsParsed, setRequirementsParsed] = useState(false);
+  const [parsingRequirements, setParsingRequirements] = useState(false);
+  const [requirementsError, setRequirementsError] = useState<string | null>(
+    null,
+  );
   const [inventory, setInventory] = useState<{
     agentCount: number;
     certificates: Array<{
@@ -65,6 +90,18 @@ export function ExportSettingsForm({
       name: string;
       teamId: string | null;
       hasPrivateKey: boolean;
+      installedAgents: Array<{ id: string }>;
+    }>;
+    profiles: Array<{
+      uuid: string;
+      name: string;
+      profileType: string;
+      bundleId: string;
+      teamId: string | null;
+      platforms: string[];
+      expiresAt: string | null;
+      expired: boolean;
+      certificateSha1s: string[];
       installedAgents: Array<{ id: string }>;
     }>;
   } | null>(null);
@@ -79,9 +116,25 @@ export function ExportSettingsForm({
         hasPrivateKey: boolean;
         installedAgents: Array<{ id: string }>;
       }>;
+      signingProfiles: Array<{
+        uuid: string;
+        name: string;
+        profileType: string;
+        bundleId: string;
+        teamId: string | null;
+        platforms: string[];
+        expiresAt: string | null;
+        expired: boolean;
+        certificateSha1s: string[];
+        installedAgents: Array<{ id: string }>;
+      }>;
     }>(`query ExportSigningInventory {
       signingAgents { supported }
       signingCertificates { sha1 name teamId hasPrivateKey installedAgents { id } }
+      signingProfiles {
+        uuid name profileType bundleId teamId platforms expiresAt expired
+        certificateSha1s installedAgents { id }
+      }
     }`)
       .then((data) => {
         if (!disposed) {
@@ -89,17 +142,27 @@ export function ExportSettingsForm({
             agentCount: data.signingAgents.filter((agent) => agent.supported)
               .length,
             certificates: data.signingCertificates,
+            profiles: data.signingProfiles,
           });
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!disposed) {
+          setInventory({ agentCount: 0, certificates: [], profiles: [] });
+        }
+      });
     return () => {
       disposed = true;
     };
   }, []);
   const teams = useMemo(
     () => [
-      ...new Set(inventory?.certificates.flatMap((item) => item.teamId ?? [])),
+      ...new Set(
+        [
+          ...(inventory?.certificates ?? []),
+          ...(inventory?.profiles ?? []),
+        ].flatMap((item) => item.teamId ?? []),
+      ),
     ],
     [inventory],
   );
@@ -110,6 +173,79 @@ export function ExportSettingsForm({
     key: K,
     next: ExportSettingsValue[K],
   ) => onChange({ ...value, [key]: next });
+
+  const matchingProfiles = (
+    requirement: BuildSigningRequirement,
+    teamId = value.teamId,
+  ) =>
+    (inventory?.profiles ?? [])
+      .filter(
+        (profile) =>
+          profile.profileType === EXPORT_METHOD_PROFILE_TYPES[value.method] &&
+          !profile.expired &&
+          profileCoversBundle(profile.bundleId, requirement.bundleId) &&
+          (!requirement.platform ||
+            profile.platforms.length === 0 ||
+            profile.platforms.includes(requirement.platform)) &&
+          (!teamId || !profile.teamId || profile.teamId === teamId),
+      )
+      .sort((left, right) =>
+        (right.expiresAt ?? "").localeCompare(left.expiresAt ?? ""),
+      );
+
+  const parseRequirements = async () => {
+    if (!onParseSigningRequirements) return;
+    setParsingRequirements(true);
+    setRequirementsError(null);
+    try {
+      const parsed = await onParseSigningRequirements();
+      setRequirements(parsed);
+      setRequirementsParsed(true);
+      const parsedTeams = [
+        ...new Set(parsed.flatMap((requirement) => requirement.teamId ?? [])),
+      ];
+      const nextTeamId =
+        value.teamId ?? (parsedTeams.length === 1 ? parsedTeams[0]! : null);
+      const provisioningProfiles = Object.fromEntries(
+        parsed.flatMap((requirement) => {
+          const candidates = matchingProfiles(requirement, nextTeamId);
+          const existing = value.provisioningProfiles[requirement.bundleId];
+          const configured = requirement.provisioningProfileSpecifier;
+          const selected =
+            candidates.find((profile) => profile.uuid === existing) ??
+            candidates.find(
+              (profile) =>
+                profile.uuid === configured || profile.name === configured,
+            ) ??
+            candidates[0];
+          return selected
+            ? ([[requirement.bundleId, selected.uuid]] as const)
+            : [];
+        }),
+      );
+      onChange({
+        ...value,
+        teamId: nextTeamId,
+        provisioningProfiles,
+      });
+    } catch (error) {
+      setRequirementsError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setParsingRequirements(false);
+    }
+  };
+
+  const profileLabel = (
+    profile: NonNullable<typeof inventory>["profiles"][number],
+  ) => {
+    const expiry = profile.expiresAt
+      ? new Date(profile.expiresAt).toLocaleDateString()
+      : null;
+    return expiry ? `${profile.name} — ${expiry}` : profile.name;
+  };
+
   return (
     <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-2">
       <div className="space-y-2">
@@ -234,30 +370,103 @@ export function ExportSettingsForm({
         )}
       {value.signingStyle === "MANUAL" && (
         <div className="space-y-2 sm:col-span-2">
-          <Label>{t("provisioningProfiles")}</Label>
-          <Textarea
-            className="font-mono text-xs"
-            disabled={disabled}
-            onChange={(event) => {
-              try {
-                const parsed: unknown = JSON.parse(event.target.value);
-                if (
-                  parsed &&
-                  typeof parsed === "object" &&
-                  !Array.isArray(parsed)
-                ) {
-                  update(
-                    "provisioningProfiles",
-                    parsed as Record<string, string>,
-                  );
-                }
-              } catch {
-                // Keep the last valid mapping while the user is typing.
-              }
-            }}
-            rows={4}
-            value={JSON.stringify(value.provisioningProfiles, null, 2)}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <Label>{t("provisioningProfiles")}</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("parseProvisioningProfilesHelp")}
+              </p>
+            </div>
+            {onParseSigningRequirements && (
+              <Button
+                disabled={disabled || parsingRequirements || !inventory}
+                onClick={() => void parseRequirements()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {parsingRequirements ? <Spinner /> : <ScanSearch />}
+                {t(
+                  requirementsParsed
+                    ? "reparseProvisioningProfiles"
+                    : "parseProvisioningProfiles",
+                )}
+              </Button>
+            )}
+          </div>
+          {requirementsError && (
+            <Alert variant="destructive">
+              <AlertDescription>{requirementsError}</AlertDescription>
+            </Alert>
+          )}
+          {!requirements.length && requirementsParsed && (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              {t("noSigningRequirements")}
+            </p>
+          )}
+          {!requirements.length && !requirementsParsed && (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              {t("parseProvisioningProfilesEmpty")}
+            </p>
+          )}
+          {requirements.map((requirement) => {
+            const candidates = matchingProfiles(requirement);
+            const selected =
+              value.provisioningProfiles[requirement.bundleId] ?? "";
+            const selectedAvailable = candidates.some(
+              (profile) => profile.uuid === selected,
+            );
+            return (
+              <div className="rounded-lg border p-3" key={requirement.bundleId}>
+                <div className="mb-2">
+                  <p className="font-medium">{requirement.name}</p>
+                  <p className="break-all font-mono text-xs text-muted-foreground">
+                    {requirement.bundleId}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      requirement.target,
+                      requirement.platform,
+                      requirement.teamId,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <Select
+                  disabled={disabled || !candidates.length}
+                  onValueChange={(profileId) =>
+                    update("provisioningProfiles", {
+                      ...value.provisioningProfiles,
+                      [requirement.bundleId]: profileId,
+                    })
+                  }
+                  value={selected}
+                >
+                  <SelectTrigger className="w-full min-w-0">
+                    <SelectValue placeholder={t("selectProfile")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selected && !selectedAvailable && (
+                      <SelectItem value={selected}>
+                        {selected} · {t("savedValueUnavailable")}
+                      </SelectItem>
+                    )}
+                    {candidates.map((profile) => (
+                      <SelectItem key={profile.uuid} value={profile.uuid}>
+                        {profileLabel(profile)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!candidates.length && (
+                  <p className="mt-1 text-xs text-destructive">
+                    {t("noMatchingProfiles")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       <div className="space-y-2">

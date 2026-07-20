@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   BUILD_EXPORT_METHODS,
+  BUILD_CONFIGURATION_ICON_KEYS,
   EXPORT_METHOD_PROFILE_TYPES,
   PROVISIONING_PROFILE_TYPES,
   profileCoversBundle,
@@ -13,6 +14,7 @@ import {
   parseBuildJobPayload,
   parseBuildReportPayload,
   parseBuildSource,
+  parseBuildSourceParsePayload,
 } from "./builds.js";
 
 const destination = {
@@ -45,6 +47,28 @@ function buildPayload() {
 }
 
 describe("iOS build agent contract", () => {
+  test("accepts the expanded configuration icon catalog", () => {
+    expect(BUILD_CONFIGURATION_ICON_KEYS).toContain("apple");
+    expect(BUILD_CONFIGURATION_ICON_KEYS).toContain("terminal");
+    expect(BUILD_CONFIGURATION_ICON_KEYS).toContain("wrench");
+  });
+
+  test("captures an optional configuration when inspecting a source", () => {
+    expect(
+      parseBuildSourceParsePayload({
+        codebaseId: "codebase-1",
+        worktreeId: "worktree-1",
+        folder: "/tmp/repository",
+        gitDirectory: "/tmp/repository/.git",
+        expectedOrigin: "github.com/example/app",
+        headSha: "abc123",
+        source: { kind: "WORKSPACE", relativePath: "App.xcworkspace" },
+        scheme: "App",
+        configuration: "Release",
+      }),
+    ).toMatchObject({ scheme: "App", configuration: "Release" });
+  });
+
   test("defaults test-result parsing on for saved and legacy settings", () => {
     expect(parseBuildAdvancedSettings({}).parseTestResults).toBe(true);
     expect(

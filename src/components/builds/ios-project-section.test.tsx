@@ -100,6 +100,28 @@ afterEach(() => {
 });
 
 describe("iOS project source card", () => {
+  test("uses a wide configuration dialog with labeled icon previews", async () => {
+    render(<IosProjectSection codebaseId="codebase-1" />);
+
+    expect(await screen.findByText("Legacy Development")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("sm:max-w-5xl");
+
+    const iconSelect = within(dialog).getAllByRole("combobox")[0]!;
+    fireEvent.pointerDown(iconSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const terminalOption = await screen.findByRole("option", {
+      name: "Command line",
+    });
+    expect(terminalOption.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("option", { name: "Security" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Feature" })).toBeDefined();
+  });
+
   test("retains unavailable saved selections and stale metadata after reparse failure", async () => {
     render(<IosProjectSection codebaseId="codebase-1" />);
 

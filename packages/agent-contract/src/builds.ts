@@ -46,6 +46,30 @@ export const GENERIC_BUILD_DESTINATION_ACTIONS: readonly BuildAction[] = [
 export const BUILD_SOURCE_KINDS = ["PROJECT", "WORKSPACE", "PACKAGE"] as const;
 export type BuildSourceKind = (typeof BUILD_SOURCE_KINDS)[number];
 
+export const BUILD_CONFIGURATION_ICON_KEYS = [
+  "apple",
+  "app-window",
+  "archive",
+  "beaker",
+  "box",
+  "bug",
+  "code",
+  "gauge",
+  "hammer",
+  "layers",
+  "package",
+  "play",
+  "rocket",
+  "shield",
+  "smartphone",
+  "sparkles",
+  "terminal",
+  "test-tube",
+  "wrench",
+] as const;
+export type BuildConfigurationIconKey =
+  (typeof BUILD_CONFIGURATION_ICON_KEYS)[number];
+
 export const BUILD_DESTINATION_TYPES = [
   "SIMULATOR",
   "PHYSICAL_DEVICE",
@@ -171,6 +195,7 @@ export type BuildSourceDiscoverPayload = BuildWorktreeIdentity;
 export type BuildSourceParsePayload = BuildWorktreeIdentity & {
   source: BuildSourceSnapshot;
   scheme: string | null;
+  configuration: string | null;
 };
 export type BuildDestinationsPayload = BuildWorktreeIdentity & {
   source: BuildSourceSnapshot;
@@ -617,6 +642,10 @@ export function parseBuildSourceParsePayload(
     ...worktreeIdentity(input),
     source: parseBuildSource(input.source),
     scheme: nullableString(input.scheme, "source parse payload.scheme"),
+    configuration: nullableString(
+      input.configuration,
+      "source parse payload.configuration",
+    ),
   };
 }
 
@@ -1049,6 +1078,15 @@ export type ArchiveBundle = {
   relativePath: string;
   embeddedProfileUuid: string | null;
   embeddedProfileName: string | null;
+};
+
+export type BuildSigningRequirement = {
+  bundleId: string;
+  name: string;
+  target: string;
+  platform: string | null;
+  teamId: string | null;
+  provisioningProfileSpecifier: string | null;
 };
 
 export type BuildSigningInspection = {

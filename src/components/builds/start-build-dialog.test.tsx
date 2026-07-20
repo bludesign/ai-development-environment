@@ -140,6 +140,50 @@ beforeEach(() => {
         ],
       } as never;
     }
+    if (operation.includes("query ExportSigningInventory")) {
+      return {
+        signingAgents: [{ supported: true }],
+        signingCertificates: [
+          {
+            sha1: "CERT123",
+            name: "Apple Development: Example",
+            teamId: "TEAM123",
+            hasPrivateKey: true,
+            installedAgents: [{ id: "agent-1" }],
+          },
+        ],
+        signingProfiles: [
+          {
+            uuid: "PROFILE-APP",
+            name: "Example Development",
+            profileType: "DEVELOPMENT",
+            bundleId: "com.example.app",
+            teamId: "TEAM123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["CERT123"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+        ],
+      } as never;
+    }
+    if (operation.includes("mutation InspectStartBuildSigningRequirements")) {
+      return {
+        inspectBuildSource: {
+          signingRequirements: [
+            {
+              bundleId: "com.example.app",
+              name: "Example",
+              target: "App",
+              platform: "iOS",
+              teamId: "TEAM123",
+              provisioningProfileSpecifier: "Example Development",
+            },
+          ],
+        },
+      } as never;
+    }
     if (operation.includes("mutation StartIosBuild")) {
       return { startBuild: { id: "build-1" } } as never;
     }
@@ -153,6 +197,80 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
+  test("uses a wide dialog and parses provisioning profile requirements", async () => {
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("sm:max-w-5xl");
+    expect(await screen.findByText("Development")).toBeDefined();
+
+    const actionField = within(dialog).getByText("Action").parentElement!;
+    const actionSelect = within(actionField).getByRole("combobox");
+    fireEvent.pointerDown(actionSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Archive" }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Export when complete" }),
+    );
+
+    const signingStyleField =
+      within(dialog).getByText("Signing style").parentElement!;
+    const signingStyleSelect = within(signingStyleField).getByRole("combobox");
+    fireEvent.pointerDown(signingStyleSelect, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Manual" }));
+
+    const parse = await screen.findByRole("button", {
+      name: "Parse project",
+    });
+    await waitFor(() =>
+      expect((parse as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(parse);
+
+    expect(await screen.findByText("com.example.app")).toBeDefined();
+    expect(screen.getByText(/Example Development/)).toBeDefined();
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("InspectStartBuildSigningRequirements"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            scheme: "App",
+            configuration: "Debug",
+          }),
+        }),
+      ),
+    );
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Start Build" }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation StartIosBuild"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            action: "ARCHIVE",
+            exportWhenComplete: true,
+            exportSettings: expect.objectContaining({
+              provisioningProfiles: {
+                "com.example.app": "PROFILE-APP",
+              },
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
   test("links to repository settings when builds are not configured", async () => {
     render(
       <StartBuildButton

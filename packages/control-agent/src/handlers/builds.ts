@@ -45,6 +45,7 @@ import {
   type BuildExportSettings,
   type BuildJobPayload,
   type BuildReportKind,
+  type BuildSigningRequirement,
   type BuildSourceSnapshot,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
@@ -484,6 +485,122 @@ async function testPlans(
   return [];
 }
 
+function buildSetting(
+  settings: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = settings[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function signingPlatform(settings: Record<string, unknown>): string | null {
+  const platform = buildSetting(settings, "PLATFORM_NAME");
+  if (platform === "iphoneos") return "iOS";
+  if (platform === "watchos") return "watchOS";
+  if (platform === "appletvos") return "tvOS";
+  if (platform === "xros") return "visionOS";
+  if (platform === "macosx") return "macOS";
+  return platform;
+}
+
+/** Extracts signable app and extension targets from `xcodebuild -showBuildSettings -json`. */
+export function signingRequirementsFromBuildSettings(
+  value: unknown,
+): BuildSigningRequirement[] {
+  if (!Array.isArray(value)) return [];
+  const requirements = new Map<string, BuildSigningRequirement>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const rawSettings = record.buildSettings;
+    if (
+      !rawSettings ||
+      typeof rawSettings !== "object" ||
+      Array.isArray(rawSettings)
+    ) {
+      continue;
+    }
+    const settings = rawSettings as Record<string, unknown>;
+    const bundleId = buildSetting(settings, "PRODUCT_BUNDLE_IDENTIFIER");
+    if (!bundleId || buildSetting(settings, "CODE_SIGNING_ALLOWED") === "NO") {
+      continue;
+    }
+    const productType = buildSetting(settings, "PRODUCT_TYPE") ?? "";
+    if (
+      productType.includes("unit-test") ||
+      productType.includes("ui-testing")
+    ) {
+      continue;
+    }
+    const target =
+      (typeof record.target === "string" && record.target.trim()) || bundleId;
+    const requirement: BuildSigningRequirement = {
+      bundleId,
+      name:
+        buildSetting(settings, "PRODUCT_NAME") ??
+        buildSetting(settings, "FULL_PRODUCT_NAME") ??
+        target,
+      target,
+      platform: signingPlatform(settings),
+      teamId: buildSetting(settings, "DEVELOPMENT_TEAM"),
+      provisioningProfileSpecifier:
+        buildSetting(settings, "PROVISIONING_PROFILE_SPECIFIER") ??
+        buildSetting(settings, "PROVISIONING_PROFILE"),
+    };
+    const existing = requirements.get(bundleId);
+    if (
+      !existing ||
+      (!existing.provisioningProfileSpecifier &&
+        requirement.provisioningProfileSpecifier)
+    ) {
+      requirements.set(bundleId, requirement);
+    }
+  }
+  return [...requirements.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+async function inspectSigningRequirements(
+  source: BuildSourceSnapshot,
+  absolutePath: string,
+  folder: string,
+  scheme: string | null,
+  configuration: string | null,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<BuildSigningRequirement[]> {
+  if (!scheme || !configuration) return [];
+  const result = requireSuccess(
+    await command(
+      "xcrun",
+      [
+        "xcodebuild",
+        ...sourceArguments(source, absolutePath),
+        "-scheme",
+        scheme,
+        "-configuration",
+        configuration,
+        "-destination",
+        "generic/platform=iOS",
+        "-showBuildSettings",
+        "-json",
+      ],
+      Math.min(timeoutMs, 60_000),
+      signal,
+      folder,
+    ),
+    "Could not inspect signing requirements",
+  );
+  try {
+    return signingRequirementsFromBuildSettings(JSON.parse(result.stdout));
+  } catch (error) {
+    throw new Error(
+      `Could not parse Xcode signing requirements: ${cleanError(error)}`,
+    );
+  }
+}
+
 export const discoverBuildSources: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -517,11 +634,8 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
           metadata.configurations.length === 0
         ? await workspaceConfigurations(absolutePath, folder, timeoutMs, signal)
         : metadata.configurations;
-  return {
-    ...successfulProcess,
-    schemes: uniqueSorted(metadata.schemes),
-    configurations: uniqueSorted(configurations),
-    testPlans: await testPlans(
+  const [plans, signingRequirements] = await Promise.all([
+    testPlans(
       input.source,
       absolutePath,
       folder,
@@ -529,6 +643,22 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
       timeoutMs,
       signal,
     ),
+    inspectSigningRequirements(
+      input.source,
+      absolutePath,
+      folder,
+      input.scheme,
+      input.configuration,
+      timeoutMs,
+      signal,
+    ),
+  ]);
+  return {
+    ...successfulProcess,
+    schemes: uniqueSorted(metadata.schemes),
+    configurations: uniqueSorted(configurations),
+    testPlans: plans,
+    signingRequirements,
     xcodeVersion:
       version.exitCode === 0
         ? version.stdout.trim().replace(/\n+/g, " · ")

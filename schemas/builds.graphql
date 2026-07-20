@@ -304,6 +304,7 @@ type BuildSourceInspection {
   schemes: [String!]!
   configurations: [String!]!
   testPlans: [String!]!
+  signingRequirements: [BuildSigningRequirement!]!
   headSha: String
   xcodeVersion: String
 }
@@ -349,6 +350,7 @@ input InspectBuildSourceInput {
   sourceKind: BuildSourceKind!
   sourcePath: String!
   scheme: String
+  configuration: String
   requestId: ID!
 }
 
@@ -435,6 +437,16 @@ type ArchiveBundle {
   relativePath: String!
   embeddedProfileUuid: String
   embeddedProfileName: String
+}
+
+"A signable target discovered from Xcode build settings before an archive exists."
+type BuildSigningRequirement {
+  bundleId: String!
+  name: String!
+  target: String!
+  platform: String
+  teamId: String
+  provisioningProfileSpecifier: String
 }
 
 type BuildSigningOptions {

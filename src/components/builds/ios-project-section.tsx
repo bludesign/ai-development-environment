@@ -1,6 +1,14 @@
 "use client";
 
-import { Hammer, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
+import {
+  CircleOff,
+  Hammer,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -44,7 +52,10 @@ import type {
   BuildScript,
   IosAppProject,
 } from "./types";
-import { ConfigurationIcon } from "./configuration-icon";
+import {
+  BUILD_CONFIGURATION_ICON_KEYS,
+  ConfigurationIcon,
+} from "./configuration-icon";
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
@@ -74,6 +85,7 @@ type SourceInspection = {
   schemes: string[];
   configurations: string[];
   testPlans: string[];
+  signingRequirements: BuildSigningRequirement[];
   headSha: string | null;
   xcodeVersion: string | null;
 };
@@ -483,6 +495,7 @@ function BuildConfigurationDialog({
           schemes: configuration.observation.schemes,
           configurations: configuration.observation.configurations,
           testPlans: configuration.observation.testPlans,
+          signingRequirements: [],
           headSha: configuration.observation.headSha,
           xcodeVersion: configuration.observation.xcodeVersion,
         }
@@ -562,6 +575,9 @@ function BuildConfigurationDialog({
           inspectBuildSource(input: $input) {
             source { kind relativePath }
             schemes configurations testPlans headSha xcodeVersion
+            signingRequirements {
+              bundleId name target platform teamId provisioningProfileSpecifier
+            }
           }
         }`,
         {
@@ -570,6 +586,7 @@ function BuildConfigurationDialog({
             sourceKind: candidate.kind,
             sourcePath: candidate.relativePath,
             scheme: selectedScheme || null,
+            configuration: null,
             requestId: createClientId(),
           },
         },
@@ -592,6 +609,36 @@ function BuildConfigurationDialog({
     } finally {
       setInspecting(false);
     }
+  };
+
+  const parseSigningRequirements = async () => {
+    if (!sourcePath || !scheme || !buildConfiguration) {
+      throw new Error(t("selectSigningSourceFirst"));
+    }
+    const data = await controlPlaneRequest<{
+      inspectBuildSource: {
+        signingRequirements: BuildSigningRequirement[];
+      };
+    }>(
+      `mutation InspectBuildSigningRequirements($input: InspectBuildSourceInput!) {
+        inspectBuildSource(input: $input) {
+          signingRequirements {
+            bundleId name target platform teamId provisioningProfileSpecifier
+          }
+        }
+      }`,
+      {
+        input: {
+          worktreeId,
+          sourceKind,
+          sourcePath,
+          scheme,
+          configuration: buildConfiguration,
+          requestId: createClientId(),
+        },
+      },
+    );
+    return data.inspectBuildSource.signingRequirements;
   };
 
   const save = async () => {
@@ -660,7 +707,7 @@ function BuildConfigurationDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>
             {configuration ? t("editConfiguration") : t("newConfiguration")}
@@ -686,20 +733,28 @@ function BuildConfigurationDialog({
               <Label>{t("icon")}</Label>
               <Select onValueChange={setIconKey} value={iconKey}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <span className="flex min-w-0 items-center gap-2">
+                    {iconKey === "none" ? (
+                      <CircleOff className="size-4 shrink-0" />
+                    ) : (
+                      <ConfigurationIcon iconKey={iconKey} />
+                    )}
+                    <span className="truncate">
+                      {t(`configurationIcons.${iconKey}`)}
+                    </span>
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
-                  {[
-                    "none",
-                    "smartphone",
-                    "hammer",
-                    "play",
-                    "test-tube",
-                    "archive",
-                    "rocket",
-                  ].map((value) => (
+                  {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
                     <SelectItem key={value} value={value}>
-                      {value}
+                      <span className="flex items-center gap-2">
+                        {value === "none" ? (
+                          <CircleOff className="size-4" />
+                        ) : (
+                          <ConfigurationIcon iconKey={value} />
+                        )}
+                        {t(`configurationIcons.${value}`)}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -875,7 +930,9 @@ function BuildConfigurationDialog({
               </label>
               {autoExport && (
                 <ExportSettingsForm
+                  key={`${sourceKind}:${sourcePath}:${scheme}:${buildConfiguration}`}
                   onChange={setExportSettings}
+                  onParseSigningRequirements={parseSigningRequirements}
                   value={exportSettings}
                 />
               )}

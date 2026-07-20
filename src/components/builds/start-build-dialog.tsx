@@ -1,5 +1,6 @@
 "use client";
 
+import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
 import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -451,6 +452,34 @@ function StartBuildDialog({
     }
   };
 
+  const parseSigningRequirements = async () => {
+    if (!configuration) throw new Error(t("selectSigningSourceFirst"));
+    const data = await controlPlaneRequest<{
+      inspectBuildSource: {
+        signingRequirements: BuildSigningRequirement[];
+      };
+    }>(
+      `mutation InspectStartBuildSigningRequirements($input: InspectBuildSourceInput!) {
+        inspectBuildSource(input: $input) {
+          signingRequirements {
+            bundleId name target platform teamId provisioningProfileSpecifier
+          }
+        }
+      }`,
+      {
+        input: {
+          worktreeId,
+          sourceKind: configuration.source.kind,
+          sourcePath: configuration.source.relativePath,
+          scheme: configuration.scheme,
+          configuration: configuration.buildConfiguration,
+          requestId: createClientId(),
+        },
+      },
+    );
+    return data.inspectBuildSource.signingRequirements;
+  };
+
   useEffect(() => {
     if (!configuration || loading) return;
     const timer = window.setTimeout(
@@ -537,7 +566,7 @@ function StartBuildDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>
             {t(coverageMode ? "startWorktreeCoverage" : "startBuild")}
@@ -728,7 +757,9 @@ function StartBuildDialog({
                 </label>
                 {exportWhenComplete && (
                   <ExportSettingsForm
+                    key={configurationId}
                     onChange={setExportSettings}
+                    onParseSigningRequirements={parseSigningRequirements}
                     value={exportSettings}
                   />
                 )}

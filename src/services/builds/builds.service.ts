@@ -3,6 +3,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BUILD_ACTIONS,
+  BUILD_CONFIGURATION_ICON_KEYS,
   BUILD_DESTINATION_TYPES,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
@@ -28,6 +29,7 @@ import {
   type BuildAdvancedSettings,
   type BuildDestination,
   type BuildReportKind,
+  type BuildSigningRequirement,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
 
@@ -46,14 +48,7 @@ import type { TelemetryService } from "@/services/telemetry";
 
 import { effectiveBuildsDirectory } from "./build-directory";
 
-const ICON_KEYS = new Set([
-  "smartphone",
-  "hammer",
-  "play",
-  "test-tube",
-  "archive",
-  "rocket",
-]);
+const ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
 const FINAL_JOB_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -84,6 +79,38 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+function signingRequirements(value: unknown): BuildSigningRequirement[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): BuildSigningRequirement[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const requirement = entry as JsonObject;
+    if (
+      typeof requirement.bundleId !== "string" ||
+      typeof requirement.name !== "string" ||
+      typeof requirement.target !== "string"
+    ) {
+      return [];
+    }
+    return [
+      {
+        bundleId: requirement.bundleId,
+        name: requirement.name,
+        target: requirement.target,
+        platform:
+          typeof requirement.platform === "string"
+            ? requirement.platform
+            : null,
+        teamId:
+          typeof requirement.teamId === "string" ? requirement.teamId : null,
+        provisioningProfileSpecifier:
+          typeof requirement.provisioningProfileSpecifier === "string"
+            ? requirement.provisioningProfileSpecifier
+            : null,
+      },
+    ];
+  });
 }
 
 function online(agent: {
@@ -889,6 +916,7 @@ export class BuildsService {
     sourceKind: BuildSourceKind;
     sourcePath: string;
     scheme?: string | null;
+    configuration?: string | null;
     requestId: string;
   }) {
     const worktree = await this.requireWorktree(
@@ -908,8 +936,9 @@ export class BuildsService {
         ...this.identity(worktree),
         source,
         scheme: input.scheme?.trim() || null,
+        configuration: input.configuration?.trim() || null,
       },
-      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}`,
+      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}:${input.configuration ?? ""}`,
       timeoutSeconds: 120,
       visibility: "SYSTEM",
     });
@@ -920,6 +949,7 @@ export class BuildsService {
         schemes: stringArray(result.schemes),
         configurations: stringArray(result.configurations),
         testPlans: stringArray(result.testPlans),
+        signingRequirements: signingRequirements(result.signingRequirements),
         headSha:
           typeof result.headSha === "string"
             ? result.headSha
