@@ -374,74 +374,79 @@ export function ExportSettingsForm({
 
   return (
     <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-2">
-      <div className="space-y-2">
-        <Label>{t("distributionMethod")}</Label>
-        <Select
-          disabled={disabled}
-          onValueChange={(next) =>
-            update("method", next as ExportSettingsValue["method"])
-          }
-          value={value.method}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {BUILD_EXPORT_METHODS.map((method) => (
-              <SelectItem key={method} value={method}>
-                {t(`exportMethod.${method}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label>{t("signingStyle")}</Label>
-        <Select
-          disabled={disabled}
-          onValueChange={(next) =>
-            update("signingStyle", next as ExportSettingsValue["signingStyle"])
-          }
-          value={value.signingStyle}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="AUTOMATIC">{t("automatic")}</SelectItem>
-            <SelectItem value="MANUAL">{t("manual")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label>{t("developmentTeam")}</Label>
-        {teams.length ? (
+      <div className="grid gap-4 sm:col-span-2 sm:grid-cols-3">
+        <div className="space-y-2">
+          <Label>{t("distributionMethod")}</Label>
           <Select
             disabled={disabled}
-            onValueChange={(next) => update("teamId", next)}
-            value={value.teamId ?? ""}
+            onValueChange={(next) =>
+              update("method", next as ExportSettingsValue["method"])
+            }
+            value={value.method}
           >
             <SelectTrigger>
-              <SelectValue placeholder="ABCDE12345" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {teams.map((team) => (
-                <SelectItem key={team} value={team}>
-                  {team}
+              {BUILD_EXPORT_METHODS.map((method) => (
+                <SelectItem key={method} value={method}>
+                  {t(`exportMethod.${method}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        ) : (
-          <Input
+        </div>
+        <div className="space-y-2">
+          <Label>{t("signingStyle")}</Label>
+          <Select
             disabled={disabled}
-            onChange={(event) => update("teamId", event.target.value || null)}
-            placeholder="ABCDE12345"
-            value={value.teamId ?? ""}
-          />
-        )}
+            onValueChange={(next) =>
+              update(
+                "signingStyle",
+                next as ExportSettingsValue["signingStyle"],
+              )
+            }
+            value={value.signingStyle}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="AUTOMATIC">{t("automatic")}</SelectItem>
+              <SelectItem value="MANUAL">{t("manual")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>{t("developmentTeam")}</Label>
+          {teams.length ? (
+            <Select
+              disabled={disabled}
+              onValueChange={(next) => update("teamId", next)}
+              value={value.teamId ?? ""}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="ABCDE12345" />
+              </SelectTrigger>
+              <SelectContent>
+                {teams.map((team) => (
+                  <SelectItem key={team} value={team}>
+                    {team}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              disabled={disabled}
+              onChange={(event) => update("teamId", event.target.value || null)}
+              placeholder="ABCDE12345"
+              value={value.teamId ?? ""}
+            />
+          )}
+        </div>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 sm:col-span-2">
         <Label>{t("signingCertificate")}</Label>
         {inventory?.certificates.length ? (
           <Select
@@ -451,7 +456,7 @@ export function ExportSettingsForm({
             }
             value={value.signingCertificate ?? "AUTOMATIC"}
           >
-            <SelectTrigger>
+            <SelectTrigger className="w-full min-w-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

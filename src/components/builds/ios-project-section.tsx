@@ -272,7 +272,10 @@ export function IosProjectSection({
               }}
               value={activeCodebaseId}
             >
-              <SelectTrigger aria-label={t("parseCheckout")}>
+              <SelectTrigger
+                aria-label={t("parseCheckout")}
+                className="w-full min-w-0"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
