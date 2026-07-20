@@ -146,6 +146,16 @@ export type BuildScriptSnapshot = {
   position: number;
 };
 
+export type BuildTelemetrySettings = {
+  localBaseUrl: string;
+  remoteBaseUrl: string;
+  selectedBaseUrl: string;
+  consoleLogsUrl: string;
+  analyticsEventsUrl: string;
+  consoleCollectionEnabled: boolean;
+  analyticsCollectionEnabled: boolean;
+};
+
 export type BuildWorktreeIdentity = {
   codebaseId: string;
   worktreeId: string;
@@ -182,6 +192,8 @@ export type BuildJobPayload = BuildWorktreeIdentity & {
   destination: BuildDestination;
   advancedSettings: BuildAdvancedSettings;
   scripts: BuildScriptSnapshot[];
+  /** Optional only for jobs queued by a server version that predates telemetry. */
+  telemetry?: BuildTelemetrySettings;
   worktreeCoverage?: boolean;
 };
 
@@ -536,6 +548,57 @@ function parseScript(value: unknown, index: number): BuildScriptSnapshot {
   };
 }
 
+function httpUrl(value: unknown, name: string): string {
+  const text = stringValue(value, name);
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
+function parseBuildTelemetrySettings(
+  value: unknown,
+): BuildTelemetrySettings | undefined {
+  if (value === undefined || value === null) return undefined;
+  const input = objectValue(value, "build job payload.telemetry");
+  return {
+    localBaseUrl: httpUrl(
+      input.localBaseUrl,
+      "build job payload.telemetry.localBaseUrl",
+    ),
+    remoteBaseUrl: httpUrl(
+      input.remoteBaseUrl,
+      "build job payload.telemetry.remoteBaseUrl",
+    ),
+    selectedBaseUrl: httpUrl(
+      input.selectedBaseUrl,
+      "build job payload.telemetry.selectedBaseUrl",
+    ),
+    consoleLogsUrl: httpUrl(
+      input.consoleLogsUrl,
+      "build job payload.telemetry.consoleLogsUrl",
+    ),
+    analyticsEventsUrl: httpUrl(
+      input.analyticsEventsUrl,
+      "build job payload.telemetry.analyticsEventsUrl",
+    ),
+    consoleCollectionEnabled: booleanValue(
+      input.consoleCollectionEnabled,
+      "build job payload.telemetry.consoleCollectionEnabled",
+    ),
+    analyticsCollectionEnabled: booleanValue(
+      input.analyticsCollectionEnabled,
+      "build job payload.telemetry.analyticsCollectionEnabled",
+    ),
+  };
+}
+
 export function parseBuildSourceDiscoverPayload(
   value: unknown,
 ): BuildSourceDiscoverPayload {
@@ -642,6 +705,7 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
     destination,
     advancedSettings,
     scripts,
+    telemetry: parseBuildTelemetrySettings(input.telemetry),
     worktreeCoverage:
       input.worktreeCoverage === undefined
         ? false

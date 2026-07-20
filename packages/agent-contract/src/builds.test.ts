@@ -215,6 +215,29 @@ describe("iOS build agent contract", () => {
     ).toThrow("must be unique");
   });
 
+  test("validates optional observability URLs and collection settings", () => {
+    const telemetry = {
+      localBaseUrl: "http://127.0.0.1:3000",
+      remoteBaseUrl: "https://builds.example.com",
+      selectedBaseUrl: "http://127.0.0.1:3000",
+      consoleLogsUrl: "http://127.0.0.1:3000/api/telemetry/console-logs",
+      analyticsEventsUrl:
+        "http://127.0.0.1:3000/api/telemetry/analytics-events",
+      consoleCollectionEnabled: true,
+      analyticsCollectionEnabled: false,
+    };
+    expect(
+      parseBuildJobPayload({ ...buildPayload(), telemetry }).telemetry,
+    ).toEqual(telemetry);
+    expect(() =>
+      parseBuildJobPayload({
+        ...buildPayload(),
+        telemetry: { ...telemetry, selectedBaseUrl: "file:///tmp/events" },
+      }),
+    ).toThrow("HTTP(S)");
+    expect(parseBuildJobPayload(buildPayload()).telemetry).toBeUndefined();
+  });
+
   test("enforces action-specific destination and test-product invariants", () => {
     expect(() =>
       parseBuildJobPayload({ ...buildPayload(), action: "ARCHIVE" }),

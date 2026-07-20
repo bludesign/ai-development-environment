@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import {
   Blocks,
   ChartNoAxesCombined,
+  Combine,
   Cpu,
   Database,
   GitPullRequest,
@@ -13,6 +14,7 @@ import {
   FolderGit2,
   House,
   MessageSquareText,
+  MousePointerClick,
   PanelLeft,
   PanelRight,
   PlayCircle,
@@ -20,6 +22,7 @@ import {
   Smartphone,
   Sparkles,
   TicketCheck,
+  Terminal,
   Wrench,
   X,
 } from "lucide-react";
@@ -368,6 +371,61 @@ function NavigationSidebar() {
                   >
                     <ChartNoAxesCombined />
                     <span>{t("usage")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("observability")}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/console-logs")}
+                >
+                  <Link
+                    href="/console-logs"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Terminal />
+                    <span>{t("consoleLogs")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/analytics-events")}
+                >
+                  <Link
+                    href="/analytics-events"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <MousePointerClick />
+                    <span>{t("analyticsEvents")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/unified-events")}
+                >
+                  <Link
+                    href="/unified-events"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Combine />
+                    <span>{t("unifiedEvents")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

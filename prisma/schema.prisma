@@ -710,6 +710,90 @@ model BuildLogEvent {
   @@index([buildId, createdAt])
 }
 
+model TelemetryEntry {
+  id                       String   @id
+  entryType                String
+  clientTime               DateTime
+  receivedAt               DateTime @default(now())
+  deviceIp                 String?
+  message                  String?
+  level                    String?
+  category                 String?
+  eventName                String?
+  eventKind                String?
+  screenName               String?
+  buildId                  String?
+  sessionId                String?
+  attributesJson           String   @default("{}")
+  defaultParametersJson    String   @default("{}")
+  additionalParametersJson String   @default("{}")
+  searchText               String   @default("")
+  highlightColor           String?
+  separatorKind            String?
+  separatorName            String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([separatorKind, buildId])
+  @@index([entryType, clientTime, receivedAt])
+  @@index([clientTime, receivedAt])
+  @@index([level])
+  @@index([category])
+  @@index([eventKind])
+  @@index([eventName])
+  @@index([deviceIp])
+  @@index([buildId])
+  @@index([sessionId])
+}
+
+model TelemetrySettings {
+  id                         String   @id
+  localBaseUrlOverride       String?
+  remoteBaseUrlOverride      String?
+  consoleCollectionEnabled   Boolean  @default(true)
+  analyticsCollectionEnabled Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model TelemetryViewSettings {
+  id                   String   @id
+  view                 String   @unique
+  columnsJson          String
+  timeFormat           String   @default("12")
+  activeColumnPresetId String?
+  activeSavedFilterId  String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model TelemetryColumnPreset {
+  id             String   @id
+  view           String
+  name           String
+  normalizedName String
+  columnsJson    String
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([view, normalizedName])
+  @@index([view, isDefault, name])
+}
+
+model TelemetrySavedFilter {
+  id             String   @id
+  view           String
+  name           String
+  normalizedName String
+  definitionJson String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([view, normalizedName])
+  @@index([view, name])
+}
+
 model BuildDeployment {
   id                 String    @id
   buildId            String

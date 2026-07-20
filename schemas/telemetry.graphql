@@ -1,0 +1,202 @@
+enum TelemetryView {
+  CONSOLE
+  ANALYTICS
+  UNIFIED
+}
+
+enum TelemetryEntryType {
+  CONSOLE
+  ANALYTICS
+  SEPARATOR
+}
+
+enum TelemetrySearchMode {
+  TEXT
+  GLOB
+  REGEX
+}
+
+enum TelemetryFilterMode {
+  ALL
+  ANY
+}
+
+enum TelemetryFilterOperator {
+  CONTAINS
+  DOES_NOT_CONTAIN
+  IS
+  IS_NOT
+  MATCHES_GLOB
+  MATCHES_REGEX
+  NO_REGEX_MATCH
+  IS_EMPTY
+  IS_NOT_EMPTY
+}
+
+type TelemetryEntry {
+  id: ID!
+  entryType: TelemetryEntryType!
+  clientTime: String!
+  receivedAt: String!
+  deviceIp: String
+  message: String
+  level: String
+  category: String
+  eventName: String
+  eventKind: String
+  screenName: String
+  buildId: String
+  sessionId: String
+  attributes: JSON!
+  defaultParameters: JSON!
+  additionalParameters: JSON!
+  highlightColor: String
+  separatorKind: String
+  separatorName: String
+}
+
+type TelemetryTimelinePage {
+  items: [TelemetryEntry!]!
+  nextCursor: String
+  matchingCount: Int!
+  totalCount: Int!
+}
+
+type TelemetrySettings {
+  localBaseUrlOverride: String
+  remoteBaseUrlOverride: String
+  consoleCollectionEnabled: Boolean!
+  analyticsCollectionEnabled: Boolean!
+  detectedLocalBaseUrl: String!
+  detectedRemoteBaseUrl: String!
+  effectiveLocalBaseUrl: String!
+  effectiveRemoteBaseUrl: String!
+  updatedAt: String!
+}
+
+type TelemetryViewSettings {
+  view: TelemetryView!
+  columns: [String!]!
+  timeFormat: String!
+  activeColumnPresetId: ID
+  activeSavedFilterId: ID
+}
+
+type TelemetryColumnPreset {
+  id: ID!
+  view: TelemetryView!
+  name: String!
+  columns: [String!]!
+  isDefault: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type TelemetrySavedFilter {
+  id: ID!
+  view: TelemetryView!
+  name: String!
+  definition: JSON!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type TelemetryChange {
+  ids: [ID!]!
+  reason: String!
+}
+
+type TelemetrySettingsChange {
+  updatedAt: String!
+}
+
+input TelemetryFilterConditionInput {
+  field: String!
+  operator: TelemetryFilterOperator!
+  value: String
+  caseSensitive: Boolean = false
+  sources: [TelemetryEntryType!]
+}
+
+input TelemetryAdvancedFilterInput {
+  mode: TelemetryFilterMode!
+  conditions: [TelemetryFilterConditionInput!]!
+}
+
+input TelemetryTimelineInput {
+  view: TelemetryView!
+  first: Int = 200
+  after: String
+  search: String
+  searchMode: TelemetrySearchMode = TEXT
+  caseSensitive: Boolean = false
+  quickFilters: JSON
+  advancedFilter: TelemetryAdvancedFilterInput
+}
+
+input SaveTelemetrySettingsInput {
+  localBaseUrlOverride: String
+  remoteBaseUrlOverride: String
+  consoleCollectionEnabled: Boolean
+  analyticsCollectionEnabled: Boolean
+}
+
+input SaveTelemetryViewSettingsInput {
+  view: TelemetryView!
+  columns: [String!]
+  timeFormat: String
+  activeColumnPresetId: ID
+  activeSavedFilterId: ID
+}
+
+input SaveTelemetryColumnPresetInput {
+  id: ID
+  view: TelemetryView!
+  name: String!
+  columns: [String!]!
+  isDefault: Boolean
+}
+
+input SaveTelemetryFilterInput {
+  id: ID
+  view: TelemetryView!
+  name: String!
+  definition: TelemetryAdvancedFilterInput!
+}
+
+extend type Query {
+  telemetryTimeline(input: TelemetryTimelineInput!): TelemetryTimelinePage!
+  telemetryEntries(ids: [ID!]!): [TelemetryEntry!]!
+  telemetryFacets(view: TelemetryView!): JSON!
+  telemetryFields(view: TelemetryView!): [String!]!
+  telemetrySettings(requestOrigin: String): TelemetrySettings!
+  telemetryViewSettings(view: TelemetryView!): TelemetryViewSettings!
+  telemetryColumnPresets(view: TelemetryView!): [TelemetryColumnPreset!]!
+  telemetrySavedFilters(view: TelemetryView!): [TelemetrySavedFilter!]!
+}
+
+extend type Mutation {
+  saveTelemetrySettings(
+    input: SaveTelemetrySettingsInput!
+    requestOrigin: String
+  ): TelemetrySettings!
+  saveTelemetryViewSettings(
+    input: SaveTelemetryViewSettingsInput!
+  ): TelemetryViewSettings!
+  saveTelemetryColumnPreset(
+    input: SaveTelemetryColumnPresetInput!
+  ): TelemetryColumnPreset!
+  deleteTelemetryColumnPreset(id: ID!): Boolean!
+  saveTelemetryFilter(input: SaveTelemetryFilterInput!): TelemetrySavedFilter!
+  deleteTelemetryFilter(id: ID!): Boolean!
+  addTelemetrySeparator(name: String): TelemetryEntry!
+  updateTelemetryHighlight(id: ID!, color: String): TelemetryEntry!
+  clearSelectedTelemetry(selection: JSON!): Int!
+  clearTelemetry(view: TelemetryView!, includeSeparators: Boolean = false): Int!
+  clearTelemetryBeforeLatestSeparator(view: TelemetryView!): Int!
+}
+
+extend type Subscription {
+  telemetryEntriesChanged: TelemetryChange!
+  telemetrySettingsChanged: TelemetrySettingsChange!
+}

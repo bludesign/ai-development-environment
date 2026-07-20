@@ -315,11 +315,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
     startBuild: (
       _root: unknown,
-      { input }: { input: never },
+      { input }: { input: Parameters<BuildsService["startBuild"]>[0] },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startBuild(input);
+      return service.startBuild({
+        ...input,
+        telemetryRequestOrigin: context.requestOrigin,
+      });
     },
     rebuildBuild: (
       _root: unknown,
@@ -327,7 +330,7 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.rebuildBuild(id, requestId);
+      return service.rebuildBuild(id, requestId, context.requestOrigin);
     },
     cancelBuild: (
       _root: unknown,
@@ -387,11 +390,16 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
     startWorktreeCoverage: (
       _root: unknown,
-      { input }: { input: never },
+      {
+        input,
+      }: { input: Parameters<BuildsService["startWorktreeCoverage"]>[0] },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startWorktreeCoverage(input);
+      return service.startWorktreeCoverage({
+        ...input,
+        telemetryRequestOrigin: context.requestOrigin,
+      });
     },
     reportBuildProgress: (
       _root: unknown,

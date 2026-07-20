@@ -1,0 +1,189 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+const request = vi.hoisted(() => vi.fn());
+const subscribe = vi.hoisted(() => vi.fn(() => vi.fn()));
+
+vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneRequest: request,
+  controlPlaneSubscriptions: () => ({ subscribe }),
+}));
+vi.mock("@/lib/browser-utils", () => ({ copyText: vi.fn() }));
+
+import { TelemetryPage } from "./telemetry-page";
+
+const settings = {
+  localBaseUrlOverride: null,
+  remoteBaseUrlOverride: null,
+  consoleCollectionEnabled: true,
+  analyticsCollectionEnabled: true,
+  detectedLocalBaseUrl: "http://127.0.0.1:3000",
+  detectedRemoteBaseUrl: "https://events.example.com",
+  effectiveLocalBaseUrl: "http://127.0.0.1:3000",
+  effectiveRemoteBaseUrl: "https://events.example.com",
+  updatedAt: "2026-07-20T16:00:00.000Z",
+};
+
+const log = {
+  id: "log-1",
+  entryType: "CONSOLE",
+  clientTime: "2026-07-20T16:30:00.000Z",
+  receivedAt: "2026-07-20T16:30:01.000Z",
+  deviceIp: "203.0.113.4",
+  message: "Checkout completed",
+  level: "info",
+  category: "checkout",
+  eventName: null,
+  eventKind: null,
+  screenName: null,
+  buildId: "build-1",
+  sessionId: "session-1",
+  attributes: { device: { model: "iPhone" } },
+  defaultParameters: {},
+  additionalParameters: {},
+  highlightColor: null,
+  separatorKind: null,
+  separatorName: null,
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  request.mockImplementation((operation: string) => {
+    if (operation.includes("query TelemetryConfiguration")) {
+      return {
+        telemetrySettings: settings,
+        telemetryViewSettings: {
+          view: "CONSOLE",
+          columns: [
+            "time",
+            "level",
+            "category",
+            "message",
+            "buildId",
+            "sessionId",
+          ],
+          timeFormat: "12",
+          activeColumnPresetId: null,
+          activeSavedFilterId: null,
+        },
+        telemetryColumnPresets: [],
+        telemetrySavedFilters: [],
+        telemetryFacets: {
+          level: ["info"],
+          category: ["checkout"],
+          deviceIp: ["203.0.113.4"],
+          buildId: ["build-1"],
+          sessionId: ["session-1"],
+        },
+        telemetryFields: [
+          "message",
+          "level",
+          "category",
+          "buildId",
+          "sessionId",
+          "attributes.device.model",
+        ],
+      };
+    }
+    if (operation.includes("query TelemetryTimeline")) {
+      return {
+        telemetryTimeline: {
+          items: [log],
+          nextCursor: null,
+          matchingCount: 1,
+          totalCount: 1,
+        },
+      };
+    }
+    if (operation.includes("mutation SaveTelemetryViewSettings")) {
+      return {
+        saveTelemetryViewSettings: {
+          view: "CONSOLE",
+          columns: [
+            "time",
+            "level",
+            "category",
+            "message",
+            "buildId",
+            "sessionId",
+          ],
+          timeFormat: "24",
+          activeColumnPresetId: null,
+          activeSavedFilterId: null,
+        },
+      };
+    }
+    throw new Error(`Unexpected operation: ${operation}`);
+  });
+});
+
+afterEach(() => cleanup());
+
+describe("TelemetryPage", () => {
+  test("renders the console timeline, facets, counts, and expanded dictionaries", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Console Logs" }),
+    ).toBeTruthy();
+    expect(await screen.findByText("Checkout completed")).toBeTruthy();
+    expect(screen.getByText("1 of 1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Level/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Message" })).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Checkout completed"));
+    expect(await screen.findByText("203.0.113.4")).toBeTruthy();
+    expect(screen.getByText("attributes.device.model")).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Add attributes.device.model column",
+      }),
+    ).toBeTruthy();
+  });
+
+  test("sends text, glob, or regex search through the shared timeline input", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    const search = await screen.findByRole("textbox", {
+      name: "Search telemetry",
+    });
+    fireEvent.change(search, { target: { value: "Checkout" } });
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("query TelemetryTimeline"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            search: "Checkout",
+            searchMode: "TEXT",
+          }),
+        }),
+      ),
+    );
+  });
+
+  test("opens the shadcn advanced-filter Sheet and column manager", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    await screen.findByText("Checkout completed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(
+      await screen.findByRole("heading", { name: "Advanced filters" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    expect((await screen.findByRole("dialog")).textContent).toContain(
+      "Manage columns",
+    );
+  });
+});
