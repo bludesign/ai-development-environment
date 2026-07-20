@@ -282,9 +282,7 @@ describe("StartBuildDialog", () => {
     expect(
       await screen.findByRole("option", { name: "Any Physical iOS Device" }),
     ).toBeDefined();
-    expect(
-      screen.getByRole("option", { name: /iPhone/ }),
-    ).toBeDefined();
+    expect(screen.getByRole("option", { name: /iPhone/ })).toBeDefined();
     fireEvent.click(screen.getByRole("option", { name: /iPhone/ }));
 
     fireEvent.pointerDown(destinationType, {
