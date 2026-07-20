@@ -3,6 +3,7 @@
 import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
 import {
   CircleOff,
+  ChevronDown,
   Hammer,
   Plus,
   RefreshCw,
@@ -17,6 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -730,35 +738,47 @@ function BuildConfigurationDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>{t("icon")}</Label>
-              <Select onValueChange={setIconKey} value={iconKey}>
-                <SelectTrigger>
-                  <span className="flex min-w-0 items-center gap-2">
-                    {iconKey === "none" ? (
-                      <CircleOff className="size-4 shrink-0" />
-                    ) : (
-                      <ConfigurationIcon iconKey={iconKey} />
-                    )}
-                    <span className="truncate">
-                      {t(`configurationIcons.${iconKey}`)}
+              <Label htmlFor="configuration-icon">{t("icon")}</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`${t("icon")}: ${t(`configurationIcons.${iconKey}`)}`}
+                    className="justify-between"
+                    id="configuration-icon"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {iconKey === "none" ? (
+                        <CircleOff className="size-4 shrink-0" />
+                      ) : (
+                        <ConfigurationIcon iconKey={iconKey} />
+                      )}
+                      <span className="truncate">
+                        {t(`configurationIcons.${iconKey}`)}
+                      </span>
                     </span>
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
-                    <SelectItem key={value} value={value}>
-                      <span className="flex items-center gap-2">
+                    <ChevronDown className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-56">
+                  <DropdownMenuRadioGroup
+                    onValueChange={setIconKey}
+                    value={iconKey}
+                  >
+                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
                         {value === "none" ? (
                           <CircleOff className="size-4" />
                         ) : (
                           <ConfigurationIcon iconKey={value} />
                         )}
                         {t(`configurationIcons.${value}`)}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
           <Card>
