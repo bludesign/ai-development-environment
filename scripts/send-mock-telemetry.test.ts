@@ -40,7 +40,9 @@ describe("send-mock-telemetry", () => {
       "http://127.0.0.1:3000/api/telemetry/console-logs",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining('"message":"Mock console log 4"'),
+        body: expect.stringContaining(
+          '"message":"Mock console log 4: the simulated debug operation',
+        ),
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

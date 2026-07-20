@@ -1910,6 +1910,7 @@
     "caseSensitive": "Respecter la casse",
     "filters": "Filtres",
     "columnsAction": "Colonnes",
+    "removeColumn": "Retirer la colonne {column}",
     "export": "Exporter",
     "edit": "Modifier",
     "done": "Terminé",

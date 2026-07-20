@@ -280,11 +280,15 @@ function parameterValues(entry: TelemetryEntryView) {
 
 function parameterSummary(entry: TelemetryEntryView) {
   return parameterValues(entry)
-    .map(
-      ([key, value]) =>
-        `${key.replace(/^(default|additional)Parameters\.?/, "")}: ${display(value)}`,
-    )
+    .map(([key, value]) => `${telemetryPathLabel(key)}: ${display(value)}`)
     .join(" • ");
+}
+
+export function telemetryPathLabel(path: string): string {
+  return path.replace(
+    /^(?:attributes|defaultParameters|additionalParameters)(?:\.|(?=\[))/,
+    "",
+  );
 }
 
 function columnLabel(column: string, t: ReturnType<typeof useTranslations>) {
@@ -309,14 +313,7 @@ function columnLabel(column: string, t: ReturnType<typeof useTranslations>) {
     detail: t("columns.detail"),
   };
   if (known[column]) return known[column];
-  return column
-    .replace(/^attributes[.[]/, `${t("columns.attribute")}: `)
-    .replace(/^defaultParameters[.[]/, `${t("columns.defaultParameter")}: `)
-    .replace(
-      /^additionalParameters[.[]/,
-      `${t("columns.additionalParameter")}: `,
-    )
-    .replace(/]$/g, "");
+  return telemetryPathLabel(column);
 }
 
 export function TelemetryPage({ view }: { view: TelemetryView }) {
@@ -631,6 +628,16 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
   const addColumn = (column: string) => {
     if (columns.includes(column)) return;
     void saveViewSettings({ columns: [...columns, column] }).catch((value) =>
+      setError(value instanceof Error ? value.message : String(value)),
+    );
+  };
+
+  const removeColumn = (column: string) => {
+    if (columns.length <= 1) return;
+    void saveViewSettings({
+      columns: columns.filter((candidate) => candidate !== column),
+      activeColumnPresetId: null,
+    }).catch((value) =>
       setError(value instanceof Error ? value.message : String(value)),
     );
   };
@@ -1006,7 +1013,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {editMode && (
-                  <TableHead className="w-10">
+                  <TableHead className="h-8 w-8 px-2">
                     <Checkbox
                       aria-label={t("selectAll")}
                       checked={
@@ -1028,12 +1035,29 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                     />
                   </TableHead>
                 )}
-                <TableHead className="w-10">
+                <TableHead className="h-8 w-8 px-1">
                   <span className="sr-only">{t("expand")}</span>
                 </TableHead>
-                {columns.map((column) => (
-                  <TableHead key={column}>{columnLabel(column, t)}</TableHead>
-                ))}
+                {columns.map((column) => {
+                  const label = columnLabel(column, t);
+                  return (
+                    <TableHead className="group h-8 px-2" key={column}>
+                      <span className="flex items-center gap-1">
+                        <span>{label}</span>
+                        <Button
+                          aria-label={t("removeColumn", { column: label })}
+                          className="size-5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                          disabled={columns.length <= 1}
+                          onClick={() => removeColumn(column)}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <X className="size-3" />
+                        </Button>
+                      </span>
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1103,7 +1127,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                         )}
                         <TableRow className="bg-muted/40 hover:bg-muted/50">
                           {editMode && (
-                            <TableCell>
+                            <TableCell className="px-2 py-1.5">
                               <Checkbox
                                 aria-label={t("selectSeparator", {
                                   name: entry.separatorName || t("separator"),
@@ -1121,7 +1145,7 @@ export function TelemetryPage({ view }: { view: TelemetryView }) {
                           )}
                           <TableCell
                             colSpan={columns.length + 1}
-                            className="py-2 text-xs font-medium text-muted-foreground"
+                            className="px-2 py-1.5 text-xs font-medium text-muted-foreground"
                           >
                             <span className="flex items-center gap-2">
                               <span className="h-px flex-1 bg-border" />
@@ -1380,7 +1404,7 @@ function DayRow({
   return (
     <TableRow className="bg-muted/20 hover:bg-muted/20">
       {editMode && (
-        <TableCell className="py-1.5">
+        <TableCell className="px-2 py-1.5">
           <Checkbox
             aria-label={t("selectDay", { day })}
             checked={checked}
@@ -1389,7 +1413,7 @@ function DayRow({
         </TableCell>
       )}
       <TableCell
-        className="py-1.5 text-xs text-muted-foreground"
+        className="px-2 py-1.5 text-xs text-muted-foreground"
         colSpan={colSpan - (editMode ? 1 : 0)}
       >
         {day}
@@ -1436,10 +1460,22 @@ function TelemetryRow({
           "cursor-pointer",
           entry.highlightColor && HIGHLIGHT_CLASSES[entry.highlightColor],
         )}
-        onClick={onToggle}
+        onClick={(event) => {
+          if (
+            (event.target as HTMLElement).closest(
+              '[data-slot="context-menu-content"]',
+            )
+          ) {
+            return;
+          }
+          onToggle();
+        }}
       >
         {editMode && (
-          <TableCell onClick={(event) => event.stopPropagation()}>
+          <TableCell
+            className="px-2 py-1.5"
+            onClick={(event) => event.stopPropagation()}
+          >
             <Checkbox
               aria-label={t("selectRow")}
               checked={selected}
@@ -1447,7 +1483,7 @@ function TelemetryRow({
             />
           </TableCell>
         )}
-        <TableCell className="pr-0">
+        <TableCell className="w-8 px-1 py-1">
           <Button
             aria-expanded={expanded}
             aria-label={expanded ? t("collapse") : t("expand")}
@@ -1455,6 +1491,7 @@ function TelemetryRow({
               event.stopPropagation();
               onToggle();
             }}
+            className="size-6"
             size="icon-sm"
             variant="ghost"
           >
@@ -1466,8 +1503,9 @@ function TelemetryRow({
           return (
             <TableCell
               className={cn(
+                "px-2 py-1.5",
                 ["message", "detail", "parameters"].includes(column) &&
-                  "max-w-[36rem] whitespace-normal",
+                  "max-w-[36rem]",
               )}
               key={column}
             >
@@ -1490,7 +1528,7 @@ function TelemetryRow({
                   <span
                     className={cn(
                       ["message", "detail", "parameters"].includes(column) &&
-                        "line-clamp-2",
+                        "block truncate",
                     )}
                   >
                     {value || "—"}
@@ -1570,7 +1608,7 @@ function ValueContext({
       <ContextMenuTrigger asChild>
         <div>{children}</div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent onClick={(event) => event.stopPropagation()}>
         <ContextMenuItem onSelect={() => void copyText(`${label}: ${value}`)}>
           <Clipboard /> {t("copyColumnValue", { label })}
         </ContextMenuItem>
@@ -1629,50 +1667,17 @@ function ExpandedEntry({
   ];
   return (
     <div className="space-y-4 border-t bg-muted/15 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-muted-foreground">
-            {entry.entryType === "CONSOLE"
-              ? t("columns.message")
-              : t("columns.detail")}
-          </p>
-          <p className="mt-1 whitespace-pre-wrap break-words">
-            {entry.entryType === "CONSOLE"
-              ? entry.message
-              : `${entry.eventName} (${entry.screenName})`}
-          </p>
-        </div>
-        <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
-            {t("highlight")}
-          </p>
-          <ToggleGroup
-            onValueChange={(value) =>
-              value && onHighlight(value === "none" ? null : value)
-            }
-            size="sm"
-            spacing={1}
-            type="single"
-            value={entry.highlightColor ?? "none"}
-            variant="outline"
-          >
-            <ToggleGroupItem
-              aria-label={t("clearHighlight")}
-              className="size-7 p-0"
-              value="none"
-            >
-              <X className="size-3" />
-            </ToggleGroupItem>
-            {TELEMETRY_COLORS.map((color) => (
-              <ToggleGroupItem
-                aria-label={color}
-                className={cn("size-7 p-0", SWATCH_CLASSES[color])}
-                key={color}
-                value={color}
-              />
-            ))}
-          </ToggleGroup>
-        </div>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-muted-foreground">
+          {entry.entryType === "CONSOLE"
+            ? t("columns.message")
+            : t("columns.detail")}
+        </p>
+        <p className="mt-1 whitespace-pre-wrap break-words">
+          {entry.entryType === "CONSOLE"
+            ? entry.message
+            : `${entry.eventName} (${entry.screenName})`}
+        </p>
       </div>
       <dl className="grid gap-3 rounded-lg border bg-background/70 p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         {metadata.map(([label, value]) => (
@@ -1708,6 +1713,38 @@ function ExpandedEntry({
           />
         </div>
       )}
+      <div className="flex items-center gap-2 overflow-x-auto border-t pt-3">
+        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+          {t("highlight")}
+        </span>
+        <ToggleGroup
+          className="flex-nowrap justify-start"
+          onValueChange={(value) =>
+            value && onHighlight(value === "none" ? null : value)
+          }
+          size="sm"
+          spacing={1}
+          type="single"
+          value={entry.highlightColor ?? "none"}
+          variant="outline"
+        >
+          <ToggleGroupItem
+            aria-label={t("clearHighlight")}
+            className="size-5 rounded-sm p-0"
+            value="none"
+          >
+            <X className="size-2.5" />
+          </ToggleGroupItem>
+          {TELEMETRY_COLORS.map((color) => (
+            <ToggleGroupItem
+              aria-label={color}
+              className={cn("size-5 rounded-sm p-0", SWATCH_CLASSES[color])}
+              key={color}
+              value={color}
+            />
+          ))}
+        </ToggleGroup>
+      </div>
     </div>
   );
 }
@@ -1728,7 +1765,7 @@ function DictionaryBlock({
   const t = useTranslations("telemetry");
   const fields = flattenTelemetryObject(prefix, value);
   const lines = Object.entries(fields)
-    .map(([key, item]) => `${key}: ${display(item)}`)
+    .map(([key, item]) => `${telemetryPathLabel(key)}: ${display(item)}`)
     .join("\n");
   return (
     <ContextMenu>
@@ -1741,20 +1778,18 @@ function DictionaryBlock({
             <dl className="space-y-1 text-xs">
               {Object.entries(fields).map(([key, item]) => {
                 const text = display(item);
+                const displayKey = telemetryPathLabel(key);
                 return (
                   <ParameterContext
                     field={key}
                     filterByValue={filterByValue}
                     key={key}
+                    label={displayKey}
                     value={text}
                   >
-                    <dt className="min-w-0 flex-1 break-all font-mono text-muted-foreground">
-                      {key}
-                    </dt>
-                    <dd className="max-w-[55%] break-all text-right">{text}</dd>
                     <Button
-                      aria-label={t("addColumn", { key })}
-                      className="size-6 opacity-60 group-hover:opacity-100"
+                      aria-label={t("addColumn", { key: displayKey })}
+                      className="size-5 opacity-60 group-hover:opacity-100"
                       onClick={() => addColumn(key)}
                       size="icon-sm"
                       variant="ghost"
@@ -1762,14 +1797,18 @@ function DictionaryBlock({
                       <Plus className="size-3" />
                     </Button>
                     <Button
-                      aria-label={t("filterParameter", { key })}
-                      className="size-6 opacity-60 group-hover:opacity-100"
+                      aria-label={t("filterParameter", { key: displayKey })}
+                      className="size-5 opacity-60 group-hover:opacity-100"
                       onClick={() => filterByValue(key, text)}
                       size="icon-sm"
                       variant="ghost"
                     >
                       <Filter className="size-3" />
                     </Button>
+                    <dt className="min-w-0 break-all font-mono text-muted-foreground">
+                      {displayKey}
+                    </dt>
+                    <dd className="min-w-0 break-all pl-2 text-left">{text}</dd>
                   </ParameterContext>
                 );
               })}
@@ -1793,11 +1832,13 @@ function DictionaryBlock({
 
 function ParameterContext({
   field,
+  label,
   value,
   filterByValue,
   children,
 }: {
   field: string;
+  label: string;
   value: string;
   filterByValue: (field: string, value: string) => void;
   children: ReactNode;
@@ -1806,11 +1847,13 @@ function ParameterContext({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="group flex items-start gap-2">{children}</div>
+        <div className="group grid grid-cols-[1.25rem_1.25rem_minmax(0,max-content)_minmax(0,1fr)] items-start gap-x-0.5">
+          {children}
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={() => void copyText(`${field}: ${value}`)}>
-          <Clipboard /> {t("copyParameterValue", { key: field })}
+        <ContextMenuItem onSelect={() => void copyText(`${label}: ${value}`)}>
+          <Clipboard /> {t("copyParameterValue", { key: label })}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void copyText(value)}>
           <Clipboard /> {t("copyValue")}

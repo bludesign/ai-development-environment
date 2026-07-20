@@ -2096,6 +2096,7 @@ const mockTranslations = {
     caseSensitive: "Case sensitive",
     filters: "Filters",
     columnsAction: "Columns",
+    removeColumn: "Remove {column} column",
     export: "Export",
     edit: "Edit",
     done: "Done",

@@ -1910,6 +1910,7 @@
     "caseSensitive": "Distinguir mayúsculas y minúsculas",
     "filters": "Filtros",
     "columnsAction": "Columnas",
+    "removeColumn": "Quitar columna {column}",
     "export": "Exportar",
     "edit": "Editar",
     "done": "Listo",

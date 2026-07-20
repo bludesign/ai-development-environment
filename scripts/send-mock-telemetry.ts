@@ -58,9 +58,10 @@ export function mockTelemetryPayloads(
   const screenName = screens[sequence % screens.length]!;
   const time = now.toISOString();
   const buildId = "mock-build";
+  const message = `Mock console log ${sequence}: the simulated ${level} operation on ${screenName} completed after processing a deliberately verbose test payload. This longer message is intended to exercise truncation, compact row sizing, expansion, searching, copying, and exported table layout without requiring a real application log.`;
   return {
     consoleLog: {
-      message: `Mock console log ${sequence}`,
+      message,
       time,
       level,
       category: sequence % 2 === 0 ? "mock.network" : "mock.lifecycle",

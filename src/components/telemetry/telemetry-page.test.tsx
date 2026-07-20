@@ -60,73 +60,80 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   };
-  request.mockImplementation((operation: string) => {
-    if (operation.includes("query TelemetryConfiguration")) {
-      return {
-        telemetrySettings: settings,
-        telemetryViewSettings: {
-          view: "CONSOLE",
-          columns: [
-            "time",
+  request.mockImplementation(
+    (
+      operation: string,
+      variables?: {
+        input?: { columns?: string[]; timeFormat?: "12" | "24" };
+      },
+    ) => {
+      if (operation.includes("query TelemetryConfiguration")) {
+        return {
+          telemetrySettings: settings,
+          telemetryViewSettings: {
+            view: "CONSOLE",
+            columns: [
+              "time",
+              "level",
+              "category",
+              "message",
+              "buildId",
+              "sessionId",
+            ],
+            timeFormat: "12",
+            activeColumnPresetId: null,
+            activeSavedFilterId: null,
+          },
+          telemetryColumnPresets: [],
+          telemetrySavedFilters: [],
+          telemetryFacets: {
+            level: ["info"],
+            category: ["checkout"],
+            deviceIp: ["203.0.113.4"],
+            buildId: ["build-1"],
+            sessionId: ["session-1"],
+          },
+          telemetryFields: [
+            "message",
             "level",
             "category",
-            "message",
             "buildId",
             "sessionId",
+            "attributes.device.model",
           ],
-          timeFormat: "12",
-          activeColumnPresetId: null,
-          activeSavedFilterId: null,
-        },
-        telemetryColumnPresets: [],
-        telemetrySavedFilters: [],
-        telemetryFacets: {
-          level: ["info"],
-          category: ["checkout"],
-          deviceIp: ["203.0.113.4"],
-          buildId: ["build-1"],
-          sessionId: ["session-1"],
-        },
-        telemetryFields: [
-          "message",
-          "level",
-          "category",
-          "buildId",
-          "sessionId",
-          "attributes.device.model",
-        ],
-      };
-    }
-    if (operation.includes("query TelemetryTimeline")) {
-      return {
-        telemetryTimeline: {
-          items: [log],
-          nextCursor: null,
-          matchingCount: 1,
-          totalCount: 1,
-        },
-      };
-    }
-    if (operation.includes("mutation SaveTelemetryViewSettings")) {
-      return {
-        saveTelemetryViewSettings: {
-          view: "CONSOLE",
-          columns: [
-            "time",
-            "level",
-            "category",
-            "message",
-            "buildId",
-            "sessionId",
-          ],
-          timeFormat: "24",
-          activeColumnPresetId: null,
-          activeSavedFilterId: null,
-        },
-      };
-    }
-    throw new Error(`Unexpected operation: ${operation}`);
-  });
+        };
+      }
+      if (operation.includes("query TelemetryTimeline")) {
+        return {
+          telemetryTimeline: {
+            items: [log],
+            nextCursor: null,
+            matchingCount: 1,
+            totalCount: 1,
+          },
+        };
+      }
+      if (operation.includes("mutation SaveTelemetryViewSettings")) {
+        return {
+          saveTelemetryViewSettings: {
+            view: "CONSOLE",
+            columns: variables?.input?.columns ?? [
+              "time",
+              "level",
+              "category",
+              "message",
+              "buildId",
+              "sessionId",
+            ],
+            timeFormat: variables?.input?.timeFormat ?? "12",
+            activeColumnPresetId: null,
+            activeSavedFilterId: null,
+          },
+        };
+      }
+      throw new Error(`Unexpected operation: ${operation}`);
+    },
+  );
 });
 
 afterEach(() => cleanup());
@@ -139,18 +146,52 @@ describe("TelemetryPage", () => {
       await screen.findByRole("heading", { name: "Console Logs" }),
     ).toBeTruthy();
     expect(await screen.findByText("Checkout completed")).toBeTruthy();
+    expect(
+      screen.getByText("Checkout completed").closest("td")?.className,
+    ).toContain("py-1.5");
     expect(screen.getByText("1 of 1")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Level/ })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Message" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Level", exact: true }),
+    ).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Message/ })).toBeTruthy();
 
     fireEvent.click(screen.getByText("Checkout completed"));
     expect(await screen.findByText("203.0.113.4")).toBeTruthy();
-    expect(screen.getByText("attributes.device.model")).toBeTruthy();
     expect(
-      screen.getByRole("button", {
-        name: "Add attributes.device.model column",
-      }),
+      screen.getByRole("radio", { name: "Clear highlight" }).className,
+    ).toContain("size-5");
+    expect(screen.getByText("device.model")).toBeTruthy();
+    const addColumn = screen.getByRole("button", {
+      name: "Add device.model column",
+    });
+    fireEvent.click(addColumn);
+    const removeColumn = await screen.findByRole("button", {
+      name: "Remove device.model column",
+    });
+    expect(
+      screen.getByRole("columnheader", { name: /device\.model/ }),
     ).toBeTruthy();
+    fireEvent.click(removeColumn);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "Remove device.model column",
+        }),
+      ).toBeNull(),
+    );
+  });
+
+  test("does not expand a row when a context-menu action is selected", async () => {
+    render(<TelemetryPage view="CONSOLE" />);
+    const message = await screen.findByText("Checkout completed");
+
+    fireEvent.contextMenu(message);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy value" }),
+    );
+
+    expect(copyText).toHaveBeenCalledWith("Checkout completed");
+    expect(screen.queryByText("203.0.113.4")).toBeNull();
   });
 
   test("sends text, glob, or regex search through the shared timeline input", async () => {

@@ -1910,6 +1910,7 @@
     "caseSensitive": "Groß-/Kleinschreibung beachten",
     "filters": "Filteroptionen",
     "columnsAction": "Spalten",
+    "removeColumn": "Spalte {column} entfernen",
     "export": "Exportieren",
     "edit": "Bearbeiten",
     "done": "Fertig",
