@@ -6,9 +6,9 @@ import {
   profileCoversBundle,
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
-import { ScanSearch } from "lucide-react";
+import { Plus, ScanSearch, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,11 @@ export function ExportSettingsForm({
   const [requirementsError, setRequirementsError] = useState<string | null>(
     null,
   );
+  const [manualBundleId, setManualBundleId] = useState("");
+  const [manualBundleIds, setManualBundleIds] = useState<Set<string>>(
+    () => new Set(Object.keys(value.provisioningProfiles)),
+  );
+  const manualBundleInputId = useId();
   const [inventory, setInventory] = useState<{
     agentCount: number;
     certificates: Array<{
@@ -183,25 +188,35 @@ export function ExportSettingsForm({
   const selectedCertificate = inventory?.certificates.find(
     (certificate) => certificate.sha1 === value.signingCertificate,
   );
-  const selectedProfiles = Object.values(value.provisioningProfiles).flatMap(
-    (uuid) => {
-      const profile = inventory?.profiles.find((entry) => entry.uuid === uuid);
-      return profile ? [profile] : [];
-    },
-  );
+  const selectedProfileIds = Object.values(value.provisioningProfiles);
+  const selectedProfiles = selectedProfileIds.flatMap((uuid) => {
+    const profile = inventory?.profiles.find((entry) => entry.uuid === uuid);
+    return profile ? [profile] : [];
+  });
   const knowsAcceptedCertificates =
-    selectedProfiles.length > 0 &&
+    selectedProfileIds.length > 0 &&
+    selectedProfiles.length === selectedProfileIds.length &&
     selectedProfiles.every((profile) => profile.certificateSha1s.length > 0);
-  const availableCertificates = (inventory?.certificates ?? []).filter(
-    (certificate) =>
-      certificate.hasPrivateKey &&
-      (knowsAcceptedCertificates
-        ? selectedProfiles.every((profile) =>
-            profile.certificateSha1s
-              .map((sha1) => sha1.toUpperCase())
-              .includes(certificate.sha1.toUpperCase()),
-          )
-        : !value.teamId || certificate.teamId === value.teamId),
+  const certificateIsRecommended = (
+    certificate: NonNullable<typeof inventory>["certificates"][number],
+  ) =>
+    knowsAcceptedCertificates
+      ? selectedProfiles.every((profile) =>
+          profile.certificateSha1s
+            .map((sha1) => sha1.toUpperCase())
+            .includes(certificate.sha1.toUpperCase()),
+        )
+      : !value.teamId || certificate.teamId === value.teamId;
+  const availableCertificates = (inventory?.certificates ?? [])
+    .filter((certificate) => certificate.hasPrivateKey)
+    .sort((left, right) => {
+      const recommendationOrder =
+        Number(certificateIsRecommended(right)) -
+        Number(certificateIsRecommended(left));
+      return recommendationOrder || left.name.localeCompare(right.name);
+    });
+  const selectedCertificateAvailable = availableCertificates.some(
+    (certificate) => certificate.sha1 === value.signingCertificate,
   );
   const update = <K extends keyof ExportSettingsValue>(
     key: K,
@@ -225,13 +240,83 @@ export function ExportSettingsForm({
         (right.expiresAt ?? "").localeCompare(left.expiresAt ?? ""),
       );
 
+  const selectableProfiles = (requirement: BuildSigningRequirement) => {
+    const recommendedIds = new Set(
+      matchingProfiles(requirement).map((profile) => profile.uuid),
+    );
+    return (inventory?.profiles ?? [])
+      .filter((profile) => !profile.expired)
+      .sort((left, right) => {
+        const recommendationOrder =
+          Number(recommendedIds.has(right.uuid)) -
+          Number(recommendedIds.has(left.uuid));
+        return (
+          recommendationOrder ||
+          (right.expiresAt ?? "").localeCompare(left.expiresAt ?? "") ||
+          left.name.localeCompare(right.name)
+        );
+      });
+  };
+
+  const addManualBundleId = () => {
+    const bundleId = manualBundleId.trim();
+    if (
+      !bundleId ||
+      requirements.some((requirement) => requirement.bundleId === bundleId)
+    ) {
+      return;
+    }
+    setRequirements((current) => [
+      ...current,
+      {
+        bundleId,
+        name: bundleId,
+        target: bundleId,
+        platform: null,
+        teamId: value.teamId,
+        provisioningProfileSpecifier: null,
+      },
+    ]);
+    setManualBundleIds((current) => new Set(current).add(bundleId));
+    setManualBundleId("");
+  };
+
+  const removeManualBundleId = (bundleId: string) => {
+    setRequirements((current) =>
+      current.filter((requirement) => requirement.bundleId !== bundleId),
+    );
+    setManualBundleIds((current) => {
+      const next = new Set(current);
+      next.delete(bundleId);
+      return next;
+    });
+    const provisioningProfiles = { ...value.provisioningProfiles };
+    delete provisioningProfiles[bundleId];
+    update("provisioningProfiles", provisioningProfiles);
+  };
+
   const parseRequirements = async () => {
     if (!onParseSigningRequirements) return;
     setParsingRequirements(true);
     setRequirementsError(null);
     try {
       const parsed = await onParseSigningRequirements();
-      setRequirements(parsed);
+      const parsedBundleIds = new Set(
+        parsed.map((requirement) => requirement.bundleId),
+      );
+      const preservedManualRequirements = requirements.filter(
+        (requirement) =>
+          manualBundleIds.has(requirement.bundleId) &&
+          !parsedBundleIds.has(requirement.bundleId),
+      );
+      const mergedRequirements = [...parsed, ...preservedManualRequirements];
+      setRequirements(mergedRequirements);
+      setManualBundleIds(
+        (current) =>
+          new Set(
+            [...current].filter((bundleId) => !parsedBundleIds.has(bundleId)),
+          ),
+      );
       setRequirementsParsed(true);
       const parsedTeams = [
         ...new Set(parsed.flatMap((requirement) => requirement.teamId ?? [])),
@@ -239,19 +324,28 @@ export function ExportSettingsForm({
       const nextTeamId =
         value.teamId ?? (parsedTeams.length === 1 ? parsedTeams[0]! : null);
       const provisioningProfiles = Object.fromEntries(
-        parsed.flatMap((requirement) => {
+        mergedRequirements.flatMap((requirement) => {
           const candidates = matchingProfiles(requirement, nextTeamId);
           const existing = value.provisioningProfiles[requirement.bundleId];
           const configured = requirement.provisioningProfileSpecifier;
           const selected =
-            candidates.find((profile) => profile.uuid === existing) ??
+            (existing
+              ? (inventory?.profiles.find(
+                  (profile) => profile.uuid === existing && !profile.expired,
+                ) ?? existing)
+              : null) ??
             candidates.find(
               (profile) =>
                 profile.uuid === configured || profile.name === configured,
             ) ??
             candidates[0];
           return selected
-            ? ([[requirement.bundleId, selected.uuid]] as const)
+            ? ([
+                [
+                  requirement.bundleId,
+                  typeof selected === "string" ? selected : selected.uuid,
+                ],
+              ] as const)
             : [];
         }),
       );
@@ -364,9 +458,24 @@ export function ExportSettingsForm({
               <SelectItem value="AUTOMATIC">
                 {t("certificateAutomatic")}
               </SelectItem>
+              {value.signingCertificate && !selectedCertificateAvailable && (
+                <SelectItem value={value.signingCertificate}>
+                  {value.signingCertificate} · {t("savedValueUnavailable")}
+                </SelectItem>
+              )}
               {availableCertificates.map((certificate) => (
-                <SelectItem key={certificate.sha1} value={certificate.sha1}>
+                <SelectItem
+                  className={
+                    certificateIsRecommended(certificate)
+                      ? undefined
+                      : "text-muted-foreground"
+                  }
+                  key={certificate.sha1}
+                  value={certificate.sha1}
+                >
                   {certificate.name} · {certificate.sha1.slice(0, 10)}…
+                  {!certificateIsRecommended(certificate) &&
+                    ` · ${t("certificateMayNotMatch")}`}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -420,6 +529,40 @@ export function ExportSettingsForm({
               </Button>
             )}
           </div>
+          <div className="grid gap-2 rounded-lg border border-dashed p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="space-y-2">
+              <Label htmlFor={manualBundleInputId}>
+                {t("manualBundleIdentifier")}
+              </Label>
+              <Input
+                disabled={disabled}
+                id={manualBundleInputId}
+                onChange={(event) => setManualBundleId(event.target.value)}
+                placeholder={t("manualBundleIdentifierPlaceholder")}
+                value={manualBundleId}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("manualBundleIdentifierHelp")}
+              </p>
+            </div>
+            <Button
+              className="sm:self-end"
+              disabled={
+                disabled ||
+                !manualBundleId.trim() ||
+                requirements.some(
+                  (requirement) =>
+                    requirement.bundleId === manualBundleId.trim(),
+                )
+              }
+              onClick={addManualBundleId}
+              type="button"
+              variant="outline"
+            >
+              <Plus />
+              {t("addBundleIdentifier")}
+            </Button>
+          </div>
           {requirementsError && (
             <Alert variant="destructive">
               <AlertDescription>{requirementsError}</AlertDescription>
@@ -437,30 +580,50 @@ export function ExportSettingsForm({
           )}
           {requirements.map((requirement) => {
             const candidates = matchingProfiles(requirement);
+            const candidateIds = new Set(
+              candidates.map((profile) => profile.uuid),
+            );
+            const profiles = selectableProfiles(requirement);
             const selected =
               value.provisioningProfiles[requirement.bundleId] ?? "";
-            const selectedAvailable = candidates.some(
+            const selectedAvailable = profiles.some(
               (profile) => profile.uuid === selected,
             );
             return (
               <div className="rounded-lg border p-3" key={requirement.bundleId}>
-                <div className="mb-2">
-                  <p className="font-medium">{requirement.name}</p>
-                  <p className="break-all font-mono text-xs text-muted-foreground">
-                    {requirement.bundleId}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {[
-                      requirement.target,
-                      requirement.platform,
-                      requirement.teamId,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">{requirement.name}</p>
+                    <p className="break-all font-mono text-xs text-muted-foreground">
+                      {requirement.bundleId}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {[
+                        requirement.target,
+                        requirement.platform,
+                        requirement.teamId,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                  {manualBundleIds.has(requirement.bundleId) && (
+                    <Button
+                      aria-label={t("removeBundleIdentifier", {
+                        bundleId: requirement.bundleId,
+                      })}
+                      disabled={disabled}
+                      onClick={() => removeManualBundleId(requirement.bundleId)}
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
                 </div>
                 <Select
-                  disabled={disabled || !candidates.length}
+                  disabled={disabled || !inventory}
                   onValueChange={(profileId) =>
                     update("provisioningProfiles", {
                       ...value.provisioningProfiles,
@@ -478,9 +641,19 @@ export function ExportSettingsForm({
                         {selected} · {t("savedValueUnavailable")}
                       </SelectItem>
                     )}
-                    {candidates.map((profile) => (
-                      <SelectItem key={profile.uuid} value={profile.uuid}>
+                    {profiles.map((profile) => (
+                      <SelectItem
+                        className={
+                          candidateIds.has(profile.uuid)
+                            ? undefined
+                            : "text-muted-foreground"
+                        }
+                        key={profile.uuid}
+                        value={profile.uuid}
+                      >
                         {profileLabel(profile)}
+                        {!candidateIds.has(profile.uuid) &&
+                          ` · ${t("profileMayNotMatch")}`}
                       </SelectItem>
                     ))}
                   </SelectContent>

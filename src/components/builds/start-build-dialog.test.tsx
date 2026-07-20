@@ -151,6 +151,13 @@ beforeEach(() => {
             hasPrivateKey: true,
             installedAgents: [{ id: "agent-1" }],
           },
+          {
+            sha1: "OTHER-CERT",
+            name: "Apple Distribution: Other Team (OTHER123)",
+            teamId: "OTHER123",
+            hasPrivateKey: true,
+            installedAgents: [{ id: "agent-1" }],
+          },
         ],
         signingProfiles: [
           {
@@ -175,6 +182,18 @@ beforeEach(() => {
             expiresAt: "2030-01-01T00:00:00.000Z",
             expired: false,
             certificateSha1s: ["API-CERT"],
+            installedAgents: [{ id: "agent-1" }],
+          },
+          {
+            uuid: "PROFILE-OTHER",
+            name: "Other Enterprise Profile",
+            profileType: "ENTERPRISE",
+            bundleId: "com.example.other",
+            teamId: "OTHER123",
+            platforms: ["iOS"],
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            expired: false,
+            certificateSha1s: ["OTHER-CERT"],
             installedAgents: [{ id: "agent-1" }],
           },
         ],
@@ -217,7 +236,7 @@ afterEach(() => {
 });
 
 describe("StartBuildDialog", () => {
-  test("uses a wide dialog and parses provisioning profile requirements", async () => {
+  test("parses signing requirements while keeping manual signing overrides available", async () => {
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
     );
@@ -273,7 +292,55 @@ describe("StartBuildDialog", () => {
       name: /Apple Development: Created via API/,
     });
     expect(apiCertificate).toBeDefined();
-    fireEvent.click(apiCertificate);
+    const otherCertificate = screen.getByRole("option", {
+      name: /Apple Distribution: Other Team.*May not match selected profiles/,
+    });
+    expect(otherCertificate.className).toContain("text-muted-foreground");
+    expect(otherCertificate.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(otherCertificate);
+
+    fireEvent.change(screen.getByLabelText("Bundle identifier to add"), {
+      target: { value: "com.example.app.MissingExtension" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add bundle identifier" }),
+    );
+    const [manualBundleId] = await screen.findAllByText(
+      "com.example.app.MissingExtension",
+    );
+    const manualBundleCard = manualBundleId.closest(
+      "div.rounded-lg",
+    ) as HTMLElement;
+    fireEvent.pointerDown(within(manualBundleCard).getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const otherProfile = await screen.findByRole("option", {
+      name: /Other Enterprise Profile.*May not match this bundle/,
+    });
+    expect(otherProfile.className).toContain("text-muted-foreground");
+    expect(otherProfile.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(otherProfile);
+
+    fireEvent.click(screen.getByRole("button", { name: "Parse again" }));
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          String(query).includes(
+            "mutation InspectStartBuildSigningRequirements",
+          ),
+        ),
+      ).toHaveLength(2),
+    );
+    expect(
+      await screen.findAllByText("com.example.app.MissingExtension"),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", {
+        name: "Remove com.example.app.MissingExtension",
+      }),
+    ).toBeDefined();
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("InspectStartBuildSigningRequirements"),
@@ -300,7 +367,9 @@ describe("StartBuildDialog", () => {
               provisioningProfiles: {
                 "com.example.app": "PROFILE-APP",
                 "com.example.app.WatchKitApp": "PROFILE-WATCH",
+                "com.example.app.MissingExtension": "PROFILE-OTHER",
               },
+              signingCertificate: "OTHER-CERT",
             }),
           }),
         }),
