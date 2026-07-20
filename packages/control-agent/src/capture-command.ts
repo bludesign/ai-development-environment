@@ -24,6 +24,7 @@ export function captureCommand(options: {
     let timedOut = false;
     let cancelled = false;
     let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
     const child = spawn(options.command, options.args, {
       shell: false,
       stdio: [
@@ -47,8 +48,10 @@ export function captureCommand(options: {
     const terminate = () => {
       if (child.exitCode !== null || child.killed) return;
       child.kill("SIGTERM");
-      const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
-      timer.unref();
+      killTimer = setTimeout(() => {
+        if (child.exitCode === null) child.kill("SIGKILL");
+      }, 5_000);
+      killTimer.unref();
     };
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -65,6 +68,7 @@ export function captureCommand(options: {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
       options.signal.removeEventListener("abort", abort);
       reject(error);
     });
@@ -72,6 +76,7 @@ export function captureCommand(options: {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
       options.signal.removeEventListener("abort", abort);
       resolve({
         exitCode,
