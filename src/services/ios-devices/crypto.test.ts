@@ -9,6 +9,7 @@ import {
   X509Certificate,
   X509CertificateGenerator,
 } from "@peculiar/x509";
+import { ContentInfo, SignedData } from "pkijs";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -109,6 +110,24 @@ describe("iOS enrollment crypto", () => {
       xml,
       fixture.leafPem,
       fixture.leafPrivateKeyPem,
+    );
+    const contentInfo = ContentInfo.fromBER(
+      cms.buffer.slice(
+        cms.byteOffset,
+        cms.byteOffset + cms.byteLength,
+      ) as ArrayBuffer,
+    );
+    const signedData = new SignedData({ schema: contentInfo.content });
+    const signer = signedData.signerInfos[0];
+
+    expect(signer?.version).toBe(1);
+    expect(signer?.signatureAlgorithm.algorithmId).toBe("1.2.840.113549.1.1.1");
+    expect(signer?.signedAttrs?.attributes.map((entry) => entry.type)).toEqual(
+      expect.arrayContaining([
+        "1.2.840.113549.1.9.3",
+        "1.2.840.113549.1.9.4",
+        "1.2.840.113549.1.9.5",
+      ]),
     );
 
     await expect(verifyAppleDeviceResponse(cms, fixture.caPem)).resolves.toBe(

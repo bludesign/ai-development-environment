@@ -10,12 +10,15 @@ import {
   X509CertificateGenerator,
 } from "@peculiar/x509";
 import {
+  AlgorithmIdentifier,
+  Attribute,
   Certificate,
   ContentInfo,
   CryptoEngine,
   EncapsulatedContentInfo,
   IssuerAndSerialNumber,
   SignedData,
+  SignedAndUnsignedAttributes,
   SignerInfo,
   type ICryptoEngine,
 } from "pkijs";
@@ -34,6 +37,11 @@ const PROFILE_KEY_ALGORITHM: RsaHashedKeyGenParams = {
   publicExponent: new Uint8Array([1, 0, 1]),
   modulusLength: 2048,
 };
+
+const CMS_CONTENT_TYPE_ATTRIBUTE = "1.2.840.113549.1.9.3";
+const CMS_MESSAGE_DIGEST_ATTRIBUTE = "1.2.840.113549.1.9.4";
+const CMS_SIGNING_TIME_ATTRIBUTE = "1.2.840.113549.1.9.5";
+const RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1";
 
 // Apple documents this legacy CA as the issuer of the identity certificate used
 // to sign a Profile Service response. Its validity dates are intentionally not
@@ -177,6 +185,38 @@ export async function signMobileConfig(
     ["sign"],
   );
   const content = encoder.encode(xml);
+  const contentDigest = await webcrypto.subtle.digest(
+    "SHA-256",
+    exactArrayBuffer(content),
+  );
+  const signerInfo = new SignerInfo({
+    version: 1,
+    sid: new IssuerAndSerialNumber({
+      issuer: certificate.issuer,
+      serialNumber: certificate.serialNumber,
+    }),
+    signedAttrs: new SignedAndUnsignedAttributes({
+      type: 0,
+      attributes: [
+        new Attribute({
+          type: CMS_CONTENT_TYPE_ATTRIBUTE,
+          values: [new asn1js.ObjectIdentifier({ value: ContentInfo.DATA })],
+        }),
+        new Attribute({
+          type: CMS_SIGNING_TIME_ATTRIBUTE,
+          values: [new asn1js.UTCTime({ valueDate: new Date() })],
+        }),
+        new Attribute({
+          type: CMS_MESSAGE_DIGEST_ATTRIBUTE,
+          values: [
+            new asn1js.OctetString({
+              valueHex: contentDigest,
+            }),
+          ],
+        }),
+      ],
+    }),
+  });
   const signedData = new SignedData({
     encapContentInfo: new EncapsulatedContentInfo({
       eContentType: ContentInfo.DATA,
@@ -184,14 +224,7 @@ export async function signMobileConfig(
         valueHex: exactArrayBuffer(content),
       }),
     }),
-    signerInfos: [
-      new SignerInfo({
-        sid: new IssuerAndSerialNumber({
-          issuer: certificate.issuer,
-          serialNumber: certificate.serialNumber,
-        }),
-      }),
-    ],
+    signerInfos: [signerInfo],
     certificates: [certificate],
   });
   await signedData.sign(
@@ -201,6 +234,14 @@ export async function signMobileConfig(
     undefined,
     pkijsCrypto,
   );
+  // OpenSSL and Apple's working Profile Service examples encode RSA as the
+  // generic rsaEncryption algorithm; the digest algorithm is carried
+  // separately in SignerInfo. This is more broadly accepted by iOS than the
+  // combined sha256WithRSAEncryption identifier emitted by WebCrypto.
+  signerInfo.signatureAlgorithm = new AlgorithmIdentifier({
+    algorithmId: RSA_ENCRYPTION_OID,
+    algorithmParams: new asn1js.Null(),
+  });
   const contentInfo = new ContentInfo({
     contentType: ContentInfo.SIGNED_DATA,
     content: signedData.toSchema(true),
