@@ -2120,7 +2120,26 @@
     "confirmPortalDelete": "Confirm Apple portal change",
     "portalDeleteDescription": "This immediately changes the Apple Developer account and can break signing on other machines.",
     "none": "None found.",
-    "operations": "Recent operations"
+    "operations": "Recent operations",
+    "certificatesDescription": "Code-signing identities grouped by certificate fingerprint across agents.",
+    "noLocalProfiles": "No local provisioning profiles found.",
+    "noLocalCertificates": "No local signing identities found.",
+    "loadingPortal": "Loading Apple Developer resources…",
+    "loadingProfile": "Loading provisioning profile…",
+    "backToProfiles": "Back to provisioning profiles",
+    "profileNotFound": "This provisioning profile is no longer installed on an agent.",
+    "profileDetails": "Profile details",
+    "platforms": "Platforms",
+    "created": "Created",
+    "acceptedCertificates": "Accepted certificate fingerprints",
+    "provisionedDevices": "Provisioned devices",
+    "provisionedDevicesDescription": "This profile contains {count} device identifiers.",
+    "deviceListPendingRefresh": "Refresh signing inventory to load the device identifiers stored in this profile.",
+    "noProvisionedDevices": "This distribution profile is not restricted to individual devices.",
+    "device": "Device",
+    "udid": "Device UDID",
+    "status": "Status",
+    "unknownDevice": "Not enrolled in this app"
   },
   "apnsDevices": {
     "title": "APNs Devices",
@@ -2274,7 +2293,11 @@
     "updated": "Updated",
     "loadEdit": "Load / edit",
     "deletePreset": "Delete preset?",
-    "deletePresetDescription": "Delete this reusable payload and header preset."
+    "deletePresetDescription": "Delete this reusable payload and header preset.",
+    "historyDescription": "Sent batches, drafts, and per-recipient APNs outcomes.",
+    "presetsDescription": "Reusable notification content and headers; recipients are selected when sending.",
+    "noHistory": "No push notification history yet.",
+    "noPresets": "No push notification presets saved yet."
   },
   "status": {
     "online": "Online",

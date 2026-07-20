@@ -244,6 +244,7 @@ function profileAsset(
     teamName: profile.teamName,
     platforms: profile.platforms,
     deviceCount: stringList(decoded.raw.ProvisionedDevices).length,
+    deviceUdids: stringList(decoded.raw.ProvisionedDevices),
     certificateSha1s: profile.certificateSha1s,
     createdAt,
     expiresAt: profile.expiresAt,

@@ -22,6 +22,7 @@ type LocalSigningProfile {
   teamName: String
   platforms: [String!]!
   deviceCount: Int!
+  deviceUdids: [String!]!
   certificateSha1s: [String!]!
   createdAt: String
   expiresAt: String
@@ -98,6 +99,7 @@ input CreateApplePortalProfileInput {
 extend type Query {
   signingAgents: [SigningAgentSummary!]!
   signingProfiles: [LocalSigningProfile!]!
+  signingProfile(id: ID!): LocalSigningProfile
   signingCertificates: [LocalSigningCertificate!]!
   signingOperations(limit: Int = 50): [SigningOperation!]!
   appleDeveloperInventory: AppleDeveloperInventory!

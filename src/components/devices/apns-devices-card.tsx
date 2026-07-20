@@ -151,10 +151,10 @@ export function ApnsDevicesCard({
 
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
         <CardTitle>{t("title")}</CardTitle>
         <CardDescription>{t("description")}</CardDescription>
-        <CardAction>
+        <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
           <ApnsApiHelp />
         </CardAction>
       </CardHeader>

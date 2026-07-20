@@ -276,6 +276,8 @@ export function PushNotificationsPage() {
   const [directToken, setDirectToken] = useState("");
   const [directTokenEncoding, setDirectTokenEncoding] = useState("HEX");
   const [directEnvironment, setDirectEnvironment] = useState("SANDBOX");
+  const [editorTab, setEditorTab] = useState("content");
+  const [recordsTab, setRecordsTab] = useState("history");
   const [presetName, setPresetName] = useState("");
   const [expandedPresets, setExpandedPresets] = useState<Set<string>>(
     new Set(),
@@ -559,13 +561,13 @@ export function PushNotificationsPage() {
         </Alert>
       )}
       <Card>
-        <CardHeader>
+        <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
           <CardTitle>{t("editor")}</CardTitle>
           <CardDescription>{t("editorDescription")}</CardDescription>
-          <CardAction>
-            <div className="flex gap-2">
+          <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
+            <div className="grid gap-2 sm:flex">
               <Input
-                className="w-48"
+                className="w-full sm:w-48"
                 onChange={(event) => setPresetName(event.target.value)}
                 placeholder={t("presetName")}
                 value={presetName}
@@ -588,8 +590,19 @@ export function PushNotificationsPage() {
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-5">
-          <Tabs defaultValue="content">
-            <TabsList>
+          <Tabs onValueChange={setEditorTab} value={editorTab}>
+            <Select onValueChange={setEditorTab} value={editorTab}>
+              <SelectTrigger className="w-full sm:hidden">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="content">{t("content")}</SelectItem>
+                <SelectItem value="headers">{t("headers")}</SelectItem>
+                <SelectItem value="advanced">{t("advanced")}</SelectItem>
+                <SelectItem value="specialized">{t("specialized")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <TabsList className="hidden sm:inline-flex">
               <TabsTrigger value="content">{t("content")}</TabsTrigger>
               <TabsTrigger value="headers">{t("headers")}</TabsTrigger>
               <TabsTrigger value="advanced">{t("advanced")}</TabsTrigger>
@@ -1130,86 +1143,113 @@ export function PushNotificationsPage() {
         </CardContent>
       </Card>
       <ChannelsCard channels={channels} load={load} />
-      <Tabs defaultValue="history">
-        <TabsList>
-          <TabsTrigger value="history">
-            <History /> {t("history")}
-          </TabsTrigger>
-          <TabsTrigger value="presets">
-            <Save /> {t("presets")}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="history">
-          <ExpandableHistory
-            batches={history}
-            expanded={expandedHistory}
-            locale={locale}
-            onDelete={(id) =>
-              run(
-                `mutation Delete($id: ID!) { deletePushNotificationHistory(id: $id) }`,
-                { id },
-              )
-            }
-            onLoad={loadEditor}
-            onPreset={(batch) => {
-              setPresetName(
-                `${t("presetFromHistory")} ${new Date(batch.createdAt).toLocaleDateString(locale)}`,
-              );
-              loadEditor(batch.editor);
-            }}
-            onResend={(id) =>
-              run(
-                `mutation Resend($id: ID!, $requestId: ID!) { resendPushNotification(id: $id, requestId: $requestId) { id } }`,
-                { id, requestId: createClientId() },
-                t("queued"),
-              )
-            }
-            setExpanded={setExpandedHistory}
-          />
-          <div className="mt-3 flex justify-end">
-            <ConfirmationDialog
-              actionLabel={t("clearHistory")}
-              cancelLabel={tc("cancel")}
-              description={t("clearHistoryDescription")}
-              onConfirm={() => run(`mutation { clearPushNotificationHistory }`)}
-              title={t("clearHistory")}
-              trigger={
-                <Button disabled={!history.length} variant="outline">
-                  <Trash2 /> {t("clearHistory")}
-                </Button>
+      <Tabs onValueChange={setRecordsTab} value={recordsTab}>
+        <Card className="gap-0 py-0">
+          <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+            <CardTitle>
+              {recordsTab === "history" ? t("history") : t("presets")}
+            </CardTitle>
+            <CardDescription>
+              {recordsTab === "history"
+                ? t("historyDescription")
+                : t("presetsDescription")}
+            </CardDescription>
+            <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
+              <Select onValueChange={setRecordsTab} value={recordsTab}>
+                <SelectTrigger className="w-full sm:hidden">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="history">{t("history")}</SelectItem>
+                  <SelectItem value="presets">{t("presets")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <TabsList className="hidden sm:inline-flex">
+                <TabsTrigger value="history">
+                  <History /> {t("history")}
+                </TabsTrigger>
+                <TabsTrigger value="presets">
+                  <Save /> {t("presets")}
+                </TabsTrigger>
+              </TabsList>
+            </CardAction>
+          </CardHeader>
+          <TabsContent value="history">
+            <ExpandableHistory
+              batches={history}
+              expanded={expandedHistory}
+              locale={locale}
+              onDelete={(id) =>
+                run(
+                  `mutation Delete($id: ID!) { deletePushNotificationHistory(id: $id) }`,
+                  { id },
+                )
               }
+              onLoad={loadEditor}
+              onPreset={(batch) => {
+                setPresetName(
+                  `${t("presetFromHistory")} ${new Date(batch.createdAt).toLocaleDateString(locale)}`,
+                );
+                loadEditor(batch.editor);
+              }}
+              onResend={(id) =>
+                run(
+                  `mutation Resend($id: ID!, $requestId: ID!) { resendPushNotification(id: $id, requestId: $requestId) { id } }`,
+                  { id, requestId: createClientId() },
+                  t("queued"),
+                )
+              }
+              setExpanded={setExpandedHistory}
             />
-          </div>
-        </TabsContent>
-        <TabsContent value="presets">
-          <ExpandablePresets
-            expanded={expandedPresets}
-            onDelete={(id) =>
-              run(
-                `mutation Delete($id: ID!) { deletePushNotificationPreset(id: $id) }`,
-                { id },
-              )
-            }
-            onLoad={loadEditor}
-            onSend={(preset, sendAll, registrationIds) =>
-              run(
-                `mutation SendPreset($input: SendPushNotificationInput!) { sendPushNotification(input: $input) { id } }`,
-                {
-                  input: {
-                    requestId: createClientId(),
-                    editor: preset.editor,
-                    targetMode: sendAll ? "ALL" : "DEVICES",
-                    registrationIds,
+            {history.length > 0 && (
+              <div className="flex justify-end border-t p-3">
+                <ConfirmationDialog
+                  actionLabel={t("clearHistory")}
+                  cancelLabel={tc("cancel")}
+                  description={t("clearHistoryDescription")}
+                  onConfirm={() =>
+                    run(`mutation { clearPushNotificationHistory }`)
+                  }
+                  title={t("clearHistory")}
+                  trigger={
+                    <Button variant="outline">
+                      <Trash2 /> {t("clearHistory")}
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="presets">
+            <ExpandablePresets
+              expanded={expandedPresets}
+              onDelete={(id) =>
+                run(
+                  `mutation Delete($id: ID!) { deletePushNotificationPreset(id: $id) }`,
+                  { id },
+                )
+              }
+              onLoad={loadEditor}
+              onSend={(preset, sendAll, registrationIds) =>
+                run(
+                  `mutation SendPreset($input: SendPushNotificationInput!) { sendPushNotification(input: $input) { id } }`,
+                  {
+                    input: {
+                      requestId: createClientId(),
+                      editor: preset.editor,
+                      targetMode: sendAll ? "ALL" : "DEVICES",
+                      registrationIds,
+                    },
                   },
-                },
-                t("queued"),
-              )
-            }
-            presets={presets}
-            registrations={registrations}
-            setExpanded={setExpandedPresets}
-          />
-        </TabsContent>
+                  t("queued"),
+                )
+              }
+              presets={presets}
+              registrations={registrations}
+              setExpanded={setExpandedPresets}
+            />
+          </TabsContent>
+        </Card>
       </Tabs>
       {loading && (
         <div className="fixed bottom-4 right-4 rounded-full bg-background p-3 shadow">
@@ -1454,146 +1494,151 @@ function ExpandableHistory({
       else next.add(id);
       return next;
     });
+  if (batches.length === 0) {
+    return (
+      <p className="p-8 text-center text-sm text-muted-foreground">
+        {t("noHistory")}
+      </p>
+    );
+  }
   return (
-    <Card className="mt-3 gap-0 py-0">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-12" />
-            <TableHead>{t("created")}</TableHead>
-            <TableHead>{t("pushType")}</TableHead>
-            <TableHead>{t("deliveryMode")}</TableHead>
-            <TableHead>{t("recipients")}</TableHead>
-            <TableHead>{t("result")}</TableHead>
-            <TableHead>{t("status")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {batches.map((batch) => (
-            <Fragment key={batch.id}>
-              <TableRow
-                className="h-16 cursor-pointer"
-                onClick={() => toggle(batch.id)}
-              >
-                <TableCell>
-                  <ChevronDown
-                    className={cn(
-                      "transition-transform",
-                      expanded.has(batch.id) && "rotate-180",
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-12" />
+          <TableHead>{t("created")}</TableHead>
+          <TableHead>{t("pushType")}</TableHead>
+          <TableHead>{t("deliveryMode")}</TableHead>
+          <TableHead>{t("recipients")}</TableHead>
+          <TableHead>{t("result")}</TableHead>
+          <TableHead>{t("status")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {batches.map((batch) => (
+          <Fragment key={batch.id}>
+            <TableRow
+              className="h-16 cursor-pointer"
+              onClick={() => toggle(batch.id)}
+            >
+              <TableCell>
+                <ChevronDown
+                  className={cn(
+                    "transition-transform",
+                    expanded.has(batch.id) && "rotate-180",
+                  )}
+                />
+              </TableCell>
+              <TableCell>
+                {new Date(batch.createdAt).toLocaleString(locale)}
+              </TableCell>
+              <TableCell>
+                <Badge variant="secondary">
+                  {String(batch.editor.pushType ?? "—")}
+                </Badge>
+              </TableCell>
+              <TableCell>{batch.targetMode}</TableCell>
+              <TableCell>{batch.recipientCount}</TableCell>
+              <TableCell>
+                {batch.successCount} / {batch.failureCount}
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant={
+                    batch.status === "FAILED" ? "destructive" : "outline"
+                  }
+                >
+                  {batch.status}
+                </Badge>
+              </TableCell>
+            </TableRow>
+            {expanded.has(batch.id) && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7} className="bg-muted/20 p-5">
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <Label>{t("payload")}</Label>
+                      <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
+                        {JSON.stringify(batch.payload, null, 2)}
+                      </pre>
+                    </div>
+                    <div>
+                      <Label>{t("headers")}</Label>
+                      <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
+                        {JSON.stringify(batch.headers, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                  {batch.deliveries.length > 0 && (
+                    <div className="mt-4 grid gap-2 md:grid-cols-2">
+                      {batch.deliveries.map((delivery) => (
+                        <div
+                          className="rounded-lg border bg-background p-3"
+                          key={delivery.id}
+                        >
+                          <div className="flex justify-between">
+                            <span className="font-mono text-xs">
+                              {delivery.topic}
+                            </span>
+                            <Badge
+                              variant={
+                                delivery.status === "SUCCEEDED"
+                                  ? "default"
+                                  : "destructive"
+                              }
+                            >
+                              {delivery.status}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            HTTP {delivery.responseCode ?? "—"} ·{" "}
+                            {delivery.reason ?? "—"} · {delivery.attempts}{" "}
+                            {t("attempts")} · {delivery.durationMs ?? "—"} ms
+                          </p>
+                          {delivery.apnsId && (
+                            <p className="font-mono text-xs">
+                              {delivery.apnsId}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <Button
+                      onClick={() => onLoad(batch.editor)}
+                      variant="outline"
+                    >
+                      {t("load")}
+                    </Button>
+                    <Button onClick={() => onPreset(batch)} variant="outline">
+                      <Save /> {t("saveAsPreset")}
+                    </Button>
+                    {batch.targetMode !== "DRAFT" && (
+                      <Button onClick={() => void onResend(batch.id)}>
+                        <Send /> {t("resend")}
+                      </Button>
                     )}
-                  />
-                </TableCell>
-                <TableCell>
-                  {new Date(batch.createdAt).toLocaleString(locale)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary">
-                    {String(batch.editor.pushType ?? "—")}
-                  </Badge>
-                </TableCell>
-                <TableCell>{batch.targetMode}</TableCell>
-                <TableCell>{batch.recipientCount}</TableCell>
-                <TableCell>
-                  {batch.successCount} / {batch.failureCount}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      batch.status === "FAILED" ? "destructive" : "outline"
-                    }
-                  >
-                    {batch.status}
-                  </Badge>
+                    <ConfirmationDialog
+                      actionLabel={t("delete")}
+                      cancelLabel={tc("cancel")}
+                      description={t("deleteHistoryDescription")}
+                      onConfirm={() => onDelete(batch.id)}
+                      title={t("deleteHistory")}
+                      trigger={
+                        <Button variant="ghost">
+                          <Trash2 /> {t("delete")}
+                        </Button>
+                      }
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
-              {expanded.has(batch.id) && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={7} className="bg-muted/20 p-5">
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div>
-                        <Label>{t("payload")}</Label>
-                        <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
-                          {JSON.stringify(batch.payload, null, 2)}
-                        </pre>
-                      </div>
-                      <div>
-                        <Label>{t("headers")}</Label>
-                        <pre className="mt-2 max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
-                          {JSON.stringify(batch.headers, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
-                    {batch.deliveries.length > 0 && (
-                      <div className="mt-4 grid gap-2 md:grid-cols-2">
-                        {batch.deliveries.map((delivery) => (
-                          <div
-                            className="rounded-lg border bg-background p-3"
-                            key={delivery.id}
-                          >
-                            <div className="flex justify-between">
-                              <span className="font-mono text-xs">
-                                {delivery.topic}
-                              </span>
-                              <Badge
-                                variant={
-                                  delivery.status === "SUCCEEDED"
-                                    ? "default"
-                                    : "destructive"
-                                }
-                              >
-                                {delivery.status}
-                              </Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              HTTP {delivery.responseCode ?? "—"} ·{" "}
-                              {delivery.reason ?? "—"} · {delivery.attempts}{" "}
-                              {t("attempts")} · {delivery.durationMs ?? "—"} ms
-                            </p>
-                            {delivery.apnsId && (
-                              <p className="font-mono text-xs">
-                                {delivery.apnsId}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      <Button
-                        onClick={() => onLoad(batch.editor)}
-                        variant="outline"
-                      >
-                        {t("load")}
-                      </Button>
-                      <Button onClick={() => onPreset(batch)} variant="outline">
-                        <Save /> {t("saveAsPreset")}
-                      </Button>
-                      {batch.targetMode !== "DRAFT" && (
-                        <Button onClick={() => void onResend(batch.id)}>
-                          <Send /> {t("resend")}
-                        </Button>
-                      )}
-                      <ConfirmationDialog
-                        actionLabel={t("delete")}
-                        cancelLabel={tc("cancel")}
-                        description={t("deleteHistoryDescription")}
-                        onConfirm={() => onDelete(batch.id)}
-                        title={t("deleteHistory")}
-                        trigger={
-                          <Button variant="ghost">
-                            <Trash2 /> {t("delete")}
-                          </Button>
-                        }
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </Fragment>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
+            )}
+          </Fragment>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -1627,85 +1672,88 @@ function ExpandablePresets({
       else next.add(id);
       return next;
     });
+  if (presets.length === 0) {
+    return (
+      <p className="p-8 text-center text-sm text-muted-foreground">
+        {t("noPresets")}
+      </p>
+    );
+  }
   return (
-    <Card className="mt-3 gap-0 py-0">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-12" />
-            <TableHead>{t("name")}</TableHead>
-            <TableHead>{t("pushType")}</TableHead>
-            <TableHead>{t("topic")}</TableHead>
-            <TableHead>{t("updated")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {presets.map((preset) => (
-            <Fragment key={preset.id}>
-              <TableRow
-                className="h-16 cursor-pointer"
-                onClick={() => toggle(preset.id)}
-              >
-                <TableCell>
-                  <ChevronDown
-                    className={cn(
-                      "transition-transform",
-                      expanded.has(preset.id) && "rotate-180",
-                    )}
-                  />
-                </TableCell>
-                <TableCell className="font-medium">{preset.name}</TableCell>
-                <TableCell>{String(preset.editor.pushType ?? "—")}</TableCell>
-                <TableCell className="font-mono text-xs">
-                  {String(
-                    (
-                      preset.editor.headers as
-                        Record<string, unknown> | undefined
-                    )?.topic ?? "—",
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-12" />
+          <TableHead>{t("name")}</TableHead>
+          <TableHead>{t("pushType")}</TableHead>
+          <TableHead>{t("topic")}</TableHead>
+          <TableHead>{t("updated")}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {presets.map((preset) => (
+          <Fragment key={preset.id}>
+            <TableRow
+              className="h-16 cursor-pointer"
+              onClick={() => toggle(preset.id)}
+            >
+              <TableCell>
+                <ChevronDown
+                  className={cn(
+                    "transition-transform",
+                    expanded.has(preset.id) && "rotate-180",
                   )}
-                </TableCell>
-                <TableCell>
-                  {new Date(preset.updatedAt).toLocaleString()}
+                />
+              </TableCell>
+              <TableCell className="font-medium">{preset.name}</TableCell>
+              <TableCell>{String(preset.editor.pushType ?? "—")}</TableCell>
+              <TableCell className="font-mono text-xs">
+                {String(
+                  (preset.editor.headers as Record<string, unknown> | undefined)
+                    ?.topic ?? "—",
+                )}
+              </TableCell>
+              <TableCell>
+                {new Date(preset.updatedAt).toLocaleString()}
+              </TableCell>
+            </TableRow>
+            {expanded.has(preset.id) && (
+              <TableRow>
+                <TableCell className="bg-muted/20 p-5" colSpan={5}>
+                  <pre className="max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
+                    {JSON.stringify(preset.editor, null, 2)}
+                  </pre>
+                  <div className="mt-4 flex flex-wrap items-end justify-end gap-2">
+                    <PresetSendControls
+                      onSend={(allEligible, registrationIds) =>
+                        onSend(preset, allEligible, registrationIds)
+                      }
+                      preset={preset}
+                      registrations={registrations}
+                    />
+                    <Button onClick={() => onLoad(preset.editor)}>
+                      <Check /> {t("loadEdit")}
+                    </Button>
+                    <ConfirmationDialog
+                      actionLabel={t("delete")}
+                      cancelLabel={tc("cancel")}
+                      description={t("deletePresetDescription")}
+                      onConfirm={() => onDelete(preset.id)}
+                      title={t("deletePreset")}
+                      trigger={
+                        <Button variant="ghost">
+                          <Trash2 /> {t("delete")}
+                        </Button>
+                      }
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
-              {expanded.has(preset.id) && (
-                <TableRow>
-                  <TableCell className="bg-muted/20 p-5" colSpan={5}>
-                    <pre className="max-h-72 overflow-auto rounded-xl bg-background p-3 text-xs">
-                      {JSON.stringify(preset.editor, null, 2)}
-                    </pre>
-                    <div className="mt-4 flex flex-wrap items-end justify-end gap-2">
-                      <PresetSendControls
-                        onSend={(allEligible, registrationIds) =>
-                          onSend(preset, allEligible, registrationIds)
-                        }
-                        preset={preset}
-                        registrations={registrations}
-                      />
-                      <Button onClick={() => onLoad(preset.editor)}>
-                        <Check /> {t("loadEdit")}
-                      </Button>
-                      <ConfirmationDialog
-                        actionLabel={t("delete")}
-                        cancelLabel={tc("cancel")}
-                        description={t("deletePresetDescription")}
-                        onConfirm={() => onDelete(preset.id)}
-                        title={t("deletePreset")}
-                        trigger={
-                          <Button variant="ghost">
-                            <Trash2 /> {t("delete")}
-                          </Button>
-                        }
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </Fragment>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
+            )}
+          </Fragment>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 

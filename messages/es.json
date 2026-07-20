@@ -2124,7 +2124,26 @@
     "confirmPortalDelete": "Confirmar cambio en Apple",
     "portalDeleteDescription": "Este cambio afecta inmediatamente a la cuenta de Apple Developer y puede interrumpir firmas en otros equipos.",
     "none": "No se encontró ninguno.",
-    "operations": "Operaciones recientes"
+    "operations": "Operaciones recientes",
+    "certificatesDescription": "Identidades de firma agrupadas por huella del certificado entre agentes.",
+    "noLocalProfiles": "No se encontraron perfiles de aprovisionamiento locales.",
+    "noLocalCertificates": "No se encontraron identidades de firma locales.",
+    "loadingPortal": "Cargando recursos de Apple Developer…",
+    "loadingProfile": "Cargando perfil de aprovisionamiento…",
+    "backToProfiles": "Volver a perfiles de aprovisionamiento",
+    "profileNotFound": "Este perfil de aprovisionamiento ya no está instalado en ningún agente.",
+    "profileDetails": "Detalles del perfil",
+    "platforms": "Plataformas",
+    "created": "Creado",
+    "acceptedCertificates": "Huellas de certificados aceptados",
+    "provisionedDevices": "Dispositivos aprovisionados",
+    "provisionedDevicesDescription": "Este perfil contiene {count} identificadores de dispositivo.",
+    "deviceListPendingRefresh": "Actualiza el inventario de firma para cargar los identificadores guardados en este perfil.",
+    "noProvisionedDevices": "Este perfil de distribución no está limitado a dispositivos individuales.",
+    "device": "Dispositivo",
+    "udid": "UDID del dispositivo",
+    "status": "Estado",
+    "unknownDevice": "No inscrito en esta aplicación"
   },
   "apnsDevices": {
     "title": "Dispositivos APNs",
@@ -2278,7 +2297,11 @@
     "updated": "Actualizado",
     "loadEdit": "Cargar / editar",
     "deletePreset": "¿Eliminar ajuste?",
-    "deletePresetDescription": "Elimina este payload y sus cabeceras reutilizables."
+    "deletePresetDescription": "Elimina este payload y sus cabeceras reutilizables.",
+    "historyDescription": "Lotes enviados, borradores y resultados APNs por destinatario.",
+    "presetsDescription": "Contenido y cabeceras reutilizables; los destinatarios se eligen al enviar.",
+    "noHistory": "Todavía no hay historial de notificaciones push.",
+    "noPresets": "Todavía no hay ajustes de notificaciones push guardados."
   },
   "status": {
     "online": "En línea",

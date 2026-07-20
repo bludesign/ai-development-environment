@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { Link } from "@/i18n/navigation";
 
 type Agent = { id: string; name: string; hostname: string; supported: boolean };
 type Profile = {
@@ -156,6 +157,7 @@ export function ProvisioningProfilesPage() {
   );
   const [portalBundleId, setPortalBundleId] = useState("");
   const [portalCertificateId, setPortalCertificateId] = useState("");
+  const [assetTab, setAssetTab] = useState("profiles");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -396,8 +398,20 @@ export function ProvisioningProfilesPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="profiles">
-        <TabsList>
+      <Tabs onValueChange={setAssetTab} value={assetTab}>
+        <Select onValueChange={setAssetTab} value={assetTab}>
+          <SelectTrigger className="w-full sm:hidden">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="profiles">{t("localProfiles")}</SelectItem>
+            <SelectItem value="certificates">
+              {t("localCertificates")}
+            </SelectItem>
+            <SelectItem value="portal">{t("applePortal")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <TabsList className="hidden sm:inline-flex">
           <TabsTrigger value="profiles">
             <ShieldCheck /> {t("localProfiles")}
           </TabsTrigger>
@@ -408,10 +422,10 @@ export function ProvisioningProfilesPage() {
         </TabsList>
         <TabsContent value="profiles">
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4">
+            <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
               <CardTitle>{t("localProfiles")}</CardTitle>
               <CardDescription>{t("profilesDescription")}</CardDescription>
-              <CardAction>
+              <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
                 <ConfirmationDialog
                   actionLabel={t("deleteExpired")}
                   cancelLabel={tc("cancel")}
@@ -428,109 +442,217 @@ export function ProvisioningProfilesPage() {
                 />
               </CardAction>
             </CardHeader>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("name")}</TableHead>
-                  <TableHead>{t("bundleId")}</TableHead>
-                  <TableHead>{t("type")}</TableHead>
-                  <TableHead>{t("team")}</TableHead>
-                  <TableHead>{t("devices")}</TableHead>
-                  <TableHead>{t("expires")}</TableHead>
-                  <TableHead>{t("installedAgents")}</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profiles.map((profile) => {
-                  const installed = new Set(
-                    profile.installedAgents.map((agent) => agent.id),
-                  );
-                  const missing = agents.filter(
-                    (agent) => agent.supported && !installed.has(agent.id),
-                  );
-                  return (
-                    <TableRow key={profile.id}>
-                      <TableCell>
-                        <p className="font-medium">{profile.name}</p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {profile.uuid}
-                        </p>
-                        {profile.xcodeManaged && (
-                          <Badge variant="secondary">Xcode</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {profile.bundleId}
-                      </TableCell>
-                      <TableCell>{profile.profileType}</TableCell>
-                      <TableCell>
-                        {profile.teamName ?? profile.teamId ?? "—"}
-                      </TableCell>
-                      <TableCell>{profile.deviceCount}</TableCell>
-                      <TableCell>
-                        {profile.expiresAt
-                          ? new Date(profile.expiresAt).toLocaleDateString()
-                          : "—"}
-                        {profile.expired && (
-                          <Badge className="ml-2" variant="destructive">
-                            {t("expired")}
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {profile.installedAgents
-                          .map((agent) => agent.name)
-                          .join(", ")}
-                      </TableCell>
-                      <TableCell className="space-x-1 text-right">
-                        {missing.length > 0 && profile.installedAgents[0] && (
+            {profiles.length === 0 ? (
+              <p className="p-8 text-center text-sm text-muted-foreground">
+                {t("noLocalProfiles")}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("name")}</TableHead>
+                    <TableHead>{t("bundleId")}</TableHead>
+                    <TableHead>{t("type")}</TableHead>
+                    <TableHead>{t("team")}</TableHead>
+                    <TableHead>{t("devices")}</TableHead>
+                    <TableHead>{t("expires")}</TableHead>
+                    <TableHead>{t("installedAgents")}</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {profiles.map((profile) => {
+                    const installed = new Set(
+                      profile.installedAgents.map((agent) => agent.id),
+                    );
+                    const missing = agents.filter(
+                      (agent) => agent.supported && !installed.has(agent.id),
+                    );
+                    return (
+                      <TableRow key={profile.id}>
+                        <TableCell>
+                          <Link
+                            className="font-medium hover:underline"
+                            href={`/provisioning-profiles/${encodeURIComponent(profile.id)}`}
+                          >
+                            {profile.name}
+                          </Link>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {profile.uuid}
+                          </p>
+                          {profile.xcodeManaged && (
+                            <Badge variant="secondary">Xcode</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {profile.bundleId}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{profile.profileType}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {profile.teamName ?? profile.teamId ?? "—"}
+                        </TableCell>
+                        <TableCell>{profile.deviceCount}</TableCell>
+                        <TableCell>
+                          {profile.expiresAt
+                            ? new Date(profile.expiresAt).toLocaleDateString()
+                            : "—"}
+                          {profile.expired && (
+                            <Badge className="ml-2" variant="destructive">
+                              {t("expired")}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {profile.installedAgents
+                            .map((agent) => agent.name)
+                            .join(", ")}
+                        </TableCell>
+                        <TableCell className="space-x-1 text-right">
+                          {missing.length > 0 && profile.installedAgents[0] && (
+                            <Button
+                              disabled={busy}
+                              onClick={() =>
+                                void mutate(
+                                  `mutation Sync($uuid: String!, $source: ID!, $targets: [ID!]!) { syncSigningProfile(uuid: $uuid, sourceAgentId: $source, targetAgentIds: $targets) { id } }`,
+                                  {
+                                    uuid: profile.uuid,
+                                    source: profile.installedAgents[0]!.id,
+                                    targets: missing.map((agent) => agent.id),
+                                  },
+                                )
+                              }
+                              size="sm"
+                              variant="outline"
+                            >
+                              {t("syncMissing")}
+                            </Button>
+                          )}
                           <Button
-                            disabled={busy}
-                            onClick={() =>
-                              void mutate(
-                                `mutation Sync($uuid: String!, $source: ID!, $targets: [ID!]!) { syncSigningProfile(uuid: $uuid, sourceAgentId: $source, targetAgentIds: $targets) { id } }`,
+                            aria-label={t("download")}
+                            disabled={busy || !profile.installedAgents.length}
+                            onClick={() => void downloadProfile(profile)}
+                            size="icon-sm"
+                            variant="ghost"
+                          >
+                            <Download />
+                          </Button>
+                          <ConfirmationDialog
+                            actionLabel={t("delete")}
+                            cancelLabel={tc("cancel")}
+                            description={t("deleteProfileDescription")}
+                            onConfirm={() =>
+                              mutate(
+                                `mutation Delete($uuid: String!, $agents: [ID!]!) { deleteSigningProfile(uuid: $uuid, agentIds: $agents) { id } }`,
                                 {
                                   uuid: profile.uuid,
-                                  source: profile.installedAgents[0]!.id,
-                                  targets: missing.map((agent) => agent.id),
+                                  agents: profile.installedAgents.map(
+                                    (agent) => agent.id,
+                                  ),
                                 },
                               )
                             }
-                            size="sm"
-                            variant="outline"
-                          >
-                            {t("syncMissing")}
-                          </Button>
-                        )}
-                        <Button
-                          aria-label={t("download")}
-                          disabled={busy || !profile.installedAgents.length}
-                          onClick={() => void downloadProfile(profile)}
-                          size="icon-sm"
-                          variant="ghost"
+                            title={t("deleteProfile")}
+                            trigger={
+                              <Button
+                                disabled={busy}
+                                size="icon-sm"
+                                variant="ghost"
+                              >
+                                <Trash2 />
+                              </Button>
+                            }
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </Card>
+        </TabsContent>
+        <TabsContent value="certificates">
+          <Card className="gap-0 py-0">
+            <CardHeader className="border-b py-4">
+              <CardTitle>{t("localCertificates")}</CardTitle>
+              <CardDescription>{t("certificatesDescription")}</CardDescription>
+            </CardHeader>
+            {certificates.length === 0 ? (
+              <p className="p-8 text-center text-sm text-muted-foreground">
+                {t("noLocalCertificates")}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("name")}</TableHead>
+                    <TableHead>{t("fingerprints")}</TableHead>
+                    <TableHead>{t("team")}</TableHead>
+                    <TableHead>{t("privateKey")}</TableHead>
+                    <TableHead>{t("expires")}</TableHead>
+                    <TableHead>{t("installedAgents")}</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {certificates.map((certificate) => (
+                    <TableRow key={certificate.id}>
+                      <TableCell>
+                        <p className="font-medium">{certificate.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {certificate.certificateType}
+                        </p>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <p>SHA-1 {shortFingerprint(certificate.sha1)}</p>
+                        <p>SHA-256 {shortFingerprint(certificate.sha256)}</p>
+                      </TableCell>
+                      <TableCell>{certificate.teamId ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            certificate.hasPrivateKey
+                              ? "default"
+                              : "destructive"
+                          }
                         >
-                          <Download />
-                        </Button>
+                          {certificate.hasPrivateKey
+                            ? t("available")
+                            : t("missing")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {certificate.expiresAt
+                          ? new Date(certificate.expiresAt).toLocaleDateString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {certificate.installedAgents
+                          .map((agent) => agent.name)
+                          .join(", ")}
+                      </TableCell>
+                      <TableCell>
                         <ConfirmationDialog
                           actionLabel={t("delete")}
                           cancelLabel={tc("cancel")}
-                          description={t("deleteProfileDescription")}
+                          description={t("deleteIdentityDescription")}
                           onConfirm={() =>
                             mutate(
-                              `mutation Delete($uuid: String!, $agents: [ID!]!) { deleteSigningProfile(uuid: $uuid, agentIds: $agents) { id } }`,
+                              `mutation DeleteIdentity($sha1: String!, $agents: [ID!]!) { deleteSigningIdentity(sha1: $sha1, agentIds: $agents) { id } }`,
                               {
-                                uuid: profile.uuid,
-                                agents: profile.installedAgents.map(
+                                sha1: certificate.sha1,
+                                agents: certificate.installedAgents.map(
                                   (agent) => agent.id,
                                 ),
                               },
                             )
                           }
-                          title={t("deleteProfile")}
+                          title={t("deleteIdentity")}
                           trigger={
                             <Button
-                              disabled={busy}
+                              disabled={busy || !certificate.hasPrivateKey}
                               size="icon-sm"
                               variant="ghost"
                             >
@@ -540,104 +662,23 @@ export function ProvisioningProfilesPage() {
                         />
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </Card>
         </TabsContent>
-        <TabsContent value="certificates">
-          <Card className="gap-0 py-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("name")}</TableHead>
-                  <TableHead>{t("fingerprints")}</TableHead>
-                  <TableHead>{t("team")}</TableHead>
-                  <TableHead>{t("privateKey")}</TableHead>
-                  <TableHead>{t("expires")}</TableHead>
-                  <TableHead>{t("installedAgents")}</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {certificates.map((certificate) => (
-                  <TableRow key={certificate.id}>
-                    <TableCell>
-                      <p className="font-medium">{certificate.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {certificate.certificateType}
-                      </p>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      <p>SHA-1 {shortFingerprint(certificate.sha1)}</p>
-                      <p>SHA-256 {shortFingerprint(certificate.sha256)}</p>
-                    </TableCell>
-                    <TableCell>{certificate.teamId ?? "—"}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          certificate.hasPrivateKey ? "default" : "destructive"
-                        }
-                      >
-                        {certificate.hasPrivateKey
-                          ? t("available")
-                          : t("missing")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {certificate.expiresAt
-                        ? new Date(certificate.expiresAt).toLocaleDateString()
-                        : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {certificate.installedAgents
-                        .map((agent) => agent.name)
-                        .join(", ")}
-                    </TableCell>
-                    <TableCell>
-                      <ConfirmationDialog
-                        actionLabel={t("delete")}
-                        cancelLabel={tc("cancel")}
-                        description={t("deleteIdentityDescription")}
-                        onConfirm={() =>
-                          mutate(
-                            `mutation DeleteIdentity($sha1: String!, $agents: [ID!]!) { deleteSigningIdentity(sha1: $sha1, agentIds: $agents) { id } }`,
-                            {
-                              sha1: certificate.sha1,
-                              agents: certificate.installedAgents.map(
-                                (agent) => agent.id,
-                              ),
-                            },
-                          )
-                        }
-                        title={t("deleteIdentity")}
-                        trigger={
-                          <Button
-                            disabled={busy || !certificate.hasPrivateKey}
-                            size="icon-sm"
-                            variant="ghost"
-                          >
-                            <Trash2 />
-                          </Button>
-                        }
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
-        <TabsContent value="portal">
+        <TabsContent className="space-y-4 pb-4" value="portal">
           {portalError && (
-            <Alert variant="destructive">
+            <Alert className="px-4 py-3" variant="destructive">
               <AlertDescription>{portalError}</AlertDescription>
             </Alert>
           )}
           {!portal && !portalError ? (
-            <Spinner />
-          ) : (
+            <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+              <Spinner /> {t("loadingPortal")}
+            </p>
+          ) : portal ? (
             <div className="space-y-4">
               <Card>
                 <CardHeader>
@@ -769,7 +810,7 @@ export function ProvisioningProfilesPage() {
                 />
               </div>
             </div>
-          )}
+          ) : null}
         </TabsContent>
       </Tabs>
 

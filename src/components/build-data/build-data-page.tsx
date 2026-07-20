@@ -665,11 +665,11 @@ export function BuildDataPage() {
       )}
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
           <CardTitle>{t("history")}</CardTitle>
           <CardDescription>{t("historyDescription")}</CardDescription>
           {history.length > 0 && (
-            <CardAction>
+            <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
               <ConfirmationDialog
                 actionLabel={t("clearHistory")}
                 cancelLabel={tc("cancel")}
@@ -796,11 +796,11 @@ function DeviceSupportCard({
     entries.length > 0 && selectedEntries.length === entries.length;
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
         <CardTitle>{t("deviceSupportTitle")}</CardTitle>
         <CardDescription>{t("deviceSupportDescription")}</CardDescription>
         {selectedEntries.length > 0 && (
-          <CardAction>
+          <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
             <ConfirmationDialog
               actionLabel={t("deleteSelected")}
               cancelLabel={tc("cancel")}

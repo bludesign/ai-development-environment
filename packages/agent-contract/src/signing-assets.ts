@@ -24,6 +24,7 @@ export type SigningProfileAssetSnapshot = {
   teamName: string | null;
   platforms: string[];
   deviceCount: number;
+  deviceUdids: string[];
   certificateSha1s: string[];
   createdAt: string | null;
   expiresAt: string | null;
@@ -199,6 +200,13 @@ export function parseSigningAssetsScanResult(
         `signing profiles[${index}].platforms`,
       ),
       deviceCount,
+      deviceUdids:
+        item.deviceUdids === undefined
+          ? []
+          : stringArray(
+              item.deviceUdids,
+              `signing profiles[${index}].deviceUdids`,
+            ),
       certificateSha1s: stringArray(
         item.certificateSha1s,
         `signing profiles[${index}].certificateSha1s`,

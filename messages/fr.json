@@ -2124,7 +2124,26 @@
     "confirmPortalDelete": "Confirmer la modification Apple",
     "portalDeleteDescription": "Cette action modifie immédiatement le compte Apple Developer et peut interrompre la signature sur d’autres machines.",
     "none": "Aucun élément.",
-    "operations": "Opérations récentes"
+    "operations": "Opérations récentes",
+    "certificatesDescription": "Identités de signature regroupées par empreinte de certificat sur les agents.",
+    "noLocalProfiles": "Aucun profil de provisionnement local trouvé.",
+    "noLocalCertificates": "Aucune identité de signature locale trouvée.",
+    "loadingPortal": "Chargement des ressources Apple Developer…",
+    "loadingProfile": "Chargement du profil de provisionnement…",
+    "backToProfiles": "Retour aux profils de provisionnement",
+    "profileNotFound": "Ce profil de provisionnement n’est plus installé sur un agent.",
+    "profileDetails": "Détails du profil",
+    "platforms": "Plateformes",
+    "created": "Créé",
+    "acceptedCertificates": "Empreintes de certificats acceptées",
+    "provisionedDevices": "Appareils provisionnés",
+    "provisionedDevicesDescription": "Ce profil contient {count} identifiants d’appareil.",
+    "deviceListPendingRefresh": "Actualisez l’inventaire de signature pour charger les identifiants stockés dans ce profil.",
+    "noProvisionedDevices": "Ce profil de distribution n’est pas limité à des appareils individuels.",
+    "device": "Appareil",
+    "udid": "UDID de l’appareil",
+    "status": "État",
+    "unknownDevice": "Non inscrit dans cette application"
   },
   "apnsDevices": {
     "title": "Appareils APNs",
@@ -2278,7 +2297,11 @@
     "updated": "Mis à jour",
     "loadEdit": "Charger / modifier",
     "deletePreset": "Supprimer le préréglage ?",
-    "deletePresetDescription": "Supprime ce payload réutilisable et ses en-têtes."
+    "deletePresetDescription": "Supprime ce payload réutilisable et ses en-têtes.",
+    "historyDescription": "Lots envoyés, brouillons et résultats APNs par destinataire.",
+    "presetsDescription": "Contenu et en-têtes réutilisables ; les destinataires sont choisis à l’envoi.",
+    "noHistory": "Aucun historique de notification push.",
+    "noPresets": "Aucun préréglage de notification push enregistré."
   },
   "status": {
     "online": "En ligne",

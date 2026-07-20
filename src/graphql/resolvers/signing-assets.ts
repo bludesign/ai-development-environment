@@ -38,6 +38,14 @@ export const createSigningAssetsResolvers = (
       requireControlPlane(context);
       return service.profiles();
     },
+    signingProfile: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.profile(id);
+    },
     signingCertificates: (
       _root: unknown,
       _args: unknown,

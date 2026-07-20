@@ -133,6 +133,7 @@ export class SigningAssetsService {
             teamName: profile.teamName,
             platformsJson: JSON.stringify(profile.platforms),
             deviceCount: profile.deviceCount,
+            deviceUdidsJson: JSON.stringify(profile.deviceUdids),
             certificateSha1sJson: JSON.stringify(profile.certificateSha1s),
             createdAt: date(profile.createdAt),
             expiresAt: date(profile.expiresAt),
@@ -149,6 +150,7 @@ export class SigningAssetsService {
             teamName: profile.teamName,
             platformsJson: JSON.stringify(profile.platforms),
             deviceCount: profile.deviceCount,
+            deviceUdidsJson: JSON.stringify(profile.deviceUdids),
             certificateSha1sJson: JSON.stringify(profile.certificateSha1s),
             createdAt: date(profile.createdAt),
             expiresAt: date(profile.expiresAt),
@@ -376,6 +378,7 @@ export class SigningAssetsService {
         teamName: profile.teamName,
         platforms: stringArray(profile.platformsJson),
         deviceCount: profile.deviceCount,
+        deviceUdids: stringArray(profile.deviceUdidsJson),
         certificateSha1s: stringArray(profile.certificateSha1sJson),
         createdAt: profile.createdAt?.toISOString() ?? null,
         expiresAt: profile.expiresAt?.toISOString() ?? null,
@@ -384,6 +387,10 @@ export class SigningAssetsService {
         installedAgents: installations.map(({ agent }) => agent),
       };
     });
+  }
+
+  async profile(id: string) {
+    return (await this.profiles()).find((profile) => profile.id === id) ?? null;
   }
 
   async certificates() {

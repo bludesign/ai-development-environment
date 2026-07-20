@@ -902,6 +902,7 @@ model SigningProfileAsset {
   teamName             String?
   platformsJson        String    @default("[]")
   deviceCount          Int       @default(0)
+  deviceUdidsJson      String    @default("[]")
   certificateSha1sJson String    @default("[]")
   createdAt            DateTime?
   expiresAt            DateTime?

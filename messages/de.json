@@ -2124,7 +2124,26 @@
     "confirmPortalDelete": "Apple-Änderung bestätigen",
     "portalDeleteDescription": "Diese Aktion ändert das Apple-Developer-Konto sofort und kann Signaturen auf anderen Rechnern unterbrechen.",
     "none": "Keine gefunden.",
-    "operations": "Letzte Vorgänge"
+    "operations": "Letzte Vorgänge",
+    "certificatesDescription": "Nach Zertifikat-Fingerabdruck agentenübergreifend gruppierte Signieridentitäten.",
+    "noLocalProfiles": "Keine lokalen Bereitstellungsprofile gefunden.",
+    "noLocalCertificates": "Keine lokalen Signieridentitäten gefunden.",
+    "loadingPortal": "Apple-Developer-Ressourcen werden geladen…",
+    "loadingProfile": "Bereitstellungsprofil wird geladen…",
+    "backToProfiles": "Zurück zu den Bereitstellungsprofilen",
+    "profileNotFound": "Dieses Bereitstellungsprofil ist auf keinem Agenten mehr installiert.",
+    "profileDetails": "Profildetails",
+    "platforms": "Plattformen",
+    "created": "Erstellt",
+    "acceptedCertificates": "Akzeptierte Zertifikat-Fingerabdrücke",
+    "provisionedDevices": "Bereitgestellte Geräte",
+    "provisionedDevicesDescription": "Dieses Profil enthält {count} Gerätekennungen.",
+    "deviceListPendingRefresh": "Aktualisieren Sie den Signierbestand, um die im Profil gespeicherten Gerätekennungen zu laden.",
+    "noProvisionedDevices": "Dieses Verteilungsprofil ist nicht auf einzelne Geräte beschränkt.",
+    "device": "Gerät",
+    "udid": "Geräte-UDID",
+    "status": "Status",
+    "unknownDevice": "Nicht in dieser Anwendung registriert"
   },
   "apnsDevices": {
     "title": "APNs-Geräte",
@@ -2278,7 +2297,11 @@
     "updated": "Aktualisiert",
     "loadEdit": "Laden / bearbeiten",
     "deletePreset": "Vorlage löschen?",
-    "deletePresetDescription": "Löscht dieses wiederverwendbare Payload und seine Header."
+    "deletePresetDescription": "Löscht dieses wiederverwendbare Payload und seine Header.",
+    "historyDescription": "Gesendete Stapel, Entwürfe und APNs-Ergebnisse pro Empfänger.",
+    "presetsDescription": "Wiederverwendbare Inhalte und Header; Empfänger werden beim Senden gewählt.",
+    "noHistory": "Noch kein Push-Benachrichtigungsverlauf vorhanden.",
+    "noPresets": "Noch keine Push-Benachrichtigungsvorlagen gespeichert."
   },
   "status": {
     "online": "Online",
