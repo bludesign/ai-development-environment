@@ -49,6 +49,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import {
+  eligiblePortalDeviceIds,
+  type ApplePortalResource as AppleResource,
+} from "./apple-portal";
+
 type Agent = { id: string; name: string; hostname: string; supported: boolean };
 type Profile = {
   id: string;
@@ -77,11 +82,7 @@ type Certificate = {
   expired: boolean;
   hasPrivateKey: boolean;
   installedAgents: Array<{ id: string; name: string }>;
-};
-type AppleResource = {
-  id: string;
-  type: string;
-  attributes: Record<string, unknown>;
+  privateKeyAgents: Array<{ id: string; name: string }>;
 };
 type Operation = {
   id: string;
@@ -120,6 +121,7 @@ const LOCAL_QUERY = `query SigningAssetsPage {
   signingCertificates {
     id sha1 sha256 name teamId certificateType expiresAt expired hasPrivateKey
     installedAgents { id name }
+    privateKeyAgents { id name }
   }
   signingOperations(limit: 20) {
     id kind status error createdAt
@@ -798,7 +800,7 @@ export function ProvisioningProfilesPage() {
                               `mutation DeleteIdentity($sha1: String!, $agents: [ID!]!) { deleteSigningIdentity(sha1: $sha1, agentIds: $agents) { id } }`,
                               {
                                 sha1: certificate.sha1,
-                                agents: certificate.installedAgents.map(
+                                agents: certificate.privateKeyAgents.map(
                                   (agent) => agent.id,
                                 ),
                               },
@@ -922,14 +924,10 @@ export function ProvisioningProfilesPage() {
                             profileType: portalProfileType,
                             bundleIdId: portalBundleId,
                             certificateIds: [portalCertificateId],
-                            deviceIds: [
-                              "IOS_APP_DEVELOPMENT",
-                              "IOS_APP_ADHOC",
-                            ].includes(portalProfileType)
-                              ? (portal?.devices ?? []).map(
-                                  (resource) => resource.id,
-                                )
-                              : [],
+                            deviceIds: eligiblePortalDeviceIds(
+                              portal?.devices ?? [],
+                              portalProfileType,
+                            ),
                           },
                         },
                       ).then(async () => {

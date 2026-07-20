@@ -73,6 +73,7 @@ async function decodeProfile(
   path: string,
   timeoutMs: number,
   signal: AbortSignal,
+  strict = false,
 ): Promise<Record<string, unknown> | null> {
   try {
     const result = await captureCommand({
@@ -81,14 +82,36 @@ async function decodeProfile(
       timeoutMs: Math.min(timeoutMs, 10_000),
       signal,
     });
+    if (strict) assertCommandSucceeded(result, `Reading profile ${path}`);
     if (result.exitCode !== 0 || !result.stdout.trim()) return null;
     const parsed = parsePlist(result.stdout);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      if (strict) throw new Error(`Profile ${path} did not contain a plist`);
       return null;
     }
     return parsed as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return null;
+  }
+}
+
+function assertCommandSucceeded(
+  result: {
+    exitCode: number | null;
+    timedOut: boolean;
+    cancelled: boolean;
+    stderr: string;
+  },
+  action: string,
+): void {
+  if (result.cancelled) throw new Error(`${action} was cancelled`);
+  if (result.timedOut) throw new Error(`${action} timed out`);
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim();
+    throw new Error(
+      `${action} failed${detail ? `: ${detail}` : ` with exit code ${String(result.exitCode)}`}`,
+    );
   }
 }
 
@@ -190,13 +213,18 @@ async function readProfiles(
 async function decodedProfiles(
   timeoutMs: number,
   signal: AbortSignal,
+  strict = false,
 ): Promise<DecodedProfile[]> {
   const profiles: DecodedProfile[] = [];
+  if (strict) signal.throwIfAborted();
   for (const directory of PROFILE_DIRECTORIES) {
     let entries: string[];
     try {
       entries = await readdir(directory);
-    } catch {
+    } catch (error) {
+      if (strict && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
       continue;
     }
     for (const entry of entries) {
@@ -205,12 +233,13 @@ async function decodedProfiles(
       }
       signal.throwIfAborted();
       const path = join(directory, entry);
-      const raw = await decodeProfile(path, timeoutMs, signal);
+      const raw = await decodeProfile(path, timeoutMs, signal, strict);
       if (!raw) continue;
       let content: Buffer;
       try {
         content = await readFile(path);
-      } catch {
+      } catch (error) {
+        if (strict) throw error;
         continue;
       }
       profiles.push({
@@ -291,6 +320,7 @@ const IDENTITY_PATTERN = /^\s*\d+\)\s+([0-9A-F]{40})\s+"(.+)"\s*$/i;
 async function readIdentities(
   timeoutMs: number,
   signal: AbortSignal,
+  strict = false,
 ): Promise<SigningIdentity[]> {
   try {
     const result = await captureCommand({
@@ -299,6 +329,7 @@ async function readIdentities(
       timeoutMs: Math.min(timeoutMs, 10_000),
       signal,
     });
+    if (strict) assertCommandSucceeded(result, "Reading signing identities");
     if (result.exitCode !== 0) return [];
     const identities = new Map<string, SigningIdentity>();
     for (const line of result.stdout.split("\n")) {
@@ -310,7 +341,8 @@ async function readIdentities(
       identities.set(sha1, { sha1, name, teamId: team?.[1] ?? null });
     }
     return [...identities.values()];
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
@@ -351,6 +383,7 @@ function pemCertificates(value: string): string[] {
 async function readCertificates(
   timeoutMs: number,
   signal: AbortSignal,
+  strict = false,
 ): Promise<SigningCertificateAssetSnapshot[]> {
   const [certificateResult, identities] = await Promise.all([
     captureCommand({
@@ -359,8 +392,11 @@ async function readCertificates(
       timeoutMs: Math.min(timeoutMs, 20_000),
       signal,
     }),
-    readIdentities(timeoutMs, signal),
+    readIdentities(timeoutMs, signal, strict),
   ]);
+  if (strict) {
+    assertCommandSucceeded(certificateResult, "Reading signing certificates");
+  }
   if (certificateResult.exitCode !== 0) return [];
   const identityHashes = new Set(
     identities.map((identity) => identity.sha1.toUpperCase()),
@@ -572,16 +608,9 @@ export const scanSigningAssets: AgentJobHandler = async (
   signal,
 ) => {
   signingScanPayload(payload);
-  const warnings: string[] = [];
   const [decoded, certificates] = await Promise.all([
-    decodedProfiles(timeoutMs, signal).catch((error) => {
-      warnings.push(error instanceof Error ? error.message : String(error));
-      return [];
-    }),
-    readCertificates(timeoutMs, signal).catch((error) => {
-      warnings.push(error instanceof Error ? error.message : String(error));
-      return [];
-    }),
+    decodedProfiles(timeoutMs, signal, true),
+    readCertificates(timeoutMs, signal, true),
   ]);
   const byUuid = new Map<string, SigningProfileAssetSnapshot>();
   for (const profile of decoded) {
@@ -598,7 +627,7 @@ export const scanSigningAssets: AgentJobHandler = async (
       left.name.localeCompare(right.name),
     ),
     certificates,
-    warnings,
+    warnings: [],
   };
 };
 

@@ -15,7 +15,10 @@ import {
   AppleDeveloperClient,
   storedAppleDeveloperCredentials,
 } from "@/services/apple-developer";
-import type { AgentControlService } from "@/services/agent-control";
+import {
+  AGENT_ONLINE_WINDOW_MS,
+  type AgentControlService,
+} from "@/services/agent-control";
 import {
   agentEventBus,
   SIGNING_ASSETS_CHANGED_TOPIC,
@@ -55,6 +58,17 @@ function stringArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function online(
+  agent: { lastSeenAt: Date | null; disconnectedAt: Date | null },
+  now = Date.now(),
+): boolean {
+  return (
+    agent.lastSeenAt !== null &&
+    now - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    agent.disconnectedAt === null
+  );
 }
 
 export class SigningAssetsService {
@@ -456,6 +470,9 @@ export class SigningAssetsService {
         expired: certificate.expired,
         hasPrivateKey: installations.some((item) => item.hasPrivateKey),
         installedAgents: installations.map(({ agent }) => agent),
+        privateKeyAgents: installations
+          .filter((item) => item.hasPrivateKey)
+          .map(({ agent }) => agent),
       };
     });
   }
@@ -662,6 +679,37 @@ export class SigningAssetsService {
     if (!bytes.length || bytes.length > 20 * 1024 * 1024) {
       throw new Error("The .p12 file is empty or larger than 20 MiB");
     }
+    const targetAgentIds = [...new Set(input.targetAgentIds)];
+    const prisma = await getPrismaClient();
+    const agents = await prisma.agent.findMany({
+      where: { id: { in: targetAgentIds } },
+      select: {
+        id: true,
+        name: true,
+        capabilitiesJson: true,
+        lastSeenAt: true,
+        disconnectedAt: true,
+      },
+    });
+    const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+    const now = Date.now();
+    const unavailable = targetAgentIds.filter((agentId) => {
+      const agent = agentsById.get(agentId);
+      return (
+        !agent ||
+        !online(agent, now) ||
+        !stringArray(agent.capabilitiesJson).includes(
+          SIGNING_IDENTITY_IMPORT_JOB_KIND,
+        )
+      );
+    });
+    if (unavailable.length) {
+      throw new Error(
+        `Identity imports require online supported agents: ${unavailable
+          .map((agentId) => agentsById.get(agentId)?.name ?? agentId)
+          .join(", ")}`,
+      );
+    }
     const sha256 = createHash("sha256")
       .update(bytes)
       .digest("hex")
@@ -669,7 +717,7 @@ export class SigningAssetsService {
     const operation = await this.operation(
       "IMPORT_IDENTITY",
       sha256,
-      input.targetAgentIds,
+      targetAgentIds,
     );
     for (const item of operation.items) {
       const transferId = this.agentControl.createSigningSecretTransfer(
@@ -697,12 +745,37 @@ export class SigningAssetsService {
 
   async deleteIdentity(sha1: string, agentIds: string[]) {
     if (!agentIds.length) throw new Error("Select at least one agent");
-    const operation = await this.operation("DELETE_IDENTITY", sha1, agentIds);
+    const normalizedSha1 = sha1.toUpperCase();
+    const requestedAgentIds = [...new Set(agentIds)];
+    const prisma = await getPrismaClient();
+    const installations = await prisma.signingCertificateAsset.findMany({
+      where: {
+        sha1: normalizedSha1,
+        agentId: { in: requestedAgentIds },
+        hasPrivateKey: true,
+        missingAt: null,
+      },
+      select: { agentId: true },
+    });
+    const eligible = new Set(
+      installations.map((installation) => installation.agentId),
+    );
+    const privateKeyAgentIds = requestedAgentIds.filter((agentId) =>
+      eligible.has(agentId),
+    );
+    if (!privateKeyAgentIds.length) {
+      throw new Error("The identity has no private key on the selected agents");
+    }
+    const operation = await this.operation(
+      "DELETE_IDENTITY",
+      normalizedSha1,
+      privateKeyAgentIds,
+    );
     for (const item of operation.items) {
       const job = await this.agentControl.createJob({
         agentId: item.agentId,
         kind: SIGNING_IDENTITY_DELETE_JOB_KIND,
-        payload: { sha1 },
+        payload: { sha1: normalizedSha1 },
         idempotencyKey: `signing:${operation.id}:${item.agentId}:delete`,
         timeoutSeconds: 60,
         visibility: "SYSTEM",

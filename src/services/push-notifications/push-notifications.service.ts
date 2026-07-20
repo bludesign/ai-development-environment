@@ -24,7 +24,15 @@ import {
 
 const SETTINGS_ID = "default";
 const STALE_BATCH_MS = 2 * 60_000;
+const RECOVERY_INTERVAL_MS = 30_000;
 const DELIVERY_CONCURRENCY = 16;
+const PUSH_TARGET_MODES = ["DEVICES", "ALL", "DIRECT", "BROADCAST"] as const;
+
+type PushTargetMode = (typeof PUSH_TARGET_MODES)[number];
+
+function isPushTargetMode(value: string): value is PushTargetMode {
+  return (PUSH_TARGET_MODES as readonly string[]).includes(value);
+}
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex").toUpperCase();
@@ -82,9 +90,15 @@ function clean(value: string, name: string, max = 200): string {
 
 export class PushNotificationsService {
   private recoveryStarted = false;
+  private readonly activeBatchIds = new Set<string>();
 
   constructor(private readonly client = new ApnsClient()) {
     queueMicrotask(() => void this.recover().catch(() => undefined));
+    const timer = setInterval(
+      () => void this.recover().catch(() => undefined),
+      RECOVERY_INTERVAL_MS,
+    );
+    timer.unref();
   }
 
   private changed(): void {
@@ -543,7 +557,17 @@ export class PushNotificationsService {
 
   async deleteHistory(id: string) {
     const prisma = await getPrismaClient();
-    await prisma.pushNotificationBatch.delete({ where: { id } });
+    const deleted = await prisma.pushNotificationBatch.deleteMany({
+      where: { id, status: { notIn: ["QUEUED", "SENDING"] } },
+    });
+    if (deleted.count !== 1) {
+      const batch = await prisma.pushNotificationBatch.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!batch) throw new Error("Push history item not found");
+      throw new Error("Queued or sending push notifications cannot be deleted");
+    }
     this.changed();
     return true;
   }
@@ -560,13 +584,17 @@ export class PushNotificationsService {
   async send(input: {
     requestId: string;
     editor: unknown;
-    targetMode: "DEVICES" | "ALL" | "DIRECT" | "BROADCAST";
+    targetMode: string;
     registrationIds?: string[];
     channelId?: string | null;
     directToken?: string | null;
     directTokenEncoding?: "HEX" | "BASE64" | null;
     directEnvironment?: "SANDBOX" | "PRODUCTION" | null;
   }) {
+    if (!isPushTargetMode(input.targetMode)) {
+      throw new Error(`Unsupported push target mode: ${input.targetMode}`);
+    }
+    const targetMode = input.targetMode;
     const validated = validatePushEditor(input.editor);
     const prisma = await getPrismaClient();
     const existing = await prisma.pushNotificationBatch.findUnique({
@@ -587,7 +615,7 @@ export class PushNotificationsService {
       tokenHash: string;
       environment: "SANDBOX" | "PRODUCTION";
     } | null = null;
-    if (input.targetMode === "BROADCAST") {
+    if (targetMode === "BROADCAST") {
       if (validated.editor.pushType !== "liveactivity") {
         throw new Error(
           "Broadcast delivery is available only for Live Activities",
@@ -598,7 +626,7 @@ export class PushNotificationsService {
         where: { id: input.channelId },
       });
       if (!channel) throw new Error("Broadcast channel not found");
-    } else if (input.targetMode === "DIRECT") {
+    } else if (targetMode === "DIRECT") {
       if (validated.editor.pushType !== "liveactivity") {
         throw new Error(
           "Direct-token delivery is available only for Live Activities",
@@ -623,7 +651,7 @@ export class PushNotificationsService {
         where: {
           status: "ACTIVE",
           topic: validated.headers["apns-topic"],
-          ...(input.targetMode === "DEVICES" ? { id: { in: ids } } : {}),
+          ...(targetMode === "DEVICES" ? { id: { in: ids } } : {}),
         },
       });
       recipients = rows
@@ -648,7 +676,7 @@ export class PushNotificationsService {
         editorJson: JSON.stringify(validated.editor),
         payloadJson: JSON.stringify(validated.payload),
         headersJson: JSON.stringify(validated.headers),
-        targetMode: input.targetMode,
+        targetMode,
         channelId: channel?.id ?? null,
         recipientCount: channel || directRecipient ? 1 : recipients.length,
         deliveries: {
@@ -918,27 +946,23 @@ export class PushNotificationsService {
       },
     });
     this.changed();
+    if (tokenAuthentication) {
+      await prisma.pushNotificationSettings.updateMany({
+        where: { id: SETTINGS_ID },
+        data: succeeded
+          ? { tokenLastUsedAt: new Date(), tokenLastError: null }
+          : {
+              tokenLastError: `HTTP ${response.status}${response.reason ? `: ${response.reason}` : ""}`,
+            },
+      });
+    }
     if (!registration) return;
     if (succeeded) {
       await prisma.apnsRegistration.update({
         where: { id: registration.id },
         data: { lastSentAt: new Date(), lastFailureReason: null },
       });
-      if (tokenAuthentication) {
-        await prisma.pushNotificationSettings.updateMany({
-          where: { id: SETTINGS_ID },
-          data: { tokenLastUsedAt: new Date(), tokenLastError: null },
-        });
-      }
       return;
-    }
-    if (tokenAuthentication) {
-      await prisma.pushNotificationSettings.updateMany({
-        where: { id: SETTINGS_ID },
-        data: {
-          tokenLastError: `HTTP ${response.status}${response.reason ? `: ${response.reason}` : ""}`,
-        },
-      });
     }
     const invalid =
       response.status === 410 && response.reason === "Unregistered";
@@ -981,59 +1005,64 @@ export class PushNotificationsService {
       data: { status: "SENDING", startedAt: new Date(), error: null },
     });
     if (claim.count !== 1) return;
-    const batch = await prisma.pushNotificationBatch.findUnique({
-      where: { id },
-      include: { deliveries: true },
-    });
-    if (!batch) return;
-    const editor = json<PushEditor>(batch.editorJson);
-    const payload = json<Record<string, unknown>>(batch.payloadJson);
-    const headers = json<Record<string, string>>(batch.headersJson);
-    const channel = batch.channelId
-      ? await prisma.apnsBroadcastChannel.findUnique({
-          where: { id: batch.channelId },
-        })
-      : null;
-    let cursor = 0;
-    const workers = Array.from(
-      { length: Math.min(DELIVERY_CONCURRENCY, batch.deliveries.length) },
-      async () => {
-        while (cursor < batch.deliveries.length) {
-          const delivery = batch.deliveries[cursor++];
-          if (!delivery) return;
-          await this.executeDelivery(
-            delivery,
-            editor,
-            payload,
-            headers,
-            channel,
-          );
-        }
-      },
-    );
-    await Promise.all(workers);
-    const deliveries = await prisma.pushNotificationDelivery.findMany({
-      where: { batchId: id },
-      select: { status: true },
-    });
-    const successCount = deliveries.filter(
-      (delivery) => delivery.status === "SUCCEEDED",
-    ).length;
-    const failureCount = deliveries.length - successCount;
-    await prisma.pushNotificationBatch.update({
-      where: { id },
-      data: {
-        status: failureCount
-          ? successCount
-            ? "PARTIAL"
-            : "FAILED"
-          : "SUCCEEDED",
-        successCount,
-        failureCount,
-        finishedAt: new Date(),
-      },
-    });
-    this.changed();
+    this.activeBatchIds.add(id);
+    try {
+      const batch = await prisma.pushNotificationBatch.findUnique({
+        where: { id },
+        include: { deliveries: { where: { status: "QUEUED" } } },
+      });
+      if (!batch) return;
+      const editor = json<PushEditor>(batch.editorJson);
+      const payload = json<Record<string, unknown>>(batch.payloadJson);
+      const headers = json<Record<string, string>>(batch.headersJson);
+      const channel = batch.channelId
+        ? await prisma.apnsBroadcastChannel.findUnique({
+            where: { id: batch.channelId },
+          })
+        : null;
+      let cursor = 0;
+      const workers = Array.from(
+        { length: Math.min(DELIVERY_CONCURRENCY, batch.deliveries.length) },
+        async () => {
+          while (cursor < batch.deliveries.length) {
+            const delivery = batch.deliveries[cursor++];
+            if (!delivery) return;
+            await this.executeDelivery(
+              delivery,
+              editor,
+              payload,
+              headers,
+              channel,
+            );
+          }
+        },
+      );
+      await Promise.all(workers);
+      const deliveries = await prisma.pushNotificationDelivery.findMany({
+        where: { batchId: id },
+        select: { status: true },
+      });
+      const successCount = deliveries.filter(
+        (delivery) => delivery.status === "SUCCEEDED",
+      ).length;
+      const failureCount = deliveries.length - successCount;
+      await prisma.pushNotificationBatch.update({
+        where: { id },
+        data: {
+          status: failureCount
+            ? successCount
+              ? "PARTIAL"
+              : "FAILED"
+            : "SUCCEEDED",
+          successCount,
+          failureCount,
+          finishedAt: new Date(),
+        },
+      });
+      this.changed();
+    } finally {
+      this.activeBatchIds.delete(id);
+    }
   }
 
   async recover(): Promise<void> {
@@ -1041,28 +1070,43 @@ export class PushNotificationsService {
     this.recoveryStarted = true;
     try {
       const prisma = await getPrismaClient();
-      const staleBefore = new Date(Date.now() - STALE_BATCH_MS);
-      const stale = await prisma.pushNotificationBatch.findMany({
-        where: {
-          OR: [
-            { status: "QUEUED" },
-            { status: "SENDING", startedAt: { lt: staleBefore } },
-          ],
-        },
-        take: 100,
-      });
-      for (const batch of stale) {
-        if (batch.status === "SENDING") {
-          await prisma.pushNotificationDelivery.updateMany({
-            where: { batchId: batch.id, status: "SENDING" },
-            data: { status: "QUEUED", startedAt: null },
-          });
-          await prisma.pushNotificationBatch.update({
-            where: { id: batch.id },
-            data: { status: "QUEUED", startedAt: null },
-          });
+      while (true) {
+        const staleBefore = new Date(Date.now() - STALE_BATCH_MS);
+        const stale = await prisma.pushNotificationBatch.findMany({
+          where: {
+            OR: [
+              { status: "QUEUED" },
+              { status: "SENDING", startedAt: { lt: staleBefore } },
+            ],
+          },
+          orderBy: { createdAt: "asc" },
+          take: 100,
+        });
+        if (!stale.length) break;
+        const recoverableIds: string[] = [];
+        for (const batch of stale) {
+          if (this.activeBatchIds.has(batch.id)) continue;
+          if (batch.status === "SENDING") {
+            await prisma.pushNotificationDelivery.updateMany({
+              where: { batchId: batch.id, status: "SENDING" },
+              data: { status: "QUEUED", startedAt: null },
+            });
+            const reset = await prisma.pushNotificationBatch.updateMany({
+              where: {
+                id: batch.id,
+                status: "SENDING",
+                startedAt: { lt: staleBefore },
+              },
+              data: { status: "QUEUED", startedAt: null },
+            });
+            if (reset.count !== 1) continue;
+          }
+          recoverableIds.push(batch.id);
         }
-        void this.processBatch(batch.id).catch(() => undefined);
+        if (!recoverableIds.length) break;
+        await Promise.all(
+          recoverableIds.map((batchId) => this.processBatch(batchId)),
+        );
       }
     } finally {
       this.recoveryStarted = false;

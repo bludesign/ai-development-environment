@@ -259,6 +259,88 @@ function jsonObject(value: string, name: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+export function editorStateFromSaved(
+  value: Record<string, unknown>,
+): EditorState {
+  const headers = (value.headers ?? {}) as Record<string, unknown>;
+  const aps = (value.aps ?? {}) as Record<string, unknown>;
+  const alert = (aps.alert ?? {}) as Record<string, unknown>;
+  const live = (value.liveActivity ?? {}) as Record<string, unknown>;
+  const sound = aps.sound;
+  const soundObject =
+    sound && typeof sound === "object" && !Array.isArray(sound)
+      ? (sound as Record<string, unknown>)
+      : null;
+  const locArgs = (raw: unknown) =>
+    Array.isArray(raw) ? raw.map(String).join(", ") : "";
+  return {
+    ...DEFAULT_EDITOR,
+    pushType: (value.pushType as PushType) ?? "alert",
+    topic: String(headers.topic ?? ""),
+    priority: String(headers.priority ?? 10) as EditorState["priority"],
+    apnsId: String(headers.id ?? ""),
+    expiration: String(headers.expiration ?? ""),
+    collapseId: String(headers.collapseId ?? ""),
+    title: String(alert.title ?? ""),
+    subtitle: String(alert.subtitle ?? ""),
+    body: String(alert.body ?? ""),
+    titleLocKey: String(alert["title-loc-key"] ?? ""),
+    titleLocArgs: locArgs(alert["title-loc-args"]),
+    subtitleLocKey: String(alert["subtitle-loc-key"] ?? ""),
+    subtitleLocArgs: locArgs(alert["subtitle-loc-args"]),
+    locKey: String(alert["loc-key"] ?? ""),
+    locArgs: locArgs(alert["loc-args"]),
+    launchImage: String(alert["launch-image"] ?? ""),
+    summaryArg: String(alert["summary-arg"] ?? ""),
+    summaryArgCount:
+      alert["summary-arg-count"] === undefined
+        ? ""
+        : String(alert["summary-arg-count"]),
+    badge: aps.badge === undefined ? "" : String(aps.badge),
+    soundName:
+      typeof sound === "string" ? sound : String(soundObject?.name ?? ""),
+    criticalSound: soundObject?.critical === 1,
+    soundVolume:
+      soundObject?.volume === undefined ? "1" : String(soundObject.volume),
+    category: String(aps.category ?? ""),
+    threadId: String(aps["thread-id"] ?? ""),
+    contentAvailable: aps["content-available"] === 1,
+    mutableContent: aps["mutable-content"] === 1,
+    targetContentId: String(aps["target-content-id"] ?? ""),
+    interruptionLevel: String(aps["interruption-level"] ?? "active"),
+    relevanceScore:
+      aps["relevance-score"] === undefined
+        ? ""
+        : String(aps["relevance-score"]),
+    customJson: JSON.stringify(value.custom ?? {}, null, 2),
+    liveTimestamp: String(live.timestamp ?? Math.floor(Date.now() / 1000)),
+    liveEvent: (live.event as EditorState["liveEvent"]) ?? "update",
+    liveContentState: JSON.stringify(live["content-state"] ?? {}, null, 2),
+    liveAttributesType: String(live["attributes-type"] ?? ""),
+    liveAttributes: JSON.stringify(live.attributes ?? {}, null, 2),
+    liveStaleDate:
+      live["stale-date"] === undefined ? "" : String(live["stale-date"]),
+    liveDismissalDate:
+      live["dismissal-date"] === undefined
+        ? ""
+        : String(live["dismissal-date"]),
+    liveInputPushToken: live["input-push-token"] === 1,
+    credentialId: String(value.credentialId ?? ""),
+  };
+}
+
+export function editorStateWithPushType(
+  state: EditorState,
+  pushType: PushType,
+): EditorState {
+  return {
+    ...state,
+    pushType,
+    ...(pushType === "background" ? { priority: "5" as const } : {}),
+    ...(pushType === "mdm" ? {} : { credentialId: "" }),
+  };
+}
+
 export function PushNotificationsPage() {
   const t = useTranslations("pushNotifications");
   const tc = useTranslations("common");
@@ -499,47 +581,7 @@ export function PushNotificationsPage() {
     setBroadcastChannelId("");
     setDirectTokenMode(false);
     setDirectToken("");
-    const headers = (value.headers ?? {}) as Record<string, unknown>;
-    const aps = (value.aps ?? {}) as Record<string, unknown>;
-    const alert = (aps.alert ?? {}) as Record<string, unknown>;
-    const live = (value.liveActivity ?? {}) as Record<string, unknown>;
-    setState({
-      ...DEFAULT_EDITOR,
-      pushType: (value.pushType as PushType) ?? "alert",
-      topic: String(headers.topic ?? ""),
-      priority: String(headers.priority ?? 10) as EditorState["priority"],
-      apnsId: String(headers.id ?? ""),
-      expiration: String(headers.expiration ?? ""),
-      collapseId: String(headers.collapseId ?? ""),
-      title: String(alert.title ?? ""),
-      subtitle: String(alert.subtitle ?? ""),
-      body: String(alert.body ?? ""),
-      badge: aps.badge === undefined ? "" : String(aps.badge),
-      category: String(aps.category ?? ""),
-      threadId: String(aps["thread-id"] ?? ""),
-      contentAvailable: aps["content-available"] === 1,
-      mutableContent: aps["mutable-content"] === 1,
-      targetContentId: String(aps["target-content-id"] ?? ""),
-      interruptionLevel: String(aps["interruption-level"] ?? "active"),
-      relevanceScore:
-        aps["relevance-score"] === undefined
-          ? ""
-          : String(aps["relevance-score"]),
-      customJson: JSON.stringify(value.custom ?? {}, null, 2),
-      liveTimestamp: String(live.timestamp ?? Math.floor(Date.now() / 1000)),
-      liveEvent: (live.event as EditorState["liveEvent"]) ?? "update",
-      liveContentState: JSON.stringify(live["content-state"] ?? {}, null, 2),
-      liveAttributesType: String(live["attributes-type"] ?? ""),
-      liveAttributes: JSON.stringify(live.attributes ?? {}, null, 2),
-      liveStaleDate:
-        live["stale-date"] === undefined ? "" : String(live["stale-date"]),
-      liveDismissalDate:
-        live["dismissal-date"] === undefined
-          ? ""
-          : String(live["dismissal-date"]),
-      liveInputPushToken: live["input-push-token"] === 1,
-      credentialId: String(value.credentialId ?? ""),
-    });
+    setState(editorStateFromSaved(value));
   };
 
   return (
@@ -613,8 +655,9 @@ export function PushNotificationsPage() {
                 <Field label={t("pushType")}>
                   <Select
                     onValueChange={(value) => {
-                      update("pushType", value as PushType);
-                      if (value === "background") update("priority", "5");
+                      setState((current) =>
+                        editorStateWithPushType(current, value as PushType),
+                      );
                       if (value !== "liveactivity") {
                         setDirectTokenMode(false);
                         setBroadcastChannelId("");
@@ -1626,7 +1669,12 @@ function ExpandableHistory({
                       onConfirm={() => onDelete(batch.id)}
                       title={t("deleteHistory")}
                       trigger={
-                        <Button variant="ghost">
+                        <Button
+                          disabled={["QUEUED", "SENDING"].includes(
+                            batch.status,
+                          )}
+                          variant="ghost"
+                        >
                           <Trash2 /> {t("delete")}
                         </Button>
                       }

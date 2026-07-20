@@ -53,6 +53,7 @@ type LocalSigningCertificate {
   expired: Boolean!
   hasPrivateKey: Boolean!
   installedAgents: [SigningInstallationAgent!]!
+  privateKeyAgents: [SigningInstallationAgent!]!
 }
 
 type SigningOperationItem {
