@@ -86,7 +86,7 @@ export function JiraTicketActivity({
       }}
     >
       <Card>
-        <CardHeader className="flex grid-cols-none flex-row flex-wrap items-center justify-between gap-3 border-b">
+        <CardHeader className="flex grid-cols-none flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle>{title}</CardTitle>
           <TabsList className="ml-auto">
             <TabsTrigger value="comments">{t("comments")}</TabsTrigger>

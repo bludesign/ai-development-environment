@@ -494,7 +494,7 @@ function Panel({
 }) {
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>

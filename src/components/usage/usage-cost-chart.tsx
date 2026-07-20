@@ -130,7 +130,7 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
 
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("costChartTitle")}</CardTitle>
         <CardDescription>{t("costChartDescription")}</CardDescription>
       </CardHeader>

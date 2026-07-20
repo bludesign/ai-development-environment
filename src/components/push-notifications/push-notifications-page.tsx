@@ -1188,7 +1188,7 @@ export function PushNotificationsPage() {
       <ChannelsCard channels={channels} load={load} />
       <Tabs onValueChange={setRecordsTab} value={recordsTab}>
         <Card className="gap-0 py-0">
-          <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+          <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
             <CardTitle>
               {recordsTab === "history" ? t("history") : t("presets")}
             </CardTitle>

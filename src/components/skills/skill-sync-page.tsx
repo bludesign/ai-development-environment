@@ -471,7 +471,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       )}
       {agentProgress.length > 0 && (
         <Card className="gap-0 py-0">
-          <CardHeader className="border-b py-4">
+          <CardHeader>
             <CardTitle>{t("syncAgents")}</CardTitle>
             <CardDescription>{t("syncAgentsDescription")}</CardDescription>
           </CardHeader>
@@ -533,7 +533,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         </Card>
       )}
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle>{t("syncChanges")}</CardTitle>
           <CardDescription>{t("syncChangesDescription")}</CardDescription>
         </CardHeader>

@@ -444,7 +444,7 @@ function ReviewThreadTable({
   const t = useTranslations("githubComments");
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("reviewThreads")}</CardTitle>
         <CardDescription>
           {t("reviewThreadsDescription", { count: threads.length })}

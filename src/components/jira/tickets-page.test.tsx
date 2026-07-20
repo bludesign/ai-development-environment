@@ -135,14 +135,16 @@ describe("JiraTicketsPage", () => {
       name: "Collapse In Progress",
     });
     expect(statusHeaderButton.getAttribute("aria-expanded")).toBe("true");
-    expect(statusHeader?.classList.contains("border-b")).toBe(true);
+    // The header divider comes from `not-last:border-b` on CardHeader, so it is
+    // driven by whether the content sibling is mounted rather than by a class toggle.
+    expect(statusHeader?.nextElementSibling).not.toBeNull();
     expect(collapseStatusButton.getAttribute("data-size")).toBe("icon-sm");
     expect(collapseStatusButton.textContent).toBe("");
     fireEvent.click(statusHeaderButton);
     expect(screen.getAllByRole("table")).toHaveLength(1);
     expect(screen.queryByText("Open login screen")).toBeNull();
     expect(statusHeaderButton.getAttribute("aria-expanded")).toBe("false");
-    expect(statusHeader?.classList.contains("border-b")).toBe(false);
+    expect(statusHeader?.nextElementSibling).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand In Progress" }));
     expect(screen.getAllByRole("table")).toHaveLength(2);
     expect(screen.getByText("Open login screen")).toBeDefined();

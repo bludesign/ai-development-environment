@@ -1044,7 +1044,7 @@ function CreateWorktreeCard({
   };
   return (
     <Card>
-      <CardHeader className="border-b">
+      <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Plus /> {t("createWorktree")}
         </CardTitle>
@@ -1305,7 +1305,7 @@ function WorktreeCard(props: WorktreeItemProps) {
         }
       }}
     >
-      <CardHeader className="grid-cols-1! border-b @md/card-header:grid-cols-[minmax(0,1fr)_auto]!">
+      <CardHeader className="grid-cols-1! @md/card-header:grid-cols-[minmax(0,1fr)_auto]!">
         <CardTitle className="min-w-0">
           <Button
             aria-expanded={expanded}

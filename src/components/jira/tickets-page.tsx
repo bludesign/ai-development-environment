@@ -406,13 +406,7 @@ export function JiraTicketsPage() {
               <div className="space-y-5 pb-4">
                 {groupedTickets.map(([status, tickets]) => (
                   <Card key={status} className="gap-0 py-0">
-                    <CardHeader
-                      className={
-                        collapsedStatuses.has(status)
-                          ? "bg-muted/40 py-3"
-                          : "border-b bg-muted/40 py-3"
-                      }
-                    >
+                    <CardHeader>
                       <div className="flex items-center justify-between gap-3">
                         <Button
                           aria-expanded={!collapsedStatuses.has(status)}

@@ -182,7 +182,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
           <JsonPanel title={t("detailData")} value={ticket.detailData} />
           <JsonPanel title={t("commentsData")} value={ticket.commentsData} />
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4">
+            <CardHeader>
               <CardTitle>{t("relatedEntries")}</CardTitle>
             </CardHeader>
             {ticket.cacheEntries.length === 0 ? (
@@ -235,7 +235,7 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
   const t = useTranslations("jiraCacheDetail");
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       {value === null ? (

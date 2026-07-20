@@ -353,7 +353,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b">
+          <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3">
             <CardTitle>{t("details")}</CardTitle>
             {editFields.length > 0 && (
               <Button
@@ -371,7 +371,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
         </Card>
 
         <Card>
-          <CardHeader className="border-b">
+          <CardHeader>
             <CardTitle>{tt("relatedIssues")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -464,7 +464,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
             ticket.affectedVersions.length > 0 ||
             ticket.sprintNames.length > 0) && (
             <Card>
-              <CardHeader className="border-b">
+              <CardHeader>
                 <CardTitle>{tt("classification")}</CardTitle>
               </CardHeader>
               <CardContent>
@@ -474,7 +474,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
           )}
           {ticket.attachments.length > 0 && (
             <Card>
-              <CardHeader className="border-b">
+              <CardHeader>
                 <CardTitle>{tt("attachments")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -504,7 +504,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
       />
 
       <Card className="min-w-0 gap-0 overflow-hidden py-0">
-        <CardHeader className={fieldsOpen ? "border-b py-4" : "py-4"}>
+        <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Button
               aria-controls="jira-all-fields"

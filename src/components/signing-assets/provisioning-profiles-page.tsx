@@ -559,7 +559,7 @@ export function ProvisioningProfilesPage() {
         </TabsList>
         <TabsContent value="profiles">
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+            <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
               <CardTitle>{t("localProfiles")}</CardTitle>
               <CardDescription>{t("profilesDescription")}</CardDescription>
               <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
@@ -732,7 +732,7 @@ export function ProvisioningProfilesPage() {
         </TabsContent>
         <TabsContent value="certificates">
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4">
+            <CardHeader>
               <CardTitle>{t("localCertificates")}</CardTitle>
               <CardDescription>{t("certificatesDescription")}</CardDescription>
             </CardHeader>

@@ -209,10 +209,12 @@ describe("JiraTicketDetailPage", () => {
     });
     const fieldsHeader = fieldsTitle.closest('[data-slot="card-header"]');
     expect(fieldsTitle.getAttribute("aria-expanded")).toBe("false");
-    expect(fieldsHeader?.classList.contains("border-b")).toBe(false);
+    // The header divider comes from `not-last:border-b` on CardHeader, so it is
+    // driven by whether the content sibling is mounted rather than by a class toggle.
+    expect(fieldsHeader?.nextElementSibling).toBeNull();
     fireEvent.click(fieldsTitle);
     expect(fieldsTitle.getAttribute("aria-expanded")).toBe("true");
-    expect(fieldsHeader?.classList.contains("border-b")).toBe(true);
+    expect(fieldsHeader?.nextElementSibling).not.toBeNull();
     const collapseFields = screen.getByRole("button", {
       name: "Hide fields",
     });
@@ -279,7 +281,7 @@ describe("JiraTicketDetailPage", () => {
     fireEvent.click(fieldsTitle);
     expect(fieldsTitle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Customer impact")).toBeNull();
-    expect(fieldsHeader?.classList.contains("border-b")).toBe(false);
+    expect(fieldsHeader?.nextElementSibling).toBeNull();
     expect(screen.getByRole("textbox", { name: "Comment" })).toBeDefined();
 
     const assigneeTrigger = screen.getByRole("combobox", {
