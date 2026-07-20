@@ -74,6 +74,8 @@ type BuildConfiguration {
   buildConfiguration: String!
   defaultAction: BuildAction!
   advancedSettings: JSON!
+  autoExport: Boolean!
+  exportSettings: JSON
   observation: BuildSourceObservation
   createdAt: String!
   updatedAt: String!
@@ -321,6 +323,8 @@ input SaveBuildConfigurationInput {
   buildConfiguration: String!
   defaultAction: BuildAction!
   advancedSettings: JSON
+  autoExport: Boolean = false
+  exportSettings: JSON
 }
 
 input SaveBuildScriptInput {
@@ -355,6 +359,8 @@ input StartBuildInput {
   scriptIds: [ID!]
   action: BuildAction
   advancedSettings: JSON
+  exportWhenComplete: Boolean
+  exportSettings: JSON
   requestId: ID!
 }
 

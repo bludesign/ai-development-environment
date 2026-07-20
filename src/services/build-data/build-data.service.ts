@@ -58,6 +58,7 @@ export type BuildDataAgentStatus =
 export type BuildDataEntryView = {
   id: string;
   name: string;
+  kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
   worktreeId: string | null;
@@ -598,14 +599,17 @@ export class BuildDataService {
         views.set(id, {
           id,
           name: entry.name,
+          kind: entry.kind,
           status:
-            entry.kind === "PENDING"
-              ? "PENDING"
-              : entry.kind === "SHARED_CACHE"
-                ? "SHARED_CACHE"
-                : worktree
-                  ? "READY"
-                  : "UNLINKED",
+            entry.kind === "DEVICE_SUPPORT"
+              ? "READY"
+              : entry.kind === "PENDING"
+                ? "PENDING"
+                : entry.kind === "SHARED_CACHE"
+                  ? "SHARED_CACHE"
+                  : worktree
+                    ? "READY"
+                    : "UNLINKED",
           workspacePath: entry.workspacePath,
           worktreeId: worktree?.id ?? null,
           worktreePath: worktree
@@ -816,6 +820,7 @@ export class BuildDataService {
               worktreeId,
               worktreePath: entry.worktreePath,
               source: "USER",
+              entryKind: entry.kind,
               jobId: job.id,
               targetKey: entry.id,
             },

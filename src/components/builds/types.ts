@@ -44,6 +44,8 @@ export type BuildConfiguration = {
   buildConfiguration: string;
   defaultAction: BuildAction;
   advancedSettings: Record<string, unknown>;
+  autoExport?: boolean;
+  exportSettings?: Record<string, unknown> | null;
   observation: BuildSourceObservation | null;
   createdAt: string;
   updatedAt: string;

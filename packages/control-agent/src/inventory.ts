@@ -10,6 +10,7 @@ import {
 import { WORKTREE_JOB_KINDS } from "@ai-development-environment/agent-contract/worktrees";
 import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
 import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
+import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
@@ -21,6 +22,7 @@ export const AGENT_CAPABILITIES = [
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
+  ...SIGNING_ASSET_JOB_KINDS,
 ];
 
 export type AgentInventory = {

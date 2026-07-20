@@ -4,13 +4,16 @@ import {
   parsePlist,
   plistDocument,
 } from "@ai-development-environment/agent-contract/plist";
-import { importPKCS8, SignJWT } from "jose";
-
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentEventBus,
   IOS_DEVICES_CHANGED_TOPIC,
 } from "@/services/agent-control/event-bus";
+import {
+  AppleDeveloperClient,
+  AppleDeveloperRequestError,
+  type AppleDeveloperCredentials,
+} from "@/services/apple-developer";
 
 import type { ClientIp } from "./client-ip";
 import {
@@ -31,7 +34,6 @@ import { fetchIpswDevice } from "./ipsw";
 const SETTINGS_ID = "default";
 const ENROLLMENT_TTL_MS = 30 * 60_000;
 const EXPIRED_RETENTION_MS = 7 * 24 * 60 * 60_000;
-const APP_STORE_CONNECT_API = "https://api.appstoreconnect.apple.com";
 const IPSW_CACHE_TTL_MS = 15 * 60_000;
 const REGISTRATION_CLAIM_TTL_MS = 5 * 60_000;
 const INTERRUPTED_REGISTRATION_ERROR =
@@ -658,11 +660,11 @@ export class IosDevicesService {
     return true;
   }
 
-  private async appStoreToken(credentials: {
+  private appleDeveloperCredentials(credentials: {
     appStoreConnectIssuerId: string | null;
     appStoreConnectKeyId: string | null;
     appStoreConnectPrivateKey: string | null;
-  }): Promise<string> {
+  }): AppleDeveloperCredentials {
     if (
       !credentials.appStoreConnectIssuerId ||
       !credentials.appStoreConnectKeyId ||
@@ -670,25 +672,11 @@ export class IosDevicesService {
     ) {
       throw new Error("App Store Connect API credentials are not configured");
     }
-    let key: Awaited<ReturnType<typeof importPKCS8>>;
-    try {
-      key = await importPKCS8(credentials.appStoreConnectPrivateKey, "ES256");
-    } catch {
-      throw new Error(
-        "The App Store Connect key must be an ES256 PKCS#8 private key",
-      );
-    }
-    return new SignJWT({})
-      .setProtectedHeader({
-        alg: "ES256",
-        kid: credentials.appStoreConnectKeyId,
-        typ: "JWT",
-      })
-      .setIssuer(credentials.appStoreConnectIssuerId)
-      .setAudience("appstoreconnect-v1")
-      .setIssuedAt()
-      .setExpirationTime("15m")
-      .sign(key);
+    return {
+      issuerId: credentials.appStoreConnectIssuerId,
+      keyId: credentials.appStoreConnectKeyId,
+      privateKey: credentials.appStoreConnectPrivateKey,
+    };
   }
 
   private async appleRequest<T>(
@@ -701,45 +689,29 @@ export class IosDevicesService {
     init: RequestInit = {},
     redact = "",
   ): Promise<T> {
-    const token = await this.appStoreToken(credentials);
-    let response: Response;
     try {
-      response = await this.fetcher(`${APP_STORE_CONNECT_API}${path}`, {
-        ...init,
-        signal: init.signal ?? AbortSignal.timeout(15_000),
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
-          ...(init.body ? { "content-type": "application/json" } : {}),
-          ...init.headers,
-        },
-      });
+      return await new AppleDeveloperClient(
+        this.appleDeveloperCredentials(credentials),
+        this.fetcher,
+      ).request<T>(path, init);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        (error.name === "TimeoutError" || error.name === "AbortError")
-      ) {
-        throw new Error(
-          "App Store Connect timed out; retry to reconcile the device",
-        );
+      if (!(error instanceof AppleDeveloperRequestError)) {
+        if (error instanceof Error && error.message.includes("timed out")) {
+          throw new Error(
+            "App Store Connect timed out; retry to reconcile the device",
+          );
+        }
+        if (error instanceof Error && error.message.includes("ES256 PKCS#8")) {
+          throw error;
+        }
+        throw new Error("Could not connect to App Store Connect");
       }
-      throw new Error("Could not connect to App Store Connect");
-    }
-    const body = (await response.json().catch(() => ({}))) as {
-      errors?: Array<{
-        status?: string;
-        code?: string;
-        title?: string;
-        detail?: string;
-      }>;
-    } & T;
-    if (!response.ok) {
-      const detail = body.errors
+      const detail = error.errors
         ?.map((entry) => entry.detail || entry.title || entry.code)
         .filter(Boolean)
         .join("; ");
       const classification = `${
-        body.errors
+        error.errors
           ?.map(
             (entry) =>
               `${entry.code ?? ""} ${entry.title ?? ""} ${entry.detail ?? ""}`,
@@ -747,9 +719,9 @@ export class IosDevicesService {
           .join(" ") ?? ""
       }`.toLowerCase();
       const message =
-        response.status === 401 || response.status === 403
+        error.status === 401 || error.status === 403
           ? "App Store Connect rejected the API key or its Certificates, Identifiers & Profiles access"
-          : response.status === 429
+          : error.status === 429
             ? "Apple rate-limited device registration; wait and retry"
             : /maximum|device.?limit|limit.?reached/.test(classification)
               ? "The Apple Developer account has reached its annual device limit for this platform"
@@ -757,13 +729,12 @@ export class IosDevicesService {
                 ? "Apple reports that this device already exists; retry registration to reconcile it"
                 : /invalid.{0,30}udid|udid.{0,30}invalid/.test(classification)
                   ? "Apple rejected the UDID as invalid; re-enroll the device and try again"
-                  : response.status === 422
+                  : error.status === 422
                     ? `Apple rejected the device data${detail ? `: ${detail}` : ""}`
                     : detail ||
-                      `App Store Connect returned HTTP ${response.status}`;
+                      `App Store Connect returned HTTP ${error.status}`;
       throw new Error(redact ? redactValue(message, redact) : message);
     }
-    return body;
   }
 
   private async verifyAppStoreCredentials(credentials: {

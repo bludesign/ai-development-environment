@@ -233,6 +233,10 @@ export type BuildExportSettings = {
   uploadSymbols: boolean;
   manageAppVersionAndBuildNumber: boolean;
   testFlightInternalTestingOnly: boolean;
+  stripSwiftSymbols: boolean;
+  thinning: string | null;
+  iCloudContainerEnvironment: "Development" | "Production" | null;
+  distributionBundleIdentifier: string | null;
 };
 
 export type BuildArtifactSnapshot = {
@@ -865,6 +869,30 @@ export function parseBuildExportSettings(value: unknown): BuildExportSettings {
     testFlightInternalTestingOnly: booleanValue(
       input.testFlightInternalTestingOnly,
       "export settings.testFlightInternalTestingOnly",
+    ),
+    stripSwiftSymbols:
+      input.stripSwiftSymbols === undefined
+        ? true
+        : booleanValue(
+            input.stripSwiftSymbols,
+            "export settings.stripSwiftSymbols",
+          ),
+    thinning: nullableString(
+      input.thinning ?? null,
+      "export settings.thinning",
+    ),
+    iCloudContainerEnvironment:
+      input.iCloudContainerEnvironment === null ||
+      input.iCloudContainerEnvironment === undefined
+        ? null
+        : enumValue(
+            input.iCloudContainerEnvironment,
+            ["Development", "Production"] as const,
+            "export settings.iCloudContainerEnvironment",
+          ),
+    distributionBundleIdentifier: nullableString(
+      input.distributionBundleIdentifier ?? null,
+      "export settings.distributionBundleIdentifier",
     ),
   };
 }

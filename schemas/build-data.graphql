@@ -29,6 +29,13 @@ enum DerivedDataEntryOperation {
   DELETING
 }
 
+enum BuildDataEntryKind {
+  PROJECT
+  PENDING
+  SHARED_CACHE
+  DEVICE_SUPPORT
+}
+
 enum DerivedDataDeleteSource {
   USER
   AUTOMATIC
@@ -52,6 +59,7 @@ type BuildDataProgress {
 type DerivedDataEntry {
   id: ID!
   name: String!
+  kind: BuildDataEntryKind!
   status: DerivedDataEntryStatus!
   workspacePath: String
   worktreeId: ID
@@ -80,6 +88,7 @@ type DerivedDataDeletionHistory {
   worktreeId: ID
   worktreePath: String
   source: DerivedDataDeleteSource!
+  entryKind: BuildDataEntryKind!
   deletedAt: String!
 }
 

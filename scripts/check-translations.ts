@@ -137,6 +137,20 @@ function loadMockTranslations(mockFilePath: string): TranslationData | null {
     }
 
     const content = fs.readFileSync(mockFilePath, "utf-8");
+    const catalogAssignment = content.match(
+      /Object\.assign\(mockTranslations,\s*require\(["']([^"']+)["']\)\)/,
+    );
+    if (catalogAssignment?.[1]) {
+      const catalogPath = path.resolve(
+        path.dirname(mockFilePath),
+        catalogAssignment[1],
+      );
+      const parsed: unknown = JSON.parse(fs.readFileSync(catalogPath, "utf-8"));
+      if (!isTranslationData(parsed)) {
+        throw new Error("assigned mock translation catalog must be an object");
+      }
+      return parsed;
+    }
     const match = content.match(
       /const\s+mockTranslations\s*=\s*({[\s\S]*?})\s*;?\s*(?:const|$)/,
     );

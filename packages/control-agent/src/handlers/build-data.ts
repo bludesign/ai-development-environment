@@ -131,6 +131,51 @@ async function scanRoot(
   return { entries, warning: null };
 }
 
+async function scanDeviceSupport(
+  signal: AbortSignal,
+): Promise<{ entries: BuildDataScanEntry[]; warning: string | null }> {
+  const configuredRoot = join(
+    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY ?? homedir(),
+    ...(process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY
+      ? []
+      : ["Library", "Developer", "Xcode", "iOS DeviceSupport"]),
+  );
+  signal.throwIfAborted();
+  let rootPath: string;
+  try {
+    rootPath = await realpath(configuredRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { entries: [], warning: null };
+    }
+    return {
+      entries: [],
+      warning: `${configuredRoot}: ${errorMessage(error)}`,
+    };
+  }
+  try {
+    const children = await readdir(rootPath, { withFileTypes: true });
+    return {
+      entries: children
+        .filter((child) => child.isDirectory() && !child.isSymbolicLink())
+        .map((child) => ({
+          path: join(rootPath, child.name),
+          rootPath,
+          name: child.name,
+          kind: "DEVICE_SUPPORT" as const,
+          workspacePath: null,
+        }))
+        .sort((first, second) => first.name.localeCompare(second.name)),
+      warning: null,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      warning: `${rootPath}: ${errorMessage(error)}`,
+    };
+  }
+}
+
 export const scanBuildData: AgentJobHandler = async (
   rawPayload,
   timeoutMs,
@@ -155,6 +200,9 @@ export const scanBuildData: AgentJobHandler = async (
     entries.push(...result.entries);
     if (result.warning) warnings.push(result.warning);
   }
+  const deviceSupport = await scanDeviceSupport(signal);
+  entries.push(...deviceSupport.entries);
+  if (deviceSupport.warning) warnings.push(deviceSupport.warning);
   return { ...successfulProcess, entries, warnings };
 };
 

@@ -46,6 +46,11 @@ import type {
   IosAppProject,
 } from "./types";
 import { ConfigurationIcon } from "./configuration-icon";
+import {
+  DEFAULT_EXPORT_SETTINGS,
+  ExportSettingsForm,
+  type ExportSettingsValue,
+} from "./export-settings-form";
 
 type PriorBuildForTesting = {
   id: string;
@@ -58,7 +63,7 @@ type PriorBuildForTesting = {
 const PROJECT_FIELDS = `
   id type
   configurations {
-    id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
+  id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
@@ -266,6 +271,10 @@ function StartBuildDialog({
   const [destinationId, setDestinationId] = useState("");
   const [scriptIds, setScriptIds] = useState<Set<string>>(new Set());
   const [advanced, setAdvanced] = useState<Record<string, unknown>>({});
+  const [exportWhenComplete, setExportWhenComplete] = useState(false);
+  const [exportSettings, setExportSettings] = useState<ExportSettingsValue>(
+    DEFAULT_EXPORT_SETTINGS,
+  );
   const [overrides, setOverrides] = useState("{}");
   const [loading, setLoading] = useState(true);
   const [preparing, setPreparing] = useState(false);
@@ -302,6 +311,17 @@ function StartBuildDialog({
           setConfigurationId(first.id);
           setAction(coverageMode ? "TEST" : first.defaultAction);
           setAdvanced(first.advancedSettings ?? {});
+          setExportWhenComplete(
+            Boolean(
+              !coverageMode &&
+              first.defaultAction === "ARCHIVE" &&
+              first.autoExport,
+            ),
+          );
+          setExportSettings({
+            ...DEFAULT_EXPORT_SETTINGS,
+            ...(first.exportSettings ?? {}),
+          } as ExportSettingsValue);
           setScriptIds(
             new Set(
               data
@@ -497,6 +517,9 @@ function StartBuildDialog({
                   }
                 : {}),
             },
+            exportWhenComplete:
+              !coverageMode && action === "ARCHIVE" && exportWhenComplete,
+            exportSettings: action === "ARCHIVE" ? exportSettings : null,
             requestId: createClientId(),
           },
         },
@@ -553,6 +576,17 @@ function StartBuildDialog({
                       setConfigurationId(entry.id);
                       setAction(coverageMode ? "TEST" : entry.defaultAction);
                       setAdvanced(entry.advancedSettings ?? {});
+                      setExportWhenComplete(
+                        Boolean(
+                          !coverageMode &&
+                          entry.defaultAction === "ARCHIVE" &&
+                          entry.autoExport,
+                        ),
+                      );
+                      setExportSettings({
+                        ...DEFAULT_EXPORT_SETTINGS,
+                        ...(entry.exportSettings ?? {}),
+                      } as ExportSettingsValue);
                     }}
                     type="button"
                   >
@@ -612,7 +646,10 @@ function StartBuildDialog({
               <div className={cn("space-y-2", coverageMode && "hidden")}>
                 <Label>{t("action")}</Label>
                 <Select
-                  onValueChange={(value) => setAction(value as BuildAction)}
+                  onValueChange={(value) => {
+                    setAction(value as BuildAction);
+                    if (value !== "ARCHIVE") setExportWhenComplete(false);
+                  }}
                   value={action}
                 >
                   <SelectTrigger>
@@ -677,6 +714,26 @@ function StartBuildDialog({
                 </Select>
               </div>
             </div>
+
+            {!coverageMode && action === "ARCHIVE" && (
+              <section className="space-y-3">
+                <label className="flex items-center gap-2 font-medium">
+                  <Checkbox
+                    checked={exportWhenComplete}
+                    onCheckedChange={(checked) =>
+                      setExportWhenComplete(Boolean(checked))
+                    }
+                  />
+                  {t("exportWhenComplete")}
+                </label>
+                {exportWhenComplete && (
+                  <ExportSettingsForm
+                    onChange={setExportSettings}
+                    value={exportSettings}
+                  />
+                )}
+              </section>
+            )}
 
             {action === "TEST_WITHOUT_BUILDING" && (
               <div className="space-y-2">

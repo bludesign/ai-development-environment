@@ -81,7 +81,7 @@ const BUILD_DETAIL_FIELDS = `
   id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
   createdAt startedAt finishedAt durationMs updatedAt
   configuration {
-    id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
+  id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
   }
   artifacts { id kind relativePath sizeBytes checksum metadata createdAt }

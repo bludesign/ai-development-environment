@@ -51,6 +51,9 @@ model Agent {
   skillDeployments         SkillDeployment[]
   skillSyncItems           SkillSyncItem[]
   builds                   Build[]
+  signingProfiles          SigningProfileAsset[]
+  signingCertificates      SigningCertificateAsset[]
+  signingOperationItems    SigningOperationItem[]
 }
 
 model AgentEnrollmentToken {
@@ -62,23 +65,23 @@ model AgentEnrollmentToken {
 }
 
 model IosDevice {
-  id                String                   @id
-  udid              String                   @unique
-  displayName       String
-  product           String?
-  osVersion         String?
-  platform          String                   @default("IOS")
-  status            String                   @default("PENDING")
-  appleDeviceId     String?                  @unique
-  appleStatus       String?
-  registrationError String?
+  id                    String                   @id
+  udid                  String                   @unique
+  displayName           String
+  product               String?
+  osVersion             String?
+  platform              String                   @default("IOS")
+  status                String                   @default("PENDING")
+  appleDeviceId         String?                  @unique
+  appleStatus           String?
+  registrationError     String?
   registrationClaimedAt DateTime?
-  registeredAt      DateTime?
-  lastSeenAt        DateTime?
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
-  enrollments       IosDeviceEnrollment[]
-  ipObservations    IosDeviceIpObservation[]
+  registeredAt          DateTime?
+  lastSeenAt            DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  enrollments           IosDeviceEnrollment[]
+  ipObservations        IosDeviceIpObservation[]
 
   @@index([status, createdAt])
   @@index([lastSeenAt])
@@ -121,27 +124,27 @@ model IosDeviceIpObservation {
 }
 
 model IosDeviceSettings {
-  id                                  String    @id
-  organizationName                    String    @default("AI Development Environment")
-  profileIdentifier                   String    @default("com.ai-development-environment.device-enrollment")
-  signerCertificatePem                String?
-  signerPrivateKeyPem                 String?
-  signerFingerprint                   String?
-  signerCreatedAt                     DateTime?
-  signerExpiresAt                     DateTime?
-  appStoreConnectIssuerId             String?
-  appStoreConnectKeyId                String?
-  appStoreConnectPrivateKey           String?
+  id                                   String    @id
+  organizationName                     String    @default("AI Development Environment")
+  profileIdentifier                    String    @default("com.ai-development-environment.device-enrollment")
+  signerCertificatePem                 String?
+  signerPrivateKeyPem                  String?
+  signerFingerprint                    String?
+  signerCreatedAt                      DateTime?
+  signerExpiresAt                      DateTime?
+  appStoreConnectIssuerId              String?
+  appStoreConnectKeyId                 String?
+  appStoreConnectPrivateKey            String?
   appStoreConnectPrivateKeyFingerprint String?
-  appStoreConnectVerifiedAt           DateTime?
-  appStoreConnectLastTestedAt         DateTime?
-  appStoreConnectVerificationError    String?
-  createdAt                           DateTime  @default(now())
-  updatedAt                           DateTime  @updatedAt
+  appStoreConnectVerifiedAt            DateTime?
+  appStoreConnectLastTestedAt          DateTime?
+  appStoreConnectVerificationError     String?
+  createdAt                            DateTime  @default(now())
+  updatedAt                            DateTime  @updatedAt
 }
 
 model AgentJob {
-  id                    String               @id
+  id                    String                 @id
   agentId               String
   kind                  String
   payloadJson           String
@@ -150,23 +153,24 @@ model AgentJob {
   resultJson            String?
   error                 String?
   timeoutSeconds        Int
-  createdAt             DateTime             @default(now())
+  createdAt             DateTime               @default(now())
   startedAt             DateTime?
   finishedAt            DateTime?
-  updatedAt             DateTime             @updatedAt
+  updatedAt             DateTime               @updatedAt
   ccusageCollectionId   String?
   buildDataCollectionId String?
   codebaseId            String?
   worktreeId            String?
-  visibility            String               @default("USER")
-  agent                 Agent                @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  ccusageCollection     CcusageCollection?   @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
-  buildDataCollection   BuildDataCollection? @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
-  codebase              Codebase?            @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  visibility            String                 @default("USER")
+  agent                 Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  ccusageCollection     CcusageCollection?     @relation(fields: [ccusageCollectionId], references: [id], onDelete: SetNull)
+  buildDataCollection   BuildDataCollection?   @relation(fields: [buildDataCollectionId], references: [id], onDelete: SetNull)
+  codebase              Codebase?              @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
   logs                  AgentJobLog[]
   builds                Build[]
   deployments           BuildDeployment[]
   exports               BuildExport[]
+  signingOperationItems SigningOperationItem[]
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -551,6 +555,8 @@ model BuildConfiguration {
   buildConfiguration   String
   defaultAction        String          @default("BUILD")
   advancedSettingsJson String          @default("{}")
+  autoExport           Boolean         @default(false)
+  exportSettingsJson   String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   project              CodebaseProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -632,15 +638,15 @@ model Build {
 }
 
 model BuildArtifact {
-  id           String   @id
+  id           String       @id
   buildId      String
   kind         String
   relativePath String
   sizeBytes    Float?
   checksum     String?
-  metadataJson String   @default("{}")
-  createdAt    DateTime @default(now())
-  build        Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  metadataJson String       @default("{}")
+  createdAt    DateTime     @default(now())
+  build        Build        @relation(fields: [buildId], references: [id], onDelete: Cascade)
   report       BuildReport?
 
   @@unique([buildId, relativePath])
@@ -648,20 +654,20 @@ model BuildArtifact {
 }
 
 model BuildReport {
-  id                   String         @id
-  buildId              String
-  artifactId           String?        @unique
-  kind                 String
-  source               String
-  status               String         @default("PENDING")
-  summaryJson          String         @default("{}")
-  dataJson             String         @default("{}")
-  error                String?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
-  finishedAt           DateTime?
-  build                Build          @relation(fields: [buildId], references: [id], onDelete: Cascade)
-  artifact             BuildArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+  id          String         @id
+  buildId     String
+  artifactId  String?        @unique
+  kind        String
+  source      String
+  status      String         @default("PENDING")
+  summaryJson String         @default("{}")
+  dataJson    String         @default("{}")
+  error       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  finishedAt  DateTime?
+  build       Build          @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  artifact    BuildArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
 
   @@unique([buildId, kind])
   @@index([kind, status, createdAt])
@@ -872,6 +878,7 @@ model BuildDataDeletionHistory {
   worktreeId   String?
   worktreePath String?
   source       String
+  entryKind    String    @default("PROJECT")
   jobId        String
   targetKey    String
   deletedAt    DateTime  @default(now())
@@ -881,6 +888,227 @@ model BuildDataDeletionHistory {
   @@unique([jobId, targetKey])
   @@index([deletedAt])
   @@index([agentId, deletedAt])
+}
+
+model SigningProfileAsset {
+  id                   String    @id
+  agentId              String
+  uuid                 String
+  contentHash          String
+  name                 String
+  profileType          String
+  bundleId             String
+  teamId               String?
+  teamName             String?
+  platformsJson        String    @default("[]")
+  deviceCount          Int       @default(0)
+  certificateSha1sJson String    @default("[]")
+  createdAt            DateTime?
+  expiresAt            DateTime?
+  expired              Boolean   @default(false)
+  xcodeManaged         Boolean   @default(false)
+  observedAt           DateTime  @default(now())
+  missingAt            DateTime?
+  agent                Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, uuid])
+  @@index([uuid])
+  @@index([contentHash])
+  @@index([agentId, missingAt])
+  @@index([expiresAt])
+}
+
+model SigningCertificateAsset {
+  id              String    @id
+  agentId         String
+  sha1            String
+  sha256          String?
+  name            String
+  teamId          String?
+  certificateType String?
+  notBefore       DateTime?
+  expiresAt       DateTime?
+  expired         Boolean   @default(false)
+  hasPrivateKey   Boolean   @default(false)
+  observedAt      DateTime  @default(now())
+  missingAt       DateTime?
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, sha1])
+  @@index([sha1])
+  @@index([agentId, missingAt])
+  @@index([expiresAt])
+}
+
+model SigningOperation {
+  id            String                 @id
+  kind          String
+  assetKey      String?
+  sourceAgentId String?
+  status        String                 @default("QUEUED")
+  error         String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  finishedAt    DateTime?
+  items         SigningOperationItem[]
+
+  @@index([status, createdAt])
+}
+
+model SigningOperationItem {
+  id          String           @id
+  operationId String
+  agentId     String
+  jobId       String?          @unique
+  status      String           @default("QUEUED")
+  error       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  finishedAt  DateTime?
+  operation   SigningOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  agent       Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  job         AgentJob?        @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([operationId, agentId])
+  @@index([agentId, status])
+}
+
+model PushNotificationSettings {
+  id                         String    @id
+  tokenTeamId                String?
+  tokenKeyId                 String?
+  tokenPrivateKey            String?
+  tokenPrivateKeyFingerprint String?
+  tokenConfiguredAt          DateTime?
+  tokenLastUsedAt            DateTime?
+  tokenLastError             String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+}
+
+model ApnsCertificateCredential {
+  id           String    @id
+  name         String    @unique
+  topic        String
+  environment  String
+  p12Base64    String
+  passphrase   String
+  fingerprint  String
+  expiresAt    DateTime?
+  lastTestedAt DateTime?
+  lastError    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([topic, environment])
+}
+
+model ApnsRegistration {
+  id                   String                     @id
+  clientRegistrationId String
+  token                String
+  tokenHash            String
+  topic                String
+  environment          String
+  pushTypesJson        String                     @default("[]")
+  displayName          String
+  deviceModel          String?
+  osVersion            String?
+  appVersion           String?
+  appBuild             String?
+  locale               String?
+  pushMagic            String?
+  lastIpAddress        String?
+  status               String                     @default("ACTIVE")
+  invalidatedAt        DateTime?
+  lastFailureReason    String?
+  lastFailureAt        DateTime?
+  lastRegisteredAt     DateTime                   @default(now())
+  lastSentAt           DateTime?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  deliveries           PushNotificationDelivery[]
+
+  @@unique([clientRegistrationId, topic, environment])
+  @@unique([tokenHash, topic, environment])
+  @@index([status, topic, environment])
+  @@index([lastRegisteredAt])
+}
+
+model ApnsBroadcastChannel {
+  id            String   @id
+  channelId     String   @unique
+  bundleId      String
+  environment   String
+  storagePolicy String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([bundleId, environment])
+}
+
+model PushNotificationPreset {
+  id         String   @id
+  name       String   @unique
+  editorJson String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model PushNotificationBatch {
+  id             String                     @id
+  requestId      String                     @unique
+  status         String                     @default("DRAFT")
+  editorJson     String
+  payloadJson    String
+  headersJson    String
+  targetMode     String
+  channelId      String?
+  recipientCount Int                        @default(0)
+  successCount   Int                        @default(0)
+  failureCount   Int                        @default(0)
+  error          String?
+  createdAt      DateTime                   @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  updatedAt      DateTime                   @updatedAt
+  deliveries     PushNotificationDelivery[]
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+model PushNotificationDelivery {
+  id                String                @id
+  batchId           String
+  registrationId    String?
+  tokenHash         String?
+  topic             String
+  environment       String
+  status            String                @default("QUEUED")
+  apnsId            String?
+  responseCode      Int?
+  reason            String?
+  responseTimestamp DateTime?
+  attempts          Int                   @default(0)
+  durationMs        Int?
+  createdAt         DateTime              @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  batch             PushNotificationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  registration      ApnsRegistration?     @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  recipientSecret   ApnsPushRecipientSecret?
+
+  @@index([batchId, status])
+  @@index([registrationId, createdAt])
+}
+
+model ApnsPushRecipientSecret {
+  id         String                   @id
+  deliveryId String                   @unique
+  token      String
+  createdAt  DateTime                 @default(now())
+  delivery   PushNotificationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
 }
 
 model BuildDataDeleteProjection {

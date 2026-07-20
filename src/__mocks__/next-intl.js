@@ -2295,6 +2295,11 @@ const useTranslations = (namespace) => {
   };
 };
 
+// Keep the test dictionary structurally identical to the English catalog.
+// Individual tests still receive plain strings, while new production keys no
+// longer require duplicating the entire catalog in this CommonJS fixture.
+Object.assign(mockTranslations, require("../../messages/en.json"));
+
 const NextIntlClientProvider = ({ children }) => children;
 const useLocale = () => "en";
 const hasLocale = (supportedLocales, locale) =>

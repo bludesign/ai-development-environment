@@ -18,6 +18,7 @@ import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
+import { PushNotificationSettingsCard } from "@/components/push-notifications/push-notification-settings-card";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,7 @@ export function SettingsPage() {
       </div>
       <EditorSettingsCard />
       <IosDeviceSettingsCard />
+      <PushNotificationSettingsCard />
       <JiraSettingsPage embedded />
       <GitHubSettingsCard />
       <GitHubAppSettingsCard />

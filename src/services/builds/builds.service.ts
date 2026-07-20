@@ -355,6 +355,8 @@ export type SaveBuildConfigurationInput = {
   buildConfiguration: string;
   defaultAction: BuildAction;
   advancedSettings?: unknown;
+  autoExport?: boolean;
+  exportSettings?: unknown;
 };
 
 export type SaveBuildScriptInput = {
@@ -540,6 +542,18 @@ export class BuildsService {
     const advanced = parseBuildAdvancedSettings(
       input.advancedSettings ?? DEFAULT_BUILD_ADVANCED_SETTINGS,
     );
+    const autoExport = input.autoExport === true;
+    if (autoExport && input.defaultAction !== "ARCHIVE") {
+      throw new Error(
+        "Auto Export is available only for Archive configurations",
+      );
+    }
+    const exportSettings = input.exportSettings
+      ? parseBuildExportSettings(input.exportSettings)
+      : null;
+    if (autoExport && !exportSettings) {
+      throw new Error("Auto Export settings are required");
+    }
     const prisma = await getPrismaClient();
     const existing = input.id
       ? await prisma.buildConfiguration.findUnique({ where: { id: input.id } })
@@ -575,6 +589,10 @@ export class BuildsService {
         buildConfiguration,
         defaultAction: input.defaultAction,
         advancedSettingsJson: JSON.stringify(advanced),
+        autoExport,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       },
       update: {
         sourceId: savedSource.id,
@@ -584,6 +602,10 @@ export class BuildsService {
         buildConfiguration,
         defaultAction: input.defaultAction,
         advancedSettingsJson: JSON.stringify(advanced),
+        autoExport,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       },
       include: { source: true },
     });
@@ -1079,6 +1101,8 @@ export class BuildsService {
     scriptIds?: string[] | null;
     action?: BuildAction | null;
     advancedSettings?: unknown;
+    exportWhenComplete?: boolean | null;
+    exportSettings?: unknown;
     worktreeCoverage?: boolean;
     requestId: string;
     telemetryRequestOrigin?: string | null;
@@ -1143,6 +1167,26 @@ export class BuildsService {
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
+    if (input.exportWhenComplete && action !== "ARCHIVE") {
+      throw new Error(
+        "Export when complete is available only for Archive builds",
+      );
+    }
+    const exportWhenComplete =
+      action === "ARCHIVE" &&
+      (input.exportWhenComplete ?? configuration.autoExport);
+    const rawExportSettings =
+      input.exportSettings ?? parseJson(configuration.exportSettingsJson, null);
+    const exportSettings = exportWhenComplete
+      ? parseBuildExportSettings(rawExportSettings)
+      : rawExportSettings
+        ? parseBuildExportSettings(rawExportSettings)
+        : null;
+    if (exportWhenComplete && !exportSettings) {
+      throw new Error(
+        "Export settings are required when automatic export is enabled",
+      );
+    }
     const destination = parseBuildDestination(input.destination);
     if (!BUILD_DESTINATION_TYPES.includes(destination.type)) {
       throw new Error("Destination is invalid");
@@ -1381,6 +1425,8 @@ export class BuildsService {
         buildConfiguration: configuration.buildConfiguration,
         action,
         advancedSettings,
+        autoExport: exportWhenComplete,
+        exportSettings,
         parse: observation
           ? {
               status: observation.status,
@@ -1586,8 +1632,12 @@ export class BuildsService {
       }),
       action: build.action as BuildAction,
       advancedSettings: snapshotConfiguration.advancedSettings,
+      exportWhenComplete: snapshotConfiguration.autoExport === true,
+      ...(Object.hasOwn(snapshotConfiguration, "exportSettings")
+        ? { exportSettings: snapshotConfiguration.exportSettings }
+        : {}),
       requestId,
-      telemetryRequestOrigin,
+      ...(telemetryRequestOrigin ? { telemetryRequestOrigin } : {}),
     });
   }
 
@@ -2280,28 +2330,41 @@ export class BuildsService {
         commandSummary: `xcrun xcodebuild -exportArchive -archivePath ${JSON.stringify(archive.relativePath)} -exportPath exports/${exportId}`,
       },
     });
-    const job = await this.agentControl.createJob({
-      agentId: worktree.codebase.agentId,
-      codebaseId: worktree.codebaseId,
-      worktreeId: worktree.id,
-      kind: IOS_EXPORT_JOB_KIND,
-      payload: {
-        ...this.identity(worktree),
-        buildId: build.id,
-        exportId,
-        artifactDirectory: build.artifactDirectory,
-        archiveRelativePath: archive.relativePath,
-        settings,
-      },
-      idempotencyKey: `ios:export:${build.id}:${input.requestId}`,
-      timeoutSeconds: 3_600,
-    });
-    const updated = await prisma.buildExport.update({
-      where: { id: row.id },
-      data: { jobId: job.id },
-    });
-    this.publish(build.id);
-    return updated;
+    try {
+      const job = await this.agentControl.createJob({
+        agentId: worktree.codebase.agentId,
+        codebaseId: worktree.codebaseId,
+        worktreeId: worktree.id,
+        kind: IOS_EXPORT_JOB_KIND,
+        payload: {
+          ...this.identity(worktree),
+          buildId: build.id,
+          exportId,
+          artifactDirectory: build.artifactDirectory,
+          archiveRelativePath: archive.relativePath,
+          settings,
+        },
+        idempotencyKey: `ios:export:${build.id}:${input.requestId}`,
+        timeoutSeconds: 3_600,
+      });
+      const updated = await prisma.buildExport.update({
+        where: { id: row.id },
+        data: { jobId: job.id },
+      });
+      this.publish(build.id);
+      return updated;
+    } catch (error) {
+      const failed = await prisma.buildExport.update({
+        where: { id: row.id },
+        data: {
+          status: "FAILED",
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: new Date(),
+        },
+      });
+      this.publish(build.id);
+      return failed;
+    }
   }
 
   /**
@@ -2574,6 +2637,50 @@ export class BuildsService {
       }
     });
     this.publish(build.id);
+    if (status === "SUCCEEDED") {
+      await this.queueAutomaticExport(build.id, snapshotJson);
+    }
+  }
+
+  private async queueAutomaticExport(buildId: string, snapshotJson: string) {
+    const snapshot = objectValue(parseJson(snapshotJson, {}), "build snapshot");
+    const configuration = objectValue(
+      snapshot.configuration ?? {},
+      "build configuration snapshot",
+    );
+    if (configuration.autoExport !== true) return;
+    const settings = configuration.exportSettings;
+    try {
+      await this.exportArchive({
+        buildId,
+        requestId: "automatic",
+        settings,
+      });
+    } catch (error) {
+      const prisma = await getPrismaClient();
+      const message = error instanceof Error ? error.message : String(error);
+      await prisma.buildExport.upsert({
+        where: {
+          buildId_requestId: { buildId, requestId: "automatic" },
+        },
+        create: {
+          id: randomUUID(),
+          buildId,
+          requestId: "automatic",
+          status: "FAILED",
+          settingsSnapshotJson: JSON.stringify(settings ?? {}),
+          commandSummary: "Automatic archive export",
+          error: message,
+          finishedAt: new Date(),
+        },
+        update: {
+          status: "FAILED",
+          error: message,
+          finishedAt: new Date(),
+        },
+      });
+      this.publish(buildId);
+    }
   }
 
   private async projectGeneratedReportCompletion(job: {

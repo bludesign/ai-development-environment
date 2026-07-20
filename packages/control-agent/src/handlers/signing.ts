@@ -1,11 +1,18 @@
-import { createHash } from "node:crypto";
-import { readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { createHash, randomUUID, X509Certificate } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, join, relative, sep } from "node:path";
 
 import {
   parseBuildSigningInspectPayload,
-  profileCoversBundle,
   provisioningProfileType,
   type ArchiveBundle,
   type BuildSigningInspection,
@@ -14,6 +21,15 @@ import {
   type SigningTeam,
 } from "@ai-development-environment/agent-contract/builds";
 import { parsePlist } from "@ai-development-environment/agent-contract/plist";
+import {
+  signingIdentityDeletePayload,
+  signingIdentityImportPayload,
+  signingProfileInstallPayload,
+  signingProfileKeyPayload,
+  signingScanPayload,
+  type SigningCertificateAssetSnapshot,
+  type SigningProfileAssetSnapshot,
+} from "@ai-development-environment/agent-contract/signing-assets";
 
 import { captureCommand } from "../capture-command.js";
 
@@ -36,6 +52,13 @@ const PROFILE_DIRECTORIES = [
 ];
 
 const PROFILE_EXTENSIONS = [".mobileprovision", ".provisionprofile"];
+
+type DecodedProfile = {
+  path: string;
+  content: Buffer;
+  raw: Record<string, unknown>;
+  uuid: string;
+};
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
@@ -164,6 +187,71 @@ async function readProfiles(
   );
 }
 
+async function decodedProfiles(
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<DecodedProfile[]> {
+  const profiles: DecodedProfile[] = [];
+  for (const directory of PROFILE_DIRECTORIES) {
+    let entries: string[];
+    try {
+      entries = await readdir(directory);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!PROFILE_EXTENSIONS.some((suffix) => entry.endsWith(suffix))) {
+        continue;
+      }
+      signal.throwIfAborted();
+      const path = join(directory, entry);
+      const raw = await decodeProfile(path, timeoutMs, signal);
+      if (!raw) continue;
+      let content: Buffer;
+      try {
+        content = await readFile(path);
+      } catch {
+        continue;
+      }
+      profiles.push({
+        path,
+        content,
+        raw,
+        uuid: text(raw.UUID) ?? basename(entry).replace(/\.[^.]+$/, ""),
+      });
+    }
+  }
+  return profiles;
+}
+
+function profileAsset(
+  decoded: DecodedProfile,
+  now: number,
+): SigningProfileAssetSnapshot | null {
+  const profile = toProfile(decoded.uuid, decoded.raw, now);
+  if (!profile) return null;
+  const createdAt = text(decoded.raw.CreationDate);
+  return {
+    uuid: profile.uuid,
+    contentHash: createHash("sha256")
+      .update(decoded.content)
+      .digest("hex")
+      .toUpperCase(),
+    name: profile.name,
+    profileType: profile.type,
+    bundleId: profile.bundleId,
+    teamId: profile.teamId,
+    teamName: profile.teamName,
+    platforms: profile.platforms,
+    deviceCount: stringList(decoded.raw.ProvisionedDevices).length,
+    certificateSha1s: profile.certificateSha1s,
+    createdAt,
+    expiresAt: profile.expiresAt,
+    expired: profile.expired,
+    xcodeManaged: profile.xcodeManaged,
+  };
+}
+
 /**
  * Collapses profiles that are the same to a caller.
  *
@@ -224,6 +312,86 @@ async function readIdentities(
   } catch {
     return [];
   }
+}
+
+function commonName(certificate: X509Certificate): string {
+  return (
+    certificate.subject
+      .split(/\n|,\s*/)
+      .find((part) => part.startsWith("CN="))
+      ?.slice(3) ?? certificate.subject
+  );
+}
+
+function certificateType(name: string): string | null {
+  const known = [
+    "Apple Development",
+    "Apple Distribution",
+    "iPhone Developer",
+    "iPhone Distribution",
+    "iOS Developer",
+    "iOS Distribution",
+    "Mac Developer",
+    "Mac App Distribution",
+    "Developer ID Application",
+    "Developer ID Installer",
+  ];
+  return known.find((prefix) => name.startsWith(prefix)) ?? null;
+}
+
+function pemCertificates(value: string): string[] {
+  return (
+    value.match(
+      /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g,
+    ) ?? []
+  );
+}
+
+async function readCertificates(
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<SigningCertificateAssetSnapshot[]> {
+  const [certificateResult, identities] = await Promise.all([
+    captureCommand({
+      command: "/usr/bin/security",
+      args: ["find-certificate", "-a", "-p"],
+      timeoutMs: Math.min(timeoutMs, 20_000),
+      signal,
+    }),
+    readIdentities(timeoutMs, signal),
+  ]);
+  if (certificateResult.exitCode !== 0) return [];
+  const identityHashes = new Set(
+    identities.map((identity) => identity.sha1.toUpperCase()),
+  );
+  const assets = new Map<string, SigningCertificateAssetSnapshot>();
+  for (const pem of pemCertificates(certificateResult.stdout)) {
+    try {
+      const certificate = new X509Certificate(pem);
+      const name = commonName(certificate);
+      const type = certificateType(name);
+      if (!type) continue;
+      const sha1 = certificate.fingerprint.replaceAll(":", "").toUpperCase();
+      const expiresAt = new Date(certificate.validTo);
+      const team = /\(([A-Z0-9]{10})\)\s*$/.exec(name);
+      assets.set(sha1, {
+        sha1,
+        sha256: certificate.fingerprint256.replaceAll(":", "").toUpperCase(),
+        name,
+        teamId: team?.[1] ?? null,
+        certificateType: type,
+        notBefore: new Date(certificate.validFrom).toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        expired: expiresAt.getTime() < Date.now(),
+        hasPrivateKey: identityHashes.has(sha1),
+      });
+    } catch {
+      continue;
+    }
+  }
+  return [...assets.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 }
 
 /**
@@ -388,4 +556,185 @@ export const inspectIosSigning: AgentJobHandler = async (
     cancelled: false,
     ...inspection,
   };
+};
+
+const successfulProcess = {
+  exitCode: 0,
+  signal: null,
+  timedOut: false,
+  cancelled: false,
+} as const;
+
+export const scanSigningAssets: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  signingScanPayload(payload);
+  const warnings: string[] = [];
+  const [decoded, certificates] = await Promise.all([
+    decodedProfiles(timeoutMs, signal).catch((error) => {
+      warnings.push(error instanceof Error ? error.message : String(error));
+      return [];
+    }),
+    readCertificates(timeoutMs, signal).catch((error) => {
+      warnings.push(error instanceof Error ? error.message : String(error));
+      return [];
+    }),
+  ]);
+  const byUuid = new Map<string, SigningProfileAssetSnapshot>();
+  for (const profile of decoded) {
+    const asset = profileAsset(profile, Date.now());
+    if (!asset) continue;
+    const existing = byUuid.get(asset.uuid);
+    if (!existing || (asset.expiresAt ?? "") > (existing.expiresAt ?? "")) {
+      byUuid.set(asset.uuid, asset);
+    }
+  }
+  return {
+    ...successfulProcess,
+    profiles: [...byUuid.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+    certificates,
+    warnings,
+  };
+};
+
+async function findDecodedProfile(
+  uuid: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<DecodedProfile> {
+  const profile = (await decodedProfiles(timeoutMs, signal)).find(
+    (entry) => entry.uuid === uuid,
+  );
+  if (!profile) throw new Error("Provisioning profile is no longer installed");
+  return profile;
+}
+
+export const readSigningProfile: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const { uuid } = signingProfileKeyPayload(payload);
+  const profile = await findDecodedProfile(uuid, timeoutMs, signal);
+  return {
+    ...successfulProcess,
+    uuid,
+    contentBase64: profile.content.toString("base64"),
+    sha256: createHash("sha256")
+      .update(profile.content)
+      .digest("hex")
+      .toUpperCase(),
+  };
+};
+
+export const installSigningProfile: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const { contentBase64 } = signingProfileInstallPayload(payload);
+  const content = Buffer.from(contentBase64, "base64");
+  if (!content.length) throw new Error("Provisioning profile is empty");
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "ade-profile-"));
+  const temporaryPath = join(temporaryRoot, `${randomUUID()}.mobileprovision`);
+  try {
+    await writeFile(temporaryPath, content, { mode: 0o600 });
+    const raw = await decodeProfile(temporaryPath, timeoutMs, signal);
+    if (!raw) throw new Error("Provisioning profile is invalid or unsigned");
+    const uuid = text(raw.UUID);
+    if (!uuid) throw new Error("Provisioning profile UUID is missing");
+    const directory = PROFILE_DIRECTORIES[0]!;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const destination = join(directory, `${uuid}.mobileprovision`);
+    await writeFile(destination, content, { mode: 0o600 });
+    return { ...successfulProcess, uuid };
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+};
+
+export const deleteSigningProfile: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const { uuid } = signingProfileKeyPayload(payload);
+  const matches = (await decodedProfiles(timeoutMs, signal)).filter(
+    (entry) => entry.uuid === uuid,
+  );
+  for (const profile of matches) {
+    signal.throwIfAborted();
+    await rm(profile.path, { force: false });
+  }
+  return { ...successfulProcess, uuid, deleted: matches.length };
+};
+
+export const importSigningIdentity: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+  _onLog,
+  context,
+) => {
+  const input = signingIdentityImportPayload(payload);
+  if (!context?.claimSigningSecretTransfer) {
+    throw new Error("This agent cannot claim signing secret transfers");
+  }
+  const secret = await context.claimSigningSecretTransfer(input.transferId);
+  const p12 = Buffer.from(secret.p12Base64, "base64");
+  const hash = createHash("sha256").update(p12).digest("hex").toUpperCase();
+  if (hash !== input.sha256)
+    throw new Error("Signing identity transfer changed");
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "ade-identity-"));
+  const path = join(temporaryRoot, "identity.p12");
+  try {
+    await writeFile(path, p12, { mode: 0o600 });
+    const result = await captureCommand({
+      command: "/usr/bin/security",
+      args: [
+        "import",
+        path,
+        "-P",
+        secret.passphrase,
+        "-T",
+        "/usr/bin/codesign",
+        "-T",
+        "/usr/bin/security",
+      ],
+      timeoutMs: Math.min(timeoutMs, 60_000),
+      signal,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        result.stderr.trim() || "Could not import signing identity",
+      );
+    }
+    return { ...successfulProcess, sha256: input.sha256 };
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+};
+
+export const deleteSigningIdentity: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const { sha1 } = signingIdentityDeletePayload(payload);
+  const result = await captureCommand({
+    command: "/usr/bin/security",
+    args: ["delete-identity", "-Z", sha1],
+    timeoutMs: Math.min(timeoutMs, 30_000),
+    signal,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      result.stderr.trim() || "Could not delete signing identity",
+    );
+  }
+  return { ...successfulProcess, sha1 };
 };

@@ -45,11 +45,16 @@ import type {
   IosAppProject,
 } from "./types";
 import { ConfigurationIcon } from "./configuration-icon";
+import {
+  DEFAULT_EXPORT_SETTINGS,
+  ExportSettingsForm,
+  type ExportSettingsValue,
+} from "./export-settings-form";
 
 const PROJECT_FIELDS = `
   id type
   configurations {
-    id name iconKey scheme buildConfiguration defaultAction advancedSettings createdAt updatedAt
+  id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
@@ -496,6 +501,13 @@ function BuildConfigurationDialog({
   const [action, setAction] = useState<BuildAction>(
     configuration?.defaultAction ?? "BUILD",
   );
+  const [autoExport, setAutoExport] = useState(
+    configuration?.defaultAction === "ARCHIVE" && configuration.autoExport,
+  );
+  const [exportSettings, setExportSettings] = useState<ExportSettingsValue>({
+    ...DEFAULT_EXPORT_SETTINGS,
+    ...(configuration?.exportSettings ?? {}),
+  } as ExportSettingsValue);
   const [advanced, setAdvanced] = useState(
     JSON.stringify(configuration?.advancedSettings ?? {}, null, 2),
   );
@@ -622,6 +634,8 @@ function BuildConfigurationDialog({
             buildConfiguration,
             defaultAction: action,
             advancedSettings,
+            autoExport: action === "ARCHIVE" && autoExport,
+            exportSettings,
           },
         },
       );
@@ -825,7 +839,10 @@ function BuildConfigurationDialog({
           <div className="space-y-2">
             <Label>{t("defaultAction")}</Label>
             <Select
-              onValueChange={(value) => setAction(value as BuildAction)}
+              onValueChange={(value) => {
+                setAction(value as BuildAction);
+                if (value !== "ARCHIVE") setAutoExport(false);
+              }}
               value={action}
             >
               <SelectTrigger>
@@ -847,6 +864,23 @@ function BuildConfigurationDialog({
               </SelectContent>
             </Select>
           </div>
+          {action === "ARCHIVE" && (
+            <section className="space-y-3">
+              <label className="flex items-center gap-2 font-medium">
+                <Checkbox
+                  checked={autoExport}
+                  onCheckedChange={(checked) => setAutoExport(Boolean(checked))}
+                />
+                {t("autoExport")}
+              </label>
+              {autoExport && (
+                <ExportSettingsForm
+                  onChange={setExportSettings}
+                  value={exportSettings}
+                />
+              )}
+            </section>
+          )}
           {["TEST", "BUILD_FOR_TESTING", "TEST_WITHOUT_BUILDING"].includes(
             action,
           ) && (

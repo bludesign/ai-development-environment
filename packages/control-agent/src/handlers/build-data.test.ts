@@ -11,7 +11,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 
 import { captureCommand } from "../capture-command.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
@@ -20,6 +28,8 @@ vi.mock("../capture-command.js", () => ({ captureCommand: vi.fn() }));
 
 const temporaryDirectories: string[] = [];
 const capture = vi.mocked(captureCommand);
+const originalDeviceSupportDirectory =
+  process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY;
 
 async function temporaryDirectory() {
   const directory = await mkdtemp(join(tmpdir(), "build-data-agent-"));
@@ -28,6 +38,10 @@ async function temporaryDirectory() {
 }
 
 beforeEach(() => {
+  process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY = join(
+    tmpdir(),
+    `missing-device-support-${process.pid}`,
+  );
   capture.mockResolvedValue({
     exitCode: 1,
     signal: null,
@@ -45,6 +59,15 @@ afterEach(async () => {
       .splice(0)
       .map((directory) => rm(directory, { recursive: true, force: true })),
   );
+});
+
+afterAll(() => {
+  if (originalDeviceSupportDirectory === undefined) {
+    delete process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY;
+  } else {
+    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY =
+      originalDeviceSupportDirectory;
+  }
 });
 
 const signal = () => new AbortController().signal;
@@ -133,6 +156,32 @@ describe("Build Data agent handlers", () => {
     expect(result.entries.map((entry) => entry.name).sort()).toEqual([
       "First-hash",
       "Second-hash",
+    ]);
+  });
+
+  test("scans direct iOS Device Support children without following symlinks", async () => {
+    const derivedData = await temporaryDirectory();
+    const deviceSupport = await temporaryDirectory();
+    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY = deviceSupport;
+    await mkdir(join(deviceSupport, "iPhone17,1 26.0 (23A123)"));
+    const outside = await temporaryDirectory();
+    await symlink(outside, join(deviceSupport, "Linked Support"));
+
+    const result = (await scanBuildData(
+      { mode: "ABSOLUTE", path: derivedData, worktrees: [] },
+      10_000,
+      signal(),
+      log,
+    )) as Awaited<ReturnType<typeof scanBuildData>> & {
+      entries: Array<{ name: string; kind: string; rootPath: string }>;
+    };
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({
+        name: "iPhone17,1 26.0 (23A123)",
+        kind: "DEVICE_SUPPORT",
+        rootPath: await realpath(deviceSupport),
+      }),
     ]);
   });
 

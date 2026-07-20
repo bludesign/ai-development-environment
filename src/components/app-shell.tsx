@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   Blocks,
+  BellRing,
   ChartNoAxesCombined,
   Combine,
   Cpu,
@@ -20,6 +21,7 @@ import {
   PlayCircle,
   Settings,
   Smartphone,
+  ShieldCheck,
   Sparkles,
   TicketCheck,
   Terminal,
@@ -294,6 +296,22 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
+                  isActive={pathname.startsWith("/provisioning-profiles")}
+                >
+                  <Link
+                    href="/provisioning-profiles"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ShieldCheck />
+                    <span>{t("provisioningProfiles")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
                   isActive={pathname.startsWith("/devices")}
                 >
                   <Link
@@ -304,6 +322,22 @@ function NavigationSidebar() {
                   >
                     <Smartphone />
                     <span>{t("devices")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/push-notifications")}
+                >
+                  <Link
+                    href="/push-notifications"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <BellRing />
+                    <span>{t("pushNotifications")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

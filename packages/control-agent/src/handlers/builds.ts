@@ -2813,7 +2813,15 @@ function exportPlist(settings: BuildExportSettings): string {
     uploadSymbols: settings.uploadSymbols,
     manageAppVersionAndBuildNumber: settings.manageAppVersionAndBuildNumber,
     testFlightInternalTestingOnly: settings.testFlightInternalTestingOnly,
+    stripSwiftSymbols: settings.stripSwiftSymbols,
   };
+  if (settings.thinning) values.thinning = settings.thinning;
+  if (settings.iCloudContainerEnvironment) {
+    values.iCloudContainerEnvironment = settings.iCloudContainerEnvironment;
+  }
+  if (settings.distributionBundleIdentifier) {
+    values.distributionBundleIdentifier = settings.distributionBundleIdentifier;
+  }
   if (settings.teamId) values.teamID = settings.teamId;
   if (settings.signingCertificate)
     values.signingCertificate = settings.signingCertificate;

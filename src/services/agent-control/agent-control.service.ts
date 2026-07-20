@@ -83,6 +83,20 @@ import {
   parseSkillReadPayload,
   parseSkillScanPayload,
 } from "@ai-development-environment/agent-contract/skills";
+import {
+  SIGNING_ASSET_JOB_KINDS,
+  SIGNING_ASSETS_SCAN_JOB_KIND,
+  SIGNING_IDENTITY_DELETE_JOB_KIND,
+  SIGNING_IDENTITY_IMPORT_JOB_KIND,
+  SIGNING_PROFILE_DELETE_JOB_KIND,
+  SIGNING_PROFILE_INSTALL_JOB_KIND,
+  SIGNING_PROFILE_READ_JOB_KIND,
+  signingIdentityDeletePayload,
+  signingIdentityImportPayload,
+  signingProfileInstallPayload,
+  signingProfileKeyPayload,
+  signingScanPayload,
+} from "@ai-development-environment/agent-contract/signing-assets";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -113,6 +127,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
+  ...SIGNING_ASSET_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
@@ -235,6 +250,29 @@ export function validateJob(kind: string, payload: unknown): void {
     parseSkillApplyPayload(payload);
     return;
   }
+  if (kind === SIGNING_ASSETS_SCAN_JOB_KIND) {
+    signingScanPayload(payload);
+    return;
+  }
+  if (
+    kind === SIGNING_PROFILE_READ_JOB_KIND ||
+    kind === SIGNING_PROFILE_DELETE_JOB_KIND
+  ) {
+    signingProfileKeyPayload(payload);
+    return;
+  }
+  if (kind === SIGNING_PROFILE_INSTALL_JOB_KIND) {
+    signingProfileInstallPayload(payload);
+    return;
+  }
+  if (kind === SIGNING_IDENTITY_IMPORT_JOB_KIND) {
+    signingIdentityImportPayload(payload);
+    return;
+  }
+  if (kind === SIGNING_IDENTITY_DELETE_JOB_KIND) {
+    signingIdentityDeletePayload(payload);
+    return;
+  }
   if (kind === IOS_SOURCE_DISCOVER_JOB_KIND) {
     parseBuildSourceDiscoverPayload(payload);
     return;
@@ -335,6 +373,60 @@ function publishJob(job: {
 export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
   private readonly connectionHandlers = new Set<ConnectionHandler>();
+  private readonly signingSecretTransfers = new Map<
+    string,
+    {
+      agentId: string;
+      p12Base64: string;
+      passphrase: string;
+      expiresAt: number;
+    }
+  >();
+
+  createSigningSecretTransfer(
+    agentId: string,
+    secret: { p12Base64: string; passphrase: string },
+    ttlMs = 5 * 60_000,
+  ): string {
+    if (!secret.p12Base64 || secret.p12Base64.length > 32 * 1024 * 1024) {
+      throw new Error("Signing identity transfer is empty or too large");
+    }
+    const transferId = randomUUID();
+    const expiresAt =
+      Date.now() + Math.max(30_000, Math.min(ttlMs, 15 * 60_000));
+    this.signingSecretTransfers.set(transferId, {
+      agentId,
+      ...secret,
+      expiresAt,
+    });
+    const expiryTimer = setTimeout(() => {
+      const current = this.signingSecretTransfers.get(transferId);
+      if (current?.expiresAt === expiresAt) {
+        this.signingSecretTransfers.delete(transferId);
+      }
+    }, expiresAt - Date.now());
+    expiryTimer.unref();
+    return transferId;
+  }
+
+  claimSigningSecretTransfer(agentId: string, transferId: string) {
+    const transfer = this.signingSecretTransfers.get(transferId);
+    this.signingSecretTransfers.delete(transferId);
+    if (!transfer || transfer.expiresAt <= Date.now()) {
+      throw new Error("Signing secret transfer is missing or expired");
+    }
+    if (transfer.agentId !== agentId) {
+      throw new Error("Signing secret transfer belongs to another agent");
+    }
+    return {
+      p12Base64: transfer.p12Base64,
+      passphrase: transfer.passphrase,
+    };
+  }
+
+  revokeSigningSecretTransfer(transferId: string): void {
+    this.signingSecretTransfers.delete(transferId);
+  }
 
   registerCompletionHandler(kind: string, handler: CompletionHandler): void {
     this.completionHandlers.set(kind, handler);

@@ -1,0 +1,187 @@
+type ApnsRegistration {
+  id: ID!
+  clientRegistrationId: String!
+  tokenMasked: String!
+  topic: String!
+  environment: String!
+  supportedPushTypes: [String!]!
+  displayName: String!
+  deviceModel: String
+  osVersion: String
+  appVersion: String
+  appBuild: String
+  locale: String
+  pushMagicConfigured: Boolean!
+  status: String!
+  invalidatedAt: String
+  lastFailureReason: String
+  lastFailureAt: String
+  lastRegisteredAt: String!
+  lastSentAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ApnsCertificateCredential {
+  id: ID!
+  name: String!
+  topic: String!
+  environment: String!
+  fingerprint: String!
+  expiresAt: String
+  lastTestedAt: String
+  lastError: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PushNotificationSettings {
+  tokenConfigured: Boolean!
+  tokenTeamId: String
+  tokenKeyId: String
+  tokenPrivateKeyFingerprint: String
+  tokenConfiguredAt: String
+  tokenLastUsedAt: String
+  tokenLastError: String
+  certificates: [ApnsCertificateCredential!]!
+  updatedAt: String!
+}
+
+type ApnsBroadcastChannel {
+  id: ID!
+  channelId: String!
+  bundleId: String!
+  environment: String!
+  storagePolicy: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PushNotificationPreset {
+  id: ID!
+  name: String!
+  editor: JSON!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PushNotificationDelivery {
+  id: ID!
+  registrationId: ID
+  topic: String!
+  environment: String!
+  status: String!
+  apnsId: String
+  responseCode: Int
+  reason: String
+  responseTimestamp: String
+  attempts: Int!
+  durationMs: Int
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+}
+
+type PushNotificationBatch {
+  id: ID!
+  requestId: ID!
+  status: String!
+  editor: JSON!
+  payload: JSON!
+  headers: JSON!
+  targetMode: String!
+  channelId: ID
+  recipientCount: Int!
+  successCount: Int!
+  failureCount: Int!
+  error: String
+  createdAt: String!
+  startedAt: String
+  finishedAt: String
+  updatedAt: String!
+  deliveries: [PushNotificationDelivery!]!
+}
+
+type PushNotificationPreview {
+  editor: JSON!
+  payload: JSON!
+  headers: JSON!
+  byteLength: Int!
+}
+
+input SaveApnsTokenSettingsInput {
+  teamId: String!
+  keyId: String!
+  privateKey: String
+}
+
+input AddApnsCertificateCredentialInput {
+  name: String!
+  topic: String!
+  environment: String!
+  p12Base64: String!
+  passphrase: String!
+}
+
+input CreateApnsBroadcastChannelInput {
+  channelId: String
+  bundleId: String!
+  environment: String!
+  storagePolicy: String!
+}
+
+input SendPushNotificationInput {
+  requestId: ID!
+  editor: JSON!
+  targetMode: String!
+  registrationIds: [ID!]
+  channelId: ID
+  directToken: String
+  directTokenEncoding: String
+  directEnvironment: String
+}
+
+extend type Query {
+  apnsRegistrations: [ApnsRegistration!]!
+  pushNotificationSettings: PushNotificationSettings!
+  apnsBroadcastChannels: [ApnsBroadcastChannel!]!
+  pushNotificationPresets: [PushNotificationPreset!]!
+  pushNotificationHistory(limit: Int = 100): [PushNotificationBatch!]!
+  validatePushNotification(editor: JSON!): PushNotificationPreview!
+}
+
+extend type Mutation {
+  renameApnsRegistration(id: ID!, displayName: String!): ApnsRegistration!
+  setApnsRegistrationActive(id: ID!, active: Boolean!): ApnsRegistration!
+  deleteApnsRegistration(id: ID!): Boolean!
+  saveApnsTokenSettings(
+    input: SaveApnsTokenSettingsInput!
+  ): PushNotificationSettings!
+  clearApnsTokenSettings: PushNotificationSettings!
+  addApnsCertificateCredential(
+    input: AddApnsCertificateCredentialInput!
+  ): PushNotificationSettings!
+  retestApnsCertificateCredential(id: ID!): PushNotificationSettings!
+  deleteApnsCertificateCredential(id: ID!): Boolean!
+  createApnsBroadcastChannel(
+    input: CreateApnsBroadcastChannelInput!
+  ): ApnsBroadcastChannel!
+  deleteApnsBroadcastChannel(id: ID!): Boolean!
+  savePushNotificationPreset(
+    id: ID
+    name: String!
+    editor: JSON!
+  ): PushNotificationPreset!
+  deletePushNotificationPreset(id: ID!): Boolean!
+  savePushNotificationDraft(editor: JSON!): PushNotificationBatch!
+  sendPushNotification(
+    input: SendPushNotificationInput!
+  ): PushNotificationBatch!
+  resendPushNotification(id: ID!, requestId: ID!): PushNotificationBatch!
+  deletePushNotificationHistory(id: ID!): Boolean!
+  clearPushNotificationHistory: Int!
+}
+
+extend type Subscription {
+  pushNotificationsChanged: Boolean!
+}
