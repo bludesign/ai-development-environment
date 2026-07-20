@@ -45,7 +45,7 @@
     "type-check": "npm run type-check:generated",
     "type-check:generated": "tsc --noEmit && npm run agent:type-check",
     "test": "vitest",
-    "test:run": "vitest run",
+    "test:run": "vitest run --maxWorkers=2",
     "check-translations": "npx tsx scripts/check-translations.ts",
     "telemetry:mock": "tsx scripts/send-mock-telemetry.ts",
     "full-check": "npm run generate && npm run format && npm run lint:fix && npm run type-check:generated && npm run test:run && npm run check-translations && npm run build:generated && npm run postbuild",
