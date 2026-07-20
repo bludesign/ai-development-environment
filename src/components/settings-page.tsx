@@ -49,17 +49,23 @@ const APP_SETTINGS_FIELDS =
 export function SettingsPage() {
   const t = useTranslations("settings");
   return (
-    <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
-      <EditorSettingsCard />
-      <IosDeviceSettingsCard />
-      <PushNotificationSettingsCard />
-      <JiraSettingsPage embedded />
-      <GitHubSettingsCard />
-      <GitHubAppSettingsCard />
+      <div className="grid items-start gap-6 xl:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-6">
+          <EditorSettingsCard />
+          <IosDeviceSettingsCard />
+          <PushNotificationSettingsCard />
+        </div>
+        <div className="flex min-w-0 flex-col gap-6">
+          <JiraSettingsPage embedded />
+          <GitHubSettingsCard />
+          <GitHubAppSettingsCard />
+        </div>
+      </div>
     </section>
   );
 }
