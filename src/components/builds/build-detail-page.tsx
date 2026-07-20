@@ -68,6 +68,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import type { PublicOrigin } from "@/lib/public-origin";
 
 import { buildStatusVariant } from "./build-format";
 import { ExportArchiveDialog } from "./export-archive-dialog";
@@ -181,7 +182,13 @@ function advancedSettingHasValue(key: string, value: unknown) {
   return true;
 }
 
-export function BuildDetailPage({ buildId }: { buildId: string }) {
+export function BuildDetailPage({
+  buildId,
+  publicOrigin,
+}: {
+  buildId: string;
+  publicOrigin: PublicOrigin | null;
+}) {
   const t = useTranslations("builds");
   const locale = useLocale();
   const router = useRouter();
@@ -795,6 +802,7 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
                               artifactId={artifact.id}
                               buildId={build.id}
                               metadata={metadata}
+                              publicOrigin={publicOrigin}
                             />
                           </div>
                         </>

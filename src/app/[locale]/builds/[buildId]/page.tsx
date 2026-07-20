@@ -1,4 +1,7 @@
+import { headers } from "next/headers";
+
 import { BuildDetailPage } from "@/components/builds/build-detail-page";
+import { resolvePublicOrigin } from "@/lib/public-origin";
 
 export default async function BuildDetailRoute({
   params,
@@ -6,5 +9,12 @@ export default async function BuildDetailRoute({
   params: Promise<{ locale: string; buildId: string }>;
 }) {
   const { buildId } = await params;
-  return <BuildDetailPage buildId={buildId} key={buildId} />;
+  const publicOrigin = resolvePublicOrigin(await headers());
+  return (
+    <BuildDetailPage
+      buildId={buildId}
+      key={buildId}
+      publicOrigin={publicOrigin}
+    />
+  );
 }

@@ -7,6 +7,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { copyText } from "@/lib/browser-utils";
+import type { PublicOrigin } from "@/lib/public-origin";
 
 type InstallEnvironment = {
   origin: string;
@@ -48,10 +49,12 @@ export function IosInstallButton({
   buildId,
   artifactId,
   metadata,
+  publicOrigin,
 }: {
   buildId: string;
   artifactId: string;
   metadata: Record<string, unknown>;
+  publicOrigin: Pick<PublicOrigin, "origin" | "secure"> | null;
 }) {
   const t = useTranslations("builds");
   // The server has no way to know the browsing origin or the device, so it
@@ -65,13 +68,14 @@ export function IosInstallButton({
   const [copied, setCopied] = useState(false);
 
   const artifactPath = `/api/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
-  const manifestUrl = environment
-    ? `${environment.origin}${artifactPath}/manifest.plist`
+  const installOrigin = publicOrigin ?? environment;
+  const manifestUrl = installOrigin
+    ? `${installOrigin.origin}${artifactPath}/manifest.plist`
     : null;
 
   const blocked = (): string | null => {
     if (!environment) return null;
-    if (!environment.secure) return t("installRequiresHttps");
+    if (!installOrigin?.secure) return t("installRequiresHttps");
     if (metadata.exportMethod === "APP_STORE_CONNECT") {
       return t("installNotSupportedForAppStore");
     }
@@ -82,7 +86,8 @@ export function IosInstallButton({
   };
 
   const reason = blocked();
-  const disabled = !environment || reason !== null || busy;
+  const disabled =
+    !environment || !environment.apple || reason !== null || busy;
 
   const install = async () => {
     if (!manifestUrl) return;
@@ -99,7 +104,10 @@ export function IosInstallButton({
   };
 
   const copyLink = async () => {
-    await copyText(window.location.href);
+    const origin = installOrigin?.origin ?? window.location.origin;
+    await copyText(
+      `${origin}${window.location.pathname}${window.location.search}${window.location.hash}`,
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2_000);
   };

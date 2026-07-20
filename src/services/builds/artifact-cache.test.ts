@@ -1,4 +1,11 @@
-import { readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import {
+  readFile,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +15,13 @@ const getServerServices = vi.fn();
 vi.mock("@/services/server-services", () => ({
   getServerServices: () => getServerServices(),
 }));
+
+const fsMocks = vi.hoisted(() => ({ rename: vi.fn() }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  fsMocks.rename.mockImplementation(actual.rename);
+  return { ...actual, rename: fsMocks.rename };
+});
 
 import { receiveArtifactTransfer } from "./artifact-transfer";
 
@@ -86,6 +100,7 @@ beforeEach(async () => {
     metadata: {},
   };
   getServerServices.mockImplementation(services);
+  fsMocks.rename.mockClear();
   await rm(CACHE_DIRECTORY, { recursive: true, force: true });
 });
 
@@ -105,6 +120,21 @@ describe("materializeArtifact", () => {
       size: 9,
     });
     await expect(readFile(artifact.path, "utf8")).resolves.toBe("ipa-bytes");
+  });
+
+  test("copies across filesystems and removes transfer staging files", async () => {
+    fsMocks.rename.mockRejectedValueOnce(
+      Object.assign(new Error("Cross-device link"), { code: "EXDEV" }),
+    );
+    const { materializeArtifact } = await importCache();
+    const artifact = await materializeArtifact("build-1", "artifact-1");
+    const source = String(fsMocks.rename.mock.calls[0]?.[0]);
+
+    await expect(readFile(artifact.path, "utf8")).resolves.toBe("ipa-bytes");
+    await expect(stat(source)).rejects.toThrow();
+    await expect(readdir(CACHE_DIRECTORY)).resolves.not.toContainEqual(
+      expect.stringContaining(".incoming"),
+    );
   });
 
   test("serves a second request from cache without contacting the agent", async () => {
