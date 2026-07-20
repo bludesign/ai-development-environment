@@ -28,6 +28,33 @@ describe("PushNotificationsService direct delivery", () => {
     vi.clearAllMocks();
   });
 
+  test("starts background recovery only when explicitly requested", () => {
+    const timer = { unref: vi.fn() };
+    const setIntervalSpy = vi
+      .spyOn(globalThis, "setInterval")
+      .mockReturnValue(timer as unknown as ReturnType<typeof setInterval>);
+    const clearIntervalSpy = vi
+      .spyOn(globalThis, "clearInterval")
+      .mockImplementation(() => undefined);
+
+    try {
+      const service = new PushNotificationsService();
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+      service.startBackgroundRecovery();
+      service.startBackgroundRecovery();
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(timer.unref).toHaveBeenCalledTimes(1);
+
+      service.stopBackgroundRecovery();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
   test("keeps a one-off Live Activity token outside the history payload", async () => {
     const create = vi.fn().mockImplementation(({ data }) => ({
       id: data.id,

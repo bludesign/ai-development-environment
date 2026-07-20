@@ -43,6 +43,9 @@ function createServerServices(): ServerServices {
   const telemetryService = new TelemetryService();
   const signingAssetsService = new SigningAssetsService(agentControlService);
   const pushNotificationsService = new PushNotificationsService();
+  if (process.env.NODE_ENV !== "test") {
+    pushNotificationsService.startBackgroundRecovery();
+  }
   const buildsService = new BuildsService(
     agentControlService,
     telemetryService,
