@@ -9,6 +9,7 @@ export const IOS_DEPLOY_JOB_KIND = "ios.build.deploy";
 export const IOS_EXPORT_JOB_KIND = "ios.archive.export";
 export const IOS_TEST_RESULTS_JOB_KIND = "ios.test-results.parse";
 export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
+export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
 
 export const IOS_BUILD_JOB_KINDS = [
   IOS_SOURCE_DISCOVER_JOB_KIND,
@@ -22,6 +23,7 @@ export const IOS_BUILD_JOB_KINDS = [
   IOS_EXPORT_JOB_KIND,
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
+  IOS_SIGNING_INSPECT_JOB_KIND,
 ] as const;
 
 export const BUILD_ACTIONS = [
@@ -219,6 +221,14 @@ export type BuildExportSettings = {
   uploadSymbols: boolean;
   manageAppVersionAndBuildNumber: boolean;
   testFlightInternalTestingOnly: boolean;
+};
+
+export type BuildArtifactSnapshot = {
+  kind: string;
+  relativePath: string;
+  sizeBytes: number | null;
+  checksum: string | null;
+  metadata: Record<string, unknown>;
 };
 
 export type BuildExportPayload = BuildWorktreeIdentity & {
@@ -810,5 +820,176 @@ export function parseBuildExportPayload(value: unknown): BuildExportPayload {
       "build export payload.archiveRelativePath",
     ),
     settings: parseBuildExportSettings(input.settings),
+  };
+}
+
+/**
+ * An artifact reported back by an agent in a job result. Job results are not
+ * schema-validated on receipt, so the control plane parses them defensively:
+ * invalid entries are skipped rather than failing the whole projection, and an
+ * older agent that reports no artifacts at all yields an empty list.
+ */
+export function parseBuildArtifactSnapshots(
+  value: unknown,
+): BuildArtifactSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  const snapshots: BuildArtifactSnapshot[] = [];
+  for (const entry of value) {
+    try {
+      const input = objectValue(entry, "build artifact");
+      snapshots.push({
+        kind: stringValue(input.kind, "build artifact.kind"),
+        relativePath: safeRelativePath(
+          input.relativePath,
+          "build artifact.relativePath",
+        ),
+        sizeBytes:
+          typeof input.sizeBytes === "number" &&
+          Number.isFinite(input.sizeBytes)
+            ? input.sizeBytes
+            : null,
+        checksum: nullableString(input.checksum, "build artifact.checksum"),
+        metadata:
+          input.metadata &&
+          typeof input.metadata === "object" &&
+          !Array.isArray(input.metadata)
+            ? (input.metadata as Record<string, unknown>)
+            : {},
+      });
+    } catch {
+      continue;
+    }
+  }
+  return snapshots;
+}
+
+export const BUILD_EXPORT_METHODS = [
+  "DEBUGGING",
+  "RELEASE_TESTING",
+  "ENTERPRISE",
+  "APP_STORE_CONNECT",
+] as const;
+export type BuildExportMethod = (typeof BUILD_EXPORT_METHODS)[number];
+
+export const PROVISIONING_PROFILE_TYPES = [
+  "DEVELOPMENT",
+  "AD_HOC",
+  "ENTERPRISE",
+  "APP_STORE",
+] as const;
+export type ProvisioningProfileType =
+  (typeof PROVISIONING_PROFILE_TYPES)[number];
+
+/** The profile type each distribution method requires. */
+export const EXPORT_METHOD_PROFILE_TYPES: Record<
+  BuildExportMethod,
+  ProvisioningProfileType
+> = {
+  DEBUGGING: "DEVELOPMENT",
+  RELEASE_TESTING: "AD_HOC",
+  ENTERPRISE: "ENTERPRISE",
+  APP_STORE_CONNECT: "APP_STORE",
+};
+
+/**
+ * Classifies a profile the way Xcode does.
+ *
+ * `get-task-allow` is what separates a development profile from a distribution
+ * one, and the device list separates ad hoc from store distribution. Enterprise
+ * profiles carry no device list but claim every device instead.
+ */
+export function provisioningProfileType(profile: {
+  getTaskAllow: boolean;
+  hasProvisionedDevices: boolean;
+  provisionsAllDevices: boolean;
+}): ProvisioningProfileType {
+  if (profile.getTaskAllow) return "DEVELOPMENT";
+  if (profile.provisionsAllDevices) return "ENTERPRISE";
+  return profile.hasProvisionedDevices ? "AD_HOC" : "APP_STORE";
+}
+
+/**
+ * Whether a profile covers a bundle identifier, honouring the trailing wildcard
+ * that team-wide profiles use.
+ */
+export function profileCoversBundle(
+  profileBundleId: string,
+  bundleId: string,
+): boolean {
+  if (profileBundleId === "*") return true;
+  if (profileBundleId.endsWith(".*")) {
+    return bundleId.startsWith(profileBundleId.slice(0, -1));
+  }
+  return profileBundleId === bundleId;
+}
+
+export type SigningTeam = { id: string; name: string };
+
+export type SigningIdentity = {
+  sha1: string;
+  name: string;
+  teamId: string | null;
+};
+
+export type SigningProfile = {
+  uuid: string;
+  name: string;
+  teamId: string | null;
+  teamName: string | null;
+  bundleId: string;
+  type: ProvisioningProfileType;
+  platforms: string[];
+  expiresAt: string | null;
+  expired: boolean;
+  xcodeManaged: boolean;
+  /**
+   * SHA-1 fingerprints of the certificates embedded in the profile, matching the
+   * identifiers `security find-identity` reports. Export fails outright when the
+   * chosen certificate is absent from the profile, so this is what decides which
+   * certificates are actually offered.
+   */
+  certificateSha1s: string[];
+};
+
+export type ArchiveBundle = {
+  bundleId: string;
+  name: string;
+  relativePath: string;
+  embeddedProfileUuid: string | null;
+  embeddedProfileName: string | null;
+};
+
+export type BuildSigningInspection = {
+  teams: SigningTeam[];
+  identities: SigningIdentity[];
+  profiles: SigningProfile[];
+  bundles: ArchiveBundle[];
+};
+
+export type BuildSigningInspectPayload = {
+  buildId: string;
+  codebaseId: string;
+  artifactDirectory: string;
+  archiveRelativePath: string;
+};
+
+export function parseBuildSigningInspectPayload(
+  value: unknown,
+): BuildSigningInspectPayload {
+  const input = objectValue(value, "build signing payload");
+  return {
+    buildId: stringValue(input.buildId, "build signing payload.buildId"),
+    codebaseId: stringValue(
+      input.codebaseId,
+      "build signing payload.codebaseId",
+    ),
+    artifactDirectory: stringValue(
+      input.artifactDirectory,
+      "build signing payload.artifactDirectory",
+    ),
+    archiveRelativePath: safeRelativePath(
+      input.archiveRelativePath,
+      "build signing payload.archiveRelativePath",
+    ),
   };
 }

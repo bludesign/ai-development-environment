@@ -70,6 +70,8 @@ import {
 } from "@/lib/control-plane-client";
 
 import { buildStatusVariant } from "./build-format";
+import { ExportArchiveDialog } from "./export-archive-dialog";
+import { IosInstallButton } from "./ios-install-button";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import type { BuildLogEvent, BuildRecord, BuildReport } from "./types";
@@ -93,12 +95,18 @@ const BUILD_DETAIL_FIELDS = `
 
 const LOG_FIELDS = `id scope scopeId sequence phase level stream message createdAt`;
 
+/** Acronyms that title casing would otherwise mangle, such as IPA into "Ipa". */
+const PRESERVED_ACRONYMS = new Set(["IPA"]);
+
 function humanizeConstant(value: string): string {
   return value
-    .toLocaleLowerCase()
     .split("_")
     .filter(Boolean)
-    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
+    .map((part) =>
+      PRESERVED_ACRONYMS.has(part)
+        ? part
+        : `${part.charAt(0).toLocaleUpperCase()}${part.slice(1).toLocaleLowerCase()}`,
+    )
     .join(" ");
 }
 
@@ -736,26 +744,64 @@ export function BuildDetailPage({ buildId }: { buildId: string }) {
             </CardHeader>
             <CardContent className="space-y-2">
               {build.artifacts.length ? (
-                build.artifacts.map((artifact) => (
-                  <div className="rounded-lg border p-2" key={artifact.id}>
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">
-                        {humanizeConstant(artifact.kind)}
-                      </Badge>
-                      <Button asChild size="sm" variant="outline">
-                        <a
-                          download
-                          href={`/api/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
-                        >
-                          <Download /> {t("downloadArtifact")}
-                        </a>
-                      </Button>
+                build.artifacts.map((artifact) => {
+                  const ipa = artifact.kind === "IPA";
+                  const metadata = (artifact.metadata ?? {}) as Record<
+                    string,
+                    unknown
+                  >;
+                  return (
+                    <div className="rounded-lg border p-2" key={artifact.id}>
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant="outline">
+                          {humanizeConstant(artifact.kind)}
+                        </Badge>
+                        <Button asChild size="sm" variant="outline">
+                          <a
+                            download
+                            href={`/api/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
+                          >
+                            <Download />{" "}
+                            {ipa ? t("downloadIpa") : t("downloadArtifact")}
+                          </a>
+                        </Button>
+                      </div>
+                      <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                        {artifact.relativePath}
+                      </p>
+                      {ipa && (
+                        <>
+                          <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                            {typeof metadata.bundleIdentifier === "string" && (
+                              <div className="flex justify-between gap-2">
+                                <dt>{t("ipaBundleIdentifier")}</dt>
+                                <dd className="break-all font-mono">
+                                  {metadata.bundleIdentifier}
+                                </dd>
+                              </div>
+                            )}
+                            {typeof metadata.bundleShortVersion ===
+                              "string" && (
+                              <div className="flex justify-between gap-2">
+                                <dt>{t("ipaBundleVersion")}</dt>
+                                <dd className="font-mono">
+                                  {metadata.bundleShortVersion}
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
+                          <div className="mt-2 flex justify-end">
+                            <IosInstallButton
+                              artifactId={artifact.id}
+                              buildId={build.id}
+                              metadata={metadata}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                      {artifact.relativePath}
-                    </p>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <p className="text-sm text-muted-foreground">
                   {t("noArtifacts")}
@@ -1351,121 +1397,5 @@ function Detail({
         {value}
       </dd>
     </div>
-  );
-}
-
-function ExportArchiveDialog({
-  buildId,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  buildId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  const t = useTranslations("builds");
-  const [method, setMethod] = useState("DEBUGGING");
-  const [signingStyle, setSigningStyle] = useState("AUTOMATIC");
-  const [teamId, setTeamId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    setBusy(true);
-    try {
-      await controlPlaneRequest(
-        `mutation ExportArchive($input: ExportBuildArchiveInput!) {
-          exportBuildArchive(input: $input) { id status }
-        }`,
-        {
-          input: {
-            buildId,
-            requestId: createClientId(),
-            settings: {
-              method,
-              signingStyle,
-              teamId: teamId || null,
-              signingCertificate: null,
-              provisioningProfiles: {},
-              uploadSymbols: true,
-              manageAppVersionAndBuildNumber: true,
-              testFlightInternalTestingOnly: false,
-            },
-          },
-        },
-      );
-      await onSaved();
-      onOpenChange(false);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("exportArchive")}</DialogTitle>
-          <DialogDescription>{t("exportArchiveDescription")}</DialogDescription>
-        </DialogHeader>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t("distributionMethod")}</Label>
-            <Select onValueChange={setMethod} value={method}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[
-                  "DEBUGGING",
-                  "RELEASE_TESTING",
-                  "ENTERPRISE",
-                  "APP_STORE_CONNECT",
-                ].map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>{t("signingStyle")}</Label>
-            <Select onValueChange={setSigningStyle} value={signingStyle}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AUTOMATIC">{t("automatic")}</SelectItem>
-                <SelectItem value="MANUAL">{t("manual")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="export-team-id">{t("developmentTeam")}</Label>
-            <Input
-              id="export-team-id"
-              onChange={(event) => setTeamId(event.target.value)}
-              value={teamId}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} variant="outline">
-            {t("cancel")}
-          </Button>
-          <Button disabled={busy} onClick={() => void submit()}>
-            {busy && <Spinner />} {t("exportArchive")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

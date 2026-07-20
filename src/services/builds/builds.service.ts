@@ -16,9 +16,11 @@ import {
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
+  IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
   parseBuildAdvancedSettings,
+  parseBuildArtifactSnapshots,
   parseBuildDestination,
   parseBuildExportSettings,
   parseBuildSource,
@@ -963,6 +965,57 @@ export class BuildsService {
     }
   }
 
+  /**
+   * Lists the teams, certificates, and profiles installed on the build's agent,
+   * along with the bundles inside the archive that manual signing must map.
+   */
+  async signingOptionsForBuild(buildId: string) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { id: buildId },
+      include: { artifacts: true },
+    });
+    const archive = build?.artifacts.find(
+      (artifact) => artifact.kind === "ARCHIVE",
+    );
+    if (!build || build.status !== "SUCCEEDED" || !build.worktreeId) {
+      throw new Error("A successful archive build is required");
+    }
+    if (!archive) throw new Error("Build does not contain an archive");
+    const worktree = await this.requireWorktree(
+      build.worktreeId,
+      IOS_SIGNING_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: IOS_SIGNING_INSPECT_JOB_KIND,
+      payload: {
+        buildId: build.id,
+        codebaseId: worktree.codebaseId,
+        artifactDirectory: build.artifactDirectory,
+        archiveRelativePath: archive.relativePath,
+      },
+      idempotencyKey: `ios:signing:${build.id}:${archive.id}`,
+      timeoutSeconds: 120,
+      visibility: "SYSTEM",
+    });
+    try {
+      const result = this.result(await this.waitForJob(job.id));
+      return {
+        teams: Array.isArray(result.teams) ? result.teams : [],
+        identities: Array.isArray(result.identities) ? result.identities : [],
+        profiles: Array.isArray(result.profiles) ? result.profiles : [],
+        bundles: Array.isArray(result.bundles) ? result.bundles : [],
+      };
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
   async destinationsForBuild(buildId: string, requestId: string) {
     const prisma = await getPrismaClient();
     const build = await prisma.build.findUnique({
@@ -1793,10 +1846,36 @@ export class BuildsService {
     return removed.count;
   }
 
+  /**
+   * Artifact metadata for the over-the-air install manifest. Deliberately does
+   * not contact the agent: iOS fetches the manifest before anything else and
+   * gives up quickly, so this must answer from the database alone.
+   */
+  async artifactForInstall(buildId: string, artifactId: string) {
+    const prisma = await getPrismaClient();
+    const artifact = await prisma.buildArtifact.findFirst({
+      where: { id: artifactId, buildId },
+    });
+    if (!artifact) return null;
+    return {
+      id: artifact.id,
+      kind: artifact.kind,
+      relativePath: artifact.relativePath,
+      sizeBytes: artifact.sizeBytes,
+      checksum: artifact.checksum,
+      createdAt: artifact.createdAt.toISOString(),
+      metadata: objectValue(
+        parseJson(artifact.metadataJson, {}),
+        "build artifact metadata",
+      ),
+    };
+  }
+
   async prepareArtifactDownload(
     buildId: string,
     artifactId: string,
     uploadId: string,
+    timeoutMs = 170_000,
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const artifact = await prisma.buildArtifact.findFirst({
@@ -1830,11 +1909,11 @@ export class BuildsService {
         codebaseId,
       },
       idempotencyKey: `ios:artifact:download:${uploadId}`,
-      timeoutSeconds: 180,
+      timeoutSeconds: Math.ceil(timeoutMs / 1_000) + 10,
       visibility: "SYSTEM",
     });
     try {
-      this.result(await this.waitForJob(job.id, 170_000));
+      this.result(await this.waitForJob(job.id, timeoutMs));
     } finally {
       await prisma.agentJob.deleteMany({
         where: { id: job.id, visibility: "SYSTEM" },
@@ -2165,6 +2244,42 @@ export class BuildsService {
     return updated;
   }
 
+  /**
+   * Records artifacts an agent reported in a job result. Size, checksum, and
+   * metadata are refreshed on conflict so that re-running a job against the same
+   * relative path does not leave a stale checksum behind — downstream callers
+   * key their download cache on it.
+   */
+  private async upsertArtifacts(
+    transaction: Prisma.TransactionClient,
+    buildId: string,
+    raw: unknown,
+  ) {
+    for (const artifact of parseBuildArtifactSnapshots(raw)) {
+      const values = {
+        kind: artifact.kind,
+        sizeBytes: artifact.sizeBytes,
+        checksum: artifact.checksum,
+        metadataJson: JSON.stringify(artifact.metadata),
+      };
+      await transaction.buildArtifact.upsert({
+        where: {
+          buildId_relativePath: {
+            buildId,
+            relativePath: artifact.relativePath,
+          },
+        },
+        create: {
+          id: randomUUID(),
+          buildId,
+          relativePath: artifact.relativePath,
+          ...values,
+        },
+        update: values,
+      });
+    }
+  }
+
   private async upsertReportProjection(
     transaction: Prisma.TransactionClient,
     buildId: string,
@@ -2420,45 +2535,7 @@ export class BuildsService {
     );
     const prisma = await getPrismaClient();
     await prisma.$transaction(async (transaction) => {
-      if (Array.isArray(result.artifacts)) {
-        for (const raw of result.artifacts) {
-          const artifact = objectValue(raw, "build report artifact");
-          if (
-            typeof artifact.relativePath !== "string" ||
-            typeof artifact.kind !== "string"
-          ) {
-            continue;
-          }
-          await transaction.buildArtifact.upsert({
-            where: {
-              buildId_relativePath: {
-                buildId,
-                relativePath: artifact.relativePath,
-              },
-            },
-            create: {
-              id: randomUUID(),
-              buildId,
-              kind: artifact.kind,
-              relativePath: artifact.relativePath,
-              sizeBytes:
-                typeof artifact.sizeBytes === "number"
-                  ? artifact.sizeBytes
-                  : null,
-              checksum:
-                typeof artifact.checksum === "string"
-                  ? artifact.checksum
-                  : null,
-              metadataJson: JSON.stringify(
-                artifact.metadata && typeof artifact.metadata === "object"
-                  ? artifact.metadata
-                  : {},
-              ),
-            },
-            update: {},
-          });
-        }
-      }
+      await this.upsertArtifacts(transaction, buildId, result.artifacts);
       if (result.report && typeof result.report === "object") {
         await this.upsertReportProjection(
           transaction,
@@ -2565,23 +2642,29 @@ export class BuildsService {
       job.status === "SUCCEEDED" &&
       typeof result.outputRelativePath === "string"
     ) {
-      await prisma.buildArtifact.upsert({
-        where: {
-          buildId_relativePath: {
-            buildId: row.buildId,
-            relativePath: result.outputRelativePath,
+      const outputRelativePath = result.outputRelativePath;
+      // One transaction so a subscriber woken by publish() never observes the
+      // export directory without the IPA that was exported into it.
+      await prisma.$transaction(async (transaction) => {
+        await transaction.buildArtifact.upsert({
+          where: {
+            buildId_relativePath: {
+              buildId: row.buildId,
+              relativePath: outputRelativePath,
+            },
           },
-        },
-        create: {
-          id: randomUUID(),
-          buildId: row.buildId,
-          kind: "EXPORT",
-          relativePath: result.outputRelativePath,
-          sizeBytes:
-            typeof result.sizeBytes === "number" ? result.sizeBytes : null,
-          metadataJson: JSON.stringify({ exportId: row.id }),
-        },
-        update: {},
+          create: {
+            id: randomUUID(),
+            buildId: row.buildId,
+            kind: "EXPORT",
+            relativePath: outputRelativePath,
+            sizeBytes:
+              typeof result.sizeBytes === "number" ? result.sizeBytes : null,
+            metadataJson: JSON.stringify({ exportId: row.id }),
+          },
+          update: {},
+        });
+        await this.upsertArtifacts(transaction, row.buildId, result.artifacts);
       });
     }
     this.publish(row.buildId);

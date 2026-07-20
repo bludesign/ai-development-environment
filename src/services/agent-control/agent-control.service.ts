@@ -13,6 +13,7 @@ import {
   IOS_DEPLOY_JOB_KIND,
   IOS_DESTINATIONS_JOB_KIND,
   IOS_EXPORT_JOB_KIND,
+  IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_TEST_RESULTS_JOB_KIND,
   IOS_COVERAGE_REPORT_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
@@ -22,6 +23,7 @@ import {
   parseBuildDestinationsPayload,
   parseBuildArtifactDownloadPayload,
   parseBuildExportPayload,
+  parseBuildSigningInspectPayload,
   parseBuildJobPayload,
   parseBuildReportPayload,
   parseBuildDeletePayload,
@@ -267,6 +269,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === IOS_EXPORT_JOB_KIND) {
     parseBuildExportPayload(payload);
+    return;
+  }
+  if (kind === IOS_SIGNING_INSPECT_JOB_KIND) {
+    parseBuildSigningInspectPayload(payload);
     return;
   }
   if (

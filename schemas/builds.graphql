@@ -389,8 +389,58 @@ input BuildLogEventInput {
   createdAt: String!
 }
 
+enum ProvisioningProfileType {
+  DEVELOPMENT
+  AD_HOC
+  ENTERPRISE
+  APP_STORE
+}
+
+type SigningTeam {
+  id: ID!
+  name: String!
+}
+
+type SigningIdentity {
+  sha1: String!
+  name: String!
+  teamId: String
+}
+
+type SigningProfile {
+  uuid: ID!
+  name: String!
+  teamId: String
+  teamName: String
+  bundleId: String!
+  type: ProvisioningProfileType!
+  platforms: [String!]!
+  expiresAt: String
+  expired: Boolean!
+  xcodeManaged: Boolean!
+  "SHA-1 fingerprints of the certificates this profile accepts."
+  certificateSha1s: [String!]!
+}
+
+"A bundle inside an archive that needs its own provisioning profile."
+type ArchiveBundle {
+  bundleId: String!
+  name: String!
+  relativePath: String!
+  embeddedProfileUuid: String
+  embeddedProfileName: String
+}
+
+type BuildSigningOptions {
+  teams: [SigningTeam!]!
+  identities: [SigningIdentity!]!
+  profiles: [SigningProfile!]!
+  bundles: [ArchiveBundle!]!
+}
+
 extend type Query {
   iosAppProject(codebaseId: ID!): CodebaseProject
+  buildSigningOptions(buildId: ID!): BuildSigningOptions!
   buildScripts: [BuildScript!]!
   builds(
     first: Int = 50

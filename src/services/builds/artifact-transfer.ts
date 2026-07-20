@@ -31,12 +31,13 @@ const transfers =
 export function expectArtifactTransfer(
   uploadId: string,
   agentId: string,
+  timeoutMs = 170_000,
 ): Promise<ArtifactTransfer> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       transfers.delete(uploadId);
       reject(new Error("The agent did not upload the artifact in time"));
-    }, 170_000);
+    }, timeoutMs);
     timeout.unref();
     transfers.set(uploadId, { agentId, resolve, reject, timeout });
   });
