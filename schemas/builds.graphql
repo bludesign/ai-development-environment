@@ -418,6 +418,8 @@ type SigningProfile {
   expiresAt: String
   expired: Boolean!
   xcodeManaged: Boolean!
+  "SHA-1 fingerprints of the certificates this profile accepts."
+  certificateSha1s: [String!]!
 }
 
 "A bundle inside an archive that needs its own provisioning profile."

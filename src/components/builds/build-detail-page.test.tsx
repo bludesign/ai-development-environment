@@ -216,6 +216,13 @@ beforeEach(() => {
               name: "Apple Development: Example (TEAM123)",
               teamId: "TEAM123",
             },
+            // Shares the team but is absent from the profile, so exporting with
+            // it would fail. It must never be offered.
+            {
+              sha1: "B".repeat(40),
+              name: "Developer ID Application: Example (TEAM123)",
+              teamId: "TEAM123",
+            },
           ],
           profiles: [
             {
@@ -229,6 +236,7 @@ beforeEach(() => {
               expiresAt: "2027-07-06T00:51:24Z",
               expired: false,
               xcodeManaged: false,
+              certificateSha1s: ["A".repeat(40)],
             },
           ],
           bundles: [
@@ -651,6 +659,9 @@ describe("BuildDetailPage", () => {
     // The team is read from the agent and defaults to whichever one signed the
     // archive, so no selection is needed for the common case.
     await within(dialog).findByText("Example, LLC (TEAM123)");
+    // Only certificates the chosen profile accepts may be offered; exporting
+    // with any other one fails in xcodebuild.
+    expect(within(dialog).queryByText(/Developer ID Application/)).toBeNull();
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Export archive" }),
     );

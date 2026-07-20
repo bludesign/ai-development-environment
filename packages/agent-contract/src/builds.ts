@@ -942,6 +942,13 @@ export type SigningProfile = {
   expiresAt: string | null;
   expired: boolean;
   xcodeManaged: boolean;
+  /**
+   * SHA-1 fingerprints of the certificates embedded in the profile, matching the
+   * identifiers `security find-identity` reports. Export fails outright when the
+   * chosen certificate is absent from the profile, so this is what decides which
+   * certificates are actually offered.
+   */
+  certificateSha1s: string[];
 };
 
 export type ArchiveBundle = {

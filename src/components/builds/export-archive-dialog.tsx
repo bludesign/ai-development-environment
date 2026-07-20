@@ -48,6 +48,7 @@ const SIGNING_OPTIONS_QUERY = `query BuildSigningOptions($buildId: ID!) {
     identities { sha1 name teamId }
     profiles {
       uuid name teamId teamName bundleId type platforms expiresAt expired xcodeManaged
+      certificateSha1s
     }
     bundles { bundleId name relativePath embeddedProfileUuid embeddedProfileName }
   }
@@ -183,14 +184,6 @@ export function ExportArchiveDialog({
   }
 
   const manual = signingStyle === "MANUAL";
-  const identities = (options?.identities ?? []).filter(
-    (identity) => !teamId || !identity.teamId || identity.teamId === teamId,
-  );
-  const certificate = identities.some(
-    (identity) => identity.sha1 === certificateOverride,
-  )
-    ? certificateOverride
-    : "";
 
   const profiles = Object.fromEntries(
     (options?.bundles ?? []).flatMap((bundle) => {
@@ -206,6 +199,32 @@ export function ExportArchiveDialog({
       return chosen ? [[bundle.bundleId, chosen] as const] : [];
     }),
   );
+
+  const selectedProfiles = Object.values(profiles).flatMap((uuid) => {
+    const profile = options?.profiles.find((entry) => entry.uuid === uuid);
+    return profile ? [profile] : [];
+  });
+
+  // One certificate signs the whole export, so it has to appear in every chosen
+  // profile. Filtering by team instead would be wrong: a profile commonly
+  // accepts a certificate issued to a different team than the profile's own.
+  // An agent that predates this reports no fingerprints, in which case there is
+  // nothing to narrow by and the team is the best available signal.
+  const knowsCertificates =
+    selectedProfiles.length > 0 &&
+    selectedProfiles.every((profile) => profile.certificateSha1s?.length);
+  const identities = (options?.identities ?? []).filter((identity) =>
+    knowsCertificates
+      ? selectedProfiles.every((profile) =>
+          profile.certificateSha1s.includes(identity.sha1.toUpperCase()),
+        )
+      : !teamId || !identity.teamId || identity.teamId === teamId,
+  );
+  const certificate = identities.some(
+    (identity) => identity.sha1 === certificateOverride,
+  )
+    ? certificateOverride
+    : "";
 
   const submit = async () => {
     setBusy(true);
@@ -250,7 +269,12 @@ export function ExportArchiveDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      {/*
+        The dialog lays its sections out in a grid, whose column would otherwise
+        size to the widest profile name and push the whole dialog past the
+        viewport. Capping the column keeps long names inside the trigger.
+      */}
+      <DialogContent className="max-h-[85vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("exportArchive")}</DialogTitle>
           <DialogDescription>{t("exportArchiveDescription")}</DialogDescription>
@@ -274,7 +298,7 @@ export function ExportArchiveDialog({
               onValueChange={(value) => setMethod(value as BuildExportMethod)}
               value={method}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -294,7 +318,7 @@ export function ExportArchiveDialog({
               onValueChange={setTeamId}
               value={teamId}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full min-w-0">
                 {loading ? (
                   <Spinner />
                 ) : (
@@ -317,7 +341,7 @@ export function ExportArchiveDialog({
           <div className="space-y-2">
             <Label>{t("signingStyle")}</Label>
             <Select onValueChange={setSigningStyle} value={signingStyle}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -336,7 +360,7 @@ export function ExportArchiveDialog({
                   onValueChange={setCertificateOverride}
                   value={certificate}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full min-w-0">
                     <SelectValue placeholder={t("certificateAutomatic")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -397,7 +421,7 @@ export function ExportArchiveDialog({
                         }
                         value={profiles[bundle.bundleId] ?? ""}
                       >
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="w-full min-w-0">
                           <SelectValue placeholder={t("selectProfile")} />
                         </SelectTrigger>
                         <SelectContent>
