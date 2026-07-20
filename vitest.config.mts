@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import mdx from "@mdx-js/rollup";
 import react from "@vitejs/plugin-react";
 import remarkGfm from "remark-gfm";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,5 +43,6 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    exclude: [...configDefaults.exclude, "packages/control-agent/**"],
   },
 });
