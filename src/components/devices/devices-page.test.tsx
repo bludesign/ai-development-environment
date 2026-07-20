@@ -197,7 +197,7 @@ describe("DeviceDetailPage", () => {
       return Promise.resolve({
         iosDevice: device({
           product: "iPhone12,1",
-          osVersion: "26.5.2",
+          osVersion: "23F84",
         }),
         iosDeviceSettings: settings(),
       } as never);
@@ -207,6 +207,7 @@ describe("DeviceDetailPage", () => {
     expect(await screen.findAllByText("0000••••002E")).toHaveLength(2);
     expect(await screen.findAllByText("iPhone 11")).toHaveLength(2);
     expect(screen.getAllByText("26.5.2 (23F84)")).toHaveLength(2);
+    expect(screen.queryByText("23F84")).toBeNull();
     expect(screen.getByText("Signed")).toBeDefined();
     expect(screen.getByText("Unsigned")).toBeDefined();
     expect(screen.getAllByText("9.1 GiB")).toHaveLength(2);

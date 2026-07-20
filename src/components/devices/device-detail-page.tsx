@@ -304,12 +304,17 @@ export function DeviceDetailPage({ id }: { id: string }) {
   const canRegister =
     settings?.appStoreConnectConfigured &&
     ["PENDING", "REGISTRATION_FAILED"].includes(device.status);
-  const installedFirmware = device.osVersion
-    ? (firmware?.firmwares.find(
-        (entry) => entry.version === device.osVersion && entry.signed,
-      ) ??
-      firmware?.firmwares.find((entry) => entry.version === device.osVersion))
+  const installedFirmwareCandidates = device.osVersion
+    ? firmware?.firmwares.filter(
+        (entry) =>
+          entry.version === device.osVersion ||
+          entry.buildId.toUpperCase() === device.osVersion?.toUpperCase(),
+      )
     : null;
+  const installedFirmware =
+    installedFirmwareCandidates?.find((entry) => entry.signed) ??
+    installedFirmwareCandidates?.[0] ??
+    null;
   const installedVersion = device.osVersion
     ? installedFirmware
       ? `${installedFirmware.version} (${installedFirmware.buildId})`
