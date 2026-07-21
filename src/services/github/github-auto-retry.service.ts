@@ -30,6 +30,7 @@ const ACTIVE_STATES = new Set<GitHubPipelineState>([
   "PENDING",
   "QUEUED",
 ]);
+const TERMINAL_EXECUTION_STATES = ["COMPLETED", "EXHAUSTED", "STOPPED"];
 const PRIORITY: Record<GitHubAutoRetryScope, number> = {
   WORKFLOW_RUN: 4,
   PULL_REQUEST: 3,
@@ -317,15 +318,29 @@ export class GitHubAutoRetryService {
     enabled: boolean,
   ): Promise<GitHubAutoRetryRuleView> {
     const prisma = await getPrismaClient();
-    const rule = await prisma.gitHubAutoRetryRule.update({
-      where: { id },
-      data: {
-        enabled,
-        status: enabled ? "ACTIVE" : "PAUSED",
-        lastError: null,
-        ...(enabled ? { activatedAt: new Date() } : {}),
-      },
-      include: this.include(),
+    const rule = await prisma.$transaction(async (tx) => {
+      if (enabled) {
+        await tx.gitHubAutoRetryExecution.updateMany({
+          where: { ruleId: id, pendingFromAttempt: { not: null } },
+          data: {
+            pendingFromAttempt: null,
+            observedAttempt: 0,
+            status: "WATCHING",
+            lastError: null,
+            finishedAt: null,
+          },
+        });
+      }
+      return tx.gitHubAutoRetryRule.update({
+        where: { id },
+        data: {
+          enabled,
+          status: enabled ? "ACTIVE" : "PAUSED",
+          lastError: null,
+          ...(enabled ? { activatedAt: new Date() } : {}),
+        },
+        include: this.include(),
+      });
     });
     if (enabled)
       queueMicrotask(() => void this.reconcile().catch(() => undefined));
@@ -347,10 +362,15 @@ export class GitHubAutoRetryService {
       activatedAt: Date;
     },
     run: RetryRun,
+    tracked = false,
   ): boolean {
     if (rule.scope !== "WORKFLOW_RUN") {
       const active = ACTIVE_STATES.has(run.status);
-      if (!active && Date.parse(run.createdAt) < rule.activatedAt.getTime()) {
+      if (
+        !tracked &&
+        !active &&
+        Date.parse(run.createdAt) < rule.activatedAt.getTime()
+      ) {
         return false;
       }
     }
@@ -382,6 +402,35 @@ export class GitHubAutoRetryService {
       },
       update: {},
     });
+  }
+
+  private targetKeys(
+    rule: {
+      allWorkflows: boolean;
+      mode: string;
+      failureStrategy: string;
+      targets: Array<{
+        workflowId: string | null;
+        workflowRunId: string | null;
+        jobName: string | null;
+      }>;
+    },
+    run: RetryRun,
+  ): string[] {
+    if (rule.allWorkflows) return ["workflow"];
+    const targets = rule.targets.filter(
+      (target) =>
+        target.workflowRunId === run.id || target.workflowId === run.workflowId,
+    );
+    if (
+      targets.some((target) => !target.jobName) ||
+      (rule.mode === "FAILURE" && rule.failureStrategy === "ALL_JOBS")
+    ) {
+      return ["workflow"];
+    }
+    return targets.flatMap((target) =>
+      target.jobName ? [`job:${target.jobName}`] : [],
+    );
   }
 
   private async finishExecution(
@@ -492,13 +541,19 @@ export class GitHubAutoRetryService {
         const prisma = await getPrismaClient();
         const message =
           "GitHub did not report a new attempt after the rerun request; automatic retries are paused to prevent a duplicate rerun";
-        await prisma.gitHubAutoRetryExecution.update({
-          where: { id: execution.id },
-          data: { status: "ERROR", lastError: message },
-        });
-        await prisma.gitHubAutoRetryRule.update({
-          where: { id: rule.id },
-          data: { lastError: message },
+        await prisma.$transaction(async (tx) => {
+          await tx.gitHubAutoRetryExecution.update({
+            where: { id: execution.id },
+            data: { status: "ERROR", lastError: message },
+          });
+          await tx.gitHubAutoRetryRule.update({
+            where: { id: rule.id },
+            data: {
+              enabled: false,
+              status: "PAUSED",
+              lastError: message,
+            },
+          });
         });
         return false;
       }
@@ -567,6 +622,21 @@ export class GitHubAutoRetryService {
         orderBy: { createdAt: "asc" },
       });
       const runsByRepository = new Map<string, RetryRun[]>();
+      const trackedExecutions = rules.length
+        ? await prisma.gitHubAutoRetryExecution.findMany({
+            where: {
+              ruleId: { in: rules.map((rule) => rule.id) },
+              status: { notIn: TERMINAL_EXECUTION_STATES },
+            },
+            select: { ruleId: true, workflowRunId: true },
+          })
+        : [];
+      const trackedRunIdsByRule = new Map<string, Set<string>>();
+      for (const execution of trackedExecutions) {
+        const ids = trackedRunIdsByRule.get(execution.ruleId) ?? new Set();
+        ids.add(execution.workflowRunId);
+        trackedRunIdsByRule.set(execution.ruleId, ids);
+      }
       const selected = new Map<
         string,
         { rule: (typeof rules)[number]; run: RetryRun }
@@ -594,31 +664,32 @@ export class GitHubAutoRetryService {
             .map((target) => target.workflowRunId)
             .filter((value): value is string => Boolean(value)),
         );
-        if (rule.scope === "WORKFLOW_RUN") {
-          for (const workflowRunId of exactRunIds) {
-            if (runs.some((run) => run.id === workflowRunId)) continue;
-            try {
-              runs.push(
-                await this.github.autoRetryRun(
-                  rule.codebaseRepositoryId,
-                  workflowRunId,
-                ),
-              );
-            } catch (error) {
-              await prisma.gitHubAutoRetryRule.update({
-                where: { id: rule.id },
-                data: {
-                  lastError:
-                    error instanceof Error ? error.message : String(error),
-                },
-              });
-            }
+        const trackedRunIds = trackedRunIdsByRule.get(rule.id) ?? new Set();
+        const directRunIds = new Set([...exactRunIds, ...trackedRunIds]);
+        for (const workflowRunId of directRunIds) {
+          if (runs.some((run) => run.id === workflowRunId)) continue;
+          try {
+            runs.push(
+              await this.github.autoRetryRun(
+                rule.codebaseRepositoryId,
+                workflowRunId,
+                false,
+              ),
+            );
+          } catch (error) {
+            await prisma.gitHubAutoRetryRule.update({
+              where: { id: rule.id },
+              data: {
+                lastError:
+                  error instanceof Error ? error.message : String(error),
+              },
+            });
           }
         }
         for (const run of runs) {
           if (rule.scope === "WORKFLOW_RUN" && !exactRunIds.has(run.id))
             continue;
-          if (!this.matches(rule, run)) continue;
+          if (!this.matches(rule, run, trackedRunIds.has(run.id))) continue;
           if (
             !rule.allWorkflows &&
             !rule.targets.some(
@@ -640,8 +711,17 @@ export class GitHubAutoRetryService {
         }
       }
 
-      for (const { rule, run } of selected.values()) {
-        if (ACTIVE_STATES.has(run.status)) continue;
+      for (const { rule, run: discoveredRun } of selected.values()) {
+        const targetKeys = this.targetKeys(rule, discoveredRun);
+        if (ACTIVE_STATES.has(discoveredRun.status)) {
+          await Promise.all(
+            targetKeys.map((targetKey) =>
+              this.execution(rule.id, discoveredRun, targetKey),
+            ),
+          );
+          continue;
+        }
+        let run = discoveredRun;
         const targets = rule.allWorkflows
           ? [{ jobName: null }]
           : rule.targets.filter(
@@ -654,18 +734,76 @@ export class GitHubAutoRetryService {
           await this.reconcileExecution(rule, run, "workflow", null);
           continue;
         }
+        const executions = await Promise.all(
+          targetKeys.map((targetKey) =>
+            this.execution(rule.id, run, targetKey),
+          ),
+        );
+        const needsJobs = executions.some(
+          (execution) =>
+            execution.observedAttempt !== run.runAttempt ||
+            (execution.pendingFromAttempt != null &&
+              run.runAttempt > execution.pendingFromAttempt),
+        );
+        if (!needsJobs) {
+          for (let index = 0; index < executions.length; index += 1) {
+            if (executions[index]?.pendingFromAttempt != null) {
+              await this.reconcileExecution(
+                rule,
+                run,
+                targetKeys[index]!,
+                null,
+              );
+            }
+          }
+          continue;
+        }
+        try {
+          run = await this.github.autoRetryRun(
+            rule.codebaseRepositoryId,
+            run.id,
+          );
+        } catch (error) {
+          await prisma.gitHubAutoRetryRule.update({
+            where: { id: rule.id },
+            data: {
+              lastError: error instanceof Error ? error.message : String(error),
+            },
+          });
+          continue;
+        }
         if (rule.mode === "FAILURE" && rule.failureStrategy === "ALL_JOBS") {
           const selectedJobs = run.jobs.filter((job) =>
             targets.some((target) => target.jobName === job.name),
           );
-          if (selectedJobs.some((job) => FAILURE_STATES.has(job.status))) {
-            await this.reconcileExecution(rule, run, "workflow", null);
+          const representative =
+            selectedJobs.find((job) => FAILURE_STATES.has(job.status)) ??
+            selectedJobs.find((job) => job.status !== "SUCCESS") ??
+            selectedJobs[0];
+          if (representative) {
+            await this.reconcileExecution(
+              rule,
+              run,
+              "workflow",
+              representative,
+            );
+          } else if (executions[0]) {
+            await this.finishExecution(executions[0].id, run, "STOPPED");
           }
           continue;
         }
+        const executionByTargetKey = new Map(
+          targetKeys.map((targetKey, index) => [targetKey, executions[index]]),
+        );
         for (const target of targets) {
           const job = run.jobs.find((item) => item.name === target.jobName);
-          if (!job) continue;
+          if (!job) {
+            const execution = executionByTargetKey.get(`job:${target.jobName}`);
+            if (execution) {
+              await this.finishExecution(execution.id, run, "STOPPED");
+            }
+            continue;
+          }
           const triggered = await this.reconcileExecution(
             rule,
             run,
@@ -686,7 +824,7 @@ export class GitHubAutoRetryService {
         if (
           executions.length > 0 &&
           executions.every((execution) =>
-            ["COMPLETED", "EXHAUSTED", "STOPPED"].includes(execution.status),
+            TERMINAL_EXECUTION_STATES.includes(execution.status),
           )
         ) {
           await prisma.gitHubAutoRetryRule.update({

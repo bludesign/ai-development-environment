@@ -512,6 +512,69 @@ describe("GitHub service", () => {
     expect(parseJiraKey("ship APP-42", null)).toBeNull();
   });
 
+  test("discovers Auto Retry runs without loading jobs or supplementary pull requests", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/actions/runs?per_page=100")) {
+        return response({
+          workflow_runs: [
+            rawActionsWorkflowRun(
+              71,
+              "acme/widgets",
+              "2026-07-21T12:00:00.000Z",
+              { conclusion: "failure", pullRequests: [17] },
+            ),
+            rawActionsWorkflowRun(
+              72,
+              "acme/widgets",
+              "2026-07-21T12:01:00.000Z",
+              { conclusion: "success" },
+            ),
+          ],
+        });
+      }
+      throw new Error(`Unexpected Auto Retry request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runs = await new GitHubService().autoRetryRuns(
+      "codebase-repository-1",
+    );
+
+    expect(runs).toHaveLength(2);
+    expect(runs.every((run) => run.jobs.length === 0)).toBe(true);
+    expect(runs[0]?.pullRequests).toEqual([
+      { number: 17, url: "https://github.com/acme/widgets/pull/17" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("refreshes a tracked Auto Retry run without loading jobs", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/actions/runs/77")) {
+        return response(
+          rawActionsWorkflowRun(
+            77,
+            "acme/widgets",
+            "2026-07-21T12:00:00.000Z",
+            { conclusion: "failure" },
+          ),
+        );
+      }
+      throw new Error(`Unexpected tracked-run request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = await new GitHubService().autoRetryRun(
+      "codebase-repository-1",
+      "77",
+      false,
+    );
+
+    expect(run.id).toBe("77");
+    expect(run.jobs).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("loads an attempt-specific workflow run and read-only jobs", async () => {
     vi.stubGlobal(
       "fetch",

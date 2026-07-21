@@ -2078,75 +2078,56 @@ export class GitHubService {
       )}/actions/runs?per_page=100`,
       token,
     );
-    return Promise.all(
-      result.workflow_runs.map(async (run) => {
-        const completed = run.status.toLowerCase() === "completed";
-        const checkSuiteId = run.check_suite_node_id || null;
-        const unavailable = !completed
-          ? "NOT_COMPLETED"
-          : !checkSuiteId
-            ? "WORKFLOW_RUN_UNAVAILABLE"
-            : appSettings
-              ? null
-              : "GITHUB_APP_NOT_CONFIGURED";
-        const jobs = completed
-          ? await this.patWorkflowJobs(
-              target.owner,
-              target.name,
-              String(run.id),
-              token,
-              "all",
-            )
-          : [];
-        const pullRequestNumbers = await this.actionsPullRequestNumbers(
-          run,
-          target,
-          token,
-        );
-        return {
-          id: String(run.id),
-          workflowId: String(run.workflow_id ?? run.name ?? run.id),
-          repositoryGithubId: run.repository.node_id,
-          codebaseRepositoryId: target.id,
-          repositoryNameWithOwner: target.nameWithOwner,
-          repositoryUrl: target.url,
-          name: run.name?.trim() || "GitHub Actions",
-          displayTitle: run.display_title?.trim() || run.name || "Workflow run",
-          runNumber: run.run_number,
-          runAttempt: run.run_attempt ?? 1,
-          event: run.event,
-          status: pipelineState(run.status, run.conclusion),
-          url: run.html_url,
-          headBranch: run.head_branch,
-          headSha: run.head_sha,
-          checkSuiteId,
-          canRetry: unavailable === null,
-          retryUnavailableReason: unavailable,
-          pullRequests: pullRequestNumbers.map((number) => ({
-            number,
-            url: `${target.url}/pull/${number}`,
-          })),
-          jiraKey: null,
-          worktreeId: null,
-          startedAt: run.run_started_at ?? run.created_at,
-          createdAt: run.created_at,
-          updatedAt: run.updated_at,
-          jobs: this.workflowJobViews(jobs, Boolean(appSettings))
-            .sort(
-              (left, right) => (right.runAttempt ?? 0) - (left.runAttempt ?? 0),
-            )
-            .filter(
-              (job, index, items) =>
-                items.findIndex((item) => item.name === job.name) === index,
-            ),
-        };
-      }),
-    );
+    return result.workflow_runs.map((run) => {
+      const completed = run.status.toLowerCase() === "completed";
+      const checkSuiteId = run.check_suite_node_id || null;
+      const unavailable = !completed
+        ? "NOT_COMPLETED"
+        : !checkSuiteId
+          ? "WORKFLOW_RUN_UNAVAILABLE"
+          : appSettings
+            ? null
+            : "GITHUB_APP_NOT_CONFIGURED";
+      const pullRequestNumbers = [
+        ...new Set((run.pull_requests ?? []).map(({ number }) => number)),
+      ];
+      return {
+        id: String(run.id),
+        workflowId: String(run.workflow_id ?? run.name ?? run.id),
+        repositoryGithubId: run.repository.node_id,
+        codebaseRepositoryId: target.id,
+        repositoryNameWithOwner: target.nameWithOwner,
+        repositoryUrl: target.url,
+        name: run.name?.trim() || "GitHub Actions",
+        displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+        runNumber: run.run_number,
+        runAttempt: run.run_attempt ?? 1,
+        event: run.event,
+        status: pipelineState(run.status, run.conclusion),
+        url: run.html_url,
+        headBranch: run.head_branch,
+        headSha: run.head_sha,
+        checkSuiteId,
+        canRetry: unavailable === null,
+        retryUnavailableReason: unavailable,
+        pullRequests: pullRequestNumbers.map((number) => ({
+          number,
+          url: `${target.url}/pull/${number}`,
+        })),
+        jiraKey: null,
+        worktreeId: null,
+        startedAt: run.run_started_at ?? run.created_at,
+        createdAt: run.created_at,
+        updatedAt: run.updated_at,
+        jobs: [],
+      };
+    });
   }
 
   async autoRetryRun(
     repositoryId: string,
     workflowRunId: string,
+    includeJobs = true,
   ): Promise<GitHubActionsWorkflowRunView & { jobs: GitHubWorkflowJobView[] }> {
     const [target, token, appSettings] = await Promise.all([
       this.actionsTargetByIdentifier(repositoryId),
@@ -2162,15 +2143,16 @@ export class GitHubService {
       token,
     );
     const completed = run.status.toLowerCase() === "completed";
-    const jobs = completed
-      ? await this.patWorkflowJobs(
-          target.owner,
-          target.name,
-          workflowRunId,
-          token,
-          "all",
-        )
-      : [];
+    const jobs =
+      completed && includeJobs
+        ? await this.patWorkflowJobs(
+            target.owner,
+            target.name,
+            workflowRunId,
+            token,
+            "all",
+          )
+        : [];
     const checkSuiteId = run.check_suite_node_id || null;
     const unavailable = !completed
       ? "NOT_COMPLETED"

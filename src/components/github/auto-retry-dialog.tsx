@@ -376,8 +376,20 @@ export function AutoRetryDialog({
     }
   };
 
-  const edit = (rule: GitHubAutoRetryRuleView) => {
+  const edit = async (rule: GitHubAutoRetryRuleView) => {
     const nextFuture = rule.scope !== "WORKFLOW_RUN";
+    if (nextFuture && repositoryWorkflows.length === 0) {
+      setLoading(true);
+      setError(null);
+      try {
+        await refreshRepositoryWorkflows();
+      } catch (value) {
+        setError(value instanceof Error ? value.message : String(value));
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
     setEditingId(rule.id);
     setFuture(nextFuture);
     setAllWorkflows(rule.allWorkflows);
@@ -629,7 +641,7 @@ export function AutoRetryDialog({
                     <div className="flex gap-1">
                       <Button
                         aria-label={t("edit")}
-                        onClick={() => edit(rule)}
+                        onClick={() => void edit(rule)}
                         size="icon-sm"
                         variant="ghost"
                       >
