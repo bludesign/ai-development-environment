@@ -33,7 +33,8 @@ export type GitHubPipelineRetryUnavailableReason =
   | "GITHUB_APP_NOT_CONFIGURED"
   | "NOT_COMPLETED"
   | "NOT_GITHUB_ACTIONS"
-  | "WORKFLOW_RUN_UNAVAILABLE";
+  | "WORKFLOW_RUN_UNAVAILABLE"
+  | "HISTORICAL_ATTEMPT";
 
 export type GitHubSettingsView = {
   tokenConfigured: boolean;
@@ -56,8 +57,10 @@ export type GitHubAppSettingsView = {
 };
 
 export type GitHubAuditContext = {
-  actor: "control-plane";
+  actor: "control-plane" | "auto-retry";
   ipAddress: string | null;
+  autoRetryRuleId?: string | null;
+  autoRetryExecutionId?: string | null;
 };
 
 export type GitHubViewer = {
@@ -101,6 +104,9 @@ export type GitHubPipelineView = {
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
   jobs: GitHubWorkflowJobView[];
   workflowRunId?: string | null;
+  workflowId?: string | null;
+  runNumber?: number | null;
+  runAttempt?: number | null;
 };
 
 export type GitHubWorkflowJobStepView = {
@@ -117,6 +123,27 @@ export type GitHubWorkflowJobView = {
   canRetry: boolean;
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason | null;
   steps: GitHubWorkflowJobStepView[];
+  runAttempt?: number | null;
+};
+
+export type GitHubWorkflowRunAttemptView = {
+  workflowRunId: string;
+  runAttempt: number;
+  status: GitHubPipelineState;
+  url: string;
+  startedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  jobs: GitHubWorkflowJobView[];
+};
+
+export type GitHubRepositoryWorkflowView = {
+  id: string;
+  name: string;
+  path: string;
+  state: string;
+  url: string;
+  jobNames: string[];
 };
 
 export type GitHubActionsRepositoryView = {
@@ -138,6 +165,7 @@ export type GitHubActionsPullRequestView = {
 
 export type GitHubActionsWorkflowRunView = {
   id: string;
+  workflowId: string;
   repositoryGithubId: string;
   codebaseRepositoryId: string;
   repositoryNameWithOwner: string;
@@ -160,6 +188,74 @@ export type GitHubActionsWorkflowRunView = {
   startedAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type GitHubAutoRetryScope =
+  "WORKFLOW_RUN" | "WORKTREE_BRANCH" | "PULL_REQUEST" | "REPOSITORY";
+
+export type GitHubAutoRetryMode = "COUNT" | "FAILURE";
+export type GitHubAutoRetryFailureStrategy = "FAILED_JOBS" | "ALL_JOBS";
+export type GitHubAutoRetryRuleStatus =
+  "ACTIVE" | "PAUSED" | "COMPLETED" | "EXHAUSTED" | "ERROR";
+
+export type GitHubAutoRetryTargetView = {
+  id: string;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  jobName: string | null;
+};
+
+export type GitHubAutoRetryExecutionView = {
+  id: string;
+  workflowRunId: string;
+  workflowId: string;
+  targetKey: string;
+  status: string;
+  observedAttempt: number;
+  automaticRetries: number;
+  lastStatus: GitHubPipelineState | null;
+  lastError: string | null;
+  updatedAt: string;
+};
+
+export type GitHubAutoRetryRuleView = {
+  id: string;
+  scope: GitHubAutoRetryScope;
+  codebaseRepositoryId: string;
+  repositoryGithubId: string | null;
+  worktreeId: string | null;
+  branch: string | null;
+  pullRequestNumber: number | null;
+  allWorkflows: boolean;
+  mode: GitHubAutoRetryMode;
+  retryLimit: number | null;
+  failureStrategy: GitHubAutoRetryFailureStrategy;
+  status: GitHubAutoRetryRuleStatus;
+  enabled: boolean;
+  lastError: string | null;
+  targets: GitHubAutoRetryTargetView[];
+  executions: GitHubAutoRetryExecutionView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SaveGitHubAutoRetryRuleInput = {
+  id?: string | null;
+  scope: GitHubAutoRetryScope;
+  codebaseRepositoryId: string;
+  repositoryGithubId?: string | null;
+  worktreeId?: string | null;
+  branch?: string | null;
+  pullRequestNumber?: number | null;
+  allWorkflows: boolean;
+  mode: GitHubAutoRetryMode;
+  retryLimit?: number | null;
+  failureStrategy: GitHubAutoRetryFailureStrategy;
+  targets: Array<{
+    workflowId?: string | null;
+    workflowRunId?: string | null;
+    jobName?: string | null;
+  }>;
 };
 
 export type GitHubActionsWorkflowRunPage = {

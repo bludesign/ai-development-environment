@@ -25,6 +25,8 @@ import {
 } from "react";
 
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
+import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
+import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
@@ -68,6 +70,7 @@ import type {
   GitHubActionsWorkflowRunView,
   GitHubSettingsView,
   GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 
@@ -80,7 +83,7 @@ const CANCELLABLE_RUN_STATES = new Set<GitHubActionsWorkflowRunView["status"]>([
   "QUEUED",
 ]);
 const RUN_FIELDS =
-  "id repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
+  "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
 const JOB_FIELDS =
   "id name status url canRetry retryUnavailableReason steps { number name status }";
@@ -684,6 +687,9 @@ function ActionsTable({
   const t = useTranslations("actionsPage");
   const tp = useTranslations("pullRequests");
   const locale = useLocale();
+  const [historicalAttempts, setHistoricalAttempts] = useState<
+    Record<string, GitHubWorkflowRunAttemptView | null>
+  >({});
   const groupedRuns = useMemo(() => {
     const groups = new Map<
       string,
@@ -737,6 +743,17 @@ function ActionsTable({
                 const key = runKey(run);
                 const expanded = expandedRuns.has(key);
                 const jobState = jobStates[key];
+                const historicalAttempt = historicalAttempts[key] ?? null;
+                const displayedRun = historicalAttempt
+                  ? {
+                      ...run,
+                      status: historicalAttempt.status,
+                      url: historicalAttempt.url,
+                      startedAt: historicalAttempt.startedAt,
+                      createdAt: historicalAttempt.createdAt,
+                      updatedAt: historicalAttempt.updatedAt,
+                    }
+                  : run;
                 return (
                   <Fragment key={key}>
                     <TableRow
@@ -761,7 +778,7 @@ function ActionsTable({
                       <TableCell className="min-w-72 whitespace-normal">
                         <a
                           className="block rounded-md px-2 py-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          href={run.url}
+                          href={displayedRun.url}
                           rel="noreferrer"
                           target="_blank"
                         >
@@ -780,6 +797,19 @@ function ActionsTable({
                               : ""}
                           </span>
                         </a>
+                        <div className="mt-1 px-2">
+                          <WorkflowAttemptSelect
+                            latestAttempt={run.runAttempt}
+                            onAttemptChange={(attempt) =>
+                              setHistoricalAttempts((current) => ({
+                                ...current,
+                                [key]: attempt,
+                              }))
+                            }
+                            repositoryId={run.codebaseRepositoryId}
+                            workflowRunId={run.id}
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className="min-w-48 whitespace-normal">
                         <p>{run.event}</p>
@@ -788,8 +818,10 @@ function ActionsTable({
                         </p>
                       </TableCell>
                       <TableCell>
-                        <Badge className={pipelineStateClass(run.status)}>
-                          {tp(`pipelineStates.${run.status}`)}
+                        <Badge
+                          className={pipelineStateClass(displayedRun.status)}
+                        >
+                          {tp(`pipelineStates.${displayedRun.status}`)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -836,11 +868,16 @@ function ActionsTable({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         <div className="flex flex-col gap-0.5">
-                          <time dateTime={run.startedAt} title={run.startedAt}>
-                            {relativeAge(run.startedAt, locale)}
+                          <time
+                            dateTime={displayedRun.startedAt}
+                            title={displayedRun.startedAt}
+                          >
+                            {relativeAge(displayedRun.startedAt, locale)}
                           </time>
                           <span className="text-xs">
-                            {t("duration", { duration: runDuration(run) })}
+                            {t("duration", {
+                              duration: runDuration(displayedRun),
+                            })}
                           </span>
                         </div>
                       </TableCell>
@@ -851,6 +888,7 @@ function ActionsTable({
                             onError={onError}
                             onRetried={() => onRunRetried(run)}
                             run={run}
+                            jobs={jobState?.jobs ?? []}
                           />
                         </div>
                       </TableCell>
@@ -863,7 +901,15 @@ function ActionsTable({
                             onReload={() => onLoadJobs(run)}
                             onRetried={(jobId) => onJobRetried(run, jobId)}
                             run={run}
-                            state={jobState}
+                            state={
+                              historicalAttempt
+                                ? {
+                                    loading: false,
+                                    error: null,
+                                    jobs: historicalAttempt.jobs,
+                                  }
+                                : jobState
+                            }
                           />
                         </TableCell>
                       </TableRow>
@@ -881,11 +927,13 @@ function ActionsTable({
 
 function WorkflowRunActionsMenu({
   run,
+  jobs,
   onCancelled,
   onRetried,
   onError,
 }: {
   run: GitHubActionsWorkflowRunView;
+  jobs: GitHubWorkflowJobView[];
   onCancelled: () => void;
   onRetried: () => void;
   onError: (error: string | null) => void;
@@ -1020,6 +1068,24 @@ function WorkflowRunActionsMenu({
             {retrying ? <Spinner /> : <RotateCcw />}
             {retrying ? tp("retrying") : tp("retry")}
           </DropdownMenuItem>
+          <AutoRetryDialog
+            codebaseRepositoryId={run.codebaseRepositoryId}
+            currentRuns={[
+              {
+                id: run.id,
+                workflowId: run.workflowId,
+                name: run.name,
+                jobs,
+              },
+            ]}
+            repositoryGithubId={run.repositoryGithubId}
+            trigger={
+              <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+                <RotateCcw />
+                {t("autoRetry")}
+              </DropdownMenuItem>
+            }
+          />
         </DropdownMenuContent>
       </DropdownMenu>
       <ConfirmationDialog

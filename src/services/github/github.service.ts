@@ -10,6 +10,7 @@ import {
   type GitHubActionsWorkflowJob,
   type GitHubAppCredentials,
   rerunGitHubActionsJob,
+  rerunGitHubActionsFailedJobs,
   rerunGitHubActionsWorkflow,
   verifyGitHubAppConfiguration,
 } from "@/server/github/github-app";
@@ -19,6 +20,7 @@ import type {
   GitHubActionsRepositoryView,
   GitHubActionsWorkflowRunPage,
   GitHubActionsWorkflowRunView,
+  GitHubAutoRetryRuleView,
   GitHubAppSettingsView,
   GitHubAuditContext,
   GitHubPipelineState,
@@ -35,6 +37,7 @@ import type {
   GitHubPullRequestView,
   GitHubReviewComment,
   GitHubRepositoryCandidatePage,
+  GitHubRepositoryWorkflowView,
   GitHubRepositoryView,
   GitHubReviewDecision,
   GitHubReviewThread,
@@ -44,7 +47,10 @@ import type {
   GitHubSettingsView,
   GitHubViewer,
   GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
+  SaveGitHubAutoRetryRuleInput,
 } from "./types";
+import { GitHubAutoRetryService } from "./github-auto-retry.service";
 
 const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
@@ -114,6 +120,7 @@ type RawRetryCheckSuite = RawCheckSuite & {
 
 type RawActionsWorkflowRun = {
   id: string | number;
+  workflow_id?: string | number;
   name: string | null;
   display_title: string;
   run_number: number;
@@ -134,6 +141,14 @@ type RawActionsWorkflowRun = {
   run_started_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type RawRepositoryWorkflow = {
+  id: string | number;
+  name: string;
+  path: string;
+  state: string;
+  html_url: string;
 };
 
 type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
@@ -681,6 +696,9 @@ function checkSuitePipeline(
     workflowRunId: workflowRun?.databaseId
       ? String(workflowRun.databaseId)
       : null,
+    workflowId: null,
+    runNumber: workflowRun?.runNumber ?? null,
+    runAttempt: null,
   };
 }
 
@@ -704,6 +722,9 @@ function normalizePipelines(
         retryUnavailableReason: "NOT_GITHUB_ACTIONS",
         jobs: [],
         workflowRunId: null,
+        workflowId: null,
+        runNumber: null,
+        runAttempt: null,
       });
     }
   }
@@ -799,6 +820,41 @@ function normalizeReviewThreadState(thread: {
 }
 
 export class GitHubService {
+  private autoRetryService: GitHubAutoRetryService | null = null;
+
+  constructor(startAutoRetry = false) {
+    if (startAutoRetry)
+      this.autoRetryService = new GitHubAutoRetryService(this);
+  }
+
+  private autoRetry(): GitHubAutoRetryService {
+    return (this.autoRetryService ??= new GitHubAutoRetryService(this));
+  }
+
+  autoRetryRules(input: {
+    codebaseRepositoryId?: string | null;
+    workflowRunId?: string | null;
+  }): Promise<GitHubAutoRetryRuleView[]> {
+    return this.autoRetry().list(input);
+  }
+
+  saveAutoRetryRule(
+    input: SaveGitHubAutoRetryRuleInput,
+  ): Promise<GitHubAutoRetryRuleView> {
+    return this.autoRetry().save(input);
+  }
+
+  setAutoRetryRuleEnabled(
+    id: string,
+    enabled: boolean,
+  ): Promise<GitHubAutoRetryRuleView> {
+    return this.autoRetry().setEnabled(id, enabled);
+  }
+
+  deleteAutoRetryRule(id: string): Promise<boolean> {
+    return this.autoRetry().delete(id);
+  }
+
   private async request<T>(
     query: string,
     variables: Record<string, unknown>,
@@ -924,6 +980,7 @@ export class GitHubService {
           name: step.name,
           status: pipelineState(step.status, step.conclusion),
         })),
+        runAttempt: job.run_attempt ?? null,
       };
     });
   }
@@ -933,6 +990,7 @@ export class GitHubService {
     repository: string,
     workflowRunId: string,
     token: string,
+    filter: "latest" | "all" = "latest",
   ): Promise<GitHubActionsWorkflowJob[]> {
     const jobs: GitHubActionsWorkflowJob[] = [];
     let page = 1;
@@ -944,7 +1002,7 @@ export class GitHubService {
       }>(
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
           repository,
-        )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=latest&per_page=100&page=${page}`,
+        )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=${filter}&per_page=100&page=${page}`,
         token,
       );
       totalCount = result.total_count;
@@ -1081,6 +1139,8 @@ export class GitHubService {
           githubRequestId: input.githubRequestId ?? null,
           outcome: input.outcome,
           errorCode: input.errorCode ?? null,
+          autoRetryRuleId: context.autoRetryRuleId ?? null,
+          autoRetryExecutionId: context.autoRetryExecutionId ?? null,
         },
       });
     } catch {
@@ -1568,6 +1628,7 @@ export class GitHubService {
         const pullRequestNumbers = pullRequestNumbersByRun[index] ?? [];
         return {
           id: String(run.id),
+          workflowId: String(run.workflow_id ?? run.name ?? run.id),
           repositoryGithubId: run.repository.node_id,
           codebaseRepositoryId: target.id,
           repositoryNameWithOwner: target.nameWithOwner,
@@ -1660,6 +1721,499 @@ export class GitHubService {
       token,
     );
     return this.workflowJobViews(jobs, appSettings !== null);
+  }
+
+  private async actionsTargetByIdentifier(
+    identifier: string,
+  ): Promise<ActionsRepositoryTarget> {
+    const prisma = await getPrismaClient();
+    const codebaseRepository = await prisma.codebaseRepository.findUnique({
+      where: { id: identifier },
+      select: { id: true, canonicalOrigin: true, jiraBranchRegex: true },
+    });
+    const direct = codebaseRepository
+      ? actionsRepositoryTarget(codebaseRepository)
+      : null;
+    if (direct) return direct;
+
+    const githubRepository = await prisma.gitHubRepository.findUnique({
+      where: { githubId: identifier },
+    });
+    if (!githubRepository) {
+      throw new Error("GitHub repository was not found");
+    }
+    const canonicalOrigin = `github.com/${githubRepository.nameWithOwner.toLowerCase()}`;
+    const logical = await prisma.codebaseRepository.findUnique({
+      where: { canonicalOrigin },
+      select: { id: true, jiraBranchRegex: true },
+    });
+    return {
+      id: logical?.id ?? githubRepository.id,
+      owner: githubRepository.owner,
+      name: githubRepository.name,
+      nameWithOwner: githubRepository.nameWithOwner,
+      url: githubRepository.url,
+      jiraBranchRegex: logical?.jiraBranchRegex ?? null,
+    };
+  }
+
+  async autoRetryRepositoryId(identifier: string): Promise<string> {
+    return (await this.actionsTargetByIdentifier(identifier)).id;
+  }
+
+  async autoRetryCredentialsReady(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    const [settings, appSettings] = await Promise.all([
+      prisma.gitHubSettings.findUnique({ where: { id: SETTINGS_ID } }),
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    return Boolean(
+      settings?.apiToken &&
+      appSettings &&
+      appSettings.actionsPermission === "write",
+    );
+  }
+
+  private async patWorkflowAttemptJobs(
+    target: ActionsRepositoryTarget,
+    workflowRunId: string,
+    attempt: number,
+    token: string,
+  ): Promise<GitHubActionsWorkflowJob[]> {
+    const jobs: GitHubActionsWorkflowJob[] = [];
+    let page = 1;
+    let totalCount = 0;
+    do {
+      const result = await this.restRequest<{
+        total_count: number;
+        jobs: GitHubActionsWorkflowJob[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+          target.name,
+        )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}/jobs?per_page=100&page=${page}`,
+        token,
+      );
+      totalCount = result.total_count;
+      jobs.push(...result.jobs);
+      page += 1;
+    } while (jobs.length < totalCount);
+    return jobs;
+  }
+
+  async actionsWorkflowRunAttempt(
+    repositoryId: string,
+    workflowRunId: string,
+    attempt: number,
+  ): Promise<GitHubWorkflowRunAttemptView> {
+    if (!repositoryId.trim() || !workflowRunId.trim()) {
+      throw new Error("Repository and workflow run IDs are required");
+    }
+    if (!Number.isInteger(attempt) || attempt < 1) {
+      throw new Error("Attempt must be a positive integer");
+    }
+    const [target, token, appSettings] = await Promise.all([
+      this.actionsTargetByIdentifier(repositoryId),
+      this.requireToken(),
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const run = await this.restRequest<RawActionsWorkflowRun>(
+      `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+        target.name,
+      )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}`,
+      token,
+    );
+    const jobs = await this.patWorkflowAttemptJobs(
+      target,
+      workflowRunId,
+      attempt,
+      token,
+    );
+    return {
+      workflowRunId,
+      runAttempt: run.run_attempt ?? attempt,
+      status: pipelineState(run.status, run.conclusion),
+      url: run.html_url,
+      startedAt: run.run_started_at ?? run.created_at,
+      createdAt: run.created_at,
+      updatedAt: run.updated_at,
+      jobs: this.workflowJobViews(jobs, Boolean(appSettings)).map((job) => ({
+        ...job,
+        canRetry: false,
+        retryUnavailableReason: "HISTORICAL_ATTEMPT",
+      })),
+    };
+  }
+
+  async worktreeWorkflowRuns(
+    worktreeId: string,
+  ): Promise<GitHubActionsWorkflowRunView[]> {
+    if (!worktreeId.trim()) throw new Error("Worktree ID is required");
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      select: {
+        id: true,
+        branch: true,
+        headSha: true,
+        codebase: {
+          select: {
+            repository: {
+              select: {
+                id: true,
+                canonicalOrigin: true,
+                jiraBranchRegex: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!worktree?.headSha) return [];
+    const target = actionsRepositoryTarget(worktree.codebase.repository);
+    if (!target) return [];
+    const [token, appSettings] = await Promise.all([
+      this.requireToken(),
+      prisma.gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const result = await this.restRequest<{
+      workflow_runs: RawActionsWorkflowRun[];
+    }>(
+      `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+        target.name,
+      )}/actions/runs?head_sha=${encodeURIComponent(worktree.headSha)}&per_page=100`,
+      token,
+    );
+    return result.workflow_runs.map((run) => {
+      const completed = run.status.toLowerCase() === "completed";
+      const checkSuiteId = run.check_suite_node_id || null;
+      const unavailable = !completed
+        ? "NOT_COMPLETED"
+        : !checkSuiteId
+          ? "WORKFLOW_RUN_UNAVAILABLE"
+          : appSettings
+            ? null
+            : "GITHUB_APP_NOT_CONFIGURED";
+      return {
+        id: String(run.id),
+        workflowId: String(run.workflow_id ?? run.name ?? run.id),
+        repositoryGithubId: run.repository.node_id,
+        codebaseRepositoryId: target.id,
+        repositoryNameWithOwner: target.nameWithOwner,
+        repositoryUrl: target.url,
+        name: run.name?.trim() || "GitHub Actions",
+        displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+        runNumber: run.run_number,
+        runAttempt: run.run_attempt ?? 1,
+        event: run.event,
+        status: pipelineState(run.status, run.conclusion),
+        url: run.html_url,
+        headBranch: run.head_branch,
+        headSha: run.head_sha,
+        checkSuiteId,
+        canRetry: unavailable === null,
+        retryUnavailableReason: unavailable,
+        pullRequests: (run.pull_requests ?? []).map(({ number }) => ({
+          number,
+          url: `${target.url}/pull/${number}`,
+        })),
+        jiraKey: null,
+        worktreeId: worktree.id,
+        startedAt: run.run_started_at ?? run.created_at,
+        createdAt: run.created_at,
+        updatedAt: run.updated_at,
+      };
+    });
+  }
+
+  async repositoryWorkflows(
+    codebaseRepositoryId: string,
+  ): Promise<GitHubRepositoryWorkflowView[]> {
+    const target = await this.actionsTargetByIdentifier(codebaseRepositoryId);
+    const token = await this.requireToken();
+    const workflows: RawRepositoryWorkflow[] = [];
+    let page = 1;
+    let totalCount = 0;
+    do {
+      const result = await this.restRequest<{
+        total_count: number;
+        workflows: RawRepositoryWorkflow[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+          target.name,
+        )}/actions/workflows?per_page=100&page=${page}`,
+        token,
+      );
+      totalCount = result.total_count;
+      workflows.push(...result.workflows);
+      page += 1;
+    } while (workflows.length < totalCount);
+
+    return Promise.all(
+      workflows.map(async (workflow) => {
+        const latest = await this.restRequest<{
+          workflow_runs: RawActionsWorkflowRun[];
+        }>(
+          `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+            target.name,
+          )}/actions/workflows/${encodeURIComponent(String(workflow.id))}/runs?per_page=1`,
+          token,
+        );
+        const run = latest.workflow_runs[0];
+        const jobs = run
+          ? await this.patWorkflowJobs(
+              target.owner,
+              target.name,
+              String(run.id),
+              token,
+            )
+          : [];
+        return {
+          id: String(workflow.id),
+          name: workflow.name,
+          path: workflow.path,
+          state: workflow.state,
+          url: workflow.html_url,
+          jobNames: [...new Set(jobs.map((job) => job.name))].sort(),
+        };
+      }),
+    );
+  }
+
+  async autoRetryRuns(
+    repositoryId: string,
+  ): Promise<
+    Array<GitHubActionsWorkflowRunView & { jobs: GitHubWorkflowJobView[] }>
+  > {
+    const [target, token, appSettings] = await Promise.all([
+      this.actionsTargetByIdentifier(repositoryId),
+      this.requireToken(),
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const result = await this.restRequest<{
+      workflow_runs: RawActionsWorkflowRun[];
+    }>(
+      `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+        target.name,
+      )}/actions/runs?per_page=100`,
+      token,
+    );
+    return Promise.all(
+      result.workflow_runs.map(async (run) => {
+        const completed = run.status.toLowerCase() === "completed";
+        const checkSuiteId = run.check_suite_node_id || null;
+        const unavailable = !completed
+          ? "NOT_COMPLETED"
+          : !checkSuiteId
+            ? "WORKFLOW_RUN_UNAVAILABLE"
+            : appSettings
+              ? null
+              : "GITHUB_APP_NOT_CONFIGURED";
+        const jobs = completed
+          ? await this.patWorkflowJobs(
+              target.owner,
+              target.name,
+              String(run.id),
+              token,
+              "all",
+            )
+          : [];
+        const pullRequestNumbers = await this.actionsPullRequestNumbers(
+          run,
+          target,
+          token,
+        );
+        return {
+          id: String(run.id),
+          workflowId: String(run.workflow_id ?? run.name ?? run.id),
+          repositoryGithubId: run.repository.node_id,
+          codebaseRepositoryId: target.id,
+          repositoryNameWithOwner: target.nameWithOwner,
+          repositoryUrl: target.url,
+          name: run.name?.trim() || "GitHub Actions",
+          displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+          runNumber: run.run_number,
+          runAttempt: run.run_attempt ?? 1,
+          event: run.event,
+          status: pipelineState(run.status, run.conclusion),
+          url: run.html_url,
+          headBranch: run.head_branch,
+          headSha: run.head_sha,
+          checkSuiteId,
+          canRetry: unavailable === null,
+          retryUnavailableReason: unavailable,
+          pullRequests: pullRequestNumbers.map((number) => ({
+            number,
+            url: `${target.url}/pull/${number}`,
+          })),
+          jiraKey: null,
+          worktreeId: null,
+          startedAt: run.run_started_at ?? run.created_at,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+          jobs: this.workflowJobViews(jobs, Boolean(appSettings))
+            .sort(
+              (left, right) => (right.runAttempt ?? 0) - (left.runAttempt ?? 0),
+            )
+            .filter(
+              (job, index, items) =>
+                items.findIndex((item) => item.name === job.name) === index,
+            ),
+        };
+      }),
+    );
+  }
+
+  async autoRetryRun(
+    repositoryId: string,
+    workflowRunId: string,
+  ): Promise<GitHubActionsWorkflowRunView & { jobs: GitHubWorkflowJobView[] }> {
+    const [target, token, appSettings] = await Promise.all([
+      this.actionsTargetByIdentifier(repositoryId),
+      this.requireToken(),
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+      }),
+    ]);
+    const run = await this.restRequest<RawActionsWorkflowRun>(
+      `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+        target.name,
+      )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+      token,
+    );
+    const completed = run.status.toLowerCase() === "completed";
+    const jobs = completed
+      ? await this.patWorkflowJobs(
+          target.owner,
+          target.name,
+          workflowRunId,
+          token,
+          "all",
+        )
+      : [];
+    const checkSuiteId = run.check_suite_node_id || null;
+    const unavailable = !completed
+      ? "NOT_COMPLETED"
+      : !checkSuiteId
+        ? "WORKFLOW_RUN_UNAVAILABLE"
+        : appSettings
+          ? null
+          : "GITHUB_APP_NOT_CONFIGURED";
+    return {
+      id: String(run.id),
+      workflowId: String(run.workflow_id ?? run.name ?? run.id),
+      repositoryGithubId: run.repository.node_id,
+      codebaseRepositoryId: target.id,
+      repositoryNameWithOwner: target.nameWithOwner,
+      repositoryUrl: target.url,
+      name: run.name?.trim() || "GitHub Actions",
+      displayTitle: run.display_title?.trim() || run.name || "Workflow run",
+      runNumber: run.run_number,
+      runAttempt: run.run_attempt ?? 1,
+      event: run.event,
+      status: pipelineState(run.status, run.conclusion),
+      url: run.html_url,
+      headBranch: run.head_branch,
+      headSha: run.head_sha,
+      checkSuiteId,
+      canRetry: unavailable === null,
+      retryUnavailableReason: unavailable,
+      pullRequests: (run.pull_requests ?? []).map(({ number }) => ({
+        number,
+        url: `${target.url}/pull/${number}`,
+      })),
+      jiraKey: null,
+      worktreeId: null,
+      startedAt: run.run_started_at ?? run.created_at,
+      createdAt: run.created_at,
+      updatedAt: run.updated_at,
+      jobs: this.workflowJobViews(jobs, Boolean(appSettings))
+        .sort((left, right) => (right.runAttempt ?? 0) - (left.runAttempt ?? 0))
+        .filter(
+          (job, index, items) =>
+            items.findIndex((item) => item.name === job.name) === index,
+        ),
+    };
+  }
+
+  async autoRetryRerun(
+    repositoryId: string,
+    workflowRunId: string,
+    action: "ALL_JOBS" | "FAILED_JOBS" | "JOB",
+    jobId: string | null,
+    auditContext: GitHubAuditContext,
+  ): Promise<void> {
+    const target = await this.actionsTargetByIdentifier(repositoryId);
+    const prisma = await getPrismaClient();
+    const appSettings = await prisma.gitHubAppSettings.findUnique({
+      where: { id: GITHUB_APP_SETTINGS_ID },
+    });
+    if (!appSettings) throw new Error("GitHub App is not configured");
+    const credentials = this.appCredentials(appSettings);
+    let githubRequestId: string | null = null;
+    try {
+      if (action === "JOB") {
+        if (!jobId) throw new Error("Job ID is required");
+        githubRequestId = (
+          await rerunGitHubActionsJob(credentials, {
+            owner: target.owner,
+            repository: target.name,
+            workflowRunId,
+            jobId,
+          })
+        ).githubRequestId;
+      } else if (action === "FAILED_JOBS") {
+        githubRequestId = (
+          await rerunGitHubActionsFailedJobs(credentials, {
+            owner: target.owner,
+            repository: target.name,
+            workflowRunId,
+          })
+        ).githubRequestId;
+      } else {
+        githubRequestId = (
+          await rerunGitHubActionsWorkflow(credentials, {
+            owner: target.owner,
+            repository: target.name,
+            workflowRunId,
+          })
+        ).githubRequestId;
+      }
+      await this.audit(auditContext, {
+        operation:
+          action === "JOB"
+            ? "GITHUB_ACTIONS_AUTO_JOB_RERUN"
+            : "GITHUB_ACTIONS_AUTO_WORKFLOW_RERUN",
+        repositoryId,
+        jobId,
+        githubRequestId,
+        outcome: "SUCCESS",
+      });
+    } catch (error) {
+      await this.audit(auditContext, {
+        operation:
+          action === "JOB"
+            ? "GITHUB_ACTIONS_AUTO_JOB_RERUN"
+            : "GITHUB_ACTIONS_AUTO_WORKFLOW_RERUN",
+        repositoryId,
+        jobId,
+        githubRequestId:
+          error instanceof GitHubAppError ? error.githubRequestId : null,
+        outcome: "FAILURE",
+        errorCode:
+          error instanceof GitHubAppError
+            ? error.code
+            : "GITHUB_APP_REQUEST_FAILED",
+      });
+      throw error;
+    }
   }
 
   async cancelActionsWorkflowRun(
@@ -2678,8 +3232,25 @@ export class GitHubService {
       summary.pipelines.map(async (pipeline) => {
         const workflowRunId = pipeline.workflowRunId;
         if (!workflowRunId) return pipeline;
+        let run: RawActionsWorkflowRun | null = null;
+        try {
+          run = await this.restRequest<RawActionsWorkflowRun>(
+            `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+              name,
+            )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+            token,
+          );
+        } catch {
+          // Attempt metadata is additive; preserve the existing PR pipeline when
+          // GitHub does not expose the REST run to this token.
+        }
         return {
           ...pipeline,
+          workflowId: run
+            ? String(run.workflow_id ?? pipeline.name)
+            : pipeline.workflowId,
+          runNumber: run?.run_number ?? pipeline.runNumber,
+          runAttempt: run ? (run.run_attempt ?? 1) : pipeline.runAttempt,
           jobs: await this.workflowJobs(
             owner,
             name,

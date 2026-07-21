@@ -1,0 +1,229 @@
+"use client";
+
+import { ExternalLink } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Fragment, useEffect, useState } from "react";
+
+import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
+import {
+  RetryPipelineButton,
+  pipelineStateClass,
+} from "@/components/github/pipeline-menu";
+import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
+import type {
+  GitHubActionsWorkflowRunView,
+  GitHubPipelineView,
+  GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
+} from "@/services/github/types";
+
+export function WorktreePipelinesCard({
+  runs,
+  error,
+  worktreeId,
+  branch,
+  onError,
+}: {
+  runs: GitHubActionsWorkflowRunView[];
+  error: string | null;
+  worktreeId: string;
+  branch: string | null;
+  onError: (error: string | null) => void;
+}) {
+  const t = useTranslations("githubAutomation");
+  const tp = useTranslations("pullRequests");
+  const [jobs, setJobs] = useState<Record<string, GitHubWorkflowJobView[]>>({});
+  const [attempts, setAttempts] = useState<
+    Record<string, GitHubWorkflowRunAttemptView | null>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      runs.map(async (run) => {
+        try {
+          const data = await controlPlaneRequest<{
+            githubActionsWorkflowJobs: GitHubWorkflowJobView[];
+          }>(
+            `query WorktreePipelineJobs($repositoryId: ID!, $workflowRunId: ID!) {
+              githubActionsWorkflowJobs(
+                codebaseRepositoryId: $repositoryId
+                workflowRunId: $workflowRunId
+              ) { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } }
+            }`,
+            {
+              repositoryId: run.codebaseRepositoryId,
+              workflowRunId: run.id,
+            },
+          );
+          return [run.id, data.githubActionsWorkflowJobs] as const;
+        } catch {
+          return [run.id, []] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) setJobs(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runs]);
+
+  if (!runs.length && !error) return null;
+
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 py-5">
+        <div>
+          <CardTitle>{t("pipelines")}</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            {t("pipelineCount", { count: runs.length })}
+          </p>
+        </div>
+        {runs.length ? (
+          <AutoRetryDialog
+            allowFuture={Boolean(branch)}
+            branch={branch}
+            codebaseRepositoryId={runs[0].codebaseRepositoryId}
+            currentRuns={runs.map((run) => ({
+              id: run.id,
+              workflowId: run.workflowId,
+              name: run.name,
+              jobs: jobs[run.id],
+            }))}
+            repositoryGithubId={runs[0].repositoryGithubId}
+            worktreeId={worktreeId}
+          />
+        ) : null}
+      </CardHeader>
+      <CardContent className="px-0">
+        {error ? (
+          <Alert className="m-4" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {runs.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t("pipeline")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
+                <TableHead className="text-right">{t("actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {runs.map((run) => {
+                const historical = attempts[run.id] ?? null;
+                const displayedJobs = historical?.jobs ?? jobs[run.id] ?? [];
+                const pipeline: GitHubPipelineView = {
+                  id: run.id,
+                  name: run.name,
+                  status: run.status,
+                  url: run.url,
+                  checkSuiteId: run.checkSuiteId,
+                  canRetry: run.canRetry,
+                  retryUnavailableReason: run.retryUnavailableReason,
+                  jobs: jobs[run.id] ?? [],
+                  workflowRunId: run.id,
+                  workflowId: run.workflowId,
+                  runNumber: run.runNumber,
+                  runAttempt: run.runAttempt,
+                };
+                return (
+                  <Fragment key={run.id}>
+                    <TableRow>
+                      <TableCell>
+                        <p className="font-medium">{run.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {run.displayTitle}
+                        </p>
+                        <div className="mt-2">
+                          <WorkflowAttemptSelect
+                            latestAttempt={run.runAttempt}
+                            onAttemptChange={(attempt) =>
+                              setAttempts((current) => ({
+                                ...current,
+                                [run.id]: attempt,
+                              }))
+                            }
+                            repositoryId={run.codebaseRepositoryId}
+                            workflowRunId={run.id}
+                          />
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={pipelineStateClass(
+                            historical?.status ?? run.status,
+                          )}
+                        >
+                          {tp(
+                            `pipelineStates.${historical?.status ?? run.status}`,
+                          )}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
+                          <Button asChild size="sm" variant="outline">
+                            <a
+                              href={historical?.url ?? run.url}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              {t("view")} <ExternalLink />
+                            </a>
+                          </Button>
+                          {!historical ? (
+                            <RetryPipelineButton
+                              onError={onError}
+                              pipeline={pipeline}
+                              repositoryId={run.repositoryGithubId}
+                            />
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell colSpan={3}>
+                        {displayedJobs.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {displayedJobs.map((job) => (
+                              <Badge
+                                className={pipelineStateClass(job.status)}
+                                key={job.id}
+                                variant="outline"
+                              >
+                                {job.name}: {tp(`pipelineStates.${job.status}`)}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            {t("noJobs")}
+                          </p>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}

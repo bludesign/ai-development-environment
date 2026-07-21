@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
+import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -227,6 +228,7 @@ export function RepositoryDetailPage({
         <TabsList>
           <TabsTrigger value="details">{t("repositoryDetails")}</TabsTrigger>
           <TabsTrigger value="ios-app">{buildsT("iosApp")}</TabsTrigger>
+          <TabsTrigger value="auto-retry">{t("autoRetry")}</TabsTrigger>
         </TabsList>
         <TabsContent value="details">
           <form className="space-y-5" onSubmit={save}>
@@ -336,6 +338,28 @@ export function RepositoryDetailPage({
             checkouts={checkouts}
             codebaseId={checkouts[0]?.codebaseId ?? ""}
           />
+        </TabsContent>
+        <TabsContent value="auto-retry">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("autoRetry")}</CardTitle>
+              <CardDescription>{t("autoRetryDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {repository.canonicalOrigin.startsWith("github.com/") ? (
+                <AutoRetryDialog
+                  codebaseRepositoryId={repository.id}
+                  repositoryMode
+                />
+              ) : (
+                <Alert>
+                  <AlertDescription>
+                    {t("autoRetryGitHubOnly")}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </section>

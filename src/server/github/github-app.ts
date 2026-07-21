@@ -72,6 +72,7 @@ export type GitHubActionsWorkflowJob = {
   status: string;
   conclusion: string | null;
   html_url: string | null;
+  run_attempt?: number | null;
   steps?: Array<{
     number: number;
     name: string;
@@ -502,6 +503,41 @@ export async function rerunGitHubActionsWorkflow(
       githubRequestId,
     );
   }
+  if (!response.ok) {
+    const body = await responseBody(response);
+    throw new GitHubAppError(
+      response.status === 404
+        ? "REPOSITORY_NOT_INSTALLED"
+        : "GITHUB_APP_REQUEST_FAILED",
+      response.status === 404
+        ? "The repository or workflow run is not available to this installation"
+        : responseMessage(body, response.status, [
+            token,
+            credentials.privateKey,
+          ]),
+      githubRequestId,
+    );
+  }
+  return { githubRequestId };
+}
+
+export async function rerunGitHubActionsFailedJobs(
+  credentials: GitHubAppCredentials,
+  input: { owner: string; repository: string; workflowRunId: string },
+): Promise<{ githubRequestId: string | null }> {
+  const url = `${credentials.apiBaseUrl}/repos/${encodeURIComponent(
+    input.owner,
+  )}/${encodeURIComponent(input.repository)}/actions/runs/${encodeURIComponent(
+    input.workflowRunId,
+  )}/rerun-failed-jobs`;
+  const requestResult = await withInstallationToken(credentials, (token) =>
+    githubFetch(url, {
+      method: "POST",
+      headers: githubHeaders(`Bearer ${token}`),
+    }),
+  );
+  const { response, token } = requestResult;
+  const githubRequestId = requestId(response);
   if (!response.ok) {
     const body = await responseBody(response);
     throw new GitHubAppError(

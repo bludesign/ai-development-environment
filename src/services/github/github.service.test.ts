@@ -218,6 +218,7 @@ function rawPullRequest(
 ) {
   return {
     id,
+    workflow_id: 99,
     number: id === "pull-request-1" ? 17 : 18,
     title,
     url: `https://github.com/acme/widgets/pull/${id}`,
@@ -489,6 +490,63 @@ describe("GitHub service", () => {
       "APP-42",
     );
     expect(parseJiraKey("ship APP-42", null)).toBeNull();
+  });
+
+  test("loads an attempt-specific workflow run and read-only jobs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/actions/runs/77/attempts/2")) {
+          return response({
+            ...rawActionsWorkflowRun(
+              77,
+              "acme/widgets",
+              "2026-07-21T12:00:00.000Z",
+              { conclusion: "failure" },
+            ),
+            run_attempt: 2,
+          });
+        }
+        if (url.includes("/actions/runs/77/attempts/2/jobs")) {
+          return response({
+            total_count: 1,
+            jobs: [
+              {
+                id: 501,
+                name: "test",
+                status: "completed",
+                conclusion: "failure",
+                html_url: "https://github.com/acme/widgets/actions/jobs/501",
+                run_attempt: 2,
+                steps: [],
+              },
+            ],
+          });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }),
+    );
+
+    await expect(
+      new GitHubService().actionsWorkflowRunAttempt(
+        "codebase-repository-1",
+        "77",
+        2,
+      ),
+    ).resolves.toMatchObject({
+      workflowRunId: "77",
+      runAttempt: 2,
+      status: "FAILURE",
+      jobs: [
+        {
+          id: "501",
+          name: "test",
+          runAttempt: 2,
+          canRetry: false,
+          retryUnavailableReason: "HISTORICAL_ATTEMPT",
+        },
+      ],
+    });
   });
 
   test("merges and paginates workflow runs across unique GitHub codebases", async () => {

@@ -1403,10 +1403,76 @@ model GitHubAuditEvent {
   githubRequestId String?
   outcome         String
   errorCode       String?
+  autoRetryRuleId String?
+  autoRetryExecutionId String?
   createdAt       DateTime @default(now())
 
   @@index([operation, createdAt])
   @@index([repositoryId, createdAt])
+  @@index([autoRetryRuleId, createdAt])
+}
+
+model GitHubAutoRetryRule {
+  id                       String                     @id
+  scope                    String
+  codebaseRepositoryId     String
+  repositoryGithubId       String?
+  worktreeId               String?
+  branch                   String?
+  pullRequestNumber        Int?
+  allWorkflows             Boolean                    @default(false)
+  mode                     String
+  retryLimit               Int?
+  failureStrategy          String                     @default("FAILED_JOBS")
+  status                   String                     @default("ACTIVE")
+  enabled                  Boolean                    @default(true)
+  lastError                String?
+  activatedAt              DateTime                   @default(now())
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  targets                  GitHubAutoRetryTarget[]
+  executions               GitHubAutoRetryExecution[]
+
+  @@index([enabled, status, updatedAt])
+  @@index([codebaseRepositoryId, scope])
+  @@index([worktreeId])
+}
+
+model GitHubAutoRetryTarget {
+  id            String                  @id
+  ruleId        String
+  workflowId    String?
+  workflowRunId String?
+  jobName       String?
+  createdAt     DateTime                @default(now())
+  rule          GitHubAutoRetryRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId])
+  @@index([workflowRunId])
+  @@unique([ruleId, workflowId, workflowRunId, jobName])
+}
+
+model GitHubAutoRetryExecution {
+  id                 String                  @id
+  ruleId             String
+  workflowRunId      String
+  workflowId         String
+  targetKey          String
+  status             String                  @default("WATCHING")
+  observedAttempt    Int                     @default(0)
+  automaticRetries   Int                     @default(0)
+  pendingFromAttempt Int?
+  lastStatus         String?
+  lastError          String?
+  startedAt          DateTime                @default(now())
+  finishedAt         DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  rule               GitHubAutoRetryRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, workflowRunId, targetKey])
+  @@index([ruleId, status])
+  @@index([workflowRunId])
 }
 
 model GitHubRepository {

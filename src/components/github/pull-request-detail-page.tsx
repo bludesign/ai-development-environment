@@ -20,6 +20,8 @@ import {
   RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
+import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
+import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { ReviewThreadCard } from "@/components/github/review-thread-card";
@@ -55,10 +57,11 @@ import type {
   GitHubReviewDecision,
   GitHubReviewThreadState,
   GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -100,6 +103,9 @@ export function PullRequestDetailPage({
     useState<GitHubPullRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historicalAttempts, setHistoricalAttempts] = useState<
+    Record<string, GitHubWorkflowRunAttemptView | null>
+  >({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -390,12 +396,32 @@ export function PullRequestDetailPage({
                   {t("pipelineCount", { count: pullRequest.pipelines.length })}
                 </p>
               </div>
-              <PipelineMenu
-                onPipelineRetried={pipelineRetried}
-                pipelineStatus={pullRequest.pipelineStatus}
-                pipelines={pullRequest.pipelines}
-                repositoryId={pullRequest.repositoryGithubId}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <AutoRetryDialog
+                  allowFuture
+                  branch={pullRequest.headRefName}
+                  codebaseRepositoryId={pullRequest.repositoryGithubId}
+                  currentRuns={pullRequest.pipelines
+                    .filter(
+                      (pipeline) =>
+                        pipeline.workflowRunId && pipeline.workflowId,
+                    )
+                    .map((pipeline) => ({
+                      id: pipeline.workflowRunId!,
+                      workflowId: pipeline.workflowId!,
+                      name: pipeline.name,
+                      jobs: pipeline.jobs,
+                    }))}
+                  pullRequestNumber={pullRequest.number}
+                  repositoryGithubId={pullRequest.repositoryGithubId}
+                />
+                <PipelineMenu
+                  onPipelineRetried={pipelineRetried}
+                  pipelineStatus={pullRequest.pipelineStatus}
+                  pipelines={pullRequest.pipelines}
+                  repositoryId={pullRequest.repositoryGithubId}
+                />
+              </div>
             </CardHeader>
             <CardContent className="px-0">
               {pullRequest.pipelines.length === 0 ? (
@@ -414,82 +440,113 @@ export function PullRequestDetailPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pullRequest.pipelines.map((pipeline) => (
-                      <Fragment key={pipeline.id}>
-                        <TableRow>
-                          <TableCell className="font-medium">
-                            {pipeline.name}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              className={pipelineStateClass(pipeline.status)}
-                            >
-                              {tp(`pipelineStates.${pipeline.status}`)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-2">
-                              {pipeline.url ? (
-                                <Button asChild size="sm" variant="outline">
-                                  <a
-                                    href={pipeline.url}
-                                    rel="noreferrer"
-                                    target="_blank"
-                                  >
+                    {pullRequest.pipelines.map((pipeline) => {
+                      const historicalAttempt =
+                        historicalAttempts[pipeline.id] ?? null;
+                      const displayedStatus =
+                        historicalAttempt?.status ?? pipeline.status;
+                      const displayedUrl =
+                        historicalAttempt?.url ?? pipeline.url;
+                      const displayedJobs =
+                        historicalAttempt?.jobs ?? pipeline.jobs;
+                      return (
+                        <Fragment key={pipeline.id}>
+                          <TableRow>
+                            <TableCell className="font-medium">
+                              {pipeline.name}
+                              {pipeline.workflowRunId && pipeline.runAttempt ? (
+                                <div className="mt-2">
+                                  <WorkflowAttemptSelect
+                                    latestAttempt={pipeline.runAttempt}
+                                    onAttemptChange={(attempt) =>
+                                      setHistoricalAttempts((current) => ({
+                                        ...current,
+                                        [pipeline.id]: attempt,
+                                      }))
+                                    }
+                                    repositoryId={
+                                      pullRequest.repositoryGithubId
+                                    }
+                                    workflowRunId={pipeline.workflowRunId}
+                                  />
+                                </div>
+                              ) : null}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={pipelineStateClass(displayedStatus)}
+                              >
+                                {tp(`pipelineStates.${displayedStatus}`)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                {displayedUrl ? (
+                                  <Button asChild size="sm" variant="outline">
+                                    <a
+                                      href={displayedUrl}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      {t("viewPipeline")}
+                                      <ExternalLink />
+                                    </a>
+                                  </Button>
+                                ) : (
+                                  <Button disabled size="sm" variant="outline">
                                     {t("viewPipeline")}
                                     <ExternalLink />
-                                  </a>
-                                </Button>
-                              ) : (
-                                <Button disabled size="sm" variant="outline">
-                                  {t("viewPipeline")}
-                                  <ExternalLink />
-                                </Button>
-                              )}
-                              <RetryPipelineButton
-                                onError={setError}
-                                onPipelineRetried={pipelineRetried}
-                                pipeline={pipeline}
-                                repositoryId={pullRequest.repositoryGithubId}
-                              />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        <TableRow className="bg-muted/20 hover:bg-muted/20">
-                          <TableCell className="p-0" colSpan={3}>
-                            <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
-                              <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                {t("jobCount", {
-                                  count: pipeline.jobs.length,
-                                })}
-                              </p>
-                              {pipeline.jobs.length === 0 ? (
-                                <p className="px-3 pb-3 text-sm text-muted-foreground">
-                                  {t("noJobs")}
+                                  </Button>
+                                )}
+                                {!historicalAttempt ? (
+                                  <RetryPipelineButton
+                                    onError={setError}
+                                    onPipelineRetried={pipelineRetried}
+                                    pipeline={pipeline}
+                                    repositoryId={
+                                      pullRequest.repositoryGithubId
+                                    }
+                                  />
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          <TableRow className="bg-muted/20 hover:bg-muted/20">
+                            <TableCell className="p-0" colSpan={3}>
+                              <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
+                                <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  {t("jobCount", {
+                                    count: displayedJobs.length,
+                                  })}
                                 </p>
-                              ) : (
-                                <div className="divide-y">
-                                  {pipeline.jobs.map((job) => (
-                                    <WorkflowJob
-                                      checkSuiteId={pipeline.checkSuiteId}
-                                      job={job}
-                                      key={job.id}
-                                      onError={setError}
-                                      onRetried={() =>
-                                        jobRetried(pipeline.id, job.id)
-                                      }
-                                      repositoryId={
-                                        pullRequest.repositoryGithubId
-                                      }
-                                    />
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      </Fragment>
-                    ))}
+                                {displayedJobs.length === 0 ? (
+                                  <p className="px-3 pb-3 text-sm text-muted-foreground">
+                                    {t("noJobs")}
+                                  </p>
+                                ) : (
+                                  <div className="divide-y">
+                                    {displayedJobs.map((job) => (
+                                      <WorkflowJob
+                                        checkSuiteId={pipeline.checkSuiteId}
+                                        job={job}
+                                        key={job.id}
+                                        onError={setError}
+                                        onRetried={() =>
+                                          jobRetried(pipeline.id, job.id)
+                                        }
+                                        repositoryId={
+                                          pullRequest.repositoryGithubId
+                                        }
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
