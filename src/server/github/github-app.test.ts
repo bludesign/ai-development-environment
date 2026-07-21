@@ -12,6 +12,7 @@ import {
   GitHubAppError,
   listGitHubActionsWorkflowJobs,
   rerunGitHubActionsJob,
+  rerunGitHubActionsFailedJobs,
   rerunGitHubActionsWorkflow,
   verifyGitHubAppConfiguration,
 } from "./github-app";
@@ -226,6 +227,26 @@ describe("GitHub App authentication", () => {
     expect((caught as Error).message).toContain("[REDACTED]");
     expect((caught as Error).message).not.toContain("secret-token");
     expect((caught as Error).message).not.toContain("BEGIN RSA PRIVATE KEY");
+  });
+
+  test("reruns only failed jobs through the workflow endpoint", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/access_tokens")) return tokenResponse();
+      if (url.endsWith("/actions/runs/987/rerun-failed-jobs")) {
+        expect(init?.method).toBe("POST");
+        return response(null, 201, "FAILED-JOBS-1");
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      rerunGitHubActionsFailedJobs(credentials, {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+      }),
+    ).resolves.toEqual({ githubRequestId: "FAILED-JOBS-1" });
   });
 
   test.each([

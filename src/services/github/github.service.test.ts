@@ -39,6 +39,18 @@ const state = vi.hoisted(() => ({
     canonicalOrigin: string;
   } | null,
   linkedWorktree: null as { id: string; branch: string } | null,
+  worktreeDetail: null as {
+    id: string;
+    branch: string | null;
+    headSha: string | null;
+    codebase: {
+      repository: {
+        id: string;
+        canonicalOrigin: string;
+        jiraBranchRegex: string | null;
+      };
+    };
+  } | null,
   codebaseRepositoryOrigins: [] as string[],
   codebaseRepositories: [
     {
@@ -144,6 +156,8 @@ vi.mock("@/data/prisma-client", () => ({
         state.linkedWorktree?.branch === where.branch
           ? { id: state.linkedWorktree.id }
           : null,
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        state.worktreeDetail?.id === where.id ? state.worktreeDetail : null,
     },
     codebaseSettings: {
       findUnique: async () => ({
@@ -218,6 +232,7 @@ function rawPullRequest(
 ) {
   return {
     id,
+    workflow_id: 99,
     number: id === "pull-request-1" ? 17 : 18,
     title,
     url: `https://github.com/acme/widgets/pull/${id}`,
@@ -316,6 +331,11 @@ function rawActionsWorkflowRun(
     run_started_at: createdAt,
     created_at: createdAt,
     updated_at: createdAt,
+    triggering_actor: {
+      login: "octocat",
+      avatar_url: "https://avatars.githubusercontent.com/u/1?v=4",
+      html_url: "https://github.com/octocat",
+    },
   };
 }
 
@@ -413,6 +433,7 @@ beforeEach(() => {
   state.auditEvents = [];
   state.linkedCodebaseRepository = null;
   state.linkedWorktree = null;
+  state.worktreeDetail = null;
   state.codebaseRepositoryOrigins = [];
   state.codebaseRepositories = [
     {
@@ -489,6 +510,213 @@ describe("GitHub service", () => {
       "APP-42",
     );
     expect(parseJiraKey("ship APP-42", null)).toBeNull();
+  });
+
+  test("discovers Auto Retry runs without loading jobs or supplementary pull requests", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/actions/runs?per_page=100")) {
+        return response({
+          workflow_runs: [
+            rawActionsWorkflowRun(
+              71,
+              "acme/widgets",
+              "2026-07-21T12:00:00.000Z",
+              { conclusion: "failure", pullRequests: [17] },
+            ),
+            rawActionsWorkflowRun(
+              72,
+              "acme/widgets",
+              "2026-07-21T12:01:00.000Z",
+              { conclusion: "success" },
+            ),
+          ],
+        });
+      }
+      throw new Error(`Unexpected Auto Retry request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runs = await new GitHubService().autoRetryRuns(
+      "codebase-repository-1",
+    );
+
+    expect(runs).toHaveLength(2);
+    expect(runs.every((run) => run.jobs.length === 0)).toBe(true);
+    expect(runs[0]?.pullRequests).toEqual([
+      { number: 17, url: "https://github.com/acme/widgets/pull/17" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("refreshes a tracked Auto Retry run without loading jobs", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/actions/runs/77")) {
+        return response(
+          rawActionsWorkflowRun(
+            77,
+            "acme/widgets",
+            "2026-07-21T12:00:00.000Z",
+            { conclusion: "failure" },
+          ),
+        );
+      }
+      throw new Error(`Unexpected tracked-run request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = await new GitHubService().autoRetryRun(
+      "codebase-repository-1",
+      "77",
+      false,
+    );
+
+    expect(run.id).toBe("77");
+    expect(run.jobs).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("loads an attempt-specific workflow run and read-only jobs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/actions/runs/77/attempts/2")) {
+          return response({
+            ...rawActionsWorkflowRun(
+              77,
+              "acme/widgets",
+              "2026-07-21T12:00:00.000Z",
+              { conclusion: "failure" },
+            ),
+            run_attempt: 2,
+          });
+        }
+        if (url.includes("/actions/runs/77/attempts/2/jobs")) {
+          return response({
+            total_count: 1,
+            jobs: [
+              {
+                id: 501,
+                name: "test",
+                status: "completed",
+                conclusion: "failure",
+                html_url: "https://github.com/acme/widgets/actions/jobs/501",
+                run_attempt: 2,
+                steps: [],
+              },
+            ],
+          });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }),
+    );
+
+    await expect(
+      new GitHubService().actionsWorkflowRunAttempt(
+        "codebase-repository-1",
+        "77",
+        2,
+      ),
+    ).resolves.toMatchObject({
+      workflowRunId: "77",
+      runAttempt: 2,
+      status: "FAILURE",
+      triggeringActor: {
+        login: "octocat",
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
+        url: "https://github.com/octocat",
+      },
+      jobs: [
+        {
+          id: "501",
+          name: "test",
+          runAttempt: 2,
+          canRetry: false,
+          retryUnavailableReason: "HISTORICAL_ATTEMPT",
+        },
+      ],
+    });
+  });
+
+  test("skips attempt jobs when only metadata is requested", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/actions/runs/77/attempts/2")) {
+        return response({
+          ...rawActionsWorkflowRun(
+            77,
+            "acme/widgets",
+            "2026-07-21T12:00:00.000Z",
+          ),
+          run_attempt: 2,
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().actionsWorkflowRunAttempt(
+        "codebase-repository-1",
+        "77",
+        2,
+        false,
+      ),
+    ).resolves.toMatchObject({
+      workflowRunId: "77",
+      runAttempt: 2,
+      jobs: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("falls back to the latest branch runs when the worktree head is ahead", async () => {
+    state.worktreeDetail = {
+      id: "worktree-1",
+      branch: "feature/APP-42",
+      headSha: "local-only-sha",
+      codebase: {
+        repository: {
+          id: "codebase-repository-1",
+          canonicalOrigin: "github.com/acme/widgets",
+          jiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        },
+      },
+    };
+    const latestOne = {
+      ...rawActionsWorkflowRun(81, "acme/widgets", "2026-07-21T14:00:00.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "latest-remote-sha",
+    };
+    const latestTwo = {
+      ...rawActionsWorkflowRun(82, "acme/widgets", "2026-07-21T14:00:01.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "latest-remote-sha",
+    };
+    const older = {
+      ...rawActionsWorkflowRun(80, "acme/widgets", "2026-07-21T13:00:00.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "older-remote-sha",
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("head_sha=local-only-sha")) {
+        return response({ workflow_runs: [] });
+      }
+      if (url.includes("branch=feature%2FAPP-42")) {
+        return response({ workflow_runs: [latestTwo, latestOne, older] });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().worktreeWorkflowRuns("worktree-1"),
+    ).resolves.toMatchObject([
+      { id: "82", headSha: "latest-remote-sha", worktreeId: "worktree-1" },
+      { id: "81", headSha: "latest-remote-sha", worktreeId: "worktree-1" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   test("merges and paginates workflow runs across unique GitHub codebases", async () => {
@@ -653,6 +881,51 @@ describe("GitHub service", () => {
         ).toString("base64url"),
       ),
     ).rejects.toThrow("cursor");
+  });
+
+  test("filters workflow runs by branch and pipeline and binds pagination to the filters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("/repos/acme/widgets/actions/workflows/987/runs");
+      expect(url).toContain("branch=feature%2FAPP-42");
+      return response({
+        total_count: 2,
+        workflow_runs: [
+          rawActionsWorkflowRun(2, "acme/widgets", "2026-07-17T12:00:00.000Z", {
+            branch: "feature/APP-42",
+            pullRequests: [17],
+          }),
+          rawActionsWorkflowRun(1, "acme/widgets", "2026-07-16T12:00:00.000Z", {
+            branch: "feature/APP-42",
+            pullRequests: [17],
+          }),
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new GitHubService();
+    const page = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      1,
+      null,
+      " feature/APP-42 ",
+      " 987 ",
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual(["2"]);
+    expect(page.endCursor).toBeTruthy();
+    await expect(
+      service.actionsWorkflowRuns(
+        "codebase-repository-1",
+        1,
+        page.endCursor,
+        "feature/APP-42",
+        "988",
+      ),
+    ).rejects.toThrow("cursor");
+    await expect(
+      service.actionsWorkflowRuns(null, 1, null, "feature/APP-42"),
+    ).rejects.toThrow("repository");
   });
 
   test("loads workflow jobs through the PAT and reserves retries for the App", async () => {
@@ -1666,6 +1939,7 @@ describe("GitHub service", () => {
       service.pullRequest("acme", "widgets", 17),
     ).resolves.toMatchObject({ worktreeId: "fork-worktree" });
     expect(state.codebaseRepositoryOrigins).toEqual([
+      "github.com/acme/widgets",
       "github.com/forkowner/mixedrepo",
     ]);
 
@@ -1674,7 +1948,9 @@ describe("GitHub service", () => {
     await expect(
       service.pullRequest("acme", "widgets", 17),
     ).resolves.toMatchObject({ worktreeId: null });
-    expect(state.codebaseRepositoryOrigins).toEqual([]);
+    expect(state.codebaseRepositoryOrigins).toEqual([
+      "github.com/acme/widgets",
+    ]);
   });
 
   test("keeps the App private key write-only and verifies before replacing settings", async () => {

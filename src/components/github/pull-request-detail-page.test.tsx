@@ -37,6 +37,10 @@ const pipeline = {
   checkSuiteId: "check-suite-1",
   canRetry: true,
   retryUnavailableReason: null,
+  workflowRunId: "run-1",
+  workflowId: "workflow-1",
+  runNumber: 1,
+  runAttempt: 1,
   jobs: [
     {
       id: "job-11",
@@ -55,6 +59,7 @@ const pipeline = {
 
 const detail = {
   id: "pull-request-1",
+  codebaseRepositoryId: "codebase-repository-1",
   number: 17,
   title: "APP-42 Add the API",
   url: "https://github.com/acme/widgets/pull/17",
@@ -235,16 +240,30 @@ describe("PullRequestDetailPage", () => {
     ).toBe(detail.url);
 
     const pipelineRow = screen.getByRole("row", { name: /CI/ });
-    const viewButton = within(pipelineRow).getByRole("link", { name: /View/ });
-    const retryButton = within(pipelineRow).getByRole("button", {
-      name: "Retry",
+    expect(
+      screen.getByRole("link", { name: "View all" }).getAttribute("href"),
+    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2Fapp-42");
+    const actionsButton = within(pipelineRow).getByRole("button", {
+      name: "Actions: CI",
     });
-
-    expect(viewButton.getAttribute("data-variant")).toBe("outline");
-    expect(viewButton.getAttribute("data-size")).toBe("sm");
-    expect(retryButton.getAttribute("data-variant")).toBe("outline");
-    expect(retryButton.getAttribute("data-size")).toBe("sm");
-    fireEvent.click(retryButton);
+    expect(actionsButton.getAttribute("data-variant")).toBe("outline");
+    expect(actionsButton.getAttribute("data-size")).toBe("icon-sm");
+    fireEvent.pointerDown(actionsButton, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
+    expect(
+      screen.getByRole("menuitem", { name: "View all" }).getAttribute("href"),
+    ).toBe(
+      "/actions?repository=codebase-repository-1&branch=feature%2Fapp-42&pipeline=workflow-1",
+    );
+    expect(screen.getByRole("menuitem", { name: "Cancel" })).toBeDefined();
+    expect(
+      screen.getByRole("menuitem", { name: "Force cancel" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
 
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
@@ -264,5 +283,51 @@ describe("PullRequestDetailPage", () => {
         },
       ),
     );
+  });
+
+  test("cancels an active pipeline with the pull request repository", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestDetail")) {
+        return {
+          githubPullRequest: {
+            ...detail,
+            pipelineStatus: "PENDING",
+            pipelines: [
+              {
+                ...pipeline,
+                status: "IN_PROGRESS",
+                canRetry: false,
+                retryUnavailableReason: "NOT_COMPLETED",
+              },
+            ],
+          },
+        } as never;
+      }
+      if (query.includes("CancelGitHubActionsWorkflowRun")) {
+        return { cancelGitHubActionsWorkflowRun: true } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(
+      <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
+    );
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Actions: CI" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("CancelGitHubActionsWorkflowRun"),
+        {
+          codebaseRepositoryId: "codebase-repository-1",
+          workflowRunId: "run-1",
+          force: false,
+        },
+      ),
+    );
+    expect(screen.getByText("Cancelled")).toBeDefined();
   });
 });

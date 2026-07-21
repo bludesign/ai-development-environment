@@ -231,6 +231,18 @@ const initialDetail: WorktreeDetail = {
   ],
   changesTruncated: false,
   commitsTruncated: false,
+  branchChanges: [
+    {
+      path: "src/branch-change.ts",
+      previousPath: null,
+      changeType: "M",
+      additions: 41,
+      deletions: 7,
+      binary: false,
+      image: false,
+    },
+  ],
+  branchChangesTruncated: false,
 };
 
 const buildHistoryItem = {
@@ -360,6 +372,21 @@ describe("WorktreeDetailPage", () => {
     });
     expect(changeRow.className).toContain("py-1.5");
     expect(changeRow.className).toContain("min-h-8");
+    expect(
+      within(changeRow).getByText("Staged").parentElement?.className,
+    ).toContain("text-xs");
+    expect(
+      within(changeRow).getByText("Unstaged").parentElement?.className,
+    ).toContain("text-xs");
+    expect(
+      within(changeRow).getByText("+10").parentElement?.className,
+    ).toContain("text-xs");
+    const branchChangeRow = screen.getByRole("button", {
+      name: /src\/branch-change\.ts/,
+    });
+    expect(
+      within(branchChangeRow).getByText("+41").parentElement?.className,
+    ).toContain("text-xs");
     const coverageHeader = screen
       .getByText("Code coverage")
       .closest<HTMLElement>('[data-slot="card-header"]');

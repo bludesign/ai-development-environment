@@ -697,7 +697,7 @@ function ChangeState({
   deletions: number | null;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
+    <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-muted-foreground">
       <span>{label}</span>
       <LineCounts additions={additions} deletions={deletions} />
     </span>
@@ -715,7 +715,7 @@ function LineCounts({
     return <span className="text-muted-foreground">—</span>;
   }
   return (
-    <span className="inline-flex gap-1 tabular-nums">
+    <span className="inline-flex gap-1 text-xs tabular-nums">
       <span className="text-emerald-700 dark:text-emerald-400">
         +{additions ?? 0}
       </span>

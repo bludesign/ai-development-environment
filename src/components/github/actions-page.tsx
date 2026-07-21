@@ -1,20 +1,18 @@
 "use client";
 
 import {
-  Ban,
   ChevronDown,
   ChevronRight,
-  CircleStop,
   ExternalLink,
-  GitBranch,
-  MoreHorizontal,
   PlayCircle,
   RefreshCw,
   RotateCcw,
+  X,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
+  FormEvent,
   Fragment,
   MouseEvent,
   useCallback,
@@ -25,20 +23,15 @@ import {
 } from "react";
 
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
+import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
+import { WorkflowRunActionsMenu } from "@/components/github/workflow-run-actions-menu";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
-import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Empty,
   EmptyDescription,
@@ -68,19 +61,13 @@ import type {
   GitHubActionsWorkflowRunView,
   GitHubSettingsView,
   GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
-import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 
 const ALL_REPOSITORIES = "all";
-const CANCELLABLE_RUN_STATES = new Set<GitHubActionsWorkflowRunView["status"]>([
-  "ACTION_REQUIRED",
-  "EXPECTED",
-  "IN_PROGRESS",
-  "PENDING",
-  "QUEUED",
-]);
+const ALL_PIPELINES = "all";
 const RUN_FIELDS =
-  "id repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
+  "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
 const JOB_FIELDS =
   "id name status url canRetry retryUnavailableReason steps { number name status }";
@@ -101,6 +88,34 @@ function replaceIssueParam(issueKey: string | null) {
   else params.delete("issue");
   const query = params.toString();
   window.history.pushState(
+    null,
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}`,
+  );
+}
+
+function replaceFilterParams(
+  repositoryId: string,
+  branch: string,
+  pipeline: string,
+) {
+  const params = new URLSearchParams(window.location.search);
+  if (repositoryId === ALL_REPOSITORIES) {
+    params.delete("repository");
+    params.delete("branch");
+    params.delete("pipeline");
+  } else {
+    params.set("repository", repositoryId);
+    if (branch) params.set("branch", branch);
+    else params.delete("branch");
+    if (pipeline && pipeline !== ALL_PIPELINES) {
+      params.set("pipeline", pipeline);
+    } else {
+      params.delete("pipeline");
+    }
+  }
+  const query = params.toString();
+  window.history.replaceState(
     null,
     "",
     `${window.location.pathname}${query ? `?${query}` : ""}`,
@@ -160,6 +175,11 @@ export function ActionsPage() {
   const t = useTranslations("actionsPage");
   const searchParams = useSearchParams();
   const issueKey = searchParams.get("issue");
+  const initialFiltersRef = useRef({
+    repositoryId: searchParams.get("repository")?.trim() || ALL_REPOSITORIES,
+    branch: searchParams.get("branch")?.trim() || "",
+    pipeline: searchParams.get("pipeline")?.trim() || ALL_PIPELINES,
+  });
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [configurationLoading, setConfigurationLoading] = useState(true);
   const [runs, setRuns] = useState<GitHubActionsWorkflowRunView[]>([]);
@@ -169,8 +189,27 @@ export function ActionsPage() {
   const [repositoryErrors, setRepositoryErrors] = useState<
     GitHubActionsRepositoryErrorView[]
   >([]);
-  const [selectedRepositoryId, setSelectedRepositoryId] =
-    useState(ALL_REPOSITORIES);
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState(
+    initialFiltersRef.current.repositoryId,
+  );
+  const [selectedBranch, setSelectedBranch] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ""
+      : initialFiltersRef.current.branch,
+  );
+  const [branchInput, setBranchInput] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ""
+      : initialFiltersRef.current.branch,
+  );
+  const [selectedPipeline, setSelectedPipeline] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ALL_PIPELINES
+      : initialFiltersRef.current.pipeline,
+  );
+  const [knownPipelines, setKnownPipelines] = useState<Record<string, string>>(
+    {},
+  );
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -186,6 +225,8 @@ export function ActionsPage() {
   const loadRuns = useCallback(
     async (
       repositoryId: string,
+      branch: string,
+      pipeline: string,
       options: { append: boolean; cursor?: string | null } = {
         append: false,
       },
@@ -221,11 +262,15 @@ export function ActionsPage() {
         }>(
           `query GitHubActionsWorkflowRuns(
             $codebaseRepositoryId: ID
+            $branch: String
+            $workflowId: ID
             $first: Int!
             $after: String
           ) {
             githubActionsWorkflowRuns(
               codebaseRepositoryId: $codebaseRepositoryId
+              branch: $branch
+              workflowId: $workflowId
               first: $first
               after: $after
             ) {
@@ -239,12 +284,28 @@ export function ActionsPage() {
           {
             codebaseRepositoryId:
               repositoryId === ALL_REPOSITORIES ? null : repositoryId,
+            branch:
+              repositoryId === ALL_REPOSITORIES || !branch ? null : branch,
+            workflowId:
+              repositoryId === ALL_REPOSITORIES || pipeline === ALL_PIPELINES
+                ? null
+                : pipeline,
             first: 25,
             after: options.cursor ?? null,
           },
         );
         if (generation !== requestGenerationRef.current) return;
         const page = data.githubActionsWorkflowRuns;
+        if (repositoryId !== ALL_REPOSITORIES) {
+          const pagePipelines = Object.fromEntries(
+            page.items.map((run) => [run.workflowId, run.name]),
+          );
+          setKnownPipelines((current) =>
+            !options.append && pipeline === ALL_PIPELINES
+              ? pagePipelines
+              : { ...current, ...pagePipelines },
+          );
+        }
         setRuns((current) =>
           options.append
             ? [
@@ -294,7 +355,16 @@ export function ActionsPage() {
         setSettings(data.githubSettings);
         setError(null);
         if (data.githubSettings.tokenConfigured) {
-          await loadRuns(ALL_REPOSITORIES);
+          const initialFilters = initialFiltersRef.current;
+          await loadRuns(
+            initialFilters.repositoryId,
+            initialFilters.repositoryId === ALL_REPOSITORIES
+              ? ""
+              : initialFilters.branch,
+            initialFilters.repositoryId === ALL_REPOSITORIES
+              ? ALL_PIPELINES
+              : initialFilters.pipeline,
+          );
         }
       } catch (value) {
         setError(value instanceof Error ? value.message : String(value));
@@ -321,7 +391,7 @@ export function ActionsPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadRuns(selectedRepositoryId, {
+        void loadRuns(selectedRepositoryId, selectedBranch, selectedPipeline, {
           append: true,
           cursor: endCursor,
         });
@@ -338,12 +408,42 @@ export function ActionsPage() {
     loadingMore,
     paginationError,
     selectedRepositoryId,
+    selectedBranch,
+    selectedPipeline,
     settings?.tokenConfigured,
   ]);
 
   const selectRepository = (repositoryId: string) => {
     setSelectedRepositoryId(repositoryId);
-    void loadRuns(repositoryId);
+    setSelectedBranch("");
+    setBranchInput("");
+    setSelectedPipeline(ALL_PIPELINES);
+    setKnownPipelines({});
+    replaceFilterParams(repositoryId, "", ALL_PIPELINES);
+    void loadRuns(repositoryId, "", ALL_PIPELINES);
+  };
+
+  const applyBranchFilter = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const branch = branchInput.trim();
+    setBranchInput(branch);
+    setSelectedBranch(branch);
+    replaceFilterParams(selectedRepositoryId, branch, selectedPipeline);
+    void loadRuns(selectedRepositoryId, branch, selectedPipeline);
+  };
+
+  const clearBranchFilter = () => {
+    setBranchInput("");
+    if (!selectedBranch) return;
+    setSelectedBranch("");
+    replaceFilterParams(selectedRepositoryId, "", selectedPipeline);
+    void loadRuns(selectedRepositoryId, "", selectedPipeline);
+  };
+
+  const selectPipeline = (pipeline: string) => {
+    setSelectedPipeline(pipeline);
+    replaceFilterParams(selectedRepositoryId, selectedBranch, pipeline);
+    void loadRuns(selectedRepositoryId, selectedBranch, pipeline);
   };
 
   const loadJobs = useCallback(async (run: GitHubActionsWorkflowRunView) => {
@@ -507,6 +607,23 @@ export function ActionsPage() {
       keywords: repository.nameWithOwner,
     })),
   ];
+  const pipelineNames = new Map(Object.entries(knownPipelines));
+  if (
+    selectedPipeline !== ALL_PIPELINES &&
+    !pipelineNames.has(selectedPipeline)
+  ) {
+    pipelineNames.set(selectedPipeline, selectedPipeline);
+  }
+  const pipelineOptions: SearchableSelectOption[] = [
+    {
+      value: ALL_PIPELINES,
+      label: t("allPipelines"),
+      keywords: t("allPipelines"),
+    },
+    ...[...pipelineNames.entries()]
+      .sort((left, right) => left[1].localeCompare(right[1]))
+      .map(([id, name]) => ({ value: id, label: name, keywords: name })),
+  ];
 
   return (
     <section className="mx-auto flex w-full max-w-[1800px] flex-col gap-5">
@@ -521,7 +638,13 @@ export function ActionsPage() {
         </div>
         <Button
           disabled={!settings?.tokenConfigured || loading}
-          onClick={() => void loadRuns(selectedRepositoryId)}
+          onClick={() =>
+            void loadRuns(
+              selectedRepositoryId,
+              selectedBranch,
+              selectedPipeline,
+            )
+          }
           variant="outline"
         >
           <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -558,7 +681,7 @@ export function ActionsPage() {
       ) : (
         <>
           {repositories.length > 0 && (
-            <div className="max-w-lg">
+            <div className="grid max-w-6xl gap-3 sm:grid-cols-3">
               <SearchableSelect
                 ariaLabel={t("repositoryFilter")}
                 emptyMessage={t("noRepositoryMatches")}
@@ -568,6 +691,45 @@ export function ActionsPage() {
                 searchPlaceholder={t("searchRepositories")}
                 value={selectedRepositoryId}
               />
+              {selectedRepositoryId !== ALL_REPOSITORIES && (
+                <>
+                  <form className="flex gap-2" onSubmit={applyBranchFilter}>
+                    <Input
+                      aria-label={t("branchFilter")}
+                      autoCapitalize="none"
+                      onChange={(event) => setBranchInput(event.target.value)}
+                      placeholder={t("branchFilterPlaceholder")}
+                      spellCheck={false}
+                      value={branchInput}
+                    />
+                    <Button disabled={loading} type="submit" variant="outline">
+                      {t("applyBranchFilter")}
+                    </Button>
+                    {(branchInput || selectedBranch) && (
+                      <Button
+                        aria-label={t("clearBranchFilter")}
+                        disabled={loading}
+                        onClick={clearBranchFilter}
+                        size="icon"
+                        title={t("clearBranchFilter")}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X />
+                      </Button>
+                    )}
+                  </form>
+                  <SearchableSelect
+                    ariaLabel={t("pipelineFilter")}
+                    emptyMessage={t("noPipelineMatches")}
+                    onValueChange={selectPipeline}
+                    options={pipelineOptions}
+                    placeholder={t("pipelineFilter")}
+                    searchPlaceholder={t("searchPipelines")}
+                    value={selectedPipeline}
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -624,10 +786,15 @@ export function ActionsPage() {
                 <Button
                   disabled={loadingMore || !endCursor}
                   onClick={() =>
-                    void loadRuns(selectedRepositoryId, {
-                      append: true,
-                      cursor: endCursor,
-                    })
+                    void loadRuns(
+                      selectedRepositoryId,
+                      selectedBranch,
+                      selectedPipeline,
+                      {
+                        append: true,
+                        cursor: endCursor,
+                      },
+                    )
                   }
                   size="sm"
                   variant="outline"
@@ -684,6 +851,9 @@ function ActionsTable({
   const t = useTranslations("actionsPage");
   const tp = useTranslations("pullRequests");
   const locale = useLocale();
+  const [historicalAttempts, setHistoricalAttempts] = useState<
+    Record<string, GitHubWorkflowRunAttemptView | null>
+  >({});
   const groupedRuns = useMemo(() => {
     const groups = new Map<
       string,
@@ -737,6 +907,17 @@ function ActionsTable({
                 const key = runKey(run);
                 const expanded = expandedRuns.has(key);
                 const jobState = jobStates[key];
+                const historicalAttempt = historicalAttempts[key] ?? null;
+                const displayedRun = historicalAttempt
+                  ? {
+                      ...run,
+                      status: historicalAttempt.status,
+                      url: historicalAttempt.url,
+                      startedAt: historicalAttempt.startedAt,
+                      createdAt: historicalAttempt.createdAt,
+                      updatedAt: historicalAttempt.updatedAt,
+                    }
+                  : run;
                 return (
                   <Fragment key={key}>
                     <TableRow
@@ -761,7 +942,7 @@ function ActionsTable({
                       <TableCell className="min-w-72 whitespace-normal">
                         <a
                           className="block rounded-md px-2 py-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          href={run.url}
+                          href={displayedRun.url}
                           rel="noreferrer"
                           target="_blank"
                         >
@@ -780,6 +961,19 @@ function ActionsTable({
                               : ""}
                           </span>
                         </a>
+                        <div className="mt-1 px-2">
+                          <WorkflowAttemptSelect
+                            latestAttempt={run.runAttempt}
+                            onAttemptChange={(attempt) =>
+                              setHistoricalAttempts((current) => ({
+                                ...current,
+                                [key]: attempt,
+                              }))
+                            }
+                            repositoryId={run.codebaseRepositoryId}
+                            workflowRunId={run.id}
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className="min-w-48 whitespace-normal">
                         <p>{run.event}</p>
@@ -788,8 +982,10 @@ function ActionsTable({
                         </p>
                       </TableCell>
                       <TableCell>
-                        <Badge className={pipelineStateClass(run.status)}>
-                          {tp(`pipelineStates.${run.status}`)}
+                        <Badge
+                          className={pipelineStateClass(displayedRun.status)}
+                        >
+                          {tp(`pipelineStates.${displayedRun.status}`)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -836,21 +1032,29 @@ function ActionsTable({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         <div className="flex flex-col gap-0.5">
-                          <time dateTime={run.startedAt} title={run.startedAt}>
-                            {relativeAge(run.startedAt, locale)}
+                          <time
+                            dateTime={displayedRun.startedAt}
+                            title={displayedRun.startedAt}
+                          >
+                            {relativeAge(displayedRun.startedAt, locale)}
                           </time>
                           <span className="text-xs">
-                            {t("duration", { duration: runDuration(run) })}
+                            {t("duration", {
+                              duration: runDuration(displayedRun),
+                            })}
                           </span>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end">
                           <WorkflowRunActionsMenu
+                            includeAutoRetry
+                            includeWorktree
                             onCancelled={() => onRunCancelled(run)}
                             onError={onError}
                             onRetried={() => onRunRetried(run)}
                             run={run}
+                            jobs={jobState?.jobs ?? []}
                           />
                         </div>
                       </TableCell>
@@ -863,7 +1067,15 @@ function ActionsTable({
                             onReload={() => onLoadJobs(run)}
                             onRetried={(jobId) => onJobRetried(run, jobId)}
                             run={run}
-                            state={jobState}
+                            state={
+                              historicalAttempt
+                                ? {
+                                    loading: false,
+                                    error: null,
+                                    jobs: historicalAttempt.jobs,
+                                  }
+                                : jobState
+                            }
                           />
                         </TableCell>
                       </TableRow>
@@ -876,162 +1088,6 @@ function ActionsTable({
         </TableBody>
       </Table>
     </Card>
-  );
-}
-
-function WorkflowRunActionsMenu({
-  run,
-  onCancelled,
-  onRetried,
-  onError,
-}: {
-  run: GitHubActionsWorkflowRunView;
-  onCancelled: () => void;
-  onRetried: () => void;
-  onError: (error: string | null) => void;
-}) {
-  const t = useTranslations("actionsPage");
-  const tp = useTranslations("pullRequests");
-  const [retrying, setRetrying] = useState(false);
-  const [cancelling, setCancelling] = useState<"cancel" | "force" | null>(null);
-  const [confirmingForceCancel, setConfirmingForceCancel] = useState(false);
-
-  const retry = async () => {
-    if (!run.canRetry || !run.checkSuiteId) return;
-    setRetrying(true);
-    try {
-      await controlPlaneRequest<{ retryGitHubPipeline: { id: string } }>(
-        `mutation RetryGitHubPipeline(
-          $repositoryId: ID!
-          $checkSuiteId: ID!
-        ) {
-          retryGitHubPipeline(
-            repositoryId: $repositoryId
-            checkSuiteId: $checkSuiteId
-          ) { id }
-        }`,
-        {
-          repositoryId: run.repositoryGithubId,
-          checkSuiteId: run.checkSuiteId,
-        },
-      );
-      onRetried();
-      onError(null);
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setRetrying(false);
-    }
-  };
-
-  const cancelRun = async (force: boolean) => {
-    if (!CANCELLABLE_RUN_STATES.has(run.status) || cancelling) return;
-    setCancelling(force ? "force" : "cancel");
-    try {
-      await controlPlaneRequest<{
-        cancelGitHubActionsWorkflowRun: boolean;
-      }>(
-        `mutation CancelGitHubActionsWorkflowRun(
-          $codebaseRepositoryId: ID!
-          $workflowRunId: ID!
-          $force: Boolean!
-        ) {
-          cancelGitHubActionsWorkflowRun(
-            codebaseRepositoryId: $codebaseRepositoryId
-            workflowRunId: $workflowRunId
-            force: $force
-          )
-        }`,
-        {
-          codebaseRepositoryId: run.codebaseRepositoryId,
-          workflowRunId: run.id,
-          force,
-        },
-      );
-      onCancelled();
-      onError(null);
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setCancelling(null);
-    }
-  };
-
-  const retryUnavailableMessage = run.retryUnavailableReason
-    ? tp(`retryUnavailable.${run.retryUnavailableReason}`)
-    : undefined;
-
-  const cancellable = CANCELLABLE_RUN_STATES.has(run.status);
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            aria-label={`${t("actions")}: ${run.displayTitle}`}
-            size="icon-sm"
-            variant="outline"
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem asChild>
-            <a href={run.url} rel="noreferrer" target="_blank">
-              <ExternalLink />
-              {t("view")}
-            </a>
-          </DropdownMenuItem>
-          {run.worktreeId ? (
-            <DropdownMenuItem asChild>
-              <Link href={worktreeDetailHref(run.worktreeId)}>
-                <GitBranch />
-                {t("worktree")}
-              </Link>
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem disabled>
-              <GitBranch />
-              {t("worktree")}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={Boolean(cancelling) || !cancellable}
-            onSelect={() => void cancelRun(false)}
-          >
-            {cancelling === "cancel" ? <Spinner /> : <CircleStop />}
-            {cancelling === "cancel" ? t("cancelling") : t("cancel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={Boolean(cancelling) || !cancellable}
-            onSelect={() => setConfirmingForceCancel(true)}
-            variant="destructive"
-          >
-            {cancelling === "force" ? <Spinner /> : <Ban />}
-            {cancelling === "force" ? t("forceCancelling") : t("forceCancel")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={retrying || !run.canRetry || !run.checkSuiteId}
-            onSelect={() => void retry()}
-            title={retryUnavailableMessage}
-          >
-            {retrying ? <Spinner /> : <RotateCcw />}
-            {retrying ? tp("retrying") : tp("retry")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ConfirmationDialog
-        actionLabel={t("forceCancel")}
-        cancelLabel={t("keepRunning")}
-        description={t("forceCancelDescription")}
-        onConfirm={() => cancelRun(true)}
-        onOpenChange={setConfirmingForceCancel}
-        open={confirmingForceCancel}
-        title={t("forceCancelTitle")}
-      />
-    </>
   );
 }
 

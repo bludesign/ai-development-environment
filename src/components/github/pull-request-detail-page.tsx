@@ -2,24 +2,27 @@
 
 import {
   ArrowLeft,
-  ChevronDown,
-  ChevronRight,
   ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
   GitBranch,
   RefreshCw,
-  RotateCcw,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { Fragment, MouseEvent, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import {
   PipelineMenu,
-  RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
+import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
+import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
+import { WorkflowJob } from "@/components/github/workflow-job";
+import {
+  actionsForBranchHref,
+  WorkflowRunActionsMenu,
+} from "@/components/github/workflow-run-actions-menu";
 import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { ReviewThreadCard } from "@/components/github/review-thread-card";
@@ -54,11 +57,11 @@ import type {
   GitHubReviewComment,
   GitHubReviewDecision,
   GitHubReviewThreadState,
-  GitHubWorkflowJobView,
+  GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
+  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -100,6 +103,9 @@ export function PullRequestDetailPage({
     useState<GitHubPullRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historicalAttempts, setHistoricalAttempts] = useState<
+    Record<string, GitHubWorkflowRunAttemptView | null>
+  >({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,6 +148,48 @@ export function PullRequestDetailPage({
               item.id === pipeline.id
                 ? { ...pipeline, jobs: pipeline.jobs ?? item.jobs }
                 : item,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const pipelineRunRetried = (pipelineId: string) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            pipelineStatus: "PENDING",
+            pipelines: current.pipelines.map((pipeline) =>
+              pipeline.id === pipelineId
+                ? {
+                    ...pipeline,
+                    status: "QUEUED",
+                    canRetry: false,
+                    retryUnavailableReason: "NOT_COMPLETED",
+                  }
+                : pipeline,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const pipelineRunCancelled = (pipelineId: string) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            pipelineStatus: "FAILURE",
+            pipelines: current.pipelines.map((pipeline) =>
+              pipeline.id === pipelineId
+                ? {
+                    ...pipeline,
+                    status: "CANCELLED",
+                    canRetry: false,
+                    retryUnavailableReason: "NOT_COMPLETED",
+                  }
+                : pipeline,
             ),
           }
         : current,
@@ -390,12 +438,46 @@ export function PullRequestDetailPage({
                   {t("pipelineCount", { count: pullRequest.pipelines.length })}
                 </p>
               </div>
-              <PipelineMenu
-                onPipelineRetried={pipelineRetried}
-                pipelineStatus={pullRequest.pipelineStatus}
-                pipelines={pullRequest.pipelines}
-                repositoryId={pullRequest.repositoryGithubId}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                {pullRequest.codebaseRepositoryId ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link
+                      href={actionsForBranchHref(
+                        pullRequest.codebaseRepositoryId,
+                        pullRequest.headRefName,
+                      )}
+                    >
+                      {t("viewAll")}
+                    </Link>
+                  </Button>
+                ) : null}
+                {pullRequest.codebaseRepositoryId ? (
+                  <AutoRetryDialog
+                    allowFuture
+                    branch={pullRequest.headRefName}
+                    codebaseRepositoryId={pullRequest.codebaseRepositoryId}
+                    currentRuns={pullRequest.pipelines
+                      .filter(
+                        (pipeline) =>
+                          pipeline.workflowRunId && pipeline.workflowId,
+                      )
+                      .map((pipeline) => ({
+                        id: pipeline.workflowRunId!,
+                        workflowId: pipeline.workflowId!,
+                        name: pipeline.name,
+                        jobs: pipeline.jobs,
+                      }))}
+                    pullRequestNumber={pullRequest.number}
+                    repositoryGithubId={pullRequest.repositoryGithubId}
+                  />
+                ) : null}
+                <PipelineMenu
+                  onPipelineRetried={pipelineRetried}
+                  pipelineStatus={pullRequest.pipelineStatus}
+                  pipelines={pullRequest.pipelines}
+                  repositoryId={pullRequest.repositoryGithubId}
+                />
+              </div>
             </CardHeader>
             <CardContent className="px-0">
               {pullRequest.pipelines.length === 0 ? (
@@ -414,82 +496,129 @@ export function PullRequestDetailPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pullRequest.pipelines.map((pipeline) => (
-                      <Fragment key={pipeline.id}>
-                        <TableRow>
-                          <TableCell className="font-medium">
-                            {pipeline.name}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              className={pipelineStateClass(pipeline.status)}
-                            >
-                              {tp(`pipelineStates.${pipeline.status}`)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-2">
-                              {pipeline.url ? (
-                                <Button asChild size="sm" variant="outline">
-                                  <a
-                                    href={pipeline.url}
-                                    rel="noreferrer"
-                                    target="_blank"
-                                  >
-                                    {t("viewPipeline")}
-                                    <ExternalLink />
-                                  </a>
-                                </Button>
-                              ) : (
-                                <Button disabled size="sm" variant="outline">
-                                  {t("viewPipeline")}
-                                  <ExternalLink />
-                                </Button>
-                              )}
-                              <RetryPipelineButton
-                                onError={setError}
-                                onPipelineRetried={pipelineRetried}
-                                pipeline={pipeline}
-                                repositoryId={pullRequest.repositoryGithubId}
-                              />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        <TableRow className="bg-muted/20 hover:bg-muted/20">
-                          <TableCell className="p-0" colSpan={3}>
-                            <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
-                              <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                {t("jobCount", {
-                                  count: pipeline.jobs.length,
-                                })}
-                              </p>
-                              {pipeline.jobs.length === 0 ? (
-                                <p className="px-3 pb-3 text-sm text-muted-foreground">
-                                  {t("noJobs")}
-                                </p>
-                              ) : (
-                                <div className="divide-y">
-                                  {pipeline.jobs.map((job) => (
-                                    <WorkflowJob
-                                      checkSuiteId={pipeline.checkSuiteId}
-                                      job={job}
-                                      key={job.id}
-                                      onError={setError}
-                                      onRetried={() =>
-                                        jobRetried(pipeline.id, job.id)
-                                      }
-                                      repositoryId={
-                                        pullRequest.repositoryGithubId
-                                      }
-                                    />
-                                  ))}
+                    {pullRequest.pipelines.map((pipeline) => {
+                      const historicalAttempt =
+                        historicalAttempts[pipeline.id] ?? null;
+                      const displayedStatus =
+                        historicalAttempt?.status ?? pipeline.status;
+                      const displayedUrl =
+                        historicalAttempt?.url ?? pipeline.url;
+                      const displayedJobs =
+                        historicalAttempt?.jobs ?? pipeline.jobs;
+                      return (
+                        <Fragment key={pipeline.id}>
+                          <TableRow>
+                            <TableCell className="font-medium">
+                              {pipeline.name}
+                              {pipeline.workflowRunId && pipeline.runAttempt ? (
+                                <div className="mt-2">
+                                  <WorkflowAttemptSelect
+                                    latestAttempt={pipeline.runAttempt}
+                                    onAttemptChange={(attempt) =>
+                                      setHistoricalAttempts((current) => ({
+                                        ...current,
+                                        [pipeline.id]: attempt,
+                                      }))
+                                    }
+                                    repositoryId={
+                                      pullRequest.repositoryGithubId
+                                    }
+                                    workflowRunId={pipeline.workflowRunId}
+                                  />
                                 </div>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      </Fragment>
-                    ))}
+                              ) : null}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={pipelineStateClass(displayedStatus)}
+                              >
+                                {tp(`pipelineStates.${displayedStatus}`)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end">
+                                <WorkflowRunActionsMenu
+                                  onCancelled={() =>
+                                    pipelineRunCancelled(pipeline.id)
+                                  }
+                                  onError={setError}
+                                  onRetried={() =>
+                                    pipelineRunRetried(pipeline.id)
+                                  }
+                                  run={{
+                                    id: pipeline.workflowRunId ?? pipeline.id,
+                                    workflowId:
+                                      pipeline.workflowId ?? pipeline.name,
+                                    repositoryGithubId:
+                                      pullRequest.repositoryGithubId,
+                                    codebaseRepositoryId:
+                                      !historicalAttempt &&
+                                      pipeline.workflowRunId
+                                        ? pullRequest.codebaseRepositoryId
+                                        : null,
+                                    name: pipeline.name,
+                                    displayTitle: pipeline.name,
+                                    status: displayedStatus,
+                                    url: displayedUrl,
+                                    checkSuiteId: historicalAttempt
+                                      ? null
+                                      : pipeline.checkSuiteId,
+                                    canRetry: historicalAttempt
+                                      ? false
+                                      : pipeline.canRetry,
+                                    retryUnavailableReason:
+                                      pipeline.retryUnavailableReason,
+                                  }}
+                                  viewAllHref={
+                                    pullRequest.codebaseRepositoryId &&
+                                    pipeline.workflowId
+                                      ? actionsForBranchHref(
+                                          pullRequest.codebaseRepositoryId,
+                                          pullRequest.headRefName,
+                                          pipeline.workflowId,
+                                        )
+                                      : null
+                                  }
+                                />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          <TableRow className="bg-muted/20 hover:bg-muted/20">
+                            <TableCell className="p-0" colSpan={3}>
+                              <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
+                                <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  {t("jobCount", {
+                                    count: displayedJobs.length,
+                                  })}
+                                </p>
+                                {displayedJobs.length === 0 ? (
+                                  <p className="px-3 pb-3 text-sm text-muted-foreground">
+                                    {t("noJobs")}
+                                  </p>
+                                ) : (
+                                  <div className="divide-y">
+                                    {displayedJobs.map((job) => (
+                                      <WorkflowJob
+                                        checkSuiteId={pipeline.checkSuiteId}
+                                        job={job}
+                                        key={job.id}
+                                        onError={setError}
+                                        onRetried={() =>
+                                          jobRetried(pipeline.id, job.id)
+                                        }
+                                        repositoryId={
+                                          pullRequest.repositoryGithubId
+                                        }
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -583,162 +712,6 @@ export function PullRequestDetailPage({
         onClose={() => replaceIssueParam(null)}
       />
     </section>
-  );
-}
-
-function WorkflowJob({
-  job,
-  repositoryId,
-  checkSuiteId,
-  onRetried,
-  onError,
-}: {
-  job: GitHubWorkflowJobView;
-  repositoryId: string;
-  checkSuiteId: string | null;
-  onRetried: () => void;
-  onError: (error: string | null) => void;
-}) {
-  const t = useTranslations("pullRequestDetail");
-  const tp = useTranslations("pullRequests");
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div>
-      <div className="flex items-center gap-2 px-2 py-1.5">
-        <button
-          aria-expanded={expanded}
-          aria-label={t(expanded ? "hideJobSteps" : "showJobSteps", {
-            job: job.name,
-          })}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => setExpanded((current) => !current)}
-          type="button"
-        >
-          {expanded ? (
-            <ChevronDown className="size-4 shrink-0" />
-          ) : (
-            <ChevronRight className="size-4 shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
-            {job.name}
-          </span>
-          <Badge className={pipelineStateClass(job.status)}>
-            {tp(`pipelineStates.${job.status}`)}
-          </Badge>
-        </button>
-        {job.url && (
-          <Button asChild size="sm" variant="outline">
-            <a
-              aria-label={t("viewJob", { job: job.name })}
-              href={job.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {t("viewPipeline")}
-              <ExternalLink />
-            </a>
-          </Button>
-        )}
-        <RetryWorkflowJobButton
-          checkSuiteId={checkSuiteId}
-          job={job}
-          onError={onError}
-          onRetried={onRetried}
-          repositoryId={repositoryId}
-        />
-      </div>
-      {expanded && (
-        <div className="mb-3 w-full rounded-md border bg-background p-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {t("steps")}
-          </p>
-          {job.steps.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("noSteps")}</p>
-          ) : (
-            <ol className="space-y-2">
-              {job.steps.map((step) => (
-                <li
-                  className="flex items-center gap-3 text-sm"
-                  key={step.number}
-                >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] text-muted-foreground">
-                    {step.number}
-                  </span>
-                  <span className="min-w-0 flex-1">{step.name}</span>
-                  <Badge className={pipelineStateClass(step.status)}>
-                    {tp(`pipelineStates.${step.status}`)}
-                  </Badge>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RetryWorkflowJobButton({
-  job,
-  repositoryId,
-  checkSuiteId,
-  onRetried,
-  onError,
-}: {
-  job: GitHubWorkflowJobView;
-  repositoryId: string;
-  checkSuiteId: string | null;
-  onRetried: () => void;
-  onError: (error: string | null) => void;
-}) {
-  const t = useTranslations("pullRequestDetail");
-  const tp = useTranslations("pullRequests");
-  const [retrying, setRetrying] = useState(false);
-
-  const retry = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (!job.canRetry || !checkSuiteId) return;
-    setRetrying(true);
-    try {
-      await controlPlaneRequest<{ retryGitHubWorkflowJob: boolean }>(
-        `mutation RetryGitHubWorkflowJob(
-          $repositoryId: ID!
-          $checkSuiteId: ID!
-          $jobId: ID!
-        ) {
-          retryGitHubWorkflowJob(
-            repositoryId: $repositoryId
-            checkSuiteId: $checkSuiteId
-            jobId: $jobId
-          )
-        }`,
-        { repositoryId, checkSuiteId, jobId: job.id },
-      );
-      onRetried();
-      onError(null);
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setRetrying(false);
-    }
-  };
-
-  const unavailableMessage = job.retryUnavailableReason
-    ? tp(`retryUnavailable.${job.retryUnavailableReason}`)
-    : undefined;
-  return (
-    <Button
-      aria-label={t("retryJob", { job: job.name })}
-      disabled={retrying || !job.canRetry || !checkSuiteId}
-      onClick={(event) => void retry(event)}
-      size="sm"
-      title={unavailableMessage}
-      variant="outline"
-    >
-      {retrying ? <Spinner /> : <RotateCcw />}
-      {retrying ? tp("retrying") : tp("retry")}
-    </Button>
   );
 }
 

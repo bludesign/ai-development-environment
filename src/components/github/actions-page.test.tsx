@@ -84,6 +84,7 @@ Object.defineProperties(HTMLElement.prototype, {
 
 const run = {
   id: "44",
+  workflowId: "workflow-1",
   repositoryGithubId: "repository-1",
   codebaseRepositoryId: "codebase-repository-1",
   repositoryNameWithOwner: "acme/widgets",
@@ -406,13 +407,75 @@ describe("ActionsPage", () => {
       ),
     );
 
+    fireEvent.change(screen.getByRole("textbox", { name: "Branch" }), {
+      target: { value: "feature/APP-42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("branch: $branch"),
+        expect.objectContaining({
+          codebaseRepositoryId: "codebase-repository-1",
+          branch: "feature/APP-42",
+          after: null,
+        }),
+      ),
+    );
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42",
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Pipeline" }));
+    fireEvent.click(screen.getByRole("option", { name: "CI" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("workflowId: $workflowId"),
+        expect.objectContaining({
+          codebaseRepositoryId: "codebase-repository-1",
+          branch: "feature/APP-42",
+          workflowId: "workflow-1",
+          after: null,
+        }),
+      ),
+    );
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1",
+    );
+
     const filteredRow = await screen.findByRole("row", {
       name: /APP-42 Ship widgets/,
     });
     fireEvent.click(
       within(filteredRow).getByRole("button", { name: "APP-42" }),
     );
-    expect(window.location.search).toBe("?issue=APP-42");
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1&issue=APP-42",
+    );
+  });
+
+  test("loads repository and branch filters from the URL", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/actions?repository=codebase-repository-1&branch=feature%2FAPP-42&pipeline=workflow-1",
+    );
+
+    render(<ActionsPage />);
+
+    expect(await screen.findByDisplayValue("feature/APP-42")).toBeDefined();
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({
+          codebaseRepositoryId: "codebase-repository-1",
+          branch: "feature/APP-42",
+          workflowId: "workflow-1",
+        }),
+      ),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Pipeline" }).textContent,
+    ).toContain("CI");
   });
 
   test("expands runs and jobs, shows steps, and retries a job", async () => {

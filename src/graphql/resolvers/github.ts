@@ -6,6 +6,7 @@ import type {
   GitHubMergeMethod,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
+  SaveGitHubAutoRetryRuleInput,
   GitHubService,
 } from "@/services/github";
 import { normalizeGitHubRepositoryName } from "@/services/github";
@@ -124,10 +125,14 @@ export const createGitHubResolvers = (
       _root: unknown,
       {
         codebaseRepositoryId,
+        branch,
+        workflowId,
         first,
         after,
       }: {
         codebaseRepositoryId?: string | null;
+        branch?: string | null;
+        workflowId?: string | null;
         first?: number | null;
         after?: string | null;
       },
@@ -138,6 +143,8 @@ export const createGitHubResolvers = (
         codebaseRepositoryId,
         first ?? 25,
         after,
+        branch,
+        workflowId,
       );
     },
     githubActionsWorkflowJobs: (
@@ -153,6 +160,57 @@ export const createGitHubResolvers = (
         codebaseRepositoryId,
         workflowRunId,
       );
+    },
+    githubActionsWorkflowRunAttempt: (
+      _root: unknown,
+      {
+        repositoryId,
+        workflowRunId,
+        attempt,
+      }: { repositoryId: string; workflowRunId: string; attempt: number },
+      context: GraphQLContext,
+      info?: GraphQLResolveInfo,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.actionsWorkflowRunAttempt(
+        repositoryId,
+        workflowRunId,
+        attempt,
+        requestsPipelineJobs(info),
+      );
+    },
+    githubWorktreeWorkflowRuns: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.worktreeWorkflowRuns(worktreeId);
+    },
+    githubRepositoryWorkflows: (
+      _root: unknown,
+      { codebaseRepositoryId }: { codebaseRepositoryId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.repositoryWorkflows(codebaseRepositoryId);
+    },
+    githubAutoRetryRules: (
+      _root: unknown,
+      {
+        codebaseRepositoryId,
+        workflowRunId,
+      }: {
+        codebaseRepositoryId?: string | null;
+        workflowRunId?: string | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.autoRetryRules({
+        codebaseRepositoryId,
+        workflowRunId,
+      });
     },
     githubPullRequests: (
       _root: unknown,
@@ -376,6 +434,30 @@ export const createGitHubResolvers = (
         force,
         auditContext(context),
       );
+    },
+    saveGitHubAutoRetryRule: (
+      _root: unknown,
+      { input }: { input: SaveGitHubAutoRetryRuleInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.saveAutoRetryRule(input);
+    },
+    setGitHubAutoRetryRuleEnabled: (
+      _root: unknown,
+      { id, enabled }: { id: string; enabled: boolean },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.setAutoRetryRuleEnabled(id, enabled);
+    },
+    deleteGitHubAutoRetryRule: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.deleteAutoRetryRule(id);
     },
     replyToGitHubReviewThread: (
       _root: unknown,

@@ -20,6 +20,7 @@ import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
 import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
+import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import type { GitHubActionsWorkflowRunView } from "@/services/github/types";
 
 import {
   BranchChangesPanel,
@@ -136,6 +138,10 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pipelines, setPipelines] = useState<GitHubActionsWorkflowRunView[]>(
+    [],
+  );
+  const [pipelinesError, setPipelinesError] = useState<string | null>(null);
   const latestLoad = useRef(0);
   const displayedCodebaseId = useRef<string | null>(null);
 
@@ -156,6 +162,32 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       setBuildsNextCursor(data.builds?.nextCursor ?? null);
       setCoverageReports(data.worktreeCoverageReports ?? []);
       setError(null);
+      try {
+        const pipelineData = await controlPlaneRequest<{
+          githubWorktreeWorkflowRuns: GitHubActionsWorkflowRunView[];
+        }>(
+          `query GitHubWorktreeWorkflowRuns($worktreeId: ID!) {
+            githubWorktreeWorkflowRuns(worktreeId: $worktreeId) {
+              id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl
+              name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId
+              canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt
+            }
+          }`,
+          { worktreeId },
+        );
+        if (requestId === latestLoad.current) {
+          setPipelines(pipelineData.githubWorktreeWorkflowRuns ?? []);
+          setPipelinesError(null);
+        }
+      } catch (pipelineError) {
+        if (requestId === latestLoad.current) {
+          setPipelinesError(
+            pipelineError instanceof Error
+              ? pipelineError.message
+              : String(pipelineError),
+          );
+        }
+      }
     } catch (value) {
       if (requestId === latestLoad.current) {
         setError(value instanceof Error ? value.message : String(value));
@@ -328,9 +360,40 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       key={entry.worktree.id}
       loadError={error}
       onLoadMoreBuilds={loadMoreBuilds}
+      onPipelineCancelled={(runId) =>
+        setPipelines((current) =>
+          current.map((run) =>
+            run.id === runId
+              ? {
+                  ...run,
+                  status: "CANCELLED",
+                  canRetry: false,
+                  retryUnavailableReason: "NOT_COMPLETED",
+                  updatedAt: new Date().toISOString(),
+                }
+              : run,
+          ),
+        )
+      }
+      onPipelineRetried={(runId) =>
+        setPipelines((current) =>
+          current.map((run) =>
+            run.id === runId
+              ? {
+                  ...run,
+                  status: "QUEUED",
+                  canRetry: false,
+                  retryUnavailableReason: "NOT_COMPLETED",
+                }
+              : run,
+          ),
+        )
+      }
       onReload={load}
       onUpdate={updateWorktree}
       overview={overview}
+      pipelines={pipelines}
+      pipelinesError={pipelinesError}
     />
   );
 }
@@ -342,8 +405,12 @@ function LoadedWorktreeDetail({
   buildsNextCursor,
   entry,
   overview,
+  pipelines,
+  pipelinesError,
   loadError,
   onLoadMoreBuilds,
+  onPipelineCancelled,
+  onPipelineRetried,
   onReload,
   onUpdate,
 }: {
@@ -353,8 +420,12 @@ function LoadedWorktreeDetail({
   buildsNextCursor: string | null;
   entry: WorktreeOverviewEntry;
   overview: WorktreeOverview;
+  pipelines: GitHubActionsWorkflowRunView[];
+  pipelinesError: string | null;
   loadError: string | null;
   onLoadMoreBuilds: () => Promise<void>;
+  onPipelineCancelled: (runId: string) => void;
+  onPipelineRetried: (runId: string) => void;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
 }) {
@@ -583,6 +654,16 @@ function LoadedWorktreeDetail({
           <ActionRow {...managementProps} onCompleted={reloadEverything} />
         </CardContent>
       </Card>
+
+      <WorktreePipelinesCard
+        branch={worktree.branch}
+        error={pipelinesError}
+        onCancelled={onPipelineCancelled}
+        onError={setOperationError}
+        onRetried={onPipelineRetried}
+        runs={pipelines}
+        worktreeId={worktree.id}
+      />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>

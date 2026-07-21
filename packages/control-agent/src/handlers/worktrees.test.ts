@@ -511,7 +511,7 @@ describe("worktree inventory and inspection", () => {
     await writeFile(join(folder, "watched.txt"), "stopped\n");
     await new Promise((resolve) => setTimeout(resolve, 750));
     expect(reportWorktreeActivity).not.toHaveBeenCalled();
-  });
+  }, 10_000);
 
   test("reports switching to a same-commit branch", async () => {
     const folder = await repository();

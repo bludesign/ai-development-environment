@@ -62,6 +62,7 @@ enum GitHubPipelineRetryUnavailableReason {
   NOT_COMPLETED
   NOT_GITHUB_ACTIONS
   WORKFLOW_RUN_UNAVAILABLE
+  HISTORICAL_ATTEMPT
 }
 
 type GitHubSettings {
@@ -143,6 +144,10 @@ type GitHubPipeline {
   canRetry: Boolean!
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
   jobs: [GitHubWorkflowJob!]!
+  workflowRunId: ID
+  workflowId: ID
+  runNumber: Int
+  runAttempt: Int
 }
 
 type GitHubWorkflowJobStep {
@@ -159,6 +164,7 @@ type GitHubWorkflowJob {
   canRetry: Boolean!
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
   steps: [GitHubWorkflowJobStep!]!
+  runAttempt: Int
 }
 
 type GitHubActionsRepository {
@@ -180,6 +186,7 @@ type GitHubActionsPullRequest {
 
 type GitHubActionsWorkflowRun {
   id: ID!
+  workflowId: ID!
   repositoryGithubId: ID!
   codebaseRepositoryId: ID!
   repositoryNameWithOwner: String!
@@ -202,6 +209,120 @@ type GitHubActionsWorkflowRun {
   startedAt: String!
   createdAt: String!
   updatedAt: String!
+}
+
+type GitHubWorkflowRunAttempt {
+  workflowRunId: ID!
+  runAttempt: Int!
+  status: GitHubPipelineState!
+  url: String!
+  triggeringActor: GitHubWorkflowRunActor
+  startedAt: String!
+  createdAt: String!
+  updatedAt: String!
+  jobs: [GitHubWorkflowJob!]!
+}
+
+type GitHubWorkflowRunActor {
+  login: String!
+  avatarUrl: String!
+  url: String!
+}
+
+type GitHubRepositoryWorkflow {
+  id: ID!
+  name: String!
+  path: String!
+  state: String!
+  url: String!
+  jobNames: [String!]!
+}
+
+enum GitHubAutoRetryScope {
+  WORKFLOW_RUN
+  WORKTREE_BRANCH
+  PULL_REQUEST
+  REPOSITORY
+}
+
+enum GitHubAutoRetryMode {
+  COUNT
+  FAILURE
+}
+
+enum GitHubAutoRetryFailureStrategy {
+  FAILED_JOBS
+  ALL_JOBS
+}
+
+enum GitHubAutoRetryRuleStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  EXHAUSTED
+  ERROR
+}
+
+type GitHubAutoRetryTarget {
+  id: ID!
+  workflowId: ID
+  workflowRunId: ID
+  jobName: String
+}
+
+type GitHubAutoRetryExecution {
+  id: ID!
+  workflowRunId: ID!
+  workflowId: ID!
+  targetKey: String!
+  status: String!
+  observedAttempt: Int!
+  automaticRetries: Int!
+  lastStatus: GitHubPipelineState
+  lastError: String
+  updatedAt: String!
+}
+
+type GitHubAutoRetryRule {
+  id: ID!
+  scope: GitHubAutoRetryScope!
+  codebaseRepositoryId: ID!
+  repositoryGithubId: ID
+  worktreeId: ID
+  branch: String
+  pullRequestNumber: Int
+  allWorkflows: Boolean!
+  mode: GitHubAutoRetryMode!
+  retryLimit: Int
+  failureStrategy: GitHubAutoRetryFailureStrategy!
+  status: GitHubAutoRetryRuleStatus!
+  enabled: Boolean!
+  lastError: String
+  targets: [GitHubAutoRetryTarget!]!
+  executions: [GitHubAutoRetryExecution!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+input GitHubAutoRetryTargetInput {
+  workflowId: ID
+  workflowRunId: ID
+  jobName: String
+}
+
+input SaveGitHubAutoRetryRuleInput {
+  id: ID
+  scope: GitHubAutoRetryScope!
+  codebaseRepositoryId: ID!
+  repositoryGithubId: ID
+  worktreeId: ID
+  branch: String
+  pullRequestNumber: Int
+  allWorkflows: Boolean!
+  mode: GitHubAutoRetryMode!
+  retryLimit: Int
+  failureStrategy: GitHubAutoRetryFailureStrategy!
+  targets: [GitHubAutoRetryTargetInput!]!
 }
 
 type GitHubActionsWorkflowRunPage {
@@ -273,6 +394,7 @@ type GitHubReviewThreadState {
 
 type GitHubPullRequestDetail {
   id: ID!
+  codebaseRepositoryId: ID
   number: Int!
   title: String!
   url: String!
@@ -367,6 +489,8 @@ extend type Query {
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubActionsWorkflowRuns(
     codebaseRepositoryId: ID
+    branch: String
+    workflowId: ID
     first: Int = 25
     after: String
   ): GitHubActionsWorkflowRunPage!
@@ -374,6 +498,19 @@ extend type Query {
     codebaseRepositoryId: ID!
     workflowRunId: ID!
   ): [GitHubWorkflowJob!]!
+  githubActionsWorkflowRunAttempt(
+    repositoryId: ID!
+    workflowRunId: ID!
+    attempt: Int!
+  ): GitHubWorkflowRunAttempt!
+  githubWorktreeWorkflowRuns(worktreeId: ID!): [GitHubActionsWorkflowRun!]!
+  githubRepositoryWorkflows(
+    codebaseRepositoryId: ID!
+  ): [GitHubRepositoryWorkflow!]!
+  githubAutoRetryRules(
+    codebaseRepositoryId: ID
+    workflowRunId: ID
+  ): [GitHubAutoRetryRule!]!
   githubPullRequests(
     scope: GitHubPullRequestScope!
     repositoryId: ID
@@ -420,6 +557,14 @@ extend type Mutation {
     workflowRunId: ID!
     force: Boolean! = false
   ): Boolean!
+  saveGitHubAutoRetryRule(
+    input: SaveGitHubAutoRetryRuleInput!
+  ): GitHubAutoRetryRule!
+  setGitHubAutoRetryRuleEnabled(
+    id: ID!
+    enabled: Boolean!
+  ): GitHubAutoRetryRule!
+  deleteGitHubAutoRetryRule(id: ID!): Boolean!
   replyToGitHubReviewThread(threadId: ID!, body: String!): GitHubReviewComment!
   setGitHubReviewThreadResolved(
     threadId: ID!

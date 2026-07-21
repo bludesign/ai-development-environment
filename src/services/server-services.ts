@@ -57,7 +57,7 @@ function createServerServices(): ServerServices {
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService();
   const iosDevicesService = new IosDevicesService();
-  const gitHubService = new GitHubService();
+  const gitHubService = new GitHubService(true);
   const cacheServerService = new CacheServerService();
   const worktreesService = new WorktreesService(
     agentControlService,

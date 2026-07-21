@@ -133,6 +133,8 @@ describe("GitHub resolvers", () => {
       {},
       {
         codebaseRepositoryId: "codebase-repository-1",
+        branch: "feature/APP-42",
+        workflowId: "workflow-1",
         first: 10,
         after: "cursor-1",
       },
@@ -228,6 +230,8 @@ describe("GitHub resolvers", () => {
       "codebase-repository-1",
       10,
       "cursor-1",
+      "feature/APP-42",
+      "workflow-1",
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
       "codebase-repository-1",
@@ -304,5 +308,61 @@ describe("GitHub resolvers", () => {
       first: 25,
       after: undefined,
     });
+  });
+
+  test("only hydrates attempt jobs when the query selects them", async () => {
+    const service = {
+      actionsWorkflowRunAttempt: vi.fn().mockResolvedValue({ jobs: [] }),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+    const args = {
+      repositoryId: "repository-1",
+      workflowRunId: "77",
+      attempt: 2,
+    };
+
+    await resolvers.Query.githubActionsWorkflowRunAttempt(
+      {},
+      args,
+      context(null),
+      resolveInfo(`
+        query Attempt {
+          githubActionsWorkflowRunAttempt(
+            repositoryId: "repository-1"
+            workflowRunId: "77"
+            attempt: 2
+          ) { status startedAt }
+        }
+      `),
+    );
+    await resolvers.Query.githubActionsWorkflowRunAttempt(
+      {},
+      args,
+      context(null),
+      resolveInfo(`
+        query Attempt {
+          githubActionsWorkflowRunAttempt(
+            repositoryId: "repository-1"
+            workflowRunId: "77"
+            attempt: 2
+          ) { status jobs { name } }
+        }
+      `),
+    );
+
+    expect(service.actionsWorkflowRunAttempt).toHaveBeenNthCalledWith(
+      1,
+      "repository-1",
+      "77",
+      2,
+      false,
+    );
+    expect(service.actionsWorkflowRunAttempt).toHaveBeenNthCalledWith(
+      2,
+      "repository-1",
+      "77",
+      2,
+      true,
+    );
   });
 });
