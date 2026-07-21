@@ -218,6 +218,19 @@ describe("CacheServerService", () => {
     expect(result).toBeNull();
   });
 
+  test("deleteCacheEntriesByIds deletes each entry individually", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(undefined));
+    await new CacheServerService().deleteCacheEntriesByIds([
+      "entry-1",
+      "entry-2",
+    ]);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(String(calls[0][0]).endsWith("/cache-entries/entry-1")).toBe(true);
+    expect(String(calls[1][0]).endsWith("/cache-entries/entry-2")).toBe(true);
+    expect(calls.every(([, init]) => init?.method === "DELETE")).toBe(true);
+  });
+
   test("deleteCacheEntries issues a DELETE with the filters as a JSON body", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(undefined));
     await new CacheServerService().deleteCacheEntries({

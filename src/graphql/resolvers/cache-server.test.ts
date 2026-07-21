@@ -51,6 +51,7 @@ describe("cache server resolvers", () => {
       testConnection: vi.fn(() => "tested"),
       clearSettings: vi.fn(() => "cleared"),
       deleteCacheEntry: vi.fn(() => true),
+      deleteCacheEntriesByIds: vi.fn(() => true),
       deleteCacheEntries: vi.fn(() => true),
       deleteStorageLocation: vi.fn(() => true),
     } as unknown as CacheServerService;
@@ -87,6 +88,16 @@ describe("cache server resolvers", () => {
 
     resolvers.Mutation.deleteCacheEntry({}, { id: "entry-1" }, ctx);
     expect(service.deleteCacheEntry).toHaveBeenCalledWith("entry-1");
+
+    resolvers.Mutation.deleteCacheEntriesByIds(
+      {},
+      { ids: ["entry-1", "entry-2"] },
+      ctx,
+    );
+    expect(service.deleteCacheEntriesByIds).toHaveBeenCalledWith([
+      "entry-1",
+      "entry-2",
+    ]);
 
     const filters = { key: "cache", version: "v1" };
     resolvers.Mutation.deleteCacheEntries({}, filters, ctx);

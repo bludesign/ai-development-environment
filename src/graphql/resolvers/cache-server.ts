@@ -93,6 +93,14 @@ export const createCacheServerResolvers = (
       requireControlPlane(context);
       return cacheServerService.deleteCacheEntry(id);
     },
+    deleteCacheEntriesByIds: (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return cacheServerService.deleteCacheEntriesByIds(ids);
+    },
     deleteCacheEntries: (
       _root: unknown,
       filters: CacheEntryFilters,

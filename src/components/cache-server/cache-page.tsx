@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  Check,
   DatabaseZap,
   Eye,
+  Pencil,
   RefreshCw,
   Search,
   SearchCheck,
@@ -18,11 +20,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -122,6 +126,8 @@ export function CacheServerPage() {
   const [error, setError] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [matchOpen, setMatchOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const formatTimestamp = useCallback(
     (value: number | null) =>
@@ -185,16 +191,25 @@ export function CacheServerPage() {
     return () => window.clearTimeout(timeout);
   }, [load]);
 
+  // Selection only ever refers to the rows currently on screen, so anything that
+  // swaps out those rows also clears it.
+  const clearSelection = () => setSelected(new Set());
+
+  const goToPage = (next: number) => {
+    setPage(next);
+    clearSelection();
+  };
+
   const applyFilters = (event: FormEvent) => {
     event.preventDefault();
-    setPage(1);
+    goToPage(1);
     setAppliedFilters({ ...filters });
   };
 
   const resetFilters = () => {
     setFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
-    setPage(1);
+    goToPage(1);
   };
 
   const deleteEntry = async (id: string) => {
@@ -204,6 +219,24 @@ export function CacheServerPage() {
         "mutation DeleteCacheEntry($id: ID!) { deleteCacheEntry(id: $id) }",
         { id },
       );
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBusyKey("selection");
+    try {
+      await controlPlaneRequest(
+        "mutation DeleteCacheEntriesByIds($ids: [ID!]!) { deleteCacheEntriesByIds(ids: $ids) }",
+        { ids },
+      );
+      setSelected(new Set());
       await load();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -245,6 +278,14 @@ export function CacheServerPage() {
   const start = total === 0 ? 0 : (page - 1) * itemsPerPage + 1;
   const end = Math.min(page * itemsPerPage, total);
   const bulkEnabled = hasActiveFilters(appliedFilters);
+  const selectedItems = items.filter((entry) => selected.has(entry.id));
+  const allSelected = items.length > 0 && selectedItems.length === items.length;
+  const someSelected = selectedItems.length > 0 && !allSelected;
+
+  const stopEditing = () => {
+    setEditing(false);
+    clearSelection();
+  };
 
   if (configured === null) {
     return (
@@ -415,7 +456,7 @@ export function CacheServerPage() {
                 <Select
                   onValueChange={(value) => {
                     setItemsPerPage(Number(value));
-                    setPage(1);
+                    goToPage(1);
                   }}
                   value={String(itemsPerPage)}
                 >
@@ -466,7 +507,48 @@ export function CacheServerPage() {
         <CardHeader className="border-b py-4">
           <CardTitle>{t("entriesTitle")}</CardTitle>
           <CardDescription>{t("entriesDescription")}</CardDescription>
+          {items.length > 0 && (
+            <CardAction>
+              <Button
+                onClick={() => (editing ? stopEditing() : setEditing(true))}
+                size="sm"
+                variant={editing ? "secondary" : "outline"}
+              >
+                {editing ? <Check /> : <Pencil />}
+                {editing ? t("doneEditing") : t("edit")}
+              </Button>
+            </CardAction>
+          )}
         </CardHeader>
+        {editing && items.length > 0 && (
+          <div className="flex items-center justify-between gap-3 border-b p-3">
+            <p className="text-sm">
+              {t("selected", { count: selectedItems.length })}
+            </p>
+            <ConfirmationDialog
+              actionLabel={t("deleteSelected")}
+              cancelLabel={tc("cancel")}
+              description={tc("cannotBeUndone")}
+              onConfirm={deleteSelected}
+              title={t("confirmDeleteSelected", {
+                count: selectedItems.length,
+              })}
+              trigger={
+                <Button
+                  disabled={
+                    selectedItems.length === 0 || busyKey === "selection"
+                  }
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                >
+                  <Trash2 />
+                  {t("deleteSelected")}
+                </Button>
+              }
+            />
+          </div>
+        )}
         {loading && !data ? (
           <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
             <Spinner />
@@ -483,6 +565,27 @@ export function CacheServerPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {editing && (
+                    <TableHead className="w-12">
+                      <Checkbox
+                        aria-label={t("selectAll")}
+                        checked={
+                          allSelected
+                            ? true
+                            : someSelected
+                              ? "indeterminate"
+                              : false
+                        }
+                        onCheckedChange={(checked) =>
+                          setSelected(
+                            checked === true
+                              ? new Set(items.map((entry) => entry.id))
+                              : new Set(),
+                          )
+                        }
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>{t("key")}</TableHead>
                   <TableHead>{t("scope")}</TableHead>
                   <TableHead>{t("version")}</TableHead>
@@ -494,6 +597,22 @@ export function CacheServerPage() {
               <TableBody>
                 {items.map((entry) => (
                   <TableRow key={entry.id}>
+                    {editing && (
+                      <TableCell>
+                        <Checkbox
+                          aria-label={t("selectEntry", { name: entry.key })}
+                          checked={selected.has(entry.id)}
+                          onCheckedChange={(checked) =>
+                            setSelected((current) => {
+                              const next = new Set(current);
+                              if (checked === true) next.add(entry.id);
+                              else next.delete(entry.id);
+                              return next;
+                            })
+                          }
+                        />
+                      </TableCell>
+                    )}
                     <TableCell className="max-w-xs truncate font-medium">
                       {entry.key}
                     </TableCell>
@@ -545,7 +664,7 @@ export function CacheServerPage() {
               <div className="flex gap-2">
                 <Button
                   disabled={page <= 1}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  onClick={() => goToPage(Math.max(1, page - 1))}
                   size="sm"
                   variant="outline"
                 >
@@ -553,7 +672,7 @@ export function CacheServerPage() {
                 </Button>
                 <Button
                   disabled={end >= total}
-                  onClick={() => setPage((current) => current + 1)}
+                  onClick={() => goToPage(page + 1)}
                   size="sm"
                   variant="outline"
                 >

@@ -101,6 +101,7 @@ extend type Mutation {
   testCacheServerConnection: CacheServerSettings!
   clearCacheServerSettings: CacheServerSettings!
   deleteCacheEntry(id: ID!): Boolean!
+  deleteCacheEntriesByIds(ids: [ID!]!): Boolean!
   deleteCacheEntries(
     key: String
     version: String

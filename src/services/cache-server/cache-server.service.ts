@@ -309,6 +309,13 @@ export class CacheServerService {
     return true;
   }
 
+  async deleteCacheEntriesByIds(ids: string[]): Promise<boolean> {
+    for (const id of ids) {
+      await this.deleteCacheEntry(id);
+    }
+    return true;
+  }
+
   async deleteCacheEntries(filters: CacheEntryFilters): Promise<boolean> {
     const body: Record<string, string> = {};
     if (filters.key?.trim()) body.key = filters.key.trim();
