@@ -136,25 +136,28 @@ export function CacheServerPage() {
     [locale],
   );
 
-  const load = useCallback(async (requestedPage = page) => {
-    const generation = ++loadGeneration.current;
-    setLoading(true);
-    try {
-      const config = await controlPlaneRequest<{
-        cacheServerSettings: { configured: boolean };
-      }>("query CacheServerConfigured { cacheServerSettings { configured } }");
-      if (generation !== loadGeneration.current) return;
-      if (!config.cacheServerSettings.configured) {
-        setConfigured(false);
-        setData(null);
-        setError(null);
-        return;
-      }
-      setConfigured(true);
-      const result = await controlPlaneRequest<{
-        cacheEntries: CacheEntryPageView;
-      }>(
-        `query CacheServerEntries(
+  const load = useCallback(
+    async (requestedPage = page) => {
+      const generation = ++loadGeneration.current;
+      setLoading(true);
+      try {
+        const config = await controlPlaneRequest<{
+          cacheServerSettings: { configured: boolean };
+        }>(
+          "query CacheServerConfigured { cacheServerSettings { configured } }",
+        );
+        if (generation !== loadGeneration.current) return;
+        if (!config.cacheServerSettings.configured) {
+          setConfigured(false);
+          setData(null);
+          setError(null);
+          return;
+        }
+        setConfigured(true);
+        const result = await controlPlaneRequest<{
+          cacheEntries: CacheEntryPageView;
+        }>(
+          `query CacheServerEntries(
           $key: String
           $version: String
           $scope: String
@@ -174,36 +177,35 @@ export function CacheServerPage() {
             items { ${CACHE_ENTRY_FIELDS} }
           }
         }`,
-        {
-          ...toFilterInput(appliedFilters),
-          itemsPerPage,
-          page: requestedPage,
-        },
-      );
-      if (generation !== loadGeneration.current) return;
-      const lastPage = Math.max(
-        1,
-        Math.ceil(result.cacheEntries.total / itemsPerPage),
-      );
-      if (
-        result.cacheEntries.total > 0 &&
-        requestedPage > lastPage
-      ) {
-        setData(null);
-        setPage(lastPage);
-        setSelected(new Set());
-        return;
+          {
+            ...toFilterInput(appliedFilters),
+            itemsPerPage,
+            page: requestedPage,
+          },
+        );
+        if (generation !== loadGeneration.current) return;
+        const lastPage = Math.max(
+          1,
+          Math.ceil(result.cacheEntries.total / itemsPerPage),
+        );
+        if (result.cacheEntries.total > 0 && requestedPage > lastPage) {
+          setData(null);
+          setPage(lastPage);
+          setSelected(new Set());
+          return;
+        }
+        setData(result.cacheEntries);
+        setError(null);
+      } catch (value) {
+        if (generation === loadGeneration.current) {
+          setError(value instanceof Error ? value.message : String(value));
+        }
+      } finally {
+        if (generation === loadGeneration.current) setLoading(false);
       }
-      setData(result.cacheEntries);
-      setError(null);
-    } catch (value) {
-      if (generation === loadGeneration.current) {
-        setError(value instanceof Error ? value.message : String(value));
-      }
-    } finally {
-      if (generation === loadGeneration.current) setLoading(false);
-    }
-  }, [appliedFilters, itemsPerPage, page]);
+    },
+    [appliedFilters, itemsPerPage, page],
+  );
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);

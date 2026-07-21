@@ -49,9 +49,7 @@ export function CacheServerSettingsCard() {
     setSettings(next);
     setBaseUrl(next.baseUrl ?? "");
     setApiKey("");
-    setHeaders(
-      next.headers.map((header) => ({ ...header, value: "" })),
-    );
+    setHeaders(next.headers.map((header) => ({ ...header, value: "" })));
   }, []);
 
   const load = useCallback(async () => {

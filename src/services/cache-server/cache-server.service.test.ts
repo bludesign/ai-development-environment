@@ -108,9 +108,7 @@ describe("CacheServerService", () => {
     expect(view.configured).toBe(true);
     expect(view.apiKeyConfigured).toBe(true);
     expect(view.baseUrl).toBe("http://cache.test/api");
-    expect(view.headers).toEqual([
-      { name: "x-tenant", valueConfigured: true },
-    ]);
+    expect(view.headers).toEqual([{ name: "x-tenant", valueConfigured: true }]);
     expect(view).not.toHaveProperty("apiKey");
     expect(view.headers[0]).not.toHaveProperty("value");
   });
@@ -126,9 +124,7 @@ describe("CacheServerService", () => {
     expect(state.settings?.headersJson).toBe(
       JSON.stringify([{ name: "x-tenant", value: "beta" }]),
     );
-    expect(view.headers).toEqual([
-      { name: "x-tenant", valueConfigured: true },
-    ]);
+    expect(view.headers).toEqual([{ name: "x-tenant", valueConfigured: true }]);
   });
 
   test("saveSettings keeps stored custom-header values when blank", async () => {
@@ -140,9 +136,7 @@ describe("CacheServerService", () => {
     expect(state.settings?.headersJson).toBe(
       JSON.stringify([{ name: "X-Tenant", value: "acme" }]),
     );
-    expect(view.headers).toEqual([
-      { name: "X-Tenant", valueConfigured: true },
-    ]);
+    expect(view.headers).toEqual([{ name: "X-Tenant", valueConfigured: true }]);
   });
 
   test("saveSettings requires values for new custom headers", async () => {
@@ -306,8 +300,7 @@ describe("CacheServerService", () => {
     expect(
       calls.some(
         ([url, init]) =>
-          init?.method === "DELETE" &&
-          String(url).endsWith("/cache-entries"),
+          init?.method === "DELETE" && String(url).endsWith("/cache-entries"),
       ),
     ).toBe(false);
   });
@@ -323,9 +316,9 @@ describe("CacheServerService", () => {
     "testConnection rejects an invalid management response: %j",
     async (body) => {
       vi.mocked(fetch).mockResolvedValue(jsonResponse(body));
-      await expect(
-        new CacheServerService().testConnection(),
-      ).rejects.toThrow("invalid cache entry response");
+      await expect(new CacheServerService().testConnection()).rejects.toThrow(
+        "invalid cache entry response",
+      );
     },
   );
 
