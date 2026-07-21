@@ -163,12 +163,14 @@ export const createGitHubResolvers = (
         attempt,
       }: { repositoryId: string; workflowRunId: string; attempt: number },
       context: GraphQLContext,
+      info?: GraphQLResolveInfo,
     ) => {
       requireControlPlane(context);
       return gitHubService.actionsWorkflowRunAttempt(
         repositoryId,
         workflowRunId,
         attempt,
+        requestsPipelineJobs(info),
       );
     },
     githubWorktreeWorkflowRuns: (

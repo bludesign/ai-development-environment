@@ -141,6 +141,14 @@ type RawActionsWorkflowRun = {
   run_started_at: string | null;
   created_at: string;
   updated_at: string;
+  actor?: RawWorkflowRunActor | null;
+  triggering_actor?: RawWorkflowRunActor | null;
+};
+
+type RawWorkflowRunActor = {
+  login: string;
+  avatar_url: string;
+  html_url: string;
 };
 
 type RawRepositoryWorkflow = {
@@ -1806,6 +1814,7 @@ export class GitHubService {
     repositoryId: string,
     workflowRunId: string,
     attempt: number,
+    includeJobs = true,
   ): Promise<GitHubWorkflowRunAttemptView> {
     if (!repositoryId.trim() || !workflowRunId.trim()) {
       throw new Error("Repository and workflow run IDs are required");
@@ -1816,9 +1825,11 @@ export class GitHubService {
     const [target, token, appSettings] = await Promise.all([
       this.actionsTargetByIdentifier(repositoryId),
       this.requireToken(),
-      (await getPrismaClient()).gitHubAppSettings.findUnique({
-        where: { id: GITHUB_APP_SETTINGS_ID },
-      }),
+      includeJobs
+        ? (await getPrismaClient()).gitHubAppSettings.findUnique({
+            where: { id: GITHUB_APP_SETTINGS_ID },
+          })
+        : null,
     ]);
     const run = await this.restRequest<RawActionsWorkflowRun>(
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
@@ -1826,17 +1837,27 @@ export class GitHubService {
       )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}`,
       token,
     );
-    const jobs = await this.patWorkflowAttemptJobs(
-      target,
-      workflowRunId,
-      attempt,
-      token,
-    );
+    const jobs = includeJobs
+      ? await this.patWorkflowAttemptJobs(target, workflowRunId, attempt, token)
+      : [];
     return {
       workflowRunId,
       runAttempt: run.run_attempt ?? attempt,
       status: pipelineState(run.status, run.conclusion),
       url: run.html_url,
+      triggeringActor: run.triggering_actor
+        ? {
+            login: run.triggering_actor.login,
+            avatarUrl: run.triggering_actor.avatar_url,
+            url: run.triggering_actor.html_url,
+          }
+        : run.actor
+          ? {
+              login: run.actor.login,
+              avatarUrl: run.actor.avatar_url,
+              url: run.actor.html_url,
+            }
+          : null,
       startedAt: run.run_started_at ?? run.created_at,
       createdAt: run.created_at,
       updatedAt: run.updated_at,

@@ -126,11 +126,18 @@ export type GitHubWorkflowJobView = {
   runAttempt?: number | null;
 };
 
+export type GitHubWorkflowRunActor = {
+  login: string;
+  avatarUrl: string;
+  url: string;
+};
+
 export type GitHubWorkflowRunAttemptView = {
   workflowRunId: string;
   runAttempt: number;
   status: GitHubPipelineState;
   url: string;
+  triggeringActor: GitHubWorkflowRunActor | null;
   startedAt: string;
   createdAt: string;
   updatedAt: string;

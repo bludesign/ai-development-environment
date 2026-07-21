@@ -32,14 +32,25 @@ describe("WorkflowAttemptSelect", () => {
       runAttempt: 2,
       status: "FAILURE" as const,
       url: "https://github.com/acme/widgets/actions/runs/77/attempts/2",
+      triggeringActor: {
+        login: "octocat",
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
+        url: "https://github.com/octocat",
+      },
       startedAt: "2026-07-21T12:00:00.000Z",
       createdAt: "2026-07-21T12:00:00.000Z",
       updatedAt: "2026-07-21T12:01:00.000Z",
       jobs: [],
     };
-    vi.mocked(controlPlaneRequest).mockResolvedValue({
-      githubActionsWorkflowRunAttempt: historical,
-    } as never);
+    vi.mocked(controlPlaneRequest).mockImplementation(
+      async (_query, variables) => ({
+        githubActionsWorkflowRunAttempt: {
+          ...historical,
+          runAttempt: Number(variables?.attempt),
+          status: variables?.attempt === 3 ? "SUCCESS" : "FAILURE",
+        },
+      }),
+    );
     const onAttemptChange = vi.fn();
 
     render(
@@ -52,14 +63,28 @@ describe("WorkflowAttemptSelect", () => {
     );
 
     fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(await screen.findByRole("option", { name: "Attempt 2" }));
+    expect(await screen.findByText("Passed")).toBeTruthy();
+    expect(await screen.findAllByText(/by @octocat/)).toHaveLength(3);
+    fireEvent.click(await screen.findByRole("option", { name: /Attempt 2/ }));
 
     await waitFor(() =>
-      expect(onAttemptChange).toHaveBeenCalledWith(historical),
+      expect(onAttemptChange).toHaveBeenCalledWith({
+        ...historical,
+        runAttempt: 2,
+      }),
     );
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(4);
     expect(controlPlaneRequest).toHaveBeenCalledWith(
-      expect.stringContaining("githubActionsWorkflowRunAttempt"),
-      { repositoryId: "repository-1", workflowRunId: "77", attempt: 2 },
+      expect.stringContaining("triggeringActor { login avatarUrl url }"),
+      expect.objectContaining({
+        repositoryId: "repository-1",
+        workflowRunId: "77",
+        attempt: 2,
+      }),
+    );
+    expect(controlPlaneRequest).toHaveBeenLastCalledWith(
+      expect.stringContaining("jobs { id name status"),
+      expect.objectContaining({ attempt: 2 }),
     );
   });
 });

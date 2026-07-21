@@ -317,6 +317,11 @@ function rawActionsWorkflowRun(
     run_started_at: createdAt,
     created_at: createdAt,
     updated_at: createdAt,
+    triggering_actor: {
+      login: "octocat",
+      avatar_url: "https://avatars.githubusercontent.com/u/1?v=4",
+      html_url: "https://github.com/octocat",
+    },
   };
 }
 
@@ -537,6 +542,11 @@ describe("GitHub service", () => {
       workflowRunId: "77",
       runAttempt: 2,
       status: "FAILURE",
+      triggeringActor: {
+        login: "octocat",
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
+        url: "https://github.com/octocat",
+      },
       jobs: [
         {
           id: "501",
@@ -547,6 +557,37 @@ describe("GitHub service", () => {
         },
       ],
     });
+  });
+
+  test("skips attempt jobs when only metadata is requested", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/actions/runs/77/attempts/2")) {
+        return response({
+          ...rawActionsWorkflowRun(
+            77,
+            "acme/widgets",
+            "2026-07-21T12:00:00.000Z",
+          ),
+          run_attempt: 2,
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().actionsWorkflowRunAttempt(
+        "codebase-repository-1",
+        "77",
+        2,
+        false,
+      ),
+    ).resolves.toMatchObject({
+      workflowRunId: "77",
+      runAttempt: 2,
+      jobs: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("merges and paginates workflow runs across unique GitHub codebases", async () => {

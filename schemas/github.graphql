@@ -216,10 +216,17 @@ type GitHubWorkflowRunAttempt {
   runAttempt: Int!
   status: GitHubPipelineState!
   url: String!
+  triggeringActor: GitHubWorkflowRunActor
   startedAt: String!
   createdAt: String!
   updatedAt: String!
   jobs: [GitHubWorkflowJob!]!
+}
+
+type GitHubWorkflowRunActor {
+  login: String!
+  avatarUrl: String!
+  url: String!
 }
 
 type GitHubRepositoryWorkflow {
