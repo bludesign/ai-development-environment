@@ -133,6 +133,7 @@ describe("GitHub resolvers", () => {
       {},
       {
         codebaseRepositoryId: "codebase-repository-1",
+        branch: "feature/APP-42",
         first: 10,
         after: "cursor-1",
       },
@@ -228,6 +229,7 @@ describe("GitHub resolvers", () => {
       "codebase-repository-1",
       10,
       "cursor-1",
+      "feature/APP-42",
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
       "codebase-repository-1",

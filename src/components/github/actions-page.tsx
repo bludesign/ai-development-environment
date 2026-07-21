@@ -11,10 +11,12 @@ import {
   PlayCircle,
   RefreshCw,
   RotateCcw,
+  X,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
+  FormEvent,
   Fragment,
   MouseEvent,
   useCallback,
@@ -34,6 +36,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -110,6 +113,24 @@ function replaceIssueParam(issueKey: string | null) {
   );
 }
 
+function replaceFilterParams(repositoryId: string, branch: string) {
+  const params = new URLSearchParams(window.location.search);
+  if (repositoryId === ALL_REPOSITORIES) {
+    params.delete("repository");
+    params.delete("branch");
+  } else {
+    params.set("repository", repositoryId);
+    if (branch) params.set("branch", branch);
+    else params.delete("branch");
+  }
+  const query = params.toString();
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}`,
+  );
+}
+
 function relativeAge(value: string, locale: string) {
   const seconds = Math.round((Date.parse(value) - Date.now()) / 1000);
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
@@ -163,6 +184,10 @@ export function ActionsPage() {
   const t = useTranslations("actionsPage");
   const searchParams = useSearchParams();
   const issueKey = searchParams.get("issue");
+  const initialFiltersRef = useRef({
+    repositoryId: searchParams.get("repository")?.trim() || ALL_REPOSITORIES,
+    branch: searchParams.get("branch")?.trim() || "",
+  });
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [configurationLoading, setConfigurationLoading] = useState(true);
   const [runs, setRuns] = useState<GitHubActionsWorkflowRunView[]>([]);
@@ -172,8 +197,19 @@ export function ActionsPage() {
   const [repositoryErrors, setRepositoryErrors] = useState<
     GitHubActionsRepositoryErrorView[]
   >([]);
-  const [selectedRepositoryId, setSelectedRepositoryId] =
-    useState(ALL_REPOSITORIES);
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState(
+    initialFiltersRef.current.repositoryId,
+  );
+  const [selectedBranch, setSelectedBranch] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ""
+      : initialFiltersRef.current.branch,
+  );
+  const [branchInput, setBranchInput] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ""
+      : initialFiltersRef.current.branch,
+  );
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -189,6 +225,7 @@ export function ActionsPage() {
   const loadRuns = useCallback(
     async (
       repositoryId: string,
+      branch: string,
       options: { append: boolean; cursor?: string | null } = {
         append: false,
       },
@@ -224,11 +261,13 @@ export function ActionsPage() {
         }>(
           `query GitHubActionsWorkflowRuns(
             $codebaseRepositoryId: ID
+            $branch: String
             $first: Int!
             $after: String
           ) {
             githubActionsWorkflowRuns(
               codebaseRepositoryId: $codebaseRepositoryId
+              branch: $branch
               first: $first
               after: $after
             ) {
@@ -242,6 +281,8 @@ export function ActionsPage() {
           {
             codebaseRepositoryId:
               repositoryId === ALL_REPOSITORIES ? null : repositoryId,
+            branch:
+              repositoryId === ALL_REPOSITORIES || !branch ? null : branch,
             first: 25,
             after: options.cursor ?? null,
           },
@@ -297,7 +338,13 @@ export function ActionsPage() {
         setSettings(data.githubSettings);
         setError(null);
         if (data.githubSettings.tokenConfigured) {
-          await loadRuns(ALL_REPOSITORIES);
+          const initialFilters = initialFiltersRef.current;
+          await loadRuns(
+            initialFilters.repositoryId,
+            initialFilters.repositoryId === ALL_REPOSITORIES
+              ? ""
+              : initialFilters.branch,
+          );
         }
       } catch (value) {
         setError(value instanceof Error ? value.message : String(value));
@@ -324,7 +371,7 @@ export function ActionsPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadRuns(selectedRepositoryId, {
+        void loadRuns(selectedRepositoryId, selectedBranch, {
           append: true,
           cursor: endCursor,
         });
@@ -341,12 +388,33 @@ export function ActionsPage() {
     loadingMore,
     paginationError,
     selectedRepositoryId,
+    selectedBranch,
     settings?.tokenConfigured,
   ]);
 
   const selectRepository = (repositoryId: string) => {
     setSelectedRepositoryId(repositoryId);
-    void loadRuns(repositoryId);
+    setSelectedBranch("");
+    setBranchInput("");
+    replaceFilterParams(repositoryId, "");
+    void loadRuns(repositoryId, "");
+  };
+
+  const applyBranchFilter = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const branch = branchInput.trim();
+    setBranchInput(branch);
+    setSelectedBranch(branch);
+    replaceFilterParams(selectedRepositoryId, branch);
+    void loadRuns(selectedRepositoryId, branch);
+  };
+
+  const clearBranchFilter = () => {
+    setBranchInput("");
+    if (!selectedBranch) return;
+    setSelectedBranch("");
+    replaceFilterParams(selectedRepositoryId, "");
+    void loadRuns(selectedRepositoryId, "");
   };
 
   const loadJobs = useCallback(async (run: GitHubActionsWorkflowRunView) => {
@@ -524,7 +592,7 @@ export function ActionsPage() {
         </div>
         <Button
           disabled={!settings?.tokenConfigured || loading}
-          onClick={() => void loadRuns(selectedRepositoryId)}
+          onClick={() => void loadRuns(selectedRepositoryId, selectedBranch)}
           variant="outline"
         >
           <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -561,7 +629,7 @@ export function ActionsPage() {
       ) : (
         <>
           {repositories.length > 0 && (
-            <div className="max-w-lg">
+            <div className="grid max-w-4xl gap-3 sm:grid-cols-2">
               <SearchableSelect
                 ariaLabel={t("repositoryFilter")}
                 emptyMessage={t("noRepositoryMatches")}
@@ -571,6 +639,34 @@ export function ActionsPage() {
                 searchPlaceholder={t("searchRepositories")}
                 value={selectedRepositoryId}
               />
+              {selectedRepositoryId !== ALL_REPOSITORIES && (
+                <form className="flex gap-2" onSubmit={applyBranchFilter}>
+                  <Input
+                    aria-label={t("branchFilter")}
+                    autoCapitalize="none"
+                    onChange={(event) => setBranchInput(event.target.value)}
+                    placeholder={t("branchFilterPlaceholder")}
+                    spellCheck={false}
+                    value={branchInput}
+                  />
+                  <Button disabled={loading} type="submit" variant="outline">
+                    {t("applyBranchFilter")}
+                  </Button>
+                  {(branchInput || selectedBranch) && (
+                    <Button
+                      aria-label={t("clearBranchFilter")}
+                      disabled={loading}
+                      onClick={clearBranchFilter}
+                      size="icon"
+                      title={t("clearBranchFilter")}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <X />
+                    </Button>
+                  )}
+                </form>
+              )}
             </div>
           )}
 
@@ -627,7 +723,7 @@ export function ActionsPage() {
                 <Button
                   disabled={loadingMore || !endCursor}
                   onClick={() =>
-                    void loadRuns(selectedRepositoryId, {
+                    void loadRuns(selectedRepositoryId, selectedBranch, {
                       append: true,
                       cursor: endCursor,
                     })

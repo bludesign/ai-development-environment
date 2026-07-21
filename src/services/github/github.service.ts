@@ -168,6 +168,7 @@ type ActionsRepositoryTarget = GitHubActionsRepositoryView & {
 type ActionsCursor = {
   version: 1;
   codebaseRepositoryId: string | null;
+  branch: string | null;
   consumed: Record<string, number>;
 };
 
@@ -487,9 +488,10 @@ function actionsRepositoryTarget(repository: {
 function decodeActionsCursor(
   value: string | null | undefined,
   codebaseRepositoryId: string | null,
+  branch: string | null,
 ): ActionsCursor {
   if (!value) {
-    return { version: 1, codebaseRepositoryId, consumed: {} };
+    return { version: 1, codebaseRepositoryId, branch, consumed: {} };
   }
   try {
     const parsed = JSON.parse(
@@ -498,6 +500,7 @@ function decodeActionsCursor(
     if (
       parsed.version !== 1 ||
       parsed.codebaseRepositoryId !== codebaseRepositoryId ||
+      parsed.branch !== branch ||
       !parsed.consumed ||
       typeof parsed.consumed !== "object" ||
       Object.values(parsed.consumed).some(
@@ -1449,6 +1452,7 @@ export class GitHubService {
     codebaseRepositoryId?: string | null,
     first = ACTIONS_PAGE_SIZE,
     after?: string | null,
+    branch?: string | null,
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -1456,7 +1460,15 @@ export class GitHubService {
       );
     }
     const selectedRepositoryId = codebaseRepositoryId?.trim() || null;
-    const cursor = decodeActionsCursor(after, selectedRepositoryId);
+    const selectedBranch = branch?.trim() || null;
+    if (selectedBranch && !selectedRepositoryId) {
+      throw new Error("A repository is required to filter Actions by branch");
+    }
+    const cursor = decodeActionsCursor(
+      after,
+      selectedRepositoryId,
+      selectedBranch,
+    );
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
     const codebaseRepositories = await prisma.codebaseRepository.findMany({
@@ -1517,7 +1529,11 @@ export class GitHubService {
               stream.target.owner,
             )}/${encodeURIComponent(
               stream.target.name,
-            )}/actions/runs?per_page=${ACTIONS_PAGE_SIZE}&page=${page}`,
+            )}/actions/runs?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
+              selectedBranch
+                ? `&branch=${encodeURIComponent(selectedBranch)}`
+                : ""
+            }`,
             token,
           );
           if (
@@ -1680,6 +1696,7 @@ export class GitHubService {
       ? encodeActionsCursor({
           version: 1,
           codebaseRepositoryId: selectedRepositoryId,
+          branch: selectedBranch,
           consumed: Object.fromEntries(
             streams.map((stream) => [stream.target.id, stream.consumed]),
           ),

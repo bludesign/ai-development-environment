@@ -81,6 +81,11 @@ describe("WorktreePipelinesCard", () => {
     expect(
       within(pipelineRow).getByRole("button", { name: "Retry" }),
     ).toBeDefined();
+    expect(
+      screen
+        .getByRole("link", { name: "View all for branch" })
+        .getAttribute("href"),
+    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2FAPP-1");
     expect(screen.getByText("1 jobs")).toBeDefined();
 
     const showSteps = screen.getByRole("button", {

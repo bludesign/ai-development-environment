@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { Link } from "@/i18n/navigation";
 import type {
   GitHubActionsWorkflowRunView,
   GitHubPipelineStatus,
@@ -78,6 +79,11 @@ function pipelineView(
     runNumber: run.runNumber,
     runAttempt: run.runAttempt,
   };
+}
+
+function actionsForBranchHref(repositoryId: string, branch: string) {
+  const params = new URLSearchParams({ repository: repositoryId, branch });
+  return `/actions?${params.toString()}`;
 }
 
 export function WorktreePipelinesCard({
@@ -171,6 +177,18 @@ export function WorktreePipelinesCard({
         </div>
         {runs.length ? (
           <div className="flex flex-wrap items-center gap-2">
+            {branch ? (
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  href={actionsForBranchHref(
+                    runs[0].codebaseRepositoryId,
+                    branch,
+                  )}
+                >
+                  {t("viewAllForBranch")}
+                </Link>
+              </Button>
+            ) : null}
             <AutoRetryDialog
               allowFuture={Boolean(branch)}
               branch={branch}

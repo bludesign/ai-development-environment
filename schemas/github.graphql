@@ -488,6 +488,7 @@ extend type Query {
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubActionsWorkflowRuns(
     codebaseRepositoryId: ID
+    branch: String
     first: Int = 25
     after: String
   ): GitHubActionsWorkflowRunPage!

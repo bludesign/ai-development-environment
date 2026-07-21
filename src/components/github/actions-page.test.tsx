@@ -406,13 +406,54 @@ describe("ActionsPage", () => {
       ),
     );
 
+    fireEvent.change(screen.getByRole("textbox", { name: "Branch" }), {
+      target: { value: "feature/APP-42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("branch: $branch"),
+        expect.objectContaining({
+          codebaseRepositoryId: "codebase-repository-1",
+          branch: "feature/APP-42",
+          after: null,
+        }),
+      ),
+    );
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42",
+    );
+
     const filteredRow = await screen.findByRole("row", {
       name: /APP-42 Ship widgets/,
     });
     fireEvent.click(
       within(filteredRow).getByRole("button", { name: "APP-42" }),
     );
-    expect(window.location.search).toBe("?issue=APP-42");
+    expect(window.location.search).toBe(
+      "?repository=codebase-repository-1&branch=feature%2FAPP-42&issue=APP-42",
+    );
+  });
+
+  test("loads repository and branch filters from the URL", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/actions?repository=codebase-repository-1&branch=feature%2FAPP-42",
+    );
+
+    render(<ActionsPage />);
+
+    expect(await screen.findByDisplayValue("feature/APP-42")).toBeDefined();
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("query GitHubActionsWorkflowRuns"),
+        expect.objectContaining({
+          codebaseRepositoryId: "codebase-repository-1",
+          branch: "feature/APP-42",
+        }),
+      ),
+    );
   });
 
   test("expands runs and jobs, shows steps, and retries a job", async () => {

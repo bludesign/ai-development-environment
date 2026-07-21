@@ -820,6 +820,49 @@ describe("GitHub service", () => {
     ).rejects.toThrow("cursor");
   });
 
+  test("filters workflow runs by branch and binds pagination to the filter", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("/repos/acme/widgets/actions/runs");
+      expect(url).toContain("branch=feature%2FAPP-42");
+      return response({
+        total_count: 2,
+        workflow_runs: [
+          rawActionsWorkflowRun(2, "acme/widgets", "2026-07-17T12:00:00.000Z", {
+            branch: "feature/APP-42",
+            pullRequests: [17],
+          }),
+          rawActionsWorkflowRun(1, "acme/widgets", "2026-07-16T12:00:00.000Z", {
+            branch: "feature/APP-42",
+            pullRequests: [17],
+          }),
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new GitHubService();
+    const page = await service.actionsWorkflowRuns(
+      "codebase-repository-1",
+      1,
+      null,
+      " feature/APP-42 ",
+    );
+
+    expect(page.items.map((item) => item.id)).toEqual(["2"]);
+    expect(page.endCursor).toBeTruthy();
+    await expect(
+      service.actionsWorkflowRuns(
+        "codebase-repository-1",
+        1,
+        page.endCursor,
+        "feature/APP-99",
+      ),
+    ).rejects.toThrow("cursor");
+    await expect(
+      service.actionsWorkflowRuns(null, 1, null, "feature/APP-42"),
+    ).rejects.toThrow("repository");
+  });
+
   test("loads workflow jobs through the PAT and reserves retries for the App", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       expect(url).toContain("/actions/runs/44/jobs");
