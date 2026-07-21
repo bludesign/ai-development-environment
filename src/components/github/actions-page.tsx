@@ -65,6 +65,7 @@ import type {
 } from "@/services/github/types";
 
 const ALL_REPOSITORIES = "all";
+const ALL_PIPELINES = "all";
 const RUN_FIELDS =
   "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
@@ -93,15 +94,25 @@ function replaceIssueParam(issueKey: string | null) {
   );
 }
 
-function replaceFilterParams(repositoryId: string, branch: string) {
+function replaceFilterParams(
+  repositoryId: string,
+  branch: string,
+  pipeline: string,
+) {
   const params = new URLSearchParams(window.location.search);
   if (repositoryId === ALL_REPOSITORIES) {
     params.delete("repository");
     params.delete("branch");
+    params.delete("pipeline");
   } else {
     params.set("repository", repositoryId);
     if (branch) params.set("branch", branch);
     else params.delete("branch");
+    if (pipeline && pipeline !== ALL_PIPELINES) {
+      params.set("pipeline", pipeline);
+    } else {
+      params.delete("pipeline");
+    }
   }
   const query = params.toString();
   window.history.replaceState(
@@ -167,6 +178,7 @@ export function ActionsPage() {
   const initialFiltersRef = useRef({
     repositoryId: searchParams.get("repository")?.trim() || ALL_REPOSITORIES,
     branch: searchParams.get("branch")?.trim() || "",
+    pipeline: searchParams.get("pipeline")?.trim() || ALL_PIPELINES,
   });
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [configurationLoading, setConfigurationLoading] = useState(true);
@@ -190,6 +202,14 @@ export function ActionsPage() {
       ? ""
       : initialFiltersRef.current.branch,
   );
+  const [selectedPipeline, setSelectedPipeline] = useState(
+    initialFiltersRef.current.repositoryId === ALL_REPOSITORIES
+      ? ALL_PIPELINES
+      : initialFiltersRef.current.pipeline,
+  );
+  const [knownPipelines, setKnownPipelines] = useState<Record<string, string>>(
+    {},
+  );
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -206,6 +226,7 @@ export function ActionsPage() {
     async (
       repositoryId: string,
       branch: string,
+      pipeline: string,
       options: { append: boolean; cursor?: string | null } = {
         append: false,
       },
@@ -242,12 +263,14 @@ export function ActionsPage() {
           `query GitHubActionsWorkflowRuns(
             $codebaseRepositoryId: ID
             $branch: String
+            $workflowId: ID
             $first: Int!
             $after: String
           ) {
             githubActionsWorkflowRuns(
               codebaseRepositoryId: $codebaseRepositoryId
               branch: $branch
+              workflowId: $workflowId
               first: $first
               after: $after
             ) {
@@ -263,12 +286,26 @@ export function ActionsPage() {
               repositoryId === ALL_REPOSITORIES ? null : repositoryId,
             branch:
               repositoryId === ALL_REPOSITORIES || !branch ? null : branch,
+            workflowId:
+              repositoryId === ALL_REPOSITORIES || pipeline === ALL_PIPELINES
+                ? null
+                : pipeline,
             first: 25,
             after: options.cursor ?? null,
           },
         );
         if (generation !== requestGenerationRef.current) return;
         const page = data.githubActionsWorkflowRuns;
+        if (repositoryId !== ALL_REPOSITORIES) {
+          const pagePipelines = Object.fromEntries(
+            page.items.map((run) => [run.workflowId, run.name]),
+          );
+          setKnownPipelines((current) =>
+            !options.append && pipeline === ALL_PIPELINES
+              ? pagePipelines
+              : { ...current, ...pagePipelines },
+          );
+        }
         setRuns((current) =>
           options.append
             ? [
@@ -324,6 +361,9 @@ export function ActionsPage() {
             initialFilters.repositoryId === ALL_REPOSITORIES
               ? ""
               : initialFilters.branch,
+            initialFilters.repositoryId === ALL_REPOSITORIES
+              ? ALL_PIPELINES
+              : initialFilters.pipeline,
           );
         }
       } catch (value) {
@@ -351,7 +391,7 @@ export function ActionsPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
-        void loadRuns(selectedRepositoryId, selectedBranch, {
+        void loadRuns(selectedRepositoryId, selectedBranch, selectedPipeline, {
           append: true,
           cursor: endCursor,
         });
@@ -369,6 +409,7 @@ export function ActionsPage() {
     paginationError,
     selectedRepositoryId,
     selectedBranch,
+    selectedPipeline,
     settings?.tokenConfigured,
   ]);
 
@@ -376,8 +417,10 @@ export function ActionsPage() {
     setSelectedRepositoryId(repositoryId);
     setSelectedBranch("");
     setBranchInput("");
-    replaceFilterParams(repositoryId, "");
-    void loadRuns(repositoryId, "");
+    setSelectedPipeline(ALL_PIPELINES);
+    setKnownPipelines({});
+    replaceFilterParams(repositoryId, "", ALL_PIPELINES);
+    void loadRuns(repositoryId, "", ALL_PIPELINES);
   };
 
   const applyBranchFilter = (event: FormEvent<HTMLFormElement>) => {
@@ -385,16 +428,22 @@ export function ActionsPage() {
     const branch = branchInput.trim();
     setBranchInput(branch);
     setSelectedBranch(branch);
-    replaceFilterParams(selectedRepositoryId, branch);
-    void loadRuns(selectedRepositoryId, branch);
+    replaceFilterParams(selectedRepositoryId, branch, selectedPipeline);
+    void loadRuns(selectedRepositoryId, branch, selectedPipeline);
   };
 
   const clearBranchFilter = () => {
     setBranchInput("");
     if (!selectedBranch) return;
     setSelectedBranch("");
-    replaceFilterParams(selectedRepositoryId, "");
-    void loadRuns(selectedRepositoryId, "");
+    replaceFilterParams(selectedRepositoryId, "", selectedPipeline);
+    void loadRuns(selectedRepositoryId, "", selectedPipeline);
+  };
+
+  const selectPipeline = (pipeline: string) => {
+    setSelectedPipeline(pipeline);
+    replaceFilterParams(selectedRepositoryId, selectedBranch, pipeline);
+    void loadRuns(selectedRepositoryId, selectedBranch, pipeline);
   };
 
   const loadJobs = useCallback(async (run: GitHubActionsWorkflowRunView) => {
@@ -558,6 +607,23 @@ export function ActionsPage() {
       keywords: repository.nameWithOwner,
     })),
   ];
+  const pipelineNames = new Map(Object.entries(knownPipelines));
+  if (
+    selectedPipeline !== ALL_PIPELINES &&
+    !pipelineNames.has(selectedPipeline)
+  ) {
+    pipelineNames.set(selectedPipeline, selectedPipeline);
+  }
+  const pipelineOptions: SearchableSelectOption[] = [
+    {
+      value: ALL_PIPELINES,
+      label: t("allPipelines"),
+      keywords: t("allPipelines"),
+    },
+    ...[...pipelineNames.entries()]
+      .sort((left, right) => left[1].localeCompare(right[1]))
+      .map(([id, name]) => ({ value: id, label: name, keywords: name })),
+  ];
 
   return (
     <section className="mx-auto flex w-full max-w-[1800px] flex-col gap-5">
@@ -572,7 +638,13 @@ export function ActionsPage() {
         </div>
         <Button
           disabled={!settings?.tokenConfigured || loading}
-          onClick={() => void loadRuns(selectedRepositoryId, selectedBranch)}
+          onClick={() =>
+            void loadRuns(
+              selectedRepositoryId,
+              selectedBranch,
+              selectedPipeline,
+            )
+          }
           variant="outline"
         >
           <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -609,7 +681,7 @@ export function ActionsPage() {
       ) : (
         <>
           {repositories.length > 0 && (
-            <div className="grid max-w-4xl gap-3 sm:grid-cols-2">
+            <div className="grid max-w-6xl gap-3 sm:grid-cols-3">
               <SearchableSelect
                 ariaLabel={t("repositoryFilter")}
                 emptyMessage={t("noRepositoryMatches")}
@@ -620,32 +692,43 @@ export function ActionsPage() {
                 value={selectedRepositoryId}
               />
               {selectedRepositoryId !== ALL_REPOSITORIES && (
-                <form className="flex gap-2" onSubmit={applyBranchFilter}>
-                  <Input
-                    aria-label={t("branchFilter")}
-                    autoCapitalize="none"
-                    onChange={(event) => setBranchInput(event.target.value)}
-                    placeholder={t("branchFilterPlaceholder")}
-                    spellCheck={false}
-                    value={branchInput}
-                  />
-                  <Button disabled={loading} type="submit" variant="outline">
-                    {t("applyBranchFilter")}
-                  </Button>
-                  {(branchInput || selectedBranch) && (
-                    <Button
-                      aria-label={t("clearBranchFilter")}
-                      disabled={loading}
-                      onClick={clearBranchFilter}
-                      size="icon"
-                      title={t("clearBranchFilter")}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <X />
+                <>
+                  <form className="flex gap-2" onSubmit={applyBranchFilter}>
+                    <Input
+                      aria-label={t("branchFilter")}
+                      autoCapitalize="none"
+                      onChange={(event) => setBranchInput(event.target.value)}
+                      placeholder={t("branchFilterPlaceholder")}
+                      spellCheck={false}
+                      value={branchInput}
+                    />
+                    <Button disabled={loading} type="submit" variant="outline">
+                      {t("applyBranchFilter")}
                     </Button>
-                  )}
-                </form>
+                    {(branchInput || selectedBranch) && (
+                      <Button
+                        aria-label={t("clearBranchFilter")}
+                        disabled={loading}
+                        onClick={clearBranchFilter}
+                        size="icon"
+                        title={t("clearBranchFilter")}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X />
+                      </Button>
+                    )}
+                  </form>
+                  <SearchableSelect
+                    ariaLabel={t("pipelineFilter")}
+                    emptyMessage={t("noPipelineMatches")}
+                    onValueChange={selectPipeline}
+                    options={pipelineOptions}
+                    placeholder={t("pipelineFilter")}
+                    searchPlaceholder={t("searchPipelines")}
+                    value={selectedPipeline}
+                  />
+                </>
               )}
             </div>
           )}
@@ -703,10 +786,15 @@ export function ActionsPage() {
                 <Button
                   disabled={loadingMore || !endCursor}
                   onClick={() =>
-                    void loadRuns(selectedRepositoryId, selectedBranch, {
-                      append: true,
-                      cursor: endCursor,
-                    })
+                    void loadRuns(
+                      selectedRepositoryId,
+                      selectedBranch,
+                      selectedPipeline,
+                      {
+                        append: true,
+                        cursor: endCursor,
+                      },
+                    )
                   }
                   size="sm"
                   variant="outline"

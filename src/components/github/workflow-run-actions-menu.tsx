@@ -40,8 +40,13 @@ const CANCELLABLE_RUN_STATES = new Set<GitHubPipelineState>([
   "QUEUED",
 ]);
 
-export function actionsForBranchHref(repositoryId: string, branch: string) {
+export function actionsForBranchHref(
+  repositoryId: string,
+  branch: string,
+  workflowId?: string | null,
+) {
   const params = new URLSearchParams({ repository: repositoryId, branch });
+  if (workflowId) params.set("pipeline", workflowId);
   return `/actions?${params.toString()}`;
 }
 

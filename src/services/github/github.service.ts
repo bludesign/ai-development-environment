@@ -169,6 +169,7 @@ type ActionsCursor = {
   version: 1;
   codebaseRepositoryId: string | null;
   branch: string | null;
+  workflowId: string | null;
   consumed: Record<string, number>;
 };
 
@@ -489,9 +490,16 @@ function decodeActionsCursor(
   value: string | null | undefined,
   codebaseRepositoryId: string | null,
   branch: string | null,
+  workflowId: string | null,
 ): ActionsCursor {
   if (!value) {
-    return { version: 1, codebaseRepositoryId, branch, consumed: {} };
+    return {
+      version: 1,
+      codebaseRepositoryId,
+      branch,
+      workflowId,
+      consumed: {},
+    };
   }
   try {
     const parsed = JSON.parse(
@@ -501,6 +509,7 @@ function decodeActionsCursor(
       parsed.version !== 1 ||
       parsed.codebaseRepositoryId !== codebaseRepositoryId ||
       parsed.branch !== branch ||
+      parsed.workflowId !== workflowId ||
       !parsed.consumed ||
       typeof parsed.consumed !== "object" ||
       Object.values(parsed.consumed).some(
@@ -1453,6 +1462,7 @@ export class GitHubService {
     first = ACTIONS_PAGE_SIZE,
     after?: string | null,
     branch?: string | null,
+    workflowId?: string | null,
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -1461,13 +1471,17 @@ export class GitHubService {
     }
     const selectedRepositoryId = codebaseRepositoryId?.trim() || null;
     const selectedBranch = branch?.trim() || null;
-    if (selectedBranch && !selectedRepositoryId) {
-      throw new Error("A repository is required to filter Actions by branch");
+    const selectedWorkflowId = workflowId?.trim() || null;
+    if ((selectedBranch || selectedWorkflowId) && !selectedRepositoryId) {
+      throw new Error(
+        "A repository is required to filter Actions by branch or pipeline",
+      );
     }
     const cursor = decodeActionsCursor(
       after,
       selectedRepositoryId,
       selectedBranch,
+      selectedWorkflowId,
     );
     const token = await this.requireToken();
     const prisma = await getPrismaClient();
@@ -1521,6 +1535,9 @@ export class GitHubService {
       const offset = stream.consumed % ACTIONS_PAGE_SIZE;
       try {
         if (stream.loadedPage !== page) {
+          const workflowPath = selectedWorkflowId
+            ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
+            : "/actions/runs";
           const result = await this.restRequest<{
             total_count: number;
             workflow_runs: RawActionsWorkflowRun[];
@@ -1529,7 +1546,7 @@ export class GitHubService {
               stream.target.owner,
             )}/${encodeURIComponent(
               stream.target.name,
-            )}/actions/runs?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
+            )}${workflowPath}?per_page=${ACTIONS_PAGE_SIZE}&page=${page}${
               selectedBranch
                 ? `&branch=${encodeURIComponent(selectedBranch)}`
                 : ""
@@ -1697,6 +1714,7 @@ export class GitHubService {
           version: 1,
           codebaseRepositoryId: selectedRepositoryId,
           branch: selectedBranch,
+          workflowId: selectedWorkflowId,
           consumed: Object.fromEntries(
             streams.map((stream) => [stream.target.id, stream.consumed]),
           ),

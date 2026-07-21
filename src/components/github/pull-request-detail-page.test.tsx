@@ -240,6 +240,9 @@ describe("PullRequestDetailPage", () => {
     ).toBe(detail.url);
 
     const pipelineRow = screen.getByRole("row", { name: /CI/ });
+    expect(
+      screen.getByRole("link", { name: "View all" }).getAttribute("href"),
+    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2Fapp-42");
     const actionsButton = within(pipelineRow).getByRole("button", {
       name: "Actions: CI",
     });
@@ -253,7 +256,9 @@ describe("PullRequestDetailPage", () => {
     expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
     expect(
       screen.getByRole("menuitem", { name: "View all" }).getAttribute("href"),
-    ).toBe("/actions?repository=codebase-repository-1&branch=feature%2Fapp-42");
+    ).toBe(
+      "/actions?repository=codebase-repository-1&branch=feature%2Fapp-42&pipeline=workflow-1",
+    );
     expect(screen.getByRole("menuitem", { name: "Cancel" })).toBeDefined();
     expect(
       screen.getByRole("menuitem", { name: "Force cancel" }),

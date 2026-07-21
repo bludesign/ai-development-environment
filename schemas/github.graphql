@@ -490,6 +490,7 @@ extend type Query {
   githubActionsWorkflowRuns(
     codebaseRepositoryId: ID
     branch: String
+    workflowId: ID
     first: Int = 25
     after: String
   ): GitHubActionsWorkflowRunPage!

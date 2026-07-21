@@ -16,6 +16,7 @@ import {
 } from "@/components/github/workflow-run-actions-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -25,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubActionsWorkflowRunView,
@@ -176,6 +178,18 @@ export function WorktreePipelinesCard({
         </div>
         {runs.length ? (
           <div className="flex flex-wrap items-center gap-2">
+            {branch ? (
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  href={actionsForBranchHref(
+                    runs[0].codebaseRepositoryId,
+                    branch,
+                  )}
+                >
+                  {t("viewAll")}
+                </Link>
+              </Button>
+            ) : null}
             <AutoRetryDialog
               allowFuture={Boolean(branch)}
               branch={branch}
@@ -270,6 +284,7 @@ export function WorktreePipelinesCard({
                                 ? actionsForBranchHref(
                                     run.codebaseRepositoryId,
                                     branch,
+                                    run.workflowId,
                                   )
                                 : null
                             }

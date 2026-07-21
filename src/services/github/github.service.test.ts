@@ -820,9 +820,9 @@ describe("GitHub service", () => {
     ).rejects.toThrow("cursor");
   });
 
-  test("filters workflow runs by branch and binds pagination to the filter", async () => {
+  test("filters workflow runs by branch and pipeline and binds pagination to the filters", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      expect(url).toContain("/repos/acme/widgets/actions/runs");
+      expect(url).toContain("/repos/acme/widgets/actions/workflows/987/runs");
       expect(url).toContain("branch=feature%2FAPP-42");
       return response({
         total_count: 2,
@@ -846,6 +846,7 @@ describe("GitHub service", () => {
       1,
       null,
       " feature/APP-42 ",
+      " 987 ",
     );
 
     expect(page.items.map((item) => item.id)).toEqual(["2"]);
@@ -855,7 +856,8 @@ describe("GitHub service", () => {
         "codebase-repository-1",
         1,
         page.endCursor,
-        "feature/APP-99",
+        "feature/APP-42",
+        "988",
       ),
     ).rejects.toThrow("cursor");
     await expect(

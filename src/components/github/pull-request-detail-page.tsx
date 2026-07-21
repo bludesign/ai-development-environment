@@ -440,6 +440,18 @@ export function PullRequestDetailPage({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {pullRequest.codebaseRepositoryId ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link
+                      href={actionsForBranchHref(
+                        pullRequest.codebaseRepositoryId,
+                        pullRequest.headRefName,
+                      )}
+                    >
+                      {t("viewAll")}
+                    </Link>
+                  </Button>
+                ) : null}
+                {pullRequest.codebaseRepositoryId ? (
                   <AutoRetryDialog
                     allowFuture
                     branch={pullRequest.headRefName}
@@ -558,10 +570,12 @@ export function PullRequestDetailPage({
                                       pipeline.retryUnavailableReason,
                                   }}
                                   viewAllHref={
-                                    pullRequest.codebaseRepositoryId
+                                    pullRequest.codebaseRepositoryId &&
+                                    pipeline.workflowId
                                       ? actionsForBranchHref(
                                           pullRequest.codebaseRepositoryId,
                                           pullRequest.headRefName,
+                                          pipeline.workflowId,
                                         )
                                       : null
                                   }

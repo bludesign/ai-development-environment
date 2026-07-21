@@ -126,11 +126,13 @@ export const createGitHubResolvers = (
       {
         codebaseRepositoryId,
         branch,
+        workflowId,
         first,
         after,
       }: {
         codebaseRepositoryId?: string | null;
         branch?: string | null;
+        workflowId?: string | null;
         first?: number | null;
         after?: string | null;
       },
@@ -142,6 +144,7 @@ export const createGitHubResolvers = (
         first ?? 25,
         after,
         branch,
+        workflowId,
       );
     },
     githubActionsWorkflowJobs: (
