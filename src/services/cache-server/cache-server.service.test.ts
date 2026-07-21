@@ -108,8 +108,11 @@ describe("CacheServerService", () => {
     expect(view.configured).toBe(true);
     expect(view.apiKeyConfigured).toBe(true);
     expect(view.baseUrl).toBe("http://cache.test/api");
-    expect(view.headers).toEqual([{ name: "x-tenant", value: "acme" }]);
+    expect(view.headers).toEqual([
+      { name: "x-tenant", valueConfigured: true },
+    ]);
     expect(view).not.toHaveProperty("apiKey");
+    expect(view.headers[0]).not.toHaveProperty("value");
   });
 
   test("saveSettings trims the base URL and keeps the stored key when blank", async () => {
@@ -120,7 +123,35 @@ describe("CacheServerService", () => {
     });
     expect(view.baseUrl).toBe("http://cache.test/api");
     expect(state.settings?.apiKey).toBe("secret-key");
-    expect(view.headers).toEqual([{ name: "x-tenant", value: "beta" }]);
+    expect(state.settings?.headersJson).toBe(
+      JSON.stringify([{ name: "x-tenant", value: "beta" }]),
+    );
+    expect(view.headers).toEqual([
+      { name: "x-tenant", valueConfigured: true },
+    ]);
+  });
+
+  test("saveSettings keeps stored custom-header values when blank", async () => {
+    const view = await new CacheServerService().saveSettings({
+      baseUrl: "http://cache.test/api",
+      apiKey: null,
+      headers: [{ name: "X-Tenant", value: null }],
+    });
+    expect(state.settings?.headersJson).toBe(
+      JSON.stringify([{ name: "X-Tenant", value: "acme" }]),
+    );
+    expect(view.headers).toEqual([
+      { name: "X-Tenant", valueConfigured: true },
+    ]);
+  });
+
+  test("saveSettings requires values for new custom headers", async () => {
+    await expect(
+      new CacheServerService().saveSettings({
+        baseUrl: "http://cache.test/api",
+        headers: [{ name: "Authorization", value: null }],
+      }),
+    ).rejects.toThrow("Authorization");
   });
 
   test("saveSettings requires an API key when none is stored", async () => {
@@ -243,11 +274,70 @@ describe("CacheServerService", () => {
     expect(JSON.parse(String(init.body))).toEqual({ key: "build-cache" });
   });
 
+  test("deleteCacheEntries resolves repository matches to IDs before deleting", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          total: 101,
+          items: [entry, { ...entry, id: "wrong-repo", repoId: "repo-2" }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          total: 101,
+          items: [{ ...entry, id: "entry-2" }],
+        }),
+      )
+      .mockResolvedValue(jsonResponse(undefined));
+
+    await new CacheServerService().deleteCacheEntries({
+      repoId: " repo-1 ",
+      key: "build-cache",
+    });
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls).toHaveLength(4);
+    expect(String(calls[0][0])).toContain("repoId=repo-1");
+    expect(String(calls[0][0])).toContain("key=build-cache");
+    expect(String(calls[0][0])).toContain("page=1");
+    expect(String(calls[1][0])).toContain("page=2");
+    expect(String(calls[2][0]).endsWith("/cache-entries/entry-1")).toBe(true);
+    expect(String(calls[3][0]).endsWith("/cache-entries/entry-2")).toBe(true);
+    expect(
+      calls.some(
+        ([url, init]) =>
+          init?.method === "DELETE" &&
+          String(url).endsWith("/cache-entries"),
+      ),
+    ).toBe(false);
+  });
+
   test("testConnection requests a single-item listing", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ total: 0, items: [] }));
     await new CacheServerService().testConnection();
     const { url } = lastFetch();
     expect(url).toContain("itemsPerPage=1");
+  });
+
+  test.each([undefined, null, { total: 0 }, { total: "0", items: [] }])(
+    "testConnection rejects an invalid management response: %j",
+    async (body) => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse(body));
+      await expect(
+        new CacheServerService().testConnection(),
+      ).rejects.toThrow("invalid cache entry response");
+    },
+  );
+
+  test("testConnection rejects a successful HTML response", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "<html>Sign in</html>",
+    } as Response);
+    await expect(new CacheServerService().testConnection()).rejects.toThrow(
+      "invalid cache entry response",
+    );
   });
 
   test("requests throw when the cache server is not configured", async () => {

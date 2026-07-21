@@ -22,9 +22,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   CACHE_SERVER_SETTINGS_FIELDS,
-  type CacheServerHeaderView,
   type CacheServerSettingsView,
 } from "@/services/cache-server/types";
+
+type CacheServerHeaderDraft = {
+  name: string;
+  value: string;
+  valueConfigured: boolean;
+};
 
 export function CacheServerSettingsCard() {
   const t = useTranslations("cacheServerSettings");
@@ -34,7 +39,7 @@ export function CacheServerSettingsCard() {
   );
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [headers, setHeaders] = useState<CacheServerHeaderView[]>([]);
+  const [headers, setHeaders] = useState<CacheServerHeaderDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +49,9 @@ export function CacheServerSettingsCard() {
     setSettings(next);
     setBaseUrl(next.baseUrl ?? "");
     setApiKey("");
-    setHeaders(next.headers.map((header) => ({ ...header })));
+    setHeaders(
+      next.headers.map((header) => ({ ...header, value: "" })),
+    );
   }, []);
 
   const load = useCallback(async () => {
@@ -68,7 +75,10 @@ export function CacheServerSettingsCard() {
   }, [load]);
 
   const addHeader = () =>
-    setHeaders((current) => [...current, { name: "", value: "" }]);
+    setHeaders((current) => [
+      ...current,
+      { name: "", value: "", valueConfigured: false },
+    ]);
 
   const updateHeader = (
     index: number,
@@ -77,7 +87,15 @@ export function CacheServerSettingsCard() {
   ) =>
     setHeaders((current) =>
       current.map((header, position) =>
-        position === index ? { ...header, [field]: value } : header,
+        position === index
+          ? {
+              ...header,
+              [field]: value,
+              ...(field === "name" && value !== header.name
+                ? { valueConfigured: false }
+                : {}),
+            }
+          : header,
       ),
     );
 
@@ -93,7 +111,7 @@ export function CacheServerSettingsCard() {
       const cleanedHeaders = headers
         .map((header) => ({
           name: header.name.trim(),
-          value: header.value,
+          value: header.value || null,
         }))
         .filter((header) => header.name);
       const data = await controlPlaneRequest<{
@@ -288,11 +306,18 @@ export function CacheServerSettingsCard() {
                         />
                         <Input
                           aria-label={t("headerValue")}
+                          autoComplete="new-password"
                           className="flex-1"
                           onChange={(event) =>
                             updateHeader(index, "value", event.target.value)
                           }
-                          placeholder={t("headerValue")}
+                          placeholder={
+                            header.valueConfigured
+                              ? t("headerValuePlaceholderConfigured")
+                              : t("headerValue")
+                          }
+                          required={!header.valueConfigured}
+                          type="password"
                           value={header.value}
                         />
                         <Button

@@ -1,5 +1,5 @@
 export const CACHE_SERVER_SETTINGS_FIELDS =
-  "configured baseUrl apiKeyConfigured headers { name value } updatedAt";
+  "configured baseUrl apiKeyConfigured headers { name valueConfigured } updatedAt";
 export const CACHE_ENTRY_FIELDS =
   "id key version scope repoId updatedAt locationId";
 export const STORAGE_LOCATION_FIELDS =
@@ -7,7 +7,12 @@ export const STORAGE_LOCATION_FIELDS =
 
 export type CacheServerHeaderView = {
   name: string;
-  value: string;
+  valueConfigured: boolean;
+};
+
+export type CacheServerHeaderInput = {
+  name: string;
+  value?: string | null;
 };
 
 export type CacheServerSettingsView = {
@@ -60,7 +65,7 @@ export type CacheEntryMatchView = {
 export type SaveCacheServerSettingsInput = {
   baseUrl: string;
   apiKey?: string | null;
-  headers?: CacheServerHeaderView[] | null;
+  headers?: CacheServerHeaderInput[] | null;
 };
 
 export type CacheEntryFilters = {

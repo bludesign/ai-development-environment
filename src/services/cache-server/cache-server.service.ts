@@ -9,7 +9,7 @@ import type {
   CacheEntryMatchView,
   CacheEntryPageView,
   CacheEntryView,
-  CacheServerHeaderView,
+  CacheServerHeaderInput,
   CacheServerSettingsView,
   ListCacheEntriesArgs,
   MatchCacheEntryArgs,
@@ -19,11 +19,17 @@ import type {
 
 const SETTINGS_ID = "default";
 const API_KEY_HEADER = "x-api-key";
+const DELETE_LIST_PAGE_SIZE = 100;
+
+type StoredCacheServerHeader = {
+  name: string;
+  value: string;
+};
 
 type CacheServerConfig = {
   baseUrl: string;
   apiKey: string;
-  headers: CacheServerHeaderView[];
+  headers: StoredCacheServerHeader[];
 };
 
 type RawCacheEntry = {
@@ -77,7 +83,7 @@ function sanitizeError(message: string, apiKey: string): string {
   return message.split(apiKey).join("[REDACTED]");
 }
 
-function parseHeaders(headersJson: string): CacheServerHeaderView[] {
+function parseHeaders(headersJson: string): StoredCacheServerHeader[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(headersJson);
@@ -87,7 +93,7 @@ function parseHeaders(headersJson: string): CacheServerHeaderView[] {
   if (!Array.isArray(parsed)) return [];
   return parsed
     .filter(
-      (item): item is CacheServerHeaderView =>
+      (item): item is StoredCacheServerHeader =>
         typeof item === "object" &&
         item !== null &&
         typeof (item as { name?: unknown }).name === "string" &&
@@ -97,20 +103,39 @@ function parseHeaders(headersJson: string): CacheServerHeaderView[] {
 }
 
 function normalizeHeaders(
-  headers: CacheServerHeaderView[] | null | undefined,
-): CacheServerHeaderView[] {
+  headers: CacheServerHeaderInput[] | null | undefined,
+  existingHeaders: StoredCacheServerHeader[],
+): StoredCacheServerHeader[] {
   if (!headers) return [];
+  const existingValues = new Map(
+    existingHeaders.map((header) => [header.name.toLowerCase(), header.value]),
+  );
   const seen = new Set<string>();
-  const result: CacheServerHeaderView[] = [];
+  const result: StoredCacheServerHeader[] = [];
   for (const header of headers) {
     const name = header.name.trim();
     if (!name) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ name, value: header.value });
+    const value = header.value || existingValues.get(key);
+    if (!value) {
+      throw new Error(`A value is required for the ${name} header`);
+    }
+    result.push({ name, value });
   }
   return result;
+}
+
+function isCacheEntryPageResponse(value: unknown): value is RawCacheEntryPage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { total?: unknown }).total === "number" &&
+    Number.isInteger((value as { total: number }).total) &&
+    (value as { total: number }).total >= 0 &&
+    Array.isArray((value as { items?: unknown }).items)
+  );
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -179,7 +204,10 @@ export class CacheServerService {
       configured: Boolean(settings.baseUrl && settings.apiKey),
       baseUrl: settings.baseUrl,
       apiKeyConfigured: Boolean(settings.apiKey),
-      headers: parseHeaders(settings.headersJson),
+      headers: parseHeaders(settings.headersJson).map((header) => ({
+        name: header.name,
+        valueConfigured: Boolean(header.value),
+      })),
       updatedAt: settings.updatedAt.toISOString(),
     };
   }
@@ -196,7 +224,12 @@ export class CacheServerService {
     if (!nextApiKey) {
       throw new Error("A cache server API key is required");
     }
-    const headersJson = JSON.stringify(normalizeHeaders(input.headers));
+    const headersJson = JSON.stringify(
+      normalizeHeaders(
+        input.headers,
+        parseHeaders(existing?.headersJson ?? "[]"),
+      ),
+    );
     await prisma.cacheServerSettings.upsert({
       where: { id: SETTINGS_ID },
       create: { id: SETTINGS_ID, baseUrl, apiKey: nextApiKey, headersJson },
@@ -218,9 +251,12 @@ export class CacheServerService {
   async testConnection(): Promise<CacheServerSettingsView> {
     // No dedicated health endpoint exists, so a cheap single-item listing verifies that the
     // base URL is reachable and the API key is accepted.
-    await this.request<RawCacheEntryPage>("GET", "/cache-entries", {
+    const page = await this.request<unknown>("GET", "/cache-entries", {
       query: { itemsPerPage: 1, page: 1 },
     });
+    if (!isCacheEntryPageResponse(page)) {
+      throw new Error("Cache server returned an invalid cache entry response");
+    }
     return this.getSettings();
   }
 
@@ -317,11 +353,31 @@ export class CacheServerService {
   }
 
   async deleteCacheEntries(filters: CacheEntryFilters): Promise<boolean> {
+    const repoId = filters.repoId?.trim();
+    if (repoId) {
+      const ids = new Set<string>();
+      let pageNumber = 1;
+      let total = 0;
+      do {
+        const page = await this.listCacheEntries({
+          ...filters,
+          repoId,
+          itemsPerPage: DELETE_LIST_PAGE_SIZE,
+          page: pageNumber,
+        });
+        total = page.total;
+        for (const entry of page.items) {
+          if (entry.repoId === repoId) ids.add(entry.id);
+        }
+        pageNumber += 1;
+      } while ((pageNumber - 1) * DELETE_LIST_PAGE_SIZE < total);
+      return this.deleteCacheEntriesByIds([...ids]);
+    }
+
     const body: Record<string, string> = {};
     if (filters.key?.trim()) body.key = filters.key.trim();
     if (filters.version?.trim()) body.version = filters.version.trim();
     if (filters.scope?.trim()) body.scope = filters.scope.trim();
-    if (filters.repoId?.trim()) body.repoId = filters.repoId.trim();
     await this.request("DELETE", "/cache-entries", { body });
     return true;
   }

@@ -9,7 +9,7 @@ enum CacheEntryMatchType {
 "A single header sent with every cache server request."
 type CacheServerHeader {
   name: String!
-  value: String!
+  valueConfigured: Boolean!
 }
 
 "Connection settings for the GitHub Actions Cache Server management API."
@@ -64,7 +64,7 @@ type CacheEntryMatch {
 
 input CacheServerHeaderInput {
   name: String!
-  value: String!
+  value: String
 }
 
 input SaveCacheServerSettingsInput {

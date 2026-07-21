@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -128,6 +128,7 @@ export function CacheServerPage() {
   const [matchOpen, setMatchOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const loadGeneration = useRef(0);
 
   const formatTimestamp = useCallback(
     (value: number | null) =>
@@ -135,12 +136,14 @@ export function CacheServerPage() {
     [locale],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedPage = page) => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     try {
       const config = await controlPlaneRequest<{
         cacheServerSettings: { configured: boolean };
       }>("query CacheServerConfigured { cacheServerSettings { configured } }");
+      if (generation !== loadGeneration.current) return;
       if (!config.cacheServerSettings.configured) {
         setConfigured(false);
         setData(null);
@@ -174,15 +177,31 @@ export function CacheServerPage() {
         {
           ...toFilterInput(appliedFilters),
           itemsPerPage,
-          page,
+          page: requestedPage,
         },
       );
+      if (generation !== loadGeneration.current) return;
+      const lastPage = Math.max(
+        1,
+        Math.ceil(result.cacheEntries.total / itemsPerPage),
+      );
+      if (
+        result.cacheEntries.total > 0 &&
+        requestedPage > lastPage
+      ) {
+        setData(null);
+        setPage(lastPage);
+        setSelected(new Set());
+        return;
+      }
       setData(result.cacheEntries);
       setError(null);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (generation === loadGeneration.current) {
+        setError(value instanceof Error ? value.message : String(value));
+      }
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [appliedFilters, itemsPerPage, page]);
 
@@ -264,8 +283,8 @@ export function CacheServerPage() {
         }`,
         toFilterInput(appliedFilters),
       );
-      setPage(1);
-      await load();
+      goToPage(1);
+      await load(1);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
