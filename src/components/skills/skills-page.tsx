@@ -318,7 +318,7 @@ function DatabaseTable({ overview }: { overview: SkillsOverview }) {
   const t = useTranslations("skills");
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("databaseSkills")}</CardTitle>
         <CardDescription>{t("databaseSkillsDescription")}</CardDescription>
       </CardHeader>
@@ -395,7 +395,7 @@ function InstallationTable({
   const t = useTranslations("skills");
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("clientSkills")}</CardTitle>
         <CardDescription>{t("clientSkillsDescription")}</CardDescription>
       </CardHeader>

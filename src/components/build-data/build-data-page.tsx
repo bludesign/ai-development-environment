@@ -464,7 +464,7 @@ export function BuildDataPage() {
         <>
           {entries.length > 0 && (
             <Card className="gap-0 py-0">
-              <CardHeader className="border-b py-4">
+              <CardHeader>
                 <CardTitle>{t("derivedDataTitle")}</CardTitle>
                 <CardDescription>{t("derivedDataDescription")}</CardDescription>
               </CardHeader>
@@ -665,7 +665,7 @@ export function BuildDataPage() {
       )}
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+        <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
           <CardTitle>{t("history")}</CardTitle>
           <CardDescription>{t("historyDescription")}</CardDescription>
           {history.length > 0 && (
@@ -796,7 +796,7 @@ function DeviceSupportCard({
     entries.length > 0 && selectedEntries.length === entries.length;
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4 max-sm:has-data-[slot=card-action]:grid-cols-1">
+      <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
         <CardTitle>{t("deviceSupportTitle")}</CardTitle>
         <CardDescription>{t("deviceSupportDescription")}</CardDescription>
         {selectedEntries.length > 0 && (

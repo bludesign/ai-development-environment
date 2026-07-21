@@ -121,7 +121,7 @@ export function SkillGroupsPage() {
         </div>
       ) : (
         <Card className="gap-0 py-0">
-          <CardHeader className="border-b py-4">
+          <CardHeader>
             <CardTitle>{t("skillGroups")}</CardTitle>
             <CardDescription>{t("groupsTableDescription")}</CardDescription>
           </CardHeader>

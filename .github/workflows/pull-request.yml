@@ -48,6 +48,7 @@ jobs:
         run: npm run type-check
 
       - name: Test
+        timeout-minutes: 5
         run: npm run test:run
 
       - name: Build
@@ -81,6 +82,7 @@ jobs:
         run: npm run agent:type-check
 
       - name: Test
+        timeout-minutes: 5
         run: npm run agent:test:run
 
       - name: Build

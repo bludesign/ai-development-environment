@@ -316,7 +316,9 @@ describe("PullRequestsPage", () => {
     expect(await screen.findByRole("tab", { name: "Mine" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Review requests" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Repositories" })).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: "Ticket" })).toBeDefined();
+    expect(
+      await screen.findByRole("columnheader", { name: "Ticket" }),
+    ).toBeDefined();
 
     const title = await screen.findByRole("link", {
       name: "APP-42 Add the API",

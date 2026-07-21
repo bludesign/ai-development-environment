@@ -421,7 +421,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       </Card>
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle>{t("capabilities")}</CardTitle>
           <CardDescription>{t("capabilitiesDescription")}</CardDescription>
         </CardHeader>
@@ -1180,7 +1180,7 @@ function AgentCodebasesCard({
   const codebaseT = useTranslations("codebases");
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("codebases")}</CardTitle>
         <CardDescription>{t("codebasesDescription")}</CardDescription>
       </CardHeader>

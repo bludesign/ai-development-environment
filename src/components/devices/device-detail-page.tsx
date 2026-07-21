@@ -505,7 +505,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
       </Card>
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle>{t("ipHistory")}</CardTitle>
         </CardHeader>
         {device.ipObservations.length ? (
@@ -547,7 +547,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
       </Card>
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle>{t("enrollmentHistory")}</CardTitle>
         </CardHeader>
         {device.enrollments.length ? (
@@ -589,7 +589,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
       </Card>
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle>{t("firmwareTitle")}</CardTitle>
           <CardDescription>{t("firmwareDescription")}</CardDescription>
         </CardHeader>

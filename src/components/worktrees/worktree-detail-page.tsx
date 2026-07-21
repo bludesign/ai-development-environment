@@ -576,7 +576,7 @@ function LoadedWorktreeDetail({
       )}
 
       <Card>
-        <CardHeader className="border-b">
+        <CardHeader>
           <CardTitle>{t("actions")}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -586,7 +586,7 @@ function LoadedWorktreeDetail({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader className="border-b">
+          <CardHeader>
             <CardTitle>{t("overview")}</CardTitle>
           </CardHeader>
           <CardContent>
@@ -632,7 +632,7 @@ function LoadedWorktreeDetail({
         </Card>
 
         <Card>
-          <CardHeader className="border-b">
+          <CardHeader>
             <CardTitle>{t("management")}</CardTitle>
           </CardHeader>
           <CardContent>
@@ -661,7 +661,7 @@ function LoadedWorktreeDetail({
       />
 
       <Card className="min-w-0">
-        <CardHeader className="border-b">
+        <CardHeader>
           <CardTitle>{t("workingTree")}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -680,7 +680,7 @@ function LoadedWorktreeDetail({
       </Card>
 
       <Card className="min-w-0">
-        <CardHeader className="border-b">
+        <CardHeader>
           <CardTitle>{t("branchChanges")}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -734,7 +734,7 @@ function WorktreeCoverageCard({
       : "—";
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>{t("codeCoverage")}</CardTitle>
           <div className="sm:ml-auto">
@@ -874,7 +874,7 @@ function WorktreeBuildTable({
 
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="border-b py-4">
+      <CardHeader>
         <CardTitle>{t("title")}</CardTitle>
       </CardHeader>
       {!builds.length ? (

@@ -210,7 +210,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
       </Card>
 
       <Card className="gap-0 py-0">
-        <CardHeader className="border-b py-4">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Smartphone /> {t("provisionedDevices")}
           </CardTitle>

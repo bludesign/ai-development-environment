@@ -573,11 +573,7 @@ export function BuildDetailPage({
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0 space-y-5">
           <Card className="gap-0 py-0">
-            <CardHeader
-              className={
-                logsOpen ? "border-b bg-muted/40 py-3" : "bg-muted/40 py-3"
-              }
-            >
+            <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <Button
                   aria-expanded={logsOpen}

@@ -608,6 +608,7 @@ export const scanSigningAssets: AgentJobHandler = async (
   signal,
 ) => {
   signingScanPayload(payload);
+  signal.throwIfAborted();
   const [decoded, certificates] = await Promise.all([
     decodedProfiles(timeoutMs, signal, true),
     readCertificates(timeoutMs, signal, true),

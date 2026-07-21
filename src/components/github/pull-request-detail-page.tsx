@@ -383,7 +383,7 @@ export function PullRequestDetailPage({
           </div>
 
           <Card className="min-w-0 order-4 gap-0 py-0 lg:col-span-2">
-            <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b py-3">
+            <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3">
               <div>
                 <CardTitle>{t("pipelines")}</CardTitle>
                 <p className="text-xs text-muted-foreground">
@@ -499,7 +499,7 @@ export function PullRequestDetailPage({
 
         <div className="contents">
           <Card className="min-w-0 order-1">
-            <CardHeader className="border-b">
+            <CardHeader>
               <CardTitle>{t("details")}</CardTitle>
             </CardHeader>
             <CardContent>
@@ -546,7 +546,7 @@ export function PullRequestDetailPage({
           </Card>
 
           <Card className="min-w-0 order-1">
-            <CardHeader className="border-b">
+            <CardHeader>
               <CardTitle>{t("people")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
