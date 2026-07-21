@@ -33,9 +33,11 @@ import {
   type TelemetryJsonObject,
   type TelemetryQueryInput,
   type TelemetrySavedFilterView,
+  type TelemetrySeparatorPage,
   type TelemetrySelection,
   type TelemetrySelectionRange,
   type TelemetrySettingsView,
+  type TelemetrySinceSeparatorPage,
   type TelemetryTimelinePage,
   type TelemetryView,
   type TelemetryViewSettingsView,
@@ -256,6 +258,14 @@ function olderThan(entry: TelemetryEntryView, value: Cursor): boolean {
   if (entry.receivedAt !== value.receivedAt)
     return entry.receivedAt < value.receivedAt;
   return entry.id < value.id;
+}
+
+function newerThan(entry: TelemetryEntryView, value: Cursor): boolean {
+  if (entry.clientTime !== value.clientTime)
+    return entry.clientTime > value.clientTime;
+  if (entry.receivedAt !== value.receivedAt)
+    return entry.receivedAt > value.receivedAt;
+  return entry.id > value.id;
 }
 
 function hasActiveFilters(input: TelemetryQueryInput): boolean {
@@ -755,6 +765,110 @@ export class TelemetryService {
     return entries.map(viewEntry);
   }
 
+  async entry(
+    id: string,
+    viewValue: string,
+  ): Promise<TelemetryEntryView | null> {
+    const view = requireView(viewValue);
+    const entry = (await this.entries([id]))[0] ?? null;
+    if (!entry) return null;
+    if (
+      entry.entryType === "SEPARATOR" ||
+      !sourcesForView(view).includes(entry.entryType as "CONSOLE" | "ANALYTICS")
+    ) {
+      throw new Error(`Telemetry entry ${id} does not belong to ${view}`);
+    }
+    return entry;
+  }
+
+  async latestSeparator(): Promise<TelemetryEntryView | null> {
+    const prisma = await getPrismaClient();
+    const separator = await prisma.telemetryEntry.findFirst({
+      where: { entryType: "SEPARATOR" },
+      orderBy: [{ clientTime: "desc" }, { receivedAt: "desc" }, { id: "desc" }],
+    });
+    return separator ? viewEntry(separator) : null;
+  }
+
+  async separators(input: {
+    first?: number | null;
+    after?: string | null;
+    kind?: string | null;
+    name?: string | null;
+    buildId?: string | null;
+  }): Promise<TelemetrySeparatorPage> {
+    const first = Math.min(MAX_FIRST, Math.max(1, input.first ?? 100));
+    const after = cursor(input.after);
+    const filters: Record<string, unknown>[] = [{ entryType: "SEPARATOR" }];
+    if (input.kind?.trim()) {
+      filters.push({ separatorKind: input.kind.trim() });
+    }
+    if (input.name?.trim()) {
+      filters.push({ separatorName: { contains: input.name.trim() } });
+    }
+    if (input.buildId?.trim()) {
+      filters.push({ buildId: input.buildId.trim() });
+    }
+    if (after) filters.push(olderThanCursorWhere(after));
+    const prisma = await getPrismaClient();
+    const rows = await prisma.telemetryEntry.findMany({
+      where: { AND: filters } as never,
+      orderBy: [{ clientTime: "desc" }, { receivedAt: "desc" }, { id: "desc" }],
+      take: first + 1,
+    });
+    const hasMore = rows.length > first;
+    const items = rows.slice(0, first).map(viewEntry);
+    return {
+      items,
+      nextCursor: hasMore && items.length ? encodeCursor(items.at(-1)!) : null,
+    };
+  }
+
+  async timelineSinceLatestSeparator(
+    input: TelemetryQueryInput,
+  ): Promise<TelemetrySinceSeparatorPage> {
+    const view = requireView(input.view);
+    validateTelemetryQuery(input);
+    const first = Math.min(
+      MAX_FIRST,
+      Math.max(1, input.first ?? DEFAULT_FIRST),
+    );
+    const after = cursor(input.after);
+    const separator = await this.latestSeparator();
+    const boundary = separator
+      ? {
+          clientTime: separator.clientTime,
+          receivedAt: separator.receivedAt,
+          id: separator.id,
+        }
+      : null;
+    const items: TelemetryEntryView[] = [];
+    let matchingCount = 0;
+    let totalCount = 0;
+    let hasMore = false;
+    let lastEntry: TelemetryEntryView | null = null;
+    await this.scan(sourceWhere(view), (entry) => {
+      if (boundary && !newerThan(entry, boundary)) return false;
+      totalCount += 1;
+      if (!matchesTelemetryQuery(entry, input)) return;
+      matchingCount += 1;
+      if (after && !olderThan(entry, after)) return;
+      if (items.length < first) {
+        items.push(entry);
+        lastEntry = entry;
+      } else {
+        hasMore = true;
+      }
+    });
+    return {
+      separator,
+      items,
+      nextCursor: hasMore && lastEntry ? encodeCursor(lastEntry) : null,
+      matchingCount,
+      totalCount,
+    };
+  }
+
   async facets(viewValue: string): Promise<TelemetryFacets> {
     const view = requireView(viewValue);
     const names =
@@ -990,18 +1104,69 @@ export class TelemetryService {
     return result.count;
   }
 
-  async clearBeforeLatestSeparator(viewValue: string): Promise<number> {
+  async clearBeforeLatestSeparator(
+    viewValue: string,
+    includeSeparators = false,
+  ): Promise<number> {
     const view = requireView(viewValue);
-    const prisma = await getPrismaClient();
-    const separator = await prisma.telemetryEntry.findFirst({
-      where: { entryType: "SEPARATOR" },
-      orderBy: [{ clientTime: "desc" }, { receivedAt: "desc" }, { id: "desc" }],
-    });
+    const separator = await this.latestSeparator();
     if (!separator) return 0;
+    const prisma = await getPrismaClient();
     const result = await prisma.telemetryEntry.deleteMany({
-      where: { ...sourceWhere(view), clientTime: { lt: separator.clientTime } },
+      where: {
+        AND: [
+          includeSeparators
+            ? { entryType: { in: [...sourcesForView(view), "SEPARATOR"] } }
+            : sourceWhere(view),
+          olderThanCursorWhere({
+            clientTime: separator.clientTime,
+            receivedAt: separator.receivedAt,
+            id: separator.id,
+          }),
+        ],
+      } as never,
     });
     this.publish([], "CLEARED_BEFORE_SEPARATOR");
+    return result.count;
+  }
+
+  async clearScoped(input: {
+    view: TelemetryView;
+    scope: "IDS" | "MATCHING" | "ALL" | "BEFORE_LATEST_SEPARATOR";
+    ids?: string[] | null;
+    query?: Omit<TelemetryQueryInput, "view" | "first" | "after"> | null;
+    includeSeparators?: boolean | null;
+  }): Promise<number> {
+    const view = requireView(input.view);
+    if (input.scope === "ALL") {
+      return this.clearAll(view, Boolean(input.includeSeparators));
+    }
+    if (input.scope === "BEFORE_LATEST_SEPARATOR") {
+      return this.clearBeforeLatestSeparator(
+        view,
+        Boolean(input.includeSeparators),
+      );
+    }
+    if (input.scope === "MATCHING") {
+      if (!input.query) throw new Error("A matching query is required");
+      return this.clearSelected({ query: { ...input.query, view } });
+    }
+    const ids = [...new Set(input.ids ?? [])].slice(0, 1_000);
+    if (!ids.length)
+      throw new Error("At least one telemetry entry ID is required");
+    const prisma = await getPrismaClient();
+    const allowed = await prisma.telemetryEntry.findMany({
+      where: {
+        id: { in: ids },
+        entryType: { in: [...sourcesForView(view), "SEPARATOR"] },
+      },
+      select: { id: true },
+    });
+    if (!allowed.length) return 0;
+    const result = await prisma.telemetryEntry.deleteMany({
+      where: { id: { in: allowed.map(({ id }) => id) } },
+    });
+    this.publish([], "CLEARED");
     return result.count;
   }
 

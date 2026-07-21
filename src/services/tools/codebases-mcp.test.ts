@@ -4,8 +4,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CodebaseToolsService } from "@/services/codebases";
 import type { BuildsService } from "@/services/builds";
+import type { TelemetryService } from "@/services/telemetry";
+import type { PushNotificationsService } from "@/services/push-notifications";
+import type { AgentControlService } from "@/services/agent-control";
 
-import { createCodebasesMcpServer } from "./codebases-mcp";
+import { createBuiltInToolRegistry } from "./builtin-tools";
+import {
+  createBuiltInMcpServer,
+  createCodebasesMcpServer,
+} from "./codebases-mcp";
 
 const closeCallbacks: Array<() => Promise<void>> = [];
 
@@ -218,5 +225,52 @@ describe("codebases MCP server", () => {
         arguments: { buildId: "build-1" },
       }),
     ).resolves.toMatchObject({ isError: true });
+  });
+
+  test("lists the nested catalog as flat MCP tools and invokes a child tool", async () => {
+    const timeline = vi.fn().mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      matchingCount: 0,
+      totalCount: 0,
+    });
+    const registry = createBuiltInToolRegistry({
+      codebaseTools: {
+        list: vi.fn().mockResolvedValue([]),
+      } as unknown as CodebaseToolsService,
+      codebases: {} as never,
+      builds: {} as never,
+      telemetry: { timeline } as unknown as TelemetryService,
+      pushNotifications: {} as PushNotificationsService,
+      agents: {} as AgentControlService,
+    });
+    const server = createBuiltInMcpServer(registry);
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    closeCallbacks.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    const catalog = await client.listTools();
+    expect(catalog.tools.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        "get_codebases",
+        "get_builds",
+        "get_unified_events",
+        "get_console_logs",
+        "get_push_notification_history",
+        "get_agents",
+      ]),
+    );
+    await expect(
+      client.callTool({ name: "get_console_logs", arguments: {} }),
+    ).resolves.toMatchObject({ structuredContent: { items: [] } });
+    expect(timeline).toHaveBeenCalledWith(
+      expect.objectContaining({ view: "CONSOLE" }),
+    );
   });
 });

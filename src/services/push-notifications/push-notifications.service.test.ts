@@ -131,6 +131,31 @@ describe("PushNotificationsService direct delivery", () => {
     });
   });
 
+  test("loads individual presets and history batches for tool callers", async () => {
+    const preset = { id: "preset-1", editorJson: "{}" };
+    const batch = { id: "batch-1", deliveries: [] };
+    const presetFindUnique = vi.fn().mockResolvedValue(preset);
+    const batchFindUnique = vi.fn().mockResolvedValue(batch);
+    getPrismaClient.mockResolvedValue({
+      pushNotificationPreset: { findUnique: presetFindUnique },
+      pushNotificationBatch: {
+        findUnique: batchFindUnique,
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new PushNotificationsService();
+
+    await expect(service.preset("preset-1")).resolves.toBe(preset);
+    await expect(service.historyItem("batch-1")).resolves.toBe(batch);
+    expect(presetFindUnique).toHaveBeenCalledWith({
+      where: { id: "preset-1" },
+    });
+    expect(batchFindUnique).toHaveBeenCalledWith({
+      where: { id: "batch-1" },
+      include: { deliveries: { orderBy: { createdAt: "asc" } } },
+    });
+  });
+
   test("records token-auth success without a stored registration", async () => {
     const settingsUpdate = vi.fn().mockResolvedValue({ count: 1 });
     getPrismaClient.mockResolvedValue({

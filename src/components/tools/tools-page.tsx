@@ -59,6 +59,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { copyText } from "@/lib/browser-utils";
+import { cn } from "@/lib/utils";
 
 import type {
   ExternalMcpHeaderDraft,
@@ -163,19 +164,8 @@ export function ToolsPage() {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return groups;
     return groups.flatMap((group) => {
-      const groupMatches = [group.name, group.url ?? ""].some((value) =>
-        value.toLocaleLowerCase().includes(needle),
-      );
-      const tools = groupMatches
-        ? group.tools
-        : group.tools.filter((tool) =>
-            [tool.name, tool.title ?? "", tool.description ?? ""].some(
-              (value) => value.toLocaleLowerCase().includes(needle),
-            ),
-          );
-      return tools.length || (group.error && groupMatches)
-        ? [{ ...group, tools }]
-        : [];
+      const filtered = filterToolGroup(group, needle);
+      return filtered ? [filtered] : [];
     });
   }, [groups, query]);
 
@@ -630,10 +620,50 @@ function Field({
   );
 }
 
-function ToolGroup({ group }: { group: ToolCatalogGroup }) {
-  const t = useTranslations("tools");
+function groupToolCount(group: ToolCatalogGroup): number {
   return (
-    <Card className="gap-0 py-0">
+    group.tools.length +
+    (group.children ?? []).reduce(
+      (count, child) => count + groupToolCount(child),
+      0,
+    )
+  );
+}
+
+function filterToolGroup(
+  group: ToolCatalogGroup,
+  needle: string,
+): ToolCatalogGroup | null {
+  const children = group.children ?? [];
+  const groupMatches = [group.name, group.url ?? ""].some((value) =>
+    value.toLocaleLowerCase().includes(needle),
+  );
+  if (groupMatches) return { ...group, children };
+  const tools = group.tools.filter((tool) =>
+    [tool.name, tool.title ?? "", tool.description ?? ""].some((value) =>
+      value.toLocaleLowerCase().includes(needle),
+    ),
+  );
+  const filteredChildren = children.flatMap((child) => {
+    const filtered = filterToolGroup(child, needle);
+    return filtered ? [filtered] : [];
+  });
+  return tools.length || filteredChildren.length
+    ? { ...group, tools, children: filteredChildren }
+    : null;
+}
+
+function ToolGroup({
+  group,
+  nested = false,
+}: {
+  group: ToolCatalogGroup;
+  nested?: boolean;
+}) {
+  const t = useTranslations("tools");
+  const children = group.children ?? [];
+  return (
+    <Card className={cn("gap-0 py-0", nested && "bg-background")}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div className="flex items-center gap-2">
           {group.source === "BUILTIN" ? (
@@ -651,7 +681,7 @@ function ToolGroup({ group }: { group: ToolCatalogGroup }) {
           </div>
         </div>
         <Badge variant="outline">
-          {t("toolCount", { count: group.tools.length })}
+          {t("toolCount", { count: groupToolCount(group) })}
         </Badge>
       </div>
       {group.error && (
@@ -676,6 +706,13 @@ function ToolGroup({ group }: { group: ToolCatalogGroup }) {
             ))}
           </TableBody>
         </Table>
+      )}
+      {children.length > 0 && (
+        <div className="space-y-3 border-t bg-muted/20 p-4">
+          {children.map((child) => (
+            <ToolGroup group={child} key={child.id} nested />
+          ))}
+        </div>
       )}
     </Card>
   );

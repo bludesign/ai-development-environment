@@ -498,6 +498,11 @@ export class PushNotificationsService {
     });
   }
 
+  async preset(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.pushNotificationPreset.findUnique({ where: { id } });
+  }
+
   async savePreset(name: string, editor: unknown, id?: string | null) {
     const validated = validatePushEditor(editor);
     const prisma = await getPrismaClient();
@@ -533,6 +538,14 @@ export class PushNotificationsService {
       include: { deliveries: { orderBy: { createdAt: "asc" } } },
       orderBy: { createdAt: "desc" },
       take: Math.max(1, Math.min(limit, 200)),
+    });
+  }
+
+  async historyItem(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.pushNotificationBatch.findUnique({
+      where: { id },
+      include: { deliveries: { orderBy: { createdAt: "asc" } } },
     });
   }
 

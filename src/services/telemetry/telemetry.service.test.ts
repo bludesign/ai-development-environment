@@ -240,6 +240,62 @@ describe("TelemetryService", () => {
     expect(secondPage.items.map(({ id }) => id)).toEqual(["log-1"]);
   });
 
+  test("fetches only entries strictly newer than the latest separator", async () => {
+    const separator = raw("separator-1", "SEPARATOR", "2026-07-20T16:31:00Z");
+    const newer = raw("log-2", "CONSOLE", "2026-07-20T16:32:00Z");
+    const older = raw("log-1", "CONSOLE", "2026-07-20T16:30:00Z");
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: {
+        findFirst: vi.fn().mockResolvedValue(separator),
+        findMany: vi.fn().mockResolvedValue([newer, older]),
+      },
+    });
+
+    const page = await new TelemetryService().timelineSinceLatestSeparator({
+      view: "CONSOLE",
+      first: 50,
+    });
+
+    expect(page.separator?.id).toBe("separator-1");
+    expect(page.items.map(({ id }) => id)).toEqual(["log-2"]);
+    expect(page).toMatchObject({ matchingCount: 1, totalCount: 1 });
+  });
+
+  test("uses the complete separator ordering for same-time entries", async () => {
+    const separator = raw("separator-m", "SEPARATOR", "2026-07-20T16:31:00Z");
+    const newer = raw("separator-z", "CONSOLE", "2026-07-20T16:31:00Z");
+    const older = raw("separator-a", "CONSOLE", "2026-07-20T16:31:00Z");
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: {
+        findFirst: vi.fn().mockResolvedValue(separator),
+        findMany: vi.fn().mockResolvedValue([newer, older]),
+      },
+    });
+
+    const page = await new TelemetryService().timelineSinceLatestSeparator({
+      view: "CONSOLE",
+    });
+
+    expect(page.items.map(({ id }) => id)).toEqual(["separator-z"]);
+  });
+
+  test("treats a missing separator as an unbounded recent segment", async () => {
+    const entry = raw("log-1", "CONSOLE", "2026-07-20T16:31:00Z");
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([entry]),
+      },
+    });
+
+    const page = await new TelemetryService().timelineSinceLatestSeparator({
+      view: "CONSOLE",
+    });
+
+    expect(page.separator).toBeNull();
+    expect(page.items.map(({ id }) => id)).toEqual(["log-1"]);
+  });
+
   test("pushes supported timeline filters into the database scan", async () => {
     const findMany = vi
       .fn()
@@ -290,10 +346,92 @@ describe("TelemetryService", () => {
     ).resolves.toBe(4);
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
-        entryType: { in: ["CONSOLE"] },
-        clientTime: { lt: new Date("2026-07-20T16:31:00Z") },
+        AND: [
+          { entryType: { in: ["CONSOLE"] } },
+          {
+            OR: [
+              { clientTime: { lt: new Date("2026-07-20T16:31:00Z") } },
+              {
+                clientTime: new Date("2026-07-20T16:31:00Z"),
+                receivedAt: {
+                  lt: new Date("2026-07-20T16:31:00Z"),
+                },
+              },
+              {
+                clientTime: new Date("2026-07-20T16:31:00Z"),
+                receivedAt: new Date("2026-07-20T16:31:00Z"),
+                id: { lt: "separator-1" },
+              },
+            ],
+          },
+        ],
       },
     });
+  });
+
+  test("scopes explicit ID clears to the selected view while allowing separators", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([{ id: "console-1" }, { id: "separator-1" }]);
+    const deleteMany = vi.fn().mockResolvedValue({ count: 2 });
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: { findMany, deleteMany },
+    });
+
+    await expect(
+      new TelemetryService().clearScoped({
+        view: "CONSOLE",
+        scope: "IDS",
+        ids: ["console-1", "analytics-1", "separator-1"],
+      }),
+    ).resolves.toBe(2);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["console-1", "analytics-1", "separator-1"] },
+        entryType: { in: ["CONSOLE", "SEPARATOR"] },
+      },
+      select: { id: true },
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["console-1", "separator-1"] } },
+    });
+  });
+
+  test("dispatches matching and broad clear scopes without implicit separators", async () => {
+    const service = new TelemetryService();
+    const clearSelected = vi
+      .spyOn(service, "clearSelected")
+      .mockResolvedValue(3);
+    const clearAll = vi.spyOn(service, "clearAll").mockResolvedValue(4);
+    const clearBefore = vi
+      .spyOn(service, "clearBeforeLatestSeparator")
+      .mockResolvedValue(5);
+
+    await expect(
+      service.clearScoped({
+        view: "ANALYTICS",
+        scope: "MATCHING",
+        query: { search: "checkout" },
+      }),
+    ).resolves.toBe(3);
+    expect(clearSelected).toHaveBeenCalledWith({
+      query: { view: "ANALYTICS", search: "checkout" },
+    });
+
+    await expect(
+      service.clearScoped({ view: "UNIFIED", scope: "ALL" }),
+    ).resolves.toBe(4);
+    expect(clearAll).toHaveBeenCalledWith("UNIFIED", false);
+
+    await expect(
+      service.clearScoped({
+        view: "CONSOLE",
+        scope: "BEFORE_LATEST_SEPARATOR",
+        includeSeparators: true,
+      }),
+    ).resolves.toBe(5);
+    expect(clearBefore).toHaveBeenCalledWith("CONSOLE", true);
   });
 
   test("applies server-side query ranges to unloaded selections", async () => {
