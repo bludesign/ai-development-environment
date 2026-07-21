@@ -1,0 +1,112 @@
+"How a cache entry was matched against the requested keys."
+enum CacheEntryMatchType {
+  EXACT_PRIMARY
+  PREFIXED_PRIMARY
+  EXACT_RESTORE
+  PREFIXED_RESTORE
+}
+
+"A single header sent with every cache server request."
+type CacheServerHeader {
+  name: String!
+  valueConfigured: Boolean!
+}
+
+"Connection settings for the GitHub Actions Cache Server management API."
+type CacheServerSettings {
+  configured: Boolean!
+  baseUrl: String
+  apiKeyConfigured: Boolean!
+  headers: [CacheServerHeader!]!
+  updatedAt: String!
+}
+
+"A cache entry stored on the cache server."
+type CacheEntry {
+  id: ID!
+  key: String!
+  version: String!
+  scope: String!
+  repoId: String!
+  updatedAt: Float!
+  locationId: String!
+}
+
+"A paginated page of cache entries."
+type CacheEntryPage {
+  total: Int!
+  items: [CacheEntry!]!
+}
+
+"A storage location backing one or more cache entries."
+type StorageLocation {
+  id: ID!
+  folderName: String!
+  partCount: Float!
+  mergeStartedAt: Float
+  mergedAt: Float
+  partsDeletedAt: Float
+  lastDownloadedAt: Float
+  sizeBytes: Float
+}
+
+"A cache entry together with the storage location that backs it."
+type CacheEntryDetail {
+  entry: CacheEntry!
+  location: StorageLocation
+}
+
+"The best matching cache entry along with how it was matched."
+type CacheEntryMatch {
+  match: CacheEntry!
+  type: CacheEntryMatchType!
+}
+
+input CacheServerHeaderInput {
+  name: String!
+  value: String
+}
+
+input SaveCacheServerSettingsInput {
+  baseUrl: String!
+  apiKey: String
+  headers: [CacheServerHeaderInput!]
+}
+
+extend type Query {
+  cacheServerSettings: CacheServerSettings!
+  cacheEntries(
+    key: String
+    version: String
+    scope: String
+    repoId: String
+    itemsPerPage: Int = 20
+    page: Int = 1
+  ): CacheEntryPage!
+  cacheEntryDetail(id: ID!): CacheEntryDetail
+  cacheStorageLocation(id: ID!): StorageLocation
+  cacheEntryMatch(
+    primaryKey: String!
+    restoreKeys: [String!]
+    scopes: [String!]!
+    repoId: String!
+    version: String!
+  ): CacheEntryMatch
+}
+
+extend type Mutation {
+  saveCacheServerSettings(
+    input: SaveCacheServerSettingsInput!
+  ): CacheServerSettings!
+  testCacheServerConnection: CacheServerSettings!
+  clearCacheServerSettings: CacheServerSettings!
+  deleteCacheEntry(id: ID!): Boolean!
+  deleteCacheEntriesByIds(ids: [ID!]!): Boolean!
+  deleteCacheEntries(
+    key: String
+    version: String
+    scope: String
+    repoId: String
+  ): Boolean!
+  deleteCacheStorageLocation(id: ID!): Boolean!
+}

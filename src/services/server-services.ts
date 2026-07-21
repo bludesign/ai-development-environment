@@ -6,6 +6,7 @@ import { BuildDataService } from "@/services/build-data";
 import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import { GitHubService } from "@/services/github";
+import { CacheServerService } from "@/services/cache-server";
 import { JiraService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
 import { PrismaService } from "@/services/prisma";
@@ -27,6 +28,7 @@ export type ServerServices = {
   jiraService: JiraService;
   iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
+  cacheServerService: CacheServerService;
   toolsService: ToolsService;
   worktreesService: WorktreesService;
   skillsService: SkillsService;
@@ -56,6 +58,7 @@ function createServerServices(): ServerServices {
   const jiraService = new JiraService();
   const iosDevicesService = new IosDevicesService();
   const gitHubService = new GitHubService();
+  const cacheServerService = new CacheServerService();
   const worktreesService = new WorktreesService(
     agentControlService,
     jiraService,
@@ -73,6 +76,7 @@ function createServerServices(): ServerServices {
     jiraService,
     iosDevicesService,
     gitHubService,
+    cacheServerService,
     worktreesService,
     skillsService,
     telemetryService,
