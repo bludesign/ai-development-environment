@@ -2,14 +2,16 @@
 
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import {
+  PipelineMenu,
   RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
+import { WorkflowJob } from "@/components/github/workflow-job";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,10 +27,58 @@ import {
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubActionsWorkflowRunView,
+  GitHubPipelineStatus,
   GitHubPipelineView,
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
+
+const FAILURE_STATES = new Set([
+  "CANCELLED",
+  "ERROR",
+  "FAILURE",
+  "STALE",
+  "STARTUP_FAILURE",
+  "TIMED_OUT",
+]);
+const PENDING_STATES = new Set([
+  "ACTION_REQUIRED",
+  "EXPECTED",
+  "IN_PROGRESS",
+  "PENDING",
+  "QUEUED",
+]);
+
+function aggregateStatus(
+  runs: GitHubActionsWorkflowRunView[],
+): GitHubPipelineStatus {
+  if (runs.some((run) => FAILURE_STATES.has(run.status))) return "FAILURE";
+  if (runs.some((run) => PENDING_STATES.has(run.status))) return "PENDING";
+  if (runs.length && runs.every((run) => run.status === "SUCCESS")) {
+    return "SUCCESS";
+  }
+  return "NONE";
+}
+
+function pipelineView(
+  run: GitHubActionsWorkflowRunView,
+  jobs: GitHubWorkflowJobView[],
+): GitHubPipelineView {
+  return {
+    id: run.id,
+    name: run.name,
+    status: run.status,
+    url: run.url,
+    checkSuiteId: run.checkSuiteId,
+    canRetry: run.canRetry,
+    retryUnavailableReason: run.retryUnavailableReason,
+    jobs,
+    workflowRunId: run.id,
+    workflowId: run.workflowId,
+    runNumber: run.runNumber,
+    runAttempt: run.runAttempt,
+  };
+}
 
 export function WorktreePipelinesCard({
   runs,
@@ -43,7 +93,7 @@ export function WorktreePipelinesCard({
   branch: string | null;
   onError: (error: string | null) => void;
 }) {
-  const t = useTranslations("githubAutomation");
+  const t = useTranslations("pullRequestDetail");
   const tp = useTranslations("pullRequests");
   const [jobs, setJobs] = useState<Record<string, GitHubWorkflowJobView[]>>({});
   const [attempts, setAttempts] = useState<
@@ -82,11 +132,37 @@ export function WorktreePipelinesCard({
     };
   }, [runs]);
 
+  const pipelines = useMemo(
+    () => runs.map((run) => pipelineView(run, jobs[run.id] ?? [])),
+    [jobs, runs],
+  );
+
+  const jobRetried = (runId: string, jobId: string) => {
+    setJobs((current) => ({
+      ...current,
+      [runId]: (current[runId] ?? []).map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: "QUEUED",
+              canRetry: false,
+              retryUnavailableReason: "NOT_COMPLETED",
+              steps: [],
+            }
+          : {
+              ...job,
+              canRetry: false,
+              retryUnavailableReason: "NOT_COMPLETED",
+            },
+      ),
+    }));
+  };
+
   if (!runs.length && !error) return null;
 
   return (
-    <Card className="gap-0 py-0">
-      <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 py-5">
+    <Card className="min-w-0 gap-0 py-0">
+      <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3">
         <div>
           <CardTitle>{t("pipelines")}</CardTitle>
           <p className="text-xs text-muted-foreground">
@@ -94,19 +170,26 @@ export function WorktreePipelinesCard({
           </p>
         </div>
         {runs.length ? (
-          <AutoRetryDialog
-            allowFuture={Boolean(branch)}
-            branch={branch}
-            codebaseRepositoryId={runs[0].codebaseRepositoryId}
-            currentRuns={runs.map((run) => ({
-              id: run.id,
-              workflowId: run.workflowId,
-              name: run.name,
-              jobs: jobs[run.id],
-            }))}
-            repositoryGithubId={runs[0].repositoryGithubId}
-            worktreeId={worktreeId}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <AutoRetryDialog
+              allowFuture={Boolean(branch)}
+              branch={branch}
+              codebaseRepositoryId={runs[0].codebaseRepositoryId}
+              currentRuns={runs.map((run) => ({
+                id: run.id,
+                workflowId: run.workflowId,
+                name: run.name,
+                jobs: jobs[run.id],
+              }))}
+              repositoryGithubId={runs[0].repositoryGithubId}
+              worktreeId={worktreeId}
+            />
+            <PipelineMenu
+              pipelineStatus={aggregateStatus(runs)}
+              pipelines={pipelines}
+              repositoryId={runs[0].repositoryGithubId}
+            />
+          </div>
         ) : null}
       </CardHeader>
       <CardContent className="px-0">
@@ -119,37 +202,23 @@ export function WorktreePipelinesCard({
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>{t("pipeline")}</TableHead>
-                <TableHead>{t("status")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
+                <TableHead>{t("pipelineName")}</TableHead>
+                <TableHead>{t("pipelineStatus")}</TableHead>
+                <TableHead className="text-right">
+                  {t("pipelineDetails")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {runs.map((run) => {
                 const historical = attempts[run.id] ?? null;
                 const displayedJobs = historical?.jobs ?? jobs[run.id] ?? [];
-                const pipeline: GitHubPipelineView = {
-                  id: run.id,
-                  name: run.name,
-                  status: run.status,
-                  url: run.url,
-                  checkSuiteId: run.checkSuiteId,
-                  canRetry: run.canRetry,
-                  retryUnavailableReason: run.retryUnavailableReason,
-                  jobs: jobs[run.id] ?? [],
-                  workflowRunId: run.id,
-                  workflowId: run.workflowId,
-                  runNumber: run.runNumber,
-                  runAttempt: run.runAttempt,
-                };
+                const pipeline = pipelineView(run, jobs[run.id] ?? []);
                 return (
                   <Fragment key={run.id}>
                     <TableRow>
-                      <TableCell>
-                        <p className="font-medium">{run.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {run.displayTitle}
-                        </p>
+                      <TableCell className="font-medium">
+                        {run.name}
                         <div className="mt-2">
                           <WorkflowAttemptSelect
                             latestAttempt={run.runAttempt}
@@ -183,7 +252,8 @@ export function WorktreePipelinesCard({
                               rel="noreferrer"
                               target="_blank"
                             >
-                              {t("view")} <ExternalLink />
+                              {t("viewPipeline")}
+                              <ExternalLink />
                             </a>
                           </Button>
                           {!historical ? (
@@ -197,24 +267,30 @@ export function WorktreePipelinesCard({
                       </TableCell>
                     </TableRow>
                     <TableRow className="bg-muted/20 hover:bg-muted/20">
-                      <TableCell colSpan={3}>
-                        {displayedJobs.length ? (
-                          <div className="flex flex-wrap gap-2">
-                            {displayedJobs.map((job) => (
-                              <Badge
-                                className={pipelineStateClass(job.status)}
-                                key={job.id}
-                                variant="outline"
-                              >
-                                {job.name}: {tp(`pipelineStates.${job.status}`)}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {t("noJobs")}
+                      <TableCell className="p-0" colSpan={3}>
+                        <div className="border-l-2 border-muted-foreground/20 px-4 py-1">
+                          <p className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            {t("jobCount", { count: displayedJobs.length })}
                           </p>
-                        )}
+                          {displayedJobs.length === 0 ? (
+                            <p className="px-3 pb-3 text-sm text-muted-foreground">
+                              {t("noJobs")}
+                            </p>
+                          ) : (
+                            <div className="divide-y">
+                              {displayedJobs.map((job) => (
+                                <WorkflowJob
+                                  checkSuiteId={run.checkSuiteId}
+                                  job={job}
+                                  key={job.id}
+                                  onError={onError}
+                                  onRetried={() => jobRetried(run.id, job.id)}
+                                  repositoryId={run.repositoryGithubId}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   </Fragment>
