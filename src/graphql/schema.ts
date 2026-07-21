@@ -14,7 +14,9 @@ import { createCcusageResolvers } from "./resolvers/ccusage";
 import { createBuildDataResolvers } from "./resolvers/build-data";
 import { createJiraResolvers } from "./resolvers/jira";
 import { createGitHubResolvers } from "./resolvers/github";
+import { createCacheServerResolvers } from "./resolvers/cache-server";
 import { GitHubService } from "@/services/github";
+import type { CacheServerService } from "@/services/cache-server";
 import { JiraService } from "@/services/jira";
 import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
@@ -58,6 +60,7 @@ export const createSchema = (
   telemetryService: TelemetryService,
   signingAssetsService: SigningAssetsService,
   pushNotificationsService: PushNotificationsService,
+  cacheServerService: CacheServerService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -75,6 +78,7 @@ export const createSchema = (
     createTelemetryResolvers(telemetryService),
     createSigningAssetsResolvers(signingAssetsService),
     createPushNotificationsResolvers(pushNotificationsService),
+    createCacheServerResolvers(cacheServerService),
   ]);
 
   return buildSubgraphSchema({

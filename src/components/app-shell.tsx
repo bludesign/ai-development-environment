@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Blocks,
   BellRing,
@@ -8,6 +8,7 @@ import {
   Combine,
   Cpu,
   Database,
+  DatabaseZap,
   GitPullRequest,
   GitBranch,
   HardDrive,
@@ -45,6 +46,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Link, usePathname } from "@/i18n/navigation";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 type AppShellProps = {
@@ -219,6 +221,25 @@ function NavigationSidebar() {
   const t = useTranslations("shell");
   const { isMobile, setOpenMobile } = useSidebar();
   const pathname = usePathname();
+  const [cacheServerConfigured, setCacheServerConfigured] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void controlPlaneRequest<{ cacheServerSettings: { configured: boolean } }>(
+      "query CacheServerConfigured { cacheServerSettings { configured } }",
+    )
+      .then((data) => {
+        if (!cancelled) {
+          setCacheServerConfigured(data.cacheServerSettings.configured);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCacheServerConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   return (
     <Sidebar
@@ -438,7 +459,9 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/actions")}
+                  isActive={
+                    pathname === "/actions" || pathname.startsWith("/actions/")
+                  }
                 >
                   <Link
                     href="/actions"
@@ -467,6 +490,24 @@ function NavigationSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {cacheServerConfigured && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith("/actions-cache")}
+                  >
+                    <Link
+                      href="/actions-cache"
+                      onClick={() => {
+                        if (isMobile) setOpenMobile(false);
+                      }}
+                    >
+                      <DatabaseZap />
+                      <span>{t("actionsCache")}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

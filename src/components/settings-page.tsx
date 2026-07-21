@@ -24,6 +24,7 @@ import {
 } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { CacheServerSettingsCard } from "@/components/cache-server/settings-card";
 import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
 import { PushNotificationSettingsCard } from "@/components/push-notifications/push-notification-settings-card";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
@@ -88,6 +89,7 @@ export function SettingsPage() {
             <JiraSettingsPage embedded />
             <GitHubSettingsCard />
             <GitHubAppSettingsCard />
+            <CacheServerSettingsCard />
           </SettingsGroup>
         </div>
       </div>

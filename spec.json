@@ -1,0 +1,675 @@
+{
+  "servers": [
+    {
+      "url": "http://10.0.2.54:3006/management-api"
+    }
+  ],
+  "info": {
+    "title": "Cache Server Management API",
+    "version": "1.0.0"
+  },
+  "security": [
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "openapi": "3.1.1",
+  "paths": {
+    "/cache-entries/{id}": {
+      "get": {
+        "operationId": "cacheEntries.get",
+        "summary": "Get cache entry",
+        "description": "Retrieve a single cache entry by its id.",
+        "tags": ["Cache Entries"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "repoId": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "locationId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "version",
+                    "scope",
+                    "repoId",
+                    "updatedAt",
+                    "locationId"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": true
+                        },
+                        "code": {
+                          "const": "NOT_FOUND"
+                        },
+                        "status": {
+                          "const": 404
+                        },
+                        "message": {
+                          "type": "string",
+                          "default": "Cache entry not found"
+                        },
+                        "data": {}
+                      },
+                      "required": ["defined", "code", "status", "message"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": false
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "number"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["defined", "code", "status", "message"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cacheEntries.delete",
+        "summary": "Delete cache entry",
+        "description": "Delete a single cache entry by its id. Triggers cleanup of orphaned storage locations.",
+        "tags": ["Cache Entries"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {},
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cache-entries/match": {
+      "get": {
+        "operationId": "cacheEntries.match",
+        "summary": "Match cache entry",
+        "description": "Find the best matching cache entry using the primary key and optional restore keys across the given scopes. Returns the matched entry along with the match type, or null if no match is found. Basically what the cache server does when deciding which cache entry to restore for a given cache restore request.",
+        "tags": ["Cache Entries"],
+        "parameters": [
+          {
+            "name": "primaryKey",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The primary cache key to match against"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "restoreKeys",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional fallback keys to try if the primary key does not match"
+            },
+            "style": "deepObject",
+            "explode": true,
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "scopes",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Scopes to search within, checked in order"
+            },
+            "style": "deepObject",
+            "explode": true,
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "repoId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Repository id to match the cache entry against"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Cache version identifier"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "match": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "string"
+                            },
+                            "scope": {
+                              "type": "string"
+                            },
+                            "repoId": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "number"
+                            },
+                            "locationId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "key",
+                            "version",
+                            "scope",
+                            "repoId",
+                            "updatedAt",
+                            "locationId"
+                          ]
+                        },
+                        "type": {
+                          "enum": [
+                            "exact-primary",
+                            "prefixed-primary",
+                            "exact-restore",
+                            "prefixed-restore"
+                          ],
+                          "type": "string",
+                          "description": "How the match was found: exact-primary (exact primary key match), prefixed-primary (primary key prefix match), exact-restore (exact restore key match), prefixed-restore (restore key prefix match)"
+                        }
+                      },
+                      "required": ["match", "type"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cache-entries": {
+      "get": {
+        "operationId": "cacheEntries.findMany",
+        "summary": "List cache entries",
+        "description": "Retrieve a paginated list of cache entries, optionally filtered by key, version, and scope.",
+        "tags": ["Cache Entries"],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Filter by exact cache key"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Filter by exact cache version"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Filter by exact cache scope"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "repoId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Filter by exact repository id"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "itemsPerPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "exclusiveMinimum": 0,
+              "default": 20,
+              "description": "Number of items per page"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "exclusiveMinimum": 0,
+              "default": 1,
+              "description": "Page number"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "repoId": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "number"
+                          },
+                          "locationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "version",
+                          "scope",
+                          "repoId",
+                          "updatedAt",
+                          "locationId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["total", "items"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cacheEntries.deleteMany",
+        "summary": "Delete cache entries",
+        "description": "Delete multiple cache entries matching the given filters. Triggers cleanup of orphaned storage locations.",
+        "tags": ["Cache Entries"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "Filter by exact cache key"
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "Filter by exact cache version"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "description": "Filter by exact cache scope"
+                  },
+                  "repoId": {
+                    "type": "string",
+                    "description": "Filter by exact repository id"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {},
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/storage-locations/{id}": {
+      "get": {
+        "operationId": "storageLocations.get",
+        "summary": "Get storage location",
+        "description": "Retrieve a single storage location by its id.",
+        "tags": ["Storage Locations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "folderName": {
+                      "type": "string"
+                    },
+                    "partCount": {
+                      "type": "number"
+                    },
+                    "mergeStartedAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mergedAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "partsDeletedAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastDownloadedAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sizeBytes": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "folderName",
+                    "partCount",
+                    "mergeStartedAt",
+                    "mergedAt",
+                    "partsDeletedAt",
+                    "lastDownloadedAt",
+                    "sizeBytes"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": true
+                        },
+                        "code": {
+                          "const": "NOT_FOUND"
+                        },
+                        "status": {
+                          "const": 404
+                        },
+                        "message": {
+                          "type": "string",
+                          "default": "Storage location not found"
+                        },
+                        "data": {}
+                      },
+                      "required": ["defined", "code", "status", "message"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "defined": {
+                          "const": false
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "number"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["defined", "code", "status", "message"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "storageLocations.delete",
+        "summary": "Delete storage location",
+        "description": "Delete a storage location by its id. Removes the associated folder from storage.",
+        "tags": ["Storage Locations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {},
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
