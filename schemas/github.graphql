@@ -394,6 +394,7 @@ type GitHubReviewThreadState {
 
 type GitHubPullRequestDetail {
   id: ID!
+  codebaseRepositoryId: ID
   number: Int!
   title: String!
   url: String!

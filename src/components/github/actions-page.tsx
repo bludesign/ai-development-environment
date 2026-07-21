@@ -1,13 +1,9 @@
 "use client";
 
 import {
-  Ban,
   ChevronDown,
   ChevronRight,
-  CircleStop,
   ExternalLink,
-  GitBranch,
-  MoreHorizontal,
   PlayCircle,
   RefreshCw,
   RotateCcw,
@@ -27,23 +23,15 @@ import {
 } from "react";
 
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
-import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
+import { WorkflowRunActionsMenu } from "@/components/github/workflow-run-actions-menu";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
-import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -75,16 +63,8 @@ import type {
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
-import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 
 const ALL_REPOSITORIES = "all";
-const CANCELLABLE_RUN_STATES = new Set<GitHubActionsWorkflowRunView["status"]>([
-  "ACTION_REQUIRED",
-  "EXPECTED",
-  "IN_PROGRESS",
-  "PENDING",
-  "QUEUED",
-]);
 const RUN_FIELDS =
   "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
@@ -980,6 +960,8 @@ function ActionsTable({
                       <TableCell>
                         <div className="flex justify-end">
                           <WorkflowRunActionsMenu
+                            includeAutoRetry
+                            includeWorktree
                             onCancelled={() => onRunCancelled(run)}
                             onError={onError}
                             onRetried={() => onRunRetried(run)}
@@ -1018,182 +1000,6 @@ function ActionsTable({
         </TableBody>
       </Table>
     </Card>
-  );
-}
-
-function WorkflowRunActionsMenu({
-  run,
-  jobs,
-  onCancelled,
-  onRetried,
-  onError,
-}: {
-  run: GitHubActionsWorkflowRunView;
-  jobs: GitHubWorkflowJobView[];
-  onCancelled: () => void;
-  onRetried: () => void;
-  onError: (error: string | null) => void;
-}) {
-  const t = useTranslations("actionsPage");
-  const tp = useTranslations("pullRequests");
-  const [retrying, setRetrying] = useState(false);
-  const [cancelling, setCancelling] = useState<"cancel" | "force" | null>(null);
-  const [confirmingForceCancel, setConfirmingForceCancel] = useState(false);
-
-  const retry = async () => {
-    if (!run.canRetry || !run.checkSuiteId) return;
-    setRetrying(true);
-    try {
-      await controlPlaneRequest<{ retryGitHubPipeline: { id: string } }>(
-        `mutation RetryGitHubPipeline(
-          $repositoryId: ID!
-          $checkSuiteId: ID!
-        ) {
-          retryGitHubPipeline(
-            repositoryId: $repositoryId
-            checkSuiteId: $checkSuiteId
-          ) { id }
-        }`,
-        {
-          repositoryId: run.repositoryGithubId,
-          checkSuiteId: run.checkSuiteId,
-        },
-      );
-      onRetried();
-      onError(null);
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setRetrying(false);
-    }
-  };
-
-  const cancelRun = async (force: boolean) => {
-    if (!CANCELLABLE_RUN_STATES.has(run.status) || cancelling) return;
-    setCancelling(force ? "force" : "cancel");
-    try {
-      await controlPlaneRequest<{
-        cancelGitHubActionsWorkflowRun: boolean;
-      }>(
-        `mutation CancelGitHubActionsWorkflowRun(
-          $codebaseRepositoryId: ID!
-          $workflowRunId: ID!
-          $force: Boolean!
-        ) {
-          cancelGitHubActionsWorkflowRun(
-            codebaseRepositoryId: $codebaseRepositoryId
-            workflowRunId: $workflowRunId
-            force: $force
-          )
-        }`,
-        {
-          codebaseRepositoryId: run.codebaseRepositoryId,
-          workflowRunId: run.id,
-          force,
-        },
-      );
-      onCancelled();
-      onError(null);
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setCancelling(null);
-    }
-  };
-
-  const retryUnavailableMessage = run.retryUnavailableReason
-    ? tp(`retryUnavailable.${run.retryUnavailableReason}`)
-    : undefined;
-
-  const cancellable = CANCELLABLE_RUN_STATES.has(run.status);
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            aria-label={`${t("actions")}: ${run.displayTitle}`}
-            size="icon-sm"
-            variant="outline"
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem asChild>
-            <a href={run.url} rel="noreferrer" target="_blank">
-              <ExternalLink />
-              {t("view")}
-            </a>
-          </DropdownMenuItem>
-          {run.worktreeId ? (
-            <DropdownMenuItem asChild>
-              <Link href={worktreeDetailHref(run.worktreeId)}>
-                <GitBranch />
-                {t("worktree")}
-              </Link>
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem disabled>
-              <GitBranch />
-              {t("worktree")}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={Boolean(cancelling) || !cancellable}
-            onSelect={() => void cancelRun(false)}
-          >
-            {cancelling === "cancel" ? <Spinner /> : <CircleStop />}
-            {cancelling === "cancel" ? t("cancelling") : t("cancel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={Boolean(cancelling) || !cancellable}
-            onSelect={() => setConfirmingForceCancel(true)}
-            variant="destructive"
-          >
-            {cancelling === "force" ? <Spinner /> : <Ban />}
-            {cancelling === "force" ? t("forceCancelling") : t("forceCancel")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={retrying || !run.canRetry || !run.checkSuiteId}
-            onSelect={() => void retry()}
-            title={retryUnavailableMessage}
-          >
-            {retrying ? <Spinner /> : <RotateCcw />}
-            {retrying ? tp("retrying") : tp("retry")}
-          </DropdownMenuItem>
-          <AutoRetryDialog
-            codebaseRepositoryId={run.codebaseRepositoryId}
-            currentRuns={[
-              {
-                id: run.id,
-                workflowId: run.workflowId,
-                name: run.name,
-                jobs,
-              },
-            ]}
-            repositoryGithubId={run.repositoryGithubId}
-            trigger={
-              <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
-                <RotateCcw />
-                {t("autoRetry")}
-              </DropdownMenuItem>
-            }
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ConfirmationDialog
-        actionLabel={t("forceCancel")}
-        cancelLabel={t("keepRunning")}
-        description={t("forceCancelDescription")}
-        onConfirm={() => cancelRun(true)}
-        onOpenChange={setConfirmingForceCancel}
-        open={confirmingForceCancel}
-        title={t("forceCancelTitle")}
-      />
-    </>
   );
 }
 

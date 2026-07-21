@@ -14,12 +14,15 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 
 import {
   PipelineMenu,
-  RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
+import {
+  actionsForBranchHref,
+  WorkflowRunActionsMenu,
+} from "@/components/github/workflow-run-actions-menu";
 import { GitHubMarkdownBlock } from "@/components/github/github-markdown";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { ReviewThreadCard } from "@/components/github/review-thread-card";
@@ -58,7 +61,7 @@ import type {
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
+  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -145,6 +148,48 @@ export function PullRequestDetailPage({
               item.id === pipeline.id
                 ? { ...pipeline, jobs: pipeline.jobs ?? item.jobs }
                 : item,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const pipelineRunRetried = (pipelineId: string) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            pipelineStatus: "PENDING",
+            pipelines: current.pipelines.map((pipeline) =>
+              pipeline.id === pipelineId
+                ? {
+                    ...pipeline,
+                    status: "QUEUED",
+                    canRetry: false,
+                    retryUnavailableReason: "NOT_COMPLETED",
+                  }
+                : pipeline,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const pipelineRunCancelled = (pipelineId: string) => {
+    setPullRequest((current) =>
+      current
+        ? {
+            ...current,
+            pipelineStatus: "FAILURE",
+            pipelines: current.pipelines.map((pipeline) =>
+              pipeline.id === pipelineId
+                ? {
+                    ...pipeline,
+                    status: "CANCELLED",
+                    canRetry: false,
+                    retryUnavailableReason: "NOT_COMPLETED",
+                  }
+                : pipeline,
             ),
           }
         : current,
@@ -394,24 +439,26 @@ export function PullRequestDetailPage({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <AutoRetryDialog
-                  allowFuture
-                  branch={pullRequest.headRefName}
-                  codebaseRepositoryId={pullRequest.repositoryGithubId}
-                  currentRuns={pullRequest.pipelines
-                    .filter(
-                      (pipeline) =>
-                        pipeline.workflowRunId && pipeline.workflowId,
-                    )
-                    .map((pipeline) => ({
-                      id: pipeline.workflowRunId!,
-                      workflowId: pipeline.workflowId!,
-                      name: pipeline.name,
-                      jobs: pipeline.jobs,
-                    }))}
-                  pullRequestNumber={pullRequest.number}
-                  repositoryGithubId={pullRequest.repositoryGithubId}
-                />
+                {pullRequest.codebaseRepositoryId ? (
+                  <AutoRetryDialog
+                    allowFuture
+                    branch={pullRequest.headRefName}
+                    codebaseRepositoryId={pullRequest.codebaseRepositoryId}
+                    currentRuns={pullRequest.pipelines
+                      .filter(
+                        (pipeline) =>
+                          pipeline.workflowRunId && pipeline.workflowId,
+                      )
+                      .map((pipeline) => ({
+                        id: pipeline.workflowRunId!,
+                        workflowId: pipeline.workflowId!,
+                        name: pipeline.name,
+                        jobs: pipeline.jobs,
+                      }))}
+                    pullRequestNumber={pullRequest.number}
+                    repositoryGithubId={pullRequest.repositoryGithubId}
+                  />
+                ) : null}
                 <PipelineMenu
                   onPipelineRetried={pipelineRetried}
                   pipelineStatus={pullRequest.pipelineStatus}
@@ -477,34 +524,48 @@ export function PullRequestDetailPage({
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <div className="flex justify-end gap-2">
-                                {displayedUrl ? (
-                                  <Button asChild size="sm" variant="outline">
-                                    <a
-                                      href={displayedUrl}
-                                      rel="noreferrer"
-                                      target="_blank"
-                                    >
-                                      {t("viewPipeline")}
-                                      <ExternalLink />
-                                    </a>
-                                  </Button>
-                                ) : (
-                                  <Button disabled size="sm" variant="outline">
-                                    {t("viewPipeline")}
-                                    <ExternalLink />
-                                  </Button>
-                                )}
-                                {!historicalAttempt ? (
-                                  <RetryPipelineButton
-                                    onError={setError}
-                                    onPipelineRetried={pipelineRetried}
-                                    pipeline={pipeline}
-                                    repositoryId={
-                                      pullRequest.repositoryGithubId
-                                    }
-                                  />
-                                ) : null}
+                              <div className="flex justify-end">
+                                <WorkflowRunActionsMenu
+                                  onCancelled={() =>
+                                    pipelineRunCancelled(pipeline.id)
+                                  }
+                                  onError={setError}
+                                  onRetried={() =>
+                                    pipelineRunRetried(pipeline.id)
+                                  }
+                                  run={{
+                                    id: pipeline.workflowRunId ?? pipeline.id,
+                                    workflowId:
+                                      pipeline.workflowId ?? pipeline.name,
+                                    repositoryGithubId:
+                                      pullRequest.repositoryGithubId,
+                                    codebaseRepositoryId:
+                                      !historicalAttempt &&
+                                      pipeline.workflowRunId
+                                        ? pullRequest.codebaseRepositoryId
+                                        : null,
+                                    name: pipeline.name,
+                                    displayTitle: pipeline.name,
+                                    status: displayedStatus,
+                                    url: displayedUrl,
+                                    checkSuiteId: historicalAttempt
+                                      ? null
+                                      : pipeline.checkSuiteId,
+                                    canRetry: historicalAttempt
+                                      ? false
+                                      : pipeline.canRetry,
+                                    retryUnavailableReason:
+                                      pipeline.retryUnavailableReason,
+                                  }}
+                                  viewAllHref={
+                                    pullRequest.codebaseRepositoryId
+                                      ? actionsForBranchHref(
+                                          pullRequest.codebaseRepositoryId,
+                                          pullRequest.headRefName,
+                                        )
+                                      : null
+                                  }
+                                />
                               </div>
                             </TableCell>
                           </TableRow>

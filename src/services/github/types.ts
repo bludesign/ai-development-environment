@@ -352,6 +352,7 @@ export type GitHubReviewThreadState = {
 };
 
 export type GitHubPullRequestDetail = GitHubPullRequestView & {
+  codebaseRepositoryId: string | null;
   body: string;
   bodyHtml: string;
   author: GitHubPullRequestActor | null;

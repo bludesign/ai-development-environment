@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -15,6 +16,13 @@ import { WorktreePipelinesCard } from "./worktree-pipelines-card";
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
 }));
+
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
 
 const run: GitHubActionsWorkflowRunView = {
   id: "run-1",
@@ -68,24 +76,27 @@ describe("WorktreePipelinesCard", () => {
       <WorktreePipelinesCard
         branch="feature/APP-1"
         error={null}
+        onCancelled={vi.fn()}
         onError={vi.fn()}
+        onRetried={vi.fn()}
         runs={[run]}
         worktreeId="worktree-1"
       />,
     );
 
     const pipelineRow = await screen.findByRole("row", { name: /CI Passed/ });
+    fireEvent.pointerDown(
+      within(pipelineRow).getByRole("button", {
+        name: "Actions: Feature build",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Retry" })).toBeDefined();
     expect(
-      within(pipelineRow).getByRole("link", { name: "View" }),
-    ).toBeDefined();
-    expect(
-      within(pipelineRow).getByRole("button", { name: "Retry" }),
-    ).toBeDefined();
-    expect(
-      screen
-        .getByRole("link", { name: "View all for branch" })
-        .getAttribute("href"),
+      screen.getByRole("menuitem", { name: "View all" }).getAttribute("href"),
     ).toBe("/actions?repository=codebase-repository-1&branch=feature%2FAPP-1");
+    fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
     expect(screen.getByText("1 jobs")).toBeDefined();
 
     const showSteps = screen.getByRole("button", {
@@ -99,5 +110,60 @@ describe("WorktreePipelinesCard", () => {
     expect(
       screen.getByRole("button", { name: "Retry build-and-test" }),
     ).toBeDefined();
+  });
+
+  test("cancels an active workflow run from the pipeline menu", async () => {
+    const onCancelled = vi.fn();
+    vi.mocked(controlPlaneRequest).mockImplementation(async (query) => {
+      if (query.includes("WorktreePipelineJobs")) {
+        return { githubActionsWorkflowJobs: [] } as never;
+      }
+      if (query.includes("CancelGitHubActionsWorkflowRun")) {
+        return { cancelGitHubActionsWorkflowRun: true } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(
+      <WorktreePipelinesCard
+        branch="feature/APP-1"
+        error={null}
+        onCancelled={onCancelled}
+        onError={vi.fn()}
+        onRetried={vi.fn()}
+        runs={[
+          {
+            ...run,
+            status: "IN_PROGRESS",
+            canRetry: false,
+            retryUnavailableReason: "NOT_COMPLETED",
+          },
+        ]}
+        worktreeId="worktree-1"
+      />,
+    );
+
+    fireEvent.pointerDown(
+      await screen.findByRole("button", {
+        name: "Actions: Feature build",
+      }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "Force cancel" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(controlPlaneRequest).toHaveBeenCalledWith(
+        expect.stringContaining("CancelGitHubActionsWorkflowRun"),
+        {
+          codebaseRepositoryId: "codebase-repository-1",
+          workflowRunId: "run-1",
+          force: false,
+        },
+      ),
+    );
+    expect(onCancelled).toHaveBeenCalledWith("run-1");
   });
 });

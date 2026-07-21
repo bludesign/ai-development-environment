@@ -930,7 +930,7 @@
     "noCommentsDescription": "Cette demande de tirage ne contient aucun fil de révision.",
     "pipelines": "Chaînes d’intégration",
     "pipelineCount": "{count} pipelines et contextes d’état",
-    "viewAllForBranch": "Tout afficher pour la branche",
+    "viewAll": "Tout afficher",
     "pipelineName": "Pipeline",
     "pipelineStatus": "État",
     "pipelineDetails": "Détails",

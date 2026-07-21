@@ -1,20 +1,21 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import {
   PipelineMenu,
-  RetryPipelineButton,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
+import {
+  actionsForBranchHref,
+  WorkflowRunActionsMenu,
+} from "@/components/github/workflow-run-actions-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -25,7 +26,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { Link } from "@/i18n/navigation";
 import type {
   GitHubActionsWorkflowRunView,
   GitHubPipelineStatus,
@@ -81,23 +81,22 @@ function pipelineView(
   };
 }
 
-function actionsForBranchHref(repositoryId: string, branch: string) {
-  const params = new URLSearchParams({ repository: repositoryId, branch });
-  return `/actions?${params.toString()}`;
-}
-
 export function WorktreePipelinesCard({
   runs,
   error,
   worktreeId,
   branch,
+  onCancelled,
   onError,
+  onRetried,
 }: {
   runs: GitHubActionsWorkflowRunView[];
   error: string | null;
   worktreeId: string;
   branch: string | null;
+  onCancelled: (runId: string) => void;
   onError: (error: string | null) => void;
+  onRetried: (runId: string) => void;
 }) {
   const t = useTranslations("pullRequestDetail");
   const tp = useTranslations("pullRequests");
@@ -177,18 +176,6 @@ export function WorktreePipelinesCard({
         </div>
         {runs.length ? (
           <div className="flex flex-wrap items-center gap-2">
-            {branch ? (
-              <Button asChild size="sm" variant="outline">
-                <Link
-                  href={actionsForBranchHref(
-                    runs[0].codebaseRepositoryId,
-                    branch,
-                  )}
-                >
-                  {t("viewAllForBranch")}
-                </Link>
-              </Button>
-            ) : null}
             <AutoRetryDialog
               allowFuture={Boolean(branch)}
               branch={branch}
@@ -231,7 +218,6 @@ export function WorktreePipelinesCard({
               {runs.map((run) => {
                 const historical = attempts[run.id] ?? null;
                 const displayedJobs = historical?.jobs ?? jobs[run.id] ?? [];
-                const pipeline = pipelineView(run, jobs[run.id] ?? []);
                 return (
                   <Fragment key={run.id}>
                     <TableRow>
@@ -263,24 +249,31 @@ export function WorktreePipelinesCard({
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex justify-end gap-2">
-                          <Button asChild size="sm" variant="outline">
-                            <a
-                              href={historical?.url ?? run.url}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              {t("viewPipeline")}
-                              <ExternalLink />
-                            </a>
-                          </Button>
-                          {!historical ? (
-                            <RetryPipelineButton
-                              onError={onError}
-                              pipeline={pipeline}
-                              repositoryId={run.repositoryGithubId}
-                            />
-                          ) : null}
+                        <div className="flex justify-end">
+                          <WorkflowRunActionsMenu
+                            onCancelled={() => onCancelled(run.id)}
+                            onError={onError}
+                            onRetried={() => onRetried(run.id)}
+                            run={
+                              historical
+                                ? {
+                                    ...run,
+                                    status: historical.status,
+                                    url: historical.url,
+                                    checkSuiteId: null,
+                                    canRetry: false,
+                                  }
+                                : run
+                            }
+                            viewAllHref={
+                              branch
+                                ? actionsForBranchHref(
+                                    run.codebaseRepositoryId,
+                                    branch,
+                                  )
+                                : null
+                            }
+                          />
                         </div>
                       </TableCell>
                     </TableRow>

@@ -930,7 +930,7 @@
     "noCommentsDescription": "This pull request does not have any review threads.",
     "pipelines": "Pipelines",
     "pipelineCount": "{count} pipelines and status contexts",
-    "viewAllForBranch": "View all for branch",
+    "viewAll": "View all",
     "pipelineName": "Pipeline",
     "pipelineStatus": "Status",
     "pipelineDetails": "Details",

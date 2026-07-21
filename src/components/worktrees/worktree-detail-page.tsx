@@ -360,6 +360,35 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       key={entry.worktree.id}
       loadError={error}
       onLoadMoreBuilds={loadMoreBuilds}
+      onPipelineCancelled={(runId) =>
+        setPipelines((current) =>
+          current.map((run) =>
+            run.id === runId
+              ? {
+                  ...run,
+                  status: "CANCELLED",
+                  canRetry: false,
+                  retryUnavailableReason: "NOT_COMPLETED",
+                  updatedAt: new Date().toISOString(),
+                }
+              : run,
+          ),
+        )
+      }
+      onPipelineRetried={(runId) =>
+        setPipelines((current) =>
+          current.map((run) =>
+            run.id === runId
+              ? {
+                  ...run,
+                  status: "QUEUED",
+                  canRetry: false,
+                  retryUnavailableReason: "NOT_COMPLETED",
+                }
+              : run,
+          ),
+        )
+      }
       onReload={load}
       onUpdate={updateWorktree}
       overview={overview}
@@ -380,6 +409,8 @@ function LoadedWorktreeDetail({
   pipelinesError,
   loadError,
   onLoadMoreBuilds,
+  onPipelineCancelled,
+  onPipelineRetried,
   onReload,
   onUpdate,
 }: {
@@ -393,6 +424,8 @@ function LoadedWorktreeDetail({
   pipelinesError: string | null;
   loadError: string | null;
   onLoadMoreBuilds: () => Promise<void>;
+  onPipelineCancelled: (runId: string) => void;
+  onPipelineRetried: (runId: string) => void;
   onReload: () => Promise<void>;
   onUpdate: (worktree: Worktree) => void;
 }) {
@@ -625,7 +658,9 @@ function LoadedWorktreeDetail({
       <WorktreePipelinesCard
         branch={worktree.branch}
         error={pipelinesError}
+        onCancelled={onPipelineCancelled}
         onError={setOperationError}
+        onRetried={onPipelineRetried}
         runs={pipelines}
         worktreeId={worktree.id}
       />

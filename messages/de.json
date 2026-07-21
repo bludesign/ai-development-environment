@@ -930,7 +930,7 @@
     "noCommentsDescription": "Dieser Pull Request enthält keine Review-Threads.",
     "pipelines": "Build-Abläufe",
     "pipelineCount": "{count} Pipelines und Statuskontexte",
-    "viewAllForBranch": "Alle für diesen Branch anzeigen",
+    "viewAll": "Alle anzeigen",
     "pipelineName": "Pipeline",
     "pipelineStatus": "Status",
     "pipelineDetails": "Details",

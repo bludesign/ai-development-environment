@@ -1874,6 +1874,7 @@ describe("GitHub service", () => {
       service.pullRequest("acme", "widgets", 17),
     ).resolves.toMatchObject({ worktreeId: "fork-worktree" });
     expect(state.codebaseRepositoryOrigins).toEqual([
+      "github.com/acme/widgets",
       "github.com/forkowner/mixedrepo",
     ]);
 
@@ -1882,7 +1883,9 @@ describe("GitHub service", () => {
     await expect(
       service.pullRequest("acme", "widgets", 17),
     ).resolves.toMatchObject({ worktreeId: null });
-    expect(state.codebaseRepositoryOrigins).toEqual([]);
+    expect(state.codebaseRepositoryOrigins).toEqual([
+      "github.com/acme/widgets",
+    ]);
   });
 
   test("keeps the App private key write-only and verifies before replacing settings", async () => {

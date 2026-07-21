@@ -3321,15 +3321,23 @@ export class GitHubService {
       pullRequest.reviewThreadsFull,
       token,
     );
+    const baseCanonicalOrigin = `github.com/${pullRequest.repository.nameWithOwner.toLowerCase()}`;
+    const codebaseRepository = await prisma.codebaseRepository.findFirst({
+      where: { canonicalOrigin: baseCanonicalOrigin },
+      select: { id: true },
+    });
     const canonicalOrigin = pullRequest.headRepository
       ? `github.com/${pullRequest.headRepository.nameWithOwner.toLowerCase()}`
       : null;
-    const matchingRepository = canonicalOrigin
-      ? await prisma.codebaseRepository.findFirst({
-          where: { canonicalOrigin },
-          select: { id: true },
-        })
-      : null;
+    const matchingRepository =
+      canonicalOrigin === baseCanonicalOrigin
+        ? codebaseRepository
+        : canonicalOrigin
+          ? await prisma.codebaseRepository.findFirst({
+              where: { canonicalOrigin },
+              select: { id: true },
+            })
+          : null;
     const worktree = matchingRepository
       ? await prisma.worktree.findFirst({
           where: {
@@ -3343,6 +3351,7 @@ export class GitHubService {
       : null;
     return {
       ...summary,
+      codebaseRepositoryId: codebaseRepository?.id ?? null,
       pipelines,
       body: pullRequest.body,
       bodyHtml: pullRequest.bodyHTML,
