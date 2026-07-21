@@ -63,8 +63,11 @@ describe("WorkflowAttemptSelect", () => {
     );
 
     fireEvent.click(screen.getByRole("combobox"));
-    expect(await screen.findByText("Passed")).toBeTruthy();
-    expect(await screen.findAllByText(/by @octocat/)).toHaveLength(3);
+    const passed = await screen.findByText("Passed");
+    expect(passed.parentElement?.textContent).toBe("Latest — Attempt 3Passed");
+    const actors = await screen.findAllByText(/Started by @octocat/);
+    expect(actors).toHaveLength(3);
+    expect(actors[0]?.parentElement?.textContent).not.toContain("2026");
     fireEvent.click(await screen.findByRole("option", { name: /Attempt 2/ }));
 
     await waitFor(() =>

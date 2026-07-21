@@ -1046,7 +1046,7 @@
     "attemptSelector": "Intento del flujo de trabajo",
     "latestAttempt": "Último — Intento {attempt}",
     "attempt": "Intento {attempt}",
-    "attemptStartedBy": "{date} por @{actor}",
+    "attemptStartedBy": "Iniciado por @{actor}",
     "pipelines": "Canalizaciones",
     "pipelineCount": "{count} pipelines de GitHub Actions",
     "pipeline": "Canalización",

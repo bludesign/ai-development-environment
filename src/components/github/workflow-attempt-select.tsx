@@ -193,9 +193,7 @@ export function WorkflowAttemptSelect({
                         : t("attempt", { attempt })}
                     </span>
                     {details ? (
-                      <Badge
-                        className={`ml-auto ${pipelineStateClass(details.status)}`}
-                      >
+                      <Badge className={pipelineStateClass(details.status)}>
                         {tp(`pipelineStates.${details.status}`)}
                       </Badge>
                     ) : metadataLoading ? (
@@ -203,22 +201,20 @@ export function WorkflowAttemptSelect({
                     ) : null}
                   </span>
                   {details ? (
+                    <span className="text-xs text-muted-foreground">
+                      {attemptDate(details.startedAt, locale)}
+                    </span>
+                  ) : null}
+                  {actor ? (
                     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      {actor ? (
-                        <Avatar className="size-4">
-                          <AvatarImage alt="" src={actor.avatarUrl} />
-                          <AvatarFallback>
-                            {actor.login.slice(0, 1).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                      ) : null}
-                      <span className="truncate">
-                        {actor
-                          ? t("attemptStartedBy", {
-                              date: attemptDate(details.startedAt, locale),
-                              actor: actor.login,
-                            })
-                          : attemptDate(details.startedAt, locale)}
+                      <Avatar className="size-4">
+                        <AvatarImage alt="" src={actor.avatarUrl} />
+                        <AvatarFallback>
+                          {actor.login.slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="min-w-0 truncate">
+                        {t("attemptStartedBy", { actor: actor.login })}
                       </span>
                     </span>
                   ) : null}

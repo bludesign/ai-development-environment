@@ -1046,7 +1046,7 @@
     "attemptSelector": "Workflow attempt",
     "latestAttempt": "Latest — Attempt {attempt}",
     "attempt": "Attempt {attempt}",
-    "attemptStartedBy": "{date} by @{actor}",
+    "attemptStartedBy": "Started by @{actor}",
     "pipelines": "Pipelines",
     "pipelineCount": "{count} GitHub Actions pipelines",
     "pipeline": "Pipeline",
