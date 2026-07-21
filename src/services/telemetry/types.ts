@@ -115,6 +115,15 @@ export type TelemetryTimelinePage = {
   totalCount: number;
 };
 
+export type TelemetrySinceSeparatorPage = TelemetryTimelinePage & {
+  separator: TelemetryEntryView | null;
+};
+
+export type TelemetrySeparatorPage = {
+  items: TelemetryEntryView[];
+  nextCursor: string | null;
+};
+
 export type TelemetryFacets = Record<string, string[]>;
 
 export type TelemetrySettingsView = {

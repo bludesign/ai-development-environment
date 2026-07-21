@@ -180,6 +180,88 @@ describe("ToolsPage", () => {
     );
   });
 
+  test("renders, searches, counts, and invokes nested built-in groups", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/api/tools/catalog")) {
+          return Response.json({
+            groups: [
+              {
+                id: "builtin:debugging",
+                name: "Debugging",
+                source: "BUILTIN",
+                transport: null,
+                url: null,
+                error: null,
+                tools: [
+                  {
+                    name: "get_unified_events",
+                    title: "Get unified events",
+                    description: "Fetch unified events.",
+                    inputSchema: { type: "object", properties: {} },
+                    outputSchema: null,
+                  },
+                ],
+                children: [
+                  {
+                    id: "builtin:debugging:console-logs",
+                    name: "Console Logs",
+                    source: "BUILTIN",
+                    transport: null,
+                    url: null,
+                    error: null,
+                    tools: [
+                      {
+                        name: "get_console_logs",
+                        title: "Get console logs",
+                        description: "Fetch console logs.",
+                        inputSchema: { type: "object", properties: {} },
+                        outputSchema: null,
+                      },
+                    ],
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          groupId: "builtin:debugging:console-logs",
+          name: "get_console_logs",
+          arguments: {},
+        });
+        return Response.json({ result: { items: [] } });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ToolsPage />);
+    await screen.findByText("get_console_logs");
+    expect(screen.getByText("get_unified_events")).toBeDefined();
+    expect(screen.getByText("Debugging")).toBeDefined();
+    expect(screen.getByText("Console Logs")).toBeDefined();
+    expect(screen.getAllByText("2 tools")).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
+      target: { value: "console logs" },
+    });
+    expect(screen.queryByText("get_unified_events")).toBeNull();
+    expect(screen.getByText("get_console_logs")).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand get_console_logs" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tools/call",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
   test("creates an external server with write-only headers", async () => {
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("query ExternalMcpServers")) {

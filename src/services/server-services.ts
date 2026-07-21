@@ -82,7 +82,12 @@ function createServerServices(): ServerServices {
     telemetryService,
     signingAssetsService,
     pushNotificationsService,
-    toolsService: new ToolsService(codebaseToolsService, buildsService),
+    toolsService: new ToolsService(codebaseToolsService, buildsService, {
+      codebases: codebasesService,
+      telemetry: telemetryService,
+      pushNotifications: pushNotificationsService,
+      agents: agentControlService,
+    }),
   };
 }
 

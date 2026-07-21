@@ -45,4 +45,5 @@ export type ToolCatalogGroup = {
   url: string | null;
   error: string | null;
   tools: ToolCatalogItem[];
+  children: ToolCatalogGroup[];
 };
