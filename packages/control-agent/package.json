@@ -31,7 +31,7 @@
     "lint:fix": "eslint --fix .",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "test": "vitest",
-    "test:run": "vitest run --environment=node --pool=forks --maxWorkers=1 --fileParallelism=false",
+    "test:run": "vitest run",
     "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
     "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build",
     "full-check:dev": "npm run full-check && npm run dev",
