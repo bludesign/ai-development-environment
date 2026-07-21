@@ -242,6 +242,18 @@ function olderThanCursorWhere(value: Cursor): Record<string, unknown> {
   };
 }
 
+function newerThanCursorWhere(value: Cursor): Record<string, unknown> {
+  const clientTime = new Date(value.clientTime);
+  const receivedAt = new Date(value.receivedAt);
+  return {
+    OR: [
+      { clientTime: { gt: clientTime } },
+      { clientTime, receivedAt: { gt: receivedAt } },
+      { clientTime, receivedAt, id: { gt: value.id } },
+    ],
+  };
+}
+
 function encodeCursor(entry: TelemetryEntryView): string {
   return Buffer.from(
     JSON.stringify({
@@ -258,14 +270,6 @@ function olderThan(entry: TelemetryEntryView, value: Cursor): boolean {
   if (entry.receivedAt !== value.receivedAt)
     return entry.receivedAt < value.receivedAt;
   return entry.id < value.id;
-}
-
-function newerThan(entry: TelemetryEntryView, value: Cursor): boolean {
-  if (entry.clientTime !== value.clientTime)
-    return entry.clientTime > value.clientTime;
-  if (entry.receivedAt !== value.receivedAt)
-    return entry.receivedAt > value.receivedAt;
-  return entry.id > value.id;
 }
 
 function hasActiveFilters(input: TelemetryQueryInput): boolean {
@@ -842,13 +846,45 @@ export class TelemetryService {
           id: separator.id,
         }
       : null;
+    const filtersActive = hasActiveFilters(input);
+    const rangeWhere = boundary
+      ? { AND: [sourceWhere(view), newerThanCursorWhere(boundary)] }
+      : sourceWhere(view);
+    if (!filtersActive) {
+      const prisma = await getPrismaClient();
+      const totalCount = await prisma.telemetryEntry.count({
+        where: rangeWhere,
+      });
+      const items: TelemetryEntryView[] = [];
+      let hasMore = false;
+      let lastEntry: TelemetryEntryView | null = null;
+      await this.scan(
+        after ? { AND: [rangeWhere, olderThanCursorWhere(after)] } : rangeWhere,
+        (entry) => {
+          if (items.length < first) {
+            items.push(entry);
+            lastEntry = entry;
+            return;
+          }
+          hasMore = true;
+          return false;
+        },
+        Math.min(SCAN_SIZE, first + 1),
+      );
+      return {
+        separator,
+        items,
+        nextCursor: hasMore && lastEntry ? encodeCursor(lastEntry) : null,
+        matchingCount: totalCount,
+        totalCount,
+      };
+    }
     const items: TelemetryEntryView[] = [];
     let matchingCount = 0;
     let totalCount = 0;
     let hasMore = false;
     let lastEntry: TelemetryEntryView | null = null;
-    await this.scan(sourceWhere(view), (entry) => {
-      if (boundary && !newerThan(entry, boundary)) return false;
+    await this.scan(rangeWhere, (entry) => {
       totalCount += 1;
       if (!matchesTelemetryQuery(entry, input)) return;
       matchingCount += 1;

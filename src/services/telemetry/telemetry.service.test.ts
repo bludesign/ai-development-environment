@@ -243,11 +243,12 @@ describe("TelemetryService", () => {
   test("fetches only entries strictly newer than the latest separator", async () => {
     const separator = raw("separator-1", "SEPARATOR", "2026-07-20T16:31:00Z");
     const newer = raw("log-2", "CONSOLE", "2026-07-20T16:32:00Z");
-    const older = raw("log-1", "CONSOLE", "2026-07-20T16:30:00Z");
+    const count = vi.fn().mockResolvedValue(1);
     getPrismaClient.mockResolvedValue({
       telemetryEntry: {
+        count,
         findFirst: vi.fn().mockResolvedValue(separator),
-        findMany: vi.fn().mockResolvedValue([newer, older]),
+        findMany: vi.fn().mockResolvedValue([newer]),
       },
     });
 
@@ -259,16 +260,37 @@ describe("TelemetryService", () => {
     expect(page.separator?.id).toBe("separator-1");
     expect(page.items.map(({ id }) => id)).toEqual(["log-2"]);
     expect(page).toMatchObject({ matchingCount: 1, totalCount: 1 });
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        AND: [
+          { entryType: { in: ["CONSOLE"] } },
+          {
+            OR: [
+              { clientTime: { gt: separator.clientTime } },
+              {
+                clientTime: separator.clientTime,
+                receivedAt: { gt: separator.receivedAt },
+              },
+              {
+                clientTime: separator.clientTime,
+                receivedAt: separator.receivedAt,
+                id: { gt: separator.id },
+              },
+            ],
+          },
+        ],
+      },
+    });
   });
 
   test("uses the complete separator ordering for same-time entries", async () => {
     const separator = raw("separator-m", "SEPARATOR", "2026-07-20T16:31:00Z");
     const newer = raw("separator-z", "CONSOLE", "2026-07-20T16:31:00Z");
-    const older = raw("separator-a", "CONSOLE", "2026-07-20T16:31:00Z");
     getPrismaClient.mockResolvedValue({
       telemetryEntry: {
+        count: vi.fn().mockResolvedValue(1),
         findFirst: vi.fn().mockResolvedValue(separator),
-        findMany: vi.fn().mockResolvedValue([newer, older]),
+        findMany: vi.fn().mockResolvedValue([newer]),
       },
     });
 
@@ -283,6 +305,7 @@ describe("TelemetryService", () => {
     const entry = raw("log-1", "CONSOLE", "2026-07-20T16:31:00Z");
     getPrismaClient.mockResolvedValue({
       telemetryEntry: {
+        count: vi.fn().mockResolvedValue(1),
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([entry]),
       },
@@ -294,6 +317,34 @@ describe("TelemetryService", () => {
 
     expect(page.separator).toBeNull();
     expect(page.items.map(({ id }) => id)).toEqual(["log-1"]);
+  });
+
+  test("stops an unfiltered separator timeline after its look-ahead row", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValue(
+        Array.from({ length: 1_000 }, (_, index) =>
+          raw(`log-${index}`, "CONSOLE", "2026-07-20T16:31:00Z"),
+        ),
+      );
+    getPrismaClient.mockResolvedValue({
+      telemetryEntry: {
+        count: vi.fn().mockResolvedValue(1_000),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany,
+      },
+    });
+
+    const page = await new TelemetryService().timelineSinceLatestSeparator({
+      view: "CONSOLE",
+      first: 1,
+    });
+
+    expect(page.items.map(({ id }) => id)).toEqual(["log-0"]);
+    expect(page).toMatchObject({ matchingCount: 1_000, totalCount: 1_000 });
+    expect(page.nextCursor).toEqual(expect.any(String));
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
   });
 
   test("pushes supported timeline filters into the database scan", async () => {

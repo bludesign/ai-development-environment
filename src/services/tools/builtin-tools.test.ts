@@ -135,6 +135,38 @@ describe("built-in tool registry", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  test("advertises satisfiable JSON schemas for push send tools", () => {
+    type ObjectSchema = {
+      properties?: Record<string, unknown>;
+      required?: string[];
+      additionalProperties?: boolean;
+    };
+    const pushTools = registry().value.catalog()[2]!.children[2]!.tools;
+    const cases = [
+      ["send_push_notification", ["requestId", "editor"]],
+      ["send_push_notification_preset", ["requestId", "presetId"]],
+    ] as const;
+
+    for (const [name, commonFields] of cases) {
+      const schema = pushTools.find((tool) => tool.name === name)!
+        .inputSchema as {
+        allOf?: unknown;
+        oneOf?: ObjectSchema[];
+      };
+      expect(schema.allOf).toBeUndefined();
+      expect(schema.oneOf).toHaveLength(4);
+      for (const variant of schema.oneOf ?? []) {
+        expect(Object.keys(variant.properties ?? {})).toEqual(
+          expect.arrayContaining(["targetMode", ...commonFields]),
+        );
+        expect(variant.required).toEqual(
+          expect.arrayContaining(["targetMode", ...commonFields]),
+        );
+        expect(variant.additionalProperties).toBe(false);
+      }
+    }
+  });
+
   test("parses and invokes tools from parent and child groups", async () => {
     const { value, telemetry, agents, push } = registry();
     await expect(

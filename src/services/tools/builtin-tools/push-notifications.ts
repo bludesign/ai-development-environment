@@ -267,37 +267,55 @@ function batchView(value: Record<string, unknown>) {
   };
 }
 
-const TargetSchema = z.discriminatedUnion("targetMode", [
+const SendFields = {
+  requestId: z.string().min(1),
+  editor: z.record(z.string(), z.unknown()),
+};
+const SendPresetFields = {
+  requestId: z.string().min(1),
+  presetId: z.string().min(1),
+};
+
+const SendInputSchema = z.discriminatedUnion("targetMode", [
   z.object({
+    ...SendFields,
     targetMode: z.literal("DEVICES"),
     registrationIds: z.array(z.string().min(1)).min(1),
   }),
-  z.object({ targetMode: z.literal("ALL") }),
+  z.object({ ...SendFields, targetMode: z.literal("ALL") }),
   z.object({
+    ...SendFields,
     targetMode: z.literal("BROADCAST"),
     channelId: z.string().min(1),
   }),
   z.object({
+    ...SendFields,
     targetMode: z.literal("DIRECT"),
     directToken: z.string().min(1),
     directTokenEncoding: z.enum(["HEX", "BASE64"]).default("HEX"),
     directEnvironment: z.enum(["SANDBOX", "PRODUCTION"]).default("SANDBOX"),
   }),
 ]);
-const SendInputSchema = z.intersection(
+const SendPresetInputSchema = z.discriminatedUnion("targetMode", [
   z.object({
-    requestId: z.string().min(1),
-    editor: z.record(z.string(), z.unknown()),
+    ...SendPresetFields,
+    targetMode: z.literal("DEVICES"),
+    registrationIds: z.array(z.string().min(1)).min(1),
   }),
-  TargetSchema,
-);
-const SendPresetInputSchema = z.intersection(
+  z.object({ ...SendPresetFields, targetMode: z.literal("ALL") }),
   z.object({
-    requestId: z.string().min(1),
-    presetId: z.string().min(1),
+    ...SendPresetFields,
+    targetMode: z.literal("BROADCAST"),
+    channelId: z.string().min(1),
   }),
-  TargetSchema,
-);
+  z.object({
+    ...SendPresetFields,
+    targetMode: z.literal("DIRECT"),
+    directToken: z.string().min(1),
+    directTokenEncoding: z.enum(["HEX", "BASE64"]).default("HEX"),
+    directEnvironment: z.enum(["SANDBOX", "PRODUCTION"]).default("SANDBOX"),
+  }),
+]);
 
 function sendArguments(
   input: z.output<typeof SendInputSchema>,
