@@ -1910,7 +1910,24 @@ export class GitHubService {
       )}/actions/runs?head_sha=${encodeURIComponent(worktree.headSha)}&per_page=100`,
       token,
     );
-    return result.workflow_runs.map((run) => {
+    let runs = result.workflow_runs;
+    if (runs.length === 0 && worktree.branch) {
+      const branchResult = await this.restRequest<{
+        workflow_runs: RawActionsWorkflowRun[];
+      }>(
+        `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+          target.name,
+        )}/actions/runs?branch=${encodeURIComponent(worktree.branch)}&per_page=100`,
+        token,
+      );
+      const latestRemoteSha = branchResult.workflow_runs[0]?.head_sha;
+      runs = latestRemoteSha
+        ? branchResult.workflow_runs.filter(
+            (run) => run.head_sha === latestRemoteSha,
+          )
+        : [];
+    }
+    return runs.map((run) => {
       const completed = run.status.toLowerCase() === "completed";
       const checkSuiteId = run.check_suite_node_id || null;
       const unavailable = !completed

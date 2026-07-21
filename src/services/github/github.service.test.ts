@@ -39,6 +39,18 @@ const state = vi.hoisted(() => ({
     canonicalOrigin: string;
   } | null,
   linkedWorktree: null as { id: string; branch: string } | null,
+  worktreeDetail: null as {
+    id: string;
+    branch: string | null;
+    headSha: string | null;
+    codebase: {
+      repository: {
+        id: string;
+        canonicalOrigin: string;
+        jiraBranchRegex: string | null;
+      };
+    };
+  } | null,
   codebaseRepositoryOrigins: [] as string[],
   codebaseRepositories: [
     {
@@ -144,6 +156,8 @@ vi.mock("@/data/prisma-client", () => ({
         state.linkedWorktree?.branch === where.branch
           ? { id: state.linkedWorktree.id }
           : null,
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        state.worktreeDetail?.id === where.id ? state.worktreeDetail : null,
     },
     codebaseSettings: {
       findUnique: async () => ({
@@ -419,6 +433,7 @@ beforeEach(() => {
   state.auditEvents = [];
   state.linkedCodebaseRepository = null;
   state.linkedWorktree = null;
+  state.worktreeDetail = null;
   state.codebaseRepositoryOrigins = [];
   state.codebaseRepositories = [
     {
@@ -588,6 +603,57 @@ describe("GitHub service", () => {
       jobs: [],
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("falls back to the latest branch runs when the worktree head is ahead", async () => {
+    state.worktreeDetail = {
+      id: "worktree-1",
+      branch: "feature/APP-42",
+      headSha: "local-only-sha",
+      codebase: {
+        repository: {
+          id: "codebase-repository-1",
+          canonicalOrigin: "github.com/acme/widgets",
+          jiraBranchRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        },
+      },
+    };
+    const latestOne = {
+      ...rawActionsWorkflowRun(81, "acme/widgets", "2026-07-21T14:00:00.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "latest-remote-sha",
+    };
+    const latestTwo = {
+      ...rawActionsWorkflowRun(82, "acme/widgets", "2026-07-21T14:00:01.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "latest-remote-sha",
+    };
+    const older = {
+      ...rawActionsWorkflowRun(80, "acme/widgets", "2026-07-21T13:00:00.000Z", {
+        branch: "feature/APP-42",
+      }),
+      head_sha: "older-remote-sha",
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("head_sha=local-only-sha")) {
+        return response({ workflow_runs: [] });
+      }
+      if (url.includes("branch=feature%2FAPP-42")) {
+        return response({ workflow_runs: [latestTwo, latestOne, older] });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().worktreeWorkflowRuns("worktree-1"),
+    ).resolves.toMatchObject([
+      { id: "82", headSha: "latest-remote-sha", worktreeId: "worktree-1" },
+      { id: "81", headSha: "latest-remote-sha", worktreeId: "worktree-1" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   test("merges and paginates workflow runs across unique GitHub codebases", async () => {
