@@ -2,7 +2,14 @@
 
 import { Pause, Pencil, Play, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -74,7 +81,7 @@ export function AutoRetryDialog({
 }) {
   const t = useTranslations("githubAutomation");
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState<GitHubAutoRetryRuleView[]>([]);
@@ -93,97 +100,113 @@ export function AutoRetryDialog({
   const [unlimited, setUnlimited] = useState(false);
   const [failureStrategy, setFailureStrategy] =
     useState<GitHubAutoRetryFailureStrategy>("FAILED_JOBS");
+  const currentRunsRef = useRef(currentRuns);
+  const loadedOnceRef = useRef(false);
 
-  const load = useCallback(
-    async (showLoading = true) => {
-      if (showLoading) setLoading(true);
-      setError(null);
-      try {
-        const rulesData = await controlPlaneRequest<{
-          githubAutoRetryRules: GitHubAutoRetryRuleView[];
-          githubSettings: { tokenConfigured: boolean };
-          githubAppSettings: {
-            configured: boolean;
-            actionsPermission: string | null;
-          };
-        }>(
-          `query GitHubAutoRetryRules($codebaseRepositoryId: ID) {
-          githubSettings { tokenConfigured }
-          githubAppSettings { configured actionsPermission }
-          githubAutoRetryRules(codebaseRepositoryId: $codebaseRepositoryId) { ${RULE_FIELDS} }
-        }`,
-          { codebaseRepositoryId },
-        );
-        setRules(rulesData.githubAutoRetryRules);
-        setCredentialsReady(
-          rulesData.githubSettings.tokenConfigured &&
-            rulesData.githubAppSettings.configured &&
-            rulesData.githubAppSettings.actionsPermission === "write",
-        );
+  useEffect(() => {
+    currentRunsRef.current = currentRuns;
+  }, [currentRuns]);
 
-        if (allowFuture || repositoryMode) {
-          const workflowData = await controlPlaneRequest<{
-            githubRepositoryWorkflows: GitHubRepositoryWorkflowView[];
-          }>(
-            `query GitHubRepositoryWorkflows($codebaseRepositoryId: ID!) {
-            githubRepositoryWorkflows(codebaseRepositoryId: $codebaseRepositoryId) {
-              id name path state url jobNames
-            }
-          }`,
-            { codebaseRepositoryId },
-          );
-          setRepositoryWorkflows(workflowData.githubRepositoryWorkflows);
+  const refreshRules = useCallback(async () => {
+    const rulesData = await controlPlaneRequest<{
+      githubAutoRetryRules: GitHubAutoRetryRuleView[];
+      githubSettings: { tokenConfigured: boolean };
+      githubAppSettings: {
+        configured: boolean;
+        actionsPermission: string | null;
+      };
+    }>(
+      `query GitHubAutoRetryRules($codebaseRepositoryId: ID) {
+        githubSettings { tokenConfigured }
+        githubAppSettings { configured actionsPermission }
+        githubAutoRetryRules(codebaseRepositoryId: $codebaseRepositoryId) { ${RULE_FIELDS} }
+      }`,
+      { codebaseRepositoryId },
+    );
+    setRules(rulesData.githubAutoRetryRules);
+    setCredentialsReady(
+      rulesData.githubSettings.tokenConfigured &&
+        rulesData.githubAppSettings.configured &&
+        rulesData.githubAppSettings.actionsPermission === "write",
+    );
+  }, [codebaseRepositoryId]);
+
+  const refreshRepositoryWorkflows = useCallback(async () => {
+    const workflowData = await controlPlaneRequest<{
+      githubRepositoryWorkflows: GitHubRepositoryWorkflowView[];
+    }>(
+      `query GitHubRepositoryWorkflows($codebaseRepositoryId: ID!) {
+        githubRepositoryWorkflows(codebaseRepositoryId: $codebaseRepositoryId) {
+          id name path state url jobNames
         }
+      }`,
+      { codebaseRepositoryId },
+    );
+    setRepositoryWorkflows(workflowData.githubRepositoryWorkflows);
+  }, [codebaseRepositoryId]);
 
-        const withJobs = await Promise.all(
-          currentRuns.map(async (run) => {
-            if (run.jobs?.length) return run;
-            try {
-              const data = await controlPlaneRequest<{
-                githubActionsWorkflowJobs: GitHubWorkflowJobView[];
-              }>(
-                `query AutoRetryWorkflowJobs($repositoryId: ID!, $workflowRunId: ID!) {
+  const load = useCallback(async () => {
+    if (!loadedOnceRef.current) setLoading(true);
+    setError(null);
+    try {
+      await refreshRules();
+
+      if (repositoryMode) await refreshRepositoryWorkflows();
+
+      const withJobs = await Promise.all(
+        currentRunsRef.current.map(async (run) => {
+          if (run.jobs?.length) return run;
+          try {
+            const data = await controlPlaneRequest<{
+              githubActionsWorkflowJobs: GitHubWorkflowJobView[];
+            }>(
+              `query AutoRetryWorkflowJobs($repositoryId: ID!, $workflowRunId: ID!) {
                 githubActionsWorkflowJobs(
                   codebaseRepositoryId: $repositoryId
                   workflowRunId: $workflowRunId
                 ) { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } }
               }`,
-                { repositoryId: codebaseRepositoryId, workflowRunId: run.id },
-              );
-              return { ...run, jobs: data.githubActionsWorkflowJobs };
-            } catch {
-              return run;
-            }
-          }),
+              { repositoryId: codebaseRepositoryId, workflowRunId: run.id },
+            );
+            return { ...run, jobs: data.githubActionsWorkflowJobs };
+          } catch {
+            return run;
+          }
+        }),
+      );
+      setHydratedRuns(withJobs);
+      if (!repositoryMode) {
+        setSelected((current) =>
+          current.size
+            ? current
+            : new Set(withJobs.map((run) => `workflow:${run.id}`)),
         );
-        setHydratedRuns(withJobs);
-        if (!repositoryMode && selected.size === 0) {
-          setSelected(new Set(withJobs.map((run) => `workflow:${run.id}`)));
-        }
-      } catch (value) {
-        setError(value instanceof Error ? value.message : String(value));
-      } finally {
-        if (showLoading) setLoading(false);
       }
-    },
-    [
-      allowFuture,
-      codebaseRepositoryId,
-      currentRuns,
-      repositoryMode,
-      selected.size,
-    ],
-  );
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      loadedOnceRef.current = true;
+      setLoading(false);
+    }
+  }, [
+    codebaseRepositoryId,
+    refreshRepositoryWorkflows,
+    refreshRules,
+    repositoryMode,
+  ]);
 
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => void load(), 0);
-    const poll = window.setInterval(() => void load(false), 10_000);
+    const poll = window.setInterval(
+      () => void refreshRules().catch(() => undefined),
+      10_000,
+    );
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, [load, open]);
+  }, [load, open, refreshRules]);
 
   const workflows = useMemo(
     () =>
@@ -203,7 +226,7 @@ export function AutoRetryDialog({
     [future, hydratedRuns, repositoryWorkflows],
   );
   const visibleRules = useMemo(() => {
-    const currentIds = new Set(currentRuns.map((run) => run.id));
+    const currentIds = new Set(hydratedRuns.map((run) => run.id));
     return rules.filter((rule) => {
       if (rule.scope === "WORKFLOW_RUN") {
         return rule.targets.some(
@@ -220,13 +243,31 @@ export function AutoRetryDialog({
       }
       return rule.scope === "WORKTREE_BRANCH" && rule.worktreeId === worktreeId;
     });
-  }, [currentRuns, pullRequestNumber, repositoryMode, rules, worktreeId]);
+  }, [hydratedRuns, pullRequestNumber, repositoryMode, rules, worktreeId]);
 
-  const toggle = (key: string, checked: boolean) => {
+  const toggleWorkflow = (workflowId: string, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
-      if (checked) next.add(key);
-      else next.delete(key);
+      const workflowKey = `workflow:${workflowId}`;
+      if (checked) {
+        next.add(workflowKey);
+        for (const key of next) {
+          if (key.startsWith(`job:${workflowId}:`)) next.delete(key);
+        }
+      } else {
+        next.delete(workflowKey);
+      }
+      return next;
+    });
+  };
+
+  const toggleJob = (workflowId: string, jobName: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      next.delete(`workflow:${workflowId}`);
+      const jobKey = `job:${workflowId}:${jobName}`;
+      if (checked) next.add(jobKey);
+      else next.delete(jobKey);
       return next;
     });
   };
@@ -301,7 +342,7 @@ export function AutoRetryDialog({
       );
       setError(null);
       setEditingId(null);
-      await load();
+      await refreshRules();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -317,7 +358,7 @@ export function AutoRetryDialog({
         }`,
         { id: rule.id, enabled: !rule.enabled },
       );
-      await load();
+      await refreshRules();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -329,7 +370,7 @@ export function AutoRetryDialog({
         "mutation DeleteGitHubAutoRetryRule($id: ID!) { deleteGitHubAutoRetryRule(id: $id) }",
         { id },
       );
-      await load();
+      await refreshRules();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }
@@ -394,9 +435,25 @@ export function AutoRetryDialog({
                 <ToggleGroup
                   onValueChange={(value) => {
                     if (!value) return;
-                    setFuture(value === "future");
-                    setAllWorkflows(value === "future");
-                    setSelected(new Set());
+                    const nextFuture = value === "future";
+                    setFuture(nextFuture);
+                    setAllWorkflows(nextFuture);
+                    if (nextFuture && repositoryWorkflows.length === 0) {
+                      void refreshRepositoryWorkflows().catch((value) =>
+                        setError(
+                          value instanceof Error
+                            ? value.message
+                            : String(value),
+                        ),
+                      );
+                    }
+                    setSelected(
+                      nextFuture
+                        ? new Set()
+                        : new Set(
+                            hydratedRuns.map((run) => `workflow:${run.id}`),
+                          ),
+                    );
                   }}
                   type="single"
                   value={future ? "future" : "current"}
@@ -433,13 +490,12 @@ export function AutoRetryDialog({
                         <Checkbox
                           checked={selected.has(`workflow:${workflow.id}`)}
                           onCheckedChange={(checked) =>
-                            toggle(`workflow:${workflow.id}`, checked === true)
+                            toggleWorkflow(workflow.id, checked === true)
                           }
                         />
                         {workflow.name}
                       </label>
-                      {!selected.has(`workflow:${workflow.id}`) &&
-                      workflow.jobNames.length ? (
+                      {workflow.jobNames.length ? (
                         <div className="ml-6 mt-2 space-y-1">
                           {workflow.jobNames.map((jobName) => (
                             <label
@@ -451,8 +507,9 @@ export function AutoRetryDialog({
                                   `job:${workflow.id}:${jobName}`,
                                 )}
                                 onCheckedChange={(checked) =>
-                                  toggle(
-                                    `job:${workflow.id}:${jobName}`,
+                                  toggleJob(
+                                    workflow.id,
+                                    jobName,
                                     checked === true,
                                   )
                                 }
