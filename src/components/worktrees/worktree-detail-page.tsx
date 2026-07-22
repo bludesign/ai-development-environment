@@ -47,6 +47,11 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 import type { GitHubActionsWorkflowRunView } from "@/services/github/types";
 
 import {
@@ -585,7 +590,17 @@ function LoadedWorktreeDetail({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-4",
+          worktree.highlightColor && "rounded-lg border-l-4 px-4 py-3",
+          worktree.highlightColor &&
+            worktreeHighlightBackgroundClasses[worktree.highlightColor],
+          worktree.highlightColor &&
+            worktreeHighlightAccentClasses[worktree.highlightColor],
+        )}
+        data-testid="worktree-summary"
+      >
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
             {entry.group.repository.name} · {entry.agentGroup.agent.name}

@@ -4,8 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ListX, Volume2, VolumeX, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -272,13 +279,8 @@ export function NotificationsSidebar() {
           >
             {soundEnabled ? <Volume2 /> : <VolumeX />}
           </Button>
-          <ConfirmationDialog
-            actionLabel={t("clearSidebar")}
-            cancelLabel={t("cancel")}
-            description={t("clearSidebarDescription")}
-            onConfirm={dismissAll}
-            title={t("clearSidebarTitle")}
-            trigger={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("clearAll")}
                 disabled={!notifications.length}
@@ -289,8 +291,20 @@ export function NotificationsSidebar() {
               >
                 <ListX />
               </Button>
-            }
-          />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="font-normal whitespace-normal leading-snug">
+                {t("clearSidebarDescription")}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => void dismissAll()}
+                variant="destructive"
+              >
+                <ListX /> {t("clearSidebar")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <MobileClose />
         </div>
       </SidebarHeader>

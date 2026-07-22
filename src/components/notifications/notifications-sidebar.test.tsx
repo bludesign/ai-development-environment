@@ -5,7 +5,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -253,7 +252,7 @@ describe("NotificationsSidebar", () => {
     );
   });
 
-  test("persists sound and confirms clearing the sidebar", async () => {
+  test("persists sound and confirms clearing from the toolbar menu", async () => {
     renderSidebar();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
@@ -265,10 +264,14 @@ describe("NotificationsSidebar", () => {
     );
     expect(oscillatorStart).toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
-    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Clear all" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Clear sidebar" }),
+      await screen.findByRole("menuitem", { name: "Clear sidebar" }),
     );
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
