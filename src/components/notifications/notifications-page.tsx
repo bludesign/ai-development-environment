@@ -359,9 +359,17 @@ export function NotificationsPage() {
     return [...groups.entries()];
   }, [preferences]);
 
+  const pushSubscriptionRegistered = Boolean(
+    pushSubscription &&
+    webPushSubscriptions.some(
+      ({ endpoint }) => endpoint === pushSubscription.endpoint,
+    ),
+  );
+
   const isSelected = useCallback(
     (notification: AppNotificationView) => {
       if (excluded.has(notification.id)) return false;
+      if (selected.has(notification.id)) return true;
       const time = new Date(notification.createdAt).getTime();
       if (
         excludedRanges.some(
@@ -372,7 +380,7 @@ export function NotificationsPage() {
       ) {
         return false;
       }
-      if (selectAll || selected.has(notification.id)) return true;
+      if (selectAll) return true;
       return selectionRanges.some(
         (range) =>
           time >= new Date(range.start).getTime() &&
@@ -424,7 +432,9 @@ export function NotificationsPage() {
     }
     setSelected((current) => {
       const next = new Set(current);
-      group.items.forEach(({ id }) => (value ? next.add(id) : next.delete(id)));
+      group.items.forEach(({ id }) =>
+        !selectAll && value ? next.add(id) : next.delete(id),
+      );
       return next;
     });
     setExcluded((current) => {
@@ -555,10 +565,11 @@ export function NotificationsPage() {
       if (!prepared.prepareWebPush.publicKey) {
         throw new Error(t("pushKeyUnavailable"));
       }
-      const registration = await navigator.serviceWorker.register("/sw.js", {
+      await navigator.serviceWorker.register("/sw.js", {
         scope: "/",
         updateViaCache: "none",
       });
+      const registration = await navigator.serviceWorker.ready;
       let subscription = await registration.pushManager.getSubscription();
       subscription ??= await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -748,7 +759,7 @@ export function NotificationsPage() {
                 <p className="text-xs text-muted-foreground">
                   {!pushSupported
                     ? t("pushUnsupported")
-                    : pushSubscription
+                    : pushSubscriptionRegistered
                       ? t("pushSubscribed")
                       : t("pushNotSubscribed")}
                 </p>
@@ -763,14 +774,16 @@ export function NotificationsPage() {
               <Button
                 disabled={!pushSupported || pushBusy}
                 onClick={() =>
-                  void (pushSubscription ? unsubscribePush() : subscribePush())
+                  void (pushSubscriptionRegistered
+                    ? unsubscribePush()
+                    : subscribePush())
                 }
                 size="sm"
                 type="button"
-                variant={pushSubscription ? "outline" : "default"}
+                variant={pushSubscriptionRegistered ? "outline" : "default"}
               >
                 {pushBusy ? <Spinner /> : <Send />}
-                {pushSubscription ? t("unsubscribe") : t("subscribe")}
+                {pushSubscriptionRegistered ? t("unsubscribe") : t("subscribe")}
               </Button>
             </div>
 
@@ -1070,16 +1083,14 @@ export function NotificationsPage() {
                     <Checkbox
                       aria-label={t("selectAll")}
                       checked={
-                        selectAll && excluded.size ? "indeterminate" : selectAll
+                        selectAll && (excluded.size || excludedRanges.length)
+                          ? "indeterminate"
+                          : selectAll
                       }
                       onCheckedChange={(checked) => {
                         const value = checked === true;
                         setSelectAll(value);
-                        setSelected(
-                          value
-                            ? new Set(notifications.map(({ id }) => id))
-                            : new Set(),
-                        );
+                        setSelected(new Set());
                         setExcluded(new Set());
                         setSelectionRanges([]);
                         setExcludedRanges([]);

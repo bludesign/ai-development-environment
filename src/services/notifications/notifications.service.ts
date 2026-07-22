@@ -322,10 +322,13 @@ export class NotificationsService {
   private selectionWhere(
     selection: NotificationSelection,
   ): Prisma.AppNotificationWhereInput {
-    const ids = [...new Set(selection.ids ?? [])];
+    const excludedRanges = selection.excludedRanges ?? [];
+    const ids =
+      selection.all && excludedRanges.length === 0
+        ? []
+        : [...new Set(selection.ids ?? [])];
     const excludedIds = [...new Set(selection.excludedIds ?? [])];
     const ranges = selection.ranges ?? [];
-    const excludedRanges = selection.excludedRanges ?? [];
     if (
       ids.length > MAX_SELECTION_IDS ||
       excludedIds.length > MAX_SELECTION_IDS
@@ -338,32 +341,38 @@ export class NotificationsService {
     ) {
       throw new Error("Notification date selection is too large");
     }
-    const exclusions: Prisma.AppNotificationWhereInput[] = [];
-    if (excludedIds.length) exclusions.push({ id: { notIn: excludedIds } });
-    if (excludedRanges.length) {
-      exclusions.push({
-        NOT: {
-          OR: excludedRanges.map((range) => {
-            const start = validDate(range.start, "Excluded selection start");
-            const end = validDate(range.end, "Excluded selection end");
-            if (start >= end)
-              throw new Error("Excluded selection range is invalid");
-            return { createdAt: { gte: start, lt: end } };
-          }),
-        },
-      });
-    }
-    if (selection.all) return exclusions.length ? { AND: exclusions } : {};
+    const excludedRangeChoices = excludedRanges.map((range) => {
+      const start = validDate(range.start, "Excluded selection start");
+      const end = validDate(range.end, "Excluded selection end");
+      if (start >= end) throw new Error("Excluded selection range is invalid");
+      return { createdAt: { gte: start, lt: end } };
+    });
+    const rangeExclusion: Prisma.AppNotificationWhereInput = {
+      NOT: { OR: excludedRangeChoices },
+    };
     const choices: Prisma.AppNotificationWhereInput[] = [];
     if (ids.length) choices.push({ id: { in: ids } });
-    for (const range of ranges) {
-      const start = validDate(range.start, "Selection start");
-      const end = validDate(range.end, "Selection end");
-      if (start >= end) throw new Error("Selection range is invalid");
-      choices.push({ createdAt: { gte: start, lt: end } });
+    if (selection.all) {
+      choices.push(excludedRangeChoices.length ? rangeExclusion : {});
+    } else if (ranges.length) {
+      const rangeChoices = ranges.map((range) => {
+        const start = validDate(range.start, "Selection start");
+        const end = validDate(range.end, "Selection end");
+        if (start >= end) throw new Error("Selection range is invalid");
+        return { createdAt: { gte: start, lt: end } };
+      });
+      choices.push({
+        AND: [
+          { OR: rangeChoices },
+          ...(excludedRangeChoices.length ? [rangeExclusion] : []),
+        ],
+      });
     }
     if (!choices.length) return { id: { in: [] } };
-    return { AND: [{ OR: choices }, ...exclusions] };
+    const inclusion = choices.length === 1 ? choices[0] : { OR: choices };
+    return excludedIds.length
+      ? { AND: [inclusion, { id: { notIn: excludedIds } }] }
+      : inclusion;
   }
 
   async deleteSelection(selection: NotificationSelection): Promise<number> {

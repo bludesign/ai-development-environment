@@ -224,4 +224,59 @@ describe("NotificationsService", () => {
       expect.objectContaining({ TTL: 60 }),
     );
   });
+
+  test("lets explicitly selected IDs override excluded date ranges", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({ appNotification: { deleteMany } });
+    const service = new NotificationsService(credentials());
+
+    await service.deleteSelection({
+      all: true,
+      ids: ["notification-1"],
+      excludedRanges: [
+        {
+          start: "2026-07-22T00:00:00.000Z",
+          end: "2026-07-23T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { id: { in: ["notification-1"] } },
+          {
+            NOT: {
+              OR: [
+                {
+                  createdAt: {
+                    gte: new Date("2026-07-22T00:00:00.000Z"),
+                    lt: new Date("2026-07-23T00:00:00.000Z"),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  test("ignores redundant selected IDs when every notification is selected", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({ appNotification: { deleteMany } });
+    const service = new NotificationsService(credentials());
+
+    await expect(
+      service.deleteSelection({
+        all: true,
+        ids: Array.from(
+          { length: 5_001 },
+          (_, index) => `notification-${index}`,
+        ),
+      }),
+    ).resolves.toBe(0);
+
+    expect(deleteMany).toHaveBeenCalledWith({ where: {} });
+  });
 });
