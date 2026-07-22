@@ -54,6 +54,16 @@ describe("JiraSettingsPage", () => {
     ) as HTMLInputElement;
     expect(tokenInput.value).toBe("");
     expect(tokenInput.type).toBe("password");
+    expect(
+      screen.getByText(/copy only its https:\/\/\*\.atlassian\.net origin/),
+    ).toBeDefined();
+    const tokenLink = screen.getByRole("link", {
+      name: /Create Jira API token/,
+    });
+    expect(tokenLink.getAttribute("href")).toBe(
+      "https://id.atlassian.com/manage-profile/security/api-tokens",
+    );
+    expect(tokenLink.getAttribute("target")).toBe("_blank");
 
     fireEvent.change(tokenInput, { target: { value: "replacement-token" } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));

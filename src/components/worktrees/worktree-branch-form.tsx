@@ -29,6 +29,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { parseJiraIssueKey } from "@/lib/jira-issue-key";
 
 export type WorktreeBranchMode = "NEW" | "EXISTING" | "TICKET";
 
@@ -121,9 +122,9 @@ export function WorktreeBranchForm({
 
   useEffect(() => {
     const request = ++previewRequest.current;
-    const normalized = ticketKey.trim().toUpperCase();
+    const normalized = parseJiraIssueKey(ticketKey);
     const timer = window.setTimeout(async () => {
-      if (mode !== "TICKET" || !/^[A-Z][A-Z0-9_]*-\d+$/.test(normalized)) {
+      if (mode !== "TICKET" || !normalized) {
         setPreviewLoading(false);
         return;
       }
@@ -198,7 +199,7 @@ export function WorktreeBranchForm({
         ? { branchName }
         : mode === "EXISTING"
           ? { branchName: existingBranch }
-          : { ticketKey: ticketKey.trim().toUpperCase() }),
+          : { ticketKey: parseJiraIssueKey(ticketKey) }),
     };
     try {
       setError(null);

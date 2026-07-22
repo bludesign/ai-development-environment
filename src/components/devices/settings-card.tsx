@@ -14,6 +14,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { DragEvent, FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { SettingsHelpLink } from "@/components/settings-help-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -292,6 +293,9 @@ export function IosDeviceSettingsCard() {
                     required
                     value={organizationName}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {t("profileOrganizationHelp")}
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="ios-profile-identifier">
@@ -309,6 +313,9 @@ export function IosDeviceSettingsCard() {
                     spellCheck={false}
                     value={profileIdentifier}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {t("profileIdentifierHelp")}
+                  </p>
                 </div>
               </div>
 
@@ -380,6 +387,12 @@ export function IosDeviceSettingsCard() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
+                <p className="sm:col-span-2 text-xs text-muted-foreground">
+                  {t("appleSetupHelp")}{" "}
+                  <SettingsHelpLink href="https://appstoreconnect.apple.com/access/integrations/api">
+                    {t("openApiKeys")}
+                  </SettingsHelpLink>
+                </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="app-store-issuer-id">{t("issuerId")}</Label>
                   <Input

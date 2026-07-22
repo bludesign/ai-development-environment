@@ -223,6 +223,9 @@ export function CacheServerSettingsCard() {
                   </AlertDescription>
                 </Alert>
               )}
+              <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                {t("setupHelp")}
+              </p>
               <div>
                 <Label
                   className="mb-1.5 block text-sm font-medium"
@@ -284,6 +287,9 @@ export function CacheServerSettingsCard() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t("headersHelp")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("headersSetupHelp")}
                 </p>
                 {headers.length === 0 ? (
                   <p className="text-xs text-muted-foreground">

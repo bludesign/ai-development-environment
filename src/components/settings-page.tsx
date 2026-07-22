@@ -3,7 +3,6 @@
 import {
   CheckCircle2,
   Code2,
-  ExternalLink,
   GitPullRequest,
   KeyRound,
   RotateCw,
@@ -27,6 +26,7 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { CacheServerSettingsCard } from "@/components/cache-server/settings-card";
 import { IosDeviceSettingsCard } from "@/components/devices/settings-card";
 import { PushNotificationSettingsCard } from "@/components/push-notifications/push-notification-settings-card";
+import { SettingsHelpLink } from "@/components/settings-help-link";
 import { JiraSettingsPage } from "@/components/jira/settings-page";
 import { DatabaseEncryptionAlert } from "@/components/credentials/database-encryption-alert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -212,6 +212,17 @@ function EditorSettingsCard() {
                   <SelectItem value="NONE">{t("none")}</SelectItem>
                 </SelectContent>
               </Select>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>{t("setupHelp")}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  <SettingsHelpLink href="https://code.visualstudio.com/download">
+                    {t("downloadCode")}
+                  </SettingsHelpLink>
+                  <SettingsHelpLink href="https://code.visualstudio.com/insiders/">
+                    {t("downloadInsiders")}
+                  </SettingsHelpLink>
+                </div>
+              </div>
             </div>
             <Button disabled={busy} onClick={() => void save()}>
               {busy ? <Spinner /> : <Save />} {t("save")}
@@ -422,15 +433,9 @@ function GitHubAppSettingsCard() {
                 <ol className="mt-3 list-decimal space-y-3 pl-5 text-sm text-muted-foreground">
                   <li>
                     {t("stepRegister")}{" "}
-                    <a
-                      className="inline-flex items-center gap-1 text-primary hover:underline"
-                      href="https://github.com/settings/apps/new"
-                      rel="noreferrer"
-                      target="_blank"
-                    >
+                    <SettingsHelpLink href="https://github.com/settings/apps/new">
                       {t("registerLink")}
-                      <ExternalLink className="size-3" />
-                    </a>
+                    </SettingsHelpLink>
                   </li>
                   <li>
                     {t("stepHomepage")}{" "}
@@ -785,6 +790,12 @@ function GitHubSettingsCard() {
                   {settings?.tokenConfigured
                     ? t("tokenKeepHelp")
                     : t("tokenHelp")}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("tokenAcquireHelp")}{" "}
+                  <SettingsHelpLink href="https://github.com/settings/personal-access-tokens/new">
+                    {t("createToken")}
+                  </SettingsHelpLink>
                 </p>
               </div>
               {connection && (

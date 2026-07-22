@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { SettingsHelpLink } from "@/components/settings-help-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,6 +158,12 @@ export function PushNotificationSettingsCard() {
               {settings?.tokenConfigured ? t("configured") : t("notConfigured")}
             </Badge>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {t("tokenSetupHelp")}{" "}
+            <SettingsHelpLink href="https://developer.apple.com/account/resources/authkeys/add">
+              {t("createTokenKey")}
+            </SettingsHelpLink>
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="apns-team">{t("teamId")}</Label>
@@ -175,6 +182,12 @@ export function PushNotificationSettingsCard() {
               />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {t("teamIdHelp")}{" "}
+            <SettingsHelpLink href="https://developer.apple.com/account#MembershipDetailsCard">
+              {t("openMembership")}
+            </SettingsHelpLink>
+          </p>
           <Label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed p-6">
             <Upload />{" "}
             {privateKey
@@ -246,6 +259,12 @@ export function PushNotificationSettingsCard() {
             <h3 className="font-medium">{t("certificateAuthentication")}</h3>
             <p className="text-sm text-muted-foreground">
               {t("certificateDescription")}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("certificateSetupHelp")}{" "}
+              <SettingsHelpLink href="https://developer.apple.com/account/resources/certificates/add">
+                {t("createCertificate")}
+              </SettingsHelpLink>
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
