@@ -698,12 +698,14 @@ function CodebaseCard({
           />
           <Info
             label={t("lastChecked")}
+            small
             value={
               <DateTime fallback={t("never")} value={codebase.lastCheckedAt} />
             }
           />
           <Info
             label={t("lastFetched")}
+            small
             value={
               <DateTime fallback={t("never")} value={codebase.lastFetchedAt} />
             }
@@ -768,16 +770,23 @@ function Info({
   label,
   value,
   mono = false,
+  small = false,
 }: {
   label: string;
   value: React.ReactNode;
   mono?: boolean;
+  /** Match the mono rows' size without switching the typeface. */
+  small?: boolean;
 }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={cn("truncate", mono && "font-mono text-xs")}
+        className={cn(
+          "truncate",
+          (mono || small) && "text-xs",
+          mono && "font-mono",
+        )}
         title={typeof value === "string" ? value : undefined}
       >
         {value}

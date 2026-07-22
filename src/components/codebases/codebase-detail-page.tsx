@@ -54,6 +54,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import type {
   CodebaseDetail,
@@ -540,6 +541,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             />
             <Info
               label={t("lastFetched")}
+              small
               value={
                 <DateTime
                   fallback={codebaseT("never")}
@@ -1068,16 +1070,23 @@ function Info({
   label,
   value,
   mono = false,
+  small = false,
 }: {
   label: string;
   value: React.ReactNode;
   mono?: boolean;
+  /** Match the mono rows' size without switching the typeface. */
+  small?: boolean;
 }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={mono ? "truncate font-mono text-xs" : "truncate"}
+        className={cn(
+          "truncate",
+          (mono || small) && "text-xs",
+          mono && "font-mono",
+        )}
         title={typeof value === "string" ? value : undefined}
       >
         {value}

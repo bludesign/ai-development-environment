@@ -625,7 +625,6 @@ export function PushNotificationsPage() {
                     t("presetSaved"),
                   )
                 }
-                size="sm"
                 variant="outline"
               >
                 <Save /> {t("savePreset")}
