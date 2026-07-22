@@ -864,6 +864,11 @@ export class GitHubService {
     ));
   }
 
+  private pollingConfigurationChanged(): void {
+    this.notificationsConfigurationChanged?.();
+    this.autoRetryService?.configurationChanged();
+  }
+
   autoRetryRules(input: {
     codebaseRepositoryId?: string | null;
     workflowRunId?: string | null;
@@ -1168,7 +1173,7 @@ export class GitHubService {
         update: settingsData,
       });
     }
-    this.notificationsConfigurationChanged?.();
+    this.pollingConfigurationChanged();
     return this.getSettings();
   }
 
@@ -1183,7 +1188,7 @@ export class GitHubService {
         });
       },
     );
-    this.notificationsConfigurationChanged?.();
+    this.pollingConfigurationChanged();
     return this.getSettings();
   }
 

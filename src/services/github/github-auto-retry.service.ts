@@ -16,7 +16,8 @@ import type {
 import type { GitHubService } from "./github.service";
 import type { PollingService } from "@/services/polling";
 
-const POLL_INTERVAL_MS = 30_000;
+const DEFAULT_POLL_INTERVAL_SECONDS = 60;
+const MIN_POLL_INTERVAL_SECONDS = 30;
 const AMBIGUOUS_ACTION_TIMEOUT_MS = 2 * 60_000;
 const FAILURE_STATES = new Set<GitHubPipelineState>([
   "FAILURE",
@@ -120,45 +121,83 @@ function ruleView(rule: {
 }
 
 export class GitHubAutoRetryService {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private pollingTickRunning = false;
+  private rerunRequested = false;
   private reconciling = false;
 
   constructor(
     private readonly github: GitHubService,
     private readonly polling?: PollingService,
+    startPolling = true,
   ) {
     this.polling?.register({
       id: POLLING_OPERATION_ID,
       kind: "GITHUB_AUTO_RETRY",
       runtime: "SERVER",
       enabled: true,
-      cadenceSeconds: POLL_INTERVAL_MS / 1_000,
+      cadenceSeconds: DEFAULT_POLL_INTERVAL_SECONDS,
       details: {},
     });
+    if (startPolling) queueMicrotask(() => void this.pollReconcile());
+  }
+
+  private schedule(seconds: number): void {
+    if (this.timer) clearTimeout(this.timer);
+    const delay = Math.max(MIN_POLL_INTERVAL_SECONDS, seconds) * 1_000;
+    this.timer = setTimeout(() => void this.pollReconcile(), delay);
+    this.timer.unref();
+    this.polling?.schedule(POLLING_OPERATION_ID, new Date(Date.now() + delay));
+  }
+
+  configurationChanged(): void {
+    if (this.pollingTickRunning) {
+      this.rerunRequested = true;
+      return;
+    }
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     queueMicrotask(() => void this.pollReconcile());
-    const timer = setInterval(
-      () => void this.pollReconcile(),
-      POLL_INTERVAL_MS,
-    );
-    timer.unref();
   }
 
   private async pollReconcile(): Promise<void> {
-    this.polling?.schedule(
-      POLLING_OPERATION_ID,
-      new Date(Date.now() + POLL_INTERVAL_MS),
-    );
+    if (this.pollingTickRunning) return;
+    this.pollingTickRunning = true;
+    let intervalSeconds = DEFAULT_POLL_INTERVAL_SECONDS;
     try {
+      const reconcileAtConfiguredCadence = async () => {
+        const settings = await (
+          await getPrismaClient()
+        ).gitHubSettings.upsert({
+          where: { id: "default" },
+          create: { id: "default" },
+          update: {},
+        });
+        intervalSeconds = settings.actionsNotificationPollIntervalSeconds;
+        this.polling?.configure(POLLING_OPERATION_ID, {
+          cadenceSeconds: intervalSeconds,
+        });
+        return this.reconcile();
+      };
       if (this.polling) {
         await this.polling.run(
           POLLING_OPERATION_ID,
-          () => this.reconcile(),
+          reconcileAtConfiguredCadence,
           (activeRules) => ({ activeRules }),
         );
       } else {
-        await this.reconcile();
+        await reconcileAtConfiguredCadence();
       }
     } catch {
       // The coordinator exposes the failure and the next interval retries it.
+    } finally {
+      this.pollingTickRunning = false;
+      if (this.rerunRequested) {
+        this.rerunRequested = false;
+        queueMicrotask(() => void this.pollReconcile());
+      } else {
+        this.schedule(intervalSeconds);
+      }
     }
   }
 

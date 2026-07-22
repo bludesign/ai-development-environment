@@ -50,7 +50,7 @@ describe("SettingsPage", () => {
         return {
           saveGitHubSettings: {
             tokenConfigured: true,
-            actionsNotificationPollIntervalSeconds: 60,
+            actionsNotificationPollIntervalSeconds: 120,
             updatedAt: new Date().toISOString(),
           },
         } as never;
@@ -70,6 +70,14 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("region", { name: "Integrations" })).toBeDefined();
     expect(tokenInput.type).toBe("password");
     expect(tokenInput.value).toBe("");
+    const actionsInterval = screen.getByLabelText(
+      "Actions notification and Auto Retry interval (seconds)",
+    );
+    expect(
+      screen.getByText(
+        /Controls Auto Retry polling and, when a signed GitHub App webhook is unavailable, notification polling/,
+      ),
+    ).toBeDefined();
     const createTokenLink = screen.getByRole("link", {
       name: /Create fine-grained token/,
     });
@@ -86,6 +94,7 @@ describe("SettingsPage", () => {
     ).toHaveProperty("href", "https://code.visualstudio.com/insiders/");
 
     fireEvent.change(tokenInput, { target: { value: "replacement-token" } });
+    fireEvent.change(actionsInterval, { target: { value: "120" } });
     const form = tokenInput.closest("form");
     expect(form).not.toBeNull();
     fireEvent.click(
@@ -100,7 +109,7 @@ describe("SettingsPage", () => {
         {
           input: {
             apiToken: "replacement-token",
-            actionsNotificationPollIntervalSeconds: 60,
+            actionsNotificationPollIntervalSeconds: 120,
           },
         },
       ),

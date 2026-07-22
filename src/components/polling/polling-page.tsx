@@ -22,6 +22,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { Link } from "@/i18n/navigation";
 
 type PollingOperation = {
   id: string;
@@ -52,14 +53,23 @@ function statusVariant(status: PollingOperation["status"]) {
 
 function detailText(details: Record<string, unknown>): string {
   return Object.entries(details)
-    .filter(([, value]) =>
-      ["string", "number", "boolean"].includes(typeof value),
+    .filter(
+      ([key, value]) =>
+        key !== "agentId" &&
+        key !== "agentName" &&
+        ["string", "number", "boolean"].includes(typeof value),
     )
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(" · ");
 }
 
-function OperationsTable({ operations }: { operations: PollingOperation[] }) {
+function OperationsTable({
+  operations,
+  showAgent = false,
+}: {
+  operations: PollingOperation[];
+  showAgent?: boolean;
+}) {
   const t = useTranslations("polling");
   if (operations.length === 0) {
     return <p className="text-sm text-muted-foreground">{t("empty")}</p>;
@@ -70,6 +80,7 @@ function OperationsTable({ operations }: { operations: PollingOperation[] }) {
         <TableHeader>
           <TableRow>
             <TableHead>{t("operation")}</TableHead>
+            {showAgent && <TableHead>{t("agent")}</TableHead>}
             <TableHead>{t("status")}</TableHead>
             <TableHead>{t("cadence")}</TableHead>
             <TableHead>{t("lastStarted")}</TableHead>
@@ -91,6 +102,21 @@ function OperationsTable({ operations }: { operations: PollingOperation[] }) {
                     : t("agentRuntime")}
                 </p>
               </TableCell>
+              {showAgent && (
+                <TableCell>
+                  {typeof operation.details.agentId === "string" &&
+                  typeof operation.details.agentName === "string" ? (
+                    <Link
+                      className="font-medium underline-offset-4 hover:underline"
+                      href={`/agents/${operation.details.agentId}`}
+                    >
+                      {operation.details.agentName}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+              )}
               <TableCell>
                 <Badge variant={statusVariant(operation.status)}>
                   {t(`statuses.${operation.status}` as never)}
@@ -258,7 +284,7 @@ export function PollingPage() {
               <CardTitle>{t("agentTitle")}</CardTitle>
             </CardHeader>
             <CardContent>
-              <OperationsTable operations={grouped.agent} />
+              <OperationsTable operations={grouped.agent} showAgent />
             </CardContent>
           </Card>
         </>
