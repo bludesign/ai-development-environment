@@ -166,6 +166,82 @@ describe("AgentControlService.requestCodebaseReconcile", () => {
   });
 });
 
+describe("AgentControlService cadence settings", () => {
+  test("uses global scan and fetch defaults until an agent is customized", async () => {
+    getPrismaClient.mockResolvedValue({
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "agent-1",
+          codebaseScanIntervalSeconds: null,
+          jobReconciliationIntervalSeconds: null,
+          gitFetchIntervalSeconds: null,
+          heartbeatIntervalSeconds: null,
+        }),
+      },
+      codebaseSettings: {
+        findUnique: vi.fn().mockResolvedValue({
+          refreshIntervalSeconds: 90,
+          fetchIntervalSeconds: 600,
+        }),
+      },
+    });
+
+    await expect(
+      new AgentControlService().cadenceSettings("agent-1"),
+    ).resolves.toEqual({
+      agentId: "agent-1",
+      codebaseScanIntervalSeconds: 90,
+      jobReconciliationIntervalSeconds: 15,
+      gitFetchIntervalSeconds: 600,
+      heartbeatIntervalSeconds: 15,
+    });
+  });
+
+  test("validates, saves, and pushes cadence changes to the agent", async () => {
+    const settings = {
+      codebaseScanIntervalSeconds: 60,
+      jobReconciliationIntervalSeconds: 30,
+      gitFetchIntervalSeconds: 900,
+      heartbeatIntervalSeconds: 20,
+    };
+    const agent = { id: "agent-1", ...settings };
+    const update = vi.fn().mockResolvedValue(agent);
+    getPrismaClient.mockResolvedValue({
+      agent: {
+        update,
+        findUnique: vi.fn().mockResolvedValue(agent),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+
+    await expect(
+      new AgentControlService().updateCadenceSettings("agent-1", settings),
+    ).resolves.toEqual({ agentId: "agent-1", ...settings });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "agent-1" },
+      data: settings,
+    });
+    expect(publish).toHaveBeenCalledWith(agentEventsTopic("agent-1"), {
+      agentEvents: { type: "AGENT_CONFIGURATION_CHANGED", job: null },
+    });
+    publish.mockRestore();
+  });
+
+  test("rejects cadence values outside their operation limits", async () => {
+    await expect(
+      new AgentControlService().updateCadenceSettings("agent-1", {
+        codebaseScanIntervalSeconds: 9,
+        jobReconciliationIntervalSeconds: 15,
+        gitFetchIntervalSeconds: 300,
+        heartbeatIntervalSeconds: 15,
+      }),
+    ).rejects.toThrow(
+      "Codebase scan interval must be an integer from 10 to 3600 seconds",
+    );
+  });
+});
+
 describe("AgentControlService.updateBaseRepoDirectory", () => {
   test("stores an absolute repository directory and supports clearing it", async () => {
     const update = vi

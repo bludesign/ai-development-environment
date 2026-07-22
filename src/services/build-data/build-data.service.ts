@@ -13,7 +13,7 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   AgentControlService,
   agentEventBus,
   buildDataCollectionChangedTopic,
@@ -95,7 +95,7 @@ export type BuildDataCollectionSnapshot = {
 function online(agent: PersistedAgent): boolean {
   return (
     agent.lastSeenAt !== null &&
-    Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
   );
 }

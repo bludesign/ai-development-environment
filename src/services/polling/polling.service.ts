@@ -1,8 +1,12 @@
 import "server-only";
 
+import {
+  DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   agentEventBus,
   POLLING_CHANGED_TOPIC,
 } from "@/services/agent-control";
@@ -184,6 +188,10 @@ export class PollingService {
           name: true,
           lastSeenAt: true,
           disconnectedAt: true,
+          codebaseScanIntervalSeconds: true,
+          jobReconciliationIntervalSeconds: true,
+          gitFetchIntervalSeconds: true,
+          heartbeatIntervalSeconds: true,
           codebases: {
             select: {
               lastCheckedAt: true,
@@ -211,22 +219,32 @@ export class PollingService {
     }
     const agentViews: PollingOperationView[] = [];
     for (const agent of agents) {
+      const heartbeatSeconds =
+        agent.heartbeatIntervalSeconds ??
+        DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS;
+      const jobReconciliationSeconds =
+        agent.jobReconciliationIntervalSeconds ??
+        DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS;
+      const scanSeconds = agent.codebaseScanIntervalSeconds ?? refreshSeconds;
+      const agentFetchSeconds = agent.gitFetchIntervalSeconds ?? fetchSeconds;
       const online =
         agent.lastSeenAt !== null &&
         agent.disconnectedAt === null &&
-        Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS;
+        Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent);
       agentViews.push({
         id: `agent-heartbeat:${agent.id}`,
         kind: "AGENT_HEARTBEAT",
         runtime: "AGENT",
         status: online ? "HEALTHY" : "STALE",
         enabled: true,
-        cadenceSeconds: 15,
+        cadenceSeconds: heartbeatSeconds,
         lastStartedAt: null,
         lastCompletedAt: iso(agent.lastSeenAt),
         lastSucceededAt: iso(agent.lastSeenAt),
         nextScheduledAt: agent.lastSeenAt
-          ? new Date(agent.lastSeenAt.getTime() + 15_000).toISOString()
+          ? new Date(
+              agent.lastSeenAt.getTime() + heartbeatSeconds * 1_000,
+            ).toISOString()
           : null,
         durationMs: null,
         lastError: null,
@@ -242,12 +260,14 @@ export class PollingService {
         runtime: "AGENT",
         status: online ? "HEALTHY" : "STALE",
         enabled: true,
-        cadenceSeconds: 15,
+        cadenceSeconds: jobReconciliationSeconds,
         lastStartedAt: null,
         lastCompletedAt: iso(agent.lastSeenAt),
         lastSucceededAt: iso(agent.lastSeenAt),
         nextScheduledAt: agent.lastSeenAt
-          ? new Date(agent.lastSeenAt.getTime() + 15_000).toISOString()
+          ? new Date(
+              agent.lastSeenAt.getTime() + jobReconciliationSeconds * 1_000,
+            ).toISOString()
           : null,
         durationMs: null,
         lastError: null,
@@ -279,17 +299,17 @@ export class PollingService {
         status: derivedStatus(
           agent.codebases.length > 0,
           false,
-          refreshSeconds,
+          scanSeconds,
           lastCheck,
           null,
         ),
         enabled: agent.codebases.length > 0,
-        cadenceSeconds: refreshSeconds,
+        cadenceSeconds: scanSeconds,
         lastStartedAt: null,
         lastCompletedAt: iso(lastCheck),
         lastSucceededAt: iso(lastCheck),
         nextScheduledAt: lastCheck
-          ? new Date(lastCheck.getTime() + refreshSeconds * 1_000).toISOString()
+          ? new Date(lastCheck.getTime() + scanSeconds * 1_000).toISOString()
           : null,
         durationMs: null,
         lastError: null,
@@ -309,17 +329,19 @@ export class PollingService {
             : derivedStatus(
                 agent.codebases.length > 0,
                 false,
-                fetchSeconds,
+                agentFetchSeconds,
                 lastFetch,
                 null,
               ),
         enabled: agent.codebases.length > 0,
-        cadenceSeconds: fetchSeconds,
+        cadenceSeconds: agentFetchSeconds,
         lastStartedAt: null,
         lastCompletedAt: iso(lastFetch),
         lastSucceededAt: fetchErrors > 0 ? null : iso(lastFetch),
         nextScheduledAt: lastFetch
-          ? new Date(lastFetch.getTime() + fetchSeconds * 1_000).toISOString()
+          ? new Date(
+              lastFetch.getTime() + agentFetchSeconds * 1_000,
+            ).toISOString()
           : null,
         durationMs: null,
         lastError:

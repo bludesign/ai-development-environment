@@ -40,6 +40,14 @@ export type AgentJob = {
   updatedAt: string;
 };
 
+export type AgentCadenceSettings = {
+  agentId: string;
+  codebaseScanIntervalSeconds: number;
+  jobReconciliationIntervalSeconds: number;
+  gitFetchIntervalSeconds: number;
+  heartbeatIntervalSeconds: number;
+};
+
 export type AgentJobLog = {
   id: string;
   jobId: string;

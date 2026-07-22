@@ -176,6 +176,26 @@ describe("AgentGraphQLClient", () => {
       "query AgentCodebaseConfiguration",
     );
   });
+
+  test("loads the agent's four cadence settings", async () => {
+    const client = new AgentGraphQLClient("http://control.test");
+    const settings = {
+      agentId: "agent-1",
+      codebaseScanIntervalSeconds: 60,
+      jobReconciliationIntervalSeconds: 30,
+      gitFetchIntervalSeconds: 900,
+      heartbeatIntervalSeconds: 20,
+    };
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValue({ agentCadenceSettings: settings });
+
+    await expect(client.cadenceSettings("agent-1")).resolves.toEqual(settings);
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("query AgentCadenceSettings"),
+      { agentId: "agent-1" },
+    );
+  });
 });
 
 describe("subscribeToAgentEvents", () => {

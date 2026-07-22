@@ -3,6 +3,12 @@ import { posix, win32 } from "node:path";
 
 import {
   CCUSAGE_REPORT_JOB_KIND,
+  DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+  MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+  MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
   TUNNEL_NAME_REGEX,
 } from "@ai-development-environment/agent-contract";
 import {
@@ -50,12 +56,18 @@ import {
   CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
   CODEBASE_REFRESH_JOB_KIND,
+  DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   codebaseBrowsePayload,
   codebaseGitInspectPayload,
   codebaseGitOperationPayload,
   codebaseJobPayload,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
+  DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
@@ -119,6 +131,15 @@ const FINAL_JOB_STATUSES = new Set([
 ]);
 
 export const AGENT_ONLINE_WINDOW_MS = 45_000;
+export function agentOnlineWindowMs(agent: {
+  heartbeatIntervalSeconds?: number | null;
+}): number {
+  return Math.max(
+    AGENT_ONLINE_WINDOW_MS,
+    (agent.heartbeatIntervalSeconds ??
+      DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS) * 3_000,
+  );
+}
 export const SUPPORTED_AGENT_JOBS = [
   "cloudflared.runTunnel",
   CCUSAGE_REPORT_JOB_KIND,
@@ -169,6 +190,20 @@ function agentCapabilities(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function cadence(
+  value: number,
+  label: string,
+  min: number,
+  max: number,
+): number {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(
+      `${label} must be an integer from ${min} to ${max} seconds`,
+    );
+  }
+  return value;
 }
 
 export function validateJob(kind: string, payload: unknown): void {
@@ -575,13 +610,18 @@ export class AgentControlService {
     const prisma = await getPrismaClient();
     const previous = await prisma.agent.findUnique({
       where: { id: agentId },
-      select: { lastSeenAt: true, disconnectedAt: true },
+      select: {
+        lastSeenAt: true,
+        disconnectedAt: true,
+        heartbeatIntervalSeconds: true,
+      },
     });
     const now = new Date();
     const reconnected =
       !previous?.lastSeenAt ||
       previous.disconnectedAt !== null ||
-      now.getTime() - previous.lastSeenAt.getTime() > AGENT_ONLINE_WINDOW_MS;
+      now.getTime() - previous.lastSeenAt.getTime() >
+        agentOnlineWindowMs(previous);
     const agent = await prisma.agent.update({
       where: { id: agentId },
       data: {
@@ -613,6 +653,88 @@ export class AgentControlService {
   async getAgent(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agent.findUnique({ where: { id } });
+  }
+
+  async cadenceSettings(agentId: string) {
+    const prisma = await getPrismaClient();
+    const [agent, defaults] = await Promise.all([
+      prisma.agent.findUnique({
+        where: { id: agentId },
+        select: {
+          id: true,
+          codebaseScanIntervalSeconds: true,
+          jobReconciliationIntervalSeconds: true,
+          gitFetchIntervalSeconds: true,
+          heartbeatIntervalSeconds: true,
+        },
+      }),
+      prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
+    ]);
+    if (!agent) throw new Error("Agent not found");
+    return {
+      agentId: agent.id,
+      codebaseScanIntervalSeconds:
+        agent.codebaseScanIntervalSeconds ??
+        defaults?.refreshIntervalSeconds ??
+        DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+      jobReconciliationIntervalSeconds:
+        agent.jobReconciliationIntervalSeconds ??
+        DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+      gitFetchIntervalSeconds:
+        agent.gitFetchIntervalSeconds ??
+        defaults?.fetchIntervalSeconds ??
+        DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS,
+      heartbeatIntervalSeconds:
+        agent.heartbeatIntervalSeconds ??
+        DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+    };
+  }
+
+  async updateCadenceSettings(
+    agentId: string,
+    input: {
+      codebaseScanIntervalSeconds: number;
+      jobReconciliationIntervalSeconds: number;
+      gitFetchIntervalSeconds: number;
+      heartbeatIntervalSeconds: number;
+    },
+  ) {
+    const data = {
+      codebaseScanIntervalSeconds: cadence(
+        input.codebaseScanIntervalSeconds,
+        "Codebase scan interval",
+        MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+        MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+      ),
+      jobReconciliationIntervalSeconds: cadence(
+        input.jobReconciliationIntervalSeconds,
+        "Durable job reconciliation interval",
+        MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+        MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+      ),
+      gitFetchIntervalSeconds: cadence(
+        input.gitFetchIntervalSeconds,
+        "Git fetch interval",
+        MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+        MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+      ),
+      heartbeatIntervalSeconds: cadence(
+        input.heartbeatIntervalSeconds,
+        "Agent heartbeat interval",
+        MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+        MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+      ),
+    };
+    const prisma = await getPrismaClient();
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data,
+    });
+    publishAgent(agent);
+    agentEventBus.publish(agentEventsTopic(agentId), {
+      agentEvents: { type: "AGENT_CONFIGURATION_CHANGED", job: null },
+    });
+    return this.cadenceSettings(agentId);
   }
 
   async deleteAgent(id: string) {

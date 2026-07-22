@@ -13,7 +13,7 @@ import {
 } from "@/components/usage/aggregate-usage";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   AgentControlService,
   agentEventBus,
   ccusageCollectionChangedTopic,
@@ -54,6 +54,7 @@ type PersistedAgent = {
   ipAddress: string | null;
   lastSeenAt: Date | null;
   disconnectedAt: Date | null;
+  heartbeatIntervalSeconds?: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -108,7 +109,7 @@ export type CcusageCollectionSnapshot = {
 function isOnline(agent: PersistedAgent, now: number): boolean {
   return (
     agent.lastSeenAt !== null &&
-    now - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    now - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
   );
 }

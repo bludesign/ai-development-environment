@@ -86,6 +86,10 @@ describe("PollingService", () => {
             name: "Build Mac",
             lastSeenAt: new Date("2026-07-22T11:59:55.000Z"),
             disconnectedAt: null,
+            codebaseScanIntervalSeconds: 45,
+            jobReconciliationIntervalSeconds: 20,
+            gitFetchIntervalSeconds: 600,
+            heartbeatIntervalSeconds: 10,
             codebases: [
               {
                 lastCheckedAt: new Date("2026-07-22T11:59:45.000Z"),
@@ -112,22 +116,26 @@ describe("PollingService", () => {
           id: "agent-heartbeat:agent-1",
           kind: "AGENT_HEARTBEAT",
           status: "HEALTHY",
+          cadenceSeconds: 10,
           details: expect.objectContaining({ connection: "ONLINE" }),
         }),
         expect.objectContaining({
           id: "agent-job-reconciliation:agent-1",
           kind: "AGENT_JOB_RECONCILIATION",
+          cadenceSeconds: 20,
           details: expect.objectContaining({ pendingJobs: 3 }),
         }),
         expect.objectContaining({
           id: "agent-codebase-scan:agent-1",
           kind: "CODEBASE_SCAN",
           status: "HEALTHY",
+          cadenceSeconds: 45,
         }),
         expect.objectContaining({
           id: "agent-git-fetch:agent-1",
           kind: "GIT_FETCH",
           status: "ERROR",
+          cadenceSeconds: 600,
           details: expect.objectContaining({ repositories: 1, fetchErrors: 1 }),
         }),
       ]),

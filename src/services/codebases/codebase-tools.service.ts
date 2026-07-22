@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 
-import { AGENT_ONLINE_WINDOW_MS } from "@/services/agent-control";
+import { agentOnlineWindowMs } from "@/services/agent-control";
 
 import type { CodebasesService } from "./codebases.service";
 
@@ -166,9 +166,10 @@ export class CodebaseLookupError extends Error {
 function connectionStatus(agent: {
   lastSeenAt: Date | null;
   disconnectedAt: Date | null;
+  heartbeatIntervalSeconds?: number | null;
 }): "ONLINE" | "OFFLINE" {
   return agent.lastSeenAt !== null &&
-    Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
     ? "ONLINE"
     : "OFFLINE";

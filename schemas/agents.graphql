@@ -30,6 +30,7 @@ enum AgentEventType {
   JOB_AVAILABLE
   JOB_CANCEL_REQUESTED
   CODEBASE_RECONCILE_REQUESTED
+  AGENT_CONFIGURATION_CHANGED
 }
 
 type Agent {
@@ -62,6 +63,14 @@ type Agent {
 type AgentEnrollmentToken {
   token: String!
   expiresAt: String!
+}
+
+type AgentCadenceSettings {
+  agentId: ID!
+  codebaseScanIntervalSeconds: Int!
+  jobReconciliationIntervalSeconds: Int!
+  gitFetchIntervalSeconds: Int!
+  heartbeatIntervalSeconds: Int!
 }
 
 type SigningSecretTransfer {
@@ -139,6 +148,13 @@ input UpdateAgentDerivedDataSettingsInput {
   path: String
 }
 
+input UpdateAgentCadenceSettingsInput {
+  codebaseScanIntervalSeconds: Int!
+  jobReconciliationIntervalSeconds: Int!
+  gitFetchIntervalSeconds: Int!
+  heartbeatIntervalSeconds: Int!
+}
+
 input CreateAgentJobInput {
   agentId: ID!
   kind: String!
@@ -158,6 +174,7 @@ extend type Query {
   agents: [Agent!]!
   agent(id: ID!): Agent
   agentSelf: Agent
+  agentCadenceSettings(agentId: ID!): AgentCadenceSettings!
   agentJobs(agentId: ID!, limit: Int = 50): [AgentJob!]!
   agentJob(id: ID!): AgentJob
   agentJobLogs(jobId: ID!, afterSequence: Int = -1): [AgentJobLog!]!
@@ -185,6 +202,10 @@ type Mutation {
     agentId: ID!
     input: UpdateAgentDerivedDataSettingsInput!
   ): Agent!
+  updateAgentCadenceSettings(
+    agentId: ID!
+    input: UpdateAgentCadenceSettingsInput!
+  ): AgentCadenceSettings!
   deleteAgent(agentId: ID!): Boolean!
 }
 

@@ -30,9 +30,17 @@ export type AgentEvent =
       job: AgentJob;
     }
   | {
-      type: "CODEBASE_RECONCILE_REQUESTED";
+      type: "CODEBASE_RECONCILE_REQUESTED" | "AGENT_CONFIGURATION_CHANGED";
       job: null;
     };
+
+export type AgentCadenceSettings = {
+  agentId: string;
+  codebaseScanIntervalSeconds: number;
+  jobReconciliationIntervalSeconds: number;
+  gitFetchIntervalSeconds: number;
+  heartbeatIntervalSeconds: number;
+};
 
 export type AgentCodebaseRegistration = {
   id: string;
@@ -186,6 +194,24 @@ export class AgentGraphQLClient {
         job.status === "RUNNING" ||
         job.status === "CANCELLED",
     );
+  }
+
+  async cadenceSettings(agentId: string): Promise<AgentCadenceSettings> {
+    const data = await this.request<{
+      agentCadenceSettings: AgentCadenceSettings;
+    }>(
+      `query AgentCadenceSettings($agentId: ID!) {
+        agentCadenceSettings(agentId: $agentId) {
+          agentId
+          codebaseScanIntervalSeconds
+          jobReconciliationIntervalSeconds
+          gitFetchIntervalSeconds
+          heartbeatIntervalSeconds
+        }
+      }`,
+      { agentId },
+    );
+    return data.agentCadenceSettings;
   }
 
   async claimJob(jobId: string): Promise<AgentJob> {

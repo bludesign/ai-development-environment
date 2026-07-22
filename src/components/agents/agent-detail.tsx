@@ -3,7 +3,19 @@
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
+  MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+  MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/codebases";
+import {
+  MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+  MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+  MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract";
+import {
+  MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+  MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+} from "@ai-development-environment/agent-contract/worktrees";
 import {
   ArrowLeft,
   Check,
@@ -28,7 +40,11 @@ import {
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
-import type { Agent, AgentJob } from "@/components/agents/types";
+import type {
+  Agent,
+  AgentCadenceSettings,
+  AgentJob,
+} from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -119,6 +135,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
+  const [cadenceSettings, setCadenceSettings] =
+    useState<AgentCadenceSettings | null>(null);
   const [codebases, setCodebases] = useState<AgentCodebase[]>([]);
   const [capabilityQuery, setCapabilityQuery] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -133,11 +151,16 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     try {
       const data = await controlPlaneRequest<{
         agent: Agent | null;
+        agentCadenceSettings: AgentCadenceSettings;
         agentJobs: AgentJob[];
         codebaseOverview: { repositories: CodebaseOverviewRepository[] };
       }>(
         `query AgentDetail($id: ID!) {
           agent(id: $id) { ${AGENT_FIELDS} }
+          agentCadenceSettings(agentId: $id) {
+            agentId codebaseScanIntervalSeconds jobReconciliationIntervalSeconds
+            gitFetchIntervalSeconds heartbeatIntervalSeconds
+          }
           agentJobs(agentId: $id) { ${JOB_FIELDS} }
           codebaseOverview {
             repositories {
@@ -153,6 +176,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       );
       if (loadId !== latestLoad.current) return;
       setAgent(data.agent);
+      setCadenceSettings(data.agentCadenceSettings);
       setJobs(data.agentJobs);
       setCodebases(
         (data.codebaseOverview?.repositories ?? []).flatMap((repository) =>
@@ -419,6 +443,14 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
+      {cadenceSettings && (
+        <AgentCadenceSettingsCard
+          key={agent.id}
+          onSaved={setCadenceSettings}
+          settings={cadenceSettings}
+        />
+      )}
+
       <Card className="gap-0 py-0">
         <CardHeader>
           <CardTitle>{t("capabilities")}</CardTitle>
@@ -593,6 +625,157 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         )}
       </section>
     </div>
+  );
+}
+
+function AgentCadenceSettingsCard({
+  settings,
+  onSaved,
+}: {
+  settings: AgentCadenceSettings;
+  onSaved: (settings: AgentCadenceSettings) => void;
+}) {
+  const t = useTranslations("agentDetail");
+  const [values, setValues] = useState(settings);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const fields = [
+    {
+      key: "codebaseScanIntervalSeconds" as const,
+      label: t("codebaseScanCadence"),
+      help: t("codebaseScanCadenceHelp", {
+        min: MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+        max: MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+      }),
+      min: MIN_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+      max: MAX_CODEBASE_RECONCILE_INTERVAL_SECONDS,
+    },
+    {
+      key: "jobReconciliationIntervalSeconds" as const,
+      label: t("jobReconciliationCadence"),
+      help: t("jobReconciliationCadenceHelp", {
+        min: MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+        max: MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+      }),
+      min: MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+      max: MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
+    },
+    {
+      key: "gitFetchIntervalSeconds" as const,
+      label: t("gitFetchCadence"),
+      help: t("gitFetchCadenceHelp", {
+        min: MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+        max: MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+      }),
+      min: MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
+      max: MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
+    },
+    {
+      key: "heartbeatIntervalSeconds" as const,
+      label: t("heartbeatCadence"),
+      help: t("heartbeatCadenceHelp", {
+        min: MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+        max: MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+      }),
+      min: MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+      max: MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+    },
+  ];
+  const valid = fields.every(({ key, min, max }) => {
+    const value = values[key];
+    return Number.isInteger(value) && value >= min && value <= max;
+  });
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const data = await controlPlaneRequest<{
+        updateAgentCadenceSettings: AgentCadenceSettings;
+      }>(
+        `mutation UpdateAgentCadenceSettings($agentId: ID!, $input: UpdateAgentCadenceSettingsInput!) {
+          updateAgentCadenceSettings(agentId: $agentId, input: $input) {
+            agentId codebaseScanIntervalSeconds jobReconciliationIntervalSeconds
+            gitFetchIntervalSeconds heartbeatIntervalSeconds
+          }
+        }`,
+        {
+          agentId: settings.agentId,
+          input: {
+            codebaseScanIntervalSeconds: values.codebaseScanIntervalSeconds,
+            jobReconciliationIntervalSeconds:
+              values.jobReconciliationIntervalSeconds,
+            gitFetchIntervalSeconds: values.gitFetchIntervalSeconds,
+            heartbeatIntervalSeconds: values.heartbeatIntervalSeconds,
+          },
+        },
+      );
+      setValues(data.updateAgentCadenceSettings);
+      onSaved(data.updateAgentCadenceSettings);
+      setSaved(true);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("cadenceSettings")}</CardTitle>
+        <CardDescription>{t("cadenceSettingsDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form className="space-y-4" onSubmit={save}>
+          <div className="grid gap-4 md:grid-cols-2">
+            {fields.map(({ key, label, help, min, max }) => (
+              <div className="grid gap-1.5" key={key}>
+                <Label htmlFor={`agent-${key}`}>{label}</Label>
+                <Input
+                  disabled={busy}
+                  id={`agent-${key}`}
+                  max={max}
+                  min={min}
+                  onChange={(event) => {
+                    setValues((current) => ({
+                      ...current,
+                      [key]: Number(event.target.value),
+                    }));
+                    setSaved(false);
+                  }}
+                  required
+                  type="number"
+                  value={values[key]}
+                />
+                <p className="text-xs text-muted-foreground">{help}</p>
+              </div>
+            ))}
+          </div>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {saved && (
+            <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+              <Check />
+              <AlertDescription className="text-current">
+                {t("cadenceSettingsSaved")}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div className="flex justify-end">
+            <Button disabled={busy || !valid} type="submit">
+              {busy && <Spinner />}
+              {t("saveCadenceSettings")}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
