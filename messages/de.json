@@ -1455,6 +1455,9 @@
     "searchBranches": "Branches durchsuchen",
     "searchBranchesPlaceholder": "Nach Branch-Namen filtern",
     "noMatchingBranches": "Keine Branches entsprechen deiner Suche.",
+    "sortBranches": "Branches sortieren",
+    "sortByName": "Name",
+    "sortByNewestCommit": "Neuester Commit",
     "searchStashes": "Stashes durchsuchen",
     "searchStashesPlaceholder": "Nach Nachricht oder Selektor filtern",
     "noMatchingStashes": "Keine Stashes entsprechen deiner Suche."

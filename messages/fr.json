@@ -1459,6 +1459,9 @@
     "searchBranches": "Rechercher des branches",
     "searchBranchesPlaceholder": "Filtrer par nom de branche",
     "noMatchingBranches": "Aucune branche ne correspond à votre recherche.",
+    "sortBranches": "Trier les branches",
+    "sortByName": "Nom",
+    "sortByNewestCommit": "Commit le plus récent",
     "searchStashes": "Rechercher des remises",
     "searchStashesPlaceholder": "Filtrer par message ou sélecteur",
     "noMatchingStashes": "Aucune remise ne correspond à votre recherche."

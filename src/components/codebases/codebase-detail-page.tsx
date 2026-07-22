@@ -47,6 +47,13 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { PatchView } from "@/components/ui/patch-view";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -95,6 +102,8 @@ type DiffEntry = {
 };
 
 type CopyState = "IDLE" | "COPIED" | "FAILED";
+
+type BranchSort = "NAME" | "DATE";
 
 function liveInspectionAvailable(codebase: CodebaseDetail) {
   return (
@@ -670,13 +679,28 @@ function BranchTable({
   const t = useTranslations("codebaseDetail");
   const title = kind === "local" ? t("localBranches") : t("remoteBranches");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<BranchSort>("NAME");
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return branches;
-    return branches.filter((branch) =>
-      branch.name.toLowerCase().includes(needle),
-    );
-  }, [branches, query]);
+    const matches = needle
+      ? branches.filter((branch) => branch.name.toLowerCase().includes(needle))
+      : branches;
+    if (sort === "NAME") {
+      return [...matches].sort((first, second) =>
+        first.name.localeCompare(second.name),
+      );
+    }
+    // Newest commit first. Branches whose tip the agent could not report sort
+    // last, then by name so the order stays stable.
+    return [...matches].sort((first, second) => {
+      if (first.lastCommitAt !== second.lastCommitAt) {
+        if (!first.lastCommitAt) return 1;
+        if (!second.lastCommitAt) return -1;
+        return second.lastCommitAt.localeCompare(first.lastCommitAt);
+      }
+      return first.name.localeCompare(second.name);
+    });
+  }, [branches, query, sort]);
 
   if (branches.length === 0) {
     return (
@@ -703,12 +727,26 @@ function BranchTable({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardAction>
-          <TableSearch
-            label={t("searchBranches")}
-            onChange={setQuery}
-            placeholder={t("searchBranchesPlaceholder")}
-            value={query}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <TableSearch
+              label={t("searchBranches")}
+              onChange={setQuery}
+              placeholder={t("searchBranchesPlaceholder")}
+              value={query}
+            />
+            <Select
+              onValueChange={(value) => setSort(value as BranchSort)}
+              value={sort}
+            >
+              <SelectTrigger aria-label={t("sortBranches")} className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NAME">{t("sortByName")}</SelectItem>
+                <SelectItem value="DATE">{t("sortByNewestCommit")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardAction>
       </CardHeader>
       {visible.length === 0 ? (

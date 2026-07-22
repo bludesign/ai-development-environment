@@ -1455,6 +1455,9 @@
     "searchBranches": "Buscar ramas",
     "searchBranchesPlaceholder": "Filtrar por nombre de rama",
     "noMatchingBranches": "Ninguna rama coincide con tu búsqueda.",
+    "sortBranches": "Ordenar ramas",
+    "sortByName": "Nombre",
+    "sortByNewestCommit": "Commit más reciente",
     "searchStashes": "Buscar stashes",
     "searchStashesPlaceholder": "Filtrar por mensaje o selector",
     "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
