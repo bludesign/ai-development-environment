@@ -1456,7 +1456,6 @@
     "confirmDeleteStashDescription": "{stash} sera définitivement supprimé. Appliquez-le d’abord si vous devez conserver ses modifications.",
     "stashesTitle": "Remises",
     "stashMessage": "Remise",
-    "stashDetails": "Détails",
     "searchBranches": "Rechercher des branches",
     "searchBranchesPlaceholder": "Filtrer par nom de branche",
     "noMatchingBranches": "Aucune branche ne correspond à votre recherche.",

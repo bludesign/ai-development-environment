@@ -1452,7 +1452,6 @@
     "confirmDeleteStashDescription": "{stash} wird dauerhaft entfernt. Wende ihn zuerst an, wenn du seine Änderungen behalten möchtest.",
     "stashesTitle": "Stashes",
     "stashMessage": "Stash",
-    "stashDetails": "Details",
     "searchBranches": "Branches durchsuchen",
     "searchBranchesPlaceholder": "Nach Branch-Namen filtern",
     "noMatchingBranches": "Keine Branches entsprechen deiner Suche.",

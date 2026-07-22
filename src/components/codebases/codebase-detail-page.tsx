@@ -46,6 +46,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { PatchView } from "@/components/ui/patch-view";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -1055,7 +1056,6 @@ function StashTable({
             <TableHeader>
               <TableRow>
                 <TableHead>{t("stashMessage")}</TableHead>
-                <TableHead>{t("stashDetails")}</TableHead>
                 <TableHead className="text-right">{t("actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -1068,12 +1068,12 @@ function StashTable({
                   // in a second row keyed alongside the stash's own.
                   <Fragment key={stash.oid}>
                     <TableRow>
-                      <TableCell className="max-w-md break-words whitespace-normal">
+                      <TableCell className="max-w-md align-top break-words whitespace-normal">
                         {stash.message}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
-                        <DateTime value={stash.createdAt} />
+                        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+                          {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
+                          <DateTime value={stash.createdAt} />
+                        </span>
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-2">
@@ -1134,7 +1134,9 @@ function StashTable({
                     </TableRow>
                     {entry?.open && (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={3}>
+                        {/* `max-w-0` keeps a wide patch from stretching the
+                            table, so the patch scrolls instead of the card. */}
+                        <TableCell className="max-w-0" colSpan={2}>
                           <div className="space-y-2">
                             {entry.error ? (
                               <Alert variant="destructive">
@@ -1182,12 +1184,16 @@ function StashTable({
                                     {t("copyPatchFailed")}
                                   </p>
                                 )}
-                                <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre">
-                                  {entry.diff?.patch || t("emptyPatch")}
-                                </pre>
-                                {entry.diff?.truncated && (
-                                  <p className="text-xs text-muted-foreground">
-                                    {t("patchTruncated")}
+                                {entry.diff?.patch ? (
+                                  <PatchView
+                                    className="max-h-[32rem]"
+                                    patch={entry.diff.patch}
+                                    truncated={entry.diff.truncated}
+                                    truncatedLabel={t("patchTruncated")}
+                                  />
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">
+                                    {t("emptyPatch")}
                                   </p>
                                 )}
                               </>

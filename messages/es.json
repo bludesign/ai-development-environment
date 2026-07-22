@@ -1452,7 +1452,6 @@
     "confirmDeleteStashDescription": "{stash} se eliminará permanentemente. Aplícalo primero si necesitas conservar sus cambios.",
     "stashesTitle": "Stashes",
     "stashMessage": "Stash",
-    "stashDetails": "Detalles",
     "searchBranches": "Buscar ramas",
     "searchBranchesPlaceholder": "Filtrar por nombre de rama",
     "noMatchingBranches": "Ninguna rama coincide con tu búsqueda.",

@@ -1099,7 +1099,6 @@ const mockTranslations = {
     actions: "Actions",
     stashesTitle: "Stashes",
     stashMessage: "Stash",
-    stashDetails: "Details",
     searchBranches: "Search branches",
     searchBranchesPlaceholder: "Filter by branch name",
     noMatchingBranches: "No branches match your search.",
