@@ -17,11 +17,12 @@ import {
   Download,
   GitBranch,
   RefreshCw,
+  Search,
   Settings2,
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import type { AgentJob } from "@/components/agents/types";
@@ -29,7 +30,13 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
@@ -38,6 +45,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -109,6 +117,9 @@ function persistedState(codebase: CodebaseDetail): CodebaseGitState {
         remote: remote.has(name),
         current: name === codebase.branch,
         checkedOutPath: name === codebase.branch ? codebase.folder : null,
+        // Branch tips are only known from a live inspection.
+        lastCommitMessage: null,
+        lastCommitAt: null,
       })),
     branchesTruncated: false,
     stashes: [],
@@ -137,7 +148,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         `mutation InspectCodebaseGitState($input: InspectCodebaseGitStateInput!) {
           inspectCodebaseGitState(input: $input) {
             dirty branchesTruncated stashesTruncated
-            branches { name local remote current checkedOutPath }
+            branches { name local remote current checkedOutPath lastCommitMessage lastCommitAt }
             stashes { oid selector message createdAt }
           }
         }`,
@@ -527,7 +538,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
               </Button>
             </div>
           </div>
-          <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <Info label={t("origin")} value={codebase.observedOrigin} mono />
             <Info
               label={t("currentBranch")}
@@ -593,7 +604,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           )}
         </TabsContent>
         <TabsContent value="stashes">
-          <StashList
+          <StashTable
             busy={busy}
             canOperate={canOperate}
             diffs={diffs}
@@ -604,6 +615,33 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
           />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/** The search field the branch and stash cards share in their header. */
+function TableSearch({
+  label,
+  placeholder,
+  onChange,
+  value,
+}: {
+  label: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        aria-label={label}
+        className="pl-9"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        type="search"
+        value={value}
+      />
     </div>
   );
 }
@@ -630,11 +668,22 @@ function BranchTable({
 }) {
   const t = useTranslations("codebaseDetail");
   const title = kind === "local" ? t("localBranches") : t("remoteBranches");
-  return (
-    <section className="space-y-3">
-      <h2 className="font-medium">{title}</h2>
-      {branches.length === 0 ? (
-        <Empty className="border py-8">
+  const [query, setQuery] = useState("");
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return branches;
+    return branches.filter((branch) =>
+      branch.name.toLowerCase().includes(needle),
+    );
+  }, [branches, query]);
+
+  if (branches.length === 0) {
+    return (
+      <Card className="gap-0 py-0">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+        <Empty className="py-8">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <GitBranch />
@@ -644,255 +693,284 @@ function BranchTable({
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardAction>
+          <TableSearch
+            label={t("searchBranches")}
+            onChange={setQuery}
+            placeholder={t("searchBranchesPlaceholder")}
+            value={query}
+          />
+        </CardAction>
+      </CardHeader>
+      {visible.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">
+          {t("noMatchingBranches")}
+        </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border">
-          <Table aria-label={title}>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("branchName")}</TableHead>
-                <TableHead>{t("branchStatus")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {branches.map((branch) => {
-                const elsewhere = Boolean(
-                  branch.checkedOutPath && !branch.current,
-                );
-                const defaultBranchProtected = branch.name === defaultBranch;
-                const remoteMainProtected =
-                  kind === "remote" && branch.name === "main";
-                return (
-                  <TableRow key={branch.name}>
-                    <TableCell className="font-mono text-xs">
-                      {branch.name}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1.5">
-                        {branch.current && <Badge>{t("current")}</Badge>}
-                        {defaultBranchProtected && (
-                          <Badge variant="outline">{t("default")}</Badge>
+        <Table aria-label={title}>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("branchName")}</TableHead>
+              <TableHead>{t("branchStatus")}</TableHead>
+              <TableHead className="text-right">{t("actions")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visible.map((branch) => {
+              const elsewhere = Boolean(
+                branch.checkedOutPath && !branch.current,
+              );
+              const defaultBranchProtected = branch.name === defaultBranch;
+              const remoteMainProtected =
+                kind === "remote" && branch.name === "main";
+              return (
+                <TableRow key={branch.name}>
+                  <TableCell className="max-w-md align-top whitespace-normal">
+                    <span className="font-mono text-xs">{branch.name}</span>
+                    {(branch.lastCommitMessage || branch.lastCommitAt) && (
+                      <span className="mt-0.5 block text-xs font-normal break-words text-muted-foreground">
+                        {branch.lastCommitMessage}
+                        {branch.lastCommitMessage &&
+                          branch.lastCommitAt &&
+                          " · "}
+                        {branch.lastCommitAt && (
+                          <DateTime value={branch.lastCommitAt} />
                         )}
-                        {remoteMainProtected && !defaultBranchProtected && (
-                          <Badge variant="outline">{t("protected")}</Badge>
-                        )}
-                        {elsewhere && (
-                          <Badge
-                            title={branch.checkedOutPath ?? undefined}
-                            variant="outline"
-                          >
-                            {t("otherWorktree")}
-                          </Badge>
-                        )}
-                        {kind === "remote" && branch.local && (
-                          <Badge variant="outline">{t("localAvailable")}</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        {kind === "local" ? (
-                          <>
-                            {dirty && !branch.current ? (
-                              <ConfirmationDialog
-                                actionLabel={t("stashAndSwitch")}
-                                cancelLabel={t("cancel")}
-                                description={t(
-                                  "confirmDirtySwitchDescription",
-                                  { branch: branch.name },
-                                )}
-                                onConfirm={() =>
-                                  onOperation("SWITCH_BRANCH", {
-                                    branch: branch.name,
-                                    stashChanges: true,
-                                  })
-                                }
-                                title={t("confirmDirtySwitchTitle")}
-                                trigger={
-                                  <Button
-                                    aria-label={`${t("switch")} ${branch.name}`}
-                                    disabled={
-                                      busy ||
-                                      !canOperate ||
-                                      branch.current ||
-                                      elsewhere
-                                    }
-                                    size="sm"
-                                    variant="outline"
-                                  >
-                                    <GitBranch /> {t("switch")}
-                                  </Button>
-                                }
-                              />
-                            ) : (
-                              <Button
-                                aria-label={`${t("switch")} ${branch.name}`}
-                                disabled={
-                                  busy ||
-                                  !canOperate ||
-                                  branch.current ||
-                                  elsewhere
-                                }
-                                onClick={() =>
-                                  void onOperation("SWITCH_BRANCH", {
-                                    branch: branch.name,
-                                    stashChanges: false,
-                                  })
-                                }
-                                size="sm"
-                                variant="outline"
-                              >
-                                <GitBranch /> {t("switch")}
-                              </Button>
-                            )}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1.5">
+                      {branch.current && <Badge>{t("current")}</Badge>}
+                      {defaultBranchProtected && (
+                        <Badge variant="outline">{t("default")}</Badge>
+                      )}
+                      {remoteMainProtected && !defaultBranchProtected && (
+                        <Badge variant="outline">{t("protected")}</Badge>
+                      )}
+                      {elsewhere && (
+                        <Badge
+                          title={branch.checkedOutPath ?? undefined}
+                          variant="outline"
+                        >
+                          {t("otherWorktree")}
+                        </Badge>
+                      )}
+                      {kind === "remote" && branch.local && (
+                        <Badge variant="outline">{t("localAvailable")}</Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      {kind === "local" ? (
+                        <>
+                          {dirty && !branch.current ? (
                             <ConfirmationDialog
-                              actionLabel={t("delete")}
+                              actionLabel={t("stashAndSwitch")}
                               cancelLabel={t("cancel")}
-                              description={t("confirmDeleteBranchDescription", {
+                              description={t("confirmDirtySwitchDescription", {
                                 branch: branch.name,
                               })}
                               onConfirm={() =>
-                                onOperation("DELETE_BRANCH", {
+                                onOperation("SWITCH_BRANCH", {
                                   branch: branch.name,
+                                  stashChanges: true,
                                 })
                               }
-                              title={t("confirmDeleteBranchTitle")}
+                              title={t("confirmDirtySwitchTitle")}
                               trigger={
                                 <Button
-                                  aria-label={`${t("delete")} ${branch.name}`}
+                                  aria-label={`${t("switch")} ${branch.name}`}
                                   disabled={
                                     busy ||
                                     !canOperate ||
                                     branch.current ||
-                                    defaultBranchProtected ||
                                     elsewhere
                                   }
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                 >
-                                  <Trash2 /> {t("delete")}
+                                  <GitBranch /> {t("switch")}
                                 </Button>
                               }
                             />
-                          </>
-                        ) : (
-                          <>
-                            {dirty && !branch.current ? (
-                              <ConfirmationDialog
-                                actionLabel={t("stashAndCheckout")}
-                                cancelLabel={t("cancel")}
-                                description={t(
-                                  "confirmDirtyCheckoutDescription",
-                                  { branch: branch.name },
-                                )}
-                                onConfirm={() =>
-                                  onOperation("SWITCH_BRANCH", {
-                                    branch: branch.name,
-                                    stashChanges: true,
-                                  })
-                                }
-                                title={t("confirmDirtyCheckoutTitle")}
-                                trigger={
-                                  <Button
-                                    aria-label={`${t("checkout")} ${branch.name}`}
-                                    disabled={
-                                      busy ||
-                                      !canOperate ||
-                                      branch.current ||
-                                      elsewhere
-                                    }
-                                    size="sm"
-                                    variant="outline"
-                                  >
-                                    <GitBranch /> {t("checkout")}
-                                  </Button>
-                                }
-                              />
-                            ) : (
-                              <Button
-                                aria-label={`${t("checkout")} ${branch.name}`}
-                                disabled={
-                                  busy ||
-                                  !canOperate ||
-                                  branch.current ||
-                                  elsewhere
-                                }
-                                onClick={() =>
-                                  void onOperation("SWITCH_BRANCH", {
-                                    branch: branch.name,
-                                    stashChanges: false,
-                                  })
-                                }
-                                size="sm"
-                                variant="outline"
-                              >
-                                <GitBranch /> {t("checkout")}
-                              </Button>
-                            )}
+                          ) : (
                             <Button
-                              aria-label={`${t("pull")} ${branch.name}`}
+                              aria-label={`${t("switch")} ${branch.name}`}
                               disabled={
                                 busy ||
                                 !canOperate ||
-                                !branch.local ||
-                                elsewhere ||
-                                (branch.current && dirty)
+                                branch.current ||
+                                elsewhere
                               }
                               onClick={() =>
-                                void onOperation("PULL_BRANCH", {
+                                void onOperation("SWITCH_BRANCH", {
                                   branch: branch.name,
+                                  stashChanges: false,
                                 })
                               }
                               size="sm"
                               variant="outline"
                             >
-                              <Download /> {t("pull")}
+                              <GitBranch /> {t("switch")}
                             </Button>
+                          )}
+                          <ConfirmationDialog
+                            actionLabel={t("delete")}
+                            cancelLabel={t("cancel")}
+                            description={t("confirmDeleteBranchDescription", {
+                              branch: branch.name,
+                            })}
+                            onConfirm={() =>
+                              onOperation("DELETE_BRANCH", {
+                                branch: branch.name,
+                              })
+                            }
+                            title={t("confirmDeleteBranchTitle")}
+                            trigger={
+                              <Button
+                                aria-label={`${t("delete")} ${branch.name}`}
+                                disabled={
+                                  busy ||
+                                  !canOperate ||
+                                  branch.current ||
+                                  defaultBranchProtected ||
+                                  elsewhere
+                                }
+                                size="sm"
+                                variant="destructive"
+                              >
+                                <Trash2 /> {t("delete")}
+                              </Button>
+                            }
+                          />
+                        </>
+                      ) : (
+                        <>
+                          {dirty && !branch.current ? (
                             <ConfirmationDialog
-                              actionLabel={t("deleteRemote")}
+                              actionLabel={t("stashAndCheckout")}
                               cancelLabel={t("cancel")}
                               description={t(
-                                "confirmDeleteRemoteBranchDescription",
+                                "confirmDirtyCheckoutDescription",
                                 { branch: branch.name },
                               )}
                               onConfirm={() =>
-                                onOperation("DELETE_REMOTE_BRANCH", {
+                                onOperation("SWITCH_BRANCH", {
                                   branch: branch.name,
+                                  stashChanges: true,
                                 })
                               }
-                              title={t("confirmDeleteRemoteBranchTitle")}
+                              title={t("confirmDirtyCheckoutTitle")}
                               trigger={
                                 <Button
-                                  aria-label={`${t("deleteRemote")} ${branch.name}`}
+                                  aria-label={`${t("checkout")} ${branch.name}`}
                                   disabled={
                                     busy ||
                                     !canOperate ||
-                                    defaultBranchProtected ||
-                                    remoteMainProtected
+                                    branch.current ||
+                                    elsewhere
                                   }
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                 >
-                                  <Trash2 /> {t("deleteRemote")}
+                                  <GitBranch /> {t("checkout")}
                                 </Button>
                               }
                             />
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                          ) : (
+                            <Button
+                              aria-label={`${t("checkout")} ${branch.name}`}
+                              disabled={
+                                busy ||
+                                !canOperate ||
+                                branch.current ||
+                                elsewhere
+                              }
+                              onClick={() =>
+                                void onOperation("SWITCH_BRANCH", {
+                                  branch: branch.name,
+                                  stashChanges: false,
+                                })
+                              }
+                              size="sm"
+                              variant="outline"
+                            >
+                              <GitBranch /> {t("checkout")}
+                            </Button>
+                          )}
+                          <Button
+                            aria-label={`${t("pull")} ${branch.name}`}
+                            disabled={
+                              busy ||
+                              !canOperate ||
+                              !branch.local ||
+                              elsewhere ||
+                              (branch.current && dirty)
+                            }
+                            onClick={() =>
+                              void onOperation("PULL_BRANCH", {
+                                branch: branch.name,
+                              })
+                            }
+                            size="sm"
+                            variant="outline"
+                          >
+                            <Download /> {t("pull")}
+                          </Button>
+                          <ConfirmationDialog
+                            actionLabel={t("deleteRemote")}
+                            cancelLabel={t("cancel")}
+                            description={t(
+                              "confirmDeleteRemoteBranchDescription",
+                              { branch: branch.name },
+                            )}
+                            onConfirm={() =>
+                              onOperation("DELETE_REMOTE_BRANCH", {
+                                branch: branch.name,
+                              })
+                            }
+                            title={t("confirmDeleteRemoteBranchTitle")}
+                            trigger={
+                              <Button
+                                aria-label={`${t("deleteRemote")} ${branch.name}`}
+                                disabled={
+                                  busy ||
+                                  !canOperate ||
+                                  defaultBranchProtected ||
+                                  remoteMainProtected
+                                }
+                                size="sm"
+                                variant="destructive"
+                              >
+                                <Trash2 /> {t("deleteRemote")}
+                              </Button>
+                            }
+                          />
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
-    </section>
+    </Card>
   );
 }
 
-function StashList({
+function StashTable({
   stashes,
   truncated,
   busy,
@@ -914,6 +992,17 @@ function StashList({
 }) {
   const t = useTranslations("codebaseDetail");
   const [copyStates, setCopyStates] = useState<Record<string, CopyState>>({});
+  const [query, setQuery] = useState("");
+  const title = t("stashesTitle");
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return stashes;
+    return stashes.filter((stash) =>
+      `${stash.message} ${stash.selector} ${stash.oid}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [stashes, query]);
 
   const copyPatch = async (stashOid: string, patch: string) => {
     try {
@@ -926,139 +1015,194 @@ function StashList({
 
   if (stashes.length === 0) {
     return (
-      <Empty className="border py-12">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ArchiveRestore />
-          </EmptyMedia>
-          <EmptyTitle>{t("noStashes")}</EmptyTitle>
-          <EmptyDescription>{t("noStashesDescription")}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <Card className="gap-0 py-0">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ArchiveRestore />
+            </EmptyMedia>
+            <EmptyTitle>{t("noStashes")}</EmptyTitle>
+            <EmptyDescription>{t("noStashesDescription")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </Card>
     );
   }
+
   return (
     <div className="space-y-3">
-      {stashes.map((stash) => {
-        const entry = diffs[stash.oid];
-        const copyState = copyStates[stash.oid] ?? "IDLE";
-        return (
-          <Card key={stash.oid}>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-[1_1_24rem]">
-                  <p className="break-words font-medium">{stash.message}</p>
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">
-                    {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
-                    <DateTime value={stash.createdAt} />
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button
-                    aria-label={`${t("preview")} ${stash.selector}`}
-                    disabled={busy}
-                    onClick={() => void onToggleDiff(stash)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {entry?.loading ? (
-                      <Spinner />
-                    ) : entry?.open ? (
-                      <ChevronUp />
-                    ) : (
-                      <ChevronDown />
-                    )}
-                    {entry?.open ? t("hidePreview") : t("preview")}
-                  </Button>
-                  <Button
-                    aria-label={`${t("apply")} ${stash.selector}`}
-                    disabled={busy || !canOperate}
-                    onClick={() =>
-                      void onOperation("APPLY_STASH", { stashOid: stash.oid })
-                    }
-                    size="sm"
-                    variant="outline"
-                  >
-                    <ArchiveRestore /> {t("apply")}
-                  </Button>
-                  <ConfirmationDialog
-                    actionLabel={t("delete")}
-                    cancelLabel={t("cancel")}
-                    description={t("confirmDeleteStashDescription", {
-                      stash: stash.selector,
-                    })}
-                    onConfirm={() =>
-                      onOperation("DELETE_STASH", { stashOid: stash.oid })
-                    }
-                    title={t("confirmDeleteStashTitle")}
-                    trigger={
-                      <Button
-                        aria-label={`${t("delete")} ${stash.selector}`}
-                        disabled={busy || !canOperate}
-                        size="sm"
-                        variant="destructive"
-                      >
-                        <Trash2 /> {t("delete")}
-                      </Button>
-                    }
-                  />
-                </div>
-              </div>
-              {entry?.open && (
-                <div className="space-y-2">
-                  {entry.error ? (
-                    <Alert variant="destructive">
-                      <AlertDescription>{entry.error}</AlertDescription>
-                    </Alert>
-                  ) : entry.loading ? (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Spinner /> {t("loadingPreview")}
-                    </p>
-                  ) : (
-                    <>
-                      {entry.diff?.patch && (
-                        <div className="flex justify-end">
+      <Card className="gap-0 py-0">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+          <CardAction>
+            <TableSearch
+              label={t("searchStashes")}
+              onChange={setQuery}
+              placeholder={t("searchStashesPlaceholder")}
+              value={query}
+            />
+          </CardAction>
+        </CardHeader>
+        {visible.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {t("noMatchingStashes")}
+          </p>
+        ) : (
+          <Table aria-label={title}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("stashMessage")}</TableHead>
+                <TableHead>{t("stashDetails")}</TableHead>
+                <TableHead className="text-right">{t("actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((stash) => {
+                const entry = diffs[stash.oid];
+                const copyState = copyStates[stash.oid] ?? "IDLE";
+                return (
+                  // The patch preview needs the full table width, so it rides
+                  // in a second row keyed alongside the stash's own.
+                  <Fragment key={stash.oid}>
+                    <TableRow>
+                      <TableCell className="max-w-md break-words whitespace-normal">
+                        {stash.message}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
+                        <DateTime value={stash.createdAt} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
                           <Button
-                            aria-label={`${
-                              copyState === "COPIED"
-                                ? t("patchCopied")
-                                : t("copyPatch")
-                            } ${stash.selector}`}
-                            onClick={() =>
-                              void copyPatch(stash.oid, entry.diff?.patch ?? "")
-                            }
+                            aria-label={`${t("preview")} ${stash.selector}`}
+                            disabled={busy}
+                            onClick={() => void onToggleDiff(stash)}
                             size="sm"
-                            type="button"
                             variant="outline"
                           >
-                            {copyState === "COPIED" ? <Check /> : <Copy />}
-                            {copyState === "COPIED"
-                              ? t("patchCopied")
-                              : t("copyPatch")}
+                            {entry?.loading ? (
+                              <Spinner />
+                            ) : entry?.open ? (
+                              <ChevronUp />
+                            ) : (
+                              <ChevronDown />
+                            )}
+                            {entry?.open ? t("hidePreview") : t("preview")}
                           </Button>
+                          <Button
+                            aria-label={`${t("apply")} ${stash.selector}`}
+                            disabled={busy || !canOperate}
+                            onClick={() =>
+                              void onOperation("APPLY_STASH", {
+                                stashOid: stash.oid,
+                              })
+                            }
+                            size="sm"
+                            variant="outline"
+                          >
+                            <ArchiveRestore /> {t("apply")}
+                          </Button>
+                          <ConfirmationDialog
+                            actionLabel={t("delete")}
+                            cancelLabel={t("cancel")}
+                            description={t("confirmDeleteStashDescription", {
+                              stash: stash.selector,
+                            })}
+                            onConfirm={() =>
+                              onOperation("DELETE_STASH", {
+                                stashOid: stash.oid,
+                              })
+                            }
+                            title={t("confirmDeleteStashTitle")}
+                            trigger={
+                              <Button
+                                aria-label={`${t("delete")} ${stash.selector}`}
+                                disabled={busy || !canOperate}
+                                size="sm"
+                                variant="destructive"
+                              >
+                                <Trash2 /> {t("delete")}
+                              </Button>
+                            }
+                          />
                         </div>
-                      )}
-                      {copyState === "FAILED" && (
-                        <p className="text-xs text-destructive">
-                          {t("copyPatchFailed")}
-                        </p>
-                      )}
-                      <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre">
-                        {entry.diff?.patch || t("emptyPatch")}
-                      </pre>
-                      {entry.diff?.truncated && (
-                        <p className="text-xs text-muted-foreground">
-                          {t("patchTruncated")}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })}
+                      </TableCell>
+                    </TableRow>
+                    {entry?.open && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={3}>
+                          <div className="space-y-2">
+                            {entry.error ? (
+                              <Alert variant="destructive">
+                                <AlertDescription>
+                                  {entry.error}
+                                </AlertDescription>
+                              </Alert>
+                            ) : entry.loading ? (
+                              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Spinner /> {t("loadingPreview")}
+                              </p>
+                            ) : (
+                              <>
+                                {entry.diff?.patch && (
+                                  <div className="flex justify-end">
+                                    <Button
+                                      aria-label={`${
+                                        copyState === "COPIED"
+                                          ? t("patchCopied")
+                                          : t("copyPatch")
+                                      } ${stash.selector}`}
+                                      onClick={() =>
+                                        void copyPatch(
+                                          stash.oid,
+                                          entry.diff?.patch ?? "",
+                                        )
+                                      }
+                                      size="sm"
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      {copyState === "COPIED" ? (
+                                        <Check />
+                                      ) : (
+                                        <Copy />
+                                      )}
+                                      {copyState === "COPIED"
+                                        ? t("patchCopied")
+                                        : t("copyPatch")}
+                                    </Button>
+                                  </div>
+                                )}
+                                {copyState === "FAILED" && (
+                                  <p className="text-xs text-destructive">
+                                    {t("copyPatchFailed")}
+                                  </p>
+                                )}
+                                <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre">
+                                  {entry.diff?.patch || t("emptyPatch")}
+                                </pre>
+                                {entry.diff?.truncated && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {t("patchTruncated")}
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
       {truncated && (
         <p className="text-xs text-muted-foreground">{t("stashesTruncated")}</p>
       )}

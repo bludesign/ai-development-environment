@@ -119,6 +119,8 @@ const gitState = {
       remote: true,
       current: false,
       checkedOutPath: null,
+      lastCommitMessage: "Add the detail view",
+      lastCommitAt: new Date(0).toISOString(),
     },
     {
       name: "main",
@@ -236,6 +238,29 @@ describe("CodebaseDetailPage", () => {
       });
     });
     expect(await screen.findByText("Git operation completed.")).toBeDefined();
+  });
+
+  test("shows the branch tip and filters branches by name", async () => {
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+    await screen.findByRole("heading", { name: "Codex" });
+
+    expect(screen.getAllByText(/Add the detail view/).length).toBeGreaterThan(
+      0,
+    );
+
+    const search = screen.getAllByRole("searchbox", {
+      name: "Search branches",
+    })[0];
+    fireEvent.change(search, { target: { value: "feature" } });
+
+    const local = screen.getByRole("table", { name: "Local branches" });
+    expect(within(local).queryByText("main")).toBeNull();
+    expect(within(local).getByText("feature/detail")).toBeDefined();
+
+    fireEvent.change(search, { target: { value: "nothing-matches" } });
+    expect(
+      screen.getAllByText("No branches match your search.").length,
+    ).toBeGreaterThan(0);
   });
 
   test("loads stash patches lazily and confirms deletion", async () => {

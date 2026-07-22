@@ -1453,7 +1453,16 @@
     "stashesTruncated": "Seuls les 200 premiers stashes sont affichés.",
     "apply": "Appliquer",
     "confirmDeleteStashTitle": "Supprimer le stash ?",
-    "confirmDeleteStashDescription": "{stash} sera définitivement supprimé. Appliquez-le d’abord si vous devez conserver ses modifications."
+    "confirmDeleteStashDescription": "{stash} sera définitivement supprimé. Appliquez-le d’abord si vous devez conserver ses modifications.",
+    "stashesTitle": "Remises",
+    "stashMessage": "Remise",
+    "stashDetails": "Détails",
+    "searchBranches": "Rechercher des branches",
+    "searchBranchesPlaceholder": "Filtrer par nom de branche",
+    "noMatchingBranches": "Aucune branche ne correspond à votre recherche.",
+    "searchStashes": "Rechercher des remises",
+    "searchStashesPlaceholder": "Filtrer par message ou sélecteur",
+    "noMatchingStashes": "Aucune remise ne correspond à votre recherche."
   },
   "worktrees": {
     "title": "Arbres de travail",

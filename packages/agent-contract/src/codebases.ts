@@ -84,6 +84,10 @@ export type CodebaseGitBranch = {
   remote: boolean;
   current: boolean;
   checkedOutPath: string | null;
+  /** Subject line of the branch tip's commit. Null on agents predating it. */
+  lastCommitMessage: string | null;
+  /** Commit date of the branch tip. Null on agents predating it. */
+  lastCommitAt: string | null;
 };
 
 export type CodebaseStash = {
@@ -630,6 +634,22 @@ export function parseCodebaseGitState(value: unknown): CodebaseGitState {
             : stringValue(
                 branch.checkedOutPath,
                 `codebase Git state.branches[${index}].checkedOutPath`,
+              ),
+        // Agents older than these fields omit them entirely, so absent and
+        // null both mean "this agent cannot report the branch tip".
+        lastCommitMessage:
+          branch.lastCommitMessage == null
+            ? null
+            : stringValue(
+                branch.lastCommitMessage,
+                `codebase Git state.branches[${index}].lastCommitMessage`,
+              ),
+        lastCommitAt:
+          branch.lastCommitAt == null
+            ? null
+            : dateString(
+                branch.lastCommitAt,
+                `codebase Git state.branches[${index}].lastCommitAt`,
               ),
       };
     }),

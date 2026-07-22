@@ -163,6 +163,8 @@ type CodebaseGitBranch {
   remote: Boolean!
   current: Boolean!
   checkedOutPath: String
+  lastCommitMessage: String
+  lastCommitAt: String
 }
 
 type CodebaseStash {

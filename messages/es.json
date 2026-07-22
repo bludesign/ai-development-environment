@@ -1449,7 +1449,16 @@
     "stashesTruncated": "Solo se muestran los primeros 200 stashes.",
     "apply": "Aplicar",
     "confirmDeleteStashTitle": "¿Eliminar el stash?",
-    "confirmDeleteStashDescription": "{stash} se eliminará permanentemente. Aplícalo primero si necesitas conservar sus cambios."
+    "confirmDeleteStashDescription": "{stash} se eliminará permanentemente. Aplícalo primero si necesitas conservar sus cambios.",
+    "stashesTitle": "Stashes",
+    "stashMessage": "Stash",
+    "stashDetails": "Detalles",
+    "searchBranches": "Buscar ramas",
+    "searchBranchesPlaceholder": "Filtrar por nombre de rama",
+    "noMatchingBranches": "Ninguna rama coincide con tu búsqueda.",
+    "searchStashes": "Buscar stashes",
+    "searchStashesPlaceholder": "Filtrar por mensaje o selector",
+    "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
   },
   "worktrees": {
     "title": "Árboles de trabajo",

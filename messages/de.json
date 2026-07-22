@@ -1449,7 +1449,16 @@
     "stashesTruncated": "Nur die ersten 200 Stashes werden angezeigt.",
     "apply": "Anwenden",
     "confirmDeleteStashTitle": "Stash löschen?",
-    "confirmDeleteStashDescription": "{stash} wird dauerhaft entfernt. Wende ihn zuerst an, wenn du seine Änderungen behalten möchtest."
+    "confirmDeleteStashDescription": "{stash} wird dauerhaft entfernt. Wende ihn zuerst an, wenn du seine Änderungen behalten möchtest.",
+    "stashesTitle": "Stashes",
+    "stashMessage": "Stash",
+    "stashDetails": "Details",
+    "searchBranches": "Branches durchsuchen",
+    "searchBranchesPlaceholder": "Nach Branch-Namen filtern",
+    "noMatchingBranches": "Keine Branches entsprechen deiner Suche.",
+    "searchStashes": "Stashes durchsuchen",
+    "searchStashesPlaceholder": "Nach Nachricht oder Selektor filtern",
+    "noMatchingStashes": "Keine Stashes entsprechen deiner Suche."
   },
   "worktrees": {
     "title": "Arbeitsbäume",

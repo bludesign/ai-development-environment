@@ -1453,7 +1453,16 @@
     "stashesTruncated": "Only the first 200 stashes are shown.",
     "apply": "Apply",
     "confirmDeleteStashTitle": "Delete stash?",
-    "confirmDeleteStashDescription": "{stash} will be permanently removed. Apply it first if you need to preserve its changes."
+    "confirmDeleteStashDescription": "{stash} will be permanently removed. Apply it first if you need to preserve its changes.",
+    "stashesTitle": "Stashes",
+    "stashMessage": "Stash",
+    "stashDetails": "Details",
+    "searchBranches": "Search branches",
+    "searchBranchesPlaceholder": "Filter by branch name",
+    "noMatchingBranches": "No branches match your search.",
+    "searchStashes": "Search stashes",
+    "searchStashesPlaceholder": "Filter by message or selector",
+    "noMatchingStashes": "No stashes match your search."
   },
   "worktrees": {
     "title": "Worktrees",

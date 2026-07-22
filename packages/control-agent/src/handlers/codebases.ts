@@ -542,6 +542,33 @@ async function validateGitCodebase(
   return snapshot.folder;
 }
 
+/**
+ * The branch tip's subject and commit date, appended to a `for-each-ref`
+ * format so listing branches stays a single Git call.
+ */
+const TIP_FORMAT = "%(contents:subject)%00%(committerdate:iso-strict)";
+
+/** A NUL-separated `for-each-ref` line, split into its fields. */
+function refFields(value: string): string[][] {
+  return value
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => line.split("\0"));
+}
+
+/** Empty `for-each-ref` fields mean "unset", which the contract sends as null. */
+function refField(fields: string[], index: number): string | null {
+  return fields[index]?.trim() || null;
+}
+
+/** Normalizes Git's local-offset dates to UTC, dropping anything unparseable. */
+function isoDate(value: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed.toISOString();
+}
+
 function parsedRefLines(value: string): Array<[string, string | null]> {
   return value
     .split("\n")
@@ -616,7 +643,7 @@ export async function inspectCodebaseGitState(
         folder,
         [
           "for-each-ref",
-          "--format=%(refname:strip=2)%00%(worktreepath)",
+          `--format=%(refname:strip=2)%00%(worktreepath)%00${TIP_FORMAT}`,
           "refs/heads",
         ],
         timeoutMs,
@@ -624,7 +651,11 @@ export async function inspectCodebaseGitState(
       ),
       git(
         folder,
-        ["for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin"],
+        [
+          "for-each-ref",
+          `--format=%(refname:strip=3)%00${TIP_FORMAT}`,
+          "refs/remotes/origin",
+        ],
         timeoutMs,
         signal,
       ),
@@ -636,31 +667,46 @@ export async function inspectCodebaseGitState(
   const current =
     currentResult.exitCode === 0 ? currentResult.stdout.trim() : null;
   const branches = new Map<string, CodebaseGitState["branches"][number]>();
-  for (const [name, checkedOutPath] of parsedRefLines(localResult.stdout)) {
+  for (const fields of refFields(localResult.stdout)) {
+    const name = fields[0]?.trim();
+    if (!name) continue;
     branches.set(name, {
       name,
       local: true,
       remote: false,
       current: name === current,
-      checkedOutPath,
+      checkedOutPath: refField(fields, 1),
+      lastCommitMessage: refField(fields, 2),
+      lastCommitAt: isoDate(refField(fields, 3)),
     });
   }
-  for (const name of remoteResult.stdout
-    .split("\n")
-    .map((branch) => branch.trim())
-    .filter((branch) => branch && branch !== "HEAD")) {
+  for (const fields of refFields(remoteResult.stdout)) {
+    const name = fields[0]?.trim();
+    if (!name || name === "HEAD") continue;
     const existing = branches.get(name);
-    branches.set(
+    if (existing) {
+      existing.remote = true;
+      // A local branch may sit behind its remote, so prefer whichever tip is
+      // newer rather than always keeping the local one.
+      const remoteAt = isoDate(refField(fields, 2));
+      if (
+        remoteAt &&
+        (!existing.lastCommitAt || remoteAt > existing.lastCommitAt)
+      ) {
+        existing.lastCommitMessage = refField(fields, 1);
+        existing.lastCommitAt = remoteAt;
+      }
+      continue;
+    }
+    branches.set(name, {
       name,
-      existing ?? {
-        name,
-        local: false,
-        remote: true,
-        current: false,
-        checkedOutPath: null,
-      },
-    );
-    if (existing) existing.remote = true;
+      local: false,
+      remote: true,
+      current: false,
+      checkedOutPath: null,
+      lastCommitMessage: refField(fields, 1),
+      lastCommitAt: isoDate(refField(fields, 2)),
+    });
   }
   const sorted = [...branches.values()].sort((first, second) =>
     first.name.localeCompare(second.name),
