@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import { CREDENTIALS, CredentialService } from "@/services/credentials";
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
@@ -842,7 +843,10 @@ function normalizeReviewThreadState(thread: {
 export class GitHubService {
   private autoRetryService: GitHubAutoRetryService | null = null;
 
-  constructor(startAutoRetry = false) {
+  constructor(
+    startAutoRetry = false,
+    private readonly credentials = new CredentialService(),
+  ) {
     if (startAutoRetry)
       this.autoRetryService = new GitHubAutoRetryService(this);
   }
@@ -1068,14 +1072,13 @@ export class GitHubService {
   }
 
   private async requireToken(): Promise<string> {
-    const prisma = await getPrismaClient();
-    const settings = await prisma.gitHubSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
-    if (!settings?.apiToken) {
+    const token = await this.credentials.getText(
+      CREDENTIALS.githubPersonalAccessToken,
+    );
+    if (!token) {
       throw new Error("GitHub credentials are not configured");
     }
-    return settings.apiToken;
+    return token;
   }
 
   async getSettings(): Promise<GitHubSettingsView> {
@@ -1086,7 +1089,9 @@ export class GitHubService {
       update: {},
     });
     return {
-      tokenConfigured: Boolean(settings.apiToken),
+      tokenConfigured: await this.credentials.isConfigured(
+        CREDENTIALS.githubPersonalAccessToken,
+      ),
       defaultJiraKeyRegex: settings.defaultJiraKeyRegex,
       updatedAt: settings.updatedAt.toISOString(),
     };
@@ -1100,8 +1105,11 @@ export class GitHubService {
     const existing = await prisma.gitHubSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
-    const nextToken = input.apiToken?.trim() || existing?.apiToken || null;
-    if (input.apiToken !== undefined && !nextToken)
+    const nextToken = input.apiToken?.trim() || null;
+    const tokenConfigured = await this.credentials.isConfigured(
+      CREDENTIALS.githubPersonalAccessToken,
+    );
+    if (input.apiToken !== undefined && !nextToken && !tokenConfigured)
       throw new Error("A GitHub personal access token is required");
     const defaultJiraKeyRegex =
       input.defaultJiraKeyRegex === undefined
@@ -1110,25 +1118,39 @@ export class GitHubService {
     if (!defaultJiraKeyRegex) {
       throw new Error("A default Jira key regex is required");
     }
-    await prisma.gitHubSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: {
-        id: SETTINGS_ID,
-        apiToken: nextToken,
-        defaultJiraKeyRegex,
-      },
-      update: { apiToken: nextToken, defaultJiraKeyRegex },
-    });
+    if (nextToken) {
+      await this.credentials.setText(
+        CREDENTIALS.githubPersonalAccessToken,
+        nextToken,
+        async (transaction) => {
+          await transaction.gitHubSettings.upsert({
+            where: { id: SETTINGS_ID },
+            create: { id: SETTINGS_ID, defaultJiraKeyRegex },
+            update: { defaultJiraKeyRegex },
+          });
+        },
+      );
+    } else {
+      await prisma.gitHubSettings.upsert({
+        where: { id: SETTINGS_ID },
+        create: { id: SETTINGS_ID, defaultJiraKeyRegex },
+        update: { defaultJiraKeyRegex },
+      });
+    }
     return this.getSettings();
   }
 
   async clearCredentials(): Promise<GitHubSettingsView> {
-    const prisma = await getPrismaClient();
-    await prisma.gitHubSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID },
-      update: { apiToken: null },
-    });
+    await this.credentials.delete(
+      CREDENTIALS.githubPersonalAccessToken,
+      async (transaction) => {
+        await transaction.gitHubSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID },
+          update: {},
+        });
+      },
+    );
     return this.getSettings();
   }
 
@@ -1172,7 +1194,6 @@ export class GitHubService {
     settings: {
       appId: string;
       installationId: string;
-      privateKey: string;
       keyFingerprint: string;
       appSlug: string;
       accountLogin: string;
@@ -1181,12 +1202,13 @@ export class GitHubService {
       verifiedAt: Date;
       updatedAt: Date;
     } | null,
+    privateKeyConfigured: boolean,
   ): GitHubAppSettingsView {
     return {
-      configured: Boolean(settings),
+      configured: Boolean(settings && privateKeyConfigured),
       appId: settings?.appId ?? null,
       installationId: settings?.installationId ?? null,
-      privateKeyConfigured: Boolean(settings?.privateKey),
+      privateKeyConfigured,
       keyFingerprint: settings?.keyFingerprint ?? null,
       appSlug: settings?.appSlug ?? null,
       accountLogin: settings?.accountLogin ?? null,
@@ -1199,11 +1221,13 @@ export class GitHubService {
 
   async getAppSettings(): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
-    return this.appSettingsView(
-      await prisma.gitHubAppSettings.findUnique({
+    const [settings, privateKeyConfigured] = await Promise.all([
+      prisma.gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
-    );
+      this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey),
+    ]);
+    return this.appSettingsView(settings, privateKeyConfigured);
   }
 
   private async requireAppCredentials(): Promise<GitHubAppCredentials> {
@@ -1220,18 +1244,26 @@ export class GitHubService {
     return this.appCredentials(settings);
   }
 
-  private appCredentials(settings: {
+  private async appCredentials(settings: {
     appId: string;
     installationId: string;
-    privateKey: string;
     apiBaseUrl: string;
     graphqlUrl: string;
     keyFingerprint: string;
-  }): GitHubAppCredentials {
+  }): Promise<GitHubAppCredentials> {
+    const privateKey = await this.credentials.getText(
+      CREDENTIALS.githubAppPrivateKey,
+    );
+    if (!privateKey) {
+      throw new GitHubAppError(
+        "GITHUB_APP_NOT_CONFIGURED",
+        "A verified GitHub App is required to manage GitHub Actions workflows",
+      );
+    }
     return {
       appId: settings.appId,
       installationId: settings.installationId,
-      privateKey: settings.privateKey,
+      privateKey,
       apiBaseUrl: settings.apiBaseUrl,
       graphqlUrl: settings.graphqlUrl,
       keyFingerprint: settings.keyFingerprint,
@@ -1262,7 +1294,9 @@ export class GitHubService {
           "A replacement private key is required when the GitHub App ID changes",
         );
       }
-      const privateKey = replacementPrivateKey ?? existing?.privateKey;
+      const privateKey =
+        replacementPrivateKey ??
+        (await this.credentials.getText(CREDENTIALS.githubAppPrivateKey));
       if (!privateKey) {
         throw new GitHubAppError(
           "INVALID_PRIVATE_KEY",
@@ -1278,36 +1312,29 @@ export class GitHubService {
         graphqlUrl: GITHUB_GRAPHQL_URL,
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
-      await prisma.gitHubAppSettings.upsert({
-        where: { id: GITHUB_APP_SETTINGS_ID },
-        create: {
-          id: GITHUB_APP_SETTINGS_ID,
-          appId: verification.appId,
-          installationId: verification.installationId,
-          privateKey,
-          apiBaseUrl: GITHUB_API_BASE_URL,
-          graphqlUrl: GITHUB_GRAPHQL_URL,
-          keyFingerprint: verification.keyFingerprint,
-          appSlug: verification.appSlug,
-          accountLogin: verification.accountLogin,
-          repositorySelection: verification.repositorySelection,
-          actionsPermission: verification.actionsPermission,
-          verifiedAt: verification.verifiedAt,
+      await this.credentials.setText(
+        CREDENTIALS.githubAppPrivateKey,
+        privateKey,
+        async (transaction) => {
+          const data = {
+            appId: verification.appId,
+            installationId: verification.installationId,
+            apiBaseUrl: GITHUB_API_BASE_URL,
+            graphqlUrl: GITHUB_GRAPHQL_URL,
+            keyFingerprint: verification.keyFingerprint,
+            appSlug: verification.appSlug,
+            accountLogin: verification.accountLogin,
+            repositorySelection: verification.repositorySelection,
+            actionsPermission: verification.actionsPermission,
+            verifiedAt: verification.verifiedAt,
+          };
+          await transaction.gitHubAppSettings.upsert({
+            where: { id: GITHUB_APP_SETTINGS_ID },
+            create: { id: GITHUB_APP_SETTINGS_ID, ...data },
+            update: data,
+          });
         },
-        update: {
-          appId: verification.appId,
-          installationId: verification.installationId,
-          privateKey,
-          apiBaseUrl: GITHUB_API_BASE_URL,
-          graphqlUrl: GITHUB_GRAPHQL_URL,
-          keyFingerprint: verification.keyFingerprint,
-          appSlug: verification.appSlug,
-          accountLogin: verification.accountLogin,
-          repositorySelection: verification.repositorySelection,
-          actionsPermission: verification.actionsPermission,
-          verifiedAt: verification.verifiedAt,
-        },
-      });
+      );
       await this.audit(auditContext, {
         operation: "GITHUB_APP_SETTINGS_SAVE",
         outcome: "SUCCESS",
@@ -1372,10 +1399,14 @@ export class GitHubService {
   async clearAppCredentials(
     auditContext: GitHubAuditContext,
   ): Promise<GitHubAppSettingsView> {
-    const prisma = await getPrismaClient();
-    await prisma.gitHubAppSettings.deleteMany({
-      where: { id: GITHUB_APP_SETTINGS_ID },
-    });
+    await this.credentials.delete(
+      CREDENTIALS.githubAppPrivateKey,
+      async (transaction) => {
+        await transaction.gitHubAppSettings.deleteMany({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+        });
+      },
+    );
     clearGitHubAppTokenCache();
     await this.audit(auditContext, {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
@@ -1806,14 +1837,16 @@ export class GitHubService {
 
   async autoRetryCredentialsReady(): Promise<boolean> {
     const prisma = await getPrismaClient();
-    const [settings, appSettings] = await Promise.all([
-      prisma.gitHubSettings.findUnique({ where: { id: SETTINGS_ID } }),
-      prisma.gitHubAppSettings.findUnique({
-        where: { id: GITHUB_APP_SETTINGS_ID },
-      }),
+    const appSettings = await prisma.gitHubAppSettings.findUnique({
+      where: { id: GITHUB_APP_SETTINGS_ID },
+    });
+    const [tokenConfigured, appKeyConfigured] = await Promise.all([
+      this.credentials.isConfigured(CREDENTIALS.githubPersonalAccessToken),
+      this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey),
     ]);
     return Boolean(
-      settings?.apiToken &&
+      tokenConfigured &&
+      appKeyConfigured &&
       appSettings &&
       appSettings.actionsPermission === "write",
     );
@@ -1875,6 +1908,9 @@ export class GitHubService {
     const jobs = includeJobs
       ? await this.patWorkflowAttemptJobs(target, workflowRunId, attempt, token)
       : [];
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
     return {
       workflowRunId,
       runAttempt: run.run_attempt ?? attempt,
@@ -1896,7 +1932,7 @@ export class GitHubService {
       startedAt: run.run_started_at ?? run.created_at,
       createdAt: run.created_at,
       updatedAt: run.updated_at,
-      jobs: this.workflowJobViews(jobs, Boolean(appSettings)).map((job) => ({
+      jobs: this.workflowJobViews(jobs, appConfigured).map((job) => ({
         ...job,
         canRetry: false,
         retryUnavailableReason: "HISTORICAL_ATTEMPT",
@@ -2154,11 +2190,14 @@ export class GitHubService {
           )
         : [];
     const checkSuiteId = run.check_suite_node_id || null;
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
     const unavailable = !completed
       ? "NOT_COMPLETED"
       : !checkSuiteId
         ? "WORKFLOW_RUN_UNAVAILABLE"
-        : appSettings
+        : appConfigured
           ? null
           : "GITHUB_APP_NOT_CONFIGURED";
     return {
@@ -2189,7 +2228,7 @@ export class GitHubService {
       startedAt: run.run_started_at ?? run.created_at,
       createdAt: run.created_at,
       updatedAt: run.updated_at,
-      jobs: this.workflowJobViews(jobs, Boolean(appSettings))
+      jobs: this.workflowJobViews(jobs, appConfigured)
         .sort((left, right) => (right.runAttempt ?? 0) - (left.runAttempt ?? 0))
         .filter(
           (job, index, items) =>
@@ -2211,7 +2250,7 @@ export class GitHubService {
       where: { id: GITHUB_APP_SETTINGS_ID },
     });
     if (!appSettings) throw new Error("GitHub App is not configured");
-    const credentials = this.appCredentials(appSettings);
+    const credentials = await this.appCredentials(appSettings);
     let githubRequestId: string | null = null;
     try {
       if (action === "JOB") {
@@ -2856,10 +2895,13 @@ export class GitHubService {
     const appSettings = await prisma.gitHubAppSettings.findUnique({
       where: { id: GITHUB_APP_SETTINGS_ID },
     });
-    const appConfigured = Boolean(appSettings);
-    const appCredentials = appSettings
-      ? this.appCredentials(appSettings)
-      : null;
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
+    const appCredentials =
+      appSettings && appConfigured
+        ? await this.appCredentials(appSettings)
+        : null;
     const state = options.state ?? "OPEN";
     const searchState = pullRequestSearchState(state);
     const scopedRepositoryId = repositoryId ?? null;
@@ -3193,6 +3235,9 @@ export class GitHubService {
     ).gitHubSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
     const matching = rawItems.filter(
       (pullRequest) =>
         pullRequest.headRepository?.nameWithOwner.toLowerCase() ===
@@ -3204,7 +3249,7 @@ export class GitHubService {
           raw,
           settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
           token,
-          Boolean(appSettings),
+          appConfigured,
         )),
         headRefName: raw.headRefName,
       })),
@@ -3275,13 +3320,16 @@ export class GitHubService {
     const managedRepository = managedRepositories.find(
       (repository) => repository.githubId === pullRequest.repository.id,
     );
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
     const summary = await this.normalizePullRequest(
       pullRequest,
       managedRepository?.jiraKeyRegex ??
         settings?.defaultJiraKeyRegex ??
         DEFAULT_JIRA_KEY_REGEX,
       token,
-      Boolean(appSettings),
+      appConfigured,
     );
     const pipelines = await Promise.all(
       summary.pipelines.map(async (pipeline) => {
@@ -3311,7 +3359,9 @@ export class GitHubService {
             name,
             workflowRunId,
             token,
-            appSettings ? this.appCredentials(appSettings) : null,
+            appSettings && appConfigured
+              ? await this.appCredentials(appSettings)
+              : null,
           ),
         };
       }),

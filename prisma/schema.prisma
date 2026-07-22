@@ -128,13 +128,11 @@ model IosDeviceSettings {
   organizationName                     String    @default("AI Development Environment")
   profileIdentifier                    String    @default("com.ai-development-environment.device-enrollment")
   signerCertificatePem                 String?
-  signerPrivateKeyPem                  String?
   signerFingerprint                    String?
   signerCreatedAt                      DateTime?
   signerExpiresAt                      DateTime?
   appStoreConnectIssuerId              String?
   appStoreConnectKeyId                 String?
-  appStoreConnectPrivateKey            String?
   appStoreConnectPrivateKeyFingerprint String?
   appStoreConnectVerifiedAt            DateTime?
   appStoreConnectLastTestedAt          DateTime?
@@ -978,7 +976,6 @@ model PushNotificationSettings {
   id                         String    @id
   tokenTeamId                String?
   tokenKeyId                 String?
-  tokenPrivateKey            String?
   tokenPrivateKeyFingerprint String?
   tokenConfiguredAt          DateTime?
   tokenLastUsedAt            DateTime?
@@ -992,8 +989,6 @@ model ApnsCertificateCredential {
   name         String    @unique
   topic        String
   environment  String
-  p12Base64    String
-  passphrase   String
   fingerprint  String
   expiresAt    DateTime?
   lastTestedAt DateTime?
@@ -1192,7 +1187,6 @@ model ExternalMcpServerHeader {
   id        String            @id
   serverId  String
   name      String
-  value     String
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
   server    ExternalMcpServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
@@ -1254,7 +1248,6 @@ model JiraSettings {
   id              String   @id
   siteUrl         String?
   email           String?
-  apiToken        String?
   cacheTtlSeconds Int      @default(300)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -1359,7 +1352,6 @@ model JiraApiCallLog {
 
 model GitHubSettings {
   id                  String   @id
-  apiToken            String?
   defaultJiraKeyRegex String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -1369,7 +1361,6 @@ model GitHubAppSettings {
   id                  String   @id
   appId               String
   installationId      String
-  privateKey          String
   apiBaseUrl          String   @default("https://api.github.com")
   graphqlUrl          String   @default("https://api.github.com/graphql")
   keyFingerprint      String
@@ -1383,12 +1374,32 @@ model GitHubAppSettings {
 }
 
 model CacheServerSettings {
-  id          String   @id
-  baseUrl     String?
-  apiKey      String?
-  headersJson String   @default("[]")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id
+  baseUrl         String?
+  headerNamesJson String   @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Server-only metadata for long-lived application credentials. Database-backed rows keep
+/// their payload here; Vault and Keychain rows contain metadata only.
+model Credential {
+  id                String   @id
+  kind              String
+  ownerId           String?
+  storageType       String
+  payload           Bytes?
+  encrypted         Boolean  @default(false)
+  encryptionVersion Int?
+  nonce             Bytes?
+  authTag           Bytes?
+  keyFingerprint    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([kind])
+  @@index([ownerId])
+  @@index([storageType])
 }
 
 model GitHubAuditEvent {

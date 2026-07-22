@@ -38,6 +38,8 @@ import { createSigningAssetsResolvers } from "./resolvers/signing-assets";
 import type { SigningAssetsService } from "@/services/signing-assets";
 import { createPushNotificationsResolvers } from "./resolvers/push-notifications";
 import type { PushNotificationsService } from "@/services/push-notifications";
+import type { CredentialService } from "@/services/credentials";
+import { createCredentialResolvers } from "./resolvers/credentials";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -61,6 +63,7 @@ export const createSchema = (
   signingAssetsService: SigningAssetsService,
   pushNotificationsService: PushNotificationsService,
   cacheServerService: CacheServerService,
+  credentialService: CredentialService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -79,6 +82,7 @@ export const createSchema = (
     createSigningAssetsResolvers(signingAssetsService),
     createPushNotificationsResolvers(pushNotificationsService),
     createCacheServerResolvers(cacheServerService),
+    createCredentialResolvers(credentialService),
   ]);
 
   return buildSubgraphSchema({

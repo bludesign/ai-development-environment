@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
   callTool: vi.fn(),
   close: vi.fn(),
   connect: vi.fn(),
+  credentialHeaders: new Map<
+    string,
+    Array<{ id: string; name: string; value: string }>
+  >(),
   getPrismaClient: vi.fn(),
   httpTransport: vi.fn(),
   listTools: vi.fn(),
@@ -14,6 +18,22 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
 }));
+
+vi.mock("@/services/credentials", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/credentials")>();
+  return {
+    ...original,
+    CredentialService: class {
+      async isConfigured(descriptor: { ownerId?: string | null }) {
+        return mocks.credentialHeaders.has(descriptor.ownerId ?? "");
+      }
+      async getJson(descriptor: { ownerId?: string | null }) {
+        return mocks.credentialHeaders.get(descriptor.ownerId ?? "") ?? null;
+      }
+    },
+  };
+});
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
@@ -81,6 +101,8 @@ describe("external MCP client transport", () => {
     mocks.callTool.mockResolvedValue({
       content: [{ type: "text", text: "done" }],
     });
+    mocks.credentialHeaders.clear();
+    mocks.credentialHeaders.set("http-1", httpServer.headers);
     mocks.getPrismaClient.mockResolvedValue({
       externalMcpServer: {
         findMany: vi.fn().mockResolvedValue([httpServer, sseServer]),
@@ -159,6 +181,7 @@ describe("external MCP client transport", () => {
     mocks.getPrismaClient.mockResolvedValue({
       externalMcpServer: {
         findMany: vi.fn().mockResolvedValue([httpServer]),
+        findUnique: vi.fn().mockResolvedValue(httpServer),
       },
     });
     mocks.listTools.mockResolvedValue({ tools: [], nextCursor: "repeat" });
@@ -175,6 +198,7 @@ describe("external MCP client transport", () => {
     mocks.getPrismaClient.mockResolvedValue({
       externalMcpServer: {
         findMany: vi.fn().mockResolvedValue([httpServer]),
+        findUnique: vi.fn().mockResolvedValue(httpServer),
       },
     });
     mocks.listTools.mockImplementation(async () => ({

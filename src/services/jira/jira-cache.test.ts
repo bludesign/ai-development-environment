@@ -24,6 +24,22 @@ vi.mock("jira.js", () => ({
   },
 }));
 
+vi.mock("@/services/credentials", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/credentials")>();
+  return {
+    ...original,
+    CredentialService: class {
+      async isConfigured() {
+        return true;
+      }
+      async getText() {
+        return "secret-token";
+      }
+    },
+  };
+});
+
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => {
     const jiraCachedTicket = {

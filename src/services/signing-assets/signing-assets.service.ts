@@ -23,6 +23,7 @@ import {
   agentEventBus,
   SIGNING_ASSETS_CHANGED_TOPIC,
 } from "@/services/agent-control/event-bus";
+import { CredentialService } from "@/services/credentials";
 
 type JobCompletion = {
   id: string;
@@ -75,6 +76,7 @@ export class SigningAssetsService {
   constructor(
     private readonly agentControl: AgentControlService,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly credentials = new CredentialService(),
   ) {
     this.agentControl.registerCompletionHandler(
       SIGNING_ASSETS_SCAN_JOB_KIND,
@@ -788,7 +790,7 @@ export class SigningAssetsService {
 
   private async appleClient() {
     return new AppleDeveloperClient(
-      await storedAppleDeveloperCredentials(),
+      await storedAppleDeveloperCredentials(this.credentials),
       this.fetcher,
     );
   }

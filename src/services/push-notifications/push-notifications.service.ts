@@ -5,6 +5,11 @@ import { importPKCS8 } from "jose";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
+  CREDENTIALS,
+  CredentialService,
+  apnsCertificateCredential,
+} from "@/services/credentials";
+import {
   agentEventBus,
   PUSH_NOTIFICATIONS_CHANGED_TOPIC,
 } from "@/services/agent-control/event-bus";
@@ -29,6 +34,7 @@ const DELIVERY_CONCURRENCY = 16;
 const PUSH_TARGET_MODES = ["DEVICES", "ALL", "DIRECT", "BROADCAST"] as const;
 
 type PushTargetMode = (typeof PUSH_TARGET_MODES)[number];
+type ApnsCertificateSecret = { p12Base64: string; passphrase: string };
 
 function isPushTargetMode(value: string): value is PushTargetMode {
   return (PUSH_TARGET_MODES as readonly string[]).includes(value);
@@ -92,7 +98,10 @@ export class PushNotificationsService {
   private recoveryStarted = false;
   private readonly activeBatchIds = new Set<string>();
 
-  constructor(private readonly client = new ApnsClient()) {
+  constructor(
+    private readonly client = new ApnsClient(),
+    private readonly credentials = new CredentialService(),
+  ) {
     queueMicrotask(() => void this.recover().catch(() => undefined));
     const timer = setInterval(
       () => void this.recover().catch(() => undefined),
@@ -242,15 +251,16 @@ export class PushNotificationsService {
 
   async settings() {
     const prisma = await getPrismaClient();
-    const [settings, certificates] = await Promise.all([
+    const [settings, certificates, tokenSecretConfigured] = await Promise.all([
       this.rawSettings(),
       prisma.apnsCertificateCredential.findMany({
         orderBy: { name: "asc" },
       }),
+      this.credentials.isConfigured(CREDENTIALS.apnsTokenPrivateKey),
     ]);
     return {
       tokenConfigured: Boolean(
-        settings.tokenTeamId && settings.tokenKeyId && settings.tokenPrivateKey,
+        settings.tokenTeamId && settings.tokenKeyId && tokenSecretConfigured,
       ),
       tokenTeamId: settings.tokenTeamId,
       tokenKeyId: settings.tokenKeyId,
@@ -279,10 +289,12 @@ export class PushNotificationsService {
     keyId: string;
     privateKey?: string | null;
   }) {
-    const current = await this.rawSettings();
+    await this.rawSettings();
     const teamId = clean(input.teamId, "Team ID", 20);
     const keyId = clean(input.keyId, "Key ID", 20);
-    const privateKey = input.privateKey?.trim() || current.tokenPrivateKey;
+    const privateKey =
+      input.privateKey?.trim() ||
+      (await this.credentials.getText(CREDENTIALS.apnsTokenPrivateKey));
     if (!privateKey?.includes("-----BEGIN PRIVATE KEY-----")) {
       throw new Error("An APNs PKCS#8 .p8 private key is required");
     }
@@ -291,37 +303,44 @@ export class PushNotificationsService {
     } catch {
       throw new Error("The APNs .p8 key must be an ES256 PKCS#8 private key");
     }
-    const prisma = await getPrismaClient();
-    await prisma.pushNotificationSettings.update({
-      where: { id: SETTINGS_ID },
-      data: {
-        tokenTeamId: teamId,
-        tokenKeyId: keyId,
-        tokenPrivateKey: privateKey,
-        tokenPrivateKeyFingerprint: sha256(privateKey),
-        tokenConfiguredAt: new Date(),
-        tokenLastError: null,
+    await this.credentials.setText(
+      CREDENTIALS.apnsTokenPrivateKey,
+      privateKey,
+      async (transaction) => {
+        await transaction.pushNotificationSettings.update({
+          where: { id: SETTINGS_ID },
+          data: {
+            tokenTeamId: teamId,
+            tokenKeyId: keyId,
+            tokenPrivateKeyFingerprint: sha256(privateKey),
+            tokenConfiguredAt: new Date(),
+            tokenLastError: null,
+          },
+        });
       },
-    });
+    );
     this.changed();
     return this.settings();
   }
 
   async clearTokenSettings() {
-    const prisma = await getPrismaClient();
-    await prisma.pushNotificationSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID },
-      update: {
-        tokenTeamId: null,
-        tokenKeyId: null,
-        tokenPrivateKey: null,
-        tokenPrivateKeyFingerprint: null,
-        tokenConfiguredAt: null,
-        tokenLastUsedAt: null,
-        tokenLastError: null,
+    await this.credentials.delete(
+      CREDENTIALS.apnsTokenPrivateKey,
+      async (transaction) => {
+        await transaction.pushNotificationSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID },
+          update: {
+            tokenTeamId: null,
+            tokenKeyId: null,
+            tokenPrivateKeyFingerprint: null,
+            tokenConfiguredAt: null,
+            tokenLastUsedAt: null,
+            tokenLastError: null,
+          },
+        });
       },
-    });
+    );
     this.changed();
     return this.settings();
   }
@@ -341,27 +360,35 @@ export class PushNotificationsService {
       throw new Error("Certificate environment is invalid");
     }
     const certificate = inspectCertificateCredential(bytes, input.passphrase);
-    const prisma = await getPrismaClient();
-    await prisma.apnsCertificateCredential.create({
-      data: {
-        id: randomUUID(),
-        name: clean(input.name, "Credential name", 100),
-        topic: clean(input.topic, "Topic", 255),
-        environment: input.environment,
-        p12Base64: input.p12Base64,
-        passphrase: input.passphrase,
-        fingerprint: certificate.fingerprint,
-        expiresAt: certificate.expiresAt,
-        lastTestedAt: new Date(),
+    const id = randomUUID();
+    await this.credentials.setJson<ApnsCertificateSecret>(
+      apnsCertificateCredential(id),
+      { p12Base64: input.p12Base64, passphrase: input.passphrase },
+      async (transaction) => {
+        await transaction.apnsCertificateCredential.create({
+          data: {
+            id,
+            name: clean(input.name, "Credential name", 100),
+            topic: clean(input.topic, "Topic", 255),
+            environment: input.environment,
+            fingerprint: certificate.fingerprint,
+            expiresAt: certificate.expiresAt,
+            lastTestedAt: new Date(),
+          },
+        });
       },
-    });
+    );
     this.changed();
     return this.settings();
   }
 
   async deleteCertificateCredential(id: string) {
-    const prisma = await getPrismaClient();
-    await prisma.apnsCertificateCredential.delete({ where: { id } });
+    await this.credentials.delete(
+      apnsCertificateCredential(id),
+      async (transaction) => {
+        await transaction.apnsCertificateCredential.delete({ where: { id } });
+      },
+    );
     this.changed();
     return true;
   }
@@ -372,10 +399,15 @@ export class PushNotificationsService {
       where: { id },
     });
     if (!credential) throw new Error("APNs certificate credential not found");
+    const secret = await this.credentials.getJson<ApnsCertificateSecret>(
+      apnsCertificateCredential(id),
+    );
+    if (!secret)
+      throw new Error("APNs certificate credential is not configured");
     try {
       const certificate = inspectCertificateCredential(
-        Buffer.from(credential.p12Base64, "base64"),
-        credential.passphrase,
+        Buffer.from(secret.p12Base64, "base64"),
+        secret.passphrase,
       );
       await prisma.apnsCertificateCredential.update({
         where: { id },
@@ -408,6 +440,25 @@ export class PushNotificationsService {
     });
   }
 
+  private async tokenAuthentication(
+    errorMessage = "APNs token authentication is not configured",
+  ): Promise<Extract<ApnsAuthentication, { kind: "TOKEN" }>> {
+    const settings = await this.rawSettings();
+    if (!settings.tokenTeamId || !settings.tokenKeyId) {
+      throw new Error(errorMessage);
+    }
+    const privateKey = await this.credentials.getText(
+      CREDENTIALS.apnsTokenPrivateKey,
+    );
+    if (!privateKey) throw new Error(errorMessage);
+    return {
+      kind: "TOKEN",
+      teamId: settings.tokenTeamId,
+      keyId: settings.tokenKeyId,
+      privateKey,
+    };
+  }
+
   async createChannel(input: {
     channelId?: string | null;
     bundleId: string;
@@ -421,27 +472,16 @@ export class PushNotificationsService {
       throw new Error("Channel storage policy is invalid");
     }
     const bundleId = clean(input.bundleId, "Bundle ID", 255);
-    const settings = await this.rawSettings();
-    if (
-      !input.channelId &&
-      (!settings.tokenTeamId ||
-        !settings.tokenKeyId ||
-        !settings.tokenPrivateKey)
-    ) {
-      throw new Error(
-        "APNs token authentication is required for broadcast channels",
-      );
-    }
+    const authentication = input.channelId
+      ? null
+      : await this.tokenAuthentication(
+          "APNs token authentication is required for broadcast channels",
+        );
     const channelId =
       input.channelId?.trim() ||
       (await this.client.createBroadcastChannel({
         environment: input.environment as "SANDBOX" | "PRODUCTION",
-        authentication: {
-          kind: "TOKEN",
-          teamId: settings.tokenTeamId!,
-          keyId: settings.tokenKeyId!,
-          privateKey: settings.tokenPrivateKey!,
-        },
+        authentication: authentication!,
         bundleId,
         storagePolicy: input.storagePolicy as "NO_STORAGE" | "MOST_RECENT",
       }));
@@ -465,24 +505,12 @@ export class PushNotificationsService {
       where: { id },
     });
     if (!channel) throw new Error("Broadcast channel not found");
-    const settings = await this.rawSettings();
-    if (
-      !settings.tokenTeamId ||
-      !settings.tokenKeyId ||
-      !settings.tokenPrivateKey
-    ) {
-      throw new Error(
-        "APNs token authentication is required for broadcast channels",
-      );
-    }
+    const authentication = await this.tokenAuthentication(
+      "APNs token authentication is required for broadcast channels",
+    );
     await this.client.deleteBroadcastChannel({
       environment: channel.environment as "SANDBOX" | "PRODUCTION",
-      authentication: {
-        kind: "TOKEN",
-        teamId: settings.tokenTeamId,
-        keyId: settings.tokenKeyId,
-        privateKey: settings.tokenPrivateKey,
-      },
+      authentication,
       bundleId: channel.bundleId,
       channelId: channel.channelId,
     });
@@ -777,30 +805,23 @@ export class PushNotificationsService {
           "APNs certificate does not match the target topic/environment",
         );
       }
+      const secret = await this.credentials.getJson<ApnsCertificateSecret>(
+        apnsCertificateCredential(credential.id),
+      );
+      if (!secret) {
+        throw new Error("APNs certificate credential is not configured");
+      }
       return {
         kind: "CERTIFICATE",
-        p12Base64: credential.p12Base64,
-        passphrase: credential.passphrase,
+        p12Base64: secret.p12Base64,
+        passphrase: secret.passphrase,
         fingerprint: credential.fingerprint,
       };
     }
     if (editor.pushType === "mdm") {
       throw new Error("MDM requires certificate authentication");
     }
-    const settings = await this.rawSettings();
-    if (
-      !settings.tokenTeamId ||
-      !settings.tokenKeyId ||
-      !settings.tokenPrivateKey
-    ) {
-      throw new Error("APNs token authentication is not configured");
-    }
-    return {
-      kind: "TOKEN",
-      teamId: settings.tokenTeamId,
-      keyId: settings.tokenKeyId,
-      privateKey: settings.tokenPrivateKey,
-    };
+    return this.tokenAuthentication();
   }
 
   private async failDelivery(id: string, reason: string) {

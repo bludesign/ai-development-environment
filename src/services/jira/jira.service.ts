@@ -5,6 +5,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { AgileClient, Version3Client } from "jira.js";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
+import { CREDENTIALS, CredentialService } from "@/services/credentials";
 
 import type {
   JiraApiCallView,
@@ -421,6 +423,8 @@ export class JiraService {
     { key: string; version3: Version3Client; agile: AgileClient } | undefined;
   private lastPrunedAt = 0;
 
+  constructor(private readonly credentials = new CredentialService()) {}
+
   async getSettings(): Promise<JiraSettingsView> {
     const prisma = await getPrismaClient();
     const settings = await prisma.jiraSettings.upsert({
@@ -431,7 +435,9 @@ export class JiraService {
     return {
       siteUrl: settings.siteUrl,
       email: settings.email,
-      tokenConfigured: Boolean(settings.apiToken),
+      tokenConfigured: await this.credentials.isConfigured(
+        CREDENTIALS.jiraApiToken,
+      ),
       cacheTtlSeconds: settings.cacheTtlSeconds,
       updatedAt: settings.updatedAt.toISOString(),
     };
@@ -451,7 +457,7 @@ export class JiraService {
     const existing = await prisma.jiraSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
-    const nextToken = input.apiToken?.trim() || existing?.apiToken || null;
+    const nextToken = input.apiToken?.trim() || null;
     const siteChanged = Boolean(
       existing?.siteUrl && existing.siteUrl !== siteUrl,
     );
@@ -461,9 +467,9 @@ export class JiraService {
     const credentialsChanged =
       existing?.siteUrl !== siteUrl ||
       existing?.email !== email ||
-      existing?.apiToken !== nextToken;
+      Boolean(nextToken);
 
-    await prisma.$transaction(async (transaction) => {
+    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       if (siteChanged) {
         await transaction.jiraProject.deleteMany();
       }
@@ -477,27 +483,37 @@ export class JiraService {
           id: SETTINGS_ID,
           siteUrl,
           email,
-          apiToken: nextToken,
           cacheTtlSeconds: DEFAULT_TTL_SECONDS,
         },
-        update: { siteUrl, email, apiToken: nextToken },
+        update: { siteUrl, email },
       });
-    });
+    };
+    if (nextToken) {
+      await this.credentials.setText(
+        CREDENTIALS.jiraApiToken,
+        nextToken,
+        saveMetadata,
+      );
+    } else {
+      await prisma.$transaction(saveMetadata);
+    }
     this.clients = undefined;
     return this.getSettings();
   }
 
   async clearCredentials(): Promise<JiraSettingsView> {
-    const prisma = await getPrismaClient();
-    await prisma.$transaction([
-      prisma.jiraCacheEntry.deleteMany(),
-      prisma.jiraCachedTicket.deleteMany(),
-      prisma.jiraSettings.upsert({
-        where: { id: SETTINGS_ID },
-        create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
-        update: { email: null, apiToken: null },
-      }),
-    ]);
+    await this.credentials.delete(
+      CREDENTIALS.jiraApiToken,
+      async (transaction) => {
+        await transaction.jiraCacheEntry.deleteMany();
+        await transaction.jiraCachedTicket.deleteMany();
+        await transaction.jiraSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID, cacheTtlSeconds: DEFAULT_TTL_SECONDS },
+          update: { email: null },
+        });
+      },
+    );
     this.clients = undefined;
     return this.getSettings();
   }
@@ -1527,7 +1543,13 @@ export class JiraService {
     const settings = await prisma.jiraSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
-    if (!settings?.siteUrl || !settings.email || !settings.apiToken) {
+    if (!settings?.siteUrl || !settings.email) {
+      throw new Error(
+        "Configure the Jira site, email, and API token in Settings first",
+      );
+    }
+    const apiToken = await this.credentials.getText(CREDENTIALS.jiraApiToken);
+    if (!apiToken) {
       throw new Error(
         "Configure the Jira site, email, and API token in Settings first",
       );
@@ -1535,7 +1557,7 @@ export class JiraService {
     return {
       siteUrl: settings.siteUrl,
       email: settings.email,
-      apiToken: settings.apiToken,
+      apiToken,
       cacheTtlSeconds: settings.cacheTtlSeconds,
     };
   }

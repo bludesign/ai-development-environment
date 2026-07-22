@@ -46,7 +46,124 @@
     "consoleLogs": "Konsolenprotokolle",
     "analyticsEvents": "Analyseereignisse",
     "unifiedEvents": "Einheitliche Ansicht",
+    "credentials": "Anmeldedaten",
     "settings": "Einstellungen"
+  },
+  "credentialEncryption": {
+    "title": "Datenbank-Anmeldedaten sind nicht verschlüsselt",
+    "description": "Geheimnisse in der Anwendungsdatenbank werden derzeit im Klartext gespeichert. Erzeugen Sie mit diesem Befehl einen 32-Byte-Schlüssel:",
+    "instructionsPrefix": "Setzen Sie den erzeugten Wert als",
+    "instructionsSuffix": "in der Serverumgebung und starten Sie den Server neu. Vorhandene Klartext-Anmeldedaten werden nach dem Neustart gemeinsam verschlüsselt.",
+    "backup": "Sichern Sie diesen Schlüssel geschützt und bewahren Sie ihn während der gesamten Lebensdauer der verschlüsselten Einträge auf. Bei Verlust oder Änderung werden diese Anmeldedaten unlesbar."
+  },
+  "credentials": {
+    "title": "Anmeldedaten",
+    "description": "Prüfen Sie das aktive Backend, den Schutzstatus und ein reines Metadaten-Inventar. Geheimwerte werden hier nie angezeigt.",
+    "refresh": "Aktualisieren",
+    "loading": "Anmeldedaten-Inventar wird geladen…",
+    "loadFailed": "Anmeldedaten-Inventar konnte nicht geladen werden",
+    "storageTitle": "Speicher für Anmeldedaten",
+    "storageDescription": "Laufzeitkonfiguration und sichere Standortdetails des ausgewählten Backends.",
+    "backend": "Speicher-Backend",
+    "protection": "Schutz",
+    "itemCount": "Gespeicherte Einträge",
+    "mismatchCount": "Backend-Abweichungen",
+    "inventoryTitle": "Gespeicherte Anmeldedaten",
+    "inventoryDescription": "Diese Tabelle enthält nur Bezeichner und Schutzmetadaten. Verwalten Sie jeden Wert in den zugehörigen Einstellungen.",
+    "feature": "Zugehörige Funktion",
+    "kind": "Art der Anmeldedaten",
+    "updated": "Aktualisiert",
+    "emptyTitle": "Keine Anmeldedaten gespeichert",
+    "emptyDescription": "Anmeldedaten erscheinen hier, nachdem sie in den zugehörigen Einstellungen gespeichert wurden.",
+    "states": { "READY": "Bereit", "WARNING": "Warnung", "ERROR": "Fehler" },
+    "backends": {
+      "DATABASE": "Datenbank",
+      "VAULT": "HashiCorp-Vault",
+      "KEYCHAIN": "macOS-Schlüsselbund",
+      "UNKNOWN": "Unbekannt"
+    },
+    "encryptionStates": {
+      "ENCRYPTED": "Verschlüsselt",
+      "PLAINTEXT": "Klartext",
+      "EXTERNAL": "Externes Backend",
+      "ERROR": "Nicht verfügbar"
+    },
+    "protections": {
+      "ENCRYPTED": "AES-256-GCM-Verschlüsselung",
+      "PLAINTEXT": "Klartext",
+      "VAULT": "Vault-KV-v2-Speicher",
+      "KEYCHAIN": "Schlüsselbund"
+    },
+    "features": {
+      "jira": "Jira-Integration",
+      "github": "GitHub-Integration",
+      "cache": "Actions-Cache",
+      "mcp": "Externer MCP-Server",
+      "ios": "iOS-Geräte",
+      "push": "Push-Benachrichtigungen"
+    },
+    "kinds": {
+      "jira-api-token": "API-Token",
+      "github-personal-access-token": "Persönliches Zugriffs-Token",
+      "github-app-private-key": "Privater GitHub-App-Schlüssel",
+      "cache-server-api-key": "API-Schlüssel",
+      "cache-server-headers": "Benutzerdefiniertes Header-Paket",
+      "external-mcp-server-headers": "Header-Paket",
+      "ios-profile-signer-private-key": "Privater Profilsignatur-Schlüssel",
+      "app-store-connect-private-key": "Privater App-Store-Connect-Schlüssel",
+      "apns-token-private-key": "Privater APNs-Token-Schlüssel",
+      "apns-certificate-bundle": "APNs-Zertifikatspaket"
+    },
+    "details": {
+      "configuredValue": "Konfigurierter Wert",
+      "location": "Speicherort",
+      "encryptionKey": "Verschlüsselungsschlüssel",
+      "service": "Dienst",
+      "hostPlatform": "Host-Plattform",
+      "address": "Adresse",
+      "mount": "KV-v2-Mount",
+      "pathPrefix": "Pfadpräfix",
+      "namespace": "Namensraum",
+      "authenticationToken": "Authentifizierungs-Token",
+      "additionalHeaders": "Zusätzliche Header-Namen",
+      "customCa": "Benutzerdefinierte CA",
+      "tlsServerName": "TLS-Servername"
+    },
+    "detailValues": {
+      "configured": "Konfiguriert",
+      "notConfigured": "Nicht konfiguriert",
+      "none": "Keine",
+      "invalid": "Ungültig",
+      "applicationDatabase": "Anwendungsdatenbank"
+    },
+    "warningTitles": {
+      "DATABASE_UNENCRYPTED": "Datenbankverschlüsselung ist deaktiviert",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "Verschlüsselungsschlüssel ist ungültig",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Verschlüsselungsschlüssel fehlt",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Verschlüsselungsschlüssel stimmt nicht überein",
+      "CREDENTIAL_DATA_INVALID": "Anmeldedaten sind ungültig",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "Speichertyp ist ungültig",
+      "CREDENTIAL_STORE_UNAVAILABLE": "Anmeldedatenspeicher ist nicht verfügbar",
+      "VAULT_CONFIGURATION_INVALID": "Vault-Konfiguration ist ungültig",
+      "VAULT_INSECURE_HTTP": "Vault verwendet unverschlüsseltes HTTP",
+      "VAULT_TLS_VERIFICATION_DISABLED": "Vault-Zertifikatsprüfung ist deaktiviert",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "Schlüsselbund wird auf diesem Host nicht unterstützt",
+      "BACKEND_MISMATCH": "Anmeldedaten verwenden ein anderes Backend"
+    },
+    "warnings": {
+      "DATABASE_UNENCRYPTED": "Anmeldedaten werden im Klartext gespeichert, bis ein Verschlüsselungsschlüssel konfiguriert ist.",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY muss eine strikte Base64-Kodierung von genau 32 Byte sein. Korrigieren Sie den Wert und starten Sie neu; bei einem ungültigen Schlüssel gibt es keinen Klartext-Rückfall.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Verschlüsselte Einträge sind vorhanden, aber der Schlüssel fehlt. Stellen Sie den ursprünglichen Schlüssel wieder her und starten Sie den Server neu.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Der konfigurierte Schlüssel passt nicht zu vorhandenen Einträgen. Stellen Sie den ursprünglichen Schlüssel wieder her und starten Sie neu.",
+      "CREDENTIAL_DATA_INVALID": "Mindestens ein Anmeldedatensatz enthält ungültige Metadaten und kann nicht verwendet werden.",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE muss database, vault oder keychain sein.",
+      "CREDENTIAL_STORE_UNAVAILABLE": "Der Anmeldedatenspeicher konnte nicht initialisiert werden. Prüfen Sie Serverkonfiguration und Protokolle.",
+      "VAULT_CONFIGURATION_INVALID": "Vault kann mit den aktuellen Umgebungsvariablen nicht initialisiert werden. Prüfen Sie Adresse, Header, Pfad und TLS-Einstellungen.",
+      "VAULT_INSECURE_HTTP": "Vault-Daten, Geheimnisse und Authentifizierungs-Header sind über HTTP während der Übertragung nicht geschützt.",
+      "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY erlaubt nicht vertrauenswürdige Zertifikate und ermöglicht das Abfangen des Vault-Verkehrs.",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "Der macOS-Schlüsselbund ist nur verfügbar, wenn der Next.js-Host auf macOS läuft. Der Server bleibt erreichbar, Anmeldedatenvorgänge schlagen jedoch fehl.",
+      "BACKEND_MISMATCH": "{count} Anmeldedateneinträge wurden mit einem anderen Backend gespeichert. Geben Sie sie in den zugehörigen Einstellungen neu ein; Werte werden nicht automatisch verschoben oder gelöscht."
+    }
   },
   "agents": {
     "title": "Agenten",

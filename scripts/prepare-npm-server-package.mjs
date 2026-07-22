@@ -55,12 +55,28 @@ cpSync(standaloneSource, path.join(stagingDir, "standalone"), {
 
 // Native modules are platform-specific; drop the traced copies and install them as real
 // dependencies instead so npm builds the correct platform binary at install time.
-const nativeModules = ["better-sqlite3", "sharp", "@img"];
+const nativeModules = ["better-sqlite3", "sharp", "@img", "@napi-rs/keyring"];
 for (const name of nativeModules) {
   rmSync(path.join(stagingDir, "standalone", "node_modules", name), {
     recursive: true,
     force: true,
   });
+}
+const napiRsDirectory = path.join(
+  stagingDir,
+  "standalone",
+  "node_modules",
+  "@napi-rs",
+);
+if (existsSync(napiRsDirectory)) {
+  for (const entry of readdirSync(napiRsDirectory)) {
+    if (entry.startsWith("keyring-")) {
+      rmSync(path.join(napiRsDirectory, entry), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
 }
 
 // Turbopack aliases externalized packages behind hashed names (for example
@@ -98,7 +114,9 @@ for (const link of findSymlinks(stagingDir)) {
 
   rmSync(link);
   const externalized =
-    nativeModules.includes(packageName) || packageName.startsWith("@img/");
+    nativeModules.includes(packageName) ||
+    packageName.startsWith("@img/") ||
+    packageName.startsWith("@napi-rs/keyring-");
   if (externalized) {
     mkdirSync(link, { recursive: true });
     writeFileSync(
@@ -185,11 +203,19 @@ const nextPackage = JSON.parse(
   ),
 );
 const betterSqlite3Version = rootPackage.dependencies?.["better-sqlite3"];
+const keyringVersion = rootPackage.dependencies?.["@napi-rs/keyring"];
 const prismaVersion = rootPackage.devDependencies?.prisma;
 const sharpVersion =
   nextPackage.optionalDependencies?.sharp ?? nextPackage.dependencies?.sharp;
-if (!betterSqlite3Version || !prismaVersion || !sharpVersion) {
-  fail("unable to resolve better-sqlite3, prisma, or sharp versions to pin");
+if (
+  !betterSqlite3Version ||
+  !keyringVersion ||
+  !prismaVersion ||
+  !sharpVersion
+) {
+  fail(
+    "unable to resolve @napi-rs/keyring, better-sqlite3, prisma, or sharp versions to pin",
+  );
 }
 
 const manifest = {
@@ -206,6 +232,7 @@ const manifest = {
   engines: rootPackage.engines,
   files: ["bin", "standalone", "prisma-runtime"],
   dependencies: {
+    "@napi-rs/keyring": keyringVersion,
     "better-sqlite3": betterSqlite3Version,
     prisma: prismaVersion,
     sharp: sharpVersion,

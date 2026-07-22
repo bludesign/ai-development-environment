@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: dependabot
+    runs-on: arc-runner-set-macos
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -55,7 +55,7 @@ jobs:
         run: npm run build
 
   build-and-test-agent:
-    runs-on: dependabot
+    runs-on: arc-runner-set-macos
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -87,3 +87,36 @@ jobs:
 
       - name: Build
         run: npm run agent:build
+
+  credential-linux-standalone:
+    runs-on: arc-runner-set-macos
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.18.0
+          cache: npm
+
+      - name: Install Aikido safe chain
+        run: curl -fsSL https://github.com/AikidoSec/safe-chain/releases/latest/download/install-safe-chain.sh | sh -s -- --ci
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build standalone server
+        run: npm run build
+
+      - name: Test database and unsupported Keychain startup
+        run: npm run test:standalone-credentials
+
+      - name: Verify npm package native staging
+        run: |
+          node scripts/prepare-npm-server-package.mjs --version 0.0.0-ci
+          if find .npm-staging/server -name '*.node' -print -quit | grep -q .; then
+            echo "Published standalone staging contains a native binary" >&2
+            exit 1
+          fi
+          npm pack .npm-staging/server --dry-run

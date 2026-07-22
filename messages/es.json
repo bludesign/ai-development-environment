@@ -46,7 +46,124 @@
     "consoleLogs": "Registros de consola",
     "analyticsEvents": "Eventos analíticos",
     "unifiedEvents": "Vista unificada",
+    "credentials": "Credenciales",
     "settings": "Configuración"
+  },
+  "credentialEncryption": {
+    "title": "Las credenciales de la base de datos no están cifradas",
+    "description": "Los secretos guardados en la base de datos de la aplicación están actualmente en texto plano. Genera una clave de 32 bytes con este comando:",
+    "instructionsPrefix": "Configura el valor generado como",
+    "instructionsSuffix": "en el entorno del servidor y reinícialo. Las credenciales existentes en texto plano se cifrarán juntas después del reinicio.",
+    "backup": "Guarda una copia segura de esta clave durante toda la vida de las filas cifradas. Si se pierde o cambia, esas credenciales quedarán ilegibles."
+  },
+  "credentials": {
+    "title": "Credenciales",
+    "description": "Consulta el backend activo, el estado de protección y un inventario que solo contiene metadatos. Los valores secretos nunca se muestran aquí.",
+    "refresh": "Actualizar",
+    "loading": "Cargando el inventario de credenciales…",
+    "loadFailed": "No se pudo cargar el inventario de credenciales",
+    "storageTitle": "Almacenamiento de credenciales",
+    "storageDescription": "Configuración de ejecución y detalles seguros de ubicación del backend seleccionado.",
+    "backend": "Sistema de almacenamiento",
+    "protection": "Protección",
+    "itemCount": "Elementos guardados",
+    "mismatchCount": "Incompatibilidades de backend",
+    "inventoryTitle": "Credenciales guardadas",
+    "inventoryDescription": "Esta tabla solo contiene identificadores y metadatos de protección. Gestiona cada valor desde su configuración correspondiente.",
+    "feature": "Función propietaria",
+    "kind": "Tipo de credencial",
+    "updated": "Actualizado",
+    "emptyTitle": "No hay credenciales guardadas",
+    "emptyDescription": "Las credenciales aparecerán aquí después de guardarlas desde su formulario de configuración.",
+    "states": { "READY": "Listo", "WARNING": "Advertencia", "ERROR": "Error" },
+    "backends": {
+      "DATABASE": "Base de datos",
+      "VAULT": "Vault de HashiCorp",
+      "KEYCHAIN": "Llavero de macOS",
+      "UNKNOWN": "Desconocido"
+    },
+    "encryptionStates": {
+      "ENCRYPTED": "Cifrado",
+      "PLAINTEXT": "Texto plano",
+      "EXTERNAL": "Backend externo",
+      "ERROR": "No disponible"
+    },
+    "protections": {
+      "ENCRYPTED": "Cifrado AES-256-GCM",
+      "PLAINTEXT": "Texto plano",
+      "VAULT": "Almacén Vault KV v2",
+      "KEYCHAIN": "Llavero"
+    },
+    "features": {
+      "jira": "Integración con Jira",
+      "github": "Integración con GitHub",
+      "cache": "Caché de Actions",
+      "mcp": "Servidor MCP externo",
+      "ios": "Dispositivos iOS",
+      "push": "Notificaciones push"
+    },
+    "kinds": {
+      "jira-api-token": "Token de API",
+      "github-personal-access-token": "Token de acceso personal",
+      "github-app-private-key": "Clave privada de GitHub App",
+      "cache-server-api-key": "Clave de API",
+      "cache-server-headers": "Paquete de cabeceras personalizadas",
+      "external-mcp-server-headers": "Paquete de cabeceras",
+      "ios-profile-signer-private-key": "Clave privada del firmante de perfiles",
+      "app-store-connect-private-key": "Clave privada de App Store Connect",
+      "apns-token-private-key": "Clave privada del token APNs",
+      "apns-certificate-bundle": "Paquete de certificado APNs"
+    },
+    "details": {
+      "configuredValue": "Valor configurado",
+      "location": "Ubicación",
+      "encryptionKey": "Clave de cifrado",
+      "service": "Servicio",
+      "hostPlatform": "Plataforma del host",
+      "address": "Dirección",
+      "mount": "Montaje KV v2",
+      "pathPrefix": "Prefijo de ruta",
+      "namespace": "Espacio de nombres",
+      "authenticationToken": "Token de autenticación",
+      "additionalHeaders": "Nombres de cabeceras adicionales",
+      "customCa": "CA personalizada",
+      "tlsServerName": "Nombre de servidor TLS"
+    },
+    "detailValues": {
+      "configured": "Configurado",
+      "notConfigured": "Sin configurar",
+      "none": "Ninguna",
+      "invalid": "No válido",
+      "applicationDatabase": "Base de datos de la aplicación"
+    },
+    "warningTitles": {
+      "DATABASE_UNENCRYPTED": "El cifrado de la base de datos está desactivado",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "La clave de cifrado no es válida",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Falta la clave de cifrado",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clave de cifrado no coincide",
+      "CREDENTIAL_DATA_INVALID": "Los datos de credenciales no son válidos",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "El tipo de almacenamiento no es válido",
+      "CREDENTIAL_STORE_UNAVAILABLE": "El almacén de credenciales no está disponible",
+      "VAULT_CONFIGURATION_INVALID": "La configuración de Vault no es válida",
+      "VAULT_INSECURE_HTTP": "Vault usa HTTP sin cifrar",
+      "VAULT_TLS_VERIFICATION_DISABLED": "La verificación del certificado de Vault está desactivada",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "El llavero no es compatible con este host",
+      "BACKEND_MISMATCH": "Hay credenciales en otro backend"
+    },
+    "warnings": {
+      "DATABASE_UNENCRYPTED": "Las credenciales de la base de datos se guardan en texto plano hasta que se configure una clave de cifrado.",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY debe ser una codificación Base64 estricta de exactamente 32 bytes. Corrígela y reinicia el servidor; una clave no válida nunca usa texto plano como alternativa.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Hay credenciales cifradas, pero falta la clave. Restaura la clave original y reinicia el servidor.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clave configurada no coincide con las credenciales existentes. Restaura la clave original y reinicia el servidor.",
+      "CREDENTIAL_DATA_INVALID": "Uno o más registros de credenciales contienen metadatos no válidos y no se pueden utilizar.",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE debe ser database, vault o keychain.",
+      "CREDENTIAL_STORE_UNAVAILABLE": "No se pudo inicializar el almacén de credenciales. Revisa la configuración y los registros del servidor.",
+      "VAULT_CONFIGURATION_INVALID": "Vault no puede iniciarse con las variables de entorno actuales. Revisa la dirección, las cabeceras, la ruta y la configuración TLS.",
+      "VAULT_INSECURE_HTTP": "El tráfico de Vault, los secretos y las cabeceras de autenticación no están protegidos durante el tránsito por HTTP.",
+      "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY permite certificados no confiables y expone el tráfico de Vault a interceptación.",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "El llavero de macOS solo está disponible cuando el host de Next.js se ejecuta en macOS. El servidor sigue disponible, pero las operaciones de credenciales fallarán.",
+      "BACKEND_MISMATCH": "{count} credencial(es) se guardaron con otro backend. Vuelve a introducirlas desde sus formularios de configuración; los valores no se mueven ni eliminan automáticamente."
+    }
   },
   "agents": {
     "title": "Agentes",

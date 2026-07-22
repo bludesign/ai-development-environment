@@ -15,6 +15,7 @@ import {
   Hammer,
   FolderGit2,
   House,
+  KeyRound,
   MessageSquareText,
   MousePointerClick,
   PanelLeft,
@@ -631,6 +632,22 @@ function NavigationSidebar() {
                   >
                     <Wrench />
                     <span>{t("tools")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/credentials")}
+                >
+                  <Link
+                    href="/credentials"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <KeyRound />
+                    <span>{t("credentials")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

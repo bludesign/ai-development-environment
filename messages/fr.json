@@ -46,7 +46,128 @@
     "consoleLogs": "Journaux de console",
     "analyticsEvents": "Événements analytiques",
     "unifiedEvents": "Vue unifiée",
+    "credentials": "Identifiants",
     "settings": "Paramètres"
+  },
+  "credentialEncryption": {
+    "title": "Les identifiants de la base de données ne sont pas chiffrés",
+    "description": "Les secrets stockés dans la base de données de l’application sont actuellement en clair. Générez une clé de 32 octets avec cette commande :",
+    "instructionsPrefix": "Définissez la valeur générée comme",
+    "instructionsSuffix": "dans l’environnement du serveur, puis redémarrez-le. Les identifiants existants en clair seront chiffrés ensemble après le redémarrage.",
+    "backup": "Sauvegardez cette clé de manière sécurisée et conservez-la pendant toute la durée de vie des lignes chiffrées. Sa perte ou sa modification rend ces identifiants illisibles."
+  },
+  "credentials": {
+    "title": "Identifiants",
+    "description": "Consultez le backend actif, l’état de protection et un inventaire limité aux métadonnées. Les valeurs secrètes ne sont jamais affichées ici.",
+    "refresh": "Actualiser",
+    "loading": "Chargement de l’inventaire des identifiants…",
+    "loadFailed": "Impossible de charger l’inventaire des identifiants",
+    "storageTitle": "Stockage des identifiants",
+    "storageDescription": "Configuration d’exécution et détails d’emplacement sûrs pour le backend sélectionné.",
+    "backend": "Système de stockage",
+    "protection": "Protection",
+    "itemCount": "Éléments stockés",
+    "mismatchCount": "Incompatibilités de backend",
+    "inventoryTitle": "Identifiants stockés",
+    "inventoryDescription": "Ce tableau contient uniquement des identifiants et des métadonnées de protection. Gérez chaque valeur dans ses paramètres propriétaires.",
+    "feature": "Fonction propriétaire",
+    "kind": "Type d’identifiant",
+    "updated": "Mis à jour",
+    "emptyTitle": "Aucun identifiant stocké",
+    "emptyDescription": "Les identifiants apparaissent ici après leur enregistrement depuis le formulaire de paramètres associé.",
+    "states": {
+      "READY": "Prêt",
+      "WARNING": "Avertissement",
+      "ERROR": "Erreur"
+    },
+    "backends": {
+      "DATABASE": "Base de données",
+      "VAULT": "Coffre HashiCorp Vault",
+      "KEYCHAIN": "Trousseau macOS",
+      "UNKNOWN": "Inconnu"
+    },
+    "encryptionStates": {
+      "ENCRYPTED": "Chiffré",
+      "PLAINTEXT": "En clair",
+      "EXTERNAL": "Backend externe",
+      "ERROR": "Indisponible"
+    },
+    "protections": {
+      "ENCRYPTED": "Chiffrement AES-256-GCM",
+      "PLAINTEXT": "En clair",
+      "VAULT": "Stockage Vault KV v2",
+      "KEYCHAIN": "Trousseau"
+    },
+    "features": {
+      "jira": "Intégration Jira",
+      "github": "Intégration GitHub",
+      "cache": "Cache Actions",
+      "mcp": "Serveur MCP externe",
+      "ios": "Appareils iOS",
+      "push": "Notifications push"
+    },
+    "kinds": {
+      "jira-api-token": "Jeton d’API",
+      "github-personal-access-token": "Jeton d’accès personnel",
+      "github-app-private-key": "Clé privée GitHub App",
+      "cache-server-api-key": "Clé d’API",
+      "cache-server-headers": "Ensemble d’en-têtes personnalisés",
+      "external-mcp-server-headers": "Ensemble d’en-têtes",
+      "ios-profile-signer-private-key": "Clé privée de signature de profil",
+      "app-store-connect-private-key": "Clé privée App Store Connect",
+      "apns-token-private-key": "Clé privée du jeton APNs",
+      "apns-certificate-bundle": "Ensemble de certificat APNs"
+    },
+    "details": {
+      "configuredValue": "Valeur configurée",
+      "location": "Emplacement",
+      "encryptionKey": "Clé de chiffrement",
+      "service": "Service",
+      "hostPlatform": "Plateforme hôte",
+      "address": "Adresse",
+      "mount": "Montage KV v2",
+      "pathPrefix": "Préfixe de chemin",
+      "namespace": "Espace de noms",
+      "authenticationToken": "Jeton d’authentification",
+      "additionalHeaders": "Noms d’en-têtes supplémentaires",
+      "customCa": "AC personnalisée",
+      "tlsServerName": "Nom du serveur TLS"
+    },
+    "detailValues": {
+      "configured": "Configuré",
+      "notConfigured": "Non configuré",
+      "none": "Aucun",
+      "invalid": "Invalide",
+      "applicationDatabase": "Base de données de l’application"
+    },
+    "warningTitles": {
+      "DATABASE_UNENCRYPTED": "Le chiffrement de la base de données est désactivé",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "La clé de chiffrement est invalide",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "La clé de chiffrement est absente",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clé de chiffrement ne correspond pas",
+      "CREDENTIAL_DATA_INVALID": "Les données d’identification sont invalides",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "Le type de stockage est invalide",
+      "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants est indisponible",
+      "VAULT_CONFIGURATION_INVALID": "La configuration de Vault est invalide",
+      "VAULT_INSECURE_HTTP": "Vault utilise HTTP en clair",
+      "VAULT_TLS_VERIFICATION_DISABLED": "La vérification du certificat Vault est désactivée",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "Le trousseau n’est pas pris en charge sur cet hôte",
+      "BACKEND_MISMATCH": "Des identifiants utilisent un autre backend"
+    },
+    "warnings": {
+      "DATABASE_UNENCRYPTED": "Les identifiants de la base de données sont stockés en clair jusqu’à la configuration d’une clé de chiffrement.",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY doit être un encodage Base64 strict de 32 octets exactement. Corrigez-la et redémarrez le serveur ; aucune solution de repli en clair n’est utilisée avec une clé invalide.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Des identifiants chiffrés existent, mais la clé est absente. Restaurez la clé d’origine et redémarrez le serveur.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "La clé configurée ne correspond pas aux identifiants existants. Restaurez la clé d’origine et redémarrez le serveur.",
+      "CREDENTIAL_DATA_INVALID": "Un ou plusieurs enregistrements d’identifiants contiennent des métadonnées invalides et ne peuvent pas être utilisés.",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE doit être database, vault ou keychain.",
+      "CREDENTIAL_STORE_UNAVAILABLE": "Le stockage des identifiants n’a pas pu être initialisé. Vérifiez la configuration et les journaux du serveur.",
+      "VAULT_CONFIGURATION_INVALID": "Vault ne peut pas être initialisé avec les variables d’environnement actuelles. Vérifiez l’adresse, les en-têtes, le chemin et les réglages TLS.",
+      "VAULT_INSECURE_HTTP": "Le trafic Vault, les secrets et les en-têtes d’authentification ne sont pas protégés en transit sur HTTP.",
+      "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY autorise les certificats non approuvés et expose le trafic Vault à l’interception.",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "Le trousseau macOS n’est disponible que si l’hôte Next.js s’exécute sur macOS. Le serveur reste disponible, mais les opérations sur les identifiants échoueront.",
+      "BACKEND_MISMATCH": "{count} élément(s) d’identification ont été enregistrés avec un autre backend. Saisissez-les à nouveau dans leurs paramètres propriétaires ; les valeurs ne sont ni déplacées ni supprimées automatiquement."
+    }
   },
   "agents": {
     "title": "Agents",

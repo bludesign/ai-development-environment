@@ -23,13 +23,17 @@ const nextConfig: NextConfig = {
   allowedDevOrigins,
   output: "standalone",
   outputFileTracingIncludes: {
+    "/*": [
+      "node_modules/@napi-rs/keyring/**/*",
+      "node_modules/@napi-rs/keyring-darwin-*/**/*",
+    ],
     "/api/telemetry/export": [
       "node_modules/@expo-google-fonts/noto-emoji/400Regular/NotoEmoji_400Regular.ttf",
       "node_modules/@fontpkg/unifont/unifont-15.0.01.ttf",
     ],
   },
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
-  serverExternalPackages: ["pdfkit", "re2-wasm"],
+  serverExternalPackages: ["@napi-rs/keyring", "pdfkit", "re2-wasm"],
   async rewrites() {
     return [
       {
