@@ -15,6 +15,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import { relativeNotificationTime } from "./notification-card";
 import { NotificationsSidebar } from "./notifications-sidebar";
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -116,6 +117,9 @@ beforeEach(() => {
     if (operation.includes("mutation DismissAllSidebarNotifications")) {
       return { dismissAllSidebarNotifications: 1 } as never;
     }
+    if (operation.includes("mutation DeleteSidebarNotification")) {
+      return { deleteNotifications: 1 } as never;
+    }
     throw new Error(`Unexpected request: ${operation}`);
   });
 });
@@ -135,6 +139,33 @@ function renderSidebar() {
 }
 
 describe("NotificationsSidebar", () => {
+  test("shows live relative times with the full date on hover", async () => {
+    const setInterval = vi.spyOn(window, "setInterval");
+    renderSidebar();
+    expect(await screen.findByText("Example · Debug · main")).toBeDefined();
+
+    const timestamp = document.querySelector("time");
+    expect(timestamp?.textContent).not.toContain("2026");
+    expect(timestamp?.getAttribute("title")).toBe(
+      new Date(existing.createdAt).toLocaleString("en", {
+        dateStyle: "full",
+        timeStyle: "medium",
+      }),
+    );
+    expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 1_000);
+    setInterval.mockRestore();
+  });
+
+  test("formats relative notification ages", () => {
+    expect(
+      relativeNotificationTime(
+        existing.createdAt,
+        "en",
+        Date.parse(existing.createdAt) + 2 * 60 * 1_000,
+      ),
+    ).toBe("2 minutes ago");
+  });
+
   test("prepends and highlights live notifications while showing browser alerts", async () => {
     renderSidebar();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
@@ -154,6 +185,9 @@ describe("NotificationsSidebar", () => {
 
     const articles = screen.getAllByRole("article");
     expect(articles[0]?.textContent).toContain("iOS build failed");
+    expect(articles[0]?.className).toContain("w-full");
+    expect(articles[0]?.className).toContain("rounded-none");
+    expect(articles[0]?.parentElement?.className).toContain("gap-0");
     expect(articles[0]?.className).toContain("bg-primary/20");
     expect(articles[0]?.className).toContain("border-l-blue-500");
     expect(nativeNotification).toHaveBeenCalledWith(
@@ -175,6 +209,46 @@ describe("NotificationsSidebar", () => {
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation DismissNotification"),
         { id: "notification-1" },
+      ),
+    );
+  });
+
+  test("offers navigation, dismiss, and confirmed delete in a context menu", async () => {
+    renderSidebar();
+    expect(await screen.findByText("Example · Debug · main")).toBeDefined();
+
+    fireEvent.contextMenu(screen.getByRole("article"));
+
+    expect(
+      await screen.findByText(
+        new Date(existing.createdAt).toLocaleString("en", {
+          dateStyle: "full",
+          timeStyle: "medium",
+        }),
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("menuitem", { name: "Open build" }).getAttribute("href"),
+    ).toBe("/builds/build-1");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Open worktree" })
+        .getAttribute("href"),
+    ).toBe("/worktrees/worktree-1");
+    expect(screen.getByRole("menuitem", { name: "Dismiss" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(
+      request.mock.calls.some(([query]) =>
+        String(query).includes("mutation DeleteSidebarNotification"),
+      ),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Confirm delete" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation DeleteSidebarNotification"),
+        { selection: { ids: ["notification-1"] } },
       ),
     );
   });

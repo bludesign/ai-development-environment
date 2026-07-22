@@ -107,6 +107,7 @@ export function NotificationsSidebar() {
   const [arrivingIds, setArrivingIds] = useState<Set<string>>(new Set());
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [now, setNow] = useState<number | null>(null);
   const soundEnabledRef = useRef(false);
   const timers = useRef<Map<string, number>>(new Map());
 
@@ -192,6 +193,13 @@ export function NotificationsSidebar() {
     };
   }, [load]);
 
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now());
+    updateNow();
+    const timer = window.setInterval(updateNow, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const toggleSound = () => {
     const next = !soundEnabled;
     setSoundEnabled(next);
@@ -206,6 +214,20 @@ export function NotificationsSidebar() {
       await controlPlaneRequest(
         `mutation DismissNotification($id: ID!) { dismissNotification(id: $id) }`,
         { id },
+      );
+    } catch {
+      await load();
+    }
+  };
+
+  const deleteNotification = async (id: string) => {
+    setNotifications((current) => current.filter((entry) => entry.id !== id));
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteSidebarNotification($selection: NotificationSelectionInput!) {
+          deleteNotifications(selection: $selection)
+        }`,
+        { selection: { ids: [id] } },
       );
     } catch {
       await load();
@@ -272,13 +294,15 @@ export function NotificationsSidebar() {
           <MobileClose />
         </div>
       </SidebarHeader>
-      <SidebarContent className="p-2">
-        <div className="flex flex-col gap-2" aria-live="polite">
+      <SidebarContent className="p-0">
+        <div className="flex flex-col gap-0" aria-live="polite">
           {notifications.map((notification) => (
             <NotificationCard
               arriving={arrivingIds.has(notification.id)}
               key={notification.id}
               notification={notification}
+              now={now}
+              onDelete={(id) => void deleteNotification(id)}
               onDismiss={(id) => void dismiss(id)}
             />
           ))}
