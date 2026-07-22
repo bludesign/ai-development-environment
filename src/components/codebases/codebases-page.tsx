@@ -24,7 +24,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import {
   FormEvent,
   useCallback,
@@ -42,6 +42,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -641,15 +642,12 @@ function CodebaseCard({
   showMetadata?: boolean;
 }) {
   const t = useTranslations("codebases");
-  const locale = useLocale();
   const active = codebase.activeJob;
   const canFetch =
     codebase.agent.connectionStatus === "ONLINE" &&
     codebase.agent.capabilities.includes(CODEBASE_FETCH_JOB_KIND) &&
     codebase.availability === "AVAILABLE" &&
     !active;
-  const date = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : t("never");
   const syncLabel =
     codebase.syncState === "AHEAD" || codebase.syncState === "BEHIND"
       ? t(codebase.syncState.toLowerCase(), {
@@ -698,8 +696,20 @@ function CodebaseCard({
             value={codebase.upstream ?? t("none")}
             mono
           />
-          <Info label={t("lastChecked")} value={date(codebase.lastCheckedAt)} />
-          <Info label={t("lastFetched")} value={date(codebase.lastFetchedAt)} />
+          <Info
+            label={t("lastChecked")}
+            small
+            value={
+              <DateTime fallback={t("never")} value={codebase.lastCheckedAt} />
+            }
+          />
+          <Info
+            label={t("lastFetched")}
+            small
+            value={
+              <DateTime fallback={t("never")} value={codebase.lastFetchedAt} />
+            }
+          />
         </dl>
         {(codebase.statusError || codebase.availability !== "AVAILABLE") && (
           <Alert variant="destructive">
@@ -760,15 +770,25 @@ function Info({
   label,
   value,
   mono = false,
+  small = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
+  /** Match the mono rows' size without switching the typeface. */
+  small?: boolean;
 }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn("truncate", mono && "font-mono text-xs")} title={value}>
+      <dd
+        className={cn(
+          "truncate",
+          (mono || small) && "text-xs",
+          mono && "font-mono",
+        )}
+        title={typeof value === "string" ? value : undefined}
+      >
         {value}
       </dd>
     </div>

@@ -1,13 +1,15 @@
 "use client";
 
 import { ChevronDown, FileCode2, Images } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
+import { PatchView } from "@/components/ui/patch-view";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -33,7 +35,6 @@ export function WorktreeDetailPanel({
   inline?: boolean;
 }) {
   const t = useTranslations("worktrees");
-  const locale = useLocale();
   if (inline) return <InlineWorktreeDetail detail={detail} />;
   return (
     <div
@@ -132,8 +133,8 @@ export function WorktreeDetailPanel({
                 prefix={commit.sha.slice(0, 8)}
                 summary={
                   <span className="text-xs text-muted-foreground">
-                    {commit.authorName} ·{" "}
-                    {new Date(commit.authoredAt).toLocaleString(locale)} ·{" "}
+                    {commit.authorName} · <DateTime value={commit.authoredAt} />{" "}
+                    ·{" "}
                     <LineCounts
                       additions={commit.additions}
                       deletions={commit.deletions}
@@ -162,7 +163,6 @@ export function WorktreeDetailPanel({
 
 function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
   const t = useTranslations("worktrees");
-  const locale = useLocale();
   return (
     <div
       className="w-full space-y-4 border-t pt-4"
@@ -251,7 +251,7 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
                         </span>
                         <span className="shrink-0 text-muted-foreground">
                           {commit.authorName} ·{" "}
-                          {new Date(commit.authoredAt).toLocaleString(locale)}
+                          <DateTime value={commit.authoredAt} />
                         </span>
                       </div>
                     </TableCell>
@@ -467,7 +467,11 @@ function DiffBlock({
           worktreeId={worktreeId}
         />
       ) : value?.patch ? (
-        <PatchView patch={value.patch} truncated={value.truncated} />
+        <PatchView
+          patch={value.patch}
+          truncated={value.truncated}
+          truncatedLabel={t("diffLimit")}
+        />
       ) : (
         <p className="text-sm text-muted-foreground">
           {value?.truncated
@@ -521,40 +525,6 @@ function useDiff(
     };
   }, [commitSha, path, previousPath, scope, worktreeId]);
   return { value, loading, error };
-}
-
-function PatchView({
-  patch,
-  truncated,
-}: {
-  patch: string;
-  truncated: boolean;
-}) {
-  const t = useTranslations("worktreeDetail");
-  return (
-    <div className="overflow-auto rounded-md border bg-neutral-950 font-mono text-xs text-neutral-100">
-      {patch.split("\n").map((line, index) => (
-        <div
-          className={cn(
-            "min-w-max px-3 whitespace-pre",
-            line.startsWith("+") &&
-              !line.startsWith("+++") &&
-              "bg-emerald-950/70 text-emerald-200",
-            line.startsWith("-") &&
-              !line.startsWith("---") &&
-              "bg-red-950/70 text-red-200",
-            line.startsWith("@@") && "bg-blue-950/60 text-blue-200",
-          )}
-          key={`${index}:${line}`}
-        >
-          {line || " "}
-        </div>
-      ))}
-      {truncated && (
-        <p className="border-t p-2 text-amber-300">{t("diffLimit")}</p>
-      )}
-    </div>
-  );
 }
 
 function ImageComparison({

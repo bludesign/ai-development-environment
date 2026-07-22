@@ -7,7 +7,7 @@ import {
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
 import { Plus, ScanSearch, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 export type ExportSettingsValue = {
   method: "DEBUGGING" | "RELEASE_TESTING" | "ENTERPRISE" | "APP_STORE_CONNECT";
@@ -81,6 +82,7 @@ export function ExportSettingsForm({
   disabled?: boolean;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   const [requirements, setRequirements] = useState<BuildSigningRequirement[]>(
     () =>
       Object.keys(value.provisioningProfiles).map((bundleId) => ({
@@ -367,7 +369,7 @@ export function ExportSettingsForm({
     profile: NonNullable<typeof inventory>["profiles"][number],
   ) => {
     const expiry = profile.expiresAt
-      ? new Date(profile.expiresAt).toLocaleDateString()
+      ? formatDateValue(profile.expiresAt, "short", { locale, showTime: false })
       : null;
     return expiry ? `${profile.name} — ${expiry}` : profile.name;
   };

@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty as EmptyState,
   EmptyDescription,
@@ -57,10 +58,6 @@ type CachePageData = {
   jiraApiCalls: PaginatedResult<JiraApiCallView>;
   jiraCachedTickets: PaginatedResult<JiraCachedTicketView>;
 };
-
-function when(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
 
 function sourceClass(source: string) {
   if (source === "LIVE")
@@ -301,7 +298,9 @@ export function JiraCachePage() {
                     <TableBody>
                       {data.jiraApiCalls.items.map((call) => (
                         <TableRow key={call.id}>
-                          <TableCell>{when(call.createdAt)}</TableCell>
+                          <TableCell>
+                            <DateTime value={call.createdAt} />
+                          </TableCell>
                           <TableCell className="font-medium">
                             {call.operation.replaceAll("_", " ")}
                           </TableCell>
@@ -381,9 +380,12 @@ export function JiraCachePage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            {when(
-                              ticket.detailFetchedAt ?? ticket.summaryFetchedAt,
-                            )}
+                            <DateTime
+                              value={
+                                ticket.detailFetchedAt ??
+                                ticket.summaryFetchedAt
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             <div className="flex justify-end gap-1">

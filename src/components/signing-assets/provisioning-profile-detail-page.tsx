@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -179,19 +180,11 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
           />
           <Detail
             label={t("created")}
-            value={
-              profile.createdAt
-                ? new Date(profile.createdAt).toLocaleDateString()
-                : "—"
-            }
+            value={<DateTime showTime={false} value={profile.createdAt} />}
           />
           <Detail
             label={t("expires")}
-            value={
-              profile.expiresAt
-                ? new Date(profile.expiresAt).toLocaleDateString()
-                : "—"
-            }
+            value={<DateTime showTime={false} value={profile.expiresAt} />}
           />
           <Detail
             label={t("installedAgents")}
@@ -286,7 +279,7 @@ function Detail({
   className,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
   className?: string;
 }) {

@@ -13,7 +13,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateTime } from "@/lib/date-format";
+import { formatDateValue } from "@/lib/date-format";
 
 import { BuildDetailPage } from "./build-detail-page";
 
@@ -359,7 +359,9 @@ describe("BuildDetailPage", () => {
     expect(within(runsCard!).getByText("Succeeded")).toBeDefined();
     expect(within(runsCard!).getByText("Failed")).toBeDefined();
     expect(
-      within(runsCard!).getAllByText(formatDateTime("en", now)).length,
+      within(runsCard!).getAllByText(
+        formatDateValue(now, "short", { locale: "en" }),
+      ).length,
     ).toBe(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));

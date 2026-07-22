@@ -119,6 +119,8 @@ const gitState = {
       remote: true,
       current: false,
       checkedOutPath: null,
+      lastCommitMessage: "Add the detail view",
+      lastCommitAt: new Date(0).toISOString(),
     },
     {
       name: "main",
@@ -126,6 +128,8 @@ const gitState = {
       remote: true,
       current: true,
       checkedOutPath: "/Users/test/codex",
+      lastCommitMessage: "Release the thing",
+      lastCommitAt: new Date(86_400_000).toISOString(),
     },
     {
       name: "remote-only",
@@ -236,6 +240,51 @@ describe("CodebaseDetailPage", () => {
       });
     });
     expect(await screen.findByText("Git operation completed.")).toBeDefined();
+  });
+
+  test("shows the branch tip and filters branches by name", async () => {
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+    await screen.findByRole("heading", { name: "Codex" });
+
+    expect(screen.getAllByText(/Add the detail view/).length).toBeGreaterThan(
+      0,
+    );
+
+    const search = screen.getAllByRole("searchbox", {
+      name: "Search branches",
+    })[0];
+    fireEvent.change(search, { target: { value: "feature" } });
+
+    const local = screen.getByRole("table", { name: "Local branches" });
+    expect(within(local).queryByText("main")).toBeNull();
+    expect(within(local).getByText("feature/detail")).toBeDefined();
+
+    fireEvent.change(search, { target: { value: "nothing-matches" } });
+    expect(
+      screen.getAllByText("No branches match your search.").length,
+    ).toBeGreaterThan(0);
+  });
+
+  test("sorts branches by name or newest commit", async () => {
+    render(<CodebaseDetailPage codebaseId="codebase-1" />);
+    await screen.findByRole("heading", { name: "Codex" });
+
+    const names = () =>
+      within(screen.getByRole("table", { name: "Local branches" }))
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.textContent?.split(" ")[0]);
+
+    expect(names()?.[0]).toContain("feature/detail");
+
+    fireEvent.click(
+      screen.getAllByRole("combobox", { name: "Sort branches" })[0],
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Newest commit" }),
+    );
+
+    await waitFor(() => expect(names()?.[0]).toContain("main"));
   });
 
   test("loads stash patches lazily and confirms deletion", async () => {

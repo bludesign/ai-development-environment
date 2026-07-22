@@ -11,7 +11,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -27,6 +27,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -114,7 +115,6 @@ function formatBytes(value: number | null): string {
 export function CacheServerPage() {
   const t = useTranslations("cacheServer");
   const tc = useTranslations("common");
-  const locale = useLocale();
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -129,12 +129,6 @@ export function CacheServerPage() {
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const loadGeneration = useRef(0);
-
-  const formatTimestamp = useCallback(
-    (value: number | null) =>
-      value === null ? "—" : new Date(value).toLocaleString(locale),
-    [locale],
-  );
 
   const load = useCallback(
     async (requestedPage = page) => {
@@ -643,7 +637,7 @@ export function CacheServerPage() {
                     </TableCell>
                     <TableCell>{entry.repoId}</TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {formatTimestamp(entry.updatedAt)}
+                      <DateTime value={entry.updatedAt} />
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
@@ -707,30 +701,23 @@ export function CacheServerPage() {
 
       <CacheEntryDetailDialog
         entryId={detailId}
-        formatTimestamp={formatTimestamp}
         onClose={() => setDetailId(null)}
         onDeleted={() => {
           setDetailId(null);
           void load();
         }}
       />
-      <MatchLookupDialog
-        formatTimestamp={formatTimestamp}
-        onOpenChange={setMatchOpen}
-        open={matchOpen}
-      />
+      <MatchLookupDialog onOpenChange={setMatchOpen} open={matchOpen} />
     </section>
   );
 }
 
 function CacheEntryDetailDialog({
   entryId,
-  formatTimestamp,
   onClose,
   onDeleted,
 }: {
   entryId: string | null;
-  formatTimestamp: (value: number | null) => string;
   onClose: () => void;
   onDeleted: () => void;
 }) {
@@ -835,7 +822,7 @@ function CacheEntryDetailDialog({
                 <DetailRow label={t("repoId")} value={detail.entry.repoId} />
                 <DetailRow
                   label={t("updatedAt")}
-                  value={formatTimestamp(detail.entry.updatedAt)}
+                  value={<DateTime value={detail.entry.updatedAt} />}
                 />
                 <DetailRow
                   label={t("locationId")}
@@ -882,19 +869,21 @@ function CacheEntryDetailDialog({
                   />
                   <DetailRow
                     label={t("mergeStartedAt")}
-                    value={formatTimestamp(detail.location.mergeStartedAt)}
+                    value={<DateTime value={detail.location.mergeStartedAt} />}
                   />
                   <DetailRow
                     label={t("mergedAt")}
-                    value={formatTimestamp(detail.location.mergedAt)}
+                    value={<DateTime value={detail.location.mergedAt} />}
                   />
                   <DetailRow
                     label={t("partsDeletedAt")}
-                    value={formatTimestamp(detail.location.partsDeletedAt)}
+                    value={<DateTime value={detail.location.partsDeletedAt} />}
                   />
                   <DetailRow
                     label={t("lastDownloadedAt")}
-                    value={formatTimestamp(detail.location.lastDownloadedAt)}
+                    value={
+                      <DateTime value={detail.location.lastDownloadedAt} />
+                    }
                   />
                 </dl>
               ) : (
@@ -916,11 +905,9 @@ function CacheEntryDetailDialog({
 }
 
 function MatchLookupDialog({
-  formatTimestamp,
   onOpenChange,
   open,
 }: {
-  formatTimestamp: (value: number | null) => string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
@@ -1069,7 +1056,7 @@ function MatchLookupDialog({
                   <DetailRow label={t("repoId")} value={result.match.repoId} />
                   <DetailRow
                     label={t("updatedAt")}
-                    value={formatTimestamp(result.match.updatedAt)}
+                    value={<DateTime value={result.match.updatedAt} />}
                   />
                 </dl>
               </div>
@@ -1096,7 +1083,7 @@ function DetailRow({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
 }) {
   return (

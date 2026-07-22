@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
@@ -26,25 +27,6 @@ const COMMENT_FIELDS =
   "id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt";
 const STATE_FIELDS =
   "id isResolved viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url }";
-
-export function relativeAge(value: string, locale: string) {
-  const seconds = Math.round((Date.parse(value) - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 60 * 60 * 24 * 365],
-    ["month", 60 * 60 * 24 * 30],
-    ["week", 60 * 60 * 24 * 7],
-    ["day", 60 * 60 * 24],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return formatter.format(Math.round(seconds / size), unit);
-    }
-  }
-  return formatter.format(seconds, "second");
-}
 
 export function ReviewAuthor({
   actor,
@@ -80,12 +62,10 @@ export function threadLocation(thread: GitHubReviewThread, fileLabel: string) {
 }
 
 export function ReviewThreadCard({
-  locale,
   onReplyAdded,
   onStateChanged,
   thread,
 }: {
-  locale: string;
   onReplyAdded: (threadId: string, comment: GitHubReviewComment) => void;
   onStateChanged: (state: GitHubReviewThreadState) => void;
   thread: GitHubReviewThread;
@@ -170,15 +150,11 @@ export function ReviewThreadCard({
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <ReviewAuthor actor={thread.rootComment.author} />
                 <span className="text-muted-foreground">·</span>
-                <time
+                <DateTime
                   className="text-muted-foreground"
-                  dateTime={thread.rootComment.createdAt}
-                  title={new Date(thread.rootComment.createdAt).toLocaleString(
-                    locale,
-                  )}
-                >
-                  {relativeAge(thread.rootComment.createdAt, locale)}
-                </time>
+                  kind="relative"
+                  value={thread.rootComment.createdAt}
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Badge
@@ -226,12 +202,11 @@ export function ReviewThreadCard({
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <ReviewAuthor actor={comment.author} compact />
                         <span className="text-muted-foreground">·</span>
-                        <time
+                        <DateTime
                           className="text-muted-foreground"
-                          dateTime={comment.createdAt}
-                        >
-                          {relativeAge(comment.createdAt, locale)}
-                        </time>
+                          kind="relative"
+                          value={comment.createdAt}
+                        />
                       </div>
                     }
                     headerActions={

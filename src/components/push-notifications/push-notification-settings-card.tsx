@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound, RefreshCw, Save, Trash2, Upload } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 type Settings = {
   tokenConfigured: boolean;
@@ -58,6 +59,7 @@ const toBase64 = (file: File) =>
 export function PushNotificationSettingsCard() {
   const t = useTranslations("pushSettings");
   const tc = useTranslations("common");
+  const locale = useLocale();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [teamId, setTeamId] = useState("");
   const [keyId, setKeyId] = useState("");
@@ -321,14 +323,19 @@ export function PushNotificationSettingsCard() {
               {credential.expiresAt && (
                 <p className="text-xs text-muted-foreground">
                   {t("expires", {
-                    date: new Date(credential.expiresAt).toLocaleDateString(),
+                    date: formatDateValue(credential.expiresAt, "short", {
+                      locale,
+                      showTime: false,
+                    }),
                   })}
                 </p>
               )}
               {credential.lastTestedAt && (
                 <p className="text-xs text-muted-foreground">
                   {t("lastTested", {
-                    date: new Date(credential.lastTestedAt).toLocaleString(),
+                    date: formatDateValue(credential.lastTestedAt, "short", {
+                      locale,
+                    }),
                   })}
                 </p>
               )}

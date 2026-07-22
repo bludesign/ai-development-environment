@@ -2,7 +2,7 @@
 
 import { diffLines, type Change } from "diff";
 import { ChevronDown, GitCompareArrows, History } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 
 import { JiraUser } from "@/components/jira/jira-user";
@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { formatDateValue } from "@/lib/date-format";
 import { rawJiraText, stripAdfMarkdownMetadata } from "@/lib/jira-markup";
 import type {
   JiraChange,
@@ -99,10 +100,6 @@ export function buildDescriptionVersions(
   return versions;
 }
 
-function date(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : "—";
-}
-
 export function JiraDescriptionHistory({
   history,
   ticket,
@@ -111,6 +108,7 @@ export function JiraDescriptionHistory({
   ticket: JiraTicketDetail;
 }) {
   const t = useTranslations("jiraTicketDetail");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const versions = useMemo(
@@ -141,7 +139,7 @@ export function JiraDescriptionHistory({
 
   const versionLabel = (version: JiraDescriptionVersion) => {
     if (version.kind === "CURRENT") return t("currentVersion");
-    return date(version.createdAt);
+    return formatDateValue(version.createdAt, "short", { locale });
   };
 
   return (

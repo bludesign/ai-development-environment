@@ -7,7 +7,7 @@ import {
   MessageSquareText,
   RefreshCw,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -15,7 +15,6 @@ import {
   pullRequestKey,
 } from "@/components/github/pull-request-links";
 import {
-  relativeAge,
   ReviewAuthor,
   ReviewThreadCard,
 } from "@/components/github/review-thread-card";
@@ -29,6 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -88,7 +88,6 @@ export function CommentsPage({
   initialPullRequest?: string | null;
 }) {
   const t = useTranslations("githubComments");
-  const locale = useLocale();
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [page, setPage] = useState<GitHubReviewThreadPage | null>(null);
   const [configurationLoading, setConfigurationLoading] = useState(true);
@@ -379,7 +378,6 @@ export function CommentsPage({
                 {filteredThreads.map((thread) => (
                   <ReviewThreadCard
                     key={thread.id}
-                    locale={locale}
                     onReplyAdded={replyAdded}
                     onStateChanged={stateChanged}
                     thread={thread}
@@ -388,7 +386,7 @@ export function CommentsPage({
               </div>
             )
           ) : (
-            <ReviewThreadTable locale={locale} threads={filteredThreads} />
+            <ReviewThreadTable threads={filteredThreads} />
           )}
         </>
       )}
@@ -434,13 +432,7 @@ function FilterCheckbox({
   );
 }
 
-function ReviewThreadTable({
-  locale,
-  threads,
-}: {
-  locale: string;
-  threads: GitHubReviewThread[];
-}) {
+function ReviewThreadTable({ threads }: { threads: GitHubReviewThread[] }) {
   const t = useTranslations("githubComments");
   return (
     <Card className="gap-0 py-0">
@@ -491,9 +483,10 @@ function ReviewThreadTable({
                   {thread.rootComment.bodyText}
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
-                  <time dateTime={thread.rootComment.createdAt}>
-                    {relativeAge(thread.rootComment.createdAt, locale)}
-                  </time>
+                  <DateTime
+                    kind="relative"
+                    value={thread.rootComment.createdAt}
+                  />
                 </TableCell>
                 <TableCell>{thread.replies.length}</TableCell>
                 <TableCell className="text-right">

@@ -33,6 +33,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -63,6 +64,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 
 const PUSH_TYPES = [
@@ -623,7 +625,6 @@ export function PushNotificationsPage() {
                     t("presetSaved"),
                   )
                 }
-                size="sm"
                 variant="outline"
               >
                 <Save /> {t("savePreset")}
@@ -1221,7 +1222,6 @@ export function PushNotificationsPage() {
             <ExpandableHistory
               batches={history}
               expanded={expandedHistory}
-              locale={locale}
               onDelete={(id) =>
                 run(
                   `mutation Delete($id: ID!) { deletePushNotificationHistory(id: $id) }`,
@@ -1231,7 +1231,7 @@ export function PushNotificationsPage() {
               onLoad={loadEditor}
               onPreset={(batch) => {
                 setPresetName(
-                  `${t("presetFromHistory")} ${new Date(batch.createdAt).toLocaleDateString(locale)}`,
+                  `${t("presetFromHistory")} ${formatDateValue(batch.createdAt, "short", { locale, showTime: false })}`,
                 );
                 loadEditor(batch.editor);
               }}
@@ -1517,7 +1517,6 @@ function ExpandableHistory({
   onResend,
   onPreset,
   onDelete,
-  locale,
 }: {
   batches: Batch[];
   expanded: Set<string>;
@@ -1526,7 +1525,6 @@ function ExpandableHistory({
   onResend: (id: string) => Promise<void>;
   onPreset: (batch: Batch) => void;
   onDelete: (id: string) => Promise<void>;
-  locale: string;
 }) {
   const t = useTranslations("pushNotifications");
   const tc = useTranslations("common");
@@ -1573,7 +1571,7 @@ function ExpandableHistory({
                 />
               </TableCell>
               <TableCell>
-                {new Date(batch.createdAt).toLocaleString(locale)}
+                <DateTime value={batch.createdAt} />
               </TableCell>
               <TableCell>
                 <Badge variant="secondary">
@@ -1762,7 +1760,7 @@ function ExpandablePresets({
                 )}
               </TableCell>
               <TableCell>
-                {new Date(preset.updatedAt).toLocaleString()}
+                <DateTime value={preset.updatedAt} />
               </TableCell>
             </TableRow>
             {expanded.has(preset.id) && (

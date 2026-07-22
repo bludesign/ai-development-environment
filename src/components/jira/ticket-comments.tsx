@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { DateTime } from "@/components/ui/date-time";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTextInput, JiraTicketDetail } from "@/services/jira/types";
@@ -10,10 +11,6 @@ import type { JiraTextInput, JiraTicketDetail } from "@/services/jira/types";
 import { JiraUser } from "./jira-user";
 import { JiraRichTextBlock, JiraTextComposer } from "./rich-text";
 import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
-
-function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
 
 export function JiraTicketComments({
   onTicketChange,
@@ -75,9 +72,10 @@ export function JiraTicketComments({
                       </ItemTitle>
                     }
                     headerActions={
-                      <time className="col-start-1 row-start-2 -mt-1 mr-auto shrink-0 text-xs text-muted-foreground">
-                        {displayDate(comment.createdAt)}
-                      </time>
+                      <DateTime
+                        className="col-start-1 row-start-2 -mt-1 mr-auto shrink-0 text-xs text-muted-foreground"
+                        value={comment.createdAt}
+                      />
                     }
                     headerClassName="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-0.5 border-b pb-2 @md/comment:flex @md/comment:flex-row @md/comment:items-center @md/comment:gap-2"
                     showFormatOverride={false}

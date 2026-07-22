@@ -2,7 +2,7 @@
 
 import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
 import { Hammer, RefreshCw, TestTube2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -37,6 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Link, useRouter } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -250,6 +251,7 @@ function StartBuildDialog({
   coverageMode?: boolean;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   const [project, setProject] = useState<IosAppProject | null>(null);
   const [priorBuilds, setPriorBuilds] = useState<PriorBuildForTesting[]>([]);
   const [configurationId, setConfigurationId] = useState("");
@@ -779,8 +781,10 @@ function StartBuildDialog({
                   <SelectContent>
                     {compatiblePriorBuilds.map((build) => (
                       <SelectItem key={build.id} value={build.id}>
-                        {new Date(build.createdAt).toLocaleString()} ·{" "}
-                        {build.id}
+                        {formatDateValue(build.createdAt, "short", {
+                          locale,
+                        })}{" "}
+                        · {build.id}
                       </SelectItem>
                     ))}
                   </SelectContent>

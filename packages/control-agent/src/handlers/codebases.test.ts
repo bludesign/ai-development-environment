@@ -430,6 +430,24 @@ describe("codebase Git inspection", () => {
     ).toContain("origin/remote-only");
   });
 
+  test("reports each branch's tip commit", async () => {
+    const folder = await repository();
+    await git(folder, "checkout", "-b", "tip-branch");
+    await git(folder, "commit", "--allow-empty", "-m", "Tip of the branch");
+    await git(folder, "checkout", "main");
+
+    const state = await inspectCodebaseGitState(
+      folder,
+      10_000,
+      new AbortController().signal,
+    );
+    const branch = state.branches.find(
+      (candidate) => candidate.name === "tip-branch",
+    );
+    expect(branch?.lastCommitMessage).toBe("Tip of the branch");
+    expect(Number.isNaN(Date.parse(branch?.lastCommitAt ?? ""))).toBe(false);
+  });
+
   test("blocks branches checked out in another worktree", async () => {
     const folder = await repository();
     await git(folder, "branch", "linked-branch");

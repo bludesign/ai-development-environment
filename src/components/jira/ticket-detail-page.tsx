@@ -10,7 +10,7 @@ import {
   Pencil,
   RefreshCw,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   FormEvent,
   type ReactNode,
@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +75,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type {
   JiraEditField,
   JiraNamedValue,
@@ -85,10 +87,6 @@ import type {
 
 import { JIRA_TICKET_DETAIL_FIELDS } from "./ticket-graphql";
 import { useJiraTicketHistory } from "./ticket-history";
-
-function date(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
 
 function parseDateOnly(value: string): Date | undefined {
   const [year, month, day] = value.split("-").map(Number);
@@ -627,10 +625,10 @@ function TicketMetadata({ ticket }: { ticket: JiraTicketDetail }) {
         "—"
       ),
     ],
-    [t("created"), date(ticket.createdAt)],
-    [t("updated"), date(ticket.updatedAt)],
-    [t("due"), date(ticket.dueAt)],
-    [t("resolved"), date(ticket.resolvedAt)],
+    [t("created"), <DateTime key="created" value={ticket.createdAt} />],
+    [t("updated"), <DateTime key="updated" value={ticket.updatedAt} />],
+    [t("due"), <DateTime key="due" value={ticket.dueAt} />],
+    [t("resolved"), <DateTime key="resolved" value={ticket.resolvedAt} />],
   ];
   return (
     <dl className="space-y-3 text-sm">
@@ -727,6 +725,7 @@ function EditDetailsDialog({
 }) {
   const t = useTranslations("jiraTicketDetail");
   const tt = useTranslations("jiraTickets");
+  const locale = useLocale();
   const initial = useMemo<DetailDraft>(
     () => ({
       priorityId:
@@ -864,8 +863,9 @@ function EditDetailsDialog({
                   >
                     <CalendarDays />
                     {selectedDueDate
-                      ? selectedDueDate.toLocaleDateString(undefined, {
-                          dateStyle: "medium",
+                      ? formatDateValue(selectedDueDate, "short", {
+                          locale,
+                          showTime: false,
                         })
                       : t("pickDate")}
                   </Button>

@@ -24,6 +24,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -648,9 +649,10 @@ export function ProvisioningProfilesPage() {
                         </TableCell>
                         <TableCell>{profile.deviceCount}</TableCell>
                         <TableCell>
-                          {profile.expiresAt
-                            ? new Date(profile.expiresAt).toLocaleDateString()
-                            : "—"}
+                          <DateTime
+                            showTime={false}
+                            value={profile.expiresAt}
+                          />
                           {profile.expired && (
                             <Badge className="ml-2" variant="destructive">
                               {t("expired")}
@@ -781,9 +783,10 @@ export function ProvisioningProfilesPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {certificate.expiresAt
-                          ? new Date(certificate.expiresAt).toLocaleDateString()
-                          : "—"}
+                        <DateTime
+                          showTime={false}
+                          value={certificate.expiresAt}
+                        />
                       </TableCell>
                       <TableCell>
                         {certificate.installedAgents

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -139,9 +140,6 @@ export function DevicesPage() {
       }),
     [devices, locale, sort],
   );
-
-  const formatDate = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : "—";
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -281,13 +279,13 @@ export function DevicesPage() {
                     {device.lastIpAddress ?? t("unavailable")}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(device.createdAt)}
+                    <DateTime value={device.createdAt} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(device.registeredAt)}
+                    <DateTime value={device.registeredAt} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(device.lastSeenAt)}
+                    <DateTime value={device.lastSeenAt} />
                   </TableCell>
                 </TableRow>
               ))}

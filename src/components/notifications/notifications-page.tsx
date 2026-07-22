@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -45,6 +46,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -68,8 +70,7 @@ const PREFERENCE_FIELDS = `
 type TimeRange = { key: string; start: string; end: string };
 
 function localDayKey(value: string): string {
-  const date = new Date(value);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  return dayKey(value) ?? value;
 }
 
 function localDayRange(value: string): TimeRange {
@@ -326,7 +327,6 @@ export function NotificationsPage() {
   }, [loadMore, nextCursor]);
 
   const groupedNotifications = useMemo(() => {
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     const groups: Array<{
       key: string;
       label: string;
@@ -340,7 +340,10 @@ export function NotificationsPage() {
       else {
         groups.push({
           key: range.key,
-          label: formatter.format(new Date(notification.createdAt)),
+          label: formatDateValue(notification.createdAt, "long", {
+            locale,
+            showTime: false,
+          }),
           range,
           items: [notification],
         });
@@ -955,12 +958,7 @@ export function NotificationsPage() {
                     </TableCell>
                     <TableCell>{subscription.locale ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      <time dateTime={subscription.lastSeenAt}>
-                        {new Date(subscription.lastSeenAt).toLocaleString(
-                          locale,
-                          { dateStyle: "medium", timeStyle: "short" },
-                        )}
-                      </time>
+                      <DateTime value={subscription.lastSeenAt} />
                     </TableCell>
                     <TableCell className="pr-4">
                       <div className="flex justify-end gap-1">
@@ -1227,19 +1225,10 @@ export function NotificationsPage() {
                               </div>
                             </TableCell>
                             <TableCell className="text-right text-xs text-muted-foreground">
-                              <time
-                                dateTime={notification.createdAt}
-                                title={new Date(
-                                  notification.createdAt,
-                                ).toLocaleString(locale)}
-                              >
-                                {new Date(
-                                  notification.createdAt,
-                                ).toLocaleTimeString(locale, {
-                                  hour: "numeric",
-                                  minute: "2-digit",
-                                })}
-                              </time>
+                              <DateTime
+                                kind="time"
+                                value={notification.createdAt}
+                              />
                             </TableCell>
                           </TableRow>
                         );

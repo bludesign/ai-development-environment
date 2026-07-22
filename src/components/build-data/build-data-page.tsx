@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +59,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 
 type AgentProgress = {
   agent: Agent;
@@ -141,25 +143,6 @@ function formatBytes(value: number, locale: string): string {
   )} ${units[index]}`;
 }
 
-function relativeAge(value: string, locale: string, now: number): string {
-  const seconds = Math.round((Date.parse(value) - now) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 365 * 24 * 60 * 60],
-    ["month", 30 * 24 * 60 * 60],
-    ["week", 7 * 24 * 60 * 60],
-    ["day", 24 * 60 * 60],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return formatter.format(Math.round(seconds / size), unit);
-    }
-  }
-  return formatter.format(seconds, "second");
-}
-
 export function BuildDataPage() {
   const t = useTranslations("buildData");
   const tc = useTranslations("common");
@@ -178,7 +161,6 @@ export function BuildDataPage() {
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyVersion, setHistoryVersion] = useState(0);
-  const [now, setNow] = useState<number | null>(null);
 
   const applyCollection = useCallback((next: DerivedDataCollection) => {
     setCollection(next);
@@ -289,16 +271,6 @@ export function BuildDataPage() {
     return () => window.clearTimeout(timer);
   }, [historyVersion, loadHistory]);
 
-  useEffect(() => {
-    const update = () => setNow(Date.now());
-    const initial = window.setTimeout(update, 0);
-    const timer = window.setInterval(update, 30_000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(timer);
-    };
-  }, []);
-
   const allEntries = collection?.entries ?? [];
   const entries = allEntries.filter((entry) => entry.kind !== "DEVICE_SUPPORT");
   const deviceSupportEntries = allEntries.filter(
@@ -385,12 +357,11 @@ export function BuildDataPage() {
 
   const groupedHistory = useMemo(() => {
     const groups = new Map<string, { label: string; items: HistoryItem[] }>();
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const item of history) {
       const date = new Date(item.deletedAt);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const key = dayKey(date) ?? item.deletedAt;
       const group = groups.get(key) ?? {
-        label: formatter.format(date),
+        label: formatDateValue(date, "long", { locale, showTime: false }),
         items: [],
       };
       group.items.push(item);
@@ -732,16 +703,8 @@ export function BuildDataPage() {
                           {item.worktreePath ?? "—"}
                         </TableCell>
                         <TableCell>{item.agentName}</TableCell>
-                        <TableCell
-                          title={new Date(item.deletedAt).toLocaleString(
-                            locale,
-                          )}
-                        >
-                          {relativeAge(
-                            item.deletedAt,
-                            locale,
-                            now ?? Date.parse(item.deletedAt),
-                          )}
+                        <TableCell>
+                          <DateTime kind="relative" value={item.deletedAt} />
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary">

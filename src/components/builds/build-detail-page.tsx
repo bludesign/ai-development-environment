@@ -29,6 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { DetailItem, DetailList } from "@/components/ui/detail-list";
 import {
   Dialog,
@@ -69,7 +70,6 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateTime } from "@/lib/date-format";
 import type { PublicOrigin } from "@/lib/public-origin";
 import { cn } from "@/lib/utils";
 import {
@@ -198,7 +198,6 @@ export function BuildDetailPage({
   publicOrigin: PublicOrigin | null;
 }) {
   const t = useTranslations("builds");
-  const locale = useLocale();
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
   const [logs, setLogs] = useState<BuildLogEvent[]>([]);
@@ -376,7 +375,6 @@ export function BuildDetailPage({
   const coverageAvailable =
     resultBundle?.metadata.coverageAvailable === true ||
     configuration?.advancedSettings?.codeCoverage === true;
-  const date = (value: string | null) => formatDateTime(locale, value);
   const highlightColor = build?.worktree?.highlightColor;
 
   const copyCommandSummary = async (commandSummary: string) => {
@@ -743,10 +741,13 @@ export function BuildDetailPage({
                   value={worktree?.headSha ?? "—"}
                   mono
                 />
-                <Detail label={t("startedAt")} value={date(build.startedAt)} />
+                <Detail
+                  label={t("startedAt")}
+                  value={<DateTime value={build.startedAt} />}
+                />
                 <Detail
                   label={t("finishedAt")}
-                  value={date(build.finishedAt)}
+                  value={<DateTime value={build.finishedAt} />}
                 />
                 <Detail
                   label={t("artifactDirectory")}
@@ -850,13 +851,14 @@ export function BuildDetailPage({
                       >
                         {humanizeConstant(deployment.status)}
                       </Badge>
-                      <time className="text-xs text-muted-foreground">
-                        {date(
+                      <DateTime
+                        className="text-xs text-muted-foreground"
+                        value={
                           deployment.finishedAt ??
-                            deployment.startedAt ??
-                            deployment.createdAt,
-                        )}
-                      </time>
+                          deployment.startedAt ??
+                          deployment.createdAt
+                        }
+                      />
                     </div>
                   </div>
                   {deployment.error && (
@@ -878,13 +880,12 @@ export function BuildDetailPage({
                       >
                         {humanizeConstant(entry.status)}
                       </Badge>
-                      <time className="text-xs text-muted-foreground">
-                        {date(
-                          entry.finishedAt ??
-                            entry.startedAt ??
-                            entry.createdAt,
-                        )}
-                      </time>
+                      <DateTime
+                        className="text-xs text-muted-foreground"
+                        value={
+                          entry.finishedAt ?? entry.startedAt ?? entry.createdAt
+                        }
+                      />
                     </div>
                   </div>
                   {entry.outputRelativePath && (
@@ -1405,7 +1406,7 @@ function Detail({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
 }) {
   return (

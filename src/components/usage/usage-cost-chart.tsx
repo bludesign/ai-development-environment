@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/chart";
 
 import type { UsageDayRow } from "./aggregate-usage";
+import { formatDateValue } from "@/lib/date-format";
 
 const SERIES_COLORS = [
   "var(--chart-1)",
@@ -116,17 +117,12 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
       }),
     [locale],
   );
-  const date = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      }),
-    [locale],
-  );
   const formatPeriod = (period: string) =>
-    date.format(new Date(`${period}T00:00:00Z`));
+    formatDateValue(`${period}T00:00:00Z`, "short", {
+      locale,
+      utc: true,
+      showTime: false,
+    });
 
   return (
     <Card className="gap-0 py-0">

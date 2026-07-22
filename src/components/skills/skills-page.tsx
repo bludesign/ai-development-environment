@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -366,7 +367,7 @@ function DatabaseTable({ overview }: { overview: SkillsOverview }) {
                 </TableCell>
                 <TableCell>{skill.files.length}</TableCell>
                 <TableCell>
-                  {new Date(skill.updatedAt).toLocaleString()}
+                  <DateTime value={skill.updatedAt} />
                 </TableCell>
               </TableRow>
             ))}

@@ -13,7 +13,7 @@ import {
   Unplug,
   Upload,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   DragEvent,
   FormEvent,
@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type {
   GitHubAppSettingsView,
   GitHubSettingsView,
@@ -225,6 +226,7 @@ function EditorSettingsCard() {
 function GitHubAppSettingsCard() {
   const t = useTranslations("githubAppSettings");
   const tc = useTranslations("common");
+  const locale = useLocale();
   const [settings, setSettings] = useState<GitHubAppSettingsView | null>(null);
   const [appId, setAppId] = useState("");
   const [installationId, setInstallationId] = useState("");
@@ -554,7 +556,9 @@ function GitHubAppSettingsCard() {
                     {settings.verifiedAt && (
                       <p className="mt-1 text-xs">
                         {t("lastVerified", {
-                          date: new Date(settings.verifiedAt).toLocaleString(),
+                          date: formatDateValue(settings.verifiedAt, "short", {
+                            locale,
+                          }),
                         })}
                       </p>
                     )}

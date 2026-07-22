@@ -14,7 +14,9 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { DateTime } from "@/components/ui/date-time";
 import { Link } from "@/i18n/navigation";
+import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -23,39 +25,14 @@ import {
 
 import type { AppNotificationView } from "./types";
 
-export function relativeNotificationTime(
-  value: string,
-  locale: string,
-  now: number,
-): string {
-  const seconds = Math.round((Date.parse(value) - now) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 365 * 24 * 60 * 60],
-    ["month", 30 * 24 * 60 * 60],
-    ["week", 7 * 24 * 60 * 60],
-    ["day", 24 * 60 * 60],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return formatter.format(Math.round(seconds / size), unit);
-    }
-  }
-  return formatter.format(seconds, "second");
-}
-
 export function NotificationCard({
   notification,
   arriving = false,
-  now,
   onDelete,
   onDismiss,
 }: {
   notification: AppNotificationView;
   arriving?: boolean;
-  now: number | null;
   onDelete?: (id: string) => void;
   onDismiss?: (id: string) => void;
 }) {
@@ -64,9 +41,8 @@ export function NotificationCard({
   const color = notification.highlightColor;
   const [deleteArmed, setDeleteArmed] = useState(false);
   const deleteTimer = useRef<number | null>(null);
-  const fullTime = new Date(notification.createdAt).toLocaleString(locale, {
-    dateStyle: "full",
-    timeStyle: "medium",
+  const fullTime = formatDateValue(notification.createdAt, "long", {
+    locale,
   });
 
   useEffect(
@@ -118,17 +94,12 @@ export function NotificationCard({
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
               {notification.body}
             </p>
-            <time
+            <DateTime
               className="mt-1.5 block text-[11px] text-muted-foreground"
-              dateTime={notification.createdAt}
-              title={fullTime}
-            >
-              {relativeNotificationTime(
-                notification.createdAt,
-                locale,
-                now ?? Date.parse(notification.createdAt),
-              )}
-            </time>
+              hover={false}
+              kind="relative"
+              value={notification.createdAt}
+            />
           </Link>
           {onDismiss && (
             <Button

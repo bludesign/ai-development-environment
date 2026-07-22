@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -50,6 +51,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -60,7 +62,6 @@ import {
   buildDuration,
   buildSnapshotName,
   buildStatusVariant,
-  relativeBuildAge,
 } from "./build-format";
 import { BUILD_LIST_FIELDS } from "./graphql-fields";
 import { RebuildButton } from "./rebuild-button";
@@ -199,18 +200,20 @@ export function BuildsPage() {
       label: string;
       items: BuildRecord[];
     }> = [];
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const build of builds) {
       const timestamp = build.startedAt ?? build.createdAt;
       const buildDate = new Date(timestamp);
-      const dateKey = `${buildDate.getFullYear()}-${buildDate.getMonth()}-${buildDate.getDate()}`;
+      const dateKey = dayKey(buildDate) ?? timestamp;
       const group = groups.at(-1);
       if (group?.dateKey === dateKey) group.items.push(build);
       else {
         groups.push({
           key: `${dateKey}-${build.id}`,
           dateKey,
-          label: formatter.format(buildDate),
+          label: formatDateValue(buildDate, "long", {
+            locale,
+            showTime: false,
+          }),
           items: [build],
         });
       }
@@ -471,18 +474,11 @@ export function BuildsPage() {
                                 <TableCell>{build.destination.name}</TableCell>
                                 <TableCell className="text-muted-foreground">
                                   <div className="flex flex-col gap-0.5">
-                                    <time
-                                      dateTime={startedAt}
-                                      title={new Date(startedAt).toLocaleString(
-                                        locale,
-                                      )}
-                                    >
-                                      {relativeBuildAge(
-                                        startedAt,
-                                        locale,
-                                        buildTime,
-                                      )}
-                                    </time>
+                                    <DateTime
+                                      kind="time"
+                                      relativeToday
+                                      value={startedAt}
+                                    />
                                     <span className="text-xs">
                                       {t("durationValue", {
                                         duration: buildDuration(

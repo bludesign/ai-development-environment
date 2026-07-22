@@ -1449,7 +1449,18 @@
     "stashesTruncated": "Solo se muestran los primeros 200 stashes.",
     "apply": "Aplicar",
     "confirmDeleteStashTitle": "¿Eliminar el stash?",
-    "confirmDeleteStashDescription": "{stash} se eliminará permanentemente. Aplícalo primero si necesitas conservar sus cambios."
+    "confirmDeleteStashDescription": "{stash} se eliminará permanentemente. Aplícalo primero si necesitas conservar sus cambios.",
+    "stashesTitle": "Stashes",
+    "stashMessage": "Stash",
+    "searchBranches": "Buscar ramas",
+    "searchBranchesPlaceholder": "Filtrar por nombre de rama",
+    "noMatchingBranches": "Ninguna rama coincide con tu búsqueda.",
+    "sortBranches": "Ordenar ramas",
+    "sortByName": "Nombre",
+    "sortByNewestCommit": "Commit más reciente",
+    "searchStashes": "Buscar stashes",
+    "searchStashesPlaceholder": "Filtrar por mensaje o selector",
+    "noMatchingStashes": "Ningún stash coincide con tu búsqueda."
   },
   "worktrees": {
     "title": "Árboles de trabajo",

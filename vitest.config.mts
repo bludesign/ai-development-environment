@@ -42,6 +42,10 @@ export default defineConfig({
     ],
   },
   test: {
+    // Date tests assert that a zoneless format differs from the UTC one, so the run
+    // needs a fixed non-UTC zone. CI machines default to UTC, which makes those
+    // assertions vacuously equal.
+    env: { TZ: "America/New_York" },
     environment: "jsdom",
     exclude: [...configDefaults.exclude, "packages/control-agent/**"],
   },
