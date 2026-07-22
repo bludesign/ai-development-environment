@@ -138,16 +138,17 @@ function renderSidebar() {
 }
 
 describe("NotificationsSidebar", () => {
-  test("shows live relative times with the full date on hover", async () => {
+  test("shows live relative times without a tooltip or hover card", async () => {
     const setInterval = vi.spyOn(window, "setInterval");
     renderSidebar();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
     const timestamp = document.querySelector("time");
     expect(timestamp?.textContent).not.toContain("2026");
-    // The full date moved from a native title tooltip into a hover card.
+    // Sidebar timestamps opt out of both the native title tooltip and the
+    // hover card; the full date lives in the row's context menu instead.
     expect(timestamp?.getAttribute("title")).toBeNull();
-    expect(timestamp?.getAttribute("data-slot")).toBe("hover-card-trigger");
+    expect(timestamp?.getAttribute("data-slot")).toBeNull();
     expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 1_000);
     setInterval.mockRestore();
   });
