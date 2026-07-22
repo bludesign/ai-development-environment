@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import {
   SearchableSelect,
   type SearchableSelectOption,
-} from "@/components/ui/searchable-select";
+} from "@/components/common/searchable-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {

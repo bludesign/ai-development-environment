@@ -14,7 +14,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import { Link } from "@/i18n/navigation";
 import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";

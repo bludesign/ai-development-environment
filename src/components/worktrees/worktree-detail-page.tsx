@@ -25,8 +25,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DateTime } from "@/components/ui/date-time";
-import { DetailItem, DetailList } from "@/components/ui/detail-list";
+import { DateTime } from "@/components/common/date-time";
+import { DetailItem, DetailList } from "@/components/common/detail-list";
 import {
   Empty,
   EmptyDescription,

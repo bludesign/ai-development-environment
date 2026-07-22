@@ -29,8 +29,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { DateTime } from "@/components/ui/date-time";
-import { DetailItem, DetailList } from "@/components/ui/detail-list";
+import { DateTime } from "@/components/common/date-time";
+import { DetailItem, DetailList } from "@/components/common/detail-list";
 import {
   Dialog,
   DialogContent,
