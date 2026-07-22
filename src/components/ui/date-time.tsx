@@ -56,10 +56,10 @@ function DateHoverContent({
 
   return (
     <>
-      <p className="text-sm font-medium tabular-nums">
+      <p className="text-xs font-medium tabular-nums">
         {formatDateValue(date, "long", { locale, hour12, utc })}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+      <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
         {now === null
           ? null
           : `${formatDateValue(date, "relative", { locale, now })} · `}
@@ -141,7 +141,7 @@ export function DateTime({
   return (
     <HoverCard>
       <HoverCardTrigger asChild>{element}</HoverCardTrigger>
-      <HoverCardContent className="w-auto max-w-[calc(100vw-2rem)]">
+      <HoverCardContent className="w-auto max-w-[calc(100vw-2rem)] p-2">
         <DateHoverContent
           date={date}
           hour12={hour12}
