@@ -48,6 +48,34 @@ afterEach(() => {
 });
 
 describe("IosDeviceSettingsCard", () => {
+  test("keeps profile and App Store Connect acquisition guidance visible for configured credentials", async () => {
+    request.mockResolvedValue({
+      iosDeviceSettings: settings({
+        appStoreConnectConfigured: true,
+        appStoreConnectIssuerId: "issuer-1",
+        appStoreConnectKeyId: "key-1",
+        appStoreConnectPrivateKeyConfigured: true,
+      }),
+    } as never);
+
+    render(<IosDeviceSettingsCard />);
+
+    expect(await screen.findByDisplayValue("issuer-1")).toBeDefined();
+    expect(
+      screen.getByText(
+        /iOS displays this organization while the enrollment profile is installed/,
+      ),
+    ).toBeDefined();
+    expect(screen.getByText(/stable reverse-DNS identifier/)).toBeDefined();
+    const apiKeysLink = screen.getByRole("link", {
+      name: /Open App Store Connect API keys/,
+    });
+    expect(apiKeysLink.getAttribute("href")).toBe(
+      "https://appstoreconnect.apple.com/access/integrations/api",
+    );
+    expect(apiKeysLink.getAttribute("target")).toBe("_blank");
+  });
+
   test("accepts a dropped .p8, saves and verifies it, and clears the browser value", async () => {
     const initial = settings();
     const configured = settings({

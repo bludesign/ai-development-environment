@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { SettingsHelpLink } from "@/components/settings-help-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -237,6 +238,9 @@ export function JiraSettingsPage({
                   type="email"
                   value={email}
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("accountHelp")}
+                </p>
               </div>
               <div>
                 <Label
@@ -262,6 +266,12 @@ export function JiraSettingsPage({
                   {settings?.tokenConfigured
                     ? t("tokenKeepHelp")
                     : t("tokenHelp")}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("tokenAcquireHelp")}{" "}
+                  <SettingsHelpLink href="https://id.atlassian.com/manage-profile/security/api-tokens">
+                    {t("createToken")}
+                  </SettingsHelpLink>
                 </p>
               </div>
               {connection && (

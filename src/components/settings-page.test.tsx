@@ -68,6 +68,20 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("region", { name: "Integrations" })).toBeDefined();
     expect(tokenInput.type).toBe("password");
     expect(tokenInput.value).toBe("");
+    const createTokenLink = screen.getByRole("link", {
+      name: /Create fine-grained token/,
+    });
+    expect(createTokenLink.getAttribute("href")).toBe(
+      "https://github.com/settings/personal-access-tokens/new",
+    );
+    expect(createTokenLink.getAttribute("target")).toBe("_blank");
+    expect(createTokenLink.getAttribute("rel")).toBe("noreferrer");
+    expect(
+      await screen.findByRole("link", { name: /Download Visual Studio Code/ }),
+    ).toHaveProperty("href", "https://code.visualstudio.com/download");
+    expect(
+      screen.getByRole("link", { name: /Download VS Code Insiders/ }),
+    ).toHaveProperty("href", "https://code.visualstudio.com/insiders/");
 
     fireEvent.change(tokenInput, { target: { value: "replacement-token" } });
     const form = tokenInput.closest("form");
@@ -152,9 +166,12 @@ describe("SettingsPage", () => {
     const privateKey = screen.getByLabelText(
       "PEM private key",
     ) as HTMLTextAreaElement;
-    expect(
-      screen.getByRole("link", { name: /New GitHub App/ }).getAttribute("href"),
-    ).toBe("https://github.com/settings/apps/new");
+    const appLink = screen.getByRole("link", { name: /New GitHub App/ });
+    expect(appLink.getAttribute("href")).toBe(
+      "https://github.com/settings/apps/new",
+    );
+    expect(appLink.getAttribute("target")).toBe("_blank");
+    expect(appLink.getAttribute("rel")).toBe("noreferrer");
     expect(screen.getByText(/Actions to Read and write/)).toBeDefined();
     expect(
       screen.getByText(
