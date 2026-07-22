@@ -27,6 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -189,14 +190,6 @@ export function DeviceDetailPage({ id }: { id: string }) {
       window.clearTimeout(timer);
     };
   }, [firmwareDeviceId, firmwareProduct]);
-
-  const formatDate = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : "—";
-
-  const formatReleaseDate = (value: string) =>
-    new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-      new Date(value),
-    );
 
   const rename = async (event: FormEvent) => {
     event.preventDefault();
@@ -490,7 +483,9 @@ export function DeviceDetailPage({ id }: { id: string }) {
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">{t("lastSeen")}</dt>
-              <dd className="mt-1">{formatDate(device.lastSeenAt)}</dd>
+              <dd className="mt-1">
+                <DateTime value={device.lastSeenAt} />
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">
@@ -533,7 +528,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
                     {t(`ipHeaderSource.${observation.headerSource}`)}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(observation.observedAt)}
+                    <DateTime value={observation.observedAt} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -569,10 +564,10 @@ export function DeviceDetailPage({ id }: { id: string }) {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(enrollment.createdAt)}
+                    <DateTime value={enrollment.createdAt} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(enrollment.consumedAt)}
+                    <DateTime value={enrollment.consumedAt} />
                   </TableCell>
                   <TableCell>
                     {enrollment.failureCode ?? t("unavailable")}
@@ -635,7 +630,10 @@ export function DeviceDetailPage({ id }: { id: string }) {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       <time dateTime={version.releaseDate}>
-                        {formatReleaseDate(version.releaseDate)}
+                        <DateTime
+                          showTime={false}
+                          value={version.releaseDate}
+                        />
                       </time>
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">

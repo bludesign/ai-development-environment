@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Item,
   ItemActions,
@@ -48,10 +49,6 @@ const PRIORITY_CLASSES: Record<string, string> = {
   lowest:
     "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300",
 };
-
-function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
 
 function priorityClass(priority: string) {
   return PRIORITY_CLASSES[priority.trim().toLowerCase()];
@@ -337,10 +334,10 @@ function DetailGrid({ ticket }: { ticket: JiraTicketDetail }) {
         "—"
       ),
     ],
-    [t("created"), displayDate(ticket.createdAt)],
-    [t("updated"), displayDate(ticket.updatedAt)],
-    [t("due"), displayDate(ticket.dueAt)],
-    [t("resolved"), displayDate(ticket.resolvedAt)],
+    [t("created"), <DateTime key="created" value={ticket.createdAt} />],
+    [t("updated"), <DateTime key="updated" value={ticket.updatedAt} />],
+    [t("due"), <DateTime key="due" value={ticket.dueAt} />],
+    [t("resolved"), <DateTime key="resolved" value={ticket.resolvedAt} />],
   ];
   return (
     <dl className="grid gap-3 rounded-lg bg-muted/50 p-4 text-sm sm:grid-cols-2">

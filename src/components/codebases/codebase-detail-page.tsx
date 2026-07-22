@@ -20,7 +20,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
@@ -30,6 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -117,7 +118,6 @@ function persistedState(codebase: CodebaseDetail): CodebaseGitState {
 export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   const t = useTranslations("codebaseDetail");
   const codebaseT = useTranslations("codebases");
-  const locale = useLocale();
   const [codebase, setCodebase] = useState<CodebaseDetail | null>(null);
   const [gitState, setGitState] = useState<CodebaseGitState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -427,8 +427,6 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
     gitState?.branches.filter((branch) => branch.local) ?? [];
   const remoteBranches =
     gitState?.branches.filter((branch) => branch.remote) ?? [];
-  const date = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : codebaseT("never");
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -542,7 +540,12 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             />
             <Info
               label={t("lastFetched")}
-              value={date(codebase.lastFetchedAt)}
+              value={
+                <DateTime
+                  fallback={codebaseT("never")}
+                  value={codebase.lastFetchedAt}
+                />
+              }
             />
           </dl>
           {activeJob && (
@@ -908,7 +911,6 @@ function StashList({
   ) => Promise<void>;
 }) {
   const t = useTranslations("codebaseDetail");
-  const locale = useLocale();
   const [copyStates, setCopyStates] = useState<Record<string, CopyState>>({});
 
   const copyPatch = async (stashOid: string, patch: string) => {
@@ -946,7 +948,7 @@ function StashList({
                   <p className="break-words font-medium">{stash.message}</p>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
                     {stash.selector} · {stash.oid.slice(0, 10)} ·{" "}
-                    {new Date(stash.createdAt).toLocaleString(locale)}
+                    <DateTime value={stash.createdAt} />
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -1068,7 +1070,7 @@ function Info({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
 }) {
   return (
@@ -1076,7 +1078,7 @@ function Info({
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
         className={mono ? "truncate font-mono text-xs" : "truncate"}
-        title={value}
+        title={typeof value === "string" ? value : undefined}
       >
         {value}
       </dd>

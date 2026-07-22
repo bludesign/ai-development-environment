@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -158,9 +159,7 @@ export function SkillGroupsPage() {
                     <TableCell>{group.skills?.length ?? 0}</TableCell>
                     <TableCell>{group.repositories?.length ?? 0}</TableCell>
                     <TableCell>
-                      {group.updatedAt
-                        ? new Date(group.updatedAt).toLocaleString()
-                        : "—"}
+                      <DateTime value={group.updatedAt} />
                     </TableCell>
                   </TableRow>
                 ))}

@@ -124,6 +124,7 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { createClientId } from "@/lib/browser-utils";
+import { formatDateValue } from "@/lib/date-format";
 import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
 import {
   controlPlaneRequest,
@@ -1185,10 +1186,10 @@ function FetchAge({
       ? t("neverFetched")
       : age < 60_000
         ? t("secondsAgo", { count: Math.floor(age / 1_000) })
-        : new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(
-            -Math.floor(age / 60_000),
-            "minute",
-          );
+        : formatDateValue(codebase.lastFetchedAt, "relative", {
+            locale,
+            now: now ?? undefined,
+          });
   return (
     <span
       className={cn(

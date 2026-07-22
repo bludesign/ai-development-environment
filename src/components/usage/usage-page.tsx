@@ -32,6 +32,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 import type { AggregatedUsage, UsageMetrics } from "./aggregate-usage";
 import { UsageCostChart } from "./usage-cost-chart";
@@ -426,10 +427,8 @@ function UsageTable({
   const t = useTranslations("usage");
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
-  const dateFormatter = new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeZone: "UTC",
-  });
+  const formatDay = (value: string) =>
+    formatDateValue(value, "short", { locale, utc: true, showTime: false });
   const toggle = (
     setter: React.Dispatch<React.SetStateAction<Set<string>>>,
     key: string,
@@ -479,9 +478,7 @@ function UsageTable({
                     >
                       {dayExpanded ? <ChevronDown /> : <ChevronRight />}
                       <span>
-                        {dateFormatter.format(
-                          new Date(`${day.period}T00:00:00Z`),
-                        )}
+                        {formatDay(`${day.period}T00:00:00Z`)}
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
                           {t("modelCount", { count: day.models.length })}
                         </span>

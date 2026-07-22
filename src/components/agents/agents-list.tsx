@@ -1,7 +1,7 @@
 "use client";
 
 import { Copy, Laptop, Plus, RefreshCw } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,6 +28,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 import { StatusBadge } from "./status-badge";
 import { AGENT_FIELDS } from "./graphql-fields";
@@ -41,6 +42,7 @@ export function AgentsList({
   localServerOrigins?: string[];
 }) {
   const t = useTranslations("agents");
+  const locale = useLocale();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -189,7 +191,9 @@ export function AgentsList({
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
               {t("expires", {
-                date: new Date(enrollment.expiresAt).toLocaleString(),
+                date: formatDateValue(enrollment.expiresAt, "short", {
+                  locale,
+                }),
               })}
             </p>
           </CardContent>
@@ -250,7 +254,9 @@ export function AgentsList({
                       <dt>{t("lastSeen")}</dt>
                       <dd className="text-foreground">
                         {agent.lastSeenAt
-                          ? new Date(agent.lastSeenAt).toLocaleString()
+                          ? formatDateValue(agent.lastSeenAt, "short", {
+                              locale,
+                            })
                           : t("never")}
                       </dd>
                     </div>

@@ -14,7 +14,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
-import { relativeNotificationTime } from "./notification-card";
+import { formatDateValue } from "@/lib/date-format";
 import { NotificationsSidebar } from "./notifications-sidebar";
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -145,23 +145,19 @@ describe("NotificationsSidebar", () => {
 
     const timestamp = document.querySelector("time");
     expect(timestamp?.textContent).not.toContain("2026");
-    expect(timestamp?.getAttribute("title")).toBe(
-      new Date(existing.createdAt).toLocaleString("en", {
-        dateStyle: "full",
-        timeStyle: "medium",
-      }),
-    );
+    // The full date moved from a native title tooltip into a hover card.
+    expect(timestamp?.getAttribute("title")).toBeNull();
+    expect(timestamp?.getAttribute("data-slot")).toBe("hover-card-trigger");
     expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 1_000);
     setInterval.mockRestore();
   });
 
   test("formats relative notification ages", () => {
     expect(
-      relativeNotificationTime(
-        existing.createdAt,
-        "en",
-        Date.parse(existing.createdAt) + 2 * 60 * 1_000,
-      ),
+      formatDateValue(existing.createdAt, "relative", {
+        locale: "en",
+        now: Date.parse(existing.createdAt) + 2 * 60 * 1_000,
+      }),
     ).toBe("2 minutes ago");
   });
 
@@ -220,10 +216,7 @@ describe("NotificationsSidebar", () => {
 
     expect(
       await screen.findByText(
-        new Date(existing.createdAt).toLocaleString("en", {
-          dateStyle: "full",
-          timeStyle: "medium",
-        }),
+        formatDateValue(existing.createdAt, "long", { locale: "en" }),
       ),
     ).toBeDefined();
     expect(

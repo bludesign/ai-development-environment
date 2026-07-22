@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 import type { IosDeviceSettings } from "./types";
 import { IOS_DEVICE_SETTINGS_FIELDS } from "./types";
@@ -76,12 +77,10 @@ export function IosDeviceSettingsCard() {
   }, [load]);
 
   const formatDate = (value: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(value))
-      : t("unavailable");
+    formatDateValue(value, "short", {
+      locale,
+      fallback: t("unavailable"),
+    });
 
   const saveProfile = async (event: FormEvent) => {
     event.preventDefault();

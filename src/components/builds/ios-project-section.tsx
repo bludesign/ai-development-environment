@@ -10,7 +10,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -53,6 +53,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 import type {
   BuildAction,
@@ -112,6 +113,7 @@ export function IosProjectSection({
   checkouts?: ProjectCheckout[];
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   const [activeCodebaseId, setActiveCodebaseId] = useState(
     checkouts?.find((checkout) => checkout.available)?.codebaseId ?? codebaseId,
   );
@@ -374,9 +376,11 @@ export function IosProjectSection({
                           <p className="mt-1 text-xs text-muted-foreground">
                             {configuration.observation?.lastParsedAt
                               ? t("lastParsed", {
-                                  value: new Date(
+                                  value: formatDateValue(
                                     configuration.observation.lastParsedAt,
-                                  ).toLocaleString(),
+                                    "short",
+                                    { locale },
+                                  ),
                                 })
                               : t("neverParsed")}
                             {configuration.observation?.stale

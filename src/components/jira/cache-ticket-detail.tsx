@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -25,10 +26,6 @@ import type { JiraCachedTicketDetail } from "@/services/jira/types";
 
 const DETAIL_FIELDS =
   "issueKey projectKey summary status coverage stale summaryFetchedAt detailFetchedAt commentsFetchedAt updatedAt summaryData detailData commentsData cacheEntries { id operation fetchedAt }";
-
-function date(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
 
 export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
   const t = useTranslations("jiraCacheDetail");
@@ -171,11 +168,11 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
             />
             <Metadata
               label={t("detailFetched")}
-              value={date(ticket.detailFetchedAt)}
+              value={<DateTime value={ticket.detailFetchedAt} />}
             />
             <Metadata
               label={t("commentsFetched")}
-              value={date(ticket.commentsFetchedAt)}
+              value={<DateTime value={ticket.commentsFetchedAt} />}
             />
           </div>
           <JsonPanel title={t("summaryData")} value={ticket.summaryData} />
@@ -204,7 +201,9 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
                       <TableCell className="font-medium">
                         {entry.operation}
                       </TableCell>
-                      <TableCell>{date(entry.fetchedAt)}</TableCell>
+                      <TableCell>
+                        <DateTime value={entry.fetchedAt} />
+                      </TableCell>
                       <TableCell className="font-mono text-xs">
                         {entry.id}
                       </TableCell>

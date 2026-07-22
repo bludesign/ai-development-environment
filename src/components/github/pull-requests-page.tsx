@@ -39,6 +39,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -87,6 +88,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type {
   GitHubPipelineView,
   GitHubPullRequestPage,
@@ -127,25 +129,6 @@ function replaceIssueParam(issueKey: string | null) {
     "",
     `${window.location.pathname}${query ? `?${query}` : ""}`,
   );
-}
-
-function relativeAge(value: string, locale: string) {
-  const seconds = Math.round((Date.parse(value) - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 60 * 60 * 24 * 365],
-    ["month", 60 * 60 * 24 * 30],
-    ["week", 60 * 60 * 24 * 7],
-    ["day", 60 * 60 * 24],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return formatter.format(Math.round(seconds / size), unit);
-    }
-  }
-  return formatter.format(seconds, "second");
 }
 
 function reviewClass(decision: GitHubReviewDecision) {
@@ -707,7 +690,6 @@ function PullRequestTable({
       label: string;
       items: GitHubPullRequestView[];
     }> = [];
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const pullRequest of items) {
       const date = new Date(pullRequest.createdAt);
       const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -718,7 +700,7 @@ function PullRequestTable({
         groups.push({
           key: `${dateKey}-${pullRequest.id}`,
           dateKey,
-          label: formatter.format(date),
+          label: formatDateValue(date, "long", { locale, showTime: false }),
           items: [pullRequest],
         });
       }
@@ -869,9 +851,7 @@ function PullRequestTable({
                       <Badge variant="outline">
                         {t(`pullRequestStates.${pullRequest.state}`)}
                       </Badge>
-                      <time dateTime={pullRequest.createdAt}>
-                        {relativeAge(pullRequest.createdAt, locale)}
-                      </time>
+                      <DateTime kind="relative" value={pullRequest.createdAt} />
                     </div>
                   </TableCell>
                   <TableCell className="text-right">

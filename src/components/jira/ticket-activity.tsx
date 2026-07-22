@@ -1,14 +1,16 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type {
   JiraActivityPage,
   JiraTicketDetail,
@@ -27,10 +29,6 @@ import {
 
 const PAGE_SIZE = 50;
 
-function date(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
-
 export function JiraTicketActivity({
   history,
   onTicketChange,
@@ -43,6 +41,7 @@ export function JiraTicketActivity({
   title: string;
 }) {
   const t = useTranslations("jiraTicketDetail");
+  const locale = useLocale();
   const [worklogs, setWorklogs] = useState<JiraWorklog[]>([]);
   const [worklogTotal, setWorklogTotal] = useState<number | null>(null);
   const [worklogLoading, setWorklogLoading] = useState(false);
@@ -115,7 +114,7 @@ export function JiraTicketActivity({
                       avatarUrl={change.author?.avatarUrl ?? null}
                       name={change.author?.displayName ?? t("unknownUser")}
                     />
-                    <time>{date(change.createdAt)}</time>
+                    <DateTime value={change.createdAt} />
                   </div>
                   <ul className="space-y-1 text-sm">
                     {change.items.map((item, index) => (
@@ -163,7 +162,11 @@ export function JiraTicketActivity({
                     <span className="text-sm">{worklog.timeSpent ?? "—"}</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {t("started", { date: date(worklog.startedAt) })}
+                    {t("started", {
+                      date: formatDateValue(worklog.startedAt, "short", {
+                        locale,
+                      }),
+                    })}
                   </p>
                   {worklog.comment && (
                     <JiraRichTextBlock

@@ -31,6 +31,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
 import {
   Empty,
@@ -54,6 +55,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type {
   GitHubActionsRepositoryErrorView,
   GitHubActionsRepositoryView,
@@ -120,25 +122,6 @@ function replaceFilterParams(
     "",
     `${window.location.pathname}${query ? `?${query}` : ""}`,
   );
-}
-
-function relativeAge(value: string, locale: string) {
-  const seconds = Math.round((Date.parse(value) - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 60 * 60 * 24 * 365],
-    ["month", 60 * 60 * 24 * 30],
-    ["week", 60 * 60 * 24 * 7],
-    ["day", 60 * 60 * 24],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return formatter.format(Math.round(seconds / size), unit);
-    }
-  }
-  return formatter.format(seconds, "second");
 }
 
 function runDuration(run: GitHubActionsWorkflowRunView) {
@@ -859,12 +842,11 @@ function ActionsTable({
       string,
       { label: string; items: GitHubActionsWorkflowRunView[] }
     >();
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
     for (const run of runs) {
       const date = new Date(run.createdAt);
       const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
       const group = groups.get(key) ?? {
-        label: formatter.format(date),
+        label: formatDateValue(date, "long", { locale, showTime: false }),
         items: [],
       };
       group.items.push(run);
@@ -1032,12 +1014,10 @@ function ActionsTable({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         <div className="flex flex-col gap-0.5">
-                          <time
-                            dateTime={displayedRun.startedAt}
-                            title={displayedRun.startedAt}
-                          >
-                            {relativeAge(displayedRun.startedAt, locale)}
-                          </time>
+                          <DateTime
+                            kind="relative"
+                            value={displayedRun.startedAt}
+                          />
                           <span className="text-xs">
                             {t("duration", {
                               duration: runDuration(displayedRun),

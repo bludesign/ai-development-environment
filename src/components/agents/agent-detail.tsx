@@ -40,6 +40,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -386,9 +387,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             <Info
               label={t("lastSeen")}
               value={
-                agent.lastSeenAt
-                  ? new Date(agent.lastSeenAt).toLocaleString(locale)
-                  : t("never")
+                <DateTime fallback={t("never")} value={agent.lastSeenAt} />
               }
             />
             <Info
@@ -466,7 +465,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         )}
       </Card>
 
-      <AgentCodebasesCard codebases={codebases} locale={locale} />
+      <AgentCodebasesCard codebases={codebases} />
 
       <Card>
         <CardHeader>
@@ -581,12 +580,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
                       <StatusBadge status={job.status} />
                     </TableCell>
                     <TableCell>
-                      {new Date(job.createdAt).toLocaleString(locale)}
+                      <DateTime value={job.createdAt} />
                     </TableCell>
                     <TableCell>
-                      {job.finishedAt
-                        ? new Date(job.finishedAt).toLocaleString(locale)
-                        : "—"}
+                      <DateTime value={job.finishedAt} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -838,13 +835,16 @@ function Info({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
 }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn("truncate", mono && "font-mono text-xs")} title={value}>
+      <dd
+        className={cn("truncate", mono && "font-mono text-xs")}
+        title={typeof value === "string" ? value : undefined}
+      >
         {value}
       </dd>
     </div>
@@ -1169,13 +1169,7 @@ function CapabilityRunner({
   );
 }
 
-function AgentCodebasesCard({
-  codebases,
-  locale,
-}: {
-  codebases: AgentCodebase[];
-  locale: string;
-}) {
+function AgentCodebasesCard({ codebases }: { codebases: AgentCodebase[] }) {
   const t = useTranslations("agentDetail");
   const codebaseT = useTranslations("codebases");
   return (
@@ -1229,9 +1223,10 @@ function AgentCodebasesCard({
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  {codebase.lastCheckedAt
-                    ? new Date(codebase.lastCheckedAt).toLocaleString(locale)
-                    : codebaseT("never")}
+                  <DateTime
+                    fallback={codebaseT("never")}
+                    value={codebase.lastCheckedAt}
+                  />
                 </TableCell>
                 <TableCell>
                   <Button asChild size="sm" variant="ghost">

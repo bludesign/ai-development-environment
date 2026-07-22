@@ -1,12 +1,13 @@
 "use client";
 
 import { ChevronDown, FileCode2, Images } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DateTime } from "@/components/ui/date-time";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -33,7 +34,6 @@ export function WorktreeDetailPanel({
   inline?: boolean;
 }) {
   const t = useTranslations("worktrees");
-  const locale = useLocale();
   if (inline) return <InlineWorktreeDetail detail={detail} />;
   return (
     <div
@@ -132,8 +132,8 @@ export function WorktreeDetailPanel({
                 prefix={commit.sha.slice(0, 8)}
                 summary={
                   <span className="text-xs text-muted-foreground">
-                    {commit.authorName} ·{" "}
-                    {new Date(commit.authoredAt).toLocaleString(locale)} ·{" "}
+                    {commit.authorName} · <DateTime value={commit.authoredAt} />{" "}
+                    ·{" "}
                     <LineCounts
                       additions={commit.additions}
                       deletions={commit.deletions}
@@ -162,7 +162,6 @@ export function WorktreeDetailPanel({
 
 function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
   const t = useTranslations("worktrees");
-  const locale = useLocale();
   return (
     <div
       className="w-full space-y-4 border-t pt-4"
@@ -251,7 +250,7 @@ function InlineWorktreeDetail({ detail }: { detail: WorktreeDetail }) {
                         </span>
                         <span className="shrink-0 text-muted-foreground">
                           {commit.authorName} ·{" "}
-                          {new Date(commit.authoredAt).toLocaleString(locale)}
+                          <DateTime value={commit.authoredAt} />
                         </span>
                       </div>
                     </TableCell>

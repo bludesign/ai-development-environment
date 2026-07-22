@@ -8,7 +8,7 @@ import {
   GitBranch,
   RefreshCw,
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useState } from "react";
 
@@ -32,6 +32,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -96,7 +97,6 @@ export function PullRequestDetailPage({
 }) {
   const t = useTranslations("pullRequestDetail");
   const tp = useTranslations("pullRequests");
-  const locale = useLocale();
   const searchParams = useSearchParams();
   const issueKey = searchParams.get("issue");
   const [pullRequest, setPullRequest] =
@@ -305,13 +305,6 @@ export function PullRequestDetailPage({
     );
   }
 
-  const dateFormatter = new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-  const formatDate = (value: string | null) =>
-    value ? dateFormatter.format(new Date(value)) : "—";
-
   return (
     <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -420,7 +413,6 @@ export function PullRequestDetailPage({
                 {pullRequest.reviewThreads.map((thread) => (
                   <ReviewThreadCard
                     key={thread.id}
-                    locale={locale}
                     onReplyAdded={replyAdded}
                     onStateChanged={threadStateChanged}
                     thread={thread}
@@ -660,14 +652,14 @@ export function PullRequestDetailPage({
                   {pullRequest.unresolvedReviewThreadCount}
                 </DetailRow>
                 <DetailRow label={t("created")}>
-                  {formatDate(pullRequest.createdAt)}
+                  <DateTime value={pullRequest.createdAt} />
                 </DetailRow>
                 <DetailRow label={t("updated")}>
-                  {formatDate(pullRequest.updatedAt)}
+                  <DateTime value={pullRequest.updatedAt} />
                 </DetailRow>
                 {pullRequest.mergedAt && (
                   <DetailRow label={t("merged")}>
-                    {formatDate(pullRequest.mergedAt)}
+                    <DateTime value={pullRequest.mergedAt} />
                   </DetailRow>
                 )}
               </dl>

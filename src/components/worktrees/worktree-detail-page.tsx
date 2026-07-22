@@ -12,7 +12,6 @@ import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import {
   buildDuration,
   buildStatusVariant,
-  relativeBuildAge,
 } from "@/components/builds/build-format";
 import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
 import { RebuildButton } from "@/components/builds/rebuild-button";
@@ -26,6 +25,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import { DetailItem, DetailList } from "@/components/ui/detail-list";
 import {
   Empty,
@@ -48,7 +48,6 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateTime } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -438,7 +437,6 @@ function LoadedWorktreeDetail({
 }) {
   const t = useTranslations("worktreeDetail");
   const wt = useTranslations("worktrees");
-  const locale = useLocale();
   const router = useRouter();
   const [jiraIssueKey, setJiraIssueKey] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -566,7 +564,6 @@ function LoadedWorktreeDetail({
     },
     overview,
   };
-  const formatDate = (value: string | null) => formatDateTime(locale, value);
   const inspectionUnavailable = !canInspect
     ? entry.agentGroup.agent.connectionStatus === "OFFLINE"
       ? t("inspectionOffline")
@@ -715,10 +712,10 @@ function LoadedWorktreeDetail({
                 <BaseFreshnessBadge worktree={worktree} />
               </DetailItem>
               <DetailItem label={t("lastChecked")}>
-                {formatDate(worktree.lastCheckedAt)}
+                <DateTime value={worktree.lastCheckedAt} />
               </DetailItem>
               <DetailItem label={t("lastFetched")}>
-                {formatDate(entry.group.codebase.lastFetchedAt)}
+                <DateTime value={entry.group.codebase.lastFetchedAt} />
               </DetailItem>
             </DetailList>
           </CardContent>
@@ -892,9 +889,7 @@ function WorktreeCoverageCard({
                     />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(
-                      report.finishedAt ?? report.createdAt,
-                    ).toLocaleString(locale)}
+                    <DateTime value={report.finishedAt ?? report.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     {report.status === "READY" && (
@@ -961,7 +956,6 @@ function WorktreeBuildTable({
   onReload: () => Promise<void>;
 }) {
   const t = useTranslations("builds");
-  const locale = useLocale();
   const router = useRouter();
   const buildTime = useBuildTimeTicker();
 
@@ -1046,12 +1040,7 @@ function WorktreeBuildTable({
                   <TableCell>{build.destination.name}</TableCell>
                   <TableCell className="text-muted-foreground">
                     <div className="flex flex-col gap-0.5">
-                      <time
-                        dateTime={startedAt}
-                        title={new Date(startedAt).toLocaleString(locale)}
-                      >
-                        {relativeBuildAge(startedAt, locale, buildTime)}
-                      </time>
+                      <DateTime kind="relative" value={startedAt} />
                       <span className="text-xs">
                         {t("durationValue", {
                           duration: buildDuration(build, buildTime),

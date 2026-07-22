@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound, RefreshCw, ShieldAlert } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { DatabaseEncryptionAlert } from "./database-encryption-alert";
@@ -16,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -97,7 +98,6 @@ const valueKeys: Record<string, string> = {
 
 export function CredentialsPage() {
   const t = useTranslations("credentials");
-  const locale = useLocale();
   const [data, setData] = useState<CredentialsData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,12 +135,6 @@ export function CredentialsPage() {
 
   const warningCodes =
     data?.credentialStoreStatus.warnings.map((warning) => warning.code) ?? [];
-  const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(locale, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
-
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
@@ -283,7 +277,7 @@ export function CredentialsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
-                          {formatDate(item.updatedAt)}
+                          <DateTime value={item.updatedAt} />
                         </TableCell>
                       </TableRow>
                     ))}

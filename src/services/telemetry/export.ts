@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 import PDFDocument from "pdfkit";
 
+import { formatDateValue } from "@/lib/date-format";
+
 import { telemetryFields } from "./fields";
 import {
   DEFAULT_TELEMETRY_COLUMNS,
@@ -243,12 +245,11 @@ function formattedTime(
   input: TelemetryExportInput,
   includeDate: boolean,
 ): string {
-  return new Intl.DateTimeFormat(input.locale || "en", {
-    ...(includeDate ? { dateStyle: "medium" as const } : {}),
-    timeStyle: "medium",
+  return formatDateValue(value, includeDate ? "short" : "time", {
+    locale: input.locale || "en",
     hour12: input.timeFormat !== "24",
-    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-  }).format(new Date(value));
+    timeZone: input.timeZone ?? undefined,
+  });
 }
 
 function fieldValue(
@@ -423,10 +424,11 @@ function dayLabel(
   entry: TelemetryEntryView,
   input: TelemetryExportInput,
 ): string {
-  return new Intl.DateTimeFormat(input.locale || "en", {
-    dateStyle: "full",
-    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-  }).format(new Date(entry.clientTime));
+  return formatDateValue(entry.clientTime, "long", {
+    locale: input.locale || "en",
+    showTime: false,
+    timeZone: input.timeZone ?? undefined,
+  });
 }
 
 export function telemetryCsv(

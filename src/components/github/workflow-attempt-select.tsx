@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 import type { GitHubWorkflowRunAttemptView } from "@/services/github/types";
 
 const ATTEMPT_METADATA_FIELDS =
@@ -25,10 +26,7 @@ const ATTEMPT_JOB_FIELDS =
 function attemptDate(value: string, locale: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return formatDateValue(date, "short", { locale });
 }
 
 export function WorkflowAttemptSelect({

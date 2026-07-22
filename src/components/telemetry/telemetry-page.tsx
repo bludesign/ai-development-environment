@@ -92,6 +92,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { copyText } from "@/lib/browser-utils";
+import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   flattenTelemetryObject,
@@ -1412,9 +1413,7 @@ function localDayRange(value: string): TelemetrySelectionRange {
 }
 
 function formatDay(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, { dateStyle: "full" }).format(
-    new Date(value),
-  );
+  return formatDateValue(value, "long", { locale, showTime: false });
 }
 
 function formatTime(
@@ -1423,11 +1422,10 @@ function formatTime(
   format: "12" | "24",
   date = false,
 ) {
-  return new Intl.DateTimeFormat(locale, {
-    ...(date ? { dateStyle: "medium" as const } : {}),
-    timeStyle: "medium",
+  return formatDateValue(value, date ? "short" : "time", {
+    locale,
     hour12: format === "12",
-  }).format(new Date(value));
+  });
 }
 
 function facetValues(facets: TelemetryFacets, field: string) {

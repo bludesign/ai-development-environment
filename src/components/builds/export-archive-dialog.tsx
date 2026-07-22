@@ -10,7 +10,7 @@ import {
   type SigningProfile,
   type SigningTeam,
 } from "@ai-development-environment/agent-contract/builds";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -34,6 +34,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { formatDateValue } from "@/lib/date-format";
 
 type SigningOptions = {
   teams: SigningTeam[];
@@ -103,9 +104,9 @@ function bestProfile(
   )[0]!;
 }
 
-function profileLabel(profile: SigningProfile): string {
+function profileLabel(profile: SigningProfile, locale: string): string {
   const expiry = profile.expiresAt
-    ? new Date(profile.expiresAt).toLocaleDateString()
+    ? formatDateValue(profile.expiresAt, "short", { locale, showTime: false })
     : null;
   return expiry ? `${profile.name} — ${expiry}` : profile.name;
 }
@@ -122,6 +123,7 @@ export function ExportArchiveDialog({
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   const [method, setMethod] = useState<BuildExportMethod>("DEBUGGING");
   const [signingStyle, setSigningStyle] = useState("AUTOMATIC");
   const [teamId, setTeamId] = useState("");
@@ -431,7 +433,7 @@ export function ExportArchiveDialog({
                         <SelectContent>
                           {listed.map((profile) => (
                             <SelectItem key={profile.uuid} value={profile.uuid}>
-                              {profileLabel(profile)}
+                              {profileLabel(profile, locale)}
                               {profile.expired
                                 ? ` (${t("profileExpired")})`
                                 : ""}

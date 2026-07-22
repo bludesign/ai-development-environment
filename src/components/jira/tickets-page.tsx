@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -115,10 +116,6 @@ function replaceParams(changes: Record<string, string | null>) {
     "",
     `${window.location.pathname}${query ? `?${query}` : ""}`,
   );
-}
-
-function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
 }
 
 function priorityClass(priority: string) {
@@ -503,7 +500,7 @@ export function JiraTicketsPage() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                  {displayDate(ticket.updatedAt)}
+                                  <DateTime value={ticket.updatedAt} />
                                 </TableCell>
                               </TableRow>
                             ))}

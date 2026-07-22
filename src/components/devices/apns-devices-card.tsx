@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, HelpCircle, MoreHorizontal, Trash2 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DateTime } from "@/components/ui/date-time";
 import {
   Dialog,
   DialogContent,
@@ -83,7 +84,6 @@ export function ApnsDevicesCard({
 } = {}) {
   const t = useTranslations("apnsDevices");
   const tc = useTranslations("common");
-  const locale = useLocale();
   const [registrations, setRegistrations] = useState<ApnsRegistrationSummary[]>(
     [],
   );
@@ -238,14 +238,10 @@ export function ApnsDevicesCard({
                   )}
                 </TableCell>
                 <TableCell>
-                  {new Date(registration.lastRegisteredAt).toLocaleString(
-                    locale,
-                  )}
+                  <DateTime value={registration.lastRegisteredAt} />
                 </TableCell>
                 <TableCell>
-                  {registration.lastSentAt
-                    ? new Date(registration.lastSentAt).toLocaleString(locale)
-                    : "—"}
+                  <DateTime value={registration.lastSentAt} />
                 </TableCell>
                 <TableCell>
                   <DropdownMenu>

@@ -114,7 +114,6 @@ export function NotificationsSidebar() {
   const [arrivingIds, setArrivingIds] = useState<Set<string>>(new Set());
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [now, setNow] = useState<number | null>(null);
   const soundEnabledRef = useRef(false);
   const timers = useRef<Map<string, number>>(new Map());
 
@@ -199,13 +198,6 @@ export function NotificationsSidebar() {
       arrivalTimers.clear();
     };
   }, [load]);
-
-  useEffect(() => {
-    const updateNow = () => setNow(Date.now());
-    updateNow();
-    const timer = window.setInterval(updateNow, 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -315,7 +307,6 @@ export function NotificationsSidebar() {
               arriving={arrivingIds.has(notification.id)}
               key={notification.id}
               notification={notification}
-              now={now}
               onDelete={(id) => void deleteNotification(id)}
               onDismiss={(id) => void dismiss(id)}
             />
