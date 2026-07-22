@@ -289,6 +289,7 @@ export const createGitHubResolvers = (
           appId: string;
           installationId: string;
           privateKey?: string | null;
+          webhookUrl?: string | null;
         };
       },
       context: GraphQLContext,

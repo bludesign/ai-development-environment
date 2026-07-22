@@ -482,7 +482,7 @@ export async function verifyGitHubAppConfiguration(
 export async function configureGitHubAppWebhook(
   credentials: GitHubAppCredentials,
   input: { url: string; secret: string },
-): Promise<{ githubRequestId: string | null }> {
+): Promise<{ configured: boolean; githubRequestId: string | null }> {
   const prepared = prepareGitHubAppCredentials(credentials);
   const appJwt = await createAppJwt(prepared);
   const response = await githubFetch(`${prepared.apiBaseUrl}/app/hook/config`, {
@@ -499,6 +499,9 @@ export async function configureGitHubAppWebhook(
     }),
   });
   const githubRequestId = requestId(response);
+  if (response.status === 404) {
+    return { configured: false, githubRequestId };
+  }
   if (!response.ok) {
     const body = await responseBody(response);
     throw new GitHubAppError(
@@ -511,7 +514,7 @@ export async function configureGitHubAppWebhook(
       githubRequestId,
     );
   }
-  return { githubRequestId };
+  return { configured: true, githubRequestId };
 }
 
 export async function rerunGitHubActionsWorkflow(

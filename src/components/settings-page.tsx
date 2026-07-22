@@ -244,6 +244,8 @@ function GitHubAppSettingsCard() {
   const [installationId, setInstallationId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [deploymentUrl, setDeploymentUrl] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookUrlIsExplicit, setWebhookUrlIsExplicit] = useState(false);
   const [draggingPem, setDraggingPem] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -255,6 +257,8 @@ function GitHubAppSettingsCard() {
     setAppId(next.appId ?? "");
     setInstallationId(next.installationId ?? "");
     setPrivateKey("");
+    setWebhookUrl((current) => next.webhookUrl ?? current);
+    setWebhookUrlIsExplicit(Boolean(next.webhookUrl));
   }, []);
 
   const load = useCallback(async () => {
@@ -275,6 +279,9 @@ function GitHubAppSettingsCard() {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setDeploymentUrl(window.location.origin);
+      setWebhookUrl(
+        `${window.location.origin.replace(/\/$/, "")}/api/public/github/webhook`,
+      );
       void load();
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -295,6 +302,7 @@ function GitHubAppSettingsCard() {
             appId: appId.trim(),
             installationId: installationId.trim(),
             privateKey: privateKey || null,
+            ...(webhookUrlIsExplicit ? { webhookUrl: webhookUrl.trim() } : {}),
           },
         },
       );
@@ -449,7 +457,7 @@ function GitHubAppSettingsCard() {
                   <li>
                     {t("stepWebhook")}{" "}
                     <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
-                      {deploymentUrl}/api/public/github/webhook
+                      {webhookUrl}
                     </code>
                     {t("stepWebhookSuffix")}
                   </li>
@@ -498,6 +506,29 @@ function GitHubAppSettingsCard() {
                     value={installationId}
                   />
                 </div>
+              </div>
+
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="github-app-webhook-url"
+                >
+                  {t("webhookUrl")}
+                </Label>
+                <Input
+                  id="github-app-webhook-url"
+                  onChange={(event) => {
+                    setWebhookUrl(event.target.value);
+                    setWebhookUrlIsExplicit(true);
+                  }}
+                  placeholder="https://example.com/api/public/github/webhook"
+                  required
+                  type="url"
+                  value={webhookUrl}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("webhookUrlHelp")}
+                </p>
               </div>
 
               <div>
@@ -580,7 +611,9 @@ function GitHubAppSettingsCard() {
                         ? t("webhookConfigured", {
                             url: settings.webhookUrl ?? "—",
                           })
-                        : t("webhookUnavailable")}
+                        : settings.webhookUrl
+                          ? t("webhookNeedsSetup")
+                          : t("webhookUnavailable")}
                     </p>
                     {settings.webhookLastReceivedAt && (
                       <p className="mt-1 text-xs">

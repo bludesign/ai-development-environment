@@ -179,6 +179,7 @@ describe("SettingsPage", () => {
 
     const appId = await screen.findByLabelText("GitHub App ID");
     const installationId = screen.getByLabelText("Installation ID");
+    const webhookUrl = screen.getByLabelText("Webhook URL") as HTMLInputElement;
     const privateKey = screen.getByLabelText(
       "PEM private key",
     ) as HTMLTextAreaElement;
@@ -197,6 +198,10 @@ describe("SettingsPage", () => {
 
     fireEvent.change(appId, { target: { value: "123" } });
     fireEvent.change(installationId, { target: { value: "456" } });
+    expect(webhookUrl.value).toContain("/api/public/github/webhook");
+    fireEvent.change(webhookUrl, {
+      target: { value: "https://hooks.example/github-actions" },
+    });
     const dropZone = screen.getByRole("group", {
       name: "PEM private key drop zone",
     });
@@ -249,6 +254,7 @@ describe("SettingsPage", () => {
             appId: "123",
             installationId: "456",
             privateKey: pem,
+            webhookUrl: "https://hooks.example/github-actions",
           },
         },
       ),

@@ -110,6 +110,7 @@ describe("GitHub resolvers", () => {
       appId: "123",
       installationId: "456",
       privateKey: "private-key",
+      webhookUrl: "https://hooks.example/github",
     };
 
     await expect(

@@ -468,6 +468,7 @@ input SaveGitHubAppSettingsInput {
   appId: String!
   installationId: String!
   privateKey: String
+  webhookUrl: String
 }
 
 input AddGitHubRepositoryInput {

@@ -597,7 +597,10 @@ beforeEach(() => {
     verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
   }));
   appClient.configureWebhook.mockReset();
-  appClient.configureWebhook.mockResolvedValue({ githubRequestId: "HOOK-1" });
+  appClient.configureWebhook.mockResolvedValue({
+    configured: true,
+    githubRequestId: "HOOK-1",
+  });
   vi.unstubAllGlobals();
 });
 
@@ -2116,6 +2119,7 @@ describe("GitHub service", () => {
       service.saveAppSettings(
         { appId: "123", installationId: "456", privateKey: null },
         { actor: "control-plane", ipAddress: null },
+        "https://other.example",
       ),
     ).resolves.toMatchObject({
       webhookConfigured: true,
@@ -2123,6 +2127,80 @@ describe("GitHub service", () => {
     });
     expect(state.webhookSecret).toBe(secret);
     expect(appClient.configureWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  test("uses an explicit public webhook URL instead of the request origin", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          webhookUrl: "https://hooks.example/github-actions",
+        },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).resolves.toMatchObject({
+      webhookConfigured: true,
+      webhookUrl: "https://hooks.example/github-actions",
+    });
+    expect(appClient.configureWebhook).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        url: "https://hooks.example/github-actions",
+      }),
+    );
+  });
+
+  test("saves verified App settings when GitHub reports that webhooks are disabled", async () => {
+    appClient.configureWebhook.mockResolvedValue({
+      configured: false,
+      githubRequestId: "HOOK-404",
+    });
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          webhookUrl: "https://control.example/api/public/github/webhook",
+        },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).resolves.toMatchObject({
+      configured: true,
+      webhookConfigured: false,
+      webhookUrl: "https://control.example/api/public/github/webhook",
+      webhookConfiguredAt: null,
+    });
+    expect(state.webhookSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  test.each([
+    "http://hooks.example/github",
+    "https://127.0.0.1/github",
+    "https://hooks.example/github?token=secret",
+  ])("rejects unsafe explicit webhook URL %s", async (webhookUrl) => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          webhookUrl,
+        },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).rejects.toThrow("Webhook URL must be a public HTTPS URL");
+    expect(appClient.verify).not.toHaveBeenCalled();
+    expect(appClient.configureWebhook).not.toHaveBeenCalled();
   });
 
   test.each([

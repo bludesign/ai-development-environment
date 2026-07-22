@@ -624,10 +624,12 @@ const mockTranslations = {
       "Register a uniquely named GitHub App, such as “AI Environment Check Rerunner,” from",
     registerLink: "New GitHub App",
     stepHomepage: "Use",
-    stepHomepageSuffix:
-      " as the Homepage URL. Leave the callback URL empty and disable webhooks.",
+    stepHomepageSuffix: " as the Homepage URL. Leave the callback URL empty.",
     stepPermissions:
       "Set Repository permissions → Actions to Read and write. Metadata remains read-only automatically; Checks permission is not required.",
+    stepWebhook: "Enable webhooks, select the Workflow run event, and use",
+    stepWebhookSuffix:
+      " as the Webhook URL. Saving below generates the secret and configures this URL through GitHub.",
     stepInstall:
       "Create the app, generate a private key, then install it on only the repositories this deployment should control.",
     stepInstallationId:
@@ -640,6 +642,9 @@ const mockTranslations = {
     appIdPlaceholder: "Enter the numeric App ID",
     installationId: "Installation ID",
     installationIdPlaceholder: "Enter the numeric installation ID",
+    webhookUrl: "Webhook URL",
+    webhookUrlHelp:
+      "Override the public HTTPS endpoint when this deployment is behind a proxy or tunnel.",
     privateKey: "PEM private key",
     privateKeyDropZone: "PEM private key drop zone",
     pemDropHint: "Drop a .pem file here, or paste the key below.",
@@ -656,6 +661,12 @@ const mockTranslations = {
     connectedAs: "Connected to {app} on {account}",
     connectionDetails: "Actions: {permission}; repositories: {selection}",
     lastVerified: "Last verified: {date}",
+    webhookConfigured: "Webhook configured at {url}",
+    webhookNeedsSetup:
+      "GitHub App credentials are verified, but GitHub reports that webhooks are not enabled. Enable webhooks, select the Workflow run event, then save again.",
+    webhookUnavailable:
+      "Webhook unavailable until this deployment has a public HTTPS origin; personal-token polling remains available.",
+    lastWebhook: "Last webhook: {date} ({outcome})",
     save: "Save and verify",
     rotate: "Rotate key and verify",
     test: "Test connection",

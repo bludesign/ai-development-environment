@@ -1346,6 +1346,7 @@ export class GitHubService {
       appId: string;
       installationId: string;
       privateKey?: string | null;
+      webhookUrl?: string | null;
     },
     auditContext: GitHubAuditContext,
     requestOrigin: string | null = null,
@@ -1375,6 +1376,12 @@ export class GitHubService {
           "A GitHub App private key is required",
         );
       }
+      const webhookUrl = this.webhookUrl(
+        input.webhookUrl !== undefined
+          ? input.webhookUrl
+          : (existing?.webhookUrl ?? undefined),
+        requestOrigin,
+      );
       clearGitHubAppTokenCache();
       const credentials: GitHubAppCredentials = {
         appId: input.appId,
@@ -1384,18 +1391,27 @@ export class GitHubService {
         graphqlUrl: GITHUB_GRAPHQL_URL,
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
-      const webhookUrl = this.webhookUrl(requestOrigin);
       const existingWebhookSecret = await this.credentials.getText(
         CREDENTIALS.githubAppWebhookSecret,
       );
       const webhookSecret = webhookUrl
         ? (existingWebhookSecret ?? randomBytes(32).toString("base64url"))
         : existingWebhookSecret;
-      if (webhookUrl && webhookSecret) {
-        await configureGitHubAppWebhook(credentials, {
+      let storedWebhookUrl = existing?.webhookUrl ?? null;
+      let webhookConfiguredAt = existing?.webhookConfiguredAt ?? null;
+      const webhookShouldBeConfigured =
+        Boolean(webhookUrl) &&
+        (input.webhookUrl !== undefined || !existing?.webhookUrl);
+      if (webhookShouldBeConfigured || input.webhookUrl !== undefined) {
+        storedWebhookUrl = webhookUrl;
+        webhookConfiguredAt = null;
+      }
+      if (webhookShouldBeConfigured && webhookUrl && webhookSecret) {
+        const configuration = await configureGitHubAppWebhook(credentials, {
           url: webhookUrl,
           secret: webhookSecret,
         });
+        webhookConfiguredAt = configuration.configured ? new Date() : null;
       }
       const credentialEntries = [
         {
@@ -1423,10 +1439,8 @@ export class GitHubService {
           repositorySelection: verification.repositorySelection,
           actionsPermission: verification.actionsPermission,
           verifiedAt: verification.verifiedAt,
-          webhookUrl: webhookUrl ?? existing?.webhookUrl ?? null,
-          webhookConfiguredAt: webhookUrl
-            ? new Date()
-            : (existing?.webhookConfiguredAt ?? null),
+          webhookUrl: storedWebhookUrl,
+          webhookConfiguredAt,
         };
         await transaction.gitHubAppSettings.upsert({
           where: { id: GITHUB_APP_SETTINGS_ID },
@@ -1456,13 +1470,21 @@ export class GitHubService {
     }
   }
 
-  private webhookUrl(origin: string | null): string | null {
-    if (!origin) return null;
+  private webhookUrl(
+    configuredUrl: string | null | undefined,
+    origin: string | null,
+  ): string | null {
+    const explicit = configuredUrl !== undefined;
+    const candidate = explicit
+      ? configuredUrl?.trim() || null
+      : origin
+        ? `${origin.replace(/\/$/, "")}/api/public/github/webhook`
+        : null;
+    if (!candidate) return null;
     try {
-      const url = new URL(origin);
-      if (url.protocol !== "https:") return null;
+      const url = new URL(candidate);
       const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-      if (
+      const isPrivateHost =
         host === "localhost" ||
         host.endsWith(".localhost") ||
         host === "::1" ||
@@ -1474,12 +1496,29 @@ export class GitHubService {
         /^169\.254\./.test(host) ||
         /^100\.(6[4-9]|[789]\d|1[01]\d|12[0-7])\./.test(host) ||
         /^f[cd][0-9a-f]{2}:/.test(host) ||
-        /^fe[89ab][0-9a-f]:/.test(host)
-      ) {
+        /^fe[89ab][0-9a-f]:/.test(host);
+      const isPublicHttps =
+        url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash &&
+        !isPrivateHost;
+      if (!isPublicHttps) {
+        if (explicit) {
+          throw new Error(
+            "Webhook URL must be a public HTTPS URL without credentials, a query, or a fragment",
+          );
+        }
         return null;
       }
-      return `${url.origin}/api/public/github/webhook`;
+      return url.toString();
     } catch {
+      if (explicit) {
+        throw new Error(
+          "Webhook URL must be a public HTTPS URL without credentials, a query, or a fragment",
+        );
+      }
       return null;
     }
   }
