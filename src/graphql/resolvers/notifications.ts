@@ -25,6 +25,13 @@ export const createNotificationsResolvers = (
   NotificationPreference: {
     updatedAt: (value: { updatedAt: Date | null }) => iso(value.updatedAt),
   },
+  WebPushSubscription: {
+    expirationTime: (value: { expirationTime: Date | null }) =>
+      iso(value.expirationTime),
+    lastSeenAt: (value: { lastSeenAt: Date }) => value.lastSeenAt.toISOString(),
+    createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+  },
   Query: {
     notifications: (
       _root: unknown,
@@ -53,6 +60,14 @@ export const createNotificationsResolvers = (
     webPushState: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       requireControlPlane(context);
       return service.webPushState();
+    },
+    webPushSubscriptions: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.webPushSubscriptions();
     },
   },
   Mutation: {
@@ -123,6 +138,22 @@ export const createNotificationsResolvers = (
     ) => {
       requireControlPlane(context);
       return service.unregisterWebPush(endpoint);
+    },
+    deleteWebPushSubscription: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteWebPushSubscription(id);
+    },
+    testWebPushSubscription: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.testWebPushSubscription(id);
     },
   },
   Subscription: {

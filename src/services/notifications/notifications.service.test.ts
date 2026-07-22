@@ -192,4 +192,36 @@ describe("NotificationsService", () => {
       where: { endpoint: "https://push.example/subscription" },
     });
   });
+
+  test("sends a test notification to one subscribed browser", async () => {
+    getPrismaClient.mockResolvedValue({
+      webPushSettings: {
+        findUnique: vi.fn().mockResolvedValue({ vapidPublicKey: "public-key" }),
+      },
+      webPushSubscription: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "subscription-1",
+          endpoint: "https://push.example/subscription",
+          expirationTime: null,
+          p256dh: "p256dh",
+          auth: "auth",
+        }),
+        deleteMany: vi.fn(),
+      },
+    });
+    sendNotification.mockResolvedValue({ statusCode: 201 });
+    const service = new NotificationsService(credentials());
+
+    await expect(
+      service.testWebPushSubscription("subscription-1"),
+    ).resolves.toBe(true);
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "https://push.example/subscription",
+      }),
+      expect.stringContaining('"title":"Test notification"'),
+      expect.objectContaining({ TTL: 60 }),
+    );
+  });
 });

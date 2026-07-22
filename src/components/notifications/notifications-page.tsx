@@ -56,6 +56,7 @@ import {
   type NotificationChangeView,
   type NotificationPreferenceView,
   type WebPushStateView,
+  type WebPushSubscriptionView,
 } from "./types";
 
 const PAGE_SIZE = 100;
@@ -103,6 +104,45 @@ function currentPushSupport(): boolean {
   );
 }
 
+function browserName(userAgent: string | null, fallback: string): string {
+  if (!userAgent) return fallback;
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /OPR\//.test(userAgent)
+      ? "Opera"
+      : /CriOS\//.test(userAgent)
+        ? "Chrome"
+        : /FxiOS\//.test(userAgent)
+          ? "Firefox"
+          : /Chrome\//.test(userAgent)
+            ? "Chrome"
+            : /Firefox\//.test(userAgent)
+              ? "Firefox"
+              : /Safari\//.test(userAgent)
+                ? "Safari"
+                : "Browser";
+  const platform = /iPad|iPhone|iPod/.test(userAgent)
+    ? "iOS"
+    : /Android/.test(userAgent)
+      ? "Android"
+      : /Windows/.test(userAgent)
+        ? "Windows"
+        : /Macintosh/.test(userAgent)
+          ? "macOS"
+          : /Linux/.test(userAgent)
+            ? "Linux"
+            : null;
+  return platform ? `${browser} · ${platform}` : browser;
+}
+
+function endpointHost(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return endpoint;
+  }
+}
+
 export function NotificationsPage() {
   const t = useTranslations("notifications");
   const locale = useLocale();
@@ -113,6 +153,9 @@ export function NotificationsPage() {
   const [webPushState, setWebPushState] = useState<WebPushStateView | null>(
     null,
   );
+  const [webPushSubscriptions, setWebPushSubscriptions] = useState<
+    WebPushSubscriptionView[]
+  >([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -132,6 +175,10 @@ export function NotificationsPage() {
   const [pushSubscription, setPushSubscription] =
     useState<PushSubscription | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  const [subscriptionBusy, setSubscriptionBusy] = useState<string | null>(null);
+  const [testedSubscription, setTestedSubscription] = useState<string | null>(
+    null,
+  );
   const [isIos, setIsIos] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -146,6 +193,7 @@ export function NotificationsPage() {
         };
         notificationPreferences: NotificationPreferenceView[];
         webPushState: WebPushStateView;
+        webPushSubscriptions: WebPushSubscriptionView[];
       }>(`query NotificationsPage {
         notifications(first: ${PAGE_SIZE}) {
           items { ${APP_NOTIFICATION_FIELDS} }
@@ -153,12 +201,16 @@ export function NotificationsPage() {
         }
         notificationPreferences { ${PREFERENCE_FIELDS} }
         webPushState { configured publicKey subscriptionCount }
+        webPushSubscriptions {
+          id endpoint expirationTime locale userAgent lastSeenAt createdAt updatedAt
+        }
       }`);
       setNotifications(data.notifications.items);
       setNextCursor(data.notifications.nextCursor);
       setTotalCount(data.notifications.totalCount);
       setPreferences(data.notificationPreferences);
       setWebPushState(data.webPushState);
+      setWebPushSubscriptions(data.webPushSubscriptions);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -543,6 +595,7 @@ export function NotificationsPage() {
       setPushSubscription(subscription);
       setWebPushState(data.registerWebPushSubscription);
       setError(null);
+      await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -571,10 +624,69 @@ export function NotificationsPage() {
         }`,
       );
       setWebPushState(state.webPushState);
+      setWebPushSubscriptions((current) =>
+        current.filter((entry) => entry.endpoint !== endpoint),
+      );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setPushBusy(false);
+    }
+  };
+
+  const testSubscription = async (id: string) => {
+    setSubscriptionBusy(`test:${id}`);
+    setTestedSubscription(null);
+    try {
+      await controlPlaneRequest(
+        `mutation TestWebPushSubscription($id: ID!) {
+          testWebPushSubscription(id: $id)
+        }`,
+        { id },
+      );
+      setTestedSubscription(id);
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      await refresh();
+    } finally {
+      setSubscriptionBusy(null);
+    }
+  };
+
+  const deleteSubscription = async (subscription: WebPushSubscriptionView) => {
+    setSubscriptionBusy(`delete:${subscription.id}`);
+    try {
+      if (pushSubscription?.endpoint === subscription.endpoint) {
+        await pushSubscription.unsubscribe();
+        setPushSubscription(null);
+      }
+      await controlPlaneRequest(
+        `mutation DeleteWebPushSubscription($id: ID!) {
+          deleteWebPushSubscription(id: $id)
+        }`,
+        { id: subscription.id },
+      );
+      setWebPushSubscriptions((current) =>
+        current.filter(({ id }) => id !== subscription.id),
+      );
+      setWebPushState((current) =>
+        current
+          ? {
+              ...current,
+              subscriptionCount: Math.max(0, current.subscriptionCount - 1),
+            }
+          : current,
+      );
+      setTestedSubscription((current) =>
+        current === subscription.id ? null : current,
+      );
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      await refresh();
+    } finally {
+      setSubscriptionBusy(null);
     }
   };
 
@@ -681,13 +793,13 @@ export function NotificationsPage() {
                   <TableHead className="pl-4">
                     {t("notificationType")}
                   </TableHead>
-                  <TableHead className="text-center">
+                  <TableHead className="w-24 text-center">
                     {t("sidebarChannel")}
                   </TableHead>
-                  <TableHead className="text-center">
+                  <TableHead className="w-24 text-center">
                     {t("browserChannel")}
                   </TableHead>
-                  <TableHead className="pr-4 text-center">
+                  <TableHead className="w-24 text-center">
                     {t("pushChannel")}
                   </TableHead>
                 </TableRow>
@@ -720,7 +832,7 @@ export function NotificationsPage() {
                             "webPushEnabled",
                           ] as const
                         ).map((channel) => (
-                          <TableCell className="text-center" key={channel}>
+                          <TableCell className="w-24 text-center" key={channel}>
                             <Checkbox
                               aria-label={t("toggleChannel", {
                                 channel: t(
@@ -733,6 +845,7 @@ export function NotificationsPage() {
                                 type: t(`types.${preference.key}.title`),
                               })}
                               checked={preference[channel]}
+                              className="mx-auto"
                               disabled={savingPreference === preference.key}
                               onCheckedChange={(checked) =>
                                 void updatePreference(
@@ -753,6 +866,139 @@ export function NotificationsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="gap-0 overflow-hidden py-0">
+        <CardHeader className="border-b">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>{t("subscribedBrowsers")}</CardTitle>
+              <CardDescription>
+                {t("subscribedBrowsersDescription")}
+              </CardDescription>
+            </div>
+            <Badge variant="outline">
+              {t("subscriptionCount", {
+                count: webPushSubscriptions.length,
+              })}
+            </Badge>
+          </div>
+        </CardHeader>
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-4">{t("browser")}</TableHead>
+              <TableHead>{t("pushService")}</TableHead>
+              <TableHead>{t("locale")}</TableHead>
+              <TableHead>{t("lastSeen")}</TableHead>
+              <TableHead className="pr-4 text-right">{t("actions")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {webPushSubscriptions.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  className="py-10 text-center text-muted-foreground"
+                  colSpan={5}
+                >
+                  {t("noSubscribedBrowsers")}
+                </TableCell>
+              </TableRow>
+            ) : (
+              webPushSubscriptions.map((subscription) => {
+                const isCurrent =
+                  pushSubscription?.endpoint === subscription.endpoint;
+                const testing = subscriptionBusy === `test:${subscription.id}`;
+                const deleting =
+                  subscriptionBusy === `delete:${subscription.id}`;
+                const tested = testedSubscription === subscription.id;
+                return (
+                  <TableRow key={subscription.id}>
+                    <TableCell className="max-w-sm pl-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {browserName(
+                            subscription.userAgent,
+                            t("unknownBrowser"),
+                          )}
+                        </span>
+                        {isCurrent && (
+                          <Badge variant="secondary">{t("current")}</Badge>
+                        )}
+                      </div>
+                      {subscription.userAgent && (
+                        <p
+                          className="max-w-sm truncate text-xs text-muted-foreground"
+                          title={subscription.userAgent}
+                        >
+                          {subscription.userAgent}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span title={subscription.endpoint}>
+                        {endpointHost(subscription.endpoint)}
+                      </span>
+                    </TableCell>
+                    <TableCell>{subscription.locale ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <time dateTime={subscription.lastSeenAt}>
+                        {new Date(subscription.lastSeenAt).toLocaleString(
+                          locale,
+                          { dateStyle: "medium", timeStyle: "short" },
+                        )}
+                      </time>
+                    </TableCell>
+                    <TableCell className="pr-4">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          disabled={subscriptionBusy !== null}
+                          onClick={() => void testSubscription(subscription.id)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {testing ? (
+                            <Spinner />
+                          ) : tested ? (
+                            <CheckCircle2 />
+                          ) : (
+                            <Send />
+                          )}
+                          {tested ? t("testSent") : t("test")}
+                        </Button>
+                        <ConfirmationDialog
+                          actionLabel={t("remove")}
+                          cancelLabel={t("cancel")}
+                          description={t("removeBrowserDescription")}
+                          onConfirm={() => deleteSubscription(subscription)}
+                          title={t("removeBrowserTitle")}
+                          trigger={
+                            <Button
+                              aria-label={t("removeBrowser", {
+                                browser: browserName(
+                                  subscription.userAgent,
+                                  t("unknownBrowser"),
+                                ),
+                              })}
+                              disabled={subscriptionBusy !== null}
+                              size="icon-sm"
+                              title={t("remove")}
+                              type="button"
+                              variant="ghost"
+                            >
+                              {deleting ? <Spinner /> : <Trash2 />}
+                            </Button>
+                          }
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </Card>
 
       <Card className="gap-0 overflow-hidden py-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b p-3">

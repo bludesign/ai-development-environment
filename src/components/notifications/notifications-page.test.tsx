@@ -66,6 +66,18 @@ const preferences = [
   },
 ];
 
+const webPushSubscription = {
+  id: "subscription-1",
+  endpoint: "https://push.example/subscription",
+  expirationTime: null,
+  locale: "en-US",
+  userAgent:
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
+  lastSeenAt: now,
+  createdAt: now,
+  updatedAt: now,
+};
+
 beforeEach(() => {
   nextChange = null;
   Object.defineProperty(window, "matchMedia", {
@@ -92,8 +104,9 @@ beforeEach(() => {
         webPushState: {
           configured: false,
           publicKey: null,
-          subscriptionCount: 0,
+          subscriptionCount: 1,
         },
+        webPushSubscriptions: [webPushSubscription],
       } as never;
     }
     if (operation.includes("mutation SaveNotificationPreference")) {
@@ -111,6 +124,9 @@ beforeEach(() => {
     }
     if (operation.includes("mutation DeleteAllNotifications")) {
       return { deleteAllNotifications: 1 } as never;
+    }
+    if (operation.includes("mutation TestWebPushSubscription")) {
+      return { testWebPushSubscription: true } as never;
     }
     throw new Error(`Unexpected request: ${operation}`);
   });
@@ -192,5 +208,20 @@ describe("NotificationsPage", () => {
     );
 
     expect(screen.getAllByText("iOS build failed").length).toBeGreaterThan(1);
+  });
+
+  test("sends a test notification to a subscribed browser", async () => {
+    render(<NotificationsPage />);
+
+    expect(await screen.findByText("Chrome · macOS")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation TestWebPushSubscription"),
+        { id: "subscription-1" },
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Sent" })).toBeDefined();
   });
 });

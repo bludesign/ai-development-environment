@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Volume2, VolumeX, X } from "lucide-react";
+import { ListX, Volume2, VolumeX, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -258,12 +258,14 @@ export function NotificationsSidebar() {
             title={t("clearSidebarTitle")}
             trigger={
               <Button
+                aria-label={t("clearAll")}
                 disabled={!notifications.length}
-                size="sm"
+                size="icon-sm"
+                title={t("clearAll")}
                 type="button"
                 variant="ghost"
               >
-                {t("clearAll")}
+                <ListX />
               </Button>
             }
           />

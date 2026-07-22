@@ -410,6 +410,23 @@ export class NotificationsService {
     };
   }
 
+  async webPushSubscriptions() {
+    const prisma = await getPrismaClient();
+    return prisma.webPushSubscription.findMany({
+      orderBy: [{ lastSeenAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        endpoint: true,
+        expirationTime: true,
+        locale: true,
+        userAgent: true,
+        lastSeenAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
   async prepareWebPush(): Promise<{ publicKey: string }> {
     if (!this.vapidPreparation) {
       this.vapidPreparation = this.prepareWebPushOnce().finally(() => {
@@ -498,6 +515,62 @@ export class NotificationsService {
       where: { endpoint },
     });
     return result.count > 0;
+  }
+
+  async deleteWebPushSubscription(idValue: string): Promise<boolean> {
+    const id = cleanText(idValue, "Push subscription", 200);
+    const prisma = await getPrismaClient();
+    const result = await prisma.webPushSubscription.deleteMany({
+      where: { id },
+    });
+    return result.count > 0;
+  }
+
+  async testWebPushSubscription(idValue: string): Promise<boolean> {
+    const id = cleanText(idValue, "Push subscription", 200);
+    const prisma = await getPrismaClient();
+    const [settings, subscription] = await Promise.all([
+      prisma.webPushSettings.findUnique({ where: { id: VAPID_SETTINGS_ID } }),
+      prisma.webPushSubscription.findUnique({ where: { id } }),
+    ]);
+    if (!subscription) throw new Error("Push subscription was not found");
+    if (!settings?.vapidPublicKey) {
+      throw new Error("Web Push is not configured");
+    }
+    const privateKey = await this.credentialService.getText(
+      CREDENTIALS.webPushVapidPrivateKey,
+    );
+    if (!privateKey) throw new Error("The Web Push private key is unavailable");
+    webpush.setVapidDetails(
+      vapidSubject(),
+      settings.vapidPublicKey,
+      privateKey,
+    );
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          expirationTime: subscription.expirationTime?.getTime() ?? null,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+        },
+        JSON.stringify({
+          id: `test:${Date.now()}`,
+          title: "Test notification",
+          body: "Web Push is working for this browser.",
+          href: "/notifications",
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+        }),
+        { TTL: 60, timeout: 10_000 },
+      );
+      return true;
+    } catch (error) {
+      if ([404, 410].includes(statusCode(error) ?? 0)) {
+        await prisma.webPushSubscription.deleteMany({ where: { id } });
+        throw new Error("The browser subscription expired and was removed");
+      }
+      throw error;
+    }
   }
 
   async deliverWebPush(notification: NotificationRecord): Promise<void> {

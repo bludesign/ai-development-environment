@@ -39,6 +39,17 @@ type WebPushState {
   subscriptionCount: Int!
 }
 
+type WebPushSubscription {
+  id: ID!
+  endpoint: String!
+  expirationTime: String
+  locale: String
+  userAgent: String
+  lastSeenAt: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
 enum NotificationChangeKind {
   CREATED
   DISMISSED
@@ -88,6 +99,7 @@ extend type Query {
   sidebarNotifications(limit: Int = 50): [AppNotification!]!
   notificationPreferences: [NotificationPreference!]!
   webPushState: WebPushState!
+  webPushSubscriptions: [WebPushSubscription!]!
 }
 
 extend type Mutation {
@@ -103,6 +115,8 @@ extend type Mutation {
     input: RegisterWebPushSubscriptionInput!
   ): WebPushState!
   unregisterWebPushSubscription(endpoint: String!): Boolean!
+  deleteWebPushSubscription(id: ID!): Boolean!
+  testWebPushSubscription(id: ID!): Boolean!
 }
 
 extend type Subscription {

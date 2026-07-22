@@ -49,3 +49,14 @@ export type WebPushStateView = {
   publicKey: string | null;
   subscriptionCount: number;
 };
+
+export type WebPushSubscriptionView = {
+  id: string;
+  endpoint: string;
+  expirationTime: string | null;
+  locale: string | null;
+  userAgent: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
