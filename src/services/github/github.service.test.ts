@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   apiToken: "secret-token" as string | null,
+  webhookSecret: null as string | null,
   appSettings: {
     id: "default",
     appId: "123",
@@ -30,6 +31,8 @@ const state = vi.hoisted(() => ({
     repositorySelection: string;
     actionsPermission: string;
     verifiedAt: Date;
+    webhookUrl?: string | null;
+    webhookConfiguredAt?: Date | null;
     createdAt: Date;
     updatedAt: Date;
   } | null,
@@ -94,6 +97,7 @@ const appClient = vi.hoisted(() => ({
   rerun: vi.fn(),
   rerunJob: vi.fn(),
   verify: vi.fn(),
+  configureWebhook: vi.fn(),
 }));
 
 vi.mock("@/server/github/github-app", async (importOriginal) => {
@@ -108,6 +112,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     rerunGitHubActionsJob: appClient.rerunJob,
     rerunGitHubActionsWorkflow: appClient.rerun,
     verifyGitHubAppConfiguration: appClient.verify,
+    configureGitHubAppWebhook: appClient.configureWebhook,
   };
 });
 
@@ -118,15 +123,19 @@ vi.mock("@/services/credentials", async (importOriginal) => {
     ...original,
     CredentialService: class {
       async isConfigured(descriptor: { id: string }) {
-        return descriptor.id.startsWith("github-app/")
+        return descriptor.id.endsWith("/private-key")
           ? Boolean(state.appSettings?.privateKey)
-          : Boolean(state.apiToken);
+          : descriptor.id.endsWith("/webhook-secret")
+            ? Boolean(state.webhookSecret)
+            : Boolean(state.apiToken);
       }
 
       async getText(descriptor: { id: string }) {
-        return descriptor.id.startsWith("github-app/")
+        return descriptor.id.endsWith("/private-key")
           ? (state.appSettings?.privateKey ?? null)
-          : state.apiToken;
+          : descriptor.id.endsWith("/webhook-secret")
+            ? state.webhookSecret
+            : state.apiToken;
       }
 
       async setText(
@@ -145,6 +154,30 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         }
       }
 
+      async setMany(
+        entries: Array<{
+          descriptor: { id: string };
+          value: Uint8Array;
+        }>,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        for (const entry of entries) {
+          if (entry.descriptor.id.endsWith("/private-key")) {
+            if (state.appSettings) {
+              state.appSettings.privateKey = Buffer.from(entry.value).toString(
+                "utf8",
+              );
+            }
+          } else if (entry.descriptor.id.endsWith("/webhook-secret")) {
+            state.webhookSecret = Buffer.from(entry.value).toString("utf8");
+          }
+        }
+      }
+
       async delete(
         descriptor: { id: string },
         mutation?: (transaction: unknown) => Promise<void>,
@@ -155,6 +188,24 @@ vi.mock("@/services/credentials", async (importOriginal) => {
         await mutation?.(prisma);
         if (descriptor.id.startsWith("github-app/")) state.appSettings = null;
         else state.apiToken = null;
+      }
+
+      async deleteMany(
+        descriptors: Array<{ id: string }>,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        if (
+          descriptors.some((descriptor) =>
+            descriptor.id.startsWith("github-app/"),
+          )
+        ) {
+          state.appSettings = null;
+          state.webhookSecret = null;
+        }
       }
     },
   };
@@ -250,6 +301,9 @@ vi.mock("@/data/prisma-client", () => ({
         state.auditEvents.push(data);
         return data;
       },
+    },
+    gitHubWebhookDelivery: {
+      findFirst: async () => null,
     },
   }),
 }));
@@ -450,6 +504,7 @@ function rawReviewThread(
 
 beforeEach(() => {
   state.apiToken = "secret-token";
+  state.webhookSecret = null;
   state.repositories = [
     {
       id: "local-repository-1",
@@ -541,6 +596,8 @@ beforeEach(() => {
     viewerLogin: "workflow-rerunner[bot]",
     verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
   }));
+  appClient.configureWebhook.mockReset();
+  appClient.configureWebhook.mockResolvedValue({ githubRequestId: "HOOK-1" });
   vi.unstubAllGlobals();
 });
 
@@ -2032,6 +2089,62 @@ describe("GitHub service", () => {
     ).rejects.toThrow("replacement private key");
     expect(state.appSettings?.appId).toBe("123");
   });
+
+  test("configures and preserves a signed webhook only for a public HTTPS origin", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        { appId: "123", installationId: "456", privateKey: null },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).resolves.toMatchObject({
+      webhookConfigured: true,
+      webhookUrl: "https://control.example/api/public/github/webhook",
+    });
+    expect(appClient.configureWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123", installationId: "456" }),
+      {
+        url: "https://control.example/api/public/github/webhook",
+        secret: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      },
+    );
+    const secret = state.webhookSecret;
+
+    await expect(
+      service.saveAppSettings(
+        { appId: "123", installationId: "456", privateKey: null },
+        { actor: "control-plane", ipAddress: null },
+      ),
+    ).resolves.toMatchObject({
+      webhookConfigured: true,
+      webhookUrl: "https://control.example/api/public/github/webhook",
+    });
+    expect(state.webhookSecret).toBe(secret);
+    expect(appClient.configureWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    "http://control.example",
+    "https://127.0.0.1:3000",
+    "https://[fd00::1]",
+  ])(
+    "leaves webhook setup unavailable for non-public origin %s",
+    async (origin) => {
+      const service = new GitHubService();
+
+      await expect(
+        service.saveAppSettings(
+          { appId: "123", installationId: "456", privateKey: null },
+          { actor: "control-plane", ipAddress: null },
+          origin,
+        ),
+      ).resolves.toMatchObject({ webhookConfigured: false, webhookUrl: null });
+      expect(appClient.configureWebhook).not.toHaveBeenCalled();
+      expect(state.webhookSecret).toBeNull();
+    },
+  );
 
   test("rejects suites outside the managed repository before using App credentials", async () => {
     vi.stubGlobal(

@@ -40,6 +40,7 @@
     "tickets": "Tickets",
     "cache": "Cache",
     "system": "Système",
+    "polling": "Interrogation",
     "skills": "Compétences",
     "tools": "Outils",
     "debugging": "Débogage",
@@ -136,9 +137,17 @@
       "IOS_BUILD_FAILED": {
         "title": "Échec du build iOS",
         "description": "Un build iOS se termine avec une erreur."
+      },
+      "GITHUB_ACTIONS_SUCCEEDED": {
+        "title": "GitHub Actions réussi",
+        "description": "Un workflow GitHub Actions se termine avec succès."
+      },
+      "GITHUB_ACTIONS_FAILED": {
+        "title": "Échec de GitHub Actions",
+        "description": "Un workflow GitHub Actions se termine avec une erreur."
       }
     },
-    "categories": { "BUILDS": "Builds" }
+    "categories": { "BUILDS": "Builds", "GITHUB": "GitHub" }
   },
   "credentialEncryption": {
     "title": "Les identifiants de la base de données ne sont pas chiffrés",
@@ -202,6 +211,7 @@
       "jira-api-token": "Jeton d’API",
       "github-personal-access-token": "Jeton d’accès personnel",
       "github-app-private-key": "Clé privée GitHub App",
+      "github-app-webhook-secret": "Secret du webhook GitHub App",
       "cache-server-api-key": "Clé d’API",
       "cache-server-headers": "Ensemble d’en-têtes personnalisés",
       "external-mcp-server-headers": "Ensemble d’en-têtes",
@@ -270,6 +280,13 @@
     "enrollmentTitle": "Commande d’inscription à usage unique",
     "enrollmentDescription": "Exécutez cette commande sur le Mac après avoir installé control-agent. Le Mac établit une connexion sortante ; il n’ouvre aucun port d’écoute.",
     "serverAddress": "Adresse du serveur",
+    "headers": "En-têtes Cloudflare Access",
+    "headersDescription": "Ces valeurs sont ajoutées uniquement à la commande et enregistrées dans la configuration locale de l’agent.",
+    "addHeader": "Ajouter un en-tête",
+    "header": "en-tête",
+    "headerName": "Nom de l’en-tête",
+    "headerValue": "Valeur de l’en-tête",
+    "removeHeader": "Supprimer {name}",
     "copy": "Copier la commande",
     "copyFailed": "Impossible de copier la commande. Sélectionnez-la et copiez-la manuellement.",
     "expires": "Le jeton expire le {date}",
@@ -907,6 +924,8 @@
     "tokenKeepHelp": "Laissez ce champ vide sauf si vous souhaitez remplacer le jeton enregistré.",
     "tokenAcquireHelp": "Créez un jeton à granularité fine limité aux dépôts utilisés ici. Accordez Actions : lecture, Checks : lecture, Pull requests : lecture et écriture, et Contents : lecture et écriture pour les fusions. La lecture des adresses e-mail est facultative pour le choix de l’adresse des commits.",
     "createToken": "Créer un jeton à granularité fine",
+    "pollInterval": "Intervalle d’interrogation des notifications Actions (secondes)",
+    "pollIntervalHelp": "Utilisé lorsqu’aucun webhook signé n’est disponible. Choisissez un entier de 30 à 3600.",
     "save": "Enregistrer les paramètres",
     "test": "Tester la connexion",
     "remove": "Supprimer les identifiants",
@@ -926,8 +945,10 @@
     "stepRegister": "Enregistrez une GitHub App au nom unique, par exemple « Relance IA Environnement », depuis",
     "registerLink": "Créer une GitHub App",
     "stepHomepage": "Utilisez",
-    "stepHomepageSuffix": " comme URL de page d’accueil. Laissez l’URL de rappel vide et désactivez les webhooks.",
+    "stepHomepageSuffix": " comme URL de page d’accueil. Laissez l’URL de rappel vide.",
     "stepPermissions": "Réglez Repository permissions → Actions sur Read and write. Metadata reste automatiquement en lecture seule ; aucun droit Checks n’est nécessaire.",
+    "stepWebhook": "Activez les webhooks, sélectionnez l’événement Workflow run et utilisez",
+    "stepWebhookSuffix": " comme URL du webhook. L’enregistrement configure le secret et l’URL via GitHub.",
     "stepInstall": "Créez l’app, générez une clé privée, puis installez-la uniquement sur les dépôts que ce déploiement doit contrôler.",
     "stepInstallationId": "Après l’installation, ouvrez la page Configure de l’app. L’identifiant d’installation est le dernier nombre de l’URL, par exemple",
     "stepInstallationIdSuffix": ". Remplacez Organization-name par votre organisation et copiez la valeur finale de l’ID.",
@@ -949,6 +970,9 @@
     "connectedAs": "Connexion à {app} sur {account}",
     "connectionDetails": "Actions : {permission} ; dépôts : {selection}",
     "lastVerified": "Dernière vérification : {date}",
+    "webhookConfigured": "Webhook configuré sur {url}",
+    "webhookUnavailable": "Le webhook nécessite une origine HTTPS publique ; l’interrogation par jeton personnel reste disponible.",
+    "lastWebhook": "Dernier webhook : {date} ({outcome})",
     "save": "Enregistrer et vérifier",
     "rotate": "Renouveler la clé et vérifier",
     "test": "Tester la connexion",
@@ -959,6 +983,42 @@
     "removed": "Les identifiants de la GitHub App ont été supprimés. Le jeton personnel et les dépôts gérés sont conservés.",
     "confirmRemove": "Supprimer les identifiants de la GitHub App ?",
     "confirmRemoveDescription": "L’identifiant de l’app, celui de l’installation et la clé privée seront supprimés. Les identifiants des demandes et les dépôts gérés seront conservés."
+  },
+  "polling": {
+    "title": "Interrogation",
+    "description": "Consultez les opérations en arrière-plan du serveur et des agents, leur fréquence, fraîcheur et erreurs.",
+    "refresh": "Actualiser",
+    "loading": "Chargement des opérations…",
+    "serverTitle": "Opérations du serveur",
+    "agentTitle": "Opérations des agents",
+    "empty": "Aucune opération enregistrée.",
+    "operation": "Opération",
+    "status": "État",
+    "cadence": "Fréquence",
+    "lastStarted": "Dernier démarrage",
+    "lastCompleted": "Dernière fin",
+    "nextPoll": "Prochaine interrogation",
+    "details": "Détails",
+    "serverRuntime": "Serveur",
+    "agentRuntime": "Agent",
+    "everySeconds": "Toutes les {seconds}s",
+    "duration": "{milliseconds} ms",
+    "kinds": {
+      "GITHUB_ACTIONS_NOTIFICATIONS": "Notifications GitHub Actions",
+      "GITHUB_AUTO_RETRY": "Nouvelle tentative GitHub",
+      "APNS_RECOVERY": "Récupération des lots APNs",
+      "AGENT_HEARTBEAT": "Pulsation de l’agent",
+      "AGENT_JOB_RECONCILIATION": "Rapprochement durable des tâches",
+      "CODEBASE_SCAN": "Analyse du code",
+      "GIT_FETCH": "Git fetch"
+    },
+    "statuses": {
+      "DISABLED": "Désactivé",
+      "HEALTHY": "Sain",
+      "RUNNING": "En cours",
+      "STALE": "Périmé",
+      "ERROR": "Erreur"
+    }
   },
   "pullRequests": {
     "title": "Demandes de tirage",

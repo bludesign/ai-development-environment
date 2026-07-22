@@ -192,6 +192,8 @@ model CodebaseRepository {
   skillGroups            CodebaseRepositorySkillGroup[]
   projects               CodebaseProject[]
   buildScripts           CodebaseRepositoryBuildScript[]
+  githubWorkflowRuns     GitHubWorkflowRunObservation[]
+  githubPollingState     GitHubActionsPollingState?
 
   @@index([name])
 }
@@ -1409,10 +1411,11 @@ model JiraApiCallLog {
 }
 
 model GitHubSettings {
-  id                  String   @id
-  defaultJiraKeyRegex String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                                     String   @id
+  defaultJiraKeyRegex                    String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
+  actionsNotificationPollIntervalSeconds Int      @default(60)
+  createdAt                              DateTime @default(now())
+  updatedAt                              DateTime @updatedAt
 }
 
 model GitHubAppSettings {
@@ -1427,8 +1430,60 @@ model GitHubAppSettings {
   repositorySelection String
   actionsPermission   String
   verifiedAt          DateTime
+  webhookUrl          String?
+  webhookConfiguredAt DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+model GitHubWebhookDelivery {
+  deliveryId          String    @id
+  event               String
+  action              String?
+  repositoryName      String?
+  workflowRunId       String?
+  outcome             String
+  error               String?
+  receivedAt          DateTime  @default(now())
+  processedAt         DateTime?
+
+  @@index([receivedAt])
+  @@index([event, receivedAt])
+  @@index([outcome, receivedAt])
+}
+
+model GitHubWorkflowRunObservation {
+  id                       String             @id
+  codebaseRepositoryId     String
+  workflowRunId            String
+  runAttempt               Int
+  workflowId               String
+  status                   String
+  conclusion               String?
+  githubUpdatedAt          DateTime
+  source                   String
+  notifiedAt               DateTime?
+  firstObservedAt          DateTime           @default(now())
+  lastObservedAt           DateTime
+  codebaseRepository       CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([codebaseRepositoryId, workflowRunId, runAttempt])
+  @@index([codebaseRepositoryId, lastObservedAt])
+  @@index([lastObservedAt])
+}
+
+model GitHubActionsPollingState {
+  codebaseRepositoryId String             @id
+  initializedAt        DateTime
+  lastPollStartedAt    DateTime?
+  lastPollCompletedAt  DateTime?
+  lastPollSucceededAt  DateTime?
+  lastError            String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  codebaseRepository   CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
+
+  @@index([lastPollSucceededAt])
 }
 
 model CacheServerSettings {

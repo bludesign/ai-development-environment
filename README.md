@@ -76,16 +76,9 @@ App Store Connect registration is optional. In Settings, provide an issuer ID, k
 
 ### Cloudflare Access paths
 
-When the dashboard is behind Cloudflare Access, create narrowly scoped, more-specific Access applications for the following paths and attach a **Bypass / Everyone** policy. Configure paths without query strings because Access path matching does not support them.
+When the dashboard is behind Cloudflare Access, create one more-specific Access application for `/api/public/*` and attach a **Bypass / Everyone** policy. Configure the path without a query string because Access path matching does not support one. This namespace contains only intentionally unauthenticated endpoints: the signed iOS enrollment flow, short-lived build artifact and OTA manifest downloads, and the signature-verified GitHub webhook at `/api/public/github/webhook`.
 
-| Access application path        | Route method  | Why it must bypass login                                                               |
-| ------------------------------ | ------------- | -------------------------------------------------------------------------------------- |
-| `/api/ios/enrollment-profile`  | `GET`         | Safari and the profile installation process retrieve the signed profile.               |
-| `/api/ios/profile-response`    | `POST`        | iOS Settings posts the CMS-signed device response and cannot complete an Access login. |
-| `/api/ios/enrollment-complete` | `GET`         | The validated callback redirects to this generic, script-free landing page.            |
-| `/api/builds/*/artifacts/*`    | `GET`, `HEAD` | Apple’s manifest and package installer fetch artifacts outside the dashboard session.  |
-
-Do **not** bypass `/en/devices*` (or another locale), `/api/ios/enrollment/start`, `/api/ios/devices/export.tsv`, or `/api/graphql`. Those remain behind Cloudflare Access. Access applications are path-scoped rather than method-scoped; the route handlers themselves expose only the methods listed above. Avoid JavaScript or CAPTCHA challenges on the callback. Add a WAF skip for the exact `/api/ios/profile-response` path only if production logs show that a managed rule blocks genuine iOS callbacks.
+Do **not** bypass `/en/devices*` (or another locale), `/api/ios/enrollment/start`, `/api/ios/devices/export.tsv`, or `/api/graphql`. Those remain behind Cloudflare Access. Access applications are path-scoped rather than method-scoped; the route handlers themselves expose only the methods listed above. Avoid JavaScript or CAPTCHA challenges on the callback. Add a WAF skip for the exact `/api/public/ios/profile-response` path only if production logs show that a managed rule blocks genuine iOS callbacks.
 
 Cloudflare Tunnel keeps the origin private, so IP observations trust headers in this order: a valid `CF-Connecting-IP`, the first valid `X-Forwarded-For` entry, then `X-Real-IP`. The selected header source is saved with every observation. In direct mode this same behavior assumes the existing trusted localhost/LAN deployment boundary; do not expose an unprotected origin to untrusted networks.
 
@@ -175,6 +168,8 @@ control-agent enroll \
   --enrollment-token <one-time-token>
 brew services start control-agent
 ```
+
+For a control plane protected by Cloudflare Access, add each service-token header with a repeatable `--header "Name: value"` argument. The enrollment page builds a shell-safe command without retaining those values in the browser or server. The enrolled agent stores them only in its owner-readable `0600` configuration and applies them to GraphQL, artifact uploads, health checks, and WebSocket upgrades; `status` redacts every value.
 
 Useful diagnostics:
 

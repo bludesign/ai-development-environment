@@ -15,7 +15,12 @@ export async function runAgent(
   config: AgentConfig,
   signal: AbortSignal,
 ): Promise<void> {
-  const client = new AgentGraphQLClient(config.server, config.credential);
+  const client = new AgentGraphQLClient(
+    config.server,
+    config.credential,
+    10_000,
+    config.headers,
+  );
   const repositoryCoordinator = new RepositoryCoordinator();
   const executor = new JobExecutor(client, repositoryCoordinator);
   const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);

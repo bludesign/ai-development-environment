@@ -272,6 +272,7 @@ export const createGitHubResolvers = (
         input: {
           apiToken?: string | null;
           defaultJiraKeyRegex?: string | null;
+          actionsNotificationPollIntervalSeconds?: number | null;
         };
       },
       context: GraphQLContext,
@@ -293,7 +294,11 @@ export const createGitHubResolvers = (
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.saveAppSettings(input, auditContext(context));
+      return gitHubService.saveAppSettings(
+        input,
+        auditContext(context),
+        context.requestOrigin,
+      );
     },
     testGitHubConnection: (
       _root: unknown,

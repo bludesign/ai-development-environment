@@ -40,6 +40,7 @@
     "tickets": "Tickets",
     "cache": "Cache",
     "system": "System",
+    "polling": "Polling",
     "skills": "Skills",
     "tools": "Tools",
     "debugging": "Debugging",
@@ -136,9 +137,17 @@
       "IOS_BUILD_FAILED": {
         "title": "iOS build failed",
         "description": "An iOS build finishes with a failure."
+      },
+      "GITHUB_ACTIONS_SUCCEEDED": {
+        "title": "GitHub Actions succeeded",
+        "description": "A GitHub Actions workflow finishes successfully."
+      },
+      "GITHUB_ACTIONS_FAILED": {
+        "title": "GitHub Actions failed",
+        "description": "A GitHub Actions workflow finishes with a failure."
       }
     },
-    "categories": { "BUILDS": "Builds" }
+    "categories": { "BUILDS": "Builds", "GITHUB": "GitHub" }
   },
   "credentialEncryption": {
     "title": "Database credentials are not encrypted",
@@ -202,6 +211,7 @@
       "jira-api-token": "API token",
       "github-personal-access-token": "Personal access token",
       "github-app-private-key": "GitHub App private key",
+      "github-app-webhook-secret": "GitHub App webhook secret",
       "cache-server-api-key": "API key",
       "cache-server-headers": "Custom header bundle",
       "external-mcp-server-headers": "Header bundle",
@@ -270,6 +280,13 @@
     "enrollmentTitle": "One-time enrollment command",
     "enrollmentDescription": "Run this on the Mac after installing control-agent. The Mac connects outbound; it does not open a listening port.",
     "serverAddress": "Server address",
+    "headers": "Cloudflare Access headers",
+    "headersDescription": "These values are added only to this command and saved in the agent’s owner-only local configuration.",
+    "addHeader": "Add header",
+    "header": "header",
+    "headerName": "Header name",
+    "headerValue": "Header value",
+    "removeHeader": "Remove {name}",
     "copy": "Copy command",
     "copyFailed": "Could not copy the command. Select and copy it manually.",
     "expires": "Token expires {date}",
@@ -907,6 +924,8 @@
     "tokenKeepHelp": "Leave this blank unless you want to replace the saved token.",
     "tokenAcquireHelp": "Create a fine-grained token limited to the repositories used here. Grant Actions: read, Checks: read, Pull requests: read and write, and Contents: read and write for merging. Email addresses: read is optional for commit-email choices.",
     "createToken": "Create fine-grained token",
+    "pollInterval": "Actions notification poll interval (seconds)",
+    "pollIntervalHelp": "Used when a signed GitHub App webhook is unavailable. Choose an integer from 30 to 3600.",
     "save": "Save settings",
     "test": "Test connection",
     "remove": "Remove credentials",
@@ -926,8 +945,10 @@
     "stepRegister": "Register a uniquely named GitHub App, such as “AI Environment Check Rerunner,” from",
     "registerLink": "New GitHub App",
     "stepHomepage": "Use",
-    "stepHomepageSuffix": " as the Homepage URL. Leave the callback URL empty and disable webhooks.",
+    "stepHomepageSuffix": " as the Homepage URL. Leave the callback URL empty.",
     "stepPermissions": "Set Repository permissions → Actions to Read and write. Metadata remains read-only automatically; Checks permission is not required.",
+    "stepWebhook": "Enable webhooks, select the Workflow run event, and use",
+    "stepWebhookSuffix": " as the Webhook URL. Saving below generates the secret and configures this URL through GitHub.",
     "stepInstall": "Create the app, generate a private key, then install it on only the repositories this deployment should control.",
     "stepInstallationId": "After installation, open the app’s Configure page. The installation ID is the final number in its URL, for example",
     "stepInstallationIdSuffix": ". Replace Organization-name with your organization; copy the final ID value.",
@@ -949,6 +970,9 @@
     "connectedAs": "Connected to {app} on {account}",
     "connectionDetails": "Actions: {permission}; repositories: {selection}",
     "lastVerified": "Last verified: {date}",
+    "webhookConfigured": "Webhook configured at {url}",
+    "webhookUnavailable": "Webhook unavailable until this deployment has a public HTTPS origin; personal-token polling remains available.",
+    "lastWebhook": "Last webhook: {date} ({outcome})",
     "save": "Save and verify",
     "rotate": "Rotate key and verify",
     "test": "Test connection",
@@ -959,6 +983,42 @@
     "removed": "GitHub App credentials removed. The personal token and managed repositories were kept.",
     "confirmRemove": "Remove GitHub App credentials?",
     "confirmRemoveDescription": "The App ID, installation ID, and private key will be removed. Pull request credentials and managed repositories will be kept."
+  },
+  "polling": {
+    "title": "Polling",
+    "description": "Inspect background server and agent operations, their cadence, freshness, and failures.",
+    "refresh": "Refresh",
+    "loading": "Loading polling operations…",
+    "serverTitle": "Server operations",
+    "agentTitle": "Agent operations",
+    "empty": "No operations are registered.",
+    "operation": "Operation",
+    "status": "Status",
+    "cadence": "Cadence",
+    "lastStarted": "Last started",
+    "lastCompleted": "Last completed",
+    "nextPoll": "Next poll",
+    "details": "Details",
+    "serverRuntime": "Server",
+    "agentRuntime": "Agent",
+    "everySeconds": "Every {seconds}s",
+    "duration": "{milliseconds} ms",
+    "kinds": {
+      "GITHUB_ACTIONS_NOTIFICATIONS": "GitHub Actions notifications",
+      "GITHUB_AUTO_RETRY": "GitHub auto-retry",
+      "APNS_RECOVERY": "APNs batch recovery",
+      "AGENT_HEARTBEAT": "Agent heartbeat",
+      "AGENT_JOB_RECONCILIATION": "Durable job reconciliation",
+      "CODEBASE_SCAN": "Codebase scan",
+      "GIT_FETCH": "Git fetch"
+    },
+    "statuses": {
+      "DISABLED": "Disabled",
+      "HEALTHY": "Healthy",
+      "RUNNING": "Running",
+      "STALE": "Stale",
+      "ERROR": "Error"
+    }
   },
   "pullRequests": {
     "title": "Pull Requests",

@@ -74,4 +74,43 @@ describe("AgentsList", () => {
       expect(code.textContent).toContain("--server http://192.168.1.24:3000"),
     );
   });
+
+  test("adds shell-safe transient headers only to the enrollment command", async () => {
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (operation) => {
+      if (operation.includes("createAgentEnrollmentToken")) {
+        return {
+          createAgentEnrollmentToken: {
+            token: "enroll-once",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+        } as never;
+      }
+      if (operation.includes("query Agents")) return { agents: [] } as never;
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    render(<AgentsList />);
+    await screen.findByText("No agents enrolled");
+    fireEvent.click(screen.getByRole("button", { name: "Enroll agent" }));
+    await screen.findByText(/enroll-once/);
+    fireEvent.click(screen.getByRole("button", { name: "Add header" }));
+    fireEvent.change(screen.getByLabelText("Header name"), {
+      target: { value: "CF-Access-Client-Secret" },
+    });
+    fireEvent.change(screen.getByLabelText("Header value"), {
+      target: { value: "s'ecret:two" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/enroll-once/).textContent).toContain(
+        "--header 'CF-Access-Client-Secret: s'\"'\"'ecret:two'",
+      ),
+    );
+    expect(requestMock.mock.calls.every(([, variables]) => !variables)).toBe(
+      true,
+    );
+  });
 });

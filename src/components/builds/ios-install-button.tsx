@@ -67,7 +67,7 @@ export function IosInstallButton({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const artifactPath = `/api/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
+  const artifactPath = `/api/public/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}`;
   const installOrigin = publicOrigin ?? environment;
   const manifestUrl = installOrigin
     ? `${installOrigin.origin}${artifactPath}/manifest.plist`

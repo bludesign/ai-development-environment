@@ -13,6 +13,7 @@ import {
   agentEventBus,
   PUSH_NOTIFICATIONS_CHANGED_TOPIC,
 } from "@/services/agent-control/event-bus";
+import type { PollingService } from "@/services/polling";
 
 import {
   ApnsClient,
@@ -32,6 +33,7 @@ const STALE_BATCH_MS = 2 * 60_000;
 const RECOVERY_INTERVAL_MS = 30_000;
 const DELIVERY_CONCURRENCY = 16;
 const PUSH_TARGET_MODES = ["DEVICES", "ALL", "DIRECT", "BROADCAST"] as const;
+const POLLING_OPERATION_ID = "server:apns-recovery";
 
 type PushTargetMode = (typeof PUSH_TARGET_MODES)[number];
 type ApnsCertificateSecret = { p12Base64: string; passphrase: string };
@@ -101,13 +103,42 @@ export class PushNotificationsService {
   constructor(
     private readonly client = new ApnsClient(),
     private readonly credentials = new CredentialService(),
+    private readonly polling?: PollingService,
   ) {
-    queueMicrotask(() => void this.recover().catch(() => undefined));
+    this.polling?.register({
+      id: POLLING_OPERATION_ID,
+      kind: "APNS_RECOVERY",
+      runtime: "SERVER",
+      enabled: true,
+      cadenceSeconds: RECOVERY_INTERVAL_MS / 1_000,
+      details: {},
+    });
+    queueMicrotask(() => void this.pollRecovery());
     const timer = setInterval(
-      () => void this.recover().catch(() => undefined),
+      () => void this.pollRecovery(),
       RECOVERY_INTERVAL_MS,
     );
     timer.unref();
+  }
+
+  private async pollRecovery(): Promise<void> {
+    this.polling?.schedule(
+      POLLING_OPERATION_ID,
+      new Date(Date.now() + RECOVERY_INTERVAL_MS),
+    );
+    try {
+      if (this.polling) {
+        await this.polling.run(
+          POLLING_OPERATION_ID,
+          () => this.recover(),
+          (result) => result,
+        );
+      } else {
+        await this.recover();
+      }
+    } catch {
+      // The polling coordinator retains the error for the diagnostics page.
+    }
   }
 
   private changed(): void {
@@ -1099,9 +1130,19 @@ export class PushNotificationsService {
     }
   }
 
-  async recover(): Promise<void> {
-    if (this.recoveryStarted) return;
+  async recover(): Promise<Record<string, number | boolean>> {
+    if (this.recoveryStarted) {
+      return {
+        queuedBatches: 0,
+        staleBatches: 0,
+        recoveredBatches: 0,
+        alreadyRunning: true,
+      };
+    }
     this.recoveryStarted = true;
+    let queuedBatches = 0;
+    let staleBatches = 0;
+    let recoveredBatches = 0;
     try {
       const prisma = await getPrismaClient();
       while (true) {
@@ -1117,6 +1158,12 @@ export class PushNotificationsService {
           take: 100,
         });
         if (!stale.length) break;
+        queuedBatches += stale.filter(
+          (batch) => batch.status === "QUEUED",
+        ).length;
+        staleBatches += stale.filter(
+          (batch) => batch.status === "SENDING",
+        ).length;
         const recoverableIds: string[] = [];
         for (const batch of stale) {
           if (this.activeBatchIds.has(batch.id)) continue;
@@ -1141,7 +1188,9 @@ export class PushNotificationsService {
         await Promise.all(
           recoverableIds.map((batchId) => this.processBatch(batchId)),
         );
+        recoveredBatches += recoverableIds.length;
       }
+      return { queuedBatches, staleBatches, recoveredBatches };
     } finally {
       this.recoveryStarted = false;
     }

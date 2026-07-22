@@ -40,6 +40,7 @@
     "tickets": "Incidencias",
     "cache": "Caché",
     "system": "Sistema",
+    "polling": "Sondeo",
     "skills": "Habilidades",
     "tools": "Herramientas",
     "debugging": "Depuración",
@@ -136,9 +137,17 @@
       "IOS_BUILD_FAILED": {
         "title": "Error en la compilación de iOS",
         "description": "Una compilación de iOS termina con un error."
+      },
+      "GITHUB_ACTIONS_SUCCEEDED": {
+        "title": "GitHub Actions completado",
+        "description": "Un flujo de GitHub Actions termina correctamente."
+      },
+      "GITHUB_ACTIONS_FAILED": {
+        "title": "Error en GitHub Actions",
+        "description": "Un flujo de GitHub Actions termina con un error."
       }
     },
-    "categories": { "BUILDS": "Compilaciones" }
+    "categories": { "BUILDS": "Compilaciones", "GITHUB": "GitHub" }
   },
   "credentialEncryption": {
     "title": "Las credenciales de la base de datos no están cifradas",
@@ -198,6 +207,7 @@
       "jira-api-token": "Token de API",
       "github-personal-access-token": "Token de acceso personal",
       "github-app-private-key": "Clave privada de GitHub App",
+      "github-app-webhook-secret": "Secreto del webhook de GitHub App",
       "cache-server-api-key": "Clave de API",
       "cache-server-headers": "Paquete de cabeceras personalizadas",
       "external-mcp-server-headers": "Paquete de cabeceras",
@@ -266,6 +276,13 @@
     "enrollmentTitle": "Comando de registro de un solo uso",
     "enrollmentDescription": "Ejecuta este comando en el Mac después de instalar control-agent. El Mac se conecta de forma saliente; no abre ningún puerto de escucha.",
     "serverAddress": "Dirección del servidor",
+    "headers": "Cabeceras de Cloudflare Access",
+    "headersDescription": "Estos valores solo se añaden al comando y se guardan en la configuración local del agente.",
+    "addHeader": "Añadir cabecera",
+    "header": "cabecera",
+    "headerName": "Nombre de cabecera",
+    "headerValue": "Valor de cabecera",
+    "removeHeader": "Eliminar {name}",
     "copy": "Copiar comando",
     "copyFailed": "No se pudo copiar el comando. Selecciónalo y cópialo manualmente.",
     "expires": "El token caduca el {date}",
@@ -903,6 +920,8 @@
     "tokenKeepHelp": "Déjalo en blanco salvo que quieras reemplazar el token guardado.",
     "tokenAcquireHelp": "Crea un token específico limitado a los repositorios usados aquí. Concede Actions: lectura, Checks: lectura, Pull requests: lectura y escritura, y Contents: lectura y escritura para fusionar. La lectura de direcciones de correo es opcional para elegir el correo de los commits.",
     "createToken": "Crear token específico",
+    "pollInterval": "Intervalo de sondeo de notificaciones de Actions (segundos)",
+    "pollIntervalHelp": "Se usa cuando no hay un webhook firmado disponible. Elige un entero de 30 a 3600.",
     "save": "Guardar configuración",
     "test": "Probar conexión",
     "remove": "Eliminar credenciales",
@@ -922,8 +941,10 @@
     "stepRegister": "Registra una GitHub App con un nombre único, como «Reintentos del entorno de IA», desde",
     "registerLink": "Crear una GitHub App",
     "stepHomepage": "Usa",
-    "stepHomepageSuffix": " como URL de inicio. Deja vacía la URL de retorno y desactiva los webhooks.",
+    "stepHomepageSuffix": " como URL de inicio. Deja vacía la URL de retorno.",
     "stepPermissions": "Configura Repository permissions → Actions como Read and write. Metadata queda automáticamente en solo lectura; no hace falta permiso de Checks.",
+    "stepWebhook": "Activa los webhooks, selecciona el evento Workflow run y usa",
+    "stepWebhookSuffix": " como URL del webhook. Al guardar se configuran el secreto y la URL mediante GitHub.",
     "stepInstall": "Crea la app, genera una clave privada e instálala solo en los repositorios que deba controlar este despliegue.",
     "stepInstallationId": "Después de instalarla, abre la página Configure de la app. El ID de instalación es el último número de la URL, por ejemplo",
     "stepInstallationIdSuffix": ". Sustituye Organization-name por tu organización y copia el valor ID final.",
@@ -945,6 +966,9 @@
     "connectedAs": "Conectada a {app} en {account}",
     "connectionDetails": "Actions: {permission}; repositorios: {selection}",
     "lastVerified": "Última verificación: {date}",
+    "webhookConfigured": "Webhook configurado en {url}",
+    "webhookUnavailable": "El webhook requiere un origen HTTPS público; el sondeo con token personal sigue disponible.",
+    "lastWebhook": "Último webhook: {date} ({outcome})",
     "save": "Guardar y verificar",
     "rotate": "Rotar clave y verificar",
     "test": "Probar conexión",
@@ -955,6 +979,42 @@
     "removed": "Se eliminaron las credenciales de la GitHub App. Se conservaron el token personal y los repositorios gestionados.",
     "confirmRemove": "¿Eliminar las credenciales de la GitHub App?",
     "confirmRemoveDescription": "Se eliminarán el ID de app, el ID de instalación y la clave privada. Se conservarán las credenciales de solicitudes y los repositorios gestionados."
+  },
+  "polling": {
+    "title": "Sondeo",
+    "description": "Consulta las operaciones en segundo plano del servidor y los agentes, su frecuencia, actualidad y errores.",
+    "refresh": "Actualizar",
+    "loading": "Cargando operaciones de sondeo…",
+    "serverTitle": "Operaciones del servidor",
+    "agentTitle": "Operaciones de agentes",
+    "empty": "No hay operaciones registradas.",
+    "operation": "Operación",
+    "status": "Estado",
+    "cadence": "Frecuencia",
+    "lastStarted": "Último inicio",
+    "lastCompleted": "Última finalización",
+    "nextPoll": "Próximo sondeo",
+    "details": "Detalles",
+    "serverRuntime": "Servidor",
+    "agentRuntime": "Agente",
+    "everySeconds": "Cada {seconds}s",
+    "duration": "{milliseconds} ms",
+    "kinds": {
+      "GITHUB_ACTIONS_NOTIFICATIONS": "Notificaciones de GitHub Actions",
+      "GITHUB_AUTO_RETRY": "Reintento automático de GitHub",
+      "APNS_RECOVERY": "Recuperación de lotes APNs",
+      "AGENT_HEARTBEAT": "Latido del agente",
+      "AGENT_JOB_RECONCILIATION": "Conciliación de trabajos duraderos",
+      "CODEBASE_SCAN": "Exploración del código",
+      "GIT_FETCH": "Git fetch"
+    },
+    "statuses": {
+      "DISABLED": "Desactivado",
+      "HEALTHY": "Correcto",
+      "RUNNING": "En ejecución",
+      "STALE": "Obsoleto",
+      "ERROR": "Error"
+    }
   },
   "pullRequests": {
     "title": "Solicitudes de extracción",

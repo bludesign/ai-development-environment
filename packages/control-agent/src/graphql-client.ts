@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 
 import { createClient, type Client } from "graphql-ws";
+import WebSocket from "ws";
 
 import type { AgentConfig } from "./config.js";
 import type { AgentInventory } from "./inventory.js";
@@ -55,19 +56,39 @@ export type AgentCodebaseConfiguration = {
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+function mergeHeaders(
+  custom: Record<string, string>,
+  owned: Record<string, string>,
+): Record<string, string> {
+  const ownedNames = new Set(
+    Object.keys(owned).map((name) => name.toLowerCase()),
+  );
+  return {
+    ...Object.fromEntries(
+      Object.entries(custom).filter(
+        ([name]) => !ownedNames.has(name.toLowerCase()),
+      ),
+    ),
+    ...owned,
+  };
+}
+
 export class AgentGraphQLClient {
   private readonly server: string;
   private readonly credential: string | null;
   private readonly requestTimeoutMs: number;
+  private readonly headers: Record<string, string>;
 
   constructor(
     server: string,
     credential: string | null = null,
     requestTimeoutMs = 10_000,
+    headers: Record<string, string> = {},
   ) {
     this.server = server.replace(/\/$/, "");
     this.credential = credential;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.headers = { ...headers };
   }
 
   async request<T>(
@@ -76,12 +97,12 @@ export class AgentGraphQLClient {
   ): Promise<T> {
     const response = await fetch(`${this.server}/api/graphql`, {
       method: "POST",
-      headers: {
+      headers: mergeHeaders(this.headers, {
         "content-type": "application/json",
         ...(this.credential
           ? { authorization: `Bearer ${this.credential}` }
           : {}),
-      },
+      }),
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
@@ -254,14 +275,14 @@ export class AgentGraphQLClient {
       `${this.server}/api/build-artifact-uploads/${encodeURIComponent(input.uploadId)}`,
       {
         method: "POST",
-        headers: {
+        headers: mergeHeaders(this.headers, {
           ...(this.credential
             ? { authorization: `Bearer ${this.credential}` }
             : {}),
           "content-length": String(information.size),
           "content-type": input.contentType,
           "x-artifact-filename": encodeURIComponent(input.filename),
-        },
+        }),
         body: Readable.toWeb(createReadStream(input.path)),
         duplex: "half",
       } as RequestInit & { duplex: "half" },
@@ -367,10 +388,25 @@ export class AgentGraphQLClient {
   }
 }
 
+export function agentWebSocketHeaders(
+  config: AgentConfig,
+): Record<string, string> {
+  return mergeHeaders(config.headers ?? {}, {
+    authorization: `Bearer ${config.credential}`,
+  });
+}
+
 export function createAgentSubscriptionClient(config: AgentConfig): Client {
+  const headers = agentWebSocketHeaders(config);
+  class AgentWebSocket extends WebSocket {
+    constructor(address: string | URL, protocols?: string | string[]) {
+      super(address, protocols, { headers });
+    }
+  }
   return createClient({
     url: config.websocketServer,
     connectionParams: { authorization: `Bearer ${config.credential}` },
+    webSocketImpl: AgentWebSocket,
     lazy: false,
     retryAttempts: Infinity,
     shouldRetry: () => true,

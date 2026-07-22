@@ -52,9 +52,10 @@ import type {
   GitHubViewer,
 } from "@/services/github/types";
 
-const SETTINGS_FIELDS = "tokenConfigured defaultJiraKeyRegex updatedAt";
+const SETTINGS_FIELDS =
+  "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds updatedAt";
 const APP_SETTINGS_FIELDS =
-  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt updatedAt";
+  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
 
 export function SettingsPage() {
   const t = useTranslations("settings");
@@ -445,6 +446,13 @@ function GitHubAppSettingsCard() {
                     {t("stepHomepageSuffix")}
                   </li>
                   <li>{t("stepPermissions")}</li>
+                  <li>
+                    {t("stepWebhook")}{" "}
+                    <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                      {deploymentUrl}/api/public/github/webhook
+                    </code>
+                    {t("stepWebhookSuffix")}
+                  </li>
                   <li>{t("stepInstall")}</li>
                   <li>
                     {t("stepInstallationId")}{" "}
@@ -567,6 +575,30 @@ function GitHubAppSettingsCard() {
                         })}
                       </p>
                     )}
+                    <p className="mt-1 text-xs">
+                      {settings.webhookConfigured
+                        ? t("webhookConfigured", {
+                            url: settings.webhookUrl ?? "—",
+                          })
+                        : t("webhookUnavailable")}
+                    </p>
+                    {settings.webhookLastReceivedAt && (
+                      <p className="mt-1 text-xs">
+                        {t("lastWebhook", {
+                          date: formatDateValue(
+                            settings.webhookLastReceivedAt,
+                            "short",
+                            { locale },
+                          ),
+                          outcome: settings.webhookLastOutcome ?? "—",
+                        })}
+                      </p>
+                    )}
+                    {settings.webhookLastError && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {settings.webhookLastError}
+                      </p>
+                    )}
                     {settings.keyFingerprint && (
                       <p className="mt-1 break-all font-mono text-xs">
                         {settings.keyFingerprint}
@@ -627,6 +659,7 @@ function GitHubSettingsCard() {
   const tc = useTranslations("common");
   const [settings, setSettings] = useState<GitHubSettingsView | null>(null);
   const [apiToken, setApiToken] = useState("");
+  const [pollIntervalSeconds, setPollIntervalSeconds] = useState(60);
   const [connection, setConnection] = useState<GitHubViewer | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -636,6 +669,7 @@ function GitHubSettingsCard() {
   const applySettings = (next: GitHubSettingsView) => {
     setSettings(next);
     setApiToken("");
+    setPollIntervalSeconds(next.actionsNotificationPollIntervalSeconds);
   };
 
   const load = useCallback(async () => {
@@ -666,7 +700,12 @@ function GitHubSettingsCard() {
         `mutation SaveGitHubSettings($input: SaveGitHubSettingsInput!) {
           saveGitHubSettings(input: $input) { ${SETTINGS_FIELDS} }
         }`,
-        { input: { apiToken: apiToken || null } },
+        {
+          input: {
+            apiToken: apiToken || null,
+            actionsNotificationPollIntervalSeconds: pollIntervalSeconds,
+          },
+        },
       );
       applySettings(data.saveGitHubSettings);
       setConnection(null);
@@ -796,6 +835,28 @@ function GitHubSettingsCard() {
                   <SettingsHelpLink href="https://github.com/settings/personal-access-tokens/new">
                     {t("createToken")}
                   </SettingsHelpLink>
+                </p>
+              </div>
+              <div>
+                <Label
+                  className="mb-1.5 block text-sm font-medium"
+                  htmlFor="github-actions-poll-interval"
+                >
+                  {t("pollInterval")}
+                </Label>
+                <Input
+                  id="github-actions-poll-interval"
+                  max={3600}
+                  min={30}
+                  onChange={(event) =>
+                    setPollIntervalSeconds(Number(event.target.value))
+                  }
+                  required
+                  type="number"
+                  value={pollIntervalSeconds}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("pollIntervalHelp")}
                 </p>
               </div>
               {connection && (

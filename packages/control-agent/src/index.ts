@@ -11,28 +11,34 @@ import { runAgent } from "./agent-runtime.js";
 import { runDevelopmentAgent } from "./dev-runtime.js";
 import { AgentGraphQLClient } from "./graphql-client.js";
 import { collectInventory } from "./inventory.js";
+import { redactedRequestHeaders, requestHeaders } from "./request-headers.js";
 
 const execFileAsync = promisify(execFile);
 
-function flags(args: string[]): Record<string, string> {
+function flags(args: string[]): {
+  values: Record<string, string>;
+  headers: Record<string, string>;
+} {
   const result: Record<string, string> = {};
+  const headerValues: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (!argument.startsWith("--")) continue;
     const value = args[index + 1];
     if (!value || value.startsWith("--"))
       throw new Error(`Missing value for ${argument}`);
-    result[argument.slice(2)] = value;
+    if (argument === "--header") headerValues.push(value);
+    else result[argument.slice(2)] = value;
     index += 1;
   }
-  return result;
+  return { values: result, headers: requestHeaders(headerValues) };
 }
 
 function usage(): void {
   console.log(`control-agent <command>
 
 Commands:
-  enroll --enrollment-token <token> [--server http://127.0.0.1:3090] [--websocket-server ws://127.0.0.1:3091/graphql] [--name <name>]
+  enroll --enrollment-token <token> [--server http://127.0.0.1:3090] [--websocket-server ws://127.0.0.1:3090/graphql] [--name <name>] [--header "Name: value"]...
   dev [--server http://127.0.0.1:3000] [--websocket-server ws://127.0.0.1:3092/graphql] [--name <name>]
   run
   status
@@ -40,7 +46,8 @@ Commands:
 }
 
 async function enroll(args: string[]): Promise<void> {
-  const options = flags(args);
+  const parsed = flags(args);
+  const options = parsed.values;
   const enrollmentToken = options["enrollment-token"];
   if (!enrollmentToken) throw new Error("--enrollment-token is required");
   const server = normalizeServer(options.server ?? "http://127.0.0.1:3090");
@@ -48,7 +55,7 @@ async function enroll(args: string[]): Promise<void> {
     options["websocket-server"] ?? defaultWebSocketServer(server);
   const inventory = collectInventory();
   const name = options.name ?? inventory.hostname;
-  const client = new AgentGraphQLClient(server);
+  const client = new AgentGraphQLClient(server, null, 10_000, parsed.headers);
   const response = await client.enroll({ ...inventory, enrollmentToken, name });
   await saveConfig({
     server,
@@ -56,6 +63,7 @@ async function enroll(args: string[]): Promise<void> {
     agentId: response.enrollAgent.agent.id,
     credential: response.enrollAgent.credential,
     name,
+    headers: parsed.headers,
   });
   console.log(`Enrolled agent ${name} (${response.enrollAgent.agent.id})`);
 }
@@ -65,11 +73,17 @@ async function status(): Promise<void> {
   const response = await new AgentGraphQLClient(
     config.server,
     config.credential,
+    10_000,
+    config.headers,
   ).self();
   console.log(
     JSON.stringify(
       {
-        config: { ...config, credential: "[redacted]" },
+        config: {
+          ...config,
+          credential: "[redacted]",
+          headers: redactedRequestHeaders(config.headers),
+        },
         agent: response.agentSelf,
       },
       null,
@@ -93,7 +107,12 @@ async function doctor(): Promise<void> {
   }
   try {
     const server = config?.server ?? "http://127.0.0.1:3090";
-    const health = await new AgentGraphQLClient(server).health();
+    const health = await new AgentGraphQLClient(
+      server,
+      null,
+      10_000,
+      config?.headers,
+    ).health();
     checks.push({
       check: "control plane",
       ok: health.health === "ok",
@@ -143,7 +162,7 @@ async function main(): Promise<void> {
     process.once("SIGINT", () => controller.abort());
     process.once("SIGTERM", () => controller.abort());
     if (command === "dev") {
-      const options = flags(args);
+      const options = flags(args).values;
       const server =
         options.server ??
         process.env.CONTROL_AGENT_DEV_SERVER ??

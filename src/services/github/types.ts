@@ -39,6 +39,7 @@ export type GitHubPipelineRetryUnavailableReason =
 export type GitHubSettingsView = {
   tokenConfigured: boolean;
   defaultJiraKeyRegex: string;
+  actionsNotificationPollIntervalSeconds: number;
   updatedAt: string;
 };
 
@@ -53,6 +54,12 @@ export type GitHubAppSettingsView = {
   repositorySelection: string | null;
   actionsPermission: string | null;
   verifiedAt: string | null;
+  webhookConfigured: boolean;
+  webhookUrl: string | null;
+  webhookConfiguredAt: string | null;
+  webhookLastReceivedAt: string | null;
+  webhookLastOutcome: string | null;
+  webhookLastError: string | null;
   updatedAt: string | null;
 };
 

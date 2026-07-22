@@ -23,7 +23,7 @@ describe("enrollmentProfileXml", () => {
     expect(first.PayloadOrganization).toBe("Research & Development <Team>");
     expect(firstXml).toContain("Research &amp; Development &lt;Team&gt;");
     expect(payload.URL).toBe(
-      "https://devices.example.com/api/ios/profile-response?token=abc_123-token",
+      "https://devices.example.com/api/public/ios/profile-response?token=abc_123-token",
     );
     expect(payload.Challenge).toBe("abc_123-token");
     expect(payload.DeviceAttributes).toEqual(["UDID", "PRODUCT", "VERSION"]);

@@ -41,6 +41,7 @@ describe("SettingsPage", () => {
         return {
           githubSettings: {
             tokenConfigured: true,
+            actionsNotificationPollIntervalSeconds: 60,
             updatedAt: new Date(0).toISOString(),
           },
         } as never;
@@ -49,6 +50,7 @@ describe("SettingsPage", () => {
         return {
           saveGitHubSettings: {
             tokenConfigured: true,
+            actionsNotificationPollIntervalSeconds: 60,
             updatedAt: new Date().toISOString(),
           },
         } as never;
@@ -95,7 +97,12 @@ describe("SettingsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("SaveGitHubSettings"),
-        { input: { apiToken: "replacement-token" } },
+        {
+          input: {
+            apiToken: "replacement-token",
+            actionsNotificationPollIntervalSeconds: 60,
+          },
+        },
       ),
     );
     expect(screen.queryByDisplayValue("replacement-token")).toBeNull();

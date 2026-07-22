@@ -14,6 +14,7 @@ import type {
   SaveGitHubAutoRetryRuleInput,
 } from "./types";
 import type { GitHubService } from "./github.service";
+import type { PollingService } from "@/services/polling";
 
 const POLL_INTERVAL_MS = 30_000;
 const AMBIGUOUS_ACTION_TIMEOUT_MS = 2 * 60_000;
@@ -37,6 +38,7 @@ const PRIORITY: Record<GitHubAutoRetryScope, number> = {
   WORKTREE_BRANCH: 2,
   REPOSITORY: 1,
 };
+const POLLING_OPERATION_ID = "server:github-auto-retry";
 
 export function autoRetryDecision(input: {
   mode: "COUNT" | "FAILURE";
@@ -120,13 +122,44 @@ function ruleView(rule: {
 export class GitHubAutoRetryService {
   private reconciling = false;
 
-  constructor(private readonly github: GitHubService) {
-    queueMicrotask(() => void this.reconcile().catch(() => undefined));
+  constructor(
+    private readonly github: GitHubService,
+    private readonly polling?: PollingService,
+  ) {
+    this.polling?.register({
+      id: POLLING_OPERATION_ID,
+      kind: "GITHUB_AUTO_RETRY",
+      runtime: "SERVER",
+      enabled: true,
+      cadenceSeconds: POLL_INTERVAL_MS / 1_000,
+      details: {},
+    });
+    queueMicrotask(() => void this.pollReconcile());
     const timer = setInterval(
-      () => void this.reconcile().catch(() => undefined),
+      () => void this.pollReconcile(),
       POLL_INTERVAL_MS,
     );
     timer.unref();
+  }
+
+  private async pollReconcile(): Promise<void> {
+    this.polling?.schedule(
+      POLLING_OPERATION_ID,
+      new Date(Date.now() + POLL_INTERVAL_MS),
+    );
+    try {
+      if (this.polling) {
+        await this.polling.run(
+          POLLING_OPERATION_ID,
+          () => this.reconcile(),
+          (activeRules) => ({ activeRules }),
+        );
+      } else {
+        await this.reconcile();
+      }
+    } catch {
+      // The coordinator exposes the failure and the next interval retries it.
+    }
   }
 
   private include() {
@@ -611,9 +644,10 @@ export class GitHubAutoRetryService {
     return true;
   }
 
-  async reconcile(): Promise<void> {
-    if (this.reconciling) return;
+  async reconcile(): Promise<number> {
+    if (this.reconciling) return 0;
     this.reconciling = true;
+    let activeRuleCount = 0;
     try {
       const prisma = await getPrismaClient();
       const rules = await prisma.gitHubAutoRetryRule.findMany({
@@ -621,6 +655,7 @@ export class GitHubAutoRetryService {
         include: { targets: true },
         orderBy: { createdAt: "asc" },
       });
+      activeRuleCount = rules.length;
       const runsByRepository = new Map<string, RetryRun[]>();
       const trackedExecutions = rules.length
         ? await prisma.gitHubAutoRetryExecution.findMany({
@@ -841,5 +876,6 @@ export class GitHubAutoRetryService {
     } finally {
       this.reconciling = false;
     }
+    return activeRuleCount;
   }
 }

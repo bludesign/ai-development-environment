@@ -153,10 +153,14 @@ describe("GitHub resolvers", () => {
       { input: appInput },
       context(null),
     );
-    expect(service.saveAppSettings).toHaveBeenCalledWith(appInput, {
-      actor: "control-plane",
-      ipAddress: "127.0.0.1",
-    });
+    expect(service.saveAppSettings).toHaveBeenCalledWith(
+      appInput,
+      {
+        actor: "control-plane",
+        ipAddress: "127.0.0.1",
+      },
+      undefined,
+    );
     expect(service.pullRequests).toHaveBeenCalledWith(
       "REPOSITORY",
       "repository-1",
