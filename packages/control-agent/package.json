@@ -35,8 +35,8 @@
     "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
     "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build",
     "full-check:dev": "npm run full-check && npm run dev",
-    "upgrade": "ncu -u && npm install",
-    "upgrade:check": "ncu"
+    "upgrade": "ncu -u --cooldown 48h && npm install",
+    "upgrade:check": "ncu --cooldown 48h"
   },
   "devDependencies": {
     "@ai-development-environment/agent-contract": "*",
