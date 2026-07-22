@@ -270,9 +270,7 @@ describe("JiraTicketDetailPage", () => {
     expect(descriptionEdit.getAttribute("data-variant")).toBe("outline");
     const fieldsTable = screen.getByText("Customer impact").closest("table");
     expect(fieldsTable?.className).toContain("table-fixed");
-    expect(fieldsTable?.parentElement?.className).toContain(
-      "overflow-x-hidden",
-    );
+    expect(fieldsTable?.parentElement?.dataset.slot).toBe("table-container");
     expect(
       within(fieldsTable as HTMLElement).queryByRole("combobox", {
         name: "Render format",
