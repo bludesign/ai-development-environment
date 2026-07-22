@@ -45,6 +45,11 @@ const baseRule = vi.hoisted(() => ({
 }));
 
 const prisma = vi.hoisted(() => ({
+  gitHubSettings: {
+    upsert: vi.fn(async () => ({
+      actionsNotificationPollIntervalSeconds: 120,
+    })),
+  },
   gitHubAutoRetryExecution: {
     findMany: vi.fn(async () => []),
     update: vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
@@ -97,6 +102,41 @@ beforeEach(() => {
 });
 
 describe("GitHub Auto Retry decisions", () => {
+  test("uses the GitHub Actions notification cadence for reconciliation", async () => {
+    const polling = {
+      register: vi.fn(),
+      configure: vi.fn(),
+      schedule: vi.fn(),
+      run: vi.fn(
+        async (
+          _id: string,
+          operation: () => Promise<number>,
+          _details: (activeRules: number) => Record<string, unknown>,
+        ) => operation(),
+      ),
+    };
+    const service = new GitHubAutoRetryService(
+      {} as never,
+      polling as never,
+      false,
+    );
+
+    await (
+      service as unknown as { pollReconcile(): Promise<void> }
+    ).pollReconcile();
+
+    expect(polling.register).toHaveBeenCalledWith(
+      expect.objectContaining({ cadenceSeconds: 60 }),
+    );
+    expect(polling.configure).toHaveBeenCalledWith("server:github-auto-retry", {
+      cadenceSeconds: 120,
+    });
+    expect(polling.schedule).toHaveBeenCalledWith(
+      "server:github-auto-retry",
+      expect.any(Date),
+    );
+  });
+
   test("count mode repeats successful runs until the configured limit", () => {
     expect(
       autoRetryDecision({

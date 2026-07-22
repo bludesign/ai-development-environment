@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { getPrismaClient } from "@/data/prisma-client";
 import { CREDENTIALS, CredentialService } from "@/services/credentials";
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
+  configureGitHubAppWebhook,
   githubAppGraphql,
   GitHubAppError,
   listGitHubActionsWorkflowJobs,
@@ -52,6 +53,7 @@ import type {
   SaveGitHubAutoRetryRuleInput,
 } from "./types";
 import { GitHubAutoRetryService } from "./github-auto-retry.service";
+import type { PollingService } from "@/services/polling";
 
 const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
@@ -60,6 +62,8 @@ const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const SEARCH_RESULT_LIMIT = 1000;
 const ACTIONS_PAGE_SIZE = 25;
 const PULL_REQUEST_PAGE_SIZE = 25;
+export const MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 30;
+export const MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
 
 type PageInfo = {
@@ -846,13 +850,23 @@ export class GitHubService {
   constructor(
     startAutoRetry = false,
     private readonly credentials = new CredentialService(),
+    private readonly polling?: PollingService,
+    private readonly notificationsConfigurationChanged?: () => void,
   ) {
     if (startAutoRetry)
-      this.autoRetryService = new GitHubAutoRetryService(this);
+      this.autoRetryService = new GitHubAutoRetryService(this, this.polling);
   }
 
   private autoRetry(): GitHubAutoRetryService {
-    return (this.autoRetryService ??= new GitHubAutoRetryService(this));
+    return (this.autoRetryService ??= new GitHubAutoRetryService(
+      this,
+      this.polling,
+    ));
+  }
+
+  private pollingConfigurationChanged(): void {
+    this.notificationsConfigurationChanged?.();
+    this.autoRetryService?.configurationChanged();
   }
 
   autoRetryRules(input: {
@@ -1093,6 +1107,8 @@ export class GitHubService {
         CREDENTIALS.githubPersonalAccessToken,
       ),
       defaultJiraKeyRegex: settings.defaultJiraKeyRegex,
+      actionsNotificationPollIntervalSeconds:
+        settings.actionsNotificationPollIntervalSeconds,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }
@@ -1100,6 +1116,7 @@ export class GitHubService {
   async saveSettings(input: {
     apiToken?: string | null;
     defaultJiraKeyRegex?: string | null;
+    actionsNotificationPollIntervalSeconds?: number | null;
   }): Promise<GitHubSettingsView> {
     const prisma = await getPrismaClient();
     const existing = await prisma.gitHubSettings.findUnique({
@@ -1118,6 +1135,25 @@ export class GitHubService {
     if (!defaultJiraKeyRegex) {
       throw new Error("A default Jira key regex is required");
     }
+    const actionsNotificationPollIntervalSeconds =
+      input.actionsNotificationPollIntervalSeconds ??
+      existing?.actionsNotificationPollIntervalSeconds ??
+      60;
+    if (
+      !Number.isInteger(actionsNotificationPollIntervalSeconds) ||
+      actionsNotificationPollIntervalSeconds <
+        MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS ||
+      actionsNotificationPollIntervalSeconds >
+        MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS
+    ) {
+      throw new Error(
+        `Actions notification poll interval must be an integer from ${MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS} to ${MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS} seconds`,
+      );
+    }
+    const settingsData = {
+      defaultJiraKeyRegex,
+      actionsNotificationPollIntervalSeconds,
+    };
     if (nextToken) {
       await this.credentials.setText(
         CREDENTIALS.githubPersonalAccessToken,
@@ -1125,18 +1161,19 @@ export class GitHubService {
         async (transaction) => {
           await transaction.gitHubSettings.upsert({
             where: { id: SETTINGS_ID },
-            create: { id: SETTINGS_ID, defaultJiraKeyRegex },
-            update: { defaultJiraKeyRegex },
+            create: { id: SETTINGS_ID, ...settingsData },
+            update: settingsData,
           });
         },
       );
     } else {
       await prisma.gitHubSettings.upsert({
         where: { id: SETTINGS_ID },
-        create: { id: SETTINGS_ID, defaultJiraKeyRegex },
-        update: { defaultJiraKeyRegex },
+        create: { id: SETTINGS_ID, ...settingsData },
+        update: settingsData,
       });
     }
+    this.pollingConfigurationChanged();
     return this.getSettings();
   }
 
@@ -1151,6 +1188,7 @@ export class GitHubService {
         });
       },
     );
+    this.pollingConfigurationChanged();
     return this.getSettings();
   }
 
@@ -1200,9 +1238,17 @@ export class GitHubService {
       repositorySelection: string;
       actionsPermission: string;
       verifiedAt: Date;
+      webhookUrl: string | null;
+      webhookConfiguredAt: Date | null;
       updatedAt: Date;
     } | null,
     privateKeyConfigured: boolean,
+    webhookSecretConfigured: boolean,
+    lastDelivery: {
+      receivedAt: Date;
+      outcome: string;
+      error: string | null;
+    } | null,
   ): GitHubAppSettingsView {
     return {
       configured: Boolean(settings && privateKeyConfigured),
@@ -1215,19 +1261,44 @@ export class GitHubService {
       repositorySelection: settings?.repositorySelection ?? null,
       actionsPermission: settings?.actionsPermission ?? null,
       verifiedAt: settings?.verifiedAt.toISOString() ?? null,
+      webhookConfigured: Boolean(
+        settings?.webhookUrl &&
+        settings.webhookConfiguredAt &&
+        webhookSecretConfigured,
+      ),
+      webhookUrl: settings?.webhookUrl ?? null,
+      webhookConfiguredAt: settings?.webhookConfiguredAt?.toISOString() ?? null,
+      webhookLastReceivedAt: lastDelivery?.receivedAt.toISOString() ?? null,
+      webhookLastOutcome: lastDelivery?.outcome ?? null,
+      webhookLastError: lastDelivery?.error ?? null,
       updatedAt: settings?.updatedAt.toISOString() ?? null,
     };
   }
 
   async getAppSettings(): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
-    const [settings, privateKeyConfigured] = await Promise.all([
+    const [
+      settings,
+      privateKeyConfigured,
+      webhookSecretConfigured,
+      lastDelivery,
+    ] = await Promise.all([
       prisma.gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
       this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey),
+      this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
+      prisma.gitHubWebhookDelivery.findFirst({
+        orderBy: { receivedAt: "desc" },
+        select: { receivedAt: true, outcome: true, error: true },
+      }),
     ]);
-    return this.appSettingsView(settings, privateKeyConfigured);
+    return this.appSettingsView(
+      settings,
+      privateKeyConfigured,
+      webhookSecretConfigured,
+      lastDelivery,
+    );
   }
 
   private async requireAppCredentials(): Promise<GitHubAppCredentials> {
@@ -1275,8 +1346,10 @@ export class GitHubService {
       appId: string;
       installationId: string;
       privateKey?: string | null;
+      webhookUrl?: string | null;
     },
     auditContext: GitHubAuditContext,
+    requestOrigin: string | null = null,
   ): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
     const existing = await prisma.gitHubAppSettings.findUnique({
@@ -1303,6 +1376,12 @@ export class GitHubService {
           "A GitHub App private key is required",
         );
       }
+      const webhookUrl = this.webhookUrl(
+        input.webhookUrl !== undefined
+          ? input.webhookUrl
+          : (existing?.webhookUrl ?? undefined),
+        requestOrigin,
+      );
       clearGitHubAppTokenCache();
       const credentials: GitHubAppCredentials = {
         appId: input.appId,
@@ -1312,34 +1391,69 @@ export class GitHubService {
         graphqlUrl: GITHUB_GRAPHQL_URL,
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
-      await this.credentials.setText(
-        CREDENTIALS.githubAppPrivateKey,
-        privateKey,
-        async (transaction) => {
-          const data = {
-            appId: verification.appId,
-            installationId: verification.installationId,
-            apiBaseUrl: GITHUB_API_BASE_URL,
-            graphqlUrl: GITHUB_GRAPHQL_URL,
-            keyFingerprint: verification.keyFingerprint,
-            appSlug: verification.appSlug,
-            accountLogin: verification.accountLogin,
-            repositorySelection: verification.repositorySelection,
-            actionsPermission: verification.actionsPermission,
-            verifiedAt: verification.verifiedAt,
-          };
-          await transaction.gitHubAppSettings.upsert({
-            where: { id: GITHUB_APP_SETTINGS_ID },
-            create: { id: GITHUB_APP_SETTINGS_ID, ...data },
-            update: data,
-          });
-        },
+      const existingWebhookSecret = await this.credentials.getText(
+        CREDENTIALS.githubAppWebhookSecret,
       );
+      const webhookSecret = webhookUrl
+        ? (existingWebhookSecret ?? randomBytes(32).toString("base64url"))
+        : existingWebhookSecret;
+      let storedWebhookUrl = existing?.webhookUrl ?? null;
+      let webhookConfiguredAt = existing?.webhookConfiguredAt ?? null;
+      const webhookShouldBeConfigured =
+        Boolean(webhookUrl) &&
+        (input.webhookUrl !== undefined || !existing?.webhookUrl);
+      if (webhookShouldBeConfigured || input.webhookUrl !== undefined) {
+        storedWebhookUrl = webhookUrl;
+        webhookConfiguredAt = null;
+      }
+      if (webhookShouldBeConfigured && webhookUrl && webhookSecret) {
+        const configuration = await configureGitHubAppWebhook(credentials, {
+          url: webhookUrl,
+          secret: webhookSecret,
+        });
+        webhookConfiguredAt = configuration.configured ? new Date() : null;
+      }
+      const credentialEntries = [
+        {
+          descriptor: CREDENTIALS.githubAppPrivateKey,
+          value: Buffer.from(privateKey, "utf8"),
+        },
+        ...(webhookSecret
+          ? [
+              {
+                descriptor: CREDENTIALS.githubAppWebhookSecret,
+                value: Buffer.from(webhookSecret, "utf8"),
+              },
+            ]
+          : []),
+      ];
+      await this.credentials.setMany(credentialEntries, async (transaction) => {
+        const data = {
+          appId: verification.appId,
+          installationId: verification.installationId,
+          apiBaseUrl: GITHUB_API_BASE_URL,
+          graphqlUrl: GITHUB_GRAPHQL_URL,
+          keyFingerprint: verification.keyFingerprint,
+          appSlug: verification.appSlug,
+          accountLogin: verification.accountLogin,
+          repositorySelection: verification.repositorySelection,
+          actionsPermission: verification.actionsPermission,
+          verifiedAt: verification.verifiedAt,
+          webhookUrl: storedWebhookUrl,
+          webhookConfiguredAt,
+        };
+        await transaction.gitHubAppSettings.upsert({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+          create: { id: GITHUB_APP_SETTINGS_ID, ...data },
+          update: data,
+        });
+      });
       await this.audit(auditContext, {
         operation: "GITHUB_APP_SETTINGS_SAVE",
         outcome: "SUCCESS",
         githubRequestId: verification.githubRequestId,
       });
+      this.notificationsConfigurationChanged?.();
       return this.getAppSettings();
     } catch (error) {
       await this.audit(auditContext, {
@@ -1353,6 +1467,59 @@ export class GitHubService {
           error instanceof GitHubAppError ? error.githubRequestId : null,
       });
       throw error;
+    }
+  }
+
+  private webhookUrl(
+    configuredUrl: string | null | undefined,
+    origin: string | null,
+  ): string | null {
+    const explicit = configuredUrl !== undefined;
+    const candidate = explicit
+      ? configuredUrl?.trim() || null
+      : origin
+        ? `${origin.replace(/\/$/, "")}/api/public/github/webhook`
+        : null;
+    if (!candidate) return null;
+    try {
+      const url = new URL(candidate);
+      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+      const isPrivateHost =
+        host === "localhost" ||
+        host.endsWith(".localhost") ||
+        host === "::1" ||
+        host === "0.0.0.0" ||
+        /^127\./.test(host) ||
+        /^10\./.test(host) ||
+        /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        /^169\.254\./.test(host) ||
+        /^100\.(6[4-9]|[789]\d|1[01]\d|12[0-7])\./.test(host) ||
+        /^f[cd][0-9a-f]{2}:/.test(host) ||
+        /^fe[89ab][0-9a-f]:/.test(host);
+      const isPublicHttps =
+        url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash &&
+        !isPrivateHost;
+      if (!isPublicHttps) {
+        if (explicit) {
+          throw new Error(
+            "Webhook URL must be a public HTTPS URL without credentials, a query, or a fragment",
+          );
+        }
+        return null;
+      }
+      return url.toString();
+    } catch {
+      if (explicit) {
+        throw new Error(
+          "Webhook URL must be a public HTTPS URL without credentials, a query, or a fragment",
+        );
+      }
+      return null;
     }
   }
 
@@ -1399,8 +1566,8 @@ export class GitHubService {
   async clearAppCredentials(
     auditContext: GitHubAuditContext,
   ): Promise<GitHubAppSettingsView> {
-    await this.credentials.delete(
-      CREDENTIALS.githubAppPrivateKey,
+    await this.credentials.deleteMany(
+      [CREDENTIALS.githubAppPrivateKey, CREDENTIALS.githubAppWebhookSecret],
       async (transaction) => {
         await transaction.gitHubAppSettings.deleteMany({
           where: { id: GITHUB_APP_SETTINGS_ID },
@@ -1412,6 +1579,7 @@ export class GitHubService {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
       outcome: "SUCCESS",
     });
+    this.notificationsConfigurationChanged?.();
     return this.getAppSettings();
   }
 

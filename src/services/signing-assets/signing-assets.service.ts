@@ -16,7 +16,7 @@ import {
   storedAppleDeveloperCredentials,
 } from "@/services/apple-developer";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   type AgentControlService,
 } from "@/services/agent-control";
 import {
@@ -62,12 +62,16 @@ function stringArray(value: string): string[] {
 }
 
 function online(
-  agent: { lastSeenAt: Date | null; disconnectedAt: Date | null },
+  agent: {
+    lastSeenAt: Date | null;
+    disconnectedAt: Date | null;
+    heartbeatIntervalSeconds?: number | null;
+  },
   now = Date.now(),
 ): boolean {
   return (
     agent.lastSeenAt !== null &&
-    now - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    now - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
   );
 }
@@ -691,6 +695,7 @@ export class SigningAssetsService {
         capabilitiesJson: true,
         lastSeenAt: true,
         disconnectedAt: true,
+        heartbeatIntervalSeconds: true,
       },
     });
     const agentsById = new Map(agents.map((agent) => [agent.id, agent]));

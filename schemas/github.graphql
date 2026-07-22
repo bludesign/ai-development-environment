@@ -68,6 +68,7 @@ enum GitHubPipelineRetryUnavailableReason {
 type GitHubSettings {
   tokenConfigured: Boolean!
   defaultJiraKeyRegex: String!
+  actionsNotificationPollIntervalSeconds: Int!
   updatedAt: String!
 }
 
@@ -82,6 +83,12 @@ type GitHubAppSettings {
   repositorySelection: String
   actionsPermission: String
   verifiedAt: String
+  webhookConfigured: Boolean!
+  webhookUrl: String
+  webhookConfiguredAt: String
+  webhookLastReceivedAt: String
+  webhookLastOutcome: String
+  webhookLastError: String
   updatedAt: String
 }
 
@@ -454,12 +461,14 @@ type GitHubPullRequestPage {
 input SaveGitHubSettingsInput {
   apiToken: String
   defaultJiraKeyRegex: String
+  actionsNotificationPollIntervalSeconds: Int
 }
 
 input SaveGitHubAppSettingsInput {
   appId: String!
   installationId: String!
   privateKey: String
+  webhookUrl: String
 }
 
 input AddGitHubRepositoryInput {

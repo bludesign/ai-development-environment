@@ -59,7 +59,10 @@ export async function POST(request: Request): Promise<Response> {
       );
     if (!device) throw new Error("Completed enrollment device is unavailable");
     const origin = resolvePublicOrigin(request.headers)?.origin ?? url.origin;
-    const completionUrl = new URL("/api/ios/enrollment-complete", origin);
+    const completionUrl = new URL(
+      "/api/public/ios/enrollment-complete",
+      origin,
+    );
     completionUrl.searchParams.set("deviceId", device.id);
     return new Response(null, {
       // iOS Profile Service uses a permanent redirect as the browser hand-off

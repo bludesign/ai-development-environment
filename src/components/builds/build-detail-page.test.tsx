@@ -290,7 +290,7 @@ describe("BuildDetailPage", () => {
     expect(screen.getByText("Out of date")).toBeDefined();
     const downloads = screen.getAllByRole("link", { name: "Download" });
     expect(downloads[0]?.getAttribute("href")).toBe(
-      "/api/builds/build-1/artifacts/app-artifact",
+      "/api/public/builds/build-1/artifacts/app-artifact",
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();

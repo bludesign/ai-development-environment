@@ -618,6 +618,12 @@ describe("CodebasesService", () => {
           updatedAt,
         }),
       },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({
+          codebaseScanIntervalSeconds: 90,
+          gitFetchIntervalSeconds: 600,
+        }),
+      },
       codebase: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -635,8 +641,8 @@ describe("CodebasesService", () => {
     const service = new CodebasesService(control());
 
     await expect(service.agentConfiguration("agent-1")).resolves.toEqual({
-      refreshIntervalSeconds: 120,
-      fetchIntervalSeconds: 300,
+      refreshIntervalSeconds: 90,
+      fetchIntervalSeconds: 600,
       codebases: [
         {
           id: "codebase-1",

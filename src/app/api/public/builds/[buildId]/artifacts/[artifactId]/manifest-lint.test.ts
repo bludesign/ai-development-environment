@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const getServerServices = vi.hoisted(() => vi.fn());
 vi.mock("@/services/server-services", () => ({ getServerServices }));
 
-import { GET as manifest } from "@/app/api/builds/[buildId]/artifacts/[artifactId]/manifest.plist/route";
+import { GET as manifest } from "@/app/api/public/builds/[buildId]/artifacts/[artifactId]/manifest.plist/route";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -55,7 +55,7 @@ describe("install manifest against Apple's own parser", () => {
     async () => {
       const response = await manifest(
         new Request(
-          "http://127.0.0.1:3000/api/builds/build-1/artifacts/artifact-1/manifest.plist",
+          "http://127.0.0.1:3000/api/public/builds/build-1/artifacts/artifact-1/manifest.plist",
           {
             headers: {
               "x-forwarded-proto": "https",
@@ -104,7 +104,7 @@ describe("install manifest against Apple's own parser", () => {
       );
       expect(await read("items.0.assets.0.kind")).toBe("software-package");
       expect(await read("items.0.assets.0.url")).toMatch(
-        /^https:\/\/builds\.example\.com\/api\/builds\/build-1\/artifacts\/artifact-1\?token=/,
+        /^https:\/\/builds\.example\.com\/api\/public\/builds\/build-1\/artifacts\/artifact-1\?token=/,
       );
     },
   );

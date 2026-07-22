@@ -17,6 +17,24 @@ export const NOTIFICATION_TYPES = {
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
   },
+  GITHUB_ACTIONS_SUCCEEDED: {
+    key: "GITHUB_ACTIONS_SUCCEEDED",
+    category: "GITHUB",
+    label: "GitHub Actions succeeded",
+    description: "A GitHub Actions workflow finishes successfully.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
+  GITHUB_ACTIONS_FAILED: {
+    key: "GITHUB_ACTIONS_FAILED",
+    category: "GITHUB",
+    label: "GitHub Actions failed",
+    description: "A GitHub Actions workflow finishes with a failure.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
 } as const;
 
 export type NotificationTypeKey = keyof typeof NOTIFICATION_TYPES;

@@ -4,7 +4,7 @@ import type { AgentControlService } from "@/services/agent-control";
 import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
 import {
   AGENT_CHANGED_TOPIC,
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   agentEventBus,
   agentEventsTopic,
   agentJobChangedTopic,
@@ -89,10 +89,11 @@ export const createAgentResolvers = (
     connectionStatus: (agent: {
       lastSeenAt: Date | null;
       disconnectedAt: Date | null;
+      heartbeatIntervalSeconds?: number | null;
     }) => {
       const recentlySeen =
         agent.lastSeenAt !== null &&
-        Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS;
+        Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent);
       return recentlySeen && agent.disconnectedAt === null
         ? "ONLINE"
         : "OFFLINE";
@@ -140,6 +141,14 @@ export const createAgentResolvers = (
     agentSelf: (_root: unknown, _args: unknown, context: GraphQLContext) => {
       const agentId = requireAgent(context);
       return agentControlService.getAgent(agentId);
+    },
+    agentCadenceSettings: (
+      _root: unknown,
+      { agentId }: { agentId: string },
+      context: GraphQLContext,
+    ) => {
+      requireOwnedAgent(context, agentId);
+      return agentControlService.cadenceSettings(agentId);
     },
     agentJobs: (
       _root: unknown,
@@ -326,6 +335,25 @@ export const createAgentResolvers = (
         input.mode,
         input.path ?? null,
       );
+    },
+    updateAgentCadenceSettings: (
+      _root: unknown,
+      {
+        agentId,
+        input,
+      }: {
+        agentId: string;
+        input: {
+          codebaseScanIntervalSeconds: number;
+          jobReconciliationIntervalSeconds: number;
+          gitFetchIntervalSeconds: number;
+          heartbeatIntervalSeconds: number;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return agentControlService.updateCadenceSettings(agentId, input);
     },
     deleteAgent: (
       _root: unknown,

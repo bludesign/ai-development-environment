@@ -22,7 +22,7 @@ function params() {
 
 function request(headers: Record<string, string> = {}, query = ""): Request {
   return new Request(
-    `http://127.0.0.1:3000/api/builds/build-1/artifacts/artifact-1${query}`,
+    `http://127.0.0.1:3000/api/public/builds/build-1/artifacts/artifact-1${query}`,
     { headers },
   );
 }

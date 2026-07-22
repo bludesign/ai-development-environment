@@ -28,6 +28,7 @@ import {
   Sparkles,
   TicketCheck,
   Terminal,
+  TimerReset,
   Wrench,
   X,
 } from "lucide-react";
@@ -573,6 +574,22 @@ function NavigationSidebar() {
           <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/polling")}
+                >
+                  <Link
+                    href="/polling"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <TimerReset />
+                    <span>{t("polling")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild

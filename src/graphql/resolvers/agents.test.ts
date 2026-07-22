@@ -98,4 +98,48 @@ describe("agent read ownership", () => {
     ).resolves.toBe(true);
     expect(service.requestCodebaseReconcile).toHaveBeenCalledWith(["agent-1"]);
   });
+
+  test("agents can read only their cadence and only the control plane can update it", async () => {
+    const settings = {
+      agentId: "agent-1",
+      codebaseScanIntervalSeconds: 60,
+      jobReconciliationIntervalSeconds: 30,
+      gitFetchIntervalSeconds: 900,
+      heartbeatIntervalSeconds: 20,
+    };
+    const service = {
+      cadenceSettings: vi.fn().mockResolvedValue(settings),
+      updateCadenceSettings: vi.fn().mockResolvedValue(settings),
+    } as unknown as AgentControlService;
+    const resolvers = createAgentResolvers(service);
+
+    await expect(
+      resolvers.Query.agentCadenceSettings(
+        {},
+        { agentId: "agent-1" },
+        context("agent-1"),
+      ),
+    ).resolves.toBe(settings);
+    expect(() =>
+      resolvers.Query.agentCadenceSettings(
+        {},
+        { agentId: "agent-2" },
+        context("agent-1"),
+      ),
+    ).toThrow("only read its own resources");
+    expect(() =>
+      resolvers.Mutation.updateAgentCadenceSettings(
+        {},
+        { agentId: "agent-1", input: settings },
+        context("agent-1"),
+      ),
+    ).toThrow("cannot perform control-plane operations");
+    await expect(
+      resolvers.Mutation.updateAgentCadenceSettings(
+        {},
+        { agentId: "agent-1", input: settings },
+        context(null),
+      ),
+    ).resolves.toBe(settings);
+  });
 });

@@ -110,6 +110,7 @@ describe("GitHub resolvers", () => {
       appId: "123",
       installationId: "456",
       privateKey: "private-key",
+      webhookUrl: "https://hooks.example/github",
     };
 
     await expect(
@@ -153,10 +154,14 @@ describe("GitHub resolvers", () => {
       { input: appInput },
       context(null),
     );
-    expect(service.saveAppSettings).toHaveBeenCalledWith(appInput, {
-      actor: "control-plane",
-      ipAddress: "127.0.0.1",
-    });
+    expect(service.saveAppSettings).toHaveBeenCalledWith(
+      appInput,
+      {
+        actor: "control-plane",
+        ipAddress: "127.0.0.1",
+      },
+      undefined,
+    );
     expect(service.pullRequests).toHaveBeenCalledWith(
       "REPOSITORY",
       "repository-1",

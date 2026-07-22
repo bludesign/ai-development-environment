@@ -60,7 +60,7 @@ export async function GET(
     }
 
     const { token, expires } = signArtifactToken(artifactId);
-    const packageUrl = `${origin.origin}/api/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}?token=${token}&expires=${expires}`;
+    const packageUrl = `${origin.origin}/api/public/builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(artifactId)}?token=${token}&expires=${expires}`;
 
     const manifest = plistDocument({
       items: [

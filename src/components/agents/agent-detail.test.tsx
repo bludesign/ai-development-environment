@@ -199,6 +199,93 @@ describe("AgentDetail", () => {
     expect(screen.queryByText("cloudflared.runTunnel")).toBeNull();
   });
 
+  test("explains and saves each agent cadence", async () => {
+    const createdAt = new Date(0).toISOString();
+    subscriptionsMock.mockReturnValue({
+      subscribe: vi.fn(() => vi.fn()),
+    } as never);
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("UpdateAgentCadenceSettings")) {
+        return {
+          updateAgentCadenceSettings: {
+            agentId: "agent-1",
+            codebaseScanIntervalSeconds: 60,
+            jobReconciliationIntervalSeconds: 30,
+            gitFetchIntervalSeconds: 900,
+            heartbeatIntervalSeconds: 30,
+          },
+        } as never;
+      }
+      if (query.includes("query AgentDetail")) {
+        return {
+          agent: {
+            id: "agent-1",
+            name: "Development Mac",
+            hostname: "dev-mac.local",
+            version: "1.0.0",
+            osVersion: "macOS",
+            architecture: "arm64",
+            capabilities: [],
+            baseRepoDirectory: null,
+            connectionStatus: "ONLINE",
+            ipAddress: null,
+            lastSeenAt: createdAt,
+            disconnectedAt: null,
+            createdAt,
+          },
+          agentCadenceSettings: {
+            agentId: "agent-1",
+            codebaseScanIntervalSeconds: 60,
+            jobReconciliationIntervalSeconds: 30,
+            gitFetchIntervalSeconds: 900,
+            heartbeatIntervalSeconds: 15,
+          },
+          agentJobs: [],
+          codebaseOverview: { repositories: [] },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<AgentDetail agentId="agent-1" />);
+
+    expect(
+      await screen.findByLabelText("Codebase scan (seconds)"),
+    ).toBeDefined();
+    expect(
+      screen.getByText(/Inspects registered repositories and reports branch/),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        /Queries the control plane for queued, running, or cancelled jobs/,
+      ),
+    ).toBeDefined();
+    expect(screen.getByText(/Runs git fetch origin/)).toBeDefined();
+    expect(
+      screen.getByText(/Reports connection liveness, agent inventory/),
+    ).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Agent heartbeat (seconds)"), {
+      target: { value: "30" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save cadence" }));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("UpdateAgentCadenceSettings"),
+        {
+          agentId: "agent-1",
+          input: {
+            codebaseScanIntervalSeconds: 60,
+            jobReconciliationIntervalSeconds: 30,
+            gitFetchIntervalSeconds: 900,
+            heartbeatIntervalSeconds: 30,
+          },
+        },
+      ),
+    );
+    expect(await screen.findByText("Agent cadence saved.")).toBeDefined();
+  });
+
   test("shows an empty sample payload before invoking a capability", async () => {
     const createdAt = new Date(0).toISOString();
     const job: AgentJob = {

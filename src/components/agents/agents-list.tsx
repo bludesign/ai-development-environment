@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Laptop, Plus, RefreshCw } from "lucide-react";
+import { Copy, Laptop, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -15,6 +15,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -35,6 +36,11 @@ import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
 
 const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
+const CUSTOM_SERVER_ORIGIN = "__custom__";
+
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 
 export function AgentsList({
   localServerOrigins = [],
@@ -53,6 +59,10 @@ export function AgentsList({
   const [selectedServerOrigin, setSelectedServerOrigin] = useState<
     string | null
   >(null);
+  const [customServerOrigin, setCustomServerOrigin] = useState("");
+  const [requestHeaders, setRequestHeaders] = useState<
+    Array<{ id: string; name: string; value: string }>
+  >([]);
 
   const load = useCallback(async () => {
     try {
@@ -117,8 +127,22 @@ export function AgentsList({
 
   const browserOrigin =
     typeof window === "undefined" ? null : window.location.origin;
+  const serverOrigin =
+    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
+      ? customServerOrigin.trim()
+      : (selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090");
   const command = enrollment
-    ? `control-agent enroll --server ${selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090"} --enrollment-token ${enrollment.token}`
+    ? [
+        "control-agent enroll",
+        `--server ${shellQuote(serverOrigin)}`,
+        `--enrollment-token ${enrollment.token}`,
+        ...requestHeaders
+          .filter((header) => header.name.trim() && header.value)
+          .map(
+            (header) =>
+              `--header ${shellQuote(`${header.name.trim()}: ${header.value}`)}`,
+          ),
+      ].join(" ")
     : "";
   const serverOrigins = [
     ...new Set(
@@ -174,14 +198,102 @@ export function AgentsList({
                     {origin}
                   </SelectItem>
                 ))}
+                <SelectItem value={CUSTOM_SERVER_ORIGIN}>
+                  {t("customServerAddress")}
+                </SelectItem>
               </SelectContent>
             </Select>
+            {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
+              <Input
+                aria-label={t("customServerAddress")}
+                className="mt-2 w-full sm:max-w-md"
+                onChange={(event) => setCustomServerOrigin(event.target.value)}
+                placeholder={t("customServerAddress")}
+                type="url"
+                value={customServerOrigin}
+              />
+            )}
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">{t("headers")}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {t("headersDescription")}
+                  </p>
+                </div>
+                <Button
+                  onClick={() =>
+                    setRequestHeaders((current) => [
+                      ...current,
+                      {
+                        id: crypto.randomUUID(),
+                        name: "",
+                        value: "",
+                      },
+                    ])
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <Plus /> {t("addHeader")}
+                </Button>
+              </div>
+              {requestHeaders.map((header) => (
+                <div className="flex items-center gap-2" key={header.id}>
+                  <Input
+                    aria-label={t("headerName")}
+                    onChange={(event) =>
+                      setRequestHeaders((current) =>
+                        current.map((item) =>
+                          item.id === header.id
+                            ? { ...item, name: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    placeholder={t("headerName")}
+                    value={header.name}
+                  />
+                  <Input
+                    aria-label={t("headerValue")}
+                    onChange={(event) =>
+                      setRequestHeaders((current) =>
+                        current.map((item) =>
+                          item.id === header.id
+                            ? { ...item, value: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    placeholder={t("headerValue")}
+                    value={header.value}
+                  />
+                  <Button
+                    aria-label={t("removeHeader", {
+                      name: header.name || t("header"),
+                    })}
+                    onClick={() =>
+                      setRequestHeaders((current) =>
+                        current.filter((item) => item.id !== header.id),
+                      )
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+            </div>
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-muted p-3">
               <code className="min-w-0 flex-1 break-all text-xs">
                 {command}
               </code>
               <Button
                 aria-label={t("copy")}
+                disabled={!serverOrigin}
                 onClick={() => void copyEnrollmentCommand()}
                 size="icon-sm"
                 variant="ghost"

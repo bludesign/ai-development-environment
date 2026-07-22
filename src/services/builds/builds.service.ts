@@ -36,7 +36,7 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   AgentControlService,
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
@@ -120,10 +120,11 @@ function signingRequirements(value: unknown): BuildSigningRequirement[] {
 function online(agent: {
   lastSeenAt: Date | null;
   disconnectedAt: Date | null;
+  heartbeatIntervalSeconds?: number | null;
 }): boolean {
   return (
     agent.lastSeenAt !== null &&
-    Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
   );
 }

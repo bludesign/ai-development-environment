@@ -8,6 +8,7 @@ export type AgentConfig = {
   agentId: string;
   credential: string;
   name: string;
+  headers?: Record<string, string>;
 };
 
 export const configPath = () =>
@@ -30,7 +31,6 @@ export function normalizeServer(value: string): string {
 export function defaultWebSocketServer(server: string): string {
   const url = new URL(server);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.port = process.env.AGENT_WS_PORT ?? "3091";
   url.pathname = "/graphql";
   url.search = "";
   url.hash = "";

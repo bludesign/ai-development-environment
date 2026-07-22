@@ -1,0 +1,36 @@
+enum PollingOperationRuntime {
+  SERVER
+  AGENT
+}
+
+enum PollingOperationStatus {
+  DISABLED
+  HEALTHY
+  RUNNING
+  STALE
+  ERROR
+}
+
+type PollingOperation {
+  id: ID!
+  kind: String!
+  runtime: PollingOperationRuntime!
+  status: PollingOperationStatus!
+  enabled: Boolean!
+  cadenceSeconds: Int
+  lastStartedAt: String
+  lastCompletedAt: String
+  lastSucceededAt: String
+  nextScheduledAt: String
+  durationMs: Int
+  lastError: String
+  details: JSON!
+}
+
+extend type Query {
+  pollingOperations: [PollingOperation!]!
+}
+
+extend type Subscription {
+  pollingOperationChanged: ID!
+}

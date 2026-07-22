@@ -116,7 +116,7 @@ export function enrollmentProfileXml({
   profileIdentifier: string;
   payloadUuid?: string;
 }): string {
-  const callback = `${publicOrigin}/api/ios/profile-response?token=${encodeURIComponent(token)}`;
+  const callback = `${publicOrigin}/api/public/ios/profile-response?token=${encodeURIComponent(token)}`;
   return plistDocument({
     PayloadContent: {
       URL: callback,

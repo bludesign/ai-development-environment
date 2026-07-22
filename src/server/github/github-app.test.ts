@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
+  configureGitHubAppWebhook,
   githubAppGraphql,
   GitHubAppError,
   listGitHubActionsWorkflowJobs,
@@ -58,6 +59,24 @@ beforeEach(() => {
 });
 
 describe("GitHub App authentication", () => {
+  test("treats GitHub's 404 as a disabled App webhook", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({ message: "Not Found" }, 404),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      configureGitHubAppWebhook(credentials, {
+        url: "https://control.example/api/public/github/webhook",
+        secret: "webhook-secret",
+      }),
+    ).resolves.toEqual({ configured: false, githubRequestId: "REQUEST-1" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/app/hook/config",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
   test.each([
     ["PKCS#1", pkcs1],
     ["PKCS#8", pkcs8],

@@ -762,7 +762,7 @@ export function BuildDetailPage({
                         <Button asChild size="sm" variant="outline">
                           <a
                             download
-                            href={`/api/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
+                            href={`/api/public/builds/${encodeURIComponent(build.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
                           >
                             <Download />{" "}
                             {ipa ? t("downloadIpa") : t("downloadArtifact")}

@@ -1,5 +1,5 @@
 import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
-import { AGENT_ONLINE_WINDOW_MS } from "@/services/agent-control";
+import { agentOnlineWindowMs } from "@/services/agent-control";
 
 function parsedJson(value: unknown): unknown {
   if (typeof value !== "string") return value ?? null;
@@ -21,10 +21,11 @@ function iso(value: unknown): string | null {
 export function agentConnectionStatus(value: {
   lastSeenAt?: Date | string | null;
   disconnectedAt?: Date | string | null;
+  heartbeatIntervalSeconds?: number | null;
 }): "ONLINE" | "OFFLINE" {
   const lastSeen = iso(value.lastSeenAt);
   return lastSeen !== null &&
-    Date.now() - Date.parse(lastSeen) <= AGENT_ONLINE_WINDOW_MS &&
+    Date.now() - Date.parse(lastSeen) <= agentOnlineWindowMs(value) &&
     !value.disconnectedAt
     ? "ONLINE"
     : "OFFLINE";

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   heartbeat: vi.fn(),
+  cadenceSettings: vi.fn(),
   pendingJobs: vi.fn(),
   completeJob: vi.fn(),
   execute: vi.fn(),
@@ -18,6 +19,9 @@ vi.mock("./graphql-client.js", () => ({
   AgentGraphQLClient: class {
     heartbeat(...args: unknown[]) {
       return mocks.heartbeat(...args);
+    }
+    cadenceSettings(...args: unknown[]) {
+      return mocks.cadenceSettings(...args);
     }
     pendingJobs(...args: unknown[]) {
       return mocks.pendingJobs(...args);
@@ -87,6 +91,13 @@ const config: AgentConfig = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.heartbeat.mockResolvedValue({});
+  mocks.cadenceSettings.mockResolvedValue({
+    agentId: "agent-1",
+    codebaseScanIntervalSeconds: 30,
+    jobReconciliationIntervalSeconds: 15,
+    gitFetchIntervalSeconds: 300,
+    heartbeatIntervalSeconds: 15,
+  });
   mocks.pendingJobs.mockResolvedValue([]);
   mocks.completeJob.mockResolvedValue({});
   mocks.cancelAll.mockResolvedValue(undefined);
@@ -99,6 +110,72 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("runAgent startup reconciliation", () => {
+  test("runs heartbeats and durable job reconciliation on independent cadences", async () => {
+    vi.useFakeTimers();
+    mocks.cadenceSettings.mockResolvedValue({
+      agentId: "agent-1",
+      codebaseScanIntervalSeconds: 30,
+      jobReconciliationIntervalSeconds: 40,
+      gitFetchIntervalSeconds: 300,
+      heartbeatIntervalSeconds: 20,
+    });
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+
+    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(1);
+    expect(mocks.pendingJobs).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(2);
+    expect(mocks.pendingJobs).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(3);
+    expect(mocks.pendingJobs).toHaveBeenCalledTimes(2);
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  test("applies pushed cadence changes without restarting", async () => {
+    vi.useFakeTimers();
+    mocks.cadenceSettings
+      .mockResolvedValueOnce({
+        agentId: "agent-1",
+        codebaseScanIntervalSeconds: 30,
+        jobReconciliationIntervalSeconds: 15,
+        gitFetchIntervalSeconds: 300,
+        heartbeatIntervalSeconds: 15,
+      })
+      .mockResolvedValue({
+        agentId: "agent-1",
+        codebaseScanIntervalSeconds: 20,
+        jobReconciliationIntervalSeconds: 7,
+        gitFetchIntervalSeconds: 120,
+        heartbeatIntervalSeconds: 5,
+      });
+    const controller = new AbortController();
+    const running = runAgent(config, controller.signal);
+    for (let index = 0; index < 10; index += 1) await Promise.resolve();
+    const onEvent = mocks.subscribe.mock.calls[0]?.[2] as (event: {
+      type: string;
+      job: null;
+    }) => void;
+
+    onEvent({ type: "AGENT_CONFIGURATION_CHANGED", job: null });
+    await vi.waitFor(() =>
+      expect(mocks.cadenceSettings).toHaveBeenCalledTimes(2),
+    );
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mocks.pendingJobs).toHaveBeenCalledTimes(2);
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+  });
+
   test("stays running when the initial durable-job query fails", async () => {
     mocks.pendingJobs.mockRejectedValueOnce(
       new Error("control plane starting"),

@@ -86,6 +86,7 @@ class GraphQLServerService {
       this.services.cacheServerService,
       this.services.credentialService,
       this.services.notificationsService,
+      this.services.pollingService,
     );
 
     // Introspection + the local Apollo sandbox are enabled outside production, or when

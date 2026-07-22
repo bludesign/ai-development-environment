@@ -41,6 +41,7 @@ describe("SettingsPage", () => {
         return {
           githubSettings: {
             tokenConfigured: true,
+            actionsNotificationPollIntervalSeconds: 60,
             updatedAt: new Date(0).toISOString(),
           },
         } as never;
@@ -49,6 +50,7 @@ describe("SettingsPage", () => {
         return {
           saveGitHubSettings: {
             tokenConfigured: true,
+            actionsNotificationPollIntervalSeconds: 120,
             updatedAt: new Date().toISOString(),
           },
         } as never;
@@ -68,6 +70,14 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("region", { name: "Integrations" })).toBeDefined();
     expect(tokenInput.type).toBe("password");
     expect(tokenInput.value).toBe("");
+    const actionsInterval = screen.getByLabelText(
+      "Actions notification and Auto Retry interval (seconds)",
+    );
+    expect(
+      screen.getByText(
+        /Controls Auto Retry polling and, when a signed GitHub App webhook is unavailable, notification polling/,
+      ),
+    ).toBeDefined();
     const createTokenLink = screen.getByRole("link", {
       name: /Create fine-grained token/,
     });
@@ -84,6 +94,7 @@ describe("SettingsPage", () => {
     ).toHaveProperty("href", "https://code.visualstudio.com/insiders/");
 
     fireEvent.change(tokenInput, { target: { value: "replacement-token" } });
+    fireEvent.change(actionsInterval, { target: { value: "120" } });
     const form = tokenInput.closest("form");
     expect(form).not.toBeNull();
     fireEvent.click(
@@ -95,7 +106,12 @@ describe("SettingsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("SaveGitHubSettings"),
-        { input: { apiToken: "replacement-token" } },
+        {
+          input: {
+            apiToken: "replacement-token",
+            actionsNotificationPollIntervalSeconds: 120,
+          },
+        },
       ),
     );
     expect(screen.queryByDisplayValue("replacement-token")).toBeNull();
@@ -163,6 +179,7 @@ describe("SettingsPage", () => {
 
     const appId = await screen.findByLabelText("GitHub App ID");
     const installationId = screen.getByLabelText("Installation ID");
+    const webhookUrl = screen.getByLabelText("Webhook URL") as HTMLInputElement;
     const privateKey = screen.getByLabelText(
       "PEM private key",
     ) as HTMLTextAreaElement;
@@ -181,6 +198,10 @@ describe("SettingsPage", () => {
 
     fireEvent.change(appId, { target: { value: "123" } });
     fireEvent.change(installationId, { target: { value: "456" } });
+    expect(webhookUrl.value).toContain("/api/public/github/webhook");
+    fireEvent.change(webhookUrl, {
+      target: { value: "https://hooks.example/github-actions" },
+    });
     const dropZone = screen.getByRole("group", {
       name: "PEM private key drop zone",
     });
@@ -233,6 +254,7 @@ describe("SettingsPage", () => {
             appId: "123",
             installationId: "456",
             privateKey: pem,
+            webhookUrl: "https://hooks.example/github-actions",
           },
         },
       ),

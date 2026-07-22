@@ -38,7 +38,10 @@ export async function POST(request: Request): Promise<Response> {
     }
     const enrollment =
       await getServerServices().iosDevicesService.createEnrollment(displayName);
-    const location = new URL("/api/ios/enrollment-profile", origin.origin);
+    const location = new URL(
+      "/api/public/ios/enrollment-profile",
+      origin.origin,
+    );
     location.searchParams.set("token", enrollment.token);
     return new Response(null, {
       status: 303,

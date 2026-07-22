@@ -28,7 +28,7 @@ import {
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
-  AGENT_ONLINE_WINDOW_MS,
+  agentOnlineWindowMs,
   AgentControlService,
   CODEBASE_CHANGED_TOPIC,
   agentEventBus,
@@ -76,10 +76,11 @@ function capabilities(agent: { capabilitiesJson: string }): string[] {
 function online(agent: {
   lastSeenAt: Date | null;
   disconnectedAt: Date | null;
+  heartbeatIntervalSeconds?: number | null;
 }): boolean {
   return (
     agent.lastSeenAt !== null &&
-    Date.now() - agent.lastSeenAt.getTime() <= AGENT_ONLINE_WINDOW_MS &&
+    Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
     agent.disconnectedAt === null
   );
 }
@@ -207,13 +208,23 @@ export class CodebasesService {
   }
 
   async agentConfiguration(agentId: string) {
-    const [settings, codebases] = await Promise.all([
+    const prisma = await getPrismaClient();
+    const [settings, agent, codebases] = await Promise.all([
       this.settings(),
+      prisma.agent.findUnique({
+        where: { id: agentId },
+        select: {
+          codebaseScanIntervalSeconds: true,
+          gitFetchIntervalSeconds: true,
+        },
+      }),
       this.agentCodebases(agentId),
     ]);
     return {
-      refreshIntervalSeconds: settings.refreshIntervalSeconds,
-      fetchIntervalSeconds: settings.fetchIntervalSeconds,
+      refreshIntervalSeconds:
+        agent?.codebaseScanIntervalSeconds ?? settings.refreshIntervalSeconds,
+      fetchIntervalSeconds:
+        agent?.gitFetchIntervalSeconds ?? settings.fetchIntervalSeconds,
       codebases,
     };
   }

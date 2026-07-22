@@ -335,6 +335,7 @@ function kindName(t: ReturnType<typeof useTranslations>, kind: string): string {
     "jira-api-token",
     "github-personal-access-token",
     "github-app-private-key",
+    "github-app-webhook-secret",
     "cache-server-api-key",
     "cache-server-headers",
     "external-mcp-server-headers",

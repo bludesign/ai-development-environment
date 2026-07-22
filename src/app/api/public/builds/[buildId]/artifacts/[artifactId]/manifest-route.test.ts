@@ -9,7 +9,7 @@ const artifactForInstall = vi.fn();
 
 function request(headers: Record<string, string> = {}): Request {
   return new Request(
-    "http://127.0.0.1:3000/api/builds/build-1/artifacts/artifact-1/manifest.plist",
+    "http://127.0.0.1:3000/api/public/builds/build-1/artifacts/artifact-1/manifest.plist",
     { headers },
   );
 }
@@ -79,7 +79,7 @@ describe("install manifest route", () => {
     expect(body).toContain("<key>kind</key><string>software</string>");
     expect(body).toContain("<string>software-package</string>");
     expect(body).toContain(
-      "<string>https://builds.example.com/api/builds/build-1/artifacts/artifact-1?token=",
+      "<string>https://builds.example.com/api/public/builds/build-1/artifacts/artifact-1?token=",
     );
   });
 
@@ -89,7 +89,7 @@ describe("install manifest route", () => {
     try {
       const response = await manifest(secureRequest(), params());
       await expect(response.text()).resolves.toContain(
-        "https://ota.example.com/api/builds/build-1/artifacts/artifact-1",
+        "https://ota.example.com/api/public/builds/build-1/artifacts/artifact-1",
       );
     } finally {
       delete process.env.PUBLIC_BASE_URL;

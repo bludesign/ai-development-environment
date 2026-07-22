@@ -479,6 +479,44 @@ export async function verifyGitHubAppConfiguration(
   };
 }
 
+export async function configureGitHubAppWebhook(
+  credentials: GitHubAppCredentials,
+  input: { url: string; secret: string },
+): Promise<{ configured: boolean; githubRequestId: string | null }> {
+  const prepared = prepareGitHubAppCredentials(credentials);
+  const appJwt = await createAppJwt(prepared);
+  const response = await githubFetch(`${prepared.apiBaseUrl}/app/hook/config`, {
+    method: "PATCH",
+    headers: {
+      ...githubHeaders(`Bearer ${appJwt}`),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      url: input.url,
+      content_type: "json",
+      secret: input.secret,
+      insecure_ssl: "0",
+    }),
+  });
+  const githubRequestId = requestId(response);
+  if (response.status === 404) {
+    return { configured: false, githubRequestId };
+  }
+  if (!response.ok) {
+    const body = await responseBody(response);
+    throw new GitHubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      responseMessage(body, response.status, [
+        appJwt,
+        input.secret,
+        prepared.privateKey,
+      ]),
+      githubRequestId,
+    );
+  }
+  return { configured: true, githubRequestId };
+}
+
 export async function rerunGitHubActionsWorkflow(
   credentials: GitHubAppCredentials,
   input: { owner: string; repository: string; workflowRunId: string },

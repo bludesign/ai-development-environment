@@ -5,7 +5,10 @@ import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
 import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
-import { GitHubService } from "@/services/github";
+import {
+  GitHubActionsNotificationsService,
+  GitHubService,
+} from "@/services/github";
 import { CacheServerService } from "@/services/cache-server";
 import { JiraService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
@@ -18,6 +21,7 @@ import { SigningAssetsService } from "@/services/signing-assets";
 import { PushNotificationsService } from "@/services/push-notifications";
 import { CredentialService } from "@/services/credentials";
 import { NotificationsService } from "@/services/notifications";
+import { PollingService } from "@/services/polling";
 
 export type ServerServices = {
   prismaService: PrismaService;
@@ -31,6 +35,7 @@ export type ServerServices = {
   jiraService: JiraService;
   iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
+  gitHubActionsNotificationsService: GitHubActionsNotificationsService;
   cacheServerService: CacheServerService;
   toolsService: ToolsService;
   worktreesService: WorktreesService;
@@ -39,6 +44,7 @@ export type ServerServices = {
   signingAssetsService: SigningAssetsService;
   pushNotificationsService: PushNotificationsService;
   notificationsService: NotificationsService;
+  pollingService: PollingService;
 };
 
 function createServerServices(): ServerServices {
@@ -53,9 +59,11 @@ function createServerServices(): ServerServices {
     undefined,
     credentialService,
   );
+  const pollingService = new PollingService();
   const pushNotificationsService = new PushNotificationsService(
     undefined,
     credentialService,
+    pollingService,
   );
   const notificationsService = new NotificationsService(credentialService);
   const buildsService = new BuildsService(
@@ -71,7 +79,18 @@ function createServerServices(): ServerServices {
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService(credentialService);
   const iosDevicesService = new IosDevicesService(undefined, credentialService);
-  const gitHubService = new GitHubService(true, credentialService);
+  const gitHubActionsNotificationsService =
+    new GitHubActionsNotificationsService(
+      credentialService,
+      notificationsService,
+      pollingService,
+    );
+  const gitHubService = new GitHubService(
+    true,
+    credentialService,
+    pollingService,
+    () => gitHubActionsNotificationsService.configurationChanged(),
+  );
   const cacheServerService = new CacheServerService(credentialService);
   const worktreesService = new WorktreesService(
     agentControlService,
@@ -91,6 +110,7 @@ function createServerServices(): ServerServices {
     jiraService,
     iosDevicesService,
     gitHubService,
+    gitHubActionsNotificationsService,
     cacheServerService,
     worktreesService,
     skillsService,
@@ -98,6 +118,7 @@ function createServerServices(): ServerServices {
     signingAssetsService,
     pushNotificationsService,
     notificationsService,
+    pollingService,
     toolsService: new ToolsService(
       codebaseToolsService,
       buildsService,

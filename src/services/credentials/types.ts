@@ -12,6 +12,7 @@ export const CREDENTIAL_KINDS = {
   jiraApiToken: "jira-api-token",
   githubPersonalAccessToken: "github-personal-access-token",
   githubAppPrivateKey: "github-app-private-key",
+  githubAppWebhookSecret: "github-app-webhook-secret",
   cacheServerApiKey: "cache-server-api-key",
   cacheServerHeaders: "cache-server-headers",
   externalMcpServerHeaders: "external-mcp-server-headers",
@@ -45,6 +46,11 @@ export const CREDENTIALS = {
   githubAppPrivateKey: {
     id: "github-app/default/private-key",
     kind: CREDENTIAL_KINDS.githubAppPrivateKey,
+    ownerId: "default",
+  },
+  githubAppWebhookSecret: {
+    id: "github-app/default/webhook-secret",
+    kind: CREDENTIAL_KINDS.githubAppWebhookSecret,
     ownerId: "default",
   },
   cacheServerApiKey: {
@@ -192,6 +198,7 @@ export function credentialOwnerFeature(kind: string): string {
       return "Jira";
     case CREDENTIAL_KINDS.githubPersonalAccessToken:
     case CREDENTIAL_KINDS.githubAppPrivateKey:
+    case CREDENTIAL_KINDS.githubAppWebhookSecret:
       return "GitHub";
     case CREDENTIAL_KINDS.cacheServerApiKey:
     case CREDENTIAL_KINDS.cacheServerHeaders:

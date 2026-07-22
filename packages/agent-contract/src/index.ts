@@ -3,6 +3,13 @@ export const TUNNEL_NAME_REGEX = new RegExp(`^${TUNNEL_NAME_PATTERN}$`);
 
 export const CCUSAGE_REPORT_JOB_KIND = "ccusage.report";
 
+export const DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS = 15;
+export const MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS = 5;
+export const MAX_AGENT_HEARTBEAT_INTERVAL_SECONDS = 300;
+export const DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS = 15;
+export const MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS = 5;
+export const MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS = 3_600;
+
 export type CcusageTokenTotals = {
   inputTokens: number;
   outputTokens: number;

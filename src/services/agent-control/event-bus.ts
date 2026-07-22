@@ -95,6 +95,7 @@ export const IOS_DEVICES_CHANGED_TOPIC = "ios-devices.changed";
 export const SIGNING_ASSETS_CHANGED_TOPIC = "signing-assets.changed";
 export const PUSH_NOTIFICATIONS_CHANGED_TOPIC = "push-notifications.changed";
 export const APP_NOTIFICATIONS_CHANGED_TOPIC = "app-notifications.changed";
+export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;

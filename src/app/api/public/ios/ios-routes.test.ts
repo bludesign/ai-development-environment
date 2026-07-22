@@ -17,7 +17,7 @@ vi.mock("@/services/server-services", () => ({
 
 import { GET as completion } from "./enrollment-complete/route";
 import { GET as profile } from "./enrollment-profile/route";
-import { POST as start } from "./enrollment/start/route";
+import { POST as start } from "../../ios/enrollment/start/route";
 import { POST as callback } from "./profile-response/route";
 
 function proxyHeaders(extra: Record<string, string> = {}) {
@@ -43,7 +43,7 @@ describe("iOS enrollment routes", () => {
   test("serves the signed profile with Apple MIME and no-cache headers", async () => {
     const response = await profile(
       new Request(
-        "http://127.0.0.1:3000/api/ios/enrollment-profile?token=test-token",
+        "http://127.0.0.1:3000/api/public/ios/enrollment-profile?token=test-token",
         {
           headers: proxyHeaders({ "cf-connecting-ip": "203.0.113.9" }),
         },
@@ -71,7 +71,7 @@ describe("iOS enrollment routes", () => {
   test("disables profile enrollment without HTTPS", async () => {
     const response = await profile(
       new Request(
-        "http://192.168.1.20:3000/api/ios/enrollment-profile?token=test-token",
+        "http://192.168.1.20:3000/api/public/ios/enrollment-profile?token=test-token",
         { headers: { host: "192.168.1.20:3000" } },
       ),
     );
@@ -82,7 +82,7 @@ describe("iOS enrollment routes", () => {
   test("does not treat HTTPS on a private-address origin as publicly trusted", async () => {
     const response = await profile(
       new Request(
-        "http://192.168.1.20:3000/api/ios/enrollment-profile?token=test-token",
+        "http://192.168.1.20:3000/api/public/ios/enrollment-profile?token=test-token",
         {
           headers: {
             "x-forwarded-host": "192.168.1.20",
@@ -109,7 +109,7 @@ describe("iOS enrollment routes", () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
-      "https://devices.example.com/api/ios/enrollment-profile?token=test-token",
+      "https://devices.example.com/api/public/ios/enrollment-profile?token=test-token",
     );
     expect(mocks.createEnrollment).toHaveBeenCalledWith("Test iPhone");
   });
@@ -142,7 +142,7 @@ describe("iOS enrollment routes", () => {
   test("enforces the callback body limit before parsing", async () => {
     const response = await callback(
       new Request(
-        "https://devices.example.com/api/ios/profile-response?token=test-token",
+        "https://devices.example.com/api/public/ios/profile-response?token=test-token",
         {
           method: "POST",
           headers: { "content-length": String(128 * 1024 + 1) },
@@ -165,7 +165,7 @@ describe("iOS enrollment routes", () => {
     });
     const response = await callback(
       new Request(
-        "https://devices.example.com/api/ios/profile-response?token=test-token",
+        "https://devices.example.com/api/public/ios/profile-response?token=test-token",
         {
           method: "POST",
           body,
@@ -182,7 +182,7 @@ describe("iOS enrollment routes", () => {
   test("passes raw callback bytes and redirects to the generic completion page", async () => {
     const response = await callback(
       new Request(
-        "http://127.0.0.1:3000/api/ios/profile-response?token=test-token",
+        "http://127.0.0.1:3000/api/public/ios/profile-response?token=test-token",
         {
           method: "POST",
           headers: proxyHeaders({ "x-forwarded-for": "198.51.100.7" }),
@@ -193,7 +193,7 @@ describe("iOS enrollment routes", () => {
 
     expect(response.status).toBe(301);
     expect(response.headers.get("location")).toBe(
-      `https://devices.example.com/api/ios/enrollment-complete?deviceId=${deviceId}`,
+      `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}`,
     );
     expect(mocks.completeEnrollment).toHaveBeenCalledWith(
       "test-token",
@@ -205,7 +205,7 @@ describe("iOS enrollment routes", () => {
   test("serves a script-free completion page with restrictive headers", async () => {
     const response = completion(
       new Request(
-        `https://devices.example.com/api/ios/enrollment-complete?deviceId=${deviceId}`,
+        `https://devices.example.com/api/public/ios/enrollment-complete?deviceId=${deviceId}`,
       ),
     );
     expect(response.headers.get("content-type")).toContain("text/html");
