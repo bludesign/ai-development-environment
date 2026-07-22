@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -1001,14 +1002,12 @@ export function NotificationsPage() {
       </Card>
 
       <Card className="gap-0 overflow-hidden py-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b p-3">
-          <div>
-            <h2 className="font-semibold">{t("history")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("historyCount", { count: totalCount })}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+        <CardHeader>
+          <CardTitle>{t("history")}</CardTitle>
+          <CardDescription>
+            {t("historyCount", { count: totalCount })}
+          </CardDescription>
+          <CardAction className="flex items-center gap-2">
             <Button
               onClick={() => {
                 setEditMode((current) => !current);
@@ -1038,8 +1037,8 @@ export function NotificationsPage() {
                 </Button>
               }
             />
-          </div>
-        </div>
+          </CardAction>
+        </CardHeader>
 
         {editMode && (
           <div className="flex flex-wrap items-center gap-3 border-b bg-muted/30 p-3">
@@ -1157,7 +1156,7 @@ export function NotificationsPage() {
                             {editMode && (
                               <TableCell
                                 className={cn(
-                                  "border-l-4 pl-3",
+                                  "border-l-4 pl-2",
                                   color
                                     ? worktreeHighlightAccentClasses[color]
                                     : "border-l-transparent",
@@ -1180,7 +1179,7 @@ export function NotificationsPage() {
                             <TableCell
                               className={cn(
                                 "min-w-80",
-                                !editMode && "border-l-4",
+                                !editMode && "border-l-4 pl-2",
                                 !editMode &&
                                   (color
                                     ? worktreeHighlightAccentClasses[color]

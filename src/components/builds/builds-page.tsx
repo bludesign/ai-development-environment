@@ -408,7 +408,7 @@ export function BuildsPage() {
                               >
                                 <TableCell
                                   className={cn(
-                                    "border-l-4",
+                                    "border-l-4 pl-2",
                                     highlightColor
                                       ? worktreeHighlightAccentClasses[
                                           highlightColor

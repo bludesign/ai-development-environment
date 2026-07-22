@@ -28,7 +28,12 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -270,14 +275,10 @@ export function ToolsPage() {
       )}
 
       <Card className="gap-0 py-0">
-        <div className="border-b p-4">
-          <div>
-            <h2 className="font-semibold">{t("serversTitle")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("serversDescription")}
-            </p>
-          </div>
-        </div>
+        <CardHeader>
+          <CardTitle>{t("serversTitle")}</CardTitle>
+          <CardDescription>{t("serversDescription")}</CardDescription>
+        </CardHeader>
         {loading ? (
           <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
             <Spinner /> {t("loadingServers")}

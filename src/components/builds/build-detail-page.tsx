@@ -29,6 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DetailItem, DetailList } from "@/components/ui/detail-list";
 import {
   Dialog,
   DialogContent,
@@ -68,6 +69,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateTime } from "@/lib/date-format";
 import type { PublicOrigin } from "@/lib/public-origin";
 import { cn } from "@/lib/utils";
 import {
@@ -374,8 +376,7 @@ export function BuildDetailPage({
   const coverageAvailable =
     resultBundle?.metadata.coverageAvailable === true ||
     configuration?.advancedSettings?.codeCoverage === true;
-  const date = (value: string | null) =>
-    value ? new Date(value).toLocaleString(locale) : "—";
+  const date = (value: string | null) => formatDateTime(locale, value);
   const highlightColor = build?.worktree?.highlightColor;
 
   const copyCommandSummary = async (commandSummary: string) => {
@@ -725,7 +726,7 @@ export function BuildDetailPage({
               <CardTitle>{t("overview")}</CardTitle>
             </CardHeader>
             <CardContent>
-              <dl className="space-y-3 text-sm">
+              <DetailList className="gap-3">
                 <Detail label={t("buildId")} value={build.id} mono />
                 <Detail
                   label={t("scheme")}
@@ -752,7 +753,7 @@ export function BuildDetailPage({
                   value={build.artifactDirectory}
                   mono
                 />
-              </dl>
+              </DetailList>
             </CardContent>
           </Card>
           <AdvancedSettingsCard settings={configuration?.advancedSettings} />
@@ -974,18 +975,16 @@ function AdvancedSettingsCard({
         <CardTitle>{t("advancedSettings")}</CardTitle>
       </CardHeader>
       <CardContent>
-        <dl className="space-y-3 text-sm">
+        <DetailList className="gap-3">
           {keys.map((key) => (
-            <div key={key}>
-              <dt className="text-xs text-muted-foreground">
-                {labels[key] ?? humanizeIdentifier(key)}
-              </dt>
-              <dd className="mt-0.5 min-w-0">
-                <AdvancedSettingValue value={settings[key]} />
-              </dd>
-            </div>
+            <DetailItem
+              key={key}
+              label={labels[key] ?? humanizeIdentifier(key)}
+            >
+              <AdvancedSettingValue value={settings[key]} />
+            </DetailItem>
           ))}
-        </dl>
+        </DetailList>
       </CardContent>
     </Card>
   );
@@ -1003,7 +1002,7 @@ function AdvancedSettingValue({ value }: { value: unknown }) {
   if (value === null || value === undefined || value === "") return <>—</>;
   if (Array.isArray(value)) {
     return value.length ? (
-      <span className="break-words font-mono text-xs">
+      <span className="break-words font-mono">
         {value.map(String).join(", ")}
       </span>
     ) : (
@@ -1013,7 +1012,7 @@ function AdvancedSettingValue({ value }: { value: unknown }) {
   if (typeof value === "object") {
     const serialized = JSON.stringify(value);
     return serialized && serialized !== "{}" ? (
-      <span className="break-all font-mono text-xs">{serialized}</span>
+      <span className="break-all font-mono">{serialized}</span>
     ) : (
       <>—</>
     );
@@ -1021,7 +1020,7 @@ function AdvancedSettingValue({ value }: { value: unknown }) {
   if (typeof value === "string" && /^[A-Z][A-Z0-9_]*$/.test(value)) {
     return <>{humanizeConstant(value)}</>;
   }
-  return <span className="break-words font-mono text-xs">{String(value)}</span>;
+  return <span className="break-words font-mono">{String(value)}</span>;
 }
 
 type TestCaseResult = {
@@ -1410,11 +1409,8 @@ function Detail({
   mono?: boolean;
 }) {
   return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? "mt-0.5 break-all font-mono text-xs" : "mt-0.5"}>
-        {value}
-      </dd>
-    </div>
+    <DetailItem label={label} mono={mono}>
+      {value}
+    </DetailItem>
   );
 }

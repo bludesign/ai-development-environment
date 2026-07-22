@@ -243,66 +243,64 @@ export function CredentialsPage() {
               </Alert>
             ))}
 
-          <Card>
+          <Card className="gap-0 py-0">
             <CardHeader>
               <CardTitle>{t("inventoryTitle")}</CardTitle>
               <CardDescription>{t("inventoryDescription")}</CardDescription>
             </CardHeader>
-            <CardContent>
-              {data.credentials.length ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("feature")}</TableHead>
-                        <TableHead>{t("kind")}</TableHead>
-                        <TableHead>{t("backend")}</TableHead>
-                        <TableHead>{t("protection")}</TableHead>
-                        <TableHead>{t("updated")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.credentials.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <div className="font-medium">
-                              {featureName(t, item.kind, item.ownerFeature)}
+            {data.credentials.length ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("feature")}</TableHead>
+                      <TableHead>{t("kind")}</TableHead>
+                      <TableHead>{t("backend")}</TableHead>
+                      <TableHead>{t("protection")}</TableHead>
+                      <TableHead>{t("updated")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.credentials.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          <div className="font-medium">
+                            {featureName(t, item.kind, item.ownerFeature)}
+                          </div>
+                          {item.ownerId && item.ownerId !== "default" && (
+                            <div className="font-mono text-xs text-muted-foreground">
+                              {item.ownerId}
                             </div>
-                            {item.ownerId && item.ownerId !== "default" && (
-                              <div className="font-mono text-xs text-muted-foreground">
-                                {item.ownerId}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>{kindName(t, item.kind)}</TableCell>
-                          <TableCell>
-                            {t(`backends.${item.storageType}`)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              {t(`protections.${item.protection}`)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            {formatDate(item.updatedAt)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : (
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <KeyRound />
-                    </EmptyMedia>
-                    <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-                    <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              )}
-            </CardContent>
+                          )}
+                        </TableCell>
+                        <TableCell>{kindName(t, item.kind)}</TableCell>
+                        <TableCell>
+                          {t(`backends.${item.storageType}`)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {t(`protections.${item.protection}`)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDate(item.updatedAt)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <Empty className="py-10">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <KeyRound />
+                  </EmptyMedia>
+                  <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
+                  <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
           </Card>
         </>
       )}
