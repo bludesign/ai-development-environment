@@ -13,6 +13,7 @@ import type { PollingService } from "@/services/polling";
 
 const OPERATION_ID = "server:github-actions-notifications";
 const DEFAULT_INTERVAL_SECONDS = 60;
+const GITHUB_RUNS_PAGE_SIZE = 100;
 const RETENTION_MS = 30 * 24 * 60 * 60_000;
 const FAILURE_CONCLUSIONS = new Set([
   "failure",
@@ -205,58 +206,70 @@ export class GitHubActionsNotificationsService {
   private async fetchRuns(
     target: RepositoryTarget,
     token: string,
+    updatedAfter: Date | null,
   ): Promise<WorkflowRun[]> {
-    const response = await fetch(
-      `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=100&page=1`,
-      {
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${token}`,
-          "user-agent": "ai-development-environment",
-          "x-github-api-version": "2022-11-28",
-        },
-        cache: "no-store",
-      },
-    );
-    const body = (await response.json().catch(() => null)) as {
-      workflow_runs?: Array<Record<string, unknown>>;
-      message?: string;
-    } | null;
-    if (!response.ok || !Array.isArray(body?.workflow_runs)) {
-      throw new Error(
-        body?.message ||
-          `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`,
-      );
-    }
-    return body.workflow_runs.flatMap((run) => {
-      const id = positiveInteger(run.id);
-      const workflowId = positiveInteger(run.workflow_id);
-      const updatedAtValue = text(run.updated_at);
-      const updatedAt = updatedAtValue ? new Date(updatedAtValue) : null;
-      if (
-        !id ||
-        !workflowId ||
-        !updatedAt ||
-        !Number.isFinite(updatedAt.getTime())
-      ) {
-        return [];
-      }
-      return [
+    const runs: WorkflowRun[] = [];
+    for (let page = 1; ; page += 1) {
+      const response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`,
         {
-          id: String(id),
-          workflowId: String(workflowId),
-          runAttempt: positiveInteger(run.run_attempt) ?? 1,
-          name: text(run.name) ?? "GitHub Actions",
-          displayTitle:
-            text(run.display_title) ?? text(run.name) ?? "Workflow run",
-          status: text(run.status)?.toLowerCase() ?? "unknown",
-          conclusion: text(run.conclusion)?.toLowerCase() ?? null,
-          headBranch: text(run.head_branch),
-          url: text(run.html_url) ?? "",
-          updatedAt,
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${token}`,
+            "user-agent": "ai-development-environment",
+            "x-github-api-version": "2022-11-28",
+          },
+          cache: "no-store",
         },
-      ];
-    });
+      );
+      const body = (await response.json().catch(() => null)) as {
+        workflow_runs?: Array<Record<string, unknown>>;
+        message?: string;
+      } | null;
+      if (!response.ok || !Array.isArray(body?.workflow_runs)) {
+        throw new Error(
+          body?.message ||
+            `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`,
+        );
+      }
+      const pageRuns = body.workflow_runs.flatMap((run) => {
+        const id = positiveInteger(run.id);
+        const workflowId = positiveInteger(run.workflow_id);
+        const updatedAtValue = text(run.updated_at);
+        const updatedAt = updatedAtValue ? new Date(updatedAtValue) : null;
+        if (
+          !id ||
+          !workflowId ||
+          !updatedAt ||
+          !Number.isFinite(updatedAt.getTime())
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: String(id),
+            workflowId: String(workflowId),
+            runAttempt: positiveInteger(run.run_attempt) ?? 1,
+            name: text(run.name) ?? "GitHub Actions",
+            displayTitle:
+              text(run.display_title) ?? text(run.name) ?? "Workflow run",
+            status: text(run.status)?.toLowerCase() ?? "unknown",
+            conclusion: text(run.conclusion)?.toLowerCase() ?? null,
+            headBranch: text(run.head_branch),
+            url: text(run.html_url) ?? "",
+            updatedAt,
+          },
+        ];
+      });
+      runs.push(...pageRuns);
+      if (
+        !updatedAfter ||
+        body.workflow_runs.length < GITHUB_RUNS_PAGE_SIZE ||
+        pageRuns.some((run) => run.updatedAt <= updatedAfter)
+      ) {
+        return runs;
+      }
+    }
   }
 
   private async worktreeContext(
@@ -394,7 +407,11 @@ export class GitHubActionsNotificationsService {
       update: { lastPollStartedAt: startedAt },
     });
     try {
-      const runs = await this.fetchRuns(target, token);
+      const runs = await this.fetchRuns(
+        target,
+        token,
+        state ? (state.lastPollSucceededAt ?? state.initializedAt) : null,
+      );
       const notifications: NotificationRecord[] = [];
       await prisma.$transaction(async (transaction) => {
         for (const run of runs) {
@@ -511,9 +528,28 @@ export class GitHubActionsNotificationsService {
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        return { outcome: "DUPLICATE", notificationCreated: false };
+        const retried = await prisma.gitHubWebhookDelivery.updateMany({
+          where: {
+            deliveryId,
+            outcome: { notIn: ["PROCESSED", "IGNORED"] },
+          },
+          data: {
+            event: input.event ?? "unknown",
+            action: null,
+            repositoryName: null,
+            workflowRunId: null,
+            outcome: "RECEIVED",
+            error: null,
+            receivedAt: new Date(),
+            processedAt: null,
+          },
+        });
+        if (retried.count === 0) {
+          return { outcome: "DUPLICATE", notificationCreated: false };
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
     const finish = async (
       outcome: string,

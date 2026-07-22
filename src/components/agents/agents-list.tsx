@@ -134,7 +134,7 @@ export function AgentsList({
   const command = enrollment
     ? [
         "control-agent enroll",
-        `--server ${serverOrigin}`,
+        `--server ${shellQuote(serverOrigin)}`,
         `--enrollment-token ${enrollment.token}`,
         ...requestHeaders
           .filter((header) => header.name.trim() && header.value)

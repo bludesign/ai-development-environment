@@ -144,6 +144,17 @@ function setup() {
         deliveries.set(where.deliveryId, next);
         return next;
       }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const current = deliveries.get(where.deliveryId);
+        if (
+          !current ||
+          (where.outcome.notIn as string[]).includes(current.outcome as string)
+        ) {
+          return { count: 0 };
+        }
+        deliveries.set(where.deliveryId, { ...current, ...data });
+        return { count: 1 };
+      }),
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     gitHubWorkflowRunObservation: {
@@ -164,8 +175,20 @@ function setup() {
       update: transaction.gitHubActionsPollingState.update,
     },
     $transaction: vi.fn(
-      async (operation: (client: typeof transaction) => unknown) =>
-        operation(transaction),
+      async (operation: (client: typeof transaction) => unknown) => {
+        const observationSnapshot = new Map(
+          [...observations].map(([key, value]) => [key, { ...value }]),
+        );
+        try {
+          return await operation(transaction);
+        } catch (error) {
+          observations.clear();
+          observationSnapshot.forEach((value, key) =>
+            observations.set(key, value),
+          );
+          throw error;
+        }
+      },
     ),
   };
   mocks.getPrismaClient.mockResolvedValue(prisma);
@@ -255,8 +278,42 @@ describe("GitHub Actions webhook notifications", () => {
     expect(prisma.gitHubWebhookDelivery.create).not.toHaveBeenCalled();
   });
 
-  test("records and deduplicates signed deliveries with invalid JSON", async () => {
-    const { service, deliveries } = setup();
+  test("retries signed deliveries that previously failed", async () => {
+    const { service, prisma, notifications, deliveries } = setup();
+    notifications.recordInTransaction.mockRejectedValueOnce(
+      new Error("Transient notification failure"),
+    );
+    const input = webhookInput(workflowPayload("success"), "retry-success");
+
+    await expect(service.handleWebhook(input)).rejects.toThrow(
+      "Transient notification failure",
+    );
+    expect(deliveries.get("retry-success")).toMatchObject({
+      outcome: "ERROR",
+      error: "Transient notification failure",
+    });
+
+    await expect(service.handleWebhook(input)).resolves.toEqual({
+      outcome: "PROCESSED",
+      notificationCreated: true,
+    });
+    expect(prisma.gitHubWebhookDelivery.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          deliveryId: "retry-success",
+          outcome: { notIn: ["PROCESSED", "IGNORED"] },
+        },
+      }),
+    );
+    expect(notifications.recordInTransaction).toHaveBeenCalledTimes(2);
+    expect(deliveries.get("retry-success")).toMatchObject({
+      outcome: "PROCESSED",
+      error: null,
+    });
+  });
+
+  test("records repeated failures for retried invalid JSON deliveries", async () => {
+    const { service, prisma, deliveries } = setup();
     const body = new TextEncoder().encode("not-json");
     const input = {
       body,
@@ -270,10 +327,8 @@ describe("GitHub Actions webhook notifications", () => {
       outcome: "ERROR",
       error: "GitHub webhook payload is invalid JSON",
     });
-    await expect(service.handleWebhook(input)).resolves.toEqual({
-      outcome: "DUPLICATE",
-      notificationCreated: false,
-    });
+    await expect(service.handleWebhook(input)).rejects.toThrow("invalid JSON");
+    expect(prisma.gitHubWebhookDelivery.updateMany).toHaveBeenCalledTimes(1);
   });
 
   test("filters installations and repositories and deduplicates deliveries", async () => {
@@ -302,6 +357,65 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test("paginates until it reaches runs older than the previous successful poll", async () => {
+    const { service, notifications, pollingStates } = setup();
+    const previousPoll = new Date("2026-07-22T12:00:00.000Z");
+    pollingStates.set("repository-1", {
+      initializedAt: previousPoll,
+      lastPollSucceededAt: previousPoll,
+    });
+    const newerRuns = Array.from({ length: 100 }, (_, index) => ({
+      id: 1_000 + index,
+      workflow_id: 202,
+      run_attempt: 1,
+      name: "CI",
+      status: "in_progress",
+      conclusion: null,
+      updated_at: "2026-07-22T13:00:00.000Z",
+    }));
+    const boundaryPage = [
+      {
+        id: 2_000,
+        workflow_id: 202,
+        run_attempt: 1,
+        name: "CI",
+        status: "completed",
+        conclusion: "success",
+        updated_at: "2026-07-22T13:00:00.000Z",
+      },
+      ...Array.from({ length: 99 }, (_, index) => ({
+        id: 2_001 + index,
+        workflow_id: 202,
+        run_attempt: 1,
+        name: "CI",
+        status: "in_progress",
+        conclusion: null,
+        updated_at: "2026-07-22T11:00:00.000Z",
+      })),
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("page=1")) return githubResponse(newerRuns);
+      if (url.endsWith("page=2")) return githubResponse(boundaryPage);
+      throw new Error(`Unexpected polling page: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      (
+        service as unknown as {
+          pollRepositories(): Promise<Record<string, unknown>>;
+        }
+      ).pollRepositories(),
+    ).resolves.toMatchObject({ notificationsCreated: 1 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringContaining("page=1"),
+      expect.stringContaining("page=2"),
+    ]);
+    expect(notifications.recordInTransaction).toHaveBeenCalledTimes(1);
+  });
+
   test("seeds history, then notifies a terminal transition once", async () => {
     const { service, notifications, observations } = setup();
     const fetchMock = vi

@@ -58,7 +58,7 @@ describe("AgentsList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enroll agent" }));
 
     const code = await screen.findByText(/enroll-once/);
-    expect(code.textContent).toContain(`--server ${window.location.origin}`);
+    expect(code.textContent).toContain(`--server '${window.location.origin}'`);
 
     fireEvent.pointerDown(
       screen.getByRole("combobox", { name: "Server address" }),
@@ -71,7 +71,7 @@ describe("AgentsList", () => {
     );
 
     await waitFor(() =>
-      expect(code.textContent).toContain("--server http://192.168.1.24:3000"),
+      expect(code.textContent).toContain("--server 'http://192.168.1.24:3000'"),
     );
 
     fireEvent.pointerDown(
@@ -87,11 +87,15 @@ describe("AgentsList", () => {
       "Custom server address",
     );
     fireEvent.change(customServerAddress, {
-      target: { value: "https://agents.example.com" },
+      target: {
+        value: "https://agents.example.com/enroll?tenant=acme&mode='strict'",
+      },
     });
 
     await waitFor(() =>
-      expect(code.textContent).toContain("--server https://agents.example.com"),
+      expect(code.textContent).toContain(
+        `--server 'https://agents.example.com/enroll?tenant=acme&mode='"'"'strict'"'"''`,
+      ),
     );
   });
 
