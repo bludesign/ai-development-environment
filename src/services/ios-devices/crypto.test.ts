@@ -1,4 +1,6 @@
 // @vitest-environment node
+import "reflect-metadata";
+
 import { webcrypto } from "node:crypto";
 
 import {
