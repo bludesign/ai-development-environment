@@ -177,14 +177,14 @@
       "type": "shell",
       "label": "upgrade",
       "group": "build",
-      "command": "npm run upgrade",
+      "command": "npm run upgrade --cooldown 48h",
       "detail": "Upgrade all dependencies in package.json with npm-check-updates and install"
     },
     {
       "type": "shell",
       "label": "upgrade-check",
       "group": "build",
-      "command": "npm run upgrade:check",
+      "command": "npm run upgrade:check --cooldown 48h",
       "detail": "Show available dependency upgrades without modifying package.json"
     },
     {
@@ -275,14 +275,14 @@
       "type": "shell",
       "label": "agent:upgrade",
       "group": "build",
-      "command": "npm run upgrade --workspace @ai-development-environment/control-agent",
+      "command": "npm run upgrade --workspace @ai-development-environment/control-agent --cooldown 48h",
       "detail": "Upgrade control agent dependencies with npm-check-updates and install"
     },
     {
       "type": "shell",
       "label": "agent:upgrade-check",
       "group": "build",
-      "command": "npm run upgrade:check --workspace @ai-development-environment/control-agent",
+      "command": "npm run upgrade:check --workspace @ai-development-environment/control-agent --cooldown 48h",
       "detail": "Show available control agent dependency upgrades without modifying package.json"
     }
   ]
