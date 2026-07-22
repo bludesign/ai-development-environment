@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DATE_FALLBACK,
+  dayKey,
   formatDateValue,
   formatRelativeTime,
   formatUtcMillis,
@@ -138,6 +139,28 @@ describe("formatRelativeTime", () => {
     expect(
       formatDateValue(now - 9 * 3_600_000, "relative", { locale: LOCALE, now }),
     ).toBe("9 hours ago");
+  });
+});
+
+describe("dayKey", () => {
+  it("groups instants by the viewer's calendar day, not by UTC", () => {
+    // 00:53Z on the 22nd is still the 21st in the test zone (UTC-4), so it must
+    // group with the previous evening rather than with the following morning.
+    const lateEvening = "2026-07-22T00:53:12Z";
+    const sameEvening = "2026-07-22T02:21:48Z";
+    const afterMidnight = "2026-07-22T04:51:14Z";
+
+    expect(dayKey(lateEvening)).toBe(dayKey(sameEvening));
+    expect(dayKey(lateEvening)).not.toBe(dayKey(afterMidnight));
+    // Grouping by UTC would wrongly lump all three together.
+    expect(dayKey(lateEvening, { utc: true })).toBe(
+      dayKey(afterMidnight, { utc: true }),
+    );
+  });
+
+  it("returns null for missing values so callers can fall back", () => {
+    expect(dayKey(null)).toBeNull();
+    expect(dayKey("nonsense")).toBeNull();
   });
 });
 

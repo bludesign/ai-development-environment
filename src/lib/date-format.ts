@@ -155,27 +155,35 @@ export function formatDateValue(
 }
 
 /**
- * Whether two instants land on the same calendar day in the display zone.
+ * Stable key identifying the calendar day an instant falls on, in the display
+ * zone — the viewer's own unless `utc`/`timeZone` says otherwise.
  *
- * Compares rendered date-only strings rather than raw components so that an
- * explicit `utc`/`timeZone` is respected. The locale is pinned because only
- * equality matters, never the wording.
+ * Tables that group rows under a day heading should key off this so the heading
+ * and the rows beneath it always agree. Derived from a rendered date-only
+ * string rather than raw components, so an explicit zone is honoured; the
+ * locale is pinned because only equality matters, never the wording.
  */
+export function dayKey(
+  value: DateInput,
+  options: Pick<DateFormatOptions, "utc" | "timeZone"> = {},
+): string | null {
+  const date = toDate(value);
+  if (!date) return null;
+  return formatDateValue(date, "short", {
+    ...options,
+    locale: "en",
+    showTime: false,
+  });
+}
+
+/** Whether two instants land on the same calendar day in the display zone. */
 export function isSameDay(
   a: DateInput,
   b: DateInput,
   options: Pick<DateFormatOptions, "utc" | "timeZone"> = {},
 ): boolean {
-  const left = toDate(a);
-  const right = toDate(b);
-  if (!left || !right) return false;
-  const dayOf = (date: Date) =>
-    formatDateValue(date, "short", {
-      ...options,
-      locale: "en",
-      showTime: false,
-    });
-  return dayOf(left) === dayOf(right);
+  const left = dayKey(a, options);
+  return left !== null && left === dayKey(b, options);
 }
 
 /**

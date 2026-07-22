@@ -46,7 +46,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateValue } from "@/lib/date-format";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -70,8 +70,7 @@ const PREFERENCE_FIELDS = `
 type TimeRange = { key: string; start: string; end: string };
 
 function localDayKey(value: string): string {
-  const date = new Date(value);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  return dayKey(value) ?? value;
 }
 
 function localDayRange(value: string): TimeRange {

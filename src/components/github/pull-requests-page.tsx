@@ -88,7 +88,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { formatDateValue } from "@/lib/date-format";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import type {
   GitHubPipelineView,
   GitHubPullRequestPage,
@@ -692,7 +692,7 @@ function PullRequestTable({
     }> = [];
     for (const pullRequest of items) {
       const date = new Date(pullRequest.createdAt);
-      const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const dateKey = dayKey(date) ?? pullRequest.createdAt;
       const group = groups.at(-1);
       if (group?.dateKey === dateKey) {
         group.items.push(pullRequest);

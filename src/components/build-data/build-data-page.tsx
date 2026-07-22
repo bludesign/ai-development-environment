@@ -59,7 +59,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateValue } from "@/lib/date-format";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 
 type AgentProgress = {
   agent: Agent;
@@ -359,7 +359,7 @@ export function BuildDataPage() {
     const groups = new Map<string, { label: string; items: HistoryItem[] }>();
     for (const item of history) {
       const date = new Date(item.deletedAt);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const key = dayKey(date) ?? item.deletedAt;
       const group = groups.get(key) ?? {
         label: formatDateValue(date, "long", { locale, showTime: false }),
         items: [],

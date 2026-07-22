@@ -51,7 +51,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { formatDateValue } from "@/lib/date-format";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -203,7 +203,7 @@ export function BuildsPage() {
     for (const build of builds) {
       const timestamp = build.startedAt ?? build.createdAt;
       const buildDate = new Date(timestamp);
-      const dateKey = `${buildDate.getFullYear()}-${buildDate.getMonth()}-${buildDate.getDate()}`;
+      const dateKey = dayKey(buildDate) ?? timestamp;
       const group = groups.at(-1);
       if (group?.dateKey === dateKey) group.items.push(build);
       else {

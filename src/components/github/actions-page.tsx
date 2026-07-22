@@ -55,7 +55,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { formatDateValue } from "@/lib/date-format";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import type {
   GitHubActionsRepositoryErrorView,
   GitHubActionsRepositoryView,
@@ -843,8 +843,10 @@ function ActionsTable({
       { label: string; items: GitHubActionsWorkflowRunView[] }
     >();
     for (const run of runs) {
+      // Keyed on creation, not start: a rerun of an old workflow belongs to the
+      // day it was created, which is also the order the paginated API returns.
       const date = new Date(run.createdAt);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const key = dayKey(date) ?? run.createdAt;
       const group = groups.get(key) ?? {
         label: formatDateValue(date, "long", { locale, showTime: false }),
         items: [],
