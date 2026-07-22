@@ -36,6 +36,7 @@ import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
 
 const AGENTS_QUERY = `query Agents { agents { ${AGENT_FIELDS} } }`;
+const CUSTOM_SERVER_ORIGIN = "__custom__";
 
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -58,6 +59,7 @@ export function AgentsList({
   const [selectedServerOrigin, setSelectedServerOrigin] = useState<
     string | null
   >(null);
+  const [customServerOrigin, setCustomServerOrigin] = useState("");
   const [requestHeaders, setRequestHeaders] = useState<
     Array<{ id: string; name: string; value: string }>
   >([]);
@@ -125,10 +127,14 @@ export function AgentsList({
 
   const browserOrigin =
     typeof window === "undefined" ? null : window.location.origin;
+  const serverOrigin =
+    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
+      ? customServerOrigin.trim()
+      : (selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090");
   const command = enrollment
     ? [
         "control-agent enroll",
-        `--server ${selectedServerOrigin ?? browserOrigin ?? "http://127.0.0.1:3090"}`,
+        `--server ${serverOrigin}`,
         `--enrollment-token ${enrollment.token}`,
         ...requestHeaders
           .filter((header) => header.name.trim() && header.value)
@@ -192,8 +198,21 @@ export function AgentsList({
                     {origin}
                   </SelectItem>
                 ))}
+                <SelectItem value={CUSTOM_SERVER_ORIGIN}>
+                  {t("customServerAddress")}
+                </SelectItem>
               </SelectContent>
             </Select>
+            {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
+              <Input
+                aria-label={t("customServerAddress")}
+                className="mt-2 w-full sm:max-w-md"
+                onChange={(event) => setCustomServerOrigin(event.target.value)}
+                placeholder={t("customServerAddress")}
+                type="url"
+                value={customServerOrigin}
+              />
+            )}
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -233,12 +252,11 @@ export function AgentsList({
                         ),
                       )
                     }
-                    placeholder="CF-Access-Client-Id"
+                    placeholder={t("headerName")}
                     value={header.name}
                   />
                   <Input
                     aria-label={t("headerValue")}
-                    autoComplete="new-password"
                     onChange={(event) =>
                       setRequestHeaders((current) =>
                         current.map((item) =>
@@ -249,7 +267,6 @@ export function AgentsList({
                       )
                     }
                     placeholder={t("headerValue")}
-                    type="password"
                     value={header.value}
                   />
                   <Button
@@ -276,6 +293,7 @@ export function AgentsList({
               </code>
               <Button
                 aria-label={t("copy")}
+                disabled={!serverOrigin}
                 onClick={() => void copyEnrollmentCommand()}
                 size="icon-sm"
                 variant="ghost"

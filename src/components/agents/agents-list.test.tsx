@@ -73,6 +73,26 @@ describe("AgentsList", () => {
     await waitFor(() =>
       expect(code.textContent).toContain("--server http://192.168.1.24:3000"),
     );
+
+    fireEvent.pointerDown(
+      screen.getByRole("combobox", { name: "Server address" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    const customOptions = await screen.findAllByText("Custom server address");
+    fireEvent.click(
+      customOptions.find((element) => element.tagName === "SPAN") ??
+        customOptions[0],
+    );
+    const customServerAddress = await screen.findByLabelText(
+      "Custom server address",
+    );
+    fireEvent.change(customServerAddress, {
+      target: { value: "https://agents.example.com" },
+    });
+
+    await waitFor(() =>
+      expect(code.textContent).toContain("--server https://agents.example.com"),
+    );
   });
 
   test("adds shell-safe transient headers only to the enrollment command", async () => {
@@ -97,10 +117,15 @@ describe("AgentsList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enroll agent" }));
     await screen.findByText(/enroll-once/);
     fireEvent.click(screen.getByRole("button", { name: "Add header" }));
-    fireEvent.change(screen.getByLabelText("Header name"), {
+    const headerName = screen.getByLabelText<HTMLInputElement>("Header key");
+    const headerValue = screen.getByLabelText<HTMLInputElement>("Header value");
+    expect(headerName.placeholder).toBe("Header key");
+    expect(headerName.type).toBe("text");
+    expect(headerValue.type).toBe("text");
+    fireEvent.change(headerName, {
       target: { value: "CF-Access-Client-Secret" },
     });
-    fireEvent.change(screen.getByLabelText("Header value"), {
+    fireEvent.change(headerValue, {
       target: { value: "s'ecret:two" },
     });
 
