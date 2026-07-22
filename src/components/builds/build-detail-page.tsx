@@ -69,6 +69,11 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import type { PublicOrigin } from "@/lib/public-origin";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 
 import { buildStatusVariant } from "./build-format";
 import { ExportArchiveDialog } from "./export-archive-dialog";
@@ -80,6 +85,7 @@ import type { BuildLogEvent, BuildRecord, BuildReport } from "./types";
 const BUILD_DETAIL_FIELDS = `
   id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
   createdAt startedAt finishedAt durationMs updatedAt
+  worktree { id highlightColor }
   configuration {
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
@@ -370,6 +376,7 @@ export function BuildDetailPage({
     configuration?.advancedSettings?.codeCoverage === true;
   const date = (value: string | null) =>
     value ? new Date(value).toLocaleString(locale) : "—";
+  const highlightColor = build?.worktree?.highlightColor;
 
   const copyCommandSummary = async (commandSummary: string) => {
     try {
@@ -456,7 +463,15 @@ export function BuildDetailPage({
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div
+        data-testid="build-summary"
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-4",
+          highlightColor && "rounded-lg border-l-4 px-4 py-3",
+          highlightColor && worktreeHighlightBackgroundClasses[highlightColor],
+          highlightColor && worktreeHighlightAccentClasses[highlightColor],
+        )}
+      >
         <div>
           <p className="text-sm text-muted-foreground">
             {repository?.name ?? "—"}

@@ -1,0 +1,110 @@
+type AppNotification {
+  id: ID!
+  typeKey: String!
+  title: String!
+  body: String!
+  href: String!
+  resourceKind: String!
+  resourceId: ID!
+  worktreeId: ID
+  highlightColor: String
+  sidebarRequested: Boolean!
+  browserRequested: Boolean!
+  webPushRequested: Boolean!
+  sidebarDismissedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AppNotificationPage {
+  items: [AppNotification!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type NotificationPreference {
+  key: String!
+  category: String!
+  label: String!
+  description: String!
+  sidebarEnabled: Boolean!
+  browserEnabled: Boolean!
+  webPushEnabled: Boolean!
+  updatedAt: String
+}
+
+type WebPushState {
+  configured: Boolean!
+  publicKey: String
+  subscriptionCount: Int!
+}
+
+enum NotificationChangeKind {
+  CREATED
+  DISMISSED
+  SIDEBAR_CLEARED
+  DELETED
+  HISTORY_CLEARED
+  PREFERENCES_UPDATED
+}
+
+type NotificationChange {
+  kind: NotificationChangeKind!
+  notification: AppNotification
+  notificationId: ID
+}
+
+input SaveNotificationPreferenceInput {
+  typeKey: String!
+  sidebarEnabled: Boolean!
+  browserEnabled: Boolean!
+  webPushEnabled: Boolean!
+}
+
+input NotificationTimeRangeInput {
+  start: String!
+  end: String!
+}
+
+input NotificationSelectionInput {
+  all: Boolean = false
+  ids: [ID!] = []
+  excludedIds: [ID!] = []
+  ranges: [NotificationTimeRangeInput!] = []
+  excludedRanges: [NotificationTimeRangeInput!] = []
+}
+
+input RegisterWebPushSubscriptionInput {
+  endpoint: String!
+  p256dh: String!
+  auth: String!
+  expirationTime: Float
+  locale: String
+  userAgent: String
+}
+
+extend type Query {
+  notifications(first: Int = 100, after: ID): AppNotificationPage!
+  sidebarNotifications(limit: Int = 50): [AppNotification!]!
+  notificationPreferences: [NotificationPreference!]!
+  webPushState: WebPushState!
+}
+
+extend type Mutation {
+  saveNotificationPreference(
+    input: SaveNotificationPreferenceInput!
+  ): NotificationPreference!
+  dismissNotification(id: ID!): Boolean!
+  dismissAllSidebarNotifications: Int!
+  deleteNotifications(selection: NotificationSelectionInput!): Int!
+  deleteAllNotifications: Int!
+  prepareWebPush: WebPushState!
+  registerWebPushSubscription(
+    input: RegisterWebPushSubscriptionInput!
+  ): WebPushState!
+  unregisterWebPushSubscription(endpoint: String!): Boolean!
+}
+
+extend type Subscription {
+  notificationsChanged: NotificationChange!
+}

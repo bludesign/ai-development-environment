@@ -49,6 +49,77 @@
     "credentials": "Identifiants",
     "settings": "Paramètres"
   },
+  "notifications": {
+    "title": "Notifications",
+    "description": "Consultez l’historique et choisissez comment recevoir chaque événement.",
+    "deliverySetup": "Diffusion dans le navigateur",
+    "deliverySetupDescription": "L’autorisation du navigateur et l’abonnement Web Push sont configurés séparément pour ce navigateur.",
+    "browserAlerts": "Alertes du navigateur",
+    "browserUnsupported": "Les alertes du navigateur ne sont pas prises en charge ici.",
+    "enabled": "Activé",
+    "enable": "Activer",
+    "webPush": "Push web",
+    "pushUnsupported": "Web Push nécessite un navigateur compatible et un contexte HTTPS sécurisé.",
+    "pushSubscribed": "Ce navigateur est abonné.",
+    "pushNotSubscribed": "Ce navigateur n’est pas abonné.",
+    "subscriptionCount": "{count, plural, one {# navigateur abonné} other {# navigateurs abonnés}}",
+    "subscribe": "S’abonner",
+    "unsubscribe": "Se désabonner",
+    "permissionRequired": "L’autorisation des notifications est requise pour Web Push.",
+    "pushKeyUnavailable": "La clé publique Web Push n’est pas disponible.",
+    "pushSubscriptionInvalid": "Le navigateur a renvoyé un abonnement push non valide.",
+    "iosInstallHelp": "Sur iPhone ou iPad, installez cette app via Partager → Sur l’écran d’accueil avant de vous abonner à Web Push.",
+    "preferences": "Types de notification",
+    "preferencesDescription": "Les canaux sont indépendants. Navigateur et Web Push peuvent produire les deux alertes.",
+    "notificationType": "Type",
+    "sidebarChannel": "Barre latérale",
+    "browserChannel": "Navigateur",
+    "pushChannel": "Push web",
+    "toggleChannel": "Basculer {channel} pour {type}",
+    "history": "Historique",
+    "historyCount": "{count, plural, one {# notification} other {# notifications}}",
+    "historyEmpty": "Aucune notification pour le moment.",
+    "notification": "Notification",
+    "channels": "Canaux",
+    "received": "Reçue",
+    "edit": "Modifier",
+    "done": "Terminé",
+    "deleteSelected": "Supprimer la sélection",
+    "deleteAll": "Tout supprimer",
+    "deleteAllTitle": "Supprimer tout l’historique des notifications ?",
+    "deleteAllDescription": "Cette action supprime définitivement toutes les notifications de la base de données.",
+    "selectedCount": "{count} sélectionnées",
+    "allSelected": "Toutes les notifications sont sélectionnées",
+    "selectAll": "Sélectionner toutes les notifications",
+    "selectDay": "Sélectionner les notifications du {day}",
+    "selectNotification": "Sélectionner {title}",
+    "dismiss": "Masquer",
+    "dismissOne": "Masquer {title} de la barre latérale",
+    "mute": "Couper les sons de notification",
+    "unmute": "Activer les sons de notification",
+    "clearAll": "Tout effacer",
+    "clearSidebar": "Effacer la barre latérale",
+    "clearSidebarTitle": "Effacer la barre de notifications ?",
+    "clearSidebarDescription": "Les notifications seront retirées de la barre latérale mais resteront dans l’historique.",
+    "sidebarEmpty": "Aucune nouvelle notification.",
+    "cancel": "Annuler",
+    "permissions": {
+      "default": "L’autorisation n’a pas encore été demandée.",
+      "granted": "Autorisation accordée pour ce navigateur.",
+      "denied": "L’autorisation est bloquée dans les paramètres du navigateur."
+    },
+    "types": {
+      "IOS_BUILD_SUCCEEDED": {
+        "title": "Build iOS réussi",
+        "description": "Un build iOS se termine avec succès."
+      },
+      "IOS_BUILD_FAILED": {
+        "title": "Échec du build iOS",
+        "description": "Un build iOS se termine avec une erreur."
+      }
+    },
+    "categories": { "BUILDS": "Builds" }
+  },
   "credentialEncryption": {
     "title": "Les identifiants de la base de données ne sont pas chiffrés",
     "description": "Les secrets stockés dans la base de données de l’application sont actuellement en clair. Générez une clé de 32 octets avec cette commande :",
@@ -104,7 +175,8 @@
       "cache": "Cache Actions",
       "mcp": "Serveur MCP externe",
       "ios": "Appareils iOS",
-      "push": "Notifications push"
+      "push": "Notifications push",
+      "notifications": "Notifications"
     },
     "kinds": {
       "jira-api-token": "Jeton d’API",
@@ -116,7 +188,8 @@
       "ios-profile-signer-private-key": "Clé privée de signature de profil",
       "app-store-connect-private-key": "Clé privée App Store Connect",
       "apns-token-private-key": "Clé privée du jeton APNs",
-      "apns-certificate-bundle": "Ensemble de certificat APNs"
+      "apns-certificate-bundle": "Ensemble de certificat APNs",
+      "web-push-vapid-private-key": "Clé privée VAPID de push web"
     },
     "details": {
       "configuredValue": "Valeur configurée",

@@ -350,6 +350,7 @@ function kindName(t: ReturnType<typeof useTranslations>, kind: string): string {
     "app-store-connect-private-key",
     "apns-token-private-key",
     "apns-certificate-bundle",
+    "web-push-vapid-private-key",
   ];
   return known.includes(kind) ? t(`kinds.${kind}`) : kind;
 }
@@ -371,6 +372,8 @@ function featureName(
             ? "ios"
             : kind.startsWith("apns-")
               ? "push"
-              : null;
+              : kind.startsWith("web-push-")
+                ? "notifications"
+                : null;
   return group ? t(`features.${group}`) : fallback;
 }

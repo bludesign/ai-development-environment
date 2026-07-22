@@ -124,6 +124,7 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { createClientId } from "@/lib/browser-utils";
+import { worktreeHighlightSurfaceClasses } from "@/lib/worktree-highlight";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -329,38 +330,6 @@ export function worktreeChangeActionState(
       : ("STAGE_ALL" as const),
   };
 }
-
-const highlightColorClasses: Record<string, string> = {
-  gray: "border-slate-500/30 bg-slate-500/10 hover:border-slate-500/50 hover:bg-slate-500/20",
-  stone:
-    "border-stone-500/30 bg-stone-500/10 hover:border-stone-500/50 hover:bg-stone-500/20",
-  red: "border-red-500/30 bg-red-500/10 hover:border-red-500/50 hover:bg-red-500/20",
-  rose: "border-rose-500/30 bg-rose-500/10 hover:border-rose-500/50 hover:bg-rose-500/20",
-  orange:
-    "border-orange-500/30 bg-orange-500/10 hover:border-orange-500/50 hover:bg-orange-500/20",
-  amber:
-    "border-amber-500/30 bg-amber-500/10 hover:border-amber-500/50 hover:bg-amber-500/20",
-  yellow:
-    "border-yellow-500/30 bg-yellow-500/10 hover:border-yellow-500/50 hover:bg-yellow-500/20",
-  lime: "border-lime-500/30 bg-lime-500/10 hover:border-lime-500/50 hover:bg-lime-500/20",
-  green:
-    "border-green-500/30 bg-green-500/10 hover:border-green-500/50 hover:bg-green-500/20",
-  emerald:
-    "border-emerald-500/30 bg-emerald-500/10 hover:border-emerald-500/50 hover:bg-emerald-500/20",
-  teal: "border-teal-500/30 bg-teal-500/10 hover:border-teal-500/50 hover:bg-teal-500/20",
-  cyan: "border-cyan-500/30 bg-cyan-500/10 hover:border-cyan-500/50 hover:bg-cyan-500/20",
-  sky: "border-sky-500/30 bg-sky-500/10 hover:border-sky-500/50 hover:bg-sky-500/20",
-  blue: "border-blue-500/30 bg-blue-500/10 hover:border-blue-500/50 hover:bg-blue-500/20",
-  indigo:
-    "border-indigo-500/30 bg-indigo-500/10 hover:border-indigo-500/50 hover:bg-indigo-500/20",
-  violet:
-    "border-violet-500/30 bg-violet-500/10 hover:border-violet-500/50 hover:bg-violet-500/20",
-  purple:
-    "border-purple-500/30 bg-purple-500/10 hover:border-purple-500/50 hover:bg-purple-500/20",
-  fuchsia:
-    "border-fuchsia-500/30 bg-fuchsia-500/10 hover:border-fuchsia-500/50 hover:bg-fuchsia-500/20",
-  pink: "border-pink-500/30 bg-pink-500/10 hover:border-pink-500/50 hover:bg-pink-500/20",
-};
 
 const tagColorClasses: Record<string, string> = {
   gray: "border-slate-500/40 bg-slate-500/15 text-slate-700 dark:text-slate-300",
@@ -1297,7 +1266,7 @@ function WorktreeCard(props: WorktreeItemProps) {
       className={cn(
         "cursor-pointer transition-colors hover:bg-muted/30",
         worktree.highlightColor &&
-          highlightColorClasses[worktree.highlightColor],
+          worktreeHighlightSurfaceClasses[worktree.highlightColor],
       )}
       onClick={(event) => {
         if (shouldNavigateWorktreeSurface(event)) {
@@ -2969,7 +2938,8 @@ function WorktreeTableRows(props: WorktreeItemProps) {
     if (next && !detail) void refreshInspection();
   };
   const highlight =
-    worktree.highlightColor && highlightColorClasses[worktree.highlightColor];
+    worktree.highlightColor &&
+    worktreeHighlightSurfaceClasses[worktree.highlightColor];
   return (
     <Fragment>
       <TableRow

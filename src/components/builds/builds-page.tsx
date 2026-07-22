@@ -50,6 +50,11 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 
 import {
   buildDuration,
@@ -373,10 +378,18 @@ export function BuildsPage() {
                               build.artifacts.some(
                                 (artifact) => artifact.kind === "RUNNABLE_APP",
                               );
+                            const highlightColor =
+                              build.worktree?.highlightColor;
                             return (
                               <TableRow
                                 aria-label={t("viewBuild")}
-                                className="cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                className={cn(
+                                  "cursor-pointer focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                                  highlightColor &&
+                                    worktreeHighlightBackgroundClasses[
+                                      highlightColor
+                                    ],
+                                )}
                                 key={build.id}
                                 onClick={() =>
                                   router.push(`/builds/${build.id}`)
@@ -394,6 +407,14 @@ export function BuildsPage() {
                                 tabIndex={0}
                               >
                                 <TableCell
+                                  className={cn(
+                                    "border-l-4",
+                                    highlightColor
+                                      ? worktreeHighlightAccentClasses[
+                                          highlightColor
+                                        ]
+                                      : "border-l-transparent",
+                                  )}
                                   onClick={(event) => event.stopPropagation()}
                                   onKeyDown={(event) => event.stopPropagation()}
                                 >

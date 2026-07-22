@@ -11,6 +11,13 @@ import { AppShell } from "@/components/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
+vi.mock("@/lib/control-plane-client", () => ({
+  controlPlaneRequest: vi.fn().mockResolvedValue({ sidebarNotifications: [] }),
+  controlPlaneSubscriptions: vi.fn(() => ({
+    subscribe: vi.fn(() => vi.fn()),
+  })),
+}));
+
 function setViewportWidth(width: number) {
   Object.defineProperty(window, "innerWidth", {
     configurable: true,

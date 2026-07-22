@@ -33,6 +33,7 @@ const build = {
   jobId: "job-1",
   status: "SUCCEEDED",
   outOfDate: true,
+  worktree: { id: "worktree-1", highlightColor: "blue" },
   action: "BUILD",
   destinationType: "SIMULATOR",
   destination: {
@@ -281,6 +282,9 @@ describe("BuildDetailPage", () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(await screen.findByText("Development")).toBeDefined();
+    const summary = screen.getByTestId("build-summary");
+    expect(summary.className).toContain("bg-blue-500/10");
+    expect(summary.className).toContain("border-l-blue-500");
     expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Out of date")).toBeDefined();
     const downloads = screen.getAllByRole("link", { name: "Download" });

@@ -45,6 +45,10 @@ import {
   buildTopic,
 } from "@/services/agent-control";
 import type { TelemetryService } from "@/services/telemetry";
+import type {
+  NotificationRecord,
+  NotificationsService,
+} from "@/services/notifications";
 
 import { effectiveBuildsDirectory } from "./build-directory";
 
@@ -400,6 +404,7 @@ export class BuildsService {
   constructor(
     private readonly agentControl: AgentControlService,
     private readonly telemetry?: TelemetryService,
+    private readonly notifications?: NotificationsService,
   ) {
     this.agentControl.registerCompletionHandler(IOS_BUILD_JOB_KIND, (job) =>
       this.projectBuildCompletion(job),
@@ -2505,7 +2510,10 @@ export class BuildsService {
     error: string | null;
   }) {
     const prisma = await getPrismaClient();
-    const build = await prisma.build.findFirst({ where: { jobId: job.id } });
+    const build = await prisma.build.findFirst({
+      where: { jobId: job.id },
+      include: { worktree: { select: { highlightColor: true } } },
+    });
     if (!build) return;
     const result = objectValue(parseJson(job.resultJson, {}), "build result");
     const status =
@@ -2542,6 +2550,7 @@ export class BuildsService {
         },
       });
     }
+    let notification: NotificationRecord | null = null;
     await prisma.$transaction(async (transaction) => {
       await transaction.build.update({
         where: { id: build.id },
@@ -2665,8 +2674,59 @@ export class BuildsService {
           );
         }
       }
+      if (
+        this.notifications &&
+        (status === "SUCCEEDED" || status === "FAILED")
+      ) {
+        const notificationSnapshot = objectValue(
+          parseJson(snapshotJson, {}),
+          "build notification snapshot",
+        );
+        const repository = objectValue(
+          notificationSnapshot.repository ?? {},
+          "build repository snapshot",
+        );
+        const configuration = objectValue(
+          notificationSnapshot.configuration ?? {},
+          "build configuration snapshot",
+        );
+        const worktree = objectValue(
+          notificationSnapshot.worktree ?? {},
+          "build worktree snapshot",
+        );
+        const context = [
+          typeof repository.name === "string" ? repository.name : null,
+          typeof configuration.name === "string" ? configuration.name : null,
+          typeof worktree.branch === "string"
+            ? worktree.branch
+            : typeof worktree.folder === "string"
+              ? worktree.folder
+              : null,
+        ].filter((value): value is string => Boolean(value));
+        notification = await this.notifications.recordInTransaction(
+          transaction,
+          {
+            dedupeKey: `ios-build:${build.id}:${status}`,
+            typeKey:
+              status === "SUCCEEDED"
+                ? "IOS_BUILD_SUCCEEDED"
+                : "IOS_BUILD_FAILED",
+            title:
+              status === "SUCCEEDED"
+                ? "iOS build succeeded"
+                : "iOS build failed",
+            body: context.join(" · ") || `Build ${build.id}`,
+            href: `/builds/${build.id}`,
+            resourceKind: "BUILD",
+            resourceId: build.id,
+            worktreeId: build.worktreeId,
+            highlightColor: build.worktree?.highlightColor ?? null,
+          },
+        );
+      }
     });
     this.publish(build.id);
+    this.notifications?.created(notification);
     if (status === "SUCCEEDED") {
       await this.queueAutomaticExport(build.id, snapshotJson);
     }

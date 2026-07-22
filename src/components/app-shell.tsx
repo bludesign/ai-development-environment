@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   Blocks,
   BellRing,
+  Bell,
   ChartNoAxesCombined,
   Combine,
   Cpu,
@@ -33,6 +34,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import {
   Sidebar,
   SidebarContent,
@@ -277,6 +279,22 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/notifications")}
+                >
+                  <Link
+                    href="/notifications"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Bell />
+                    <span>{t("notifications")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -671,27 +689,6 @@ function NavigationSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-    </Sidebar>
-  );
-}
-
-function NotificationsSidebar() {
-  const t = useTranslations("shell");
-
-  return (
-    <Sidebar
-      collapsible="offcanvas"
-      mobileDescription={t("notificationsDescription")}
-      mobileTitle={t("notifications")}
-      side="right"
-    >
-      <SidebarHeader className="border-b border-sidebar-border pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-2">
-        <div className="flex min-h-10 items-center px-2">
-          <h2 className="text-sm font-semibold">{t("notifications")}</h2>
-          <MobileSidebarClose label={t("closeNotifications")} />
-        </div>
-      </SidebarHeader>
-      <SidebarContent />
     </Sidebar>
   );
 }
