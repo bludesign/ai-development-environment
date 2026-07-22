@@ -16,9 +16,11 @@ import { SkillsService } from "@/services/skills";
 import { TelemetryService } from "@/services/telemetry";
 import { SigningAssetsService } from "@/services/signing-assets";
 import { PushNotificationsService } from "@/services/push-notifications";
+import { CredentialService } from "@/services/credentials";
 
 export type ServerServices = {
   prismaService: PrismaService;
+  credentialService: CredentialService;
   agentControlService: AgentControlService;
   ccusageService: CcusageService;
   buildDataService: BuildDataService;
@@ -39,12 +41,20 @@ export type ServerServices = {
 
 function createServerServices(): ServerServices {
   const prismaService = new PrismaService();
+  const credentialService = new CredentialService();
   const agentControlService = new AgentControlService();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
   const telemetryService = new TelemetryService();
-  const signingAssetsService = new SigningAssetsService(agentControlService);
-  const pushNotificationsService = new PushNotificationsService();
+  const signingAssetsService = new SigningAssetsService(
+    agentControlService,
+    undefined,
+    credentialService,
+  );
+  const pushNotificationsService = new PushNotificationsService(
+    undefined,
+    credentialService,
+  );
   const buildsService = new BuildsService(
     agentControlService,
     telemetryService,
@@ -55,10 +65,10 @@ function createServerServices(): ServerServices {
     skillsService,
   );
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
-  const jiraService = new JiraService();
-  const iosDevicesService = new IosDevicesService();
-  const gitHubService = new GitHubService(true);
-  const cacheServerService = new CacheServerService();
+  const jiraService = new JiraService(credentialService);
+  const iosDevicesService = new IosDevicesService(undefined, credentialService);
+  const gitHubService = new GitHubService(true, credentialService);
+  const cacheServerService = new CacheServerService(credentialService);
   const worktreesService = new WorktreesService(
     agentControlService,
     jiraService,
@@ -67,6 +77,7 @@ function createServerServices(): ServerServices {
   );
   return {
     prismaService,
+    credentialService,
     agentControlService,
     ccusageService,
     buildDataService,
@@ -82,12 +93,17 @@ function createServerServices(): ServerServices {
     telemetryService,
     signingAssetsService,
     pushNotificationsService,
-    toolsService: new ToolsService(codebaseToolsService, buildsService, {
-      codebases: codebasesService,
-      telemetry: telemetryService,
-      pushNotifications: pushNotificationsService,
-      agents: agentControlService,
-    }),
+    toolsService: new ToolsService(
+      codebaseToolsService,
+      buildsService,
+      {
+        codebases: codebasesService,
+        telemetry: telemetryService,
+        pushNotifications: pushNotificationsService,
+        agents: agentControlService,
+      },
+      credentialService,
+    ),
   };
 }
 

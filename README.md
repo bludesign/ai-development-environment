@@ -106,6 +106,30 @@ The localized `/en/tools` page discovers and runs these built-in tools. It can a
 
 Data access uses [Prisma 7](https://www.prisma.io/) with the `prisma-client` generator (TypeScript query compiler, no native query-engine binary) and the better-sqlite3 driver adapter. It defaults to a SQLite file at `prisma/dev.db`; set `DATABASE_URL` to another `file:` URL to change its location. Other database URL schemes are rejected. Migrations are versioned in `prisma/migrations/` and applied with `prisma migrate deploy`.
 
+## Credential storage
+
+Long-lived Jira, GitHub, cache-server, external MCP, iOS-signing, App Store Connect, and APNs credentials go through a server-only credential service. `/en/credentials` shows the selected backend, protection warnings, and item metadata; it never returns secret values, ciphertext, authentication headers, or secret-derived previews.
+
+`CREDENTIAL_STORAGE_TYPE` selects one of three backends:
+
+- `database` (the npm, Linux, Docker, and source-install default) stores payloads in the SQLite `Credential` table. Without `CREDENTIAL_ENCRYPTION_KEY`, new payloads are plaintext and Settings/Credentials show a warning. Generate a key with `openssl rand -base64 32`, set the resulting strict base64 value, and restart. The key must decode to exactly 32 bytes. Adding a valid key encrypts every existing plaintext credential atomically with AES-256-GCM. Back up and retain the key: a missing, invalid, or changed key blocks credential reads and writes whenever encrypted rows exist, and key rotation is not yet supported.
+- `vault` uses HashiCorp Vault KV v2. Set `VAULT_ADDR`; optionally set `VAULT_TOKEN`, `VAULT_NAMESPACE`, `CREDENTIAL_VAULT_MOUNT` (default `secret`), `CREDENTIAL_VAULT_PATH_PREFIX` (default `ai-development-environment/credentials`), and `CREDENTIAL_VAULT_HEADERS`. The latter must be a JSON object of string values and should be shell-quoted, for example `CREDENTIAL_VAULT_HEADERS='{"X-Vault-AWS-IAM-Server-ID":"vault.example.com"}'`. Custom headers cannot override transport-managed headers or conflict with `VAULT_TOKEN`/`VAULT_NAMESPACE`. TLS options are `VAULT_CACERT`, `VAULT_TLS_SERVER_NAME`, and `VAULT_SKIP_VERIFY`. Plaintext HTTP and disabled certificate verification are supported but produce prominent security warnings.
+- `keychain` uses the native macOS login Keychain service `com.bludesign.ai-development-environment.credentials`. It is loaded only on Darwin. Selecting it on Linux or in a container leaves the app running and reports an unsupported-backend error; credential-dependent operations fail with an actionable message. Run Homebrew services without `sudo`, because a root service uses a different or unavailable Keychain and may trigger authorization problems.
+
+Vault needs data read/write access and permanent metadata deletion, but never `LIST` access. For the default mount and prefix, a minimal policy is:
+
+```hcl
+path "secret/data/ai-development-environment/credentials/*" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "secret/metadata/ai-development-environment/credentials/*" {
+  capabilities = ["delete"]
+}
+```
+
+Each metadata row records the backend that received its payload. Changing `CREDENTIAL_STORAGE_TYPE` does not migrate, read, or delete values from the previous backend: mismatched items are reported and must be re-entered through their owning settings forms. Backend-to-backend migration and key rotation are intentionally unsupported. Vault/Keychain outages do not take down the dashboard; only features that need an unavailable credential fail.
+
 ## Homebrew
 
 The Homebrew formula is maintained in [`bludesign/homebrew-ai-development-environment`](https://github.com/bludesign/homebrew-ai-development-environment).
@@ -116,7 +140,7 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
-The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start and stores its SQLite database under Homebrew's `var/ai-development-environment/`. Settings — including `DATABASE_URL`, `AGENT_WS_HOSTNAME`, and `AGENT_WS_PORT` — live in `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
+The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start, stores its SQLite database under Homebrew's `var/ai-development-environment/`, and defaults credential storage to macOS Keychain. Settings — including every credential/Vault variable — live in the owner-only `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
 
 ## npm
 
@@ -127,7 +151,7 @@ npm install -g @ai-development-environment/server @ai-development-environment/co
 ai-development-environment
 ```
 
-The `ai-development-environment` command applies pending database migrations, then starts the server on `http://127.0.0.1:3090` with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`, storing its SQLite database at `~/.ai-development-environment/production.db`. It accepts the same `HOSTNAME`, `PORT`, `AGENT_WS_HOSTNAME`, `AGENT_WS_PORT`, and `DATABASE_URL` environment variables as the Homebrew service.
+The `ai-development-environment` command applies pending database migrations, then starts the server on `http://127.0.0.1:3090` with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`, storing its SQLite database at `~/.ai-development-environment/production.db`. It accepts the same server and credential-storage variables as the Homebrew service, but defaults to database credential storage on every platform.
 
 Unlike Homebrew, npm does not install `cloudflared`; install it separately (for example `brew install cloudflared`) before running Cloudflared jobs — `control-agent doctor` checks for it.
 

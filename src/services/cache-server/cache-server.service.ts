@@ -1,6 +1,11 @@
 import "server-only";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  CREDENTIALS,
+  CredentialService,
+  encodeJsonCredential,
+} from "@/services/credentials";
 
 import type {
   CacheEntryDetailView,
@@ -83,23 +88,15 @@ function sanitizeError(message: string, apiKey: string): string {
   return message.split(apiKey).join("[REDACTED]");
 }
 
-function parseHeaders(headersJson: string): StoredCacheServerHeader[] {
-  let parsed: unknown;
+function parseHeaderNames(headerNamesJson: string): string[] {
   try {
-    parsed = JSON.parse(headersJson);
+    const parsed: unknown = JSON.parse(headerNamesJson);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
   } catch {
     return [];
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed
-    .filter(
-      (item): item is StoredCacheServerHeader =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as { name?: unknown }).name === "string" &&
-        typeof (item as { value?: unknown }).value === "string",
-    )
-    .map((item) => ({ name: item.name, value: item.value }));
 }
 
 function normalizeHeaders(
@@ -184,6 +181,8 @@ function storageLocationView(
 // singleton row (id "default"); the API key is sent on every request as the x-api-key header
 // alongside any operator-configured custom headers.
 export class CacheServerService {
+  constructor(private readonly credentials = new CredentialService()) {}
+
   async getSettings(): Promise<CacheServerSettingsView> {
     const prisma = await getPrismaClient();
     const settings = await prisma.cacheServerSettings.upsert({
@@ -191,22 +190,29 @@ export class CacheServerService {
       create: { id: SETTINGS_ID },
       update: {},
     });
-    return this.settingsView(settings);
+    const [apiKeyConfigured, headersConfigured] = await Promise.all([
+      this.credentials.isConfigured(CREDENTIALS.cacheServerApiKey),
+      this.credentials.isConfigured(CREDENTIALS.cacheServerHeaders),
+    ]);
+    return this.settingsView(settings, apiKeyConfigured, headersConfigured);
   }
 
-  private settingsView(settings: {
-    baseUrl: string | null;
-    apiKey: string | null;
-    headersJson: string;
-    updatedAt: Date;
-  }): CacheServerSettingsView {
+  private settingsView(
+    settings: {
+      baseUrl: string | null;
+      headerNamesJson: string;
+      updatedAt: Date;
+    },
+    apiKeyConfigured: boolean,
+    headersConfigured: boolean,
+  ): CacheServerSettingsView {
     return {
-      configured: Boolean(settings.baseUrl && settings.apiKey),
+      configured: Boolean(settings.baseUrl && apiKeyConfigured),
       baseUrl: settings.baseUrl,
-      apiKeyConfigured: Boolean(settings.apiKey),
-      headers: parseHeaders(settings.headersJson).map((header) => ({
-        name: header.name,
-        valueConfigured: Boolean(header.value),
+      apiKeyConfigured,
+      headers: parseHeaderNames(settings.headerNamesJson).map((name) => ({
+        name,
+        valueConfigured: headersConfigured,
       })),
       updatedAt: settings.updatedAt.toISOString(),
     };
@@ -215,36 +221,63 @@ export class CacheServerService {
   async saveSettings(
     input: SaveCacheServerSettingsInput,
   ): Promise<CacheServerSettingsView> {
-    const prisma = await getPrismaClient();
-    const existing = await prisma.cacheServerSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
     const baseUrl = normalizeBaseUrl(input.baseUrl);
-    const nextApiKey = input.apiKey?.trim() || existing?.apiKey || null;
+    const apiKeyConfigured = await this.credentials.isConfigured(
+      CREDENTIALS.cacheServerApiKey,
+    );
+    const nextApiKey =
+      input.apiKey?.trim() ||
+      (apiKeyConfigured
+        ? await this.credentials.getText(CREDENTIALS.cacheServerApiKey)
+        : null);
     if (!nextApiKey) {
       throw new Error("A cache server API key is required");
     }
-    const headersJson = JSON.stringify(
-      normalizeHeaders(
-        input.headers,
-        parseHeaders(existing?.headersJson ?? "[]"),
-      ),
+    const headersConfigured = await this.credentials.isConfigured(
+      CREDENTIALS.cacheServerHeaders,
     );
-    await prisma.cacheServerSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID, baseUrl, apiKey: nextApiKey, headersJson },
-      update: { baseUrl, apiKey: nextApiKey, headersJson },
-    });
+    const existingHeaders = headersConfigured
+      ? ((await this.credentials.getJson<StoredCacheServerHeader[]>(
+          CREDENTIALS.cacheServerHeaders,
+        )) ?? [])
+      : [];
+    const headers = normalizeHeaders(input.headers, existingHeaders);
+    const headerNamesJson = JSON.stringify(
+      headers.map((header) => header.name),
+    );
+    await this.credentials.setMany(
+      [
+        {
+          descriptor: CREDENTIALS.cacheServerApiKey,
+          value: Buffer.from(nextApiKey, "utf8"),
+        },
+        {
+          descriptor: CREDENTIALS.cacheServerHeaders,
+          value: encodeJsonCredential(headers),
+        },
+      ],
+      async (transaction) => {
+        await transaction.cacheServerSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID, baseUrl, headerNamesJson },
+          update: { baseUrl, headerNamesJson },
+        });
+      },
+    );
     return this.getSettings();
   }
 
   async clearSettings(): Promise<CacheServerSettingsView> {
-    const prisma = await getPrismaClient();
-    await prisma.cacheServerSettings.upsert({
-      where: { id: SETTINGS_ID },
-      create: { id: SETTINGS_ID },
-      update: { baseUrl: null, apiKey: null, headersJson: "[]" },
-    });
+    await this.credentials.deleteMany(
+      [CREDENTIALS.cacheServerApiKey, CREDENTIALS.cacheServerHeaders],
+      async (transaction) => {
+        await transaction.cacheServerSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID },
+          update: { baseUrl: null, headerNamesJson: "[]" },
+        });
+      },
+    );
     return this.getSettings();
   }
 
@@ -396,13 +429,21 @@ export class CacheServerService {
     const settings = await prisma.cacheServerSettings.findUnique({
       where: { id: SETTINGS_ID },
     });
-    if (!settings?.baseUrl || !settings.apiKey) {
+    if (!settings?.baseUrl) {
       throw new Error("The cache server is not configured");
     }
+    const apiKey = await this.credentials.getText(
+      CREDENTIALS.cacheServerApiKey,
+    );
+    if (!apiKey) throw new Error("The cache server is not configured");
+    const headers =
+      (await this.credentials.getJson<StoredCacheServerHeader[]>(
+        CREDENTIALS.cacheServerHeaders,
+      )) ?? [];
     return {
       baseUrl: settings.baseUrl,
-      apiKey: settings.apiKey,
-      headers: parseHeaders(settings.headersJson),
+      apiKey,
+      headers,
     };
   }
 

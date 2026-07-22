@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
     baseUrl: string | null;
     apiKey: string | null;
     headersJson: string;
+    headerNamesJson: string;
     createdAt: Date;
     updatedAt: Date;
   } | null,
@@ -30,6 +31,7 @@ vi.mock("@/data/prisma-client", () => ({
               baseUrl: null,
               apiKey: null,
               headersJson: "[]",
+              headerNamesJson: "[]",
               createdAt: now,
               updatedAt: now,
               ...create,
@@ -39,6 +41,70 @@ vi.mock("@/data/prisma-client", () => ({
     },
   }),
 }));
+
+vi.mock("@/services/credentials", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/credentials")>();
+  return {
+    ...original,
+    CredentialService: class {
+      async isConfigured(descriptor: { id: string }) {
+        if (descriptor.id.endsWith("/api-key")) {
+          return Boolean(state.settings?.apiKey);
+        }
+        return Boolean(
+          state.settings && JSON.parse(state.settings.headersJson).length,
+        );
+      }
+
+      async getText() {
+        return state.settings?.apiKey ?? null;
+      }
+
+      async getJson() {
+        return state.settings ? JSON.parse(state.settings.headersJson) : null;
+      }
+
+      async setMany(
+        entries: Array<{ descriptor: { id: string }; value: Uint8Array }>,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const apiKey = Buffer.from(
+          entries.find((entry) => entry.descriptor.id.endsWith("/api-key"))!
+            .value,
+        ).toString("utf8");
+        const headerEnvelope = JSON.parse(
+          Buffer.from(
+            entries.find((entry) => entry.descriptor.id.endsWith("/headers"))!
+              .value,
+          ).toString("utf8"),
+        ) as { value: Array<{ name: string; value: string }> };
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        if (state.settings) {
+          state.settings.apiKey = apiKey;
+          state.settings.headersJson = JSON.stringify(headerEnvelope.value);
+        }
+      }
+
+      async deleteMany(
+        _descriptors: unknown,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        if (state.settings) {
+          state.settings.apiKey = null;
+          state.settings.headersJson = "[]";
+        }
+      }
+    },
+  };
+});
 
 import { CacheServerService } from "./cache-server.service";
 
@@ -61,6 +127,7 @@ function configuredSettings() {
     baseUrl: "http://cache.test/api",
     apiKey: "secret-key",
     headersJson: JSON.stringify([{ name: "x-tenant", value: "acme" }]),
+    headerNamesJson: JSON.stringify(["x-tenant"]),
     createdAt: new Date(0),
     updatedAt: new Date(0),
   };

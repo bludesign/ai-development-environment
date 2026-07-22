@@ -5,8 +5,13 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
 import type { BuildsService } from "@/services/builds";
 import type { CodebaseToolsService } from "@/services/codebases";
+import {
+  CredentialService,
+  externalMcpHeadersCredential,
+} from "@/services/credentials";
 
 import {
   createBuiltInToolRegistry,
@@ -47,13 +52,20 @@ export type ServerWithSecrets = {
   headers: Array<{ id: string; name: string; value: string }>;
 };
 
+type ServerMetadata = Omit<ServerWithSecrets, "headers"> & {
+  headers: Array<{ id: string; name: string }>;
+};
+
+type StoredExternalMcpHeader = { id: string; name: string; value: string };
+
 function transport(value: string): ExternalMcpTransport {
   if (value === "STREAMABLE_HTTP" || value === "SSE") return value;
   throw new Error(`Unsupported MCP transport: ${value}`);
 }
 
 function view(
-  server: ServerWithSecrets & { createdAt: Date; updatedAt: Date },
+  server: ServerMetadata & { createdAt: Date; updatedAt: Date },
+  headersConfigured: boolean,
 ): ExternalMcpServerView {
   return {
     id: server.id,
@@ -66,7 +78,7 @@ function view(
       .map((header) => ({
         id: header.id,
         name: header.name,
-        valueConfigured: Boolean(header.value),
+        valueConfigured: headersConfigured,
       })),
     createdAt: server.createdAt.toISOString(),
     updatedAt: server.updatedAt.toISOString(),
@@ -148,6 +160,7 @@ export class ToolsService {
     codebaseTools: CodebaseToolsService,
     builds?: BuildsService,
     additional: Omit<BuiltInToolServices, "codebaseTools" | "builds"> = {},
+    private readonly credentials = new CredentialService(),
   ) {
     this.builtInTools = createBuiltInToolRegistry({
       codebaseTools,
@@ -162,7 +175,17 @@ export class ToolsService {
       orderBy: { name: "asc" },
       include: { headers: true },
     });
-    return servers.map(view);
+    return Promise.all(
+      servers.map(async (server) =>
+        view(
+          server,
+          server.headers.length === 0 ||
+            (await this.credentials.isConfigured(
+              externalMcpHeadersCredential(server.id),
+            )),
+        ),
+      ),
+    );
   }
 
   async createExternalServer(
@@ -208,6 +231,16 @@ export class ToolsService {
     const existingHeaders = new Map(
       existing?.headers.map((header) => [header.id, header]) ?? [],
     );
+    const serverId = id ?? randomUUID();
+    const descriptor = externalMcpHeadersCredential(serverId);
+    const storedHeaders = id
+      ? ((await this.credentials.getJson<StoredExternalMcpHeader[]>(
+          descriptor,
+        )) ?? [])
+      : [];
+    const storedById = new Map(
+      storedHeaders.map((header) => [header.id, header]),
+    );
     for (const header of normalized.headers) {
       if (header.id && !existingHeaders.has(header.id)) {
         throw new Error(`Header ${header.name} does not belong to this server`);
@@ -219,8 +252,15 @@ export class ToolsService {
       }
     }
 
-    const serverId = id ?? randomUUID();
-    await prisma.$transaction(async (transaction) => {
+    const headers: StoredExternalMcpHeader[] = normalized.headers.map(
+      (header) => {
+        const headerId = header.id ?? randomUUID();
+        const value = header.value || storedById.get(headerId)?.value;
+        if (!value) throw new Error(`A value is required for ${header.name}`);
+        return { id: headerId, name: header.name, value };
+      },
+    );
+    const saveMetadata = async (transaction: Prisma.TransactionClient) => {
       await transaction.externalMcpServer.upsert({
         where: { id: serverId },
         create: {
@@ -237,49 +277,39 @@ export class ToolsService {
           toolNamePrefix: normalized.toolNamePrefix,
         },
       });
-      const retainedIds = normalized.headers.flatMap((header) =>
-        header.id ? [header.id] : [],
-      );
       await transaction.externalMcpServerHeader.deleteMany({
-        where: {
-          serverId,
-          ...(retainedIds.length ? { id: { notIn: retainedIds } } : {}),
-        },
+        where: { serverId },
       });
-      for (const header of normalized.headers) {
-        const existingHeader = header.id
-          ? existingHeaders.get(header.id)
-          : undefined;
-        const value = header.value || existingHeader?.value;
-        if (!value) throw new Error(`A value is required for ${header.name}`);
-        if (header.id) {
-          await transaction.externalMcpServerHeader.update({
-            where: { id: header.id },
-            data: { name: header.name, value },
-          });
-        } else {
-          await transaction.externalMcpServerHeader.create({
-            data: {
-              id: randomUUID(),
-              serverId,
-              name: header.name,
-              value,
-            },
-          });
-        }
+      if (headers.length) {
+        await transaction.externalMcpServerHeader.createMany({
+          data: headers.map((header) => ({
+            id: header.id,
+            serverId,
+            name: header.name,
+          })),
+        });
       }
-    });
+    };
+    if (headers.length) {
+      await this.credentials.setJson(descriptor, headers, saveMetadata);
+    } else {
+      await this.credentials.delete(descriptor, saveMetadata);
+    }
     const saved = await prisma.externalMcpServer.findUniqueOrThrow({
       where: { id: serverId },
       include: { headers: true },
     });
-    return view(saved);
+    return view(saved, true);
   }
 
   async deleteExternalServer(id: string): Promise<{ id: string }> {
-    const prisma = await getPrismaClient();
-    const removed = await prisma.externalMcpServer.delete({ where: { id } });
-    return { id: removed.id };
+    await this.credentials.delete(
+      externalMcpHeadersCredential(id),
+      async (transaction) => {
+        await transaction.externalMcpServer.delete({ where: { id } });
+      },
+    );
+    return { id };
   }
 
   async catalog(): Promise<{ groups: ToolCatalogGroup[] }> {
@@ -291,7 +321,9 @@ export class ToolsService {
     const externalGroups = await Promise.all(
       servers.map(async (server): Promise<ToolCatalogGroup> => {
         try {
-          const tools = await this.listRemoteTools(server);
+          const tools = await this.listRemoteTools(
+            await this.externalServerWithSecrets(server.id),
+          );
           return {
             id: `${EXTERNAL_GROUP_PREFIX}${server.id}`,
             name: server.name,
@@ -361,7 +393,28 @@ export class ToolsService {
     });
     if (!server) throw new Error("External MCP server not found");
     transport(server.transport);
-    return server;
+    if (!server.headers.length) return { ...server, headers: [] };
+    const stored = await this.credentials.getJson<StoredExternalMcpHeader[]>(
+      externalMcpHeadersCredential(server.id),
+    );
+    if (!stored) {
+      throw new Error(
+        "External MCP server headers are not configured; re-enter them in Settings",
+      );
+    }
+    const storedById = new Map(stored.map((header) => [header.id, header]));
+    return {
+      ...server,
+      headers: server.headers.map((header) => {
+        const secret = storedById.get(header.id);
+        if (!secret?.value) {
+          throw new Error(
+            `External MCP header ${header.name} is missing; re-enter it in Settings`,
+          );
+        }
+        return { id: header.id, name: header.name, value: secret.value };
+      }),
+    };
   }
 
   private async withClient<T>(

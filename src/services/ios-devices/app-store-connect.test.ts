@@ -8,7 +8,58 @@ import {
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
+const credentialState = vi.hoisted(() => ({
+  appStorePrivateKey: "" as string | null,
+  signerPrivateKey: null as string | null,
+}));
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+
+vi.mock("@/services/credentials", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/credentials")>();
+  return {
+    ...original,
+    CredentialService: class {
+      async isConfigured(descriptor: { id: string }) {
+        return descriptor.id.includes("app-store-connect")
+          ? Boolean(credentialState.appStorePrivateKey)
+          : Boolean(credentialState.signerPrivateKey);
+      }
+
+      async getText(descriptor: { id: string }) {
+        return descriptor.id.includes("app-store-connect")
+          ? credentialState.appStorePrivateKey
+          : credentialState.signerPrivateKey;
+      }
+
+      async setText(
+        descriptor: { id: string },
+        value: string,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        await mutation?.(await getPrismaClient());
+        if (descriptor.id.includes("app-store-connect")) {
+          credentialState.appStorePrivateKey = value;
+          settings.appStoreConnectPrivateKey = value;
+        } else {
+          credentialState.signerPrivateKey = value;
+          settings.signerPrivateKeyPem = value;
+        }
+      }
+
+      async delete(
+        descriptor: { id: string },
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        await mutation?.(await getPrismaClient());
+        if (descriptor.id.includes("app-store-connect")) {
+          credentialState.appStorePrivateKey = null;
+          settings.appStoreConnectPrivateKey = null;
+        }
+      }
+    },
+  };
+});
 
 import { IosDevicesService } from "./ios-devices.service";
 
@@ -178,6 +229,8 @@ beforeEach(() => {
     createdAt: new Date(0),
     updatedAt: new Date(0),
   };
+  credentialState.appStorePrivateKey = p8;
+  credentialState.signerPrivateKey = null;
   device = {
     id: "device-1",
     udid: "00008030-001C2D3E4F50002E",

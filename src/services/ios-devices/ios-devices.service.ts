@@ -5,6 +5,7 @@ import {
   plistDocument,
 } from "@ai-development-environment/agent-contract/plist";
 import { getPrismaClient } from "@/data/prisma-client";
+import { CREDENTIALS, CredentialService } from "@/services/credentials";
 import {
   agentEventBus,
   IOS_DEVICES_CHANGED_TOPIC,
@@ -140,28 +141,30 @@ function asObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function settingsView(value: {
-  organizationName: string;
-  profileIdentifier: string;
-  signerCertificatePem: string | null;
-  signerPrivateKeyPem: string | null;
-  signerFingerprint: string | null;
-  signerCreatedAt: Date | null;
-  signerExpiresAt: Date | null;
-  appStoreConnectIssuerId: string | null;
-  appStoreConnectKeyId: string | null;
-  appStoreConnectPrivateKey: string | null;
-  appStoreConnectPrivateKeyFingerprint: string | null;
-  appStoreConnectVerifiedAt: Date | null;
-  appStoreConnectLastTestedAt: Date | null;
-  appStoreConnectVerificationError: string | null;
-  updatedAt: Date;
-}): IosDeviceSettingsView {
+function settingsView(
+  value: {
+    organizationName: string;
+    profileIdentifier: string;
+    signerCertificatePem: string | null;
+    signerFingerprint: string | null;
+    signerCreatedAt: Date | null;
+    signerExpiresAt: Date | null;
+    appStoreConnectIssuerId: string | null;
+    appStoreConnectKeyId: string | null;
+    appStoreConnectPrivateKeyFingerprint: string | null;
+    appStoreConnectVerifiedAt: Date | null;
+    appStoreConnectLastTestedAt: Date | null;
+    appStoreConnectVerificationError: string | null;
+    updatedAt: Date;
+  },
+  signerKeyConfigured: boolean,
+  appStoreKeyConfigured: boolean,
+): IosDeviceSettingsView {
   return {
     organizationName: value.organizationName,
     profileIdentifier: value.profileIdentifier,
     signerConfigured: Boolean(
-      value.signerCertificatePem && value.signerPrivateKeyPem,
+      value.signerCertificatePem && signerKeyConfigured,
     ),
     signerFingerprint: value.signerFingerprint,
     signerCreatedAt: value.signerCreatedAt?.toISOString() ?? null,
@@ -169,14 +172,12 @@ function settingsView(value: {
     appStoreConnectConfigured: Boolean(
       value.appStoreConnectIssuerId &&
       value.appStoreConnectKeyId &&
-      value.appStoreConnectPrivateKey &&
+      appStoreKeyConfigured &&
       value.appStoreConnectVerifiedAt,
     ),
     appStoreConnectIssuerId: value.appStoreConnectIssuerId,
     appStoreConnectKeyId: value.appStoreConnectKeyId,
-    appStoreConnectPrivateKeyConfigured: Boolean(
-      value.appStoreConnectPrivateKey,
-    ),
+    appStoreConnectPrivateKeyConfigured: Boolean(appStoreKeyConfigured),
     appStoreConnectPrivateKeyFingerprint:
       value.appStoreConnectPrivateKeyFingerprint,
     appStoreConnectVerifiedAt:
@@ -198,7 +199,10 @@ export class IosDevicesService {
     { expiresAt: number; value: IosDeviceFirmware }
   >();
 
-  constructor(private readonly fetcher: FetchLike = fetch) {}
+  constructor(
+    private readonly fetcher: FetchLike = fetch,
+    private readonly credentials = new CredentialService(),
+  ) {}
 
   private changed(id: string | null = null): void {
     agentEventBus.publish(IOS_DEVICES_CHANGED_TOPIC, { id });
@@ -220,7 +224,13 @@ export class IosDevicesService {
   }
 
   async getSettings(): Promise<IosDeviceSettingsView> {
-    return settingsView(await this.rawSettings());
+    const [settings, signerKeyConfigured, appStoreKeyConfigured] =
+      await Promise.all([
+        this.rawSettings(),
+        this.credentials.isConfigured(CREDENTIALS.iosProfileSignerPrivateKey),
+        this.credentials.isConfigured(CREDENTIALS.appStoreConnectPrivateKey),
+      ]);
+    return settingsView(settings, signerKeyConfigured, appStoreKeyConfigured);
   }
 
   async saveProfileSettings(input: {
@@ -243,18 +253,21 @@ export class IosDevicesService {
       );
     }
     const prisma = await getPrismaClient();
-    const settings = await prisma.iosDeviceSettings.upsert({
+    await prisma.iosDeviceSettings.upsert({
       where: { id: SETTINGS_ID },
       create: { id: SETTINGS_ID, organizationName, profileIdentifier },
       update: { organizationName, profileIdentifier },
     });
-    return settingsView(settings);
+    return this.getSettings();
   }
 
   private async ensureProfileSigner() {
     const current = await this.rawSettings();
-    if (current.signerCertificatePem && current.signerPrivateKeyPem) {
-      return current;
+    const privateKeyPem = current.signerCertificatePem
+      ? await this.credentials.getText(CREDENTIALS.iosProfileSignerPrivateKey)
+      : null;
+    if (current.signerCertificatePem && privateKeyPem) {
+      return { ...current, signerPrivateKeyPem: privateKeyPem };
     }
     return this.regenerateProfileSigner();
   }
@@ -262,21 +275,30 @@ export class IosDevicesService {
   async regenerateProfileSigner() {
     const current = await this.rawSettings();
     const signer = await generateProfileSigner(current.organizationName);
-    const prisma = await getPrismaClient();
-    return prisma.iosDeviceSettings.update({
-      where: { id: SETTINGS_ID },
-      data: {
-        signerCertificatePem: signer.certificatePem,
-        signerPrivateKeyPem: signer.privateKeyPem,
-        signerFingerprint: signer.fingerprint,
-        signerCreatedAt: signer.createdAt,
-        signerExpiresAt: signer.expiresAt,
+    await this.credentials.setText(
+      CREDENTIALS.iosProfileSignerPrivateKey,
+      signer.privateKeyPem,
+      async (transaction) => {
+        await transaction.iosDeviceSettings.update({
+          where: { id: SETTINGS_ID },
+          data: {
+            signerCertificatePem: signer.certificatePem,
+            signerFingerprint: signer.fingerprint,
+            signerCreatedAt: signer.createdAt,
+            signerExpiresAt: signer.expiresAt,
+          },
+        });
       },
-    });
+    );
+    return {
+      ...(await this.rawSettings()),
+      signerPrivateKeyPem: signer.privateKeyPem,
+    };
   }
 
   async regenerateProfileSignerView(): Promise<IosDeviceSettingsView> {
-    return settingsView(await this.regenerateProfileSigner());
+    await this.regenerateProfileSigner();
+    return this.getSettings();
   }
 
   async purgeExpiredEnrollments(now = new Date()): Promise<void> {
@@ -660,38 +682,36 @@ export class IosDevicesService {
     return true;
   }
 
-  private appleDeveloperCredentials(credentials: {
+  private async appleDeveloperCredentials(credentials: {
     appStoreConnectIssuerId: string | null;
     appStoreConnectKeyId: string | null;
-    appStoreConnectPrivateKey: string | null;
-  }): AppleDeveloperCredentials {
+  }): Promise<AppleDeveloperCredentials> {
+    const privateKey = await this.credentials.getText(
+      CREDENTIALS.appStoreConnectPrivateKey,
+    );
     if (
       !credentials.appStoreConnectIssuerId ||
       !credentials.appStoreConnectKeyId ||
-      !credentials.appStoreConnectPrivateKey
+      !privateKey
     ) {
       throw new Error("App Store Connect API credentials are not configured");
     }
     return {
       issuerId: credentials.appStoreConnectIssuerId,
       keyId: credentials.appStoreConnectKeyId,
-      privateKey: credentials.appStoreConnectPrivateKey,
+      privateKey,
     };
   }
 
   private async appleRequest<T>(
-    credentials: {
-      appStoreConnectIssuerId: string | null;
-      appStoreConnectKeyId: string | null;
-      appStoreConnectPrivateKey: string | null;
-    },
+    credentials: AppleDeveloperCredentials,
     path: string,
     init: RequestInit = {},
     redact = "",
   ): Promise<T> {
     try {
       return await new AppleDeveloperClient(
-        this.appleDeveloperCredentials(credentials),
+        credentials,
         this.fetcher,
       ).request<T>(path, init);
     } catch (error) {
@@ -738,9 +758,9 @@ export class IosDevicesService {
   }
 
   private async verifyAppStoreCredentials(credentials: {
-    appStoreConnectIssuerId: string;
-    appStoreConnectKeyId: string;
-    appStoreConnectPrivateKey: string;
+    issuerId: string;
+    keyId: string;
+    privateKey: string;
   }): Promise<void> {
     await this.appleRequest<AppleDeviceListResponse>(
       credentials,
@@ -751,11 +771,12 @@ export class IosDevicesService {
   async saveAppStoreConnectSettings(
     input: AppStoreConnectSettingsInput,
   ): Promise<IosDeviceSettingsView> {
-    const current = await this.rawSettings();
+    await this.rawSettings();
     const issuerId = cleanRequired(input.issuerId, "Issuer ID", 100);
     const keyId = cleanRequired(input.keyId, "Key ID", 100);
     const privateKey =
-      input.privateKey?.trim() || current.appStoreConnectPrivateKey;
+      input.privateKey?.trim() ||
+      (await this.credentials.getText(CREDENTIALS.appStoreConnectPrivateKey));
     if (!privateKey) throw new Error("A .p8 private key is required");
     if (
       !privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
@@ -765,42 +786,38 @@ export class IosDevicesService {
         "The App Store Connect key must be a PKCS#8 .p8 private key",
       );
     }
-    const credentials = {
-      appStoreConnectIssuerId: issuerId,
-      appStoreConnectKeyId: keyId,
-      appStoreConnectPrivateKey: privateKey,
-    };
-    await this.verifyAppStoreCredentials(credentials);
-    const prisma = await getPrismaClient();
-    const settings = await prisma.iosDeviceSettings.update({
-      where: { id: SETTINGS_ID },
-      data: {
-        ...credentials,
-        appStoreConnectPrivateKeyFingerprint: sha256(privateKey).toUpperCase(),
-        appStoreConnectVerifiedAt: new Date(),
-        appStoreConnectLastTestedAt: new Date(),
-        appStoreConnectVerificationError: null,
+    await this.verifyAppStoreCredentials({ issuerId, keyId, privateKey });
+    await this.credentials.setText(
+      CREDENTIALS.appStoreConnectPrivateKey,
+      privateKey,
+      async (transaction) => {
+        await transaction.iosDeviceSettings.update({
+          where: { id: SETTINGS_ID },
+          data: {
+            appStoreConnectIssuerId: issuerId,
+            appStoreConnectKeyId: keyId,
+            appStoreConnectPrivateKeyFingerprint:
+              sha256(privateKey).toUpperCase(),
+            appStoreConnectVerifiedAt: new Date(),
+            appStoreConnectLastTestedAt: new Date(),
+            appStoreConnectVerificationError: null,
+          },
+        });
       },
-    });
-    return settingsView(settings);
+    );
+    return this.getSettings();
   }
 
   async testAppStoreConnectSettings(): Promise<IosDeviceSettingsView> {
     const current = await this.rawSettings();
-    if (
-      !current.appStoreConnectIssuerId ||
-      !current.appStoreConnectKeyId ||
-      !current.appStoreConnectPrivateKey
-    ) {
+    if (!current.appStoreConnectIssuerId || !current.appStoreConnectKeyId) {
       throw new Error("App Store Connect API credentials are not configured");
     }
     const prisma = await getPrismaClient();
     try {
-      await this.verifyAppStoreCredentials({
-        appStoreConnectIssuerId: current.appStoreConnectIssuerId,
-        appStoreConnectKeyId: current.appStoreConnectKeyId,
-        appStoreConnectPrivateKey: current.appStoreConnectPrivateKey,
-      });
+      await this.verifyAppStoreCredentials(
+        await this.appleDeveloperCredentials(current),
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -816,35 +833,36 @@ export class IosDevicesService {
       });
       throw new Error(message);
     }
-    return settingsView(
-      await prisma.iosDeviceSettings.update({
-        where: { id: SETTINGS_ID },
-        data: {
-          appStoreConnectVerifiedAt: new Date(),
-          appStoreConnectLastTestedAt: new Date(),
-          appStoreConnectVerificationError: null,
-        },
-      }),
-    );
+    await prisma.iosDeviceSettings.update({
+      where: { id: SETTINGS_ID },
+      data: {
+        appStoreConnectVerifiedAt: new Date(),
+        appStoreConnectLastTestedAt: new Date(),
+        appStoreConnectVerificationError: null,
+      },
+    });
+    return this.getSettings();
   }
 
   async clearAppStoreConnectSettings(): Promise<IosDeviceSettingsView> {
-    const prisma = await getPrismaClient();
-    return settingsView(
-      await prisma.iosDeviceSettings.upsert({
-        where: { id: SETTINGS_ID },
-        create: { id: SETTINGS_ID },
-        update: {
-          appStoreConnectIssuerId: null,
-          appStoreConnectKeyId: null,
-          appStoreConnectPrivateKey: null,
-          appStoreConnectPrivateKeyFingerprint: null,
-          appStoreConnectVerifiedAt: null,
-          appStoreConnectLastTestedAt: null,
-          appStoreConnectVerificationError: null,
-        },
-      }),
+    await this.credentials.delete(
+      CREDENTIALS.appStoreConnectPrivateKey,
+      async (transaction) => {
+        await transaction.iosDeviceSettings.upsert({
+          where: { id: SETTINGS_ID },
+          create: { id: SETTINGS_ID },
+          update: {
+            appStoreConnectIssuerId: null,
+            appStoreConnectKeyId: null,
+            appStoreConnectPrivateKeyFingerprint: null,
+            appStoreConnectVerifiedAt: null,
+            appStoreConnectLastTestedAt: null,
+            appStoreConnectVerificationError: null,
+          },
+        });
+      },
     );
+    return this.getSettings();
   }
 
   async registerDevice(id: string) {
@@ -853,13 +871,13 @@ export class IosDevicesService {
     if (
       !current.appStoreConnectIssuerId ||
       !current.appStoreConnectKeyId ||
-      !current.appStoreConnectPrivateKey ||
       !current.appStoreConnectVerifiedAt
     ) {
       throw new Error(
         "Configure and verify an App Store Connect API key in Settings first",
       );
     }
+    const appleCredentials = await this.appleDeveloperCredentials(current);
     const prisma = await getPrismaClient();
     const device = await prisma.iosDevice.findUnique({ where: { id } });
     if (!device) throw new Error("Device not found");
@@ -882,7 +900,7 @@ export class IosDevicesService {
     try {
       const encodedUdid = encodeURIComponent(device.udid);
       const existing = await this.appleRequest<AppleDeviceListResponse>(
-        current,
+        appleCredentials,
         `/v1/devices?filter%5Budid%5D=${encodedUdid}&limit=1`,
         {},
         device.udid,
@@ -891,7 +909,7 @@ export class IosDevicesService {
         existing.data[0] ??
         (
           await this.appleRequest<AppleDeviceResponse>(
-            current,
+            appleCredentials,
             "/v1/devices",
             {
               method: "POST",

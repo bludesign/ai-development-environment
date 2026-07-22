@@ -111,6 +111,55 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/credentials", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/credentials")>();
+  return {
+    ...original,
+    CredentialService: class {
+      async isConfigured(descriptor: { id: string }) {
+        return descriptor.id.startsWith("github-app/")
+          ? Boolean(state.appSettings?.privateKey)
+          : Boolean(state.apiToken);
+      }
+
+      async getText(descriptor: { id: string }) {
+        return descriptor.id.startsWith("github-app/")
+          ? (state.appSettings?.privateKey ?? null)
+          : state.apiToken;
+      }
+
+      async setText(
+        descriptor: { id: string },
+        value: string,
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        if (descriptor.id.startsWith("github-app/")) {
+          if (state.appSettings) state.appSettings.privateKey = value;
+        } else {
+          state.apiToken = value;
+        }
+      }
+
+      async delete(
+        descriptor: { id: string },
+        mutation?: (transaction: unknown) => Promise<void>,
+      ) {
+        const prisma = await (
+          await import("@/data/prisma-client")
+        ).getPrismaClient();
+        await mutation?.(prisma);
+        if (descriptor.id.startsWith("github-app/")) state.appSettings = null;
+        else state.apiToken = null;
+      }
+    },
+  };
+});
+
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitHubSettings: {

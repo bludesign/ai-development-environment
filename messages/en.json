@@ -46,7 +46,128 @@
     "consoleLogs": "Console Logs",
     "analyticsEvents": "Analytics Events",
     "unifiedEvents": "Unified View",
+    "credentials": "Credentials",
     "settings": "Settings"
+  },
+  "credentialEncryption": {
+    "title": "Database credentials are not encrypted",
+    "description": "Secrets stored in the application database are currently plaintext. Generate a 32-byte key with this command:",
+    "instructionsPrefix": "Set the generated value as",
+    "instructionsSuffix": "in the server environment, then restart the server. Existing plaintext credential rows are encrypted together after restart.",
+    "backup": "Back up this key securely and retain it for the lifetime of the encrypted rows. Losing or changing it makes those credentials unreadable."
+  },
+  "credentials": {
+    "title": "Credentials",
+    "description": "Review the active credential backend, protection status, and a metadata-only inventory. Secret values are never shown here.",
+    "refresh": "Refresh",
+    "loading": "Loading credential inventory…",
+    "loadFailed": "Credential inventory could not be loaded",
+    "storageTitle": "Credential storage",
+    "storageDescription": "Runtime configuration and safe location details for the selected backend.",
+    "backend": "Backend",
+    "protection": "Protection",
+    "itemCount": "Stored items",
+    "mismatchCount": "Backend mismatches",
+    "inventoryTitle": "Stored credential items",
+    "inventoryDescription": "This table contains identifiers and protection metadata only. Manage each value in its owning settings form.",
+    "feature": "Owning feature",
+    "kind": "Credential kind",
+    "updated": "Updated",
+    "emptyTitle": "No credentials stored",
+    "emptyDescription": "Credentials appear here after they are saved from an owning settings form.",
+    "states": {
+      "READY": "Ready",
+      "WARNING": "Warning",
+      "ERROR": "Error"
+    },
+    "backends": {
+      "DATABASE": "Database",
+      "VAULT": "HashiCorp Vault",
+      "KEYCHAIN": "macOS Keychain",
+      "UNKNOWN": "Unknown"
+    },
+    "encryptionStates": {
+      "ENCRYPTED": "Encrypted",
+      "PLAINTEXT": "Plaintext",
+      "EXTERNAL": "External backend",
+      "ERROR": "Unavailable"
+    },
+    "protections": {
+      "ENCRYPTED": "AES-256-GCM",
+      "PLAINTEXT": "Plaintext",
+      "VAULT": "Vault KV v2",
+      "KEYCHAIN": "Keychain"
+    },
+    "features": {
+      "jira": "Jira",
+      "github": "GitHub",
+      "cache": "Actions cache",
+      "mcp": "External MCP server",
+      "ios": "iOS devices",
+      "push": "Push notifications"
+    },
+    "kinds": {
+      "jira-api-token": "API token",
+      "github-personal-access-token": "Personal access token",
+      "github-app-private-key": "GitHub App private key",
+      "cache-server-api-key": "API key",
+      "cache-server-headers": "Custom header bundle",
+      "external-mcp-server-headers": "Header bundle",
+      "ios-profile-signer-private-key": "Profile signer private key",
+      "app-store-connect-private-key": "App Store Connect private key",
+      "apns-token-private-key": "APNs token private key",
+      "apns-certificate-bundle": "APNs certificate bundle"
+    },
+    "details": {
+      "configuredValue": "Configured value",
+      "location": "Location",
+      "encryptionKey": "Encryption key",
+      "service": "Service",
+      "hostPlatform": "Host platform",
+      "address": "Address",
+      "mount": "KV v2 mount",
+      "pathPrefix": "Path prefix",
+      "namespace": "Namespace",
+      "authenticationToken": "Authentication token",
+      "additionalHeaders": "Additional header names",
+      "customCa": "Custom CA",
+      "tlsServerName": "TLS server name"
+    },
+    "detailValues": {
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "none": "None",
+      "invalid": "Invalid",
+      "applicationDatabase": "Application database"
+    },
+    "warningTitles": {
+      "DATABASE_UNENCRYPTED": "Database encryption is disabled",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "Encryption key is invalid",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Encryption key is missing",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "Encryption key does not match",
+      "CREDENTIAL_DATA_INVALID": "Credential data is invalid",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "Storage type is invalid",
+      "CREDENTIAL_STORE_UNAVAILABLE": "Credential store is unavailable",
+      "VAULT_CONFIGURATION_INVALID": "Vault configuration is invalid",
+      "VAULT_INSECURE_HTTP": "Vault uses plaintext HTTP",
+      "VAULT_TLS_VERIFICATION_DISABLED": "Vault certificate verification is disabled",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "Keychain is unsupported on this host",
+      "BACKEND_MISMATCH": "Credentials use another backend"
+    },
+    "warnings": {
+      "DATABASE_UNENCRYPTED": "Database credential payloads are stored as plaintext until an encryption key is configured.",
+      "CREDENTIAL_ENCRYPTION_KEY_INVALID": "CREDENTIAL_ENCRYPTION_KEY must be strict base64 encoding of exactly 32 bytes. Fix it and restart the server; plaintext fallback is disabled when an invalid key is present.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING": "Encrypted credential rows exist, but the encryption key is missing. Restore the original key and restart the server.",
+      "CREDENTIAL_ENCRYPTION_KEY_MISMATCH": "The configured key does not match existing encrypted rows. Restore the original key and restart the server.",
+      "CREDENTIAL_DATA_INVALID": "One or more credential records contain invalid metadata and cannot be used.",
+      "CREDENTIAL_STORAGE_TYPE_INVALID": "CREDENTIAL_STORAGE_TYPE must be database, vault, or keychain.",
+      "CREDENTIAL_STORE_UNAVAILABLE": "The credential store could not be initialized. Review the server configuration and logs.",
+      "VAULT_CONFIGURATION_INVALID": "Vault cannot be initialized with the current environment variables. Review the Vault address, headers, path, and TLS settings.",
+      "VAULT_INSECURE_HTTP": "Vault traffic, secret payloads, and authentication headers are not protected in transit over HTTP.",
+      "VAULT_TLS_VERIFICATION_DISABLED": "VAULT_SKIP_VERIFY allows untrusted certificates and exposes Vault traffic to interception.",
+      "KEYCHAIN_UNSUPPORTED_PLATFORM": "macOS Keychain is available only when the Next.js host runs on macOS. The server remains available, but credential operations will fail.",
+      "BACKEND_MISMATCH": "{count} credential item(s) were recorded with another backend. Re-enter them through their owning settings forms; values are not moved or deleted automatically."
+    }
   },
   "agents": {
     "title": "Agents",

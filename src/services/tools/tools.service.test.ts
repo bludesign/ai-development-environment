@@ -78,10 +78,16 @@ describe("external MCP configuration", () => {
           id: "header-1",
           serverId: "server-1",
           name: "Authorization",
-          value: "Bearer secret",
         },
       ],
     };
+    let storedHeaders = [
+      {
+        id: "header-1",
+        name: "Authorization",
+        value: "Bearer secret",
+      },
+    ];
     const transaction = {
       externalMcpServer: {
         upsert: vi.fn(async ({ update }: { update: Partial<typeof state> }) => {
@@ -90,29 +96,14 @@ describe("external MCP configuration", () => {
         }),
       },
       externalMcpServerHeader: {
-        deleteMany: vi.fn(
-          async ({ where }: { where: { id?: { notIn?: string[] } } }) => {
-            const retained = where.id?.notIn;
-            state.headers = retained
-              ? state.headers.filter((header) => retained.includes(header.id))
-              : [];
-            return { count: 1 };
-          },
-        ),
-        update: vi.fn(
-          async ({
-            where,
-            data,
-          }: {
-            where: { id: string };
-            data: { name: string; value: string };
-          }) => {
-            const header = state.headers.find((item) => item.id === where.id);
-            if (header) Object.assign(header, data);
-            return header;
-          },
-        ),
-        create: vi.fn(),
+        deleteMany: vi.fn(async () => {
+          state.headers = [];
+          return { count: 1 };
+        }),
+        createMany: vi.fn(async ({ data }: { data: typeof state.headers }) => {
+          state.headers = data;
+          return { count: data.length };
+        }),
       },
     };
     getPrismaClient.mockResolvedValue({
@@ -128,7 +119,35 @@ describe("external MCP configuration", () => {
           callback(transaction),
       ),
     });
-    const service = new ToolsService({} as never);
+    const credentialService = {
+      isConfigured: vi.fn(async () => storedHeaders.length > 0),
+      getJson: vi.fn(async () => storedHeaders),
+      setJson: vi.fn(
+        async (
+          _descriptor: unknown,
+          value: typeof storedHeaders,
+          mutation: (transactionValue: object) => Promise<void>,
+        ) => {
+          await mutation(transaction);
+          storedHeaders = value;
+        },
+      ),
+      delete: vi.fn(
+        async (
+          _descriptor: unknown,
+          mutation: (transactionValue: object) => Promise<void>,
+        ) => {
+          await mutation(transaction);
+          storedHeaders = [];
+        },
+      ),
+    };
+    const service = new ToolsService(
+      {} as never,
+      undefined,
+      {},
+      credentialService as never,
+    );
 
     const saved = await service.updateExternalServer("server-1", {
       name: "Example",
@@ -144,6 +163,10 @@ describe("external MCP configuration", () => {
     });
 
     expect(state.headers[0]).toMatchObject({
+      name: "X-Authorization",
+    });
+    expect(state.headers[0]).not.toHaveProperty("value");
+    expect(storedHeaders[0]).toMatchObject({
       name: "X-Authorization",
       value: "Bearer secret",
     });
@@ -163,6 +186,7 @@ describe("external MCP configuration", () => {
       headers: [],
     });
     expect(state.headers).toEqual([]);
+    expect(storedHeaders).toEqual([]);
   });
 
   test("normalizes supported URLs, transports, prefixes, and headers", () => {
