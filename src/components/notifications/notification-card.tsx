@@ -96,6 +96,7 @@ export function NotificationCard({
             </p>
             <DateTime
               className="mt-1.5 block text-[11px] text-muted-foreground"
+              hover={false}
               kind="relative"
               value={notification.createdAt}
             />

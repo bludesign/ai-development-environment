@@ -629,12 +629,7 @@ export function DeviceDetailPage({ id }: { id: string }) {
                       {versionLabel}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      <time dateTime={version.releaseDate}>
-                        <DateTime
-                          showTime={false}
-                          value={version.releaseDate}
-                        />
-                      </time>
+                      <DateTime showTime={false} value={version.releaseDate} />
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">
                       {formatBytes(version.fileSize, locale)}

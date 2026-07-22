@@ -72,9 +72,10 @@ export function JiraTicketComments({
                       </ItemTitle>
                     }
                     headerActions={
-                      <time className="col-start-1 row-start-2 -mt-1 mr-auto shrink-0 text-xs text-muted-foreground">
-                        <DateTime value={comment.createdAt} />
-                      </time>
+                      <DateTime
+                        className="col-start-1 row-start-2 -mt-1 mr-auto shrink-0 text-xs text-muted-foreground"
+                        value={comment.createdAt}
+                      />
                     }
                     headerClassName="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-0.5 border-b pb-2 @md/comment:flex @md/comment:flex-row @md/comment:items-center @md/comment:gap-2"
                     showFormatOverride={false}
