@@ -30,13 +30,7 @@ import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateTime } from "@/components/ui/date-time";
 import {
   Empty,
@@ -629,6 +623,28 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
   );
 }
 
+/**
+ * The header band holding a card's title and its filter controls. The controls
+ * take their own row until there is room to sit beside the title, so they never
+ * push the header wider than the card.
+ */
+function TableToolbar({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <CardHeader className="gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+      <CardTitle>{title}</CardTitle>
+      <div className="flex flex-wrap items-center gap-2 sm:col-start-2 sm:row-start-1 sm:justify-end">
+        {children}
+      </div>
+    </CardHeader>
+  );
+}
+
 /** The search field the branch and stash cards share in their header. */
 function TableSearch({
   label,
@@ -642,7 +658,7 @@ function TableSearch({
   value: string;
 }) {
   return (
-    <div className="relative w-full sm:w-64">
+    <div className="relative min-w-40 flex-1 sm:w-64 sm:flex-none">
       <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         aria-label={label}
@@ -724,31 +740,29 @@ function BranchTable({
 
   return (
     <Card className="gap-0 py-0">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardAction>
-          <div className="flex flex-wrap items-center gap-2">
-            <TableSearch
-              label={t("searchBranches")}
-              onChange={setQuery}
-              placeholder={t("searchBranchesPlaceholder")}
-              value={query}
-            />
-            <Select
-              onValueChange={(value) => setSort(value as BranchSort)}
-              value={sort}
-            >
-              <SelectTrigger aria-label={t("sortBranches")} className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NAME">{t("sortByName")}</SelectItem>
-                <SelectItem value="DATE">{t("sortByNewestCommit")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardAction>
-      </CardHeader>
+      <TableToolbar title={title}>
+        <TableSearch
+          label={t("searchBranches")}
+          onChange={setQuery}
+          placeholder={t("searchBranchesPlaceholder")}
+          value={query}
+        />
+        <Select
+          onValueChange={(value) => setSort(value as BranchSort)}
+          value={sort}
+        >
+          <SelectTrigger
+            aria-label={t("sortBranches")}
+            className="w-40 shrink-0"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="NAME">{t("sortByName")}</SelectItem>
+            <SelectItem value="DATE">{t("sortByNewestCommit")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </TableToolbar>
       {visible.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">
           {t("noMatchingBranches")}
@@ -1074,17 +1088,14 @@ function StashTable({
   return (
     <div className="space-y-3">
       <Card className="gap-0 py-0">
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          <CardAction>
-            <TableSearch
-              label={t("searchStashes")}
-              onChange={setQuery}
-              placeholder={t("searchStashesPlaceholder")}
-              value={query}
-            />
-          </CardAction>
-        </CardHeader>
+        <TableToolbar title={title}>
+          <TableSearch
+            label={t("searchStashes")}
+            onChange={setQuery}
+            placeholder={t("searchStashesPlaceholder")}
+            value={query}
+          />
+        </TableToolbar>
         {visible.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">
             {t("noMatchingStashes")}
