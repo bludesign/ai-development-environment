@@ -80,4 +80,50 @@ describe("WorktreeBranchForm", () => {
       },
     );
   });
+
+  test("parses a Jira URL for the ticket branch preview and submission", async () => {
+    request.mockResolvedValue({
+      previewWorktreeTicketBranch: {
+        ticketKey: "APP-123",
+        ticketTitle: "Add search",
+        ticketType: "Story",
+        projectKey: "APP",
+        branchName: "feature/APP-123-add-search",
+      },
+    } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WorktreeBranchForm
+        busy={false}
+        onSubmit={onSubmit}
+        submitLabel="Change branch"
+        target={target}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "From ticket" }));
+    fireEvent.change(screen.getByLabelText("Ticket key"), {
+      target: {
+        value: "https://example.atlassian.net/browse/app-123?atlOrigin=abc",
+      },
+    });
+
+    await screen.findByText("Add search", {}, { timeout: 2_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Change branch" }));
+
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("PreviewWorktreeTicketBranch"),
+      {
+        input: {
+          codebaseId: "codebase-1",
+          worktreeId: null,
+          ticketKey: "APP-123",
+        },
+      },
+    );
+    expect(onSubmit).toHaveBeenCalledWith({
+      mode: "TICKET",
+      baseBranch: "main",
+      ticketKey: "APP-123",
+    });
+  });
 });
