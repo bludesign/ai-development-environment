@@ -5,6 +5,7 @@ import {
   formatDateValue,
   formatRelativeTime,
   formatUtcMillis,
+  isSameDay,
   toDate,
 } from "./date-format";
 
@@ -137,6 +138,40 @@ describe("formatRelativeTime", () => {
     expect(
       formatDateValue(now - 9 * 3_600_000, "relative", { locale: LOCALE, now }),
     ).toBe("9 hours ago");
+  });
+});
+
+describe("isSameDay", () => {
+  it("compares calendar days, not elapsed time", () => {
+    expect(
+      isSameDay("2026-07-22T00:00:01Z", "2026-07-22T23:59:59Z", {
+        utc: true,
+      }),
+    ).toBe(true);
+    // Under two hours apart, but either side of midnight.
+    expect(
+      isSameDay("2026-07-22T23:30:00Z", "2026-07-23T00:30:00Z", {
+        utc: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves the day in the requested zone", () => {
+    // 23:30 UTC on the 22nd is still the 22nd in UTC but the 23rd in Tokyo.
+    const late = "2026-07-22T23:30:00Z";
+    const next = "2026-07-23T02:00:00Z";
+    expect(isSameDay(late, next, { utc: true })).toBe(false);
+    expect(isSameDay(late, next, { timeZone: "Asia/Tokyo" })).toBe(true);
+  });
+
+  it("accepts epoch millis and Date instances", () => {
+    const value = Date.parse(SAMPLE);
+    expect(isSameDay(value, new Date(value), { utc: true })).toBe(true);
+  });
+
+  it("is false when either side is missing", () => {
+    expect(isSameDay(null, SAMPLE)).toBe(false);
+    expect(isSameDay(SAMPLE, "nonsense")).toBe(false);
   });
 });
 

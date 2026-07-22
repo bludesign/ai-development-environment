@@ -12,6 +12,7 @@ import {
   DATE_FALLBACK,
   formatDateValue,
   formatUtcMillis,
+  isSameDay,
   toDate,
   type DateInput,
   type DateKind,
@@ -28,6 +29,11 @@ export type DateTimeProps = {
   hour12?: boolean;
   /** Render in UTC rather than the viewer's zone. */
   utc?: boolean;
+  /**
+   * Use the relative form only for values falling on today, rendering `kind`
+   * otherwise. Suits tables that already group rows under a day heading.
+   */
+  relativeToday?: boolean;
   /** Opt out of the hover card. */
   hover?: boolean;
   /** Shown when the value is missing or unparseable. Defaults to an em dash. */
@@ -75,22 +81,34 @@ function RelativeText({
   locale,
   hour12,
   utc,
+  showTime,
+  absoluteKind,
+  onlyToday,
 }: {
   date: Date;
   locale: string;
   hour12: boolean;
   utc: boolean;
+  showTime: boolean;
+  absoluteKind: DateKind;
+  onlyToday: boolean;
 }) {
   const now = useNow(date.getTime());
+  const absolute = formatDateValue(date, absoluteKind, {
+    locale,
+    hour12,
+    utc,
+    showTime,
+  });
+
   // Before hydration there is no clock, so show an absolute value that the
   // server and client agree on, then swap to relative once mounted.
-  return (
-    <>
-      {now === null
-        ? formatDateValue(date, "short", { locale, hour12, utc })
-        : formatDateValue(date, "relative", { locale, now })}
-    </>
-  );
+  if (now === null) return <>{absolute}</>;
+  // Tables that group rows under a day heading only want the relative form for
+  // today; older rows already carry their date in the heading.
+  if (onlyToday && !isSameDay(date, now, { utc })) return <>{absolute}</>;
+
+  return <>{formatDateValue(date, "relative", { locale, now })}</>;
 }
 
 /**
@@ -106,6 +124,7 @@ export function DateTime({
   showTime = true,
   hour12 = true,
   utc = false,
+  relativeToday = false,
   hover = true,
   fallback = DATE_FALLBACK,
   className,
@@ -117,8 +136,9 @@ export function DateTime({
     return <span className={className}>{fallback}</span>;
   }
 
+  const relative = kind === "relative" || relativeToday;
   // A date without a time has nothing extra to reveal on hover.
-  const dateOnly = kind !== "relative" && kind !== "time" && !showTime;
+  const dateOnly = !relative && kind !== "time" && !showTime;
   const withHover = hover && !dateOnly;
 
   const element = (
@@ -128,8 +148,16 @@ export function DateTime({
       // Keeps the hover card reachable by keyboard, not mouse-only.
       tabIndex={withHover ? 0 : undefined}
     >
-      {kind === "relative" ? (
-        <RelativeText date={date} hour12={hour12} locale={locale} utc={utc} />
+      {relative ? (
+        <RelativeText
+          absoluteKind={kind === "relative" ? "short" : kind}
+          date={date}
+          hour12={hour12}
+          locale={locale}
+          onlyToday={relativeToday}
+          showTime={showTime}
+          utc={utc}
+        />
       ) : (
         formatDateValue(date, kind, { locale, hour12, utc, showTime })
       )}

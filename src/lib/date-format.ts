@@ -155,6 +155,30 @@ export function formatDateValue(
 }
 
 /**
+ * Whether two instants land on the same calendar day in the display zone.
+ *
+ * Compares rendered date-only strings rather than raw components so that an
+ * explicit `utc`/`timeZone` is respected. The locale is pinned because only
+ * equality matters, never the wording.
+ */
+export function isSameDay(
+  a: DateInput,
+  b: DateInput,
+  options: Pick<DateFormatOptions, "utc" | "timeZone"> = {},
+): boolean {
+  const left = toDate(a);
+  const right = toDate(b);
+  if (!left || !right) return false;
+  const dayOf = (date: Date) =>
+    formatDateValue(date, "short", {
+      ...options,
+      locale: "en",
+      showTime: false,
+    });
+  return dayOf(left) === dayOf(right);
+}
+
+/**
  * 24-hour UTC time carrying milliseconds — "23:01:37.143".
  *
  * Built from explicit components because `fractionalSecondDigits` throws when

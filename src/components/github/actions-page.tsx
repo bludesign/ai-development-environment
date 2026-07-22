@@ -1015,7 +1015,8 @@ function ActionsTable({
                       <TableCell className="text-muted-foreground">
                         <div className="flex flex-col gap-0.5">
                           <DateTime
-                            kind="relative"
+                            kind="time"
+                            relativeToday
                             value={displayedRun.startedAt}
                           />
                           <span className="text-xs">

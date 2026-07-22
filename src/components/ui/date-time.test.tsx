@@ -111,6 +111,52 @@ describe("DateTime", () => {
     expect(time()?.getAttribute("tabindex")).toBe("0");
   });
 
+  describe("relativeToday", () => {
+    // Pinned so "today" does not depend on when the suite runs. SAMPLE then sits
+    // three days in the past.
+    const EARLIER_TODAY = "2026-07-25T13:30:00.000Z";
+
+    beforeEach(() => {
+      vi.setSystemTime(new Date("2026-07-25T16:00:00.000Z"));
+    });
+
+    const tick = () =>
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+    test("uses the relative form for a value earlier today", () => {
+      render(<DateTime kind="time" relativeToday value={EARLIER_TODAY} />);
+      tick();
+
+      expect(time()?.textContent).toBe("2 hours ago");
+    });
+
+    test("falls back to time only for an earlier day", () => {
+      render(<DateTime utc kind="time" relativeToday value={SAMPLE} />);
+      tick();
+
+      expect(time()?.textContent).toBe("7:01:37 AM");
+    });
+
+    test("renders whichever kind is named for an earlier day", () => {
+      render(<DateTime utc kind="short" relativeToday value={SAMPLE} />);
+      tick();
+
+      expect(time()?.textContent).toBe("Jul 22, 2026, 7:01:37 AM");
+    });
+
+    test("keeps the hover card, which still carries the full date", () => {
+      render(<DateTime utc kind="time" relativeToday value={SAMPLE} />);
+      openHoverCard();
+
+      const [summary] = [...hoverCard()!.querySelectorAll("p")];
+      expect(summary?.textContent).toBe(
+        "Wednesday, July 22, 2026 at 7:01:37 AM",
+      );
+    });
+  });
+
   test("swaps a relative date from absolute to relative once the clock starts", () => {
     render(<DateTime kind="relative" value={Date.now() - 9 * 3_600_000} />);
 
