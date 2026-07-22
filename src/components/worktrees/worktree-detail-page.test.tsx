@@ -158,7 +158,7 @@ function overview(
                 hasStagedChanges: true,
                 hasUnstagedChanges: true,
                 pushStatus: "DIRTY",
-                highlightColor: null,
+                highlightColor: "blue",
                 availability: "AVAILABLE",
                 statusError: null,
                 ticketKey: "AIDE-43",
@@ -322,6 +322,11 @@ describe("WorktreeDetailPage", () => {
     expect(
       await screen.findByRole("heading", { name: "feature/AIDE-43" }),
     ).toBeDefined();
+    const summary = screen.getByTestId("worktree-summary");
+    expect(summary.className).toContain("rounded-lg");
+    expect(summary.className).toContain("border-l-4");
+    expect(summary.className).toContain("bg-blue-500/10");
+    expect(summary.className).toContain("border-l-blue-500");
     expect(
       screen
         .getByRole("link", { name: "Back to worktrees" })

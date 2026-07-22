@@ -19,6 +19,7 @@ export const CREDENTIAL_KINDS = {
   appStoreConnectPrivateKey: "app-store-connect-private-key",
   apnsTokenPrivateKey: "apns-token-private-key",
   apnsCertificateBundle: "apns-certificate-bundle",
+  webPushVapidPrivateKey: "web-push-vapid-private-key",
 } as const;
 
 export type CredentialKind =
@@ -69,6 +70,11 @@ export const CREDENTIALS = {
   apnsTokenPrivateKey: {
     id: "push-notifications/default/token-private-key",
     kind: CREDENTIAL_KINDS.apnsTokenPrivateKey,
+    ownerId: "default",
+  },
+  webPushVapidPrivateKey: {
+    id: "notifications/default/web-push-vapid-private-key",
+    kind: CREDENTIAL_KINDS.webPushVapidPrivateKey,
     ownerId: "default",
   },
 } as const satisfies Record<string, CredentialDescriptor>;
@@ -198,6 +204,8 @@ export function credentialOwnerFeature(kind: string): string {
     case CREDENTIAL_KINDS.apnsTokenPrivateKey:
     case CREDENTIAL_KINDS.apnsCertificateBundle:
       return "Push notifications";
+    case CREDENTIAL_KINDS.webPushVapidPrivateKey:
+      return "Notifications";
     default:
       return "Unknown";
   }

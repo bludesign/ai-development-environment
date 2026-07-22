@@ -53,6 +53,7 @@ beforeEach(() => {
               jobId: "job-1",
               status: buildStatus,
               outOfDate: buildStatus === "SUCCEEDED",
+              worktree: { id: "worktree-1", highlightColor: "blue" },
               action: "BUILD",
               destinationType: "SIMULATOR",
               destination: {
@@ -174,6 +175,11 @@ describe("BuildsPage", () => {
     render(<BuildsPage />);
 
     expect(await screen.findByText("Example App")).toBeDefined();
+    const buildRow = screen.getByRole("link", { name: "View build" });
+    expect(buildRow.className).toContain("bg-blue-500/10");
+    expect(buildRow.firstElementChild?.className).toContain(
+      "border-l-blue-500",
+    );
     expect(screen.getByText("Running")).toBeDefined();
     buildStatus = "SUCCEEDED";
     await act(async () => nextBuild?.());

@@ -276,10 +276,68 @@ model Worktree {
   skillDeployments         SkillDeployment[]
   sourceObservations       BuildSourceObservation[]
   builds                   Build[]
+  notifications            AppNotification[]
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model AppNotification {
+  id                   String    @id
+  dedupeKey            String    @unique
+  typeKey              String
+  title                String
+  body                 String
+  href                 String
+  resourceKind         String
+  resourceId           String
+  worktreeId           String?
+  highlightColor       String?
+  sidebarRequested     Boolean
+  browserRequested     Boolean
+  webPushRequested     Boolean
+  sidebarDismissedAt   DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  worktree             Worktree? @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([typeKey, createdAt])
+  @@index([worktreeId])
+  @@index([sidebarRequested, sidebarDismissedAt, createdAt])
+}
+
+model NotificationPreference {
+  typeKey           String   @id
+  sidebarEnabled    Boolean
+  browserEnabled    Boolean
+  webPushEnabled    Boolean
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model WebPushSettings {
+  id               String    @id
+  vapidPublicKey   String?
+  vapidGeneratedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model WebPushSubscription {
+  id             String    @id
+  endpoint       String    @unique
+  p256dh         String
+  auth           String
+  expirationTime DateTime?
+  locale         String?
+  userAgent      String?
+  lastSeenAt     DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([lastSeenAt])
 }
 
 model Skill {

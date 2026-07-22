@@ -493,6 +493,125 @@ describe("BuildsService", () => {
     });
   });
 
+  test.each([
+    ["SUCCEEDED", "IOS_BUILD_SUCCEEDED", "iOS build succeeded"],
+    ["FAILED", "IOS_BUILD_FAILED", "iOS build failed"],
+  ])(
+    "records and publishes a %s iOS build notification",
+    async (jobStatus, typeKey, title) => {
+      let completeBuild:
+        | Parameters<AgentControlService["registerCompletionHandler"]>[1]
+        | undefined;
+      const notification = {
+        id: "notification-1",
+        typeKey,
+        title,
+      };
+      const recordInTransaction = vi.fn().mockResolvedValue(notification);
+      const created = vi.fn();
+      const transaction = {
+        build: { update: vi.fn() },
+        worktree: { updateMany: vi.fn() },
+        buildArtifact: { upsert: vi.fn() },
+        buildScriptExecution: { updateMany: vi.fn() },
+      };
+      getPrismaClient.mockResolvedValue({
+        build: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "build-1",
+            status: "RUNNING",
+            errorCode: null,
+            error: null,
+            startedAt: new Date(0),
+            worktreeId: "worktree-1",
+            worktree: { highlightColor: "blue" },
+            snapshotJson: JSON.stringify({
+              repository: { name: "Example" },
+              configuration: { name: "Debug" },
+              worktree: { id: "worktree-1", branch: "main" },
+            }),
+          }),
+        },
+        $transaction: vi.fn((callback) => callback(transaction)),
+      });
+      new BuildsService(
+        {
+          registerCompletionHandler: vi.fn((kind, handler) => {
+            if (kind === IOS_BUILD_JOB_KIND) completeBuild = handler;
+          }),
+        } as unknown as AgentControlService,
+        undefined,
+        { recordInTransaction, created } as never,
+      );
+
+      await completeBuild!({
+        id: "job-1",
+        status: jobStatus,
+        resultJson: JSON.stringify({ artifacts: [], scriptExecutions: [] }),
+        error: jobStatus === "FAILED" ? "Build failed" : null,
+      } as never);
+
+      expect(recordInTransaction).toHaveBeenCalledWith(
+        transaction,
+        expect.objectContaining({
+          dedupeKey: `ios-build:build-1:${jobStatus}`,
+          typeKey,
+          title,
+          body: "Example · Debug · main",
+          href: "/builds/build-1",
+          highlightColor: "blue",
+        }),
+      );
+      expect(created).toHaveBeenCalledWith(notification);
+    },
+  );
+
+  test("does not record a notification for a cancelled iOS build", async () => {
+    let completeBuild:
+      | Parameters<AgentControlService["registerCompletionHandler"]>[1]
+      | undefined;
+    const recordInTransaction = vi.fn();
+    const transaction = {
+      build: { update: vi.fn() },
+      worktree: { updateMany: vi.fn() },
+      buildArtifact: { upsert: vi.fn() },
+      buildScriptExecution: { updateMany: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "RUNNING",
+          errorCode: null,
+          error: null,
+          startedAt: new Date(0),
+          worktreeId: "worktree-1",
+          worktree: { highlightColor: null },
+          snapshotJson: JSON.stringify({ worktree: { id: "worktree-1" } }),
+        }),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    new BuildsService(
+      {
+        registerCompletionHandler: vi.fn((kind, handler) => {
+          if (kind === IOS_BUILD_JOB_KIND) completeBuild = handler;
+        }),
+      } as unknown as AgentControlService,
+      undefined,
+      { recordInTransaction, created: vi.fn() } as never,
+    );
+
+    await completeBuild!({
+      id: "job-1",
+      status: "CANCELLED",
+      resultJson: JSON.stringify({ artifacts: [], scriptExecutions: [] }),
+      error: null,
+    } as never);
+
+    expect(recordInTransaction).not.toHaveBeenCalled();
+  });
+
   test("queues one automatic export from the immutable build snapshot", async () => {
     let completeBuild:
       | Parameters<AgentControlService["registerCompletionHandler"]>[1]

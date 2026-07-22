@@ -26,6 +26,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DetailItem, DetailList } from "@/components/ui/detail-list";
 import {
   Empty,
   EmptyDescription,
@@ -47,6 +48,12 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateTime } from "@/lib/date-format";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 import type { GitHubActionsWorkflowRunView } from "@/services/github/types";
 
 import {
@@ -559,12 +566,7 @@ function LoadedWorktreeDetail({
     },
     overview,
   };
-  const dateFormatter = new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-  const formatDate = (value: string | null) =>
-    value ? dateFormatter.format(new Date(value)) : "—";
+  const formatDate = (value: string | null) => formatDateTime(locale, value);
   const inspectionUnavailable = !canInspect
     ? entry.agentGroup.agent.connectionStatus === "OFFLINE"
       ? t("inspectionOffline")
@@ -585,7 +587,17 @@ function LoadedWorktreeDetail({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-4",
+          worktree.highlightColor && "rounded-lg border-l-4 px-4 py-3",
+          worktree.highlightColor &&
+            worktreeHighlightBackgroundClasses[worktree.highlightColor],
+          worktree.highlightColor &&
+            worktreeHighlightAccentClasses[worktree.highlightColor],
+        )}
+        data-testid="worktree-summary"
+      >
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
             {entry.group.repository.name} · {entry.agentGroup.agent.name}
@@ -671,44 +683,44 @@ function LoadedWorktreeDetail({
             <CardTitle>{t("overview")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid gap-3 text-sm sm:grid-cols-2">
-              <DetailValue label={t("repository")}>
+            <DetailList className="sm:grid-cols-2">
+              <DetailItem label={t("repository")}>
                 <Link
                   className="text-primary hover:underline"
                   href={`/codebases/${entry.group.codebase.id}`}
                 >
                   {entry.group.repository.name}
                 </Link>
-              </DetailValue>
-              <DetailValue label={t("origin")} mono>
+              </DetailItem>
+              <DetailItem label={t("origin")} mono>
                 {entry.group.repository.displayOrigin}
-              </DetailValue>
-              <DetailValue label={t("agent")}>
+              </DetailItem>
+              <DetailItem label={t("agent")}>
                 {entry.agentGroup.agent.name} ·{" "}
                 {entry.agentGroup.agent.hostname}
-              </DetailValue>
-              <DetailValue label={t("folder")} mono>
+              </DetailItem>
+              <DetailItem label={t("folder")} mono>
                 {worktree.folder}
-              </DetailValue>
-              <DetailValue label={t("head")} mono>
+              </DetailItem>
+              <DetailItem label={t("head")} mono>
                 {worktree.headSha ?? "—"}
-              </DetailValue>
-              <DetailValue label={t("upstream")} mono>
+              </DetailItem>
+              <DetailItem label={t("upstream")} mono>
                 {worktree.upstream ?? "—"}
-              </DetailValue>
-              <DetailValue label={t("originStatus")}>
+              </DetailItem>
+              <DetailItem label={t("originStatus")}>
                 <OriginStatusBadges worktree={worktree} />
-              </DetailValue>
-              <DetailValue label={t("baseStatus")}>
+              </DetailItem>
+              <DetailItem label={t("baseStatus")}>
                 <BaseFreshnessBadge worktree={worktree} />
-              </DetailValue>
-              <DetailValue label={t("lastChecked")}>
+              </DetailItem>
+              <DetailItem label={t("lastChecked")}>
                 {formatDate(worktree.lastCheckedAt)}
-              </DetailValue>
-              <DetailValue label={t("lastFetched")}>
+              </DetailItem>
+              <DetailItem label={t("lastFetched")}>
                 {formatDate(entry.group.codebase.lastFetchedAt)}
-              </DetailValue>
-            </dl>
+              </DetailItem>
+            </DetailList>
           </CardContent>
         </Card>
 
@@ -1085,24 +1097,5 @@ function WorktreeBuildTable({
         </div>
       )}
     </Card>
-  );
-}
-
-function DetailValue({
-  label,
-  children,
-  mono = false,
-}: {
-  label: string;
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? "mt-0.5 break-all font-mono text-xs" : "mt-0.5"}>
-        {children}
-      </dd>
-    </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatDateTime } from "@/lib/date-format";
 
 import { BuildDetailPage } from "./build-detail-page";
 
@@ -33,6 +34,7 @@ const build = {
   jobId: "job-1",
   status: "SUCCEEDED",
   outOfDate: true,
+  worktree: { id: "worktree-1", highlightColor: "blue" },
   action: "BUILD",
   destinationType: "SIMULATOR",
   destination: {
@@ -281,6 +283,9 @@ describe("BuildDetailPage", () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(await screen.findByText("Development")).toBeDefined();
+    const summary = screen.getByTestId("build-summary");
+    expect(summary.className).toContain("bg-blue-500/10");
+    expect(summary.className).toContain("border-l-blue-500");
     expect(screen.getAllByText(/build-1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Out of date")).toBeDefined();
     const downloads = screen.getAllByRole("link", { name: "Download" });
@@ -354,7 +359,7 @@ describe("BuildDetailPage", () => {
     expect(within(runsCard!).getByText("Succeeded")).toBeDefined();
     expect(within(runsCard!).getByText("Failed")).toBeDefined();
     expect(
-      within(runsCard!).getAllByText(new Date(now).toLocaleString("en")).length,
+      within(runsCard!).getAllByText(formatDateTime("en", now)).length,
     ).toBe(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));

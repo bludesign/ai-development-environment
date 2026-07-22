@@ -107,6 +107,7 @@ export type BuildRecord = {
   errorCode: string | null;
   error: string | null;
   outOfDate: boolean;
+  worktree?: { id: string; highlightColor: string | null } | null;
   artifacts: BuildArtifact[];
   reports?: BuildReport[];
   scriptExecutions: Array<{
