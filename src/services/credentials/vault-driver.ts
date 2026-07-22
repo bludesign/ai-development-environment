@@ -7,7 +7,9 @@ import type { CredentialDriver } from "./driver";
 import type { CredentialDescriptor } from "./types";
 
 const VAULT_REQUEST_TIMEOUT_MS = 10_000;
-const VAULT_MAX_RESPONSE_BYTES = 64 * 1024;
+// A supported 20 MiB p12 is base64-encoded by its owning JSON credential and then again
+// for Vault storage. Keep enough headroom for both expansions and Vault's response envelope.
+const VAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 export type VaultRequest = typeof request;
 export type VaultDispatcherFactory = (

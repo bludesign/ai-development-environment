@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,12 +30,14 @@ const CREATE_CREDENTIAL_TABLE = `
 
 describe("CredentialService database backend", () => {
   let directory: string;
+  let databasePath: string;
   let prisma: InstanceType<typeof PrismaClient>;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "ade-credentials-"));
+    databasePath = join(directory, "test.db");
     prisma = new PrismaClient({
-      adapter: new PrismaBetterSqlite3({ url: join(directory, "test.db") }),
+      adapter: new PrismaBetterSqlite3({ url: databasePath }),
     });
     await prisma.$executeRawUnsafe(CREATE_CREDENTIAL_TABLE);
   });
@@ -121,10 +123,14 @@ describe("CredentialService database backend", () => {
     await expect(missing.ensureInitialized()).rejects.toMatchObject({
       code: "CREDENTIAL_ENCRYPTION_KEY_MISSING",
     });
-    await expect(missing.status()).resolves.toMatchObject({
+    const missingStatus = await missing.status();
+    expect(missingStatus).toMatchObject({
       state: "ERROR",
       encryptionState: "ERROR",
     });
+    expect(missingStatus.warnings.map(({ code }) => code)).toEqual([
+      "CREDENTIAL_ENCRYPTION_KEY_MISSING",
+    ]);
 
     const changed = new CredentialService({
       env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
@@ -160,6 +166,37 @@ describe("CredentialService database backend", () => {
     );
   });
 
+  test("removes swept plaintext from the SQLite database and WAL", async () => {
+    await prisma.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
+    const secret = `plaintext-that-must-be-erased-${randomBytes(24).toString("hex")}`;
+    const plaintext = new CredentialService({ env: {}, prisma });
+    await plaintext.setText(CREDENTIALS.jiraApiToken, secret);
+    await prisma.$queryRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE);");
+
+    expect((await readFile(databasePath)).includes(Buffer.from(secret))).toBe(
+      true,
+    );
+
+    const encrypted = new CredentialService({
+      env: { CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64") },
+      prisma,
+    });
+    await encrypted.ensureInitialized();
+
+    expect((await readFile(databasePath)).includes(Buffer.from(secret))).toBe(
+      false,
+    );
+    const wal = await readFile(`${databasePath}-wal`).catch(
+      (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return Buffer.alloc(0);
+        }
+        throw error;
+      },
+    );
+    expect(wal).toHaveLength(0);
+  });
+
   test("rolls back the entire startup sweep if one plaintext row is invalid", async () => {
     await prisma.credential.createMany({
       data: [
@@ -188,6 +225,41 @@ describe("CredentialService database backend", () => {
     });
     expect(await prisma.credential.count({ where: { encrypted: true } })).toBe(
       0,
+    );
+  });
+
+  test("deletes unreadable database rows and permits replacement credentials", async () => {
+    const originalKey = randomBytes(32).toString("base64");
+    await new CredentialService({
+      env: { CREDENTIAL_ENCRYPTION_KEY: originalKey },
+      prisma,
+    }).setText(CREDENTIALS.jiraApiToken, "old-secret");
+
+    const replacementKey = randomBytes(32).toString("base64");
+    const service = new CredentialService({
+      env: { CREDENTIAL_ENCRYPTION_KEY: replacementKey },
+      prisma,
+    });
+    await expect(service.status()).resolves.toMatchObject({
+      state: "ERROR",
+      warnings: [
+        expect.objectContaining({
+          code: "CREDENTIAL_ENCRYPTION_KEY_MISMATCH",
+        }),
+      ],
+    });
+
+    const metadataOnlyMutation = vi.fn(async () => undefined);
+    await service.delete(
+      CREDENTIALS.githubPersonalAccessToken,
+      metadataOnlyMutation,
+    );
+    expect(metadataOnlyMutation).toHaveBeenCalledOnce();
+
+    await service.delete(CREDENTIALS.jiraApiToken);
+    await service.setText(CREDENTIALS.jiraApiToken, "replacement-secret");
+    await expect(service.getText(CREDENTIALS.jiraApiToken)).resolves.toBe(
+      "replacement-secret",
     );
   });
 
@@ -241,5 +313,102 @@ describe("CredentialService database backend", () => {
         where: { id: CREDENTIALS.jiraApiToken.id },
       }),
     ).toMatchObject({ storageType: "database" });
+  });
+
+  test("serializes overlapping external writes through rollback and metadata commit", async () => {
+    const values = new Map<string, Uint8Array>();
+    const operations: string[] = [];
+    const keychainModuleLoader = vi.fn(async () => ({
+      AsyncEntry: class {
+        constructor(
+          readonly _service: string,
+          readonly username: string,
+        ) {}
+
+        async getSecret() {
+          return values.get(this.username);
+        }
+
+        async setSecret(value: Uint8Array) {
+          const copy = Uint8Array.from(value);
+          operations.push(
+            `set:${this.username}:${Buffer.from(copy).toString("utf8")}`,
+          );
+          values.set(this.username, copy);
+        }
+
+        async deleteCredential() {
+          operations.push(`delete:${this.username}`);
+          return values.delete(this.username);
+        }
+      },
+    }));
+    const service = new CredentialService({
+      env: { CREDENTIAL_STORAGE_TYPE: "keychain" },
+      platform: "darwin",
+      prisma,
+      keychainModuleLoader,
+    });
+    const entries = (ownerId: string) => [
+      {
+        descriptor: { ...CREDENTIALS.cacheServerApiKey, ownerId },
+        value: Buffer.from(`${ownerId}-api-key`),
+      },
+      {
+        descriptor: { ...CREDENTIALS.cacheServerHeaders, ownerId },
+        value: Buffer.from(`${ownerId}-headers`),
+      },
+    ];
+
+    let markFirstMutationStarted!: () => void;
+    const firstMutationStarted = new Promise<void>((resolve) => {
+      markFirstMutationStarted = resolve;
+    });
+    let allowFirstFailure!: () => void;
+    const firstFailureAllowed = new Promise<void>((resolve) => {
+      allowFirstFailure = resolve;
+    });
+    const first = service.setMany(entries("first"), async () => {
+      markFirstMutationStarted();
+      await firstFailureAllowed;
+      throw new Error("first metadata failure");
+    });
+    const firstFailure = expect(first).rejects.toThrow(
+      "first metadata failure",
+    );
+    await firstMutationStarted;
+
+    const second = service.setMany(entries("second"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(operations).not.toContain(
+      `set:${CREDENTIALS.cacheServerApiKey.id}:second-api-key`,
+    );
+
+    allowFirstFailure();
+    await firstFailure;
+    await expect(second).resolves.toBeUndefined();
+
+    expect(
+      Buffer.from(values.get(CREDENTIALS.cacheServerApiKey.id)!).toString(
+        "utf8",
+      ),
+    ).toBe("second-api-key");
+    expect(
+      Buffer.from(values.get(CREDENTIALS.cacheServerHeaders.id)!).toString(
+        "utf8",
+      ),
+    ).toBe("second-headers");
+    const rows = await prisma.credential.findMany({
+      where: {
+        id: {
+          in: [
+            CREDENTIALS.cacheServerApiKey.id,
+            CREDENTIALS.cacheServerHeaders.id,
+          ],
+        },
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.ownerId === "second")).toBe(true);
   });
 });

@@ -148,6 +148,7 @@ describe("VaultCredentialDriver", () => {
     await driver.initialize();
     expect(dispatcherFactory).toHaveBeenCalledWith(
       expect.objectContaining({
+        maxResponseSize: 64 * 1024 * 1024,
         connect: expect.objectContaining({
           ca: Buffer.from("test-ca"),
           servername: "vault.internal",

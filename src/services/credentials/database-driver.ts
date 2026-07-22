@@ -31,6 +31,30 @@ function prismaBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(value);
 }
 
+type SqliteWalCheckpointResult = {
+  busy: number | bigint;
+};
+
+async function truncateSqliteWal(prisma: PrismaClient): Promise<void> {
+  const [result] = await prisma.$queryRawUnsafe<SqliteWalCheckpointResult[]>(
+    "PRAGMA wal_checkpoint(TRUNCATE);",
+  );
+  if (!result || Number(result.busy) !== 0) {
+    throw new Error(
+      "SQLite WAL could not be truncated after credential encryption",
+    );
+  }
+}
+
+async function erasePlaintextRemnants(prisma: PrismaClient): Promise<void> {
+  // First replace the plaintext main-database pages with their encrypted WAL versions.
+  await truncateSqliteWal(prisma);
+  // VACUUM securely rebuilds the database now that secure_delete is enabled. In WAL mode
+  // that rebuild can itself create frames, so require one final truncating checkpoint.
+  await prisma.$executeRawUnsafe("VACUUM;");
+  await truncateSqliteWal(prisma);
+}
+
 export class DatabaseCredentialDriver implements CredentialDriver {
   readonly storageType = "database" as const;
 
@@ -81,8 +105,13 @@ export class DatabaseCredentialDriver implements CredentialDriver {
         );
       }
 
+      // This connection setting makes SQLite overwrite content released by each update.
+      // Leave it enabled so subsequent credential replacements and deletions receive the
+      // same protection.
+      await this.prisma.$queryRawUnsafe("PRAGMA secure_delete = ON;");
+
       // Adding a valid key later upgrades every plaintext database credential atomically.
-      await this.prisma.$transaction(async (transaction) => {
+      const sweptRows = await this.prisma.$transaction(async (transaction) => {
         const plaintextRows = await transaction.credential.findMany({
           where: { storageType: this.storageType, encrypted: false },
           select: { id: true, kind: true, payload: true },
@@ -110,7 +139,9 @@ export class DatabaseCredentialDriver implements CredentialDriver {
             },
           });
         }
+        return plaintextRows.length;
       });
+      if (sweptRows > 0) await erasePlaintextRemnants(this.prisma);
     }
   }
 

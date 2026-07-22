@@ -70,6 +70,41 @@ function uniqueIssues(issues: CredentialStoreIssue[]): CredentialStoreIssue[] {
   });
 }
 
+// External backends cannot participate in the Prisma transaction that owns their metadata.
+// Queue overlapping IDs across every CredentialService instance until external writes, the
+// metadata transaction, and any rollback have all completed.
+const credentialMutationTails = new Map<string, Promise<void>>();
+
+async function withCredentialMutationLocks<T>(
+  ids: string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const keys = [...new Set(ids)].sort();
+  if (!keys.length) return operation();
+
+  const predecessors = keys.flatMap((key) => {
+    const predecessor = credentialMutationTails.get(key);
+    return predecessor ? [predecessor] : [];
+  });
+  let release!: () => void;
+  const tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  for (const key of keys) credentialMutationTails.set(key, tail);
+
+  await Promise.all(predecessors);
+  try {
+    return await operation();
+  } finally {
+    release();
+    for (const key of keys) {
+      if (credentialMutationTails.get(key) === tail) {
+        credentialMutationTails.delete(key);
+      }
+    }
+  }
+}
+
 export class CredentialService {
   private readonly env: CredentialEnvironment;
   private readonly platform: NodeJS.Platform;
@@ -251,70 +286,72 @@ export class CredentialService {
     }
     const driver = await this.requireCurrentDriver();
     const prisma = await this.prisma();
-    if (driver instanceof DatabaseCredentialDriver) {
-      await prisma.$transaction(async (transaction) => {
+    await withCredentialMutationLocks(ids, async () => {
+      if (driver instanceof DatabaseCredentialDriver) {
+        await prisma.$transaction(async (transaction) => {
+          for (const entry of entries) {
+            await driver.setInTransaction(
+              transaction,
+              entry.descriptor,
+              entry.value,
+            );
+          }
+          await mutation?.(transaction);
+        });
+        return;
+      }
+
+      const previous = new Map<string, Buffer | null>();
+      for (const entry of entries) {
+        previous.set(entry.descriptor.id, await driver.get(entry.descriptor));
+      }
+      const attempted: typeof entries = [];
+      try {
         for (const entry of entries) {
-          await driver.setInTransaction(
-            transaction,
-            entry.descriptor,
-            entry.value,
+          attempted.push(entry);
+          await driver.set(entry.descriptor, entry.value);
+        }
+        await prisma.$transaction(async (transaction) => {
+          for (const { descriptor } of entries) {
+            await transaction.credential.upsert({
+              where: { id: descriptor.id },
+              create: {
+                id: descriptor.id,
+                kind: descriptor.kind,
+                ownerId: descriptor.ownerId ?? null,
+                storageType: driver.storageType,
+              },
+              update: {
+                kind: descriptor.kind,
+                ownerId: descriptor.ownerId ?? null,
+                storageType: driver.storageType,
+                payload: null,
+                encrypted: false,
+                encryptionVersion: null,
+                nonce: null,
+                authTag: null,
+                keyFingerprint: null,
+              },
+            });
+          }
+          await mutation?.(transaction);
+        });
+      } catch (error) {
+        try {
+          for (const entry of attempted.reverse()) {
+            const oldValue = previous.get(entry.descriptor.id);
+            if (oldValue) await driver.set(entry.descriptor, oldValue);
+            else await driver.delete(entry.descriptor);
+          }
+        } catch {
+          throw new Error(
+            `Credential metadata could not be saved and the ${driver.storageType} rollback also failed; re-enter the affected credentials`,
+            { cause: error },
           );
         }
-        await mutation?.(transaction);
-      });
-      return;
-    }
-
-    const previous = new Map<string, Buffer | null>();
-    for (const entry of entries) {
-      previous.set(entry.descriptor.id, await driver.get(entry.descriptor));
-    }
-    const attempted: typeof entries = [];
-    try {
-      for (const entry of entries) {
-        attempted.push(entry);
-        await driver.set(entry.descriptor, entry.value);
+        throw error;
       }
-      await prisma.$transaction(async (transaction) => {
-        for (const { descriptor } of entries) {
-          await transaction.credential.upsert({
-            where: { id: descriptor.id },
-            create: {
-              id: descriptor.id,
-              kind: descriptor.kind,
-              ownerId: descriptor.ownerId ?? null,
-              storageType: driver.storageType,
-            },
-            update: {
-              kind: descriptor.kind,
-              ownerId: descriptor.ownerId ?? null,
-              storageType: driver.storageType,
-              payload: null,
-              encrypted: false,
-              encryptionVersion: null,
-              nonce: null,
-              authTag: null,
-              keyFingerprint: null,
-            },
-          });
-        }
-        await mutation?.(transaction);
-      });
-    } catch (error) {
-      try {
-        for (const entry of attempted.reverse()) {
-          const oldValue = previous.get(entry.descriptor.id);
-          if (oldValue) await driver.set(entry.descriptor, oldValue);
-          else await driver.delete(entry.descriptor);
-        }
-      } catch {
-        throw new Error(
-          `Credential metadata could not be saved and the ${driver.storageType} rollback also failed; re-enter the affected credentials`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
+    });
   }
 
   async setText(
@@ -334,10 +371,16 @@ export class CredentialService {
   }
 
   private async driverForRecordedStorage(
-    storageType: CredentialStorageType,
+    storageType: Exclude<CredentialStorageType, "database">,
   ): Promise<CredentialDriver> {
-    const current = await this.requireCurrentDriver();
-    if (current.storageType === storageType) return current;
+    if (
+      this.configResult.errors.length === 0 &&
+      this.configResult.config?.storageType === storageType
+    ) {
+      const current = await this.driver();
+      await current.initialize();
+      return current;
+    }
     const result = readCredentialStoreConfig(
       { ...this.env, CREDENTIAL_STORAGE_TYPE: storageType },
       this.platform,
@@ -350,10 +393,19 @@ export class CredentialService {
       );
     }
     const driver = await this.createDriver(result.config);
-    // Deleting a database payload does not require decrypting it or initializing its key.
-    if (!(driver instanceof DatabaseCredentialDriver))
-      await driver.initialize();
+    await driver.initialize();
     return driver;
+  }
+
+  private clearRecoverableDatabaseInitializationIssue(): void {
+    if (
+      this.runtimeIssue?.code === "CREDENTIAL_ENCRYPTION_KEY_MISSING" ||
+      this.runtimeIssue?.code === "CREDENTIAL_ENCRYPTION_KEY_MISMATCH" ||
+      this.runtimeIssue?.code === "CREDENTIAL_DATA_INVALID"
+    ) {
+      this.initializationPromise = null;
+      this.runtimeIssue = null;
+    }
   }
 
   async delete(
@@ -367,79 +419,84 @@ export class CredentialService {
     descriptors: CredentialDescriptor[],
     mutation?: CredentialMutation,
   ): Promise<void> {
-    await this.ensureInitialized();
     const ids = descriptors.map((descriptor) => descriptor.id);
     if (new Set(ids).size !== ids.length) {
       throw new Error("Credential deletes must use unique IDs");
     }
     const prisma = await this.prisma();
-    const records = await prisma.credential.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, kind: true, storageType: true },
-    });
-    if (!records.length) {
-      if (mutation) await prisma.$transaction(mutation);
-      return;
-    }
-    const descriptorById = new Map(
-      descriptors.map((descriptor) => [descriptor.id, descriptor]),
-    );
-    const external: Array<{
-      descriptor: CredentialDescriptor;
-      driver: CredentialDriver;
-      previous: Buffer | null;
-    }> = [];
-    for (const record of records) {
-      const descriptor = descriptorById.get(record.id)!;
-      if (record.kind !== descriptor.kind) {
-        throw new CredentialStoreOperationError(
-          `Credential ${descriptor.id} has unexpected kind metadata`,
-          "CREDENTIAL_DATA_INVALID",
-        );
+    await withCredentialMutationLocks(ids, async () => {
+      const records = await prisma.credential.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, kind: true, storageType: true },
+      });
+      if (!records.length) {
+        if (mutation) await prisma.$transaction(mutation);
+        return;
       }
-      const recordedStorage = knownStorageType(record.storageType);
-      if (recordedStorage === "unknown") {
-        throw new CredentialStoreOperationError(
-          `Credential ${descriptor.id} has an unknown backend`,
-          "CREDENTIAL_DATA_INVALID",
-        );
-      }
-      const driver = await this.driverForRecordedStorage(recordedStorage);
-      if (!(driver instanceof DatabaseCredentialDriver)) {
+      const descriptorById = new Map(
+        descriptors.map((descriptor) => [descriptor.id, descriptor]),
+      );
+      const external: Array<{
+        descriptor: CredentialDescriptor;
+        driver: CredentialDriver;
+        previous: Buffer | null;
+      }> = [];
+      for (const record of records) {
+        const descriptor = descriptorById.get(record.id)!;
+        if (record.kind !== descriptor.kind) {
+          throw new CredentialStoreOperationError(
+            `Credential ${descriptor.id} has unexpected kind metadata`,
+            "CREDENTIAL_DATA_INVALID",
+          );
+        }
+        const recordedStorage = knownStorageType(record.storageType);
+        if (recordedStorage === "unknown") {
+          throw new CredentialStoreOperationError(
+            `Credential ${descriptor.id} has an unknown backend`,
+            "CREDENTIAL_DATA_INVALID",
+          );
+        }
+        // Database rows are deleted directly below; their payload never needs to be read or
+        // decrypted, so a missing, mismatched, or malformed key must not block this path.
+        if (recordedStorage === "database") continue;
+        const driver = await this.driverForRecordedStorage(recordedStorage);
         external.push({
           descriptor,
           driver,
           previous: await driver.get(descriptor),
         });
       }
-    }
-    const deleted: typeof external = [];
-    try {
-      for (const entry of external) {
-        deleted.push(entry);
-        await entry.driver.delete(entry.descriptor);
-      }
-      await prisma.$transaction(async (transaction) => {
-        await transaction.credential.deleteMany({
-          where: { id: { in: records.map((record) => record.id) } },
-        });
-        await mutation?.(transaction);
-      });
-    } catch (error) {
+      const deleted: typeof external = [];
       try {
-        for (const entry of deleted.reverse()) {
-          if (entry.previous) {
-            await entry.driver.set(entry.descriptor, entry.previous);
-          }
+        for (const entry of external) {
+          deleted.push(entry);
+          await entry.driver.delete(entry.descriptor);
         }
-      } catch {
-        throw new Error(
-          "Credential metadata could not be deleted and an external-backend rollback also failed; re-enter the affected credentials",
-          { cause: error },
-        );
+        await prisma.$transaction(async (transaction) => {
+          await transaction.credential.deleteMany({
+            where: { id: { in: records.map((record) => record.id) } },
+          });
+          await mutation?.(transaction);
+        });
+      } catch (error) {
+        try {
+          for (const entry of deleted.reverse()) {
+            if (entry.previous) {
+              await entry.driver.set(entry.descriptor, entry.previous);
+            }
+          }
+        } catch {
+          throw new Error(
+            "Credential metadata could not be deleted and an external-backend rollback also failed; re-enter the affected credentials",
+            { cause: error },
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+      if (records.some((record) => record.storageType === "database")) {
+        this.clearRecoverableDatabaseInitializationIssue();
+      }
+    });
   }
 
   async list(): Promise<CredentialMetadataView[]> {
@@ -493,8 +550,15 @@ export class CredentialService {
           },
         ]
       : [];
+    const hasEncryptedDatabaseRows = rows.some(
+      (row) => row.storageType === "database" && row.encrypted,
+    );
+    const configurationWarnings = this.configResult.warnings.filter(
+      (warning) =>
+        warning.code !== "DATABASE_UNENCRYPTED" || !hasEncryptedDatabaseRows,
+    );
     const warnings = uniqueIssues([
-      ...this.configResult.warnings,
+      ...configurationWarnings,
       ...this.configResult.errors,
       ...(this.runtimeIssue ? [this.runtimeIssue] : []),
       ...mismatchIssue,
