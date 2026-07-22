@@ -56,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OTA_TOKEN_SECRET;
+  vi.restoreAllMocks();
 });
 
 describe("install manifest route", () => {
@@ -166,9 +167,15 @@ describe("install manifest route", () => {
   });
 
   test("returns 500 when the lookup fails", async () => {
-    artifactForInstall.mockRejectedValue(new Error("database is down"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = new Error("database is down");
+    artifactForInstall.mockRejectedValue(failure);
 
     const response = await manifest(secureRequest(), params());
     expect(response.status).toBe(500);
+    expect(logged).toHaveBeenCalledWith(
+      "Build artifact manifest failed:",
+      failure,
+    );
   });
 });

@@ -105,7 +105,7 @@ import {
 import {
   SearchableSelect,
   type SearchableSelectOption,
-} from "@/components/ui/searchable-select";
+} from "@/components/common/searchable-select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Select,

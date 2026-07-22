@@ -28,7 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import {
   Empty,
   EmptyDescription,
@@ -40,7 +40,7 @@ import { Label } from "@/components/ui/label";
 import {
   SearchableSelect,
   type SearchableSelectOption,
-} from "@/components/ui/searchable-select";
+} from "@/components/common/searchable-select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,

@@ -35,7 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import {
   Dialog,
   DialogContent,
@@ -546,11 +546,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
           </div>
         </CardHeader>
         {fieldsOpen && (
-          <Table
-            className="table-fixed"
-            containerClassName="overflow-x-hidden"
-            id="jira-all-fields"
-          >
+          <Table className="table-fixed" id="jira-all-fields">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-40 whitespace-normal break-words sm:w-56">

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { AgentConfig } from "./config.js";
 import {
@@ -48,6 +48,22 @@ function agentApi() {
 }
 
 describe("development agent preparation", () => {
+  // Preparation narrates its progress on stdout, which vitest would otherwise
+  // interleave with the reporter output. Capture it so it can be asserted.
+  function silenceLog() {
+    return vi.spyOn(console, "log").mockImplementation(() => {});
+  }
+
+  let logged: ReturnType<typeof silenceLog>;
+
+  beforeEach(() => {
+    logged = silenceLog();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("waits for the server and automatically enrolls on first run", async () => {
     const anonymous = agentApi();
     anonymous.health.mockRejectedValueOnce(new Error("connection refused"));
@@ -82,6 +98,12 @@ describe("development agent preparation", () => {
       "/tmp/control-agent-dev-test.json",
     );
     expect(config).toEqual(enrolledConfig);
+    expect(logged).toHaveBeenCalledWith(
+      `Waiting for local control plane at ${enrolledConfig.server} ...`,
+    );
+    expect(logged).toHaveBeenCalledWith(
+      `Enrolled development agent ${enrolledConfig.name} (${enrolledConfig.agentId})`,
+    );
   });
 
   test("reuses a valid development identity", async () => {
@@ -112,6 +134,9 @@ describe("development agent preparation", () => {
     expect(authenticated.self).toHaveBeenCalledOnce();
     expect(anonymous.createEnrollmentToken).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(
+      `Reusing development agent ${enrolledConfig.name} (${enrolledConfig.agentId})`,
+    );
   });
 
   test("re-enrolls when saved credentials are stale", async () => {
@@ -140,6 +165,9 @@ describe("development agent preparation", () => {
     expect(anonymous.enroll).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
     expect(config.agentId).toBe(enrolledConfig.agentId);
+    expect(logged).not.toHaveBeenCalledWith(
+      expect.stringContaining("Reusing development agent"),
+    );
   });
 
   test.each([

@@ -39,7 +39,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import {
   Dialog,
   DialogContent,
@@ -69,7 +69,7 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   SearchableSelect,
   type SearchableSelectOption,
-} from "@/components/ui/searchable-select";
+} from "@/components/common/searchable-select";
 import {
   Select,
   SelectContent,

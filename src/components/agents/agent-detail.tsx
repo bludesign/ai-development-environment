@@ -40,7 +40,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

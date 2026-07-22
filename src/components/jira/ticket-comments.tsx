@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { DateTime } from "@/components/ui/date-time";
+import { DateTime } from "@/components/common/date-time";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTextInput, JiraTicketDetail } from "@/services/jira/types";

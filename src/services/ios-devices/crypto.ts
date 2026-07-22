@@ -1,3 +1,5 @@
+import "reflect-metadata";
+
 import { createHash, randomBytes, webcrypto } from "node:crypto";
 
 import * as asn1js from "asn1js";
