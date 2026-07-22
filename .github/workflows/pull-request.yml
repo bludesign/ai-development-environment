@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: dependabot
+    runs-on: arc-runner-set-macos
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -55,7 +55,7 @@ jobs:
         run: npm run build
 
   build-and-test-agent:
-    runs-on: dependabot
+    runs-on: arc-runner-set-macos
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -89,7 +89,7 @@ jobs:
         run: npm run agent:build
 
   credential-linux-standalone:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set-macos
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
