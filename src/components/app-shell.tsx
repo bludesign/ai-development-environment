@@ -337,57 +337,6 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/plans")}
-                >
-                  <Link
-                    href="/plans"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ClipboardList />
-                    <span>{t("plans")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/sessions")}
-                >
-                  <Link
-                    href="/sessions"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <MessagesSquare />
-                    <span>{t("sessions")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={
-                    pathname.startsWith("/drafts") ||
-                    pathname.startsWith("/runs/new")
-                  }
-                >
-                  <Link
-                    href="/drafts"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <FilePenLine />
-                    <span>{t("drafts")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
                   isActive={pathname.startsWith("/codebases")}
                 >
                   <Link
@@ -433,6 +382,64 @@ function NavigationSidebar() {
                   >
                     <ChartNoAxesCombined />
                     <span>{t("usage")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("ai")}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/plans")}
+                >
+                  <Link
+                    href="/plans"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ClipboardList />
+                    <span>{t("plans")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/sessions")}
+                >
+                  <Link
+                    href="/sessions"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <MessagesSquare />
+                    <span>{t("sessions")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={
+                    pathname.startsWith("/drafts") ||
+                    pathname.startsWith("/runs/new")
+                  }
+                >
+                  <Link
+                    href="/drafts"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <FilePenLine />
+                    <span>{t("drafts")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

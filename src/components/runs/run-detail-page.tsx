@@ -1347,25 +1347,29 @@ export function RunDetailPage({ runId }: { runId: string }) {
             </div>
           </div>
           {followMode === "RESUME" && followProvider !== run.provider && (
-            <div className="space-y-2">
-              <Alert>
-                <AlertDescription>{t("crossProviderWarning")}</AlertDescription>
-              </Alert>
-              <Select
-                onValueChange={(value) => setContextMode(value ?? "NORMALIZED")}
-                value={contextMode}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NORMALIZED">
-                    {t("normalizedContext")}
-                  </SelectItem>
-                  <SelectItem value="SUMMARY">{t("summaryOnly")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Alert>
+              <AlertDescription className="flex flex-wrap items-center gap-3">
+                <Select
+                  onValueChange={(value) =>
+                    setContextMode(value ?? "NORMALIZED")
+                  }
+                  value={contextMode}
+                >
+                  <SelectTrigger className="w-56 shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NORMALIZED">
+                      {t("normalizedContext")}
+                    </SelectItem>
+                    <SelectItem value="SUMMARY">{t("summaryOnly")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="min-w-0 flex-1">
+                  {t("crossProviderWarning")}
+                </span>
+              </AlertDescription>
+            </Alert>
           )}
           <Textarea
             className="min-h-28"

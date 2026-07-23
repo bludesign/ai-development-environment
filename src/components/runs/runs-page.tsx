@@ -1,10 +1,18 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Archive,
   Cpu,
   FilePenLine,
+  GalleryVerticalEnd,
   Play,
   Plus,
   Search,
@@ -121,6 +129,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [drawerIssueKey, setDrawerIssueKey] = useState<string | null>(null);
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -155,7 +164,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
     }
   }, [archiveFilter, kind, origin, provider, search]);
 
-  const loadMore = async () => {
+  const loadMore = useCallback(async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
     try {
@@ -189,7 +198,22 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
     } finally {
       setLoadingMore(false);
     }
-  };
+  }, [archiveFilter, kind, nextCursor, origin, provider, search]);
+
+  useEffect(() => {
+    if (!nextCursor || loading || loadingMore || error) return;
+    const trigger = loadMoreTriggerRef.current;
+    if (!trigger) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        void loadMore();
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [error, loadMore, loading, loadingMore, nextCursor]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 150);
@@ -286,8 +310,8 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-2 md:grid-cols-[minmax(14rem,1fr)_11rem_11rem_11rem]">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full md:mr-auto md:w-auto md:min-w-56 md:flex-1">
               <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
               <Input
                 aria-label={t("search", { kind: title.toLowerCase() })}
@@ -318,10 +342,22 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">{t("allProviders")}</SelectItem>
-                <SelectItem value="CODEX">Codex</SelectItem>
-                <SelectItem value="CLAUDE">Claude</SelectItem>
-                <SelectItem value="OPENCODE">OpenCode</SelectItem>
+                <SelectItem value="ALL">
+                  <GalleryVerticalEnd />
+                  {t("allProviders")}
+                </SelectItem>
+                <SelectItem value="CODEX">
+                  <ProviderIcon provider="CODEX" />
+                  Codex
+                </SelectItem>
+                <SelectItem value="CLAUDE">
+                  <ProviderIcon provider="CLAUDE" />
+                  Claude
+                </SelectItem>
+                <SelectItem value="OPENCODE">
+                  <ProviderIcon provider="OPENCODE" />
+                  OpenCode
+                </SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -448,9 +484,9 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
             <TableBody>
               {groups.map((group) => (
                 <Fragment key={group.key}>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableRow className="bg-muted/20 hover:bg-muted/20">
                     <TableCell
-                      className="py-2 font-medium"
+                      className="py-1.5 text-xs font-normal text-muted-foreground"
                       colSpan={8 + (session ? 1 : 0) + (editMode ? 1 : 0)}
                     >
                       {formatDateValue(group.value, "long", {
@@ -688,19 +724,22 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
         </Card>
       )}
       {items.length > 0 && (
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-col items-center justify-center gap-3">
           <span className="text-sm text-muted-foreground">
             {t("showingCount", { count: items.length, total: totalCount })}
           </span>
           {nextCursor && (
-            <Button
-              disabled={loadingMore}
-              onClick={() => void loadMore()}
-              variant="outline"
+            <div
+              className="flex min-h-10 items-center justify-center gap-2 text-sm text-muted-foreground"
+              ref={loadMoreTriggerRef}
+              role="status"
             >
-              {loadingMore ? <Spinner /> : null}
-              {t("loadMore")}
-            </Button>
+              {loadingMore && (
+                <>
+                  <Spinner /> {t("loadingMore")}
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

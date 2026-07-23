@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Cpu } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -61,7 +61,7 @@ export function EffortIcon({
   /** `auto` is the provider choosing for you, which is not a point on the scale. */
   if (!filled) {
     return (
-      <Sparkles
+      <Cpu
         aria-hidden="true"
         className={cn("h-4 w-5 shrink-0", className)}
       />
