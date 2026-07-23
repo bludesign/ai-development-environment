@@ -18,6 +18,17 @@ import {
   type StagedAttachment,
 } from "./provider.js";
 
+const QUESTION_RECONCILIATION_INTERVAL_MS = 1_000;
+
+type OpenCodeQuestionSurface = "LEGACY" | "V2";
+
+type OpenCodeQuestionRequest = {
+  id: string;
+  sessionId?: string;
+  surface: OpenCodeQuestionSurface;
+  questions: ProviderQuestion[];
+};
+
 function resultData(value: unknown): unknown {
   const record = asRecord(value);
   return "data" in record ? record.data : value;
@@ -82,18 +93,41 @@ export function opencodeEventText(value: unknown): string | undefined {
 export function opencodeQuestions(
   value: unknown,
 ): { id: string; questions: ProviderQuestion[] } | null {
+  const request = opencodeQuestionRequest(value);
+  return request ? { id: request.id, questions: request.questions } : null;
+}
+
+function opencodeQuestionRequest(
+  value: unknown,
+  fallbackSurface?: OpenCodeQuestionSurface,
+): OpenCodeQuestionRequest | null {
   const event = asRecord(value);
   const payload = asRecord(event.payload);
   const type = String(payload.type ?? event.type ?? "");
-  if (type !== "question.asked" && type !== "question.v2.asked") return null;
+  if (type && type !== "question.asked" && type !== "question.v2.asked")
+    return null;
   const properties = asRecord(payload.properties ?? event.properties);
-  const request = asRecord(
-    properties.request ?? properties.data ?? event.data ?? properties,
-  );
+  const request = type
+    ? asRecord(
+        properties.request ??
+          properties.data ??
+          payload.data ??
+          event.data ??
+          properties,
+      )
+    : event;
   const candidates = request.questions;
   if (!Array.isArray(candidates)) return null;
   return {
     id: String(request.id ?? properties.id ?? "question"),
+    sessionId:
+      typeof request.sessionID === "string"
+        ? request.sessionID
+        : typeof properties.sessionID === "string"
+          ? properties.sessionID
+          : undefined,
+    surface:
+      type === "question.v2.asked" ? "V2" : (fallbackSurface ?? "LEGACY"),
     questions: candidates.map((candidate, index) => {
       const question = asRecord(candidate);
       return {
@@ -118,6 +152,46 @@ export function opencodeQuestions(
       };
     }),
   };
+}
+
+function opencodeQuestionResolution(value: unknown): string | undefined {
+  const event = asRecord(value);
+  const payload = asRecord(event.payload);
+  const type = String(payload.type ?? event.type ?? "");
+  if (
+    ![
+      "question.replied",
+      "question.rejected",
+      "question.v2.replied",
+      "question.v2.rejected",
+    ].includes(type)
+  )
+    return undefined;
+  const properties = asRecord(payload.properties ?? event.properties);
+  const data = asRecord(payload.data ?? event.data ?? properties.data);
+  const requestId = data.requestID ?? properties.requestID;
+  return typeof requestId === "string" ? requestId : undefined;
+}
+
+function responseItems(value: unknown): unknown[] {
+  const data = resultData(value);
+  if (Array.isArray(data)) return data;
+  const record = asRecord(data);
+  return Array.isArray(record.data) ? record.data : [];
+}
+
+function waitForPoll(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, QUESTION_RECONCILIATION_INTERVAL_MS);
+    timer.unref();
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }
 
 export class OpenCodeAdapter implements ProviderAdapter {
@@ -201,16 +275,58 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
     let stopReason: "PAUSED" | "CANCELLED" | null = null;
     const streamController = new AbortController();
+    const questionSurfaces = new Map<string, OpenCodeQuestionSurface>();
+    const pendingQuestions = new Set<string>();
+    let sawQuestion = false;
+
+    const reportQuestion = async (request: OpenCodeQuestionRequest) => {
+      if (questionSurfaces.has(request.id)) return;
+      questionSurfaces.set(request.id, request.surface);
+      pendingQuestions.add(request.id);
+      sawQuestion = true;
+      try {
+        await callbacks.onQuestion(request.id, request.questions);
+      } catch (error) {
+        questionSurfaces.delete(request.id);
+        pendingQuestions.delete(request.id);
+        throw error;
+      }
+    };
+
+    const reconcileQuestions = async () => {
+      const [legacy, v2] = await Promise.allSettled([
+        client.question.list({ directory: cwd }),
+        client.v2.session.question.list({ sessionID: nativeId }),
+      ]);
+      if (legacy.status === "fulfilled") {
+        for (const value of responseItems(legacy.value)) {
+          const request = opencodeQuestionRequest(value, "LEGACY");
+          if (request?.sessionId === nativeId) await reportQuestion(request);
+        }
+      }
+      if (v2.status === "fulfilled") {
+        for (const value of responseItems(v2.value)) {
+          const request = opencodeQuestionRequest(value, "V2");
+          if (request && (!request.sessionId || request.sessionId === nativeId))
+            await reportQuestion(request);
+        }
+      }
+      if (legacy.status === "rejected" && v2.status === "rejected")
+        throw legacy.reason;
+    };
+
     const eventTask = (async () => {
       try {
-        const subscription = await client.v2.event.subscribe({
-          signal: streamController.signal,
-        });
+        const subscription = await client.event.subscribe(
+          { directory: cwd },
+          { signal: streamController.signal },
+        );
         for await (const event of subscription.stream) {
           if (eventSessionId(event) !== nativeId) continue;
-          const question = opencodeQuestions(event);
-          if (question)
-            await callbacks.onQuestion(question.id, question.questions);
+          const question = opencodeQuestionRequest(event);
+          if (question) await reportQuestion(question);
+          const resolvedRequestId = opencodeQuestionResolution(event);
+          if (resolvedRequestId) pendingQuestions.delete(resolvedRequestId);
           const record = asRecord(event);
           const payload = asRecord(record.payload);
           const type = String(payload.type ?? record.type ?? "event");
@@ -229,6 +345,29 @@ export class OpenCodeAdapter implements ProviderAdapter {
             summary: `OpenCode event stream failed: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
+      }
+    })();
+
+    const questionReconciliationTask = (async () => {
+      let errorReported = false;
+      while (!streamController.signal.aborted) {
+        try {
+          await reconcileQuestions();
+          errorReported = false;
+        } catch (error) {
+          if (!errorReported) {
+            errorReported = true;
+            try {
+              await callbacks.onEvent({
+                type: "ERROR",
+                summary: `OpenCode question reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+              });
+            } catch {
+              // The live event path may still deliver the question.
+            }
+          }
+        }
+        await waitForPoll(streamController.signal);
       }
     })();
 
@@ -258,7 +397,28 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
     const completion = (async (): Promise<ProviderCompletion> => {
       try {
-        const response = await send(input.prompt, input.attachments);
+        let response = await send(input.prompt, input.attachments);
+        await reconcileQuestions();
+        while (!stopReason && pendingQuestions.size) {
+          await waitForPoll(streamController.signal);
+        }
+        if (!stopReason && sawQuestion) {
+          while (!stopReason) {
+            const statuses = asRecord(
+              resultData(await client.session.status({ directory: cwd })),
+            );
+            if (asRecord(statuses[nativeId]).type !== "busy") break;
+            await waitForPoll(streamController.signal);
+          }
+          const messages = responseItems(
+            await client.session.messages({
+              sessionID: nativeId,
+              directory: cwd,
+              limit: 1,
+            }),
+          );
+          if (messages[0]) response = messages[0];
+        }
         const finalOutput = opencodeResponseText(response);
         const info = asRecord(asRecord(response).info);
         const tokens = asRecord(info.tokens);
@@ -284,7 +444,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
             };
       } finally {
         streamController.abort();
-        await Promise.allSettled([eventTask]);
+        await Promise.allSettled([eventTask, questionReconciliationTask]);
       }
     })();
 
@@ -299,11 +459,20 @@ export class OpenCodeAdapter implements ProviderAdapter {
         await send(prompt, attachments);
       },
       async answer(requestId, answers) {
-        await client.v2.session.question.reply({
-          sessionID: nativeId,
-          requestID: requestId,
-          questionV2Reply: { answers: answerArrays(answers) },
-        });
+        if (questionSurfaces.get(requestId) === "V2") {
+          await client.v2.session.question.reply({
+            sessionID: nativeId,
+            requestID: requestId,
+            questionV2Reply: { answers: answerArrays(answers) },
+          });
+        } else {
+          await client.question.reply({
+            requestID: requestId,
+            directory: cwd,
+            answers: answerArrays(answers),
+          });
+        }
+        pendingQuestions.delete(requestId);
       },
     };
   }
