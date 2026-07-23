@@ -274,7 +274,6 @@
       "OBSERVED": "Observado"
     },
     "toolCalls": "Llamadas a herramientas",
-    "totalCost": "Coste total estimado",
     "unpinPreset": "Quitar preajuste",
     "unrestrictedWarning": "Las sesiones se ejecutan sin solicitudes de aprobación y con acceso sin restricciones mientras mantienen una reserva exclusiva del árbol de trabajo.",
     "uploadFailed": "No se pudo subir el archivo adjunto.",
@@ -283,11 +282,8 @@
     "webSearch": "Búsqueda web",
     "webSearchDescription": "Activa la herramienta nativa de búsqueda web del proveedor cuando sea compatible.",
     "worktree": "Árbol de trabajo",
-    "costSource": "Fuente del coste",
     "reportedCost": "Informado por el proveedor",
-    "catalogCost": "Catálogo de costes de modelos",
-    "pricedByProvider": "calculado por {source}",
-    "pricedByCatalog": "calculado con el catálogo de costes de modelos"
+    "catalogCost": "Catálogo de costes de modelos"
   },
   "notifications": {
     "title": "Notificaciones",

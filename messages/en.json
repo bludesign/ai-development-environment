@@ -274,7 +274,6 @@
       "OBSERVED": "Observed"
     },
     "toolCalls": "Tool calls",
-    "totalCost": "Total estimated cost",
     "unpinPreset": "Unpin preset",
     "unrestrictedWarning": "Sessions run without approval prompts and with unrestricted access while holding an exclusive worktree lease.",
     "uploadFailed": "Attachment upload failed.",
@@ -283,11 +282,8 @@
     "webSearch": "Web search",
     "webSearchDescription": "Enable the provider's native web-search tool when supported.",
     "worktree": "Worktree",
-    "costSource": "Cost source",
     "reportedCost": "Reported by provider",
-    "catalogCost": "Model cost catalog",
-    "pricedByProvider": "priced by {source}",
-    "pricedByCatalog": "priced from the model cost catalog"
+    "catalogCost": "Model cost catalog"
   },
   "notifications": {
     "title": "Notifications",

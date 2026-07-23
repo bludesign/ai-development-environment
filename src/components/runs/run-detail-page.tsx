@@ -503,9 +503,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [search, setSearch] = useState("");
   const [promptRaw, setPromptRaw] = useState(false);
   const [outputRaw, setOutputRaw] = useState(false);
-  const [costSource, setCostSource] = useState<"REPORTED" | "CATALOG">(
-    "REPORTED",
-  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -928,40 +925,37 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const followCatalog = catalog.find(({ key }) => key === followProvider);
   const runCatalog = catalog.find(({ key }) => key === run.provider);
   /**
-   * The provider's own figure leads, because it is the one that will appear on
-   * a bill. The catalog fills in where the provider reported nothing — which is
-   * why it exists — and can be selected outright to price every run the same
-   * way regardless of which tool ran it.
+   * Both figures stand on their own: the provider's is the one that will appear
+   * on a bill, and the catalog's prices every run the same way regardless of
+   * which tool ran it. Showing them side by side beats picking one, since the
+   * gap between them is itself worth seeing.
    */
-  const pickCost = (reported: number | null, catalog: number | null) =>
-    costSource === "CATALOG" ? catalog : (reported ?? catalog);
-  const totalCost = pickCost(run.estimatedCost, run.catalogCost);
-  const pricedFromCatalog =
-    totalCost !== null &&
-    (costSource === "CATALOG" || run.estimatedCost === null);
+  const money = (value: number | null) =>
+    value === null ? "—" : `≈${currency.format(value)}`;
   const usageBreakdown = [false, true].map((superseded) =>
     run.modelUsage
       .filter((usage) => usage.superseded === superseded)
       .reduce(
-        (total, usage) => {
-          const cost = pickCost(usage.estimatedCost, usage.catalogCost);
-          return {
-            input: total.input + usage.inputTokens,
-            output: total.output + usage.outputTokens,
-            cacheRead: total.cacheRead + usage.cacheReadTokens,
-            cacheWrite: total.cacheWrite + usage.cacheWriteTokens,
-            cost: total.cost + (cost ?? 0),
-            priced: total.priced || cost !== null,
-            superseded,
-          };
-        },
+        (total, usage) => ({
+          input: total.input + usage.inputTokens,
+          output: total.output + usage.outputTokens,
+          cacheRead: total.cacheRead + usage.cacheReadTokens,
+          cacheWrite: total.cacheWrite + usage.cacheWriteTokens,
+          reported: total.reported + (usage.estimatedCost ?? 0),
+          catalog: total.catalog + (usage.catalogCost ?? 0),
+          hasReported: total.hasReported || usage.estimatedCost !== null,
+          hasCatalog: total.hasCatalog || usage.catalogCost !== null,
+          superseded,
+        }),
         {
           input: 0,
           output: 0,
           cacheRead: 0,
           cacheWrite: 0,
-          cost: 0,
-          priced: false,
+          reported: 0,
+          catalog: 0,
+          hasReported: false,
+          hasCatalog: false,
           superseded,
         },
       ),
@@ -1143,46 +1137,14 @@ export function RunDetailPage({ runId }: { runId: string }) {
       </Card>
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>{t("usageCost")}</CardTitle>
-              <CardDescription>
-                {t("estimatedCost")}
-                {totalCost !== null && (
-                  <>
-                    {" · "}
-                    {pricedFromCatalog
-                      ? t("pricedByCatalog")
-                      : t("pricedByProvider", {
-                          source: run.pricingSource ?? run.provider,
-                        })}
-                  </>
-                )}
-              </CardDescription>
-            </div>
-            <Select
-              onValueChange={(value) =>
-                setCostSource(value === "CATALOG" ? "CATALOG" : "REPORTED")
-              }
-              value={costSource}
-            >
-              <SelectTrigger aria-label={t("costSource")} className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="REPORTED">{t("reportedCost")}</SelectItem>
-                <SelectItem value="CATALOG">{t("catalogCost")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <CardTitle>{t("usageCost")}</CardTitle>
+          <CardDescription>{t("estimatedCost")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              [
-                t("totalCost"),
-                totalCost === null ? "—" : `≈${currency.format(totalCost)}`,
-              ],
+              [t("reportedCost"), money(run.estimatedCost)],
+              [t("catalogCost"), money(run.catalogCost)],
               [t("inputTokens"), run.inputTokens.toLocaleString(locale)],
               [t("outputTokens"), run.outputTokens.toLocaleString(locale)],
               [
@@ -1216,7 +1178,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("outputTokens")}</TableHead>
                   <TableHead>{t("cacheReadTokens")}</TableHead>
                   <TableHead>{t("cacheWriteTokens")}</TableHead>
-                  <TableHead>{t("cost")}</TableHead>
+                  <TableHead>{t("reportedCost")}</TableHead>
+                  <TableHead>{t("catalogCost")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1234,7 +1197,10 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       {usage.cacheWrite.toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
-                      {usage.priced ? `≈${currency.format(usage.cost)}` : "—"}
+                      {money(usage.hasReported ? usage.reported : null)}
+                    </TableCell>
+                    <TableCell>
+                      {money(usage.hasCatalog ? usage.catalog : null)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1250,7 +1216,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("outputTokens")}</TableHead>
                   <TableHead>{t("cacheReadTokens")}</TableHead>
                   <TableHead>{t("cacheWriteTokens")}</TableHead>
-                  <TableHead>{t("cost")}</TableHead>
+                  <TableHead>{t("reportedCost")}</TableHead>
+                  <TableHead>{t("catalogCost")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1276,17 +1243,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     <TableCell>
                       {usage.cacheWriteTokens.toLocaleString(locale)}
                     </TableCell>
-                    <TableCell>
-                      {(() => {
-                        const cost = pickCost(
-                          usage.estimatedCost,
-                          usage.catalogCost,
-                        );
-                        return cost === null
-                          ? "—"
-                          : `≈${currency.format(cost)}`;
-                      })()}
-                    </TableCell>
+                    <TableCell>{money(usage.estimatedCost)}</TableCell>
+                    <TableCell>{money(usage.catalogCost)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

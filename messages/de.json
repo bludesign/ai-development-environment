@@ -274,7 +274,6 @@
       "OBSERVED": "Beobachtet"
     },
     "toolCalls": "Werkzeugaufrufe",
-    "totalCost": "Geschätzte Gesamtkosten",
     "unpinPreset": "Voreinstellung lösen",
     "unrestrictedWarning": "Sitzungen laufen ohne Genehmigungsdialoge und mit uneingeschränktem Zugriff, während sie eine exklusive Arbeitsbaumreservierung halten.",
     "uploadFailed": "Hochladen des Anhangs fehlgeschlagen.",
@@ -283,11 +282,8 @@
     "webSearch": "Websuche",
     "webSearchDescription": "Das native Websuchwerkzeug des Anbieters aktivieren, sofern unterstützt.",
     "worktree": "Arbeitsbaum",
-    "costSource": "Kostenquelle",
     "reportedCost": "Vom Anbieter gemeldet",
-    "catalogCost": "Modellkostenkatalog",
-    "pricedByProvider": "berechnet von {source}",
-    "pricedByCatalog": "berechnet aus dem Modellkostenkatalog"
+    "catalogCost": "Modellkostenkatalog"
   },
   "notifications": {
     "title": "Benachrichtigungen",

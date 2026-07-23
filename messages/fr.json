@@ -274,7 +274,6 @@
       "OBSERVED": "Observé"
     },
     "toolCalls": "Appels d’outil",
-    "totalCost": "Coût total estimé",
     "unpinPreset": "Détacher le préréglage",
     "unrestrictedWarning": "Les Sessions s’exécutent sans demande d’autorisation, avec un accès illimité et un verrou exclusif sur l’arborescence.",
     "uploadFailed": "Échec du téléversement de la pièce jointe.",
@@ -283,11 +282,8 @@
     "webSearch": "Recherche web",
     "webSearchDescription": "Activer l’outil de recherche web natif du fournisseur lorsqu’il est pris en charge.",
     "worktree": "Arborescence",
-    "costSource": "Source du coût",
     "reportedCost": "Communiqué par le fournisseur",
-    "catalogCost": "Catalogue des coûts de modèles",
-    "pricedByProvider": "calculé par {source}",
-    "pricedByCatalog": "calculé à partir du catalogue des coûts de modèles"
+    "catalogCost": "Catalogue des coûts de modèles"
   },
   "notifications": {
     "title": "Notifications",
