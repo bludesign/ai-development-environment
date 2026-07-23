@@ -308,7 +308,7 @@ export function ModelEffortPicker({
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-max max-w-[min(32rem,calc(100vw-2rem))] p-0"
+          className="w-max max-w-[min(32rem,calc(100vw-2rem))] gap-0 p-0"
         >
           {/*
            * `w-max` alone would resize the popover on every keystroke, since
