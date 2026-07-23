@@ -126,6 +126,9 @@ type AgentCodebaseRegistration {
 }
 
 type AgentWorktreeConfiguration {
+  id: ID!
+  folder: String!
+  branch: String
   gitDirectory: String!
   baseBranchOverride: String
 }

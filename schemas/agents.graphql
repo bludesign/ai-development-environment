@@ -31,6 +31,7 @@ enum AgentEventType {
   JOB_CANCEL_REQUESTED
   CODEBASE_RECONCILE_REQUESTED
   AGENT_CONFIGURATION_CHANGED
+  RUN_COMMAND_AVAILABLE
 }
 
 type Agent {
@@ -112,6 +113,7 @@ type AgentJobLog {
 type AgentEvent {
   type: AgentEventType!
   job: AgentJob
+  runCommand: RunCommand
 }
 
 input EnrollAgentInput {

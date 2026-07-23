@@ -1,0 +1,21 @@
+{
+  "id": "event-1",
+  "type": "question.asked",
+  "data": {
+    "id": "request-1",
+    "sessionID": "session-1",
+    "questions": [
+      {
+        "id": "strategy",
+        "header": "Strategy",
+        "question": "Choose an implementation strategy",
+        "multiple": false,
+        "custom": true,
+        "options": [
+          { "label": "Incremental", "description": "Change in stages" },
+          { "label": "Rewrite", "description": "Replace the component" }
+        ]
+      }
+    ]
+  }
+}

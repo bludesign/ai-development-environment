@@ -1,0 +1,526 @@
+enum RunKind {
+  PLAN
+  SESSION
+}
+
+enum RunStatus {
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum RunOrigin {
+  MANAGED
+  IMPORTED
+}
+
+type RunWorktreeRef {
+  id: ID!
+  folder: String!
+  branch: String
+  highlightColor: String
+}
+
+type RunAttachment {
+  id: ID!
+  filename: String!
+  contentType: String!
+  size: Int!
+  sha256: String!
+  downloadPath: String!
+  createdAt: String!
+}
+
+type RunInput {
+  id: ID!
+  sequence: Int!
+  kind: String!
+  prompt: String!
+  attachments: [RunAttachment!]!
+  createdAt: String!
+}
+
+type RunAttempt {
+  id: ID!
+  generation: Int!
+  nativeId: String
+  status: String!
+  resumeStrategy: String
+  startedAt: String!
+  finishedAt: String
+  supersededAt: String
+}
+
+type RunEvent {
+  id: ID!
+  runId: ID!
+  attemptId: ID
+  sequence: Int!
+  type: String!
+  summary: String!
+  detailMarkdown: String
+  raw: JSON
+  createdAt: String!
+  supersededAt: String
+}
+
+type RunToolCall {
+  id: ID!
+  sequence: Int!
+  name: String!
+  status: String!
+  input: JSON
+  output: JSON
+  error: String
+  startedAt: String!
+  finishedAt: String
+  supersededAt: String
+}
+
+type RunModelUsage {
+  id: ID!
+  model: String!
+  inputTokens: Int!
+  outputTokens: Int!
+  reasoningTokens: Int!
+  cacheReadTokens: Int!
+  cacheWriteTokens: Int!
+  estimatedCost: Float
+  superseded: Boolean!
+}
+
+type RunQuestionOption {
+  id: ID!
+  position: Int!
+  label: String!
+  description: String
+}
+
+type RunQuestion {
+  id: ID!
+  position: Int!
+  header: String
+  prompt: String!
+  multiSelect: Boolean!
+  allowCustom: Boolean!
+  options: [RunQuestionOption!]!
+}
+
+type RunAnswerRevision {
+  id: ID!
+  revision: Int!
+  answers: JSON!
+  createdAt: String!
+  supersededAt: String
+  replacementAttemptId: ID
+}
+
+type RunQuestionBatch {
+  id: ID!
+  nativeRequestId: String
+  eventSequence: Int
+  status: String!
+  questions: [RunQuestion!]!
+  answerRevisions: [RunAnswerRevision!]!
+  createdAt: String!
+  answeredAt: String
+  supersededAt: String
+  revisionPreparedAt: String
+  rollbackPatch: String
+  pushedCommitWarning: String
+  checkpoint: RunCheckpoint
+}
+
+type RunQuestionBatchPage {
+  items: [RunQuestionBatch!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type RunUsageSummary {
+  inputTokens: Int!
+  outputTokens: Int!
+  reasoningTokens: Int!
+  cacheReadTokens: Int!
+  cacheWriteTokens: Int!
+  toolCallCount: Int!
+  estimatedCost: Float
+  modelUsage: [RunModelUsage!]!
+  toolCalls: [RunToolCall!]!
+}
+
+type RunCheckpoint {
+  id: ID!
+  kind: String!
+  headSha: String
+  branch: String
+  upstreamSha: String
+  indexTree: String
+  worktreeTree: String
+  refName: String
+  diffSummary: String
+  diffPatch: String
+  stashRef: String
+  createdAt: String!
+}
+
+type AgentRun {
+  id: ID!
+  kind: RunKind!
+  displayNumber: Int!
+  status: RunStatus!
+  phase: String!
+  origin: RunOrigin!
+  provider: String!
+  providerVersion: String
+  worktreeId: ID
+  agentId: ID
+  worktree: RunWorktreeRef
+  jiraIssueKey: String
+  jiraSummary: String
+  repositoryName: String!
+  branch: String
+  model: String!
+  effort: String
+  webSearchEnabled: Boolean!
+  initialPrompt: String!
+  finalOutput: String
+  error: String
+  estimatedCost: Float
+  pricingSource: String
+  pricingUpdatedAt: String
+  inputTokens: Int!
+  outputTokens: Int!
+  reasoningTokens: Int!
+  cacheReadTokens: Int!
+  cacheWriteTokens: Int!
+  toolCallCount: Int!
+  sourcePlanId: ID
+  sourcePlanNumber: Int
+  playedAt: String
+  playedSessionNumber: Int
+  sourcePlan: AgentRun
+  playedSession: AgentRun
+  parentRunId: ID
+  parentRunNumber: Int
+  parentRun: AgentRun
+  followUpMode: String
+  followUps: [AgentRun!]!
+  attempts: [RunAttempt!]!
+  inputs: [RunInput!]!
+  modelUsage: [RunModelUsage!]!
+  toolCalls: [RunToolCall!]!
+  questionBatches: [RunQuestionBatch!]!
+  checkpoints: [RunCheckpoint!]!
+  archivedAt: String
+  nativeArchivedAt: String
+  startedAt: String
+  finishedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AgentRunPage {
+  items: [AgentRun!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type RunDraft {
+  id: ID!
+  kind: RunKind!
+  worktreeId: ID
+  agentId: ID
+  worktree: RunWorktreeRef
+  jiraIssueKey: String
+  jiraSummary: String
+  provider: String!
+  model: String!
+  effort: String
+  webSearchEnabled: Boolean!
+  prompt: String!
+  attachments: [RunAttachment!]!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type RunDraftPage {
+  items: [RunDraft!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type RunProviderModel {
+  id: String!
+  label: String!
+  efforts: [String!]!
+  "Sub-catalog this model belongs to, where the provider fronts several."
+  group: String
+}
+
+type RunProviderCatalogEntry {
+  key: String!
+  label: String!
+  available: Boolean!
+  models: [RunProviderModel!]!
+  supportsWebSearch: Boolean!
+  supportsQuestions: Boolean!
+  supportsImport: Boolean!
+  supportsPause: Boolean!
+  supportsSteering: Boolean!
+  supportsResume: Boolean!
+  supportsNativeDelete: Boolean!
+}
+
+type RunCommand {
+  id: ID!
+  runId: ID!
+  agentId: ID!
+  sequence: Int!
+  type: String!
+  payload: JSON!
+  status: String!
+  error: String
+  run: AgentRun!
+  createdAt: String!
+  claimedAt: String
+  finishedAt: String
+}
+
+type RunProviderImportStatus {
+  id: ID!
+  agentId: ID!
+  provider: String!
+  cursor: String
+  status: String!
+  lastStartedAt: String
+  lastCompletedAt: String
+  lastError: String
+  importedCount: Int!
+  unmatchedCount: Int!
+  catalog: JSON
+  updatedAt: String!
+}
+
+input RunConfigurationInput {
+  kind: RunKind!
+  worktreeId: ID!
+  jiraIssueKey: String
+  jiraSummary: String
+  provider: String!
+  model: String!
+  effort: String
+  webSearchEnabled: Boolean = true
+  prompt: String!
+  attachmentIds: [ID!] = []
+  draftId: ID
+  sourcePlanId: ID
+  parentRunId: ID
+  followUpMode: String
+  contextMode: String
+}
+
+input SaveRunDraftInput {
+  id: ID
+  kind: RunKind!
+  worktreeId: ID!
+  jiraIssueKey: String
+  jiraSummary: String
+  provider: String!
+  model: String!
+  effort: String
+  webSearchEnabled: Boolean = true
+  prompt: String!
+  attachmentIds: [ID!] = []
+}
+
+input RunEventInput {
+  id: ID!
+  sequence: Int!
+  type: String!
+  summary: String!
+  searchText: String
+  detailMarkdown: String
+  raw: JSON
+  createdAt: String
+}
+
+input RunQuestionOptionInput {
+  label: String!
+  description: String
+}
+
+input RunQuestionInput {
+  id: ID
+  header: String
+  prompt: String!
+  multiSelect: Boolean = false
+  allowCustom: Boolean = true
+  options: [RunQuestionOptionInput!] = []
+}
+
+input RunUsageInput {
+  model: String!
+  inputTokens: Int
+  outputTokens: Int
+  reasoningTokens: Int
+  cacheReadTokens: Int
+  cacheWriteTokens: Int
+  estimatedCost: Float
+  toolCallCount: Int
+  pricingSource: String
+}
+
+input FinishRunAttemptInput {
+  status: RunStatus!
+  phase: String
+  finalOutput: String
+  error: String
+}
+
+input ReportRunCheckpointInput {
+  kind: String!
+  headSha: String
+  branch: String
+  upstreamSha: String
+  indexTree: String
+  worktreeTree: String
+  refName: String
+  manifestJson: String
+  diffSummary: String
+  diffPatch: String
+  stashRef: String
+  questionBatchId: ID
+}
+
+input ImportedRunInput {
+  nativeId: String!
+  worktreeId: ID!
+  kind: RunKind
+  status: String
+  archived: Boolean
+  model: String
+  effort: String
+  prompt: String
+  finalOutput: String
+  branch: String
+  jiraIssueKey: String
+  createdAt: String
+  updatedAt: String
+  rawMetadata: JSON
+}
+
+extend type Query {
+  agentRuns(
+    kind: RunKind!
+    search: String
+    archive: String = "ACTIVE"
+    provider: String
+    origin: RunOrigin
+    first: Int = 100
+    after: ID
+  ): AgentRunPage!
+  agentRun(id: ID!): AgentRun
+  runEvents(
+    runId: ID!
+    search: String
+    afterSequence: Int = -1
+    first: Int = 200
+    includeSuperseded: Boolean = false
+  ): [RunEvent!]!
+  runQuestionBatches(
+    runId: ID!
+    first: Int = 100
+    after: ID
+  ): RunQuestionBatchPage!
+  runUsage(runId: ID!): RunUsageSummary
+  runLinkedItems(runId: ID!): [AgentRun!]!
+  runDrafts(
+    search: String
+    archive: String = "ACTIVE"
+    first: Int = 100
+    after: ID
+  ): RunDraftPage!
+  runDraft(id: ID!): RunDraft
+  runProviderCatalog(runId: ID, worktreeId: ID): [RunProviderCatalogEntry!]!
+  runProviderImportStatus: [RunProviderImportStatus!]!
+  pendingRunCommands: [RunCommand!]!
+}
+
+extend type Mutation {
+  createAgentRun(input: RunConfigurationInput!): AgentRun!
+  playPlan(planId: ID!): AgentRun!
+  createRunFollowUp(sourceId: ID!, input: RunConfigurationInput!): AgentRun!
+  saveRunDraft(input: SaveRunDraftInput!): RunDraft!
+  archiveAgentRuns(ids: [ID!]!, archived: Boolean!): Int!
+  deleteAgentRuns(ids: [ID!]!): Int!
+  archiveRunDrafts(ids: [ID!]!, archived: Boolean!): Int!
+  deleteRunDrafts(ids: [ID!]!): Int!
+  pauseAgentRun(id: ID!): AgentRun!
+  continueAgentRun(id: ID!): AgentRun!
+  cancelAgentRun(id: ID!): AgentRun!
+  steerAgentRun(id: ID!, prompt: String!, attachmentIds: [ID!] = []): AgentRun!
+  answerRunQuestion(batchId: ID!, answers: JSON!): AgentRun!
+  prepareRunAnswerRevision(batchId: ID!): AgentRun!
+  reviseRunAnswer(
+    batchId: ID!
+    answers: JSON!
+    stash: Boolean = false
+    rollback: Boolean = true
+  ): AgentRun!
+
+  claimRunCommand(id: ID!): RunCommand!
+  completeRunCommand(id: ID!, status: String!, error: String): RunCommand!
+  beginRunAttempt(runId: ID!, nativeId: String): RunAttempt!
+  updateRunAttemptNativeId(
+    attemptId: ID!
+    nativeId: String!
+    providerVersion: String
+  ): RunAttempt!
+  appendRunEvents(
+    runId: ID!
+    attemptId: ID
+    events: [RunEventInput!]!
+  ): [RunEvent!]!
+  reportRunQuestion(
+    runId: ID!
+    attemptId: ID
+    nativeRequestId: String
+    eventSequence: Int
+    questions: [RunQuestionInput!]!
+  ): RunQuestionBatch!
+  reportRunUsage(runId: ID!, attemptId: ID, input: RunUsageInput!): AgentRun!
+  finishRunAttempt(attemptId: ID!, input: FinishRunAttemptInput!): AgentRun!
+  reportRunCheckpoint(
+    runId: ID!
+    attemptId: ID
+    input: ReportRunCheckpointInput!
+  ): RunCheckpoint!
+  reportRunAnswerRevisionPreview(
+    batchId: ID!
+    rollbackPatch: String!
+    pushedCommitWarning: String
+  ): RunQuestionBatch!
+  applyRunAnswerRevision(
+    batchId: ID!
+    revisionId: ID!
+    replacementAttemptId: ID!
+  ): AgentRun!
+  importProviderRuns(provider: String!, runs: [ImportedRunInput!]!): Int!
+  reportRunProviderImportStatus(
+    provider: String!
+    status: String!
+    error: String
+    catalog: JSON
+  ): RunProviderImportStatus!
+}
+
+extend type Subscription {
+  agentRunsChanged: AgentRun
+  agentRunChanged(runId: ID!): AgentRun!
+  runEventAdded(runId: ID!): RunEvent!
+  runQuestionChanged(runId: ID!): RunQuestionBatch!
+}

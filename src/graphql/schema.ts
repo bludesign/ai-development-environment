@@ -44,6 +44,8 @@ import { createNotificationsResolvers } from "./resolvers/notifications";
 import type { NotificationsService } from "@/services/notifications";
 import type { PollingService } from "@/services/polling";
 import { createPollingResolvers } from "./resolvers/polling";
+import { createRunResolvers } from "./resolvers/runs";
+import type { RunsService } from "@/services/runs";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -70,6 +72,7 @@ export const createSchema = (
   credentialService: CredentialService,
   notificationsService: NotificationsService,
   pollingService: PollingService,
+  runsService: RunsService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -91,6 +94,7 @@ export const createSchema = (
     createCredentialResolvers(credentialService),
     createNotificationsResolvers(notificationsService),
     createPollingResolvers(pollingService),
+    createRunResolvers(runsService),
   ]);
 
   return buildSubgraphSchema({

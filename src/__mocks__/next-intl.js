@@ -2285,30 +2285,35 @@ const mockTranslations = {
   },
 };
 
+const resolveTranslation = (namespace, key) => {
+  const namespaceParts = namespace ? namespace.split(".") : [];
+  let namespaceTranslations = mockTranslations;
+
+  for (const part of namespaceParts) {
+    namespaceTranslations = Object.prototype.hasOwnProperty.call(
+      namespaceTranslations,
+      part,
+    )
+      ? namespaceTranslations[part]
+      : {};
+  }
+
+  const keyParts = key.split(".");
+  let translation = namespaceTranslations;
+
+  for (const keyPart of keyParts) {
+    translation =
+      translation && Object.prototype.hasOwnProperty.call(translation, keyPart)
+        ? translation[keyPart]
+        : null;
+  }
+
+  return translation;
+};
+
 const useTranslations = (namespace) => {
-  return (key, values) => {
-    const namespaceParts = namespace ? namespace.split(".") : [];
-    let namespaceTranslations = mockTranslations;
-
-    for (const part of namespaceParts) {
-      namespaceTranslations = Object.prototype.hasOwnProperty.call(
-        namespaceTranslations,
-        part,
-      )
-        ? namespaceTranslations[part]
-        : {};
-    }
-
-    const keyParts = key.split(".");
-    let translation = namespaceTranslations;
-
-    for (const keyPart of keyParts) {
-      translation =
-        translation &&
-        Object.prototype.hasOwnProperty.call(translation, keyPart)
-          ? translation[keyPart]
-          : null;
-    }
+  const translate = (key, values) => {
+    let translation = resolveTranslation(namespace, key);
 
     if (!translation) {
       translation = namespace ? `${namespace}.${key}` : key;
@@ -2322,6 +2327,11 @@ const useTranslations = (namespace) => {
 
     return translation;
   };
+
+  // next-intl exposes `t.has` so callers can branch on optional keys.
+  translate.has = (key) => resolveTranslation(namespace, key) !== null;
+
+  return translate;
 };
 
 // Keep the test dictionary structurally identical to the English catalog.

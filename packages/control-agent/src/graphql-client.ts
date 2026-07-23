@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 
 import { createClient, type Client } from "graphql-ws";
@@ -24,6 +25,60 @@ export type AgentJob = {
   timeoutSeconds: number;
 };
 
+export type RunAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  sha256: string;
+  downloadPath: string;
+};
+
+export type RunRecord = {
+  id: string;
+  kind: "PLAN" | "SESSION";
+  displayNumber: number;
+  status: string;
+  phase: string;
+  origin: "MANAGED" | "IMPORTED";
+  provider: "CODEX" | "CLAUDE" | "OPENCODE";
+  worktreeId: string | null;
+  agentId: string | null;
+  worktree: { id: string; folder: string; branch: string | null } | null;
+  model: string;
+  effort: string | null;
+  webSearchEnabled: boolean;
+  initialPrompt: string;
+  finalOutput: string | null;
+  inputs: Array<{
+    id: string;
+    sequence: number;
+    kind: string;
+    prompt: string;
+    attachments: RunAttachment[];
+  }>;
+  attempts: Array<{
+    id: string;
+    generation: number;
+    nativeId: string | null;
+    status: string;
+  }>;
+  sourcePlan: Pick<RunRecord, "id" | "provider" | "attempts"> | null;
+  parentRun: Pick<RunRecord, "id" | "provider" | "attempts"> | null;
+};
+
+export type RunCommand = {
+  id: string;
+  runId: string;
+  agentId: string;
+  sequence: number;
+  type: string;
+  payload: Record<string, unknown>;
+  status: string;
+  error: string | null;
+  run: RunRecord;
+};
+
 export type AgentEvent =
   | {
       type: "JOB_AVAILABLE" | "JOB_CANCEL_REQUESTED";
@@ -32,6 +87,12 @@ export type AgentEvent =
   | {
       type: "CODEBASE_RECONCILE_REQUESTED" | "AGENT_CONFIGURATION_CHANGED";
       job: null;
+      runCommand?: null;
+    }
+  | {
+      type: "RUN_COMMAND_AVAILABLE";
+      job: null;
+      runCommand: RunCommand;
     };
 
 export type AgentCadenceSettings = {
@@ -51,6 +112,9 @@ export type AgentCodebaseRegistration = {
   lastFetchedAt: string | null;
   lastFetchAttemptAt: string | null;
   worktrees: Array<{
+    id: string;
+    folder: string;
+    branch: string | null;
     gitDirectory: string;
     baseBranchOverride: string | null;
   }>;
@@ -63,6 +127,19 @@ export type AgentCodebaseConfiguration = {
 };
 
 type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+
+const RUN_COMMAND_FIELDS = `
+  id runId agentId sequence type payload status error
+  run {
+    id kind displayNumber status phase origin provider worktreeId agentId
+    worktree { id folder branch }
+    model effort webSearchEnabled initialPrompt finalOutput
+    inputs { id sequence kind prompt attachments { id filename contentType size sha256 downloadPath } }
+    attempts { id generation nativeId status }
+    sourcePlan { id provider attempts { id generation nativeId status } }
+    parentRun { id provider attempts { id generation nativeId status } }
+  }
+`;
 
 function mergeHeaders(
   custom: Record<string, string>,
@@ -114,11 +191,22 @@ export class AgentGraphQLClient {
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
-    const body = (await response.json()) as GraphQLResponse<T>;
-    if (!response.ok || body.errors?.length || !body.data) {
+    // Read the body as text first. A proxy or gateway can answer with a
+    // non-JSON error page, and parsing that before checking the status would
+    // mask the real HTTP failure behind an opaque JSON syntax error.
+    const raw = await response.text();
+    let body: GraphQLResponse<T> | undefined;
+    try {
+      body = raw ? (JSON.parse(raw) as GraphQLResponse<T>) : undefined;
+    } catch {
+      body = undefined;
+    }
+    if (!response.ok || body?.errors?.length || !body?.data) {
+      const detail =
+        body?.errors?.map((error) => error.message).join("; ") ||
+        `HTTP ${response.status} ${response.statusText}`.trim();
       throw new Error(
-        body.errors?.map((error) => error.message).join("; ") ||
-          `HTTP ${response.status}`,
+        !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
       );
     }
     return body.data;
@@ -334,6 +422,219 @@ export class AgentGraphQLClient {
     );
   }
 
+  async pendingRunCommands(): Promise<RunCommand[]> {
+    const data = await this.request<{ pendingRunCommands: RunCommand[] }>(
+      `query PendingRunCommands {
+        pendingRunCommands { ${RUN_COMMAND_FIELDS} }
+      }`,
+    );
+    return data.pendingRunCommands;
+  }
+
+  async claimRunCommand(id: string): Promise<RunCommand> {
+    const data = await this.request<{ claimRunCommand: RunCommand }>(
+      `mutation ClaimRunCommand($id: ID!) {
+        claimRunCommand(id: $id) { ${RUN_COMMAND_FIELDS} }
+      }`,
+      { id },
+    );
+    return data.claimRunCommand;
+  }
+
+  completeRunCommand(
+    id: string,
+    status: "SUCCEEDED" | "FAILED",
+    error?: string,
+  ) {
+    return this.request<{ completeRunCommand: { id: string; status: string } }>(
+      `mutation CompleteRunCommand($id: ID!, $status: String!, $error: String) {
+        completeRunCommand(id: $id, status: $status, error: $error) { id status }
+      }`,
+      { id, status, error },
+    );
+  }
+
+  async beginRunAttempt(runId: string, nativeId?: string) {
+    const data = await this.request<{
+      beginRunAttempt: { id: string; generation: number };
+    }>(
+      `mutation BeginRunAttempt($runId: ID!, $nativeId: String) {
+        beginRunAttempt(runId: $runId, nativeId: $nativeId) { id generation }
+      }`,
+      { runId, nativeId },
+    );
+    return data.beginRunAttempt;
+  }
+
+  updateRunAttemptNativeId(
+    attemptId: string,
+    nativeId: string,
+    providerVersion?: string,
+  ) {
+    return this.request<{
+      updateRunAttemptNativeId: { id: string; nativeId: string };
+    }>(
+      `mutation UpdateRunAttemptNativeId($attemptId: ID!, $nativeId: String!, $providerVersion: String) {
+        updateRunAttemptNativeId(attemptId: $attemptId, nativeId: $nativeId, providerVersion: $providerVersion) { id nativeId }
+      }`,
+      { attemptId, nativeId, providerVersion },
+    );
+  }
+
+  appendRunEvents(
+    runId: string,
+    attemptId: string | null,
+    events: Array<Record<string, unknown>>,
+  ) {
+    return this.request<{
+      appendRunEvents: Array<{ id: string; sequence: number }>;
+    }>(
+      `mutation AppendRunEvents($runId: ID!, $attemptId: ID, $events: [RunEventInput!]!) {
+        appendRunEvents(runId: $runId, attemptId: $attemptId, events: $events) { id sequence }
+      }`,
+      { runId, attemptId, events },
+    );
+  }
+
+  reportRunQuestion(input: {
+    runId: string;
+    attemptId: string | null;
+    nativeRequestId: string | null;
+    eventSequence: number;
+    questions: Array<Record<string, unknown>>;
+  }) {
+    return this.request<{ reportRunQuestion: { id: string } }>(
+      `mutation ReportRunQuestion($runId: ID!, $attemptId: ID, $nativeRequestId: String, $eventSequence: Int, $questions: [RunQuestionInput!]!) {
+        reportRunQuestion(runId: $runId, attemptId: $attemptId, nativeRequestId: $nativeRequestId, eventSequence: $eventSequence, questions: $questions) { id }
+      }`,
+      input,
+    ).then(({ reportRunQuestion }) => reportRunQuestion);
+  }
+
+  reportRunUsage(
+    runId: string,
+    attemptId: string | null,
+    input: Record<string, unknown>,
+  ) {
+    return this.request<{ reportRunUsage: { id: string } }>(
+      `mutation ReportRunUsage($runId: ID!, $attemptId: ID, $input: RunUsageInput!) {
+        reportRunUsage(runId: $runId, attemptId: $attemptId, input: $input) { id }
+      }`,
+      { runId, attemptId, input },
+    );
+  }
+
+  finishRunAttempt(
+    attemptId: string,
+    input: {
+      status: string;
+      phase?: string;
+      finalOutput?: string;
+      error?: string;
+    },
+  ) {
+    return this.request<{ finishRunAttempt: { id: string; status: string } }>(
+      `mutation FinishRunAttempt($attemptId: ID!, $input: FinishRunAttemptInput!) {
+        finishRunAttempt(attemptId: $attemptId, input: $input) { id status }
+      }`,
+      { attemptId, input },
+    );
+  }
+
+  reportRunCheckpoint(
+    runId: string,
+    attemptId: string | null,
+    input: Record<string, unknown>,
+  ) {
+    return this.request<{ reportRunCheckpoint: { id: string } }>(
+      `mutation ReportRunCheckpoint($runId: ID!, $attemptId: ID, $input: ReportRunCheckpointInput!) {
+        reportRunCheckpoint(runId: $runId, attemptId: $attemptId, input: $input) { id }
+      }`,
+      { runId, attemptId, input },
+    );
+  }
+
+  reportRunAnswerRevisionPreview(
+    batchId: string,
+    rollbackPatch: string,
+    pushedCommitWarning?: string | null,
+  ) {
+    return this.request<{ reportRunAnswerRevisionPreview: { id: string } }>(
+      `mutation ReportRunAnswerRevisionPreview($batchId: ID!, $rollbackPatch: String!, $pushedCommitWarning: String) {
+        reportRunAnswerRevisionPreview(batchId: $batchId, rollbackPatch: $rollbackPatch, pushedCommitWarning: $pushedCommitWarning) { id }
+      }`,
+      { batchId, rollbackPatch, pushedCommitWarning },
+    );
+  }
+
+  applyRunAnswerRevision(
+    batchId: string,
+    revisionId: string,
+    replacementAttemptId: string,
+  ) {
+    return this.request<{ applyRunAnswerRevision: { id: string } }>(
+      `mutation ApplyRunAnswerRevision($batchId: ID!, $revisionId: ID!, $replacementAttemptId: ID!) {
+        applyRunAnswerRevision(batchId: $batchId, revisionId: $revisionId, replacementAttemptId: $replacementAttemptId) { id }
+      }`,
+      { batchId, revisionId, replacementAttemptId },
+    );
+  }
+
+  importProviderRuns(provider: string, runs: Array<Record<string, unknown>>) {
+    return this.request<{ importProviderRuns: number }>(
+      `mutation ImportProviderRuns($provider: String!, $runs: [ImportedRunInput!]!) {
+        importProviderRuns(provider: $provider, runs: $runs)
+      }`,
+      { provider, runs },
+    );
+  }
+
+  reportRunProviderImportStatus(
+    provider: string,
+    status: "SYNCING" | "IDLE" | "FAILED",
+    error?: string,
+    catalog?: unknown,
+  ) {
+    return this.request<{ reportRunProviderImportStatus: { id: string } }>(
+      `mutation ReportRunProviderImportStatus($provider: String!, $status: String!, $error: String, $catalog: JSON) {
+        reportRunProviderImportStatus(provider: $provider, status: $status, error: $error, catalog: $catalog) { id }
+      }`,
+      { provider, status, error, catalog },
+    );
+  }
+
+  async downloadRunAttachment(attachment: RunAttachment, destination: string) {
+    const response = await fetch(
+      `${this.server}${attachment.downloadPath.replace("/api/run-attachments/", "/api/agent/run-attachments/")}`,
+      {
+        headers: mergeHeaders(
+          this.headers,
+          this.credential ? { authorization: `Bearer ${this.credential}` } : {},
+        ),
+      },
+    );
+    if (!response.ok || !response.body) {
+      throw new Error(`Attachment download failed: HTTP ${response.status}`);
+    }
+    const { createWriteStream } = await import("node:fs");
+    const { pipeline } = await import("node:stream/promises");
+    await pipeline(
+      Readable.fromWeb(response.body as never),
+      createWriteStream(destination, { mode: 0o600 }),
+    );
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(destination))
+      digest.update(chunk);
+    const information = await stat(destination);
+    if (
+      information.size !== attachment.size ||
+      digest.digest("hex") !== attachment.sha256
+    ) {
+      await rm(destination, { force: true });
+      throw new Error("Attachment checksum verification failed");
+    }
+  }
+
   self() {
     return this.request<{ agentSelf: Record<string, unknown> | null }>(
       `query AgentSelf { agentSelf { id name hostname version connectionStatus lastSeenAt } }`,
@@ -355,6 +656,9 @@ export class AgentGraphQLClient {
         lastFetchedAt: string | null;
         lastFetchAttemptAt: string | null;
         worktrees: Array<{
+          id: string;
+          folder: string;
+          branch: string | null;
           gitDirectory: string;
           baseBranchOverride: string | null;
         }>;
@@ -362,7 +666,7 @@ export class AgentGraphQLClient {
     }>(`query AgentCodebases {
       agentCodebases {
         id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
-        worktrees { gitDirectory baseBranchOverride }
+        worktrees { id folder branch gitDirectory baseBranchOverride }
       }
     }`);
     return data.agentCodebases;
@@ -377,7 +681,7 @@ export class AgentGraphQLClient {
         fetchIntervalSeconds
         codebases {
           id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
-          worktrees { gitDirectory baseBranchOverride }
+          worktrees { id folder branch gitDirectory baseBranchOverride }
         }
       }
     }`);
@@ -476,6 +780,7 @@ export function subscribeToAgentEvents(
           agentEvents(agentId: $agentId) {
             type
             job { id agentId kind payload status timeoutSeconds }
+            runCommand { ${RUN_COMMAND_FIELDS} }
           }
         }`,
         variables: { agentId },

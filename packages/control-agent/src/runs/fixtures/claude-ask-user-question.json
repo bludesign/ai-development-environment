@@ -1,0 +1,24 @@
+{
+  "questions": [
+    {
+      "id": "scope",
+      "header": "Scope",
+      "question": "Which scope should be changed?",
+      "multiSelect": true,
+      "allowCustom": true,
+      "options": [
+        { "label": "API", "description": "Backend API" },
+        { "label": "UI", "description": "Web interface" }
+      ]
+    },
+    {
+      "id": "tests",
+      "header": "Tests",
+      "question": "Add integration tests?",
+      "options": [
+        { "label": "Yes", "description": "Add coverage" },
+        { "label": "No", "description": "Skip coverage" }
+      ]
+    }
+  ]
+}

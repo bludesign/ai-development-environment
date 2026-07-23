@@ -56,6 +56,7 @@ import {
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { isRowActivation } from "@/lib/row-activation";
 import type {
   GitHubActionsRepositoryErrorView,
   GitHubActionsRepositoryView,
@@ -141,17 +142,6 @@ function runDuration(run: GitHubActionsWorkflowRunView) {
   if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
   if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
   return `${seconds}s`;
-}
-
-function shouldToggleRunRow(event: MouseEvent<HTMLTableRowElement>) {
-  if (event.defaultPrevented || event.button !== 0) return false;
-  const target = event.target;
-  if (!(target instanceof Element) || !event.currentTarget.contains(target)) {
-    return false;
-  }
-  return !target.closest(
-    "a, button, input, select, textarea, [role='button'], [role='link'], [role='menuitem']",
-  );
 }
 
 export function ActionsPage() {
@@ -907,7 +897,7 @@ function ActionsTable({
                     <TableRow
                       className="cursor-pointer"
                       onClick={(event) => {
-                        if (shouldToggleRunRow(event)) onToggleRun(run);
+                        if (isRowActivation(event)) onToggleRun(run);
                       }}
                     >
                       <TableCell className="pr-0">

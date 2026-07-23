@@ -23,6 +23,10 @@ export const AGENT_CAPABILITIES = [
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
+  "runs.protocol.v1",
+  "runs.provider.codex",
+  "runs.provider.claude",
+  "runs.provider.opencode",
 ];
 
 export type AgentInventory = {

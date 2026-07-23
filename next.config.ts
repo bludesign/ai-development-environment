@@ -34,6 +34,16 @@ const nextConfig: NextConfig = {
   },
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
   serverExternalPackages: ["@napi-rs/keyring", "pdfkit", "re2-wasm"],
+  turbopack: {
+    // Brand logos ship as SVG files (see @lobehub/icons-static-svg); SVGR turns
+    // them into components so they inherit `currentColor` and Tailwind sizing.
+    rules: {
+      "*.svg": {
+        loaders: ["@svgr/webpack"],
+        as: "*.js",
+      },
+    },
+  },
   async rewrites() {
     return [
       {
