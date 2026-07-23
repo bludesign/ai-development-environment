@@ -12,7 +12,7 @@ describe("useRunLabels", () => {
     expect(t.phase("WAITING_FOR_ANSWER")).toBe("Waiting for answer");
     expect(t.phase("SUPERSEDED_BY_FOLLOW_UP")).toBe("Superseded by follow-up");
     expect(t.phase("PREPARE_ANSWER_REVISION_FAILED")).toBe(
-      "Answer revision preparation failed",
+      "Prepare revision failed",
     );
   });
 

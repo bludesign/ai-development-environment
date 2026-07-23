@@ -49,10 +49,14 @@
     "analyticsEvents": "Analyseereignisse",
     "unifiedEvents": "Einheitliche Ansicht",
     "plans": "Pläne",
+    "plansDescription": "Schreibgeschützte Pläne, die eine Codebasis untersuchen und Arbeit vorschlagen, ohne sie zu ändern.",
     "sessions": "Sitzungen",
+    "sessionsDescription": "Verwaltete Provider-Sitzungen, die gegen einen Worktree laufen.",
     "drafts": "Entwürfe",
+    "draftsDescription": "Gespeicherte Prompts, die du später als Plan oder Sitzung starten kannst.",
     "credentials": "Anmeldedaten",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "costs": "Kosten"
   },
   "runs": {
     "actions": "Aktionen",
@@ -166,9 +170,9 @@
     "pausedFollowUpTitle": "Pausierte Sitzung übertragen",
     "phases": {
       "ANSWER_FAILED": "Antwort fehlgeschlagen",
-      "ANSWER_REVISION_PREPARING": "Antwortkorrektur wird vorbereitet",
-      "ANSWER_REVISION_QUEUED": "Antwortkorrektur in Warteschlange",
-      "ANSWER_REVISION_READY": "Antwortkorrektur bereit",
+      "ANSWER_REVISION_PREPARING": "Korrektur wird vorbereitet",
+      "ANSWER_REVISION_QUEUED": "Korrektur in Warteschlange",
+      "ANSWER_REVISION_READY": "Korrektur bereit",
       "CANCELLED": "Abgebrochen",
       "CANCEL_FAILED": "Abbrechen fehlgeschlagen",
       "CANCEL_REQUESTED": "Abbruch angefordert",
@@ -184,10 +188,10 @@
       "PAUSE_FAILED": "Pausieren fehlgeschlagen",
       "PAUSE_REQUESTED": "Pause angefordert",
       "PLAY_PLAN_FAILED": "Plan-Ausführung fehlgeschlagen",
-      "PREPARE_ANSWER_REVISION_FAILED": "Vorbereitung der Antwortkorrektur fehlgeschlagen",
+      "PREPARE_ANSWER_REVISION_FAILED": "Vorbereitung fehlgeschlagen",
       "QUEUED": "In Warteschlange",
       "RECOVERY_PAUSED": "Nach Wiederherstellung pausiert",
-      "REVISE_ANSWER_FAILED": "Antwortkorrektur fehlgeschlagen",
+      "REVISE_ANSWER_FAILED": "Korrektur fehlgeschlagen",
       "RUNNING": "Läuft",
       "START_FAILED": "Start fehlgeschlagen",
       "STEER_FAILED": "Steuerung fehlgeschlagen",
@@ -201,6 +205,7 @@
     "plans": "Plans",
     "play": "Plan ausführen",
     "presets": "Voreinstellungen",
+    "recentModels": "Zuletzt verwendet",
     "prompt": "Prompt",
     "promptPlaceholder": "Beschreiben Sie, was der Agent tun soll…",
     "prepareRevision": "Wiederherstellung wird vorbereitet…",
@@ -272,7 +277,12 @@
     "usageState": "Nutzung der Versuche",
     "webSearch": "Websuche",
     "webSearchDescription": "Das native Websuchwerkzeug des Anbieters aktivieren, sofern unterstützt.",
-    "worktree": "Arbeitsbaum"
+    "worktree": "Arbeitsbaum",
+    "costSource": "Kostenquelle",
+    "reportedCost": "Vom Anbieter gemeldet",
+    "catalogCost": "Modellkostenkatalog",
+    "pricedByProvider": "berechnet von {source}",
+    "pricedByCatalog": "berechnet aus dem Modellkostenkatalog"
   },
   "notifications": {
     "title": "Benachrichtigungen",
@@ -369,11 +379,32 @@
       "GITHUB_ACTIONS_FAILED": {
         "title": "GitHub Actions fehlgeschlagen",
         "description": "Ein GitHub-Actions-Workflow endet mit einem Fehler."
+      },
+      "RUN_NEEDS_ANSWER": {
+        "title": "Plan oder Sitzung braucht eine Antwort",
+        "description": "Ein verwalteter Plan oder eine Sitzung fragt nach einer Eingabe."
+      },
+      "RUN_COMPLETED": {
+        "title": "Plan oder Sitzung abgeschlossen",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird erfolgreich abgeschlossen."
+      },
+      "RUN_FAILED": {
+        "title": "Plan oder Sitzung fehlgeschlagen",
+        "description": "Ein verwalteter Plan oder eine Sitzung schlägt fehl."
+      },
+      "RUN_CANCELLED": {
+        "title": "Plan oder Sitzung abgebrochen",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird abgebrochen."
+      },
+      "RUN_RECOVERY_PAUSED": {
+        "title": "Plan oder Sitzung nach Wiederherstellung pausiert",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird nach einem Neustart des Agenten pausiert."
       }
     },
     "categories": {
       "BUILDS": "Build-Prozesse",
-      "GITHUB": "GitHub"
+      "GITHUB": "GitHub",
+      "RUNS": "Pläne und Sitzungen"
     }
   },
   "credentialEncryption": {
@@ -3106,5 +3137,34 @@
     "failed": "Fehlgeschlagen",
     "cancelled": "Abgebrochen",
     "timed_out": "Zeitüberschreitung"
+  },
+  "costs": {
+    "title": "Kosten",
+    "description": "Modellpreise zur Schätzung der Kosten von Plänen und Sitzungen.",
+    "sourceTitle": "Preiskatalog",
+    "sourceDescription": "Woher die Modellpreise geladen werden. Leer lassen, um den Standardkatalog zu verwenden. Preise werden einmal täglich automatisch aktualisiert.",
+    "catalogUrl": "URL für Modellkosten",
+    "save": "Speichern",
+    "useDefault": "Standard verwenden",
+    "fetchLatest": "Aktuelle Daten laden",
+    "lastFetched": "Zuletzt geladen",
+    "never": "Nie",
+    "modelCount": "{count, plural, =0 {Keine Modelle} one {# Modell} other {# Modelle}}",
+    "customSource": "Eigene Quelle",
+    "defaultSource": "Standardquelle",
+    "staleCatalog": "Aktualisierung fällig",
+    "lastFetchFailed": "Der letzte Abruf ist fehlgeschlagen: {error}",
+    "modelsTitle": "Modellpreise",
+    "modelsDescription": "Preise pro Million Token, wie vom Katalog veröffentlicht.",
+    "searchModels": "Modelle suchen",
+    "model": "Modell",
+    "provider": "Anbieter",
+    "inputPrice": "Eingabe / MTok",
+    "outputPrice": "Ausgabe / MTok",
+    "cacheReadPrice": "Cache-Lesen / MTok",
+    "cacheWritePrice": "Cache-Schreiben / MTok",
+    "contextWindow": "Kontext",
+    "noModels": "Keine passenden Modelle gefunden.",
+    "showingCount": "Mehr laden ({shown} von {total})"
   }
 }

@@ -49,10 +49,14 @@
     "analyticsEvents": "Analytics Events",
     "unifiedEvents": "Unified View",
     "plans": "Plans",
+    "plansDescription": "Read-only Plans that survey a codebase and propose work without changing it.",
     "sessions": "Sessions",
+    "sessionsDescription": "Managed provider Sessions that run against a worktree.",
     "drafts": "Drafts",
+    "draftsDescription": "Saved prompts you can start as a Plan or Session later.",
     "credentials": "Credentials",
-    "settings": "Settings"
+    "settings": "Settings",
+    "costs": "Costs"
   },
   "runs": {
     "actions": "Actions",
@@ -166,9 +170,9 @@
     "pausedFollowUpTitle": "Transfer paused Session",
     "phases": {
       "ANSWER_FAILED": "Answer failed",
-      "ANSWER_REVISION_PREPARING": "Preparing answer revision",
-      "ANSWER_REVISION_QUEUED": "Answer revision queued",
-      "ANSWER_REVISION_READY": "Answer revision ready",
+      "ANSWER_REVISION_PREPARING": "Preparing revision",
+      "ANSWER_REVISION_QUEUED": "Revision queued",
+      "ANSWER_REVISION_READY": "Revision ready",
       "CANCELLED": "Cancelled",
       "CANCEL_FAILED": "Cancel failed",
       "CANCEL_REQUESTED": "Cancel requested",
@@ -184,10 +188,10 @@
       "PAUSE_FAILED": "Pause failed",
       "PAUSE_REQUESTED": "Pause requested",
       "PLAY_PLAN_FAILED": "Plan run failed",
-      "PREPARE_ANSWER_REVISION_FAILED": "Answer revision preparation failed",
+      "PREPARE_ANSWER_REVISION_FAILED": "Prepare revision failed",
       "QUEUED": "Queued",
       "RECOVERY_PAUSED": "Paused after recovery",
-      "REVISE_ANSWER_FAILED": "Answer revision failed",
+      "REVISE_ANSWER_FAILED": "Revision failed",
       "RUNNING": "Running",
       "START_FAILED": "Start failed",
       "STEER_FAILED": "Steer failed",
@@ -201,6 +205,7 @@
     "plans": "Plans",
     "play": "Run Plan",
     "presets": "Presets",
+    "recentModels": "Recent",
     "prompt": "Prompt",
     "promptPlaceholder": "Describe what the agent should do…",
     "prepareRevision": "Preparing rollback…",
@@ -272,7 +277,12 @@
     "usageState": "Attempt usage",
     "webSearch": "Web search",
     "webSearchDescription": "Enable the provider's native web-search tool when supported.",
-    "worktree": "Worktree"
+    "worktree": "Worktree",
+    "costSource": "Cost source",
+    "reportedCost": "Reported by provider",
+    "catalogCost": "Model cost catalog",
+    "pricedByProvider": "priced by {source}",
+    "pricedByCatalog": "priced from the model cost catalog"
   },
   "notifications": {
     "title": "Notifications",
@@ -369,11 +379,32 @@
       "GITHUB_ACTIONS_FAILED": {
         "title": "GitHub Actions failed",
         "description": "A GitHub Actions workflow finishes with a failure."
+      },
+      "RUN_NEEDS_ANSWER": {
+        "title": "Plan or session needs an answer",
+        "description": "A managed plan or session asks for user input."
+      },
+      "RUN_COMPLETED": {
+        "title": "Plan or session completed",
+        "description": "A managed plan or session completes successfully."
+      },
+      "RUN_FAILED": {
+        "title": "Plan or session failed",
+        "description": "A managed plan or session fails."
+      },
+      "RUN_CANCELLED": {
+        "title": "Plan or session cancelled",
+        "description": "A managed plan or session is cancelled."
+      },
+      "RUN_RECOVERY_PAUSED": {
+        "title": "Plan or session paused after recovery",
+        "description": "A managed plan or session is paused after its agent restarts."
       }
     },
     "categories": {
       "BUILDS": "Builds",
-      "GITHUB": "GitHub"
+      "GITHUB": "GitHub",
+      "RUNS": "Plans and Sessions"
     }
   },
   "credentialEncryption": {
@@ -3106,5 +3137,34 @@
     "failed": "Failed",
     "cancelled": "Cancelled",
     "timed_out": "Timed out"
+  },
+  "costs": {
+    "title": "Costs",
+    "description": "Model prices used to estimate what Plans and Sessions cost.",
+    "sourceTitle": "Price catalog",
+    "sourceDescription": "Where model prices are fetched from. Leave the field empty to use the default catalog. Prices refresh automatically once a day.",
+    "catalogUrl": "Model cost URL",
+    "save": "Save",
+    "useDefault": "Use default",
+    "fetchLatest": "Fetch latest",
+    "lastFetched": "Last fetched",
+    "never": "Never",
+    "modelCount": "{count, plural, =0 {No models} one {# model} other {# models}}",
+    "customSource": "Custom source",
+    "defaultSource": "Default source",
+    "staleCatalog": "Refresh due",
+    "lastFetchFailed": "The last fetch failed: {error}",
+    "modelsTitle": "Model prices",
+    "modelsDescription": "Prices per million tokens, as published by the catalog.",
+    "searchModels": "Search models",
+    "model": "Model",
+    "provider": "Provider",
+    "inputPrice": "Input / MTok",
+    "outputPrice": "Output / MTok",
+    "cacheReadPrice": "Cache read / MTok",
+    "cacheWritePrice": "Cache write / MTok",
+    "contextWindow": "Context",
+    "noModels": "No matching models were found.",
+    "showingCount": "Load more ({shown} of {total})"
   }
 }

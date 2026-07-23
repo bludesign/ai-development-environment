@@ -53,6 +53,8 @@ export type AgentRunView = RunLinkView & {
   estimatedCost: number | null;
   pricingSource: string | null;
   pricingUpdatedAt: string | null;
+  /** Priced from the model cost catalog, whatever the provider reported. */
+  catalogCost: number | null;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -89,6 +91,7 @@ export type AgentRunView = RunLinkView & {
     cacheReadTokens: number;
     cacheWriteTokens: number;
     estimatedCost: number | null;
+    catalogCost: number | null;
     superseded: boolean;
   }>;
   toolCalls: Array<{

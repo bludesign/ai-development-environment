@@ -22,6 +22,12 @@ const recentLimit = 6;
  */
 export const modelPresetRailLimit = 6;
 
+/**
+ * The palette's recents list is shorter than the store keeps, so the group
+ * stays a glance rather than a second catalog under the pinned one.
+ */
+export const modelPresetRecentLimit = 5;
+
 type PresetStore = { pinned: ModelPreset[]; recent: ModelPreset[] };
 
 export function modelPresetKey({ provider, model, effort }: ModelPreset) {
@@ -124,13 +130,12 @@ export function useModelPresets() {
   );
   const isPinned = (preset: ModelPreset) =>
     store.pinned.some((entry) => sameModelPreset(entry, preset));
+  const recent = store.recent.filter((entry) => !isPinned(entry));
   return {
     isPinned,
     pinned: store.pinned,
-    rail: [
-      ...store.pinned,
-      ...store.recent.filter((entry) => !isPinned(entry)),
-    ],
+    recent,
+    rail: [...store.pinned, ...recent],
     togglePin: (preset: ModelPreset) =>
       save({
         pinned: isPinned(preset)

@@ -72,6 +72,7 @@ const failedRun: AgentRunView = {
   estimatedCost: null,
   pricingSource: null,
   pricingUpdatedAt: null,
+  catalogCost: null,
   inputTokens: 0,
   outputTokens: 0,
   reasoningTokens: 0,

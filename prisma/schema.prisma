@@ -502,6 +502,36 @@ model RunModelUsage {
   @@index([runId, model])
 }
 
+/// Where the model price catalog is fetched from, and when it last landed. One row.
+model ModelCostSettings {
+  id         String    @id
+  catalogUrl String?
+  fetchedAt  DateTime?
+  sourceUrl  String?
+  entryCount Int       @default(0)
+  error      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+/// One model's published prices, in cost per token as the upstream catalog states them.
+/// Prices are shown per million tokens, but storing the upstream unit keeps the rounding
+/// out of the stored value.
+model ModelCostEntry {
+  model                  String   @id
+  provider               String?
+  mode                   String?
+  inputCostPerToken      Float?
+  outputCostPerToken     Float?
+  cacheReadCostPerToken  Float?
+  cacheWriteCostPerToken Float?
+  maxInputTokens         Int?
+  maxOutputTokens        Int?
+  updatedAt              DateTime @updatedAt
+
+  @@index([provider])
+}
+
 model RunQuestionBatch {
   id                  String              @id
   runId               String

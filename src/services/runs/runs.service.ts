@@ -1320,6 +1320,12 @@ export class RunsService {
           data: { worktreeId: batch.run.worktreeId, runId: batch.runId },
         });
       }
+      /**
+       * Preparing a revision only computes the rollback preview the editor
+       * shows; the reader may close it without revising. The run's own phase
+       * therefore stays where it was, and only `reviseAnswer` — the button
+       * that actually starts the replacement Session — moves it.
+       */
       await transaction.runQuestionBatch.update({
         where: { id: batchId },
         data: {
@@ -1327,10 +1333,6 @@ export class RunsService {
           rollbackPatch: null,
           pushedCommitWarning: null,
         },
-      });
-      await transaction.agentRun.update({
-        where: { id: batch.runId },
-        data: { phase: "ANSWER_REVISION_PREPARING" },
       });
       const command = await enqueueCommand(transaction, {
         runId: batch.runId,
@@ -2121,10 +2123,11 @@ export class RunsService {
         answerRevisions: { orderBy: { revision: "asc" } },
       },
     });
-    await prisma.agentRun.update({
-      where: { id: batch.runId },
-      data: { status: "PAUSED", phase: "ANSWER_REVISION_READY" },
-    });
+    /**
+     * The preview landing is not a decision — it only fills the editor the
+     * reader opened — so the run keeps the status and phase it already had
+     * until `reviseAnswer` supersedes it.
+     */
     publishRun(batch.runId);
     agentEventBus.publish(runQuestionTopic(batch.runId), {
       runQuestionChanged: { id: batchId, runId: batch.runId },

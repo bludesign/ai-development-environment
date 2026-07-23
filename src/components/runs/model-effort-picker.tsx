@@ -31,6 +31,7 @@ import { EffortIcon } from "./effort-icon";
 import {
   modelPresetKey,
   modelPresetRailLimit,
+  modelPresetRecentLimit,
   sameModelPreset,
   useModelPresets,
   type ModelPreset,
@@ -204,7 +205,8 @@ export function ModelEffortPicker({
   isProviderDisabled?: (entry: ProviderCatalogEntry) => boolean;
 }) {
   const t = useTranslations("runs");
-  const { rail, pinned, isPinned, togglePin, remember } = useModelPresets();
+  const { rail, pinned, recent, isPinned, togglePin, remember } =
+    useModelPresets();
   const [open, setOpen] = useState(false);
 
   const providers = [...catalog].sort((left, right) => {
@@ -242,6 +244,12 @@ export function ModelEffortPicker({
     ({ preset }) => !selection || !sameModelPreset(preset, selection),
   );
   const pinnedPresets = resolve(pinned);
+  /**
+   * Pinning removes a preset from recents, so the two groups never repeat a
+   * row — which also keeps the palette's values unique, as the primitive's
+   * filtering requires.
+   */
+  const recentPresets = resolve(recent).slice(0, modelPresetRecentLimit);
 
   const apply = (preset: ModelPreset) => {
     if (preset.provider !== provider) onProviderChange(preset.provider);
@@ -264,6 +272,32 @@ export function ModelEffortPicker({
     onEffortChange(value);
     if (selection) remember({ ...selection, effort: value });
   };
+
+  const presetRow = ({
+    preset,
+    entry,
+    model: preseted,
+  }: (typeof pinnedPresets)[number]) => (
+    <CommandItem
+      className={checkedRow}
+      data-checked={Boolean(selection && sameModelPreset(preset, selection))}
+      key={modelPresetKey(preset)}
+      onSelect={() => choose(preset)}
+      value={`${entry.label} ${preseted.label} ${preseted.id} ${preset.effort}`}
+    >
+      <ProviderIcon provider={entry.key} />
+      <span className="min-w-0 flex-1 truncate">
+        <ModelLabel label={preseted.label} />
+      </span>
+      <span
+        className="flex items-center gap-1.5 text-muted-foreground"
+        data-slot="command-shortcut"
+      >
+        <EffortIcon effort={preset.effort} efforts={preseted.efforts} />
+        <span className="text-xs">{preset.effort}</span>
+      </span>
+    </CommandItem>
+  );
 
   const shown = railPresets.slice(0, modelPresetRailLimit);
   const { railRef, visible } = useRailFit(
@@ -350,32 +384,12 @@ export function ModelEffortPicker({
               <CommandEmpty>{t("empty", { kind: t("model") })}</CommandEmpty>
               {pinnedPresets.length > 0 && (
                 <CommandGroup heading={t("presets")}>
-                  {pinnedPresets.map(({ preset, entry, model: preseted }) => (
-                    <CommandItem
-                      className={checkedRow}
-                      data-checked={Boolean(
-                        selection && sameModelPreset(preset, selection),
-                      )}
-                      key={modelPresetKey(preset)}
-                      onSelect={() => choose(preset)}
-                      value={`${entry.label} ${preseted.label} ${preseted.id} ${preset.effort}`}
-                    >
-                      <ProviderIcon provider={entry.key} />
-                      <span className="min-w-0 flex-1 truncate">
-                        <ModelLabel label={preseted.label} />
-                      </span>
-                      <span
-                        className="flex items-center gap-1.5 text-muted-foreground"
-                        data-slot="command-shortcut"
-                      >
-                        <EffortIcon
-                          effort={preset.effort}
-                          efforts={preseted.efforts}
-                        />
-                        <span className="text-xs">{preset.effort}</span>
-                      </span>
-                    </CommandItem>
-                  ))}
+                  {pinnedPresets.map(presetRow)}
+                </CommandGroup>
+              )}
+              {recentPresets.length > 0 && (
+                <CommandGroup heading={t("recentModels")}>
+                  {recentPresets.map(presetRow)}
                 </CommandGroup>
               )}
               {providers.flatMap((entry) =>

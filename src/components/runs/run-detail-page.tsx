@@ -372,13 +372,9 @@ function QuestionBatch({
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                {batch.status === "PENDING" ? (
-                  <>
-                    <CircleHelp /> {t("answerNeeded")}
-                  </>
-                ) : (
-                  t("answeredQuestions")
-                )}
+                {batch.status === "PENDING"
+                  ? t("answerNeeded")
+                  : t("answeredQuestions")}
               </CardTitle>
               <CardDescription>
                 <DateTime value={batch.createdAt} />
@@ -483,9 +479,16 @@ function QuestionBatch({
           {rollback && (
             <div className="space-y-2">
               <Label>{t("rollbackDiff")}</Label>
-              <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-                {batch.rollbackPatch || t("noRollbackChanges")}
-              </pre>
+              {batch.rollbackPatch ? (
+                <ExpandablePatchView
+                  className="max-h-64 overflow-y-auto"
+                  patch={batch.rollbackPatch}
+                />
+              ) : (
+                <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+                  {t("noRollbackChanges")}
+                </p>
+              )}
             </div>
           )}
           <div className="space-y-5">{answerEditor}</div>
@@ -526,6 +529,9 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [expandedRaw, setExpandedRaw] = useState<Set<string>>(new Set());
   const [promptRaw, setPromptRaw] = useState(false);
   const [outputRaw, setOutputRaw] = useState(false);
+  const [costSource, setCostSource] = useState<"REPORTED" | "CATALOG">(
+    "REPORTED",
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -947,18 +953,33 @@ export function RunDetailPage({ runId }: { runId: string }) {
     .find(({ diffPatch }) => diffPatch)?.diffPatch;
   const followCatalog = catalog.find(({ key }) => key === followProvider);
   const runCatalog = catalog.find(({ key }) => key === run.provider);
+  /**
+   * The provider's own figure leads, because it is the one that will appear on
+   * a bill. The catalog fills in where the provider reported nothing — which is
+   * why it exists — and can be selected outright to price every run the same
+   * way regardless of which tool ran it.
+   */
+  const pickCost = (reported: number | null, catalog: number | null) =>
+    costSource === "CATALOG" ? catalog : (reported ?? catalog);
+  const totalCost = pickCost(run.estimatedCost, run.catalogCost);
+  const pricedFromCatalog =
+    totalCost !== null &&
+    (costSource === "CATALOG" || run.estimatedCost === null);
   const usageBreakdown = [false, true].map((superseded) =>
     run.modelUsage
       .filter((usage) => usage.superseded === superseded)
       .reduce(
-        (total, usage) => ({
-          input: total.input + usage.inputTokens,
-          output: total.output + usage.outputTokens,
-          cache: total.cache + usage.cacheReadTokens + usage.cacheWriteTokens,
-          cost: total.cost + (usage.estimatedCost ?? 0),
-          priced: total.priced || usage.estimatedCost !== null,
-          superseded,
-        }),
+        (total, usage) => {
+          const cost = pickCost(usage.estimatedCost, usage.catalogCost);
+          return {
+            input: total.input + usage.inputTokens,
+            output: total.output + usage.outputTokens,
+            cache: total.cache + usage.cacheReadTokens + usage.cacheWriteTokens,
+            cost: total.cost + (cost ?? 0),
+            priced: total.priced || cost !== null,
+            superseded,
+          };
+        },
         { input: 0, output: 0, cache: 0, cost: 0, priced: false, superseded },
       ),
   );
@@ -1110,6 +1131,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
           <div className="flex items-center justify-between gap-3">
             <CardTitle>{t("prompt")}</CardTitle>
             <MarkdownActions
+              copy
               onRawChange={setPromptRaw}
               raw={promptRaw}
               value={run.initialPrompt}
@@ -1136,32 +1158,47 @@ export function RunDetailPage({ runId }: { runId: string }) {
           ) : null}
         </CardContent>
       </Card>
-      {run.questionBatches.map((batch) => (
-        <QuestionBatch
-          batch={batch}
-          editable={
-            run.origin === "MANAGED" &&
-            !batch.supersededAt &&
-            Boolean(batch.checkpoint)
-          }
-          key={batch.id}
-          onAnswered={refresh}
-        />
-      ))}
-
       <Card>
         <CardHeader>
-          <CardTitle>{t("usageCost")}</CardTitle>
-          <CardDescription>{t("estimatedCost")}</CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>{t("usageCost")}</CardTitle>
+              <CardDescription>
+                {t("estimatedCost")}
+                {totalCost !== null && (
+                  <>
+                    {" · "}
+                    {pricedFromCatalog
+                      ? t("pricedByCatalog")
+                      : t("pricedByProvider", {
+                          source: run.pricingSource ?? run.provider,
+                        })}
+                  </>
+                )}
+              </CardDescription>
+            </div>
+            <Select
+              onValueChange={(value) =>
+                setCostSource(value === "CATALOG" ? "CATALOG" : "REPORTED")
+              }
+              value={costSource}
+            >
+              <SelectTrigger aria-label={t("costSource")} className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="REPORTED">{t("reportedCost")}</SelectItem>
+                <SelectItem value="CATALOG">{t("catalogCost")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               [
                 t("totalCost"),
-                run.estimatedCost === null
-                  ? "—"
-                  : `≈${currency.format(run.estimatedCost)}`,
+                totalCost === null ? "—" : `≈${currency.format(totalCost)}`,
               ],
               [t("inputTokens"), run.inputTokens.toLocaleString(locale)],
               [t("outputTokens"), run.outputTokens.toLocaleString(locale)],
@@ -1247,9 +1284,15 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       ).toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
-                      {usage.estimatedCost === null
-                        ? "—"
-                        : `≈${currency.format(usage.estimatedCost)}`}
+                      {(() => {
+                        const cost = pickCost(
+                          usage.estimatedCost,
+                          usage.catalogCost,
+                        );
+                        return cost === null
+                          ? "—"
+                          : `≈${currency.format(cost)}`;
+                      })()}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1323,7 +1366,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     <Download /> {t("export")}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="w-72">
                   <DropdownMenuItem
                     onClick={() =>
                       void exportActivity("json").catch((value) =>
@@ -1443,9 +1486,19 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       <TableCell className="h-8 max-w-0 py-1 text-xs">
                         <span className="block truncate">{event.summary}</span>
                       </TableCell>
-                      <TableCell className="h-8 py-1">
-                        <Badge className="h-5 text-[10px]" variant="outline">
-                          {labels.eventType(event.type)}
+                      {/*
+                       * `table-fixed` sizes the column but does not clip it, so
+                       * a long event type would otherwise run the badge under
+                       * the age beside it. The cell clips and the badge yields.
+                       */}
+                      <TableCell className="h-8 overflow-hidden py-1">
+                        <Badge
+                          className="h-5 max-w-full text-[10px]"
+                          variant="outline"
+                        >
+                          <span className="min-w-0 truncate">
+                            {labels.eventType(event.type)}
+                          </span>
                         </Badge>
                       </TableCell>
                       <TableCell className="h-8 py-1">
@@ -1572,6 +1625,19 @@ export function RunDetailPage({ runId }: { runId: string }) {
           </Card>
         )}
 
+      {run.questionBatches.map((batch) => (
+        <QuestionBatch
+          batch={batch}
+          editable={
+            run.origin === "MANAGED" &&
+            !batch.supersededAt &&
+            Boolean(batch.checkpoint)
+          }
+          key={batch.id}
+          onAnswered={refresh}
+        />
+      ))}
+
       <Card>
         <CardHeader>
           <CardTitle>{t("followUp")}</CardTitle>
@@ -1663,8 +1729,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
             }
             uploading={busy === "upload"}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="ml-auto flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-4">
+            <label className="flex items-center gap-2">
               <Checkbox
                 checked={followWebSearch}
                 disabled={!followCatalog?.supportsWebSearch}
@@ -1672,8 +1738,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
               />
               {t("webSearch")}
             </label>
-          </div>
-          <div className="flex justify-end">
             <Button
               disabled={
                 !followPrompt.trim() ||

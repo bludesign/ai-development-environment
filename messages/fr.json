@@ -49,10 +49,14 @@
     "analyticsEvents": "Événements analytiques",
     "unifiedEvents": "Vue unifiée",
     "plans": "Plans",
+    "plansDescription": "Plans en lecture seule qui analysent une base de code et proposent du travail sans la modifier.",
     "sessions": "Sessions",
+    "sessionsDescription": "Sessions de fournisseur gérées qui s’exécutent sur un worktree.",
     "drafts": "Brouillons",
+    "draftsDescription": "Prompts enregistrés que vous pouvez lancer plus tard comme plan ou session.",
     "credentials": "Identifiants",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "costs": "Coûts"
   },
   "runs": {
     "actions": "Opérations",
@@ -166,9 +170,9 @@
     "pausedFollowUpTitle": "Transférer la Session en pause",
     "phases": {
       "ANSWER_FAILED": "Échec de la réponse",
-      "ANSWER_REVISION_PREPARING": "Préparation de la révision de la réponse",
-      "ANSWER_REVISION_QUEUED": "Révision de la réponse en file d’attente",
-      "ANSWER_REVISION_READY": "Révision de la réponse prête",
+      "ANSWER_REVISION_PREPARING": "Préparation de la révision",
+      "ANSWER_REVISION_QUEUED": "Révision en file d’attente",
+      "ANSWER_REVISION_READY": "Révision prête",
       "CANCELLED": "Annulé",
       "CANCEL_FAILED": "Échec de l’annulation",
       "CANCEL_REQUESTED": "Annulation demandée",
@@ -184,10 +188,10 @@
       "PAUSE_FAILED": "Échec de la mise en pause",
       "PAUSE_REQUESTED": "Pause demandée",
       "PLAY_PLAN_FAILED": "Échec de l’exécution du Plan",
-      "PREPARE_ANSWER_REVISION_FAILED": "Échec de la préparation de la révision de la réponse",
+      "PREPARE_ANSWER_REVISION_FAILED": "Échec de la préparation",
       "QUEUED": "En file d’attente",
       "RECOVERY_PAUSED": "En pause après récupération",
-      "REVISE_ANSWER_FAILED": "Échec de la révision de la réponse",
+      "REVISE_ANSWER_FAILED": "Échec de la révision",
       "RUNNING": "En cours d’exécution",
       "START_FAILED": "Échec du démarrage",
       "STEER_FAILED": "Échec du pilotage",
@@ -201,6 +205,7 @@
     "plans": "Plans de travail",
     "play": "Exécuter le Plan",
     "presets": "Préréglages",
+    "recentModels": "Récents",
     "prompt": "Consigne",
     "promptPlaceholder": "Décrivez ce que l’agent doit faire…",
     "prepareRevision": "Préparation du retour arrière…",
@@ -272,7 +277,12 @@
     "usageState": "Utilisation par tentative",
     "webSearch": "Recherche web",
     "webSearchDescription": "Activer l’outil de recherche web natif du fournisseur lorsqu’il est pris en charge.",
-    "worktree": "Arborescence"
+    "worktree": "Arborescence",
+    "costSource": "Source du coût",
+    "reportedCost": "Communiqué par le fournisseur",
+    "catalogCost": "Catalogue des coûts de modèles",
+    "pricedByProvider": "calculé par {source}",
+    "pricedByCatalog": "calculé à partir du catalogue des coûts de modèles"
   },
   "notifications": {
     "title": "Notifications",
@@ -369,11 +379,32 @@
       "GITHUB_ACTIONS_FAILED": {
         "title": "Échec de GitHub Actions",
         "description": "Un workflow GitHub Actions se termine avec une erreur."
+      },
+      "RUN_NEEDS_ANSWER": {
+        "title": "Le plan ou la session attend une réponse",
+        "description": "Un plan ou une session gérée demande une saisie de l’utilisateur."
+      },
+      "RUN_COMPLETED": {
+        "title": "Plan ou session terminée",
+        "description": "Un plan ou une session gérée se termine avec succès."
+      },
+      "RUN_FAILED": {
+        "title": "Plan ou session en échec",
+        "description": "Un plan ou une session gérée échoue."
+      },
+      "RUN_CANCELLED": {
+        "title": "Plan ou session annulée",
+        "description": "Un plan ou une session gérée est annulée."
+      },
+      "RUN_RECOVERY_PAUSED": {
+        "title": "Plan ou session en pause après récupération",
+        "description": "Un plan ou une session gérée est mise en pause après le redémarrage de son agent."
       }
     },
     "categories": {
       "BUILDS": "Builds",
-      "GITHUB": "GitHub"
+      "GITHUB": "GitHub",
+      "RUNS": "Plans et sessions"
     }
   },
   "credentialEncryption": {
@@ -3106,5 +3137,34 @@
     "failed": "Échouée",
     "cancelled": "Annulée",
     "timed_out": "Délai dépassé"
+  },
+  "costs": {
+    "title": "Coûts",
+    "description": "Prix des modèles utilisés pour estimer le coût des plans et des sessions.",
+    "sourceTitle": "Catalogue de prix",
+    "sourceDescription": "D’où proviennent les prix des modèles. Laissez le champ vide pour utiliser le catalogue par défaut. Les prix sont actualisés automatiquement une fois par jour.",
+    "catalogUrl": "URL des coûts de modèles",
+    "save": "Enregistrer",
+    "useDefault": "Utiliser la valeur par défaut",
+    "fetchLatest": "Récupérer les dernières données",
+    "lastFetched": "Dernière récupération",
+    "never": "Jamais",
+    "modelCount": "{count, plural, =0 {Aucun modèle} one {# modèle} other {# modèles}}",
+    "customSource": "Source personnalisée",
+    "defaultSource": "Source par défaut",
+    "staleCatalog": "Actualisation à faire",
+    "lastFetchFailed": "La dernière récupération a échoué : {error}",
+    "modelsTitle": "Prix des modèles",
+    "modelsDescription": "Prix par million de tokens, tels que publiés par le catalogue.",
+    "searchModels": "Rechercher des modèles",
+    "model": "Modèle",
+    "provider": "Fournisseur",
+    "inputPrice": "Entrée / MTok",
+    "outputPrice": "Sortie / MTok",
+    "cacheReadPrice": "Lecture de cache / MTok",
+    "cacheWritePrice": "Écriture de cache / MTok",
+    "contextWindow": "Contexte",
+    "noModels": "Aucun modèle correspondant n’a été trouvé.",
+    "showingCount": "Charger plus ({shown} sur {total})"
   }
 }

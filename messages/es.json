@@ -49,10 +49,14 @@
     "analyticsEvents": "Eventos analíticos",
     "unifiedEvents": "Vista unificada",
     "plans": "Planes",
+    "plansDescription": "Planes de solo lectura que analizan un código y proponen trabajo sin modificarlo.",
     "sessions": "Sesiones",
+    "sessionsDescription": "Sesiones gestionadas del proveedor que se ejecutan sobre un worktree.",
     "drafts": "Borradores",
+    "draftsDescription": "Prompts guardados que puedes iniciar más tarde como plan o sesión.",
     "credentials": "Credenciales",
-    "settings": "Configuración"
+    "settings": "Configuración",
+    "costs": "Costes"
   },
   "runs": {
     "actions": "Acciones",
@@ -166,9 +170,9 @@
     "pausedFollowUpTitle": "Transferir sesión pausada",
     "phases": {
       "ANSWER_FAILED": "Error al responder",
-      "ANSWER_REVISION_PREPARING": "Preparando la revisión de la respuesta",
-      "ANSWER_REVISION_QUEUED": "Revisión de la respuesta en cola",
-      "ANSWER_REVISION_READY": "Revisión de la respuesta lista",
+      "ANSWER_REVISION_PREPARING": "Preparando revisión",
+      "ANSWER_REVISION_QUEUED": "Revisión en cola",
+      "ANSWER_REVISION_READY": "Revisión lista",
       "CANCELLED": "Cancelado",
       "CANCEL_FAILED": "Error al cancelar",
       "CANCEL_REQUESTED": "Cancelación solicitada",
@@ -184,10 +188,10 @@
       "PAUSE_FAILED": "Error al pausar",
       "PAUSE_REQUESTED": "Pausa solicitada",
       "PLAY_PLAN_FAILED": "Error al ejecutar el plan",
-      "PREPARE_ANSWER_REVISION_FAILED": "Error al preparar la revisión de la respuesta",
+      "PREPARE_ANSWER_REVISION_FAILED": "Error al preparar la revisión",
       "QUEUED": "En cola",
       "RECOVERY_PAUSED": "Pausado tras la recuperación",
-      "REVISE_ANSWER_FAILED": "Error en la revisión de la respuesta",
+      "REVISE_ANSWER_FAILED": "Error en la revisión",
       "RUNNING": "En ejecución",
       "START_FAILED": "Error al iniciar",
       "STEER_FAILED": "Error al guiar",
@@ -201,6 +205,7 @@
     "plans": "Planes",
     "play": "Ejecutar plan",
     "presets": "Preajustes",
+    "recentModels": "Recientes",
     "prompt": "Prompt",
     "promptPlaceholder": "Describe lo que debe hacer el agente…",
     "prepareRevision": "Preparando la reversión…",
@@ -272,7 +277,12 @@
     "usageState": "Uso de los intentos",
     "webSearch": "Búsqueda web",
     "webSearchDescription": "Activa la herramienta nativa de búsqueda web del proveedor cuando sea compatible.",
-    "worktree": "Árbol de trabajo"
+    "worktree": "Árbol de trabajo",
+    "costSource": "Fuente del coste",
+    "reportedCost": "Informado por el proveedor",
+    "catalogCost": "Catálogo de costes de modelos",
+    "pricedByProvider": "calculado por {source}",
+    "pricedByCatalog": "calculado con el catálogo de costes de modelos"
   },
   "notifications": {
     "title": "Notificaciones",
@@ -369,11 +379,32 @@
       "GITHUB_ACTIONS_FAILED": {
         "title": "Error en GitHub Actions",
         "description": "Un flujo de GitHub Actions termina con un error."
+      },
+      "RUN_NEEDS_ANSWER": {
+        "title": "El plan o la sesión necesita una respuesta",
+        "description": "Un plan o una sesión gestionada solicita datos al usuario."
+      },
+      "RUN_COMPLETED": {
+        "title": "Plan o sesión completada",
+        "description": "Un plan o una sesión gestionada se completa correctamente."
+      },
+      "RUN_FAILED": {
+        "title": "Plan o sesión fallida",
+        "description": "Un plan o una sesión gestionada falla."
+      },
+      "RUN_CANCELLED": {
+        "title": "Plan o sesión cancelada",
+        "description": "Un plan o una sesión gestionada se cancela."
+      },
+      "RUN_RECOVERY_PAUSED": {
+        "title": "Plan o sesión en pausa tras la recuperación",
+        "description": "Un plan o una sesión gestionada se pausa tras reiniciarse su agente."
       }
     },
     "categories": {
       "BUILDS": "Compilaciones",
-      "GITHUB": "GitHub"
+      "GITHUB": "GitHub",
+      "RUNS": "Planes y sesiones"
     }
   },
   "credentialEncryption": {
@@ -3106,5 +3137,34 @@
     "failed": "Fallido",
     "cancelled": "Cancelado",
     "timed_out": "Tiempo agotado"
+  },
+  "costs": {
+    "title": "Costes",
+    "description": "Precios de modelos usados para estimar el coste de los planes y las sesiones.",
+    "sourceTitle": "Catálogo de precios",
+    "sourceDescription": "De dónde se obtienen los precios de los modelos. Deja el campo vacío para usar el catálogo predeterminado. Los precios se actualizan automáticamente una vez al día.",
+    "catalogUrl": "URL de costes de modelos",
+    "save": "Guardar",
+    "useDefault": "Usar el predeterminado",
+    "fetchLatest": "Obtener lo último",
+    "lastFetched": "Última obtención",
+    "never": "Nunca",
+    "modelCount": "{count, plural, =0 {Sin modelos} one {# modelo} other {# modelos}}",
+    "customSource": "Fuente personalizada",
+    "defaultSource": "Fuente predeterminada",
+    "staleCatalog": "Actualización pendiente",
+    "lastFetchFailed": "La última obtención falló: {error}",
+    "modelsTitle": "Precios de modelos",
+    "modelsDescription": "Precios por millón de tokens, según los publica el catálogo.",
+    "searchModels": "Buscar modelos",
+    "model": "Modelo",
+    "provider": "Proveedor",
+    "inputPrice": "Entrada / MTok",
+    "outputPrice": "Salida / MTok",
+    "cacheReadPrice": "Lectura de caché / MTok",
+    "cacheWritePrice": "Escritura de caché / MTok",
+    "contextWindow": "Contexto",
+    "noModels": "No se encontraron modelos coincidentes.",
+    "showingCount": "Cargar más ({shown} de {total})"
   }
 }

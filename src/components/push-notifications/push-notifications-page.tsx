@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  BellRing,
-  Check,
-  ChevronDown,
-  History,
-  Save,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { Check, ChevronDown, History, Save, Send, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -589,9 +581,7 @@ export function PushNotificationsPage() {
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <BellRing /> {t("title")}
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
       </div>
       {error && (

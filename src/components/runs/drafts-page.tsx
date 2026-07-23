@@ -23,7 +23,7 @@ import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
@@ -186,26 +186,31 @@ export function DraftsPage() {
     );
 
   return (
-    <div className="space-y-4">
+    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t("drafts")}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("draftsDescription")}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => setEditMode((value) => !value)}
+            variant="outline"
+          >
+            <FilePenLine /> {editMode ? t("done") : t("edit")}
+          </Button>
+          <Button asChild>
+            <Link href="/runs/new">
+              <Plus /> {t("newDraft")}
+            </Link>
+          </Button>
+        </div>
+      </div>
       <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>{t("drafts")}</CardTitle>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => setEditMode((value) => !value)}
-                variant="outline"
-              >
-                <FilePenLine /> {editMode ? t("done") : t("edit")}
-              </Button>
-              <Button asChild>
-                <Link href="/runs/new">
-                  <Plus /> {t("newDraft")}
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative w-full md:mr-auto md:w-auto md:min-w-56 md:flex-1">
@@ -441,6 +446,6 @@ export function DraftsPage() {
         open={deleteIds.length > 0}
         title={t("deleteDraftTitle")}
       />
-    </div>
+    </section>
   );
 }
