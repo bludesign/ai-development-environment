@@ -61,10 +61,7 @@ export function EffortIcon({
   /** `auto` is the provider choosing for you, which is not a point on the scale. */
   if (!filled) {
     return (
-      <Cpu
-        aria-hidden="true"
-        className={cn("h-4 w-5 shrink-0", className)}
-      />
+      <Cpu aria-hidden="true" className={cn("h-4 w-5 shrink-0", className)} />
     );
   }
   const span = scale.length - 1;

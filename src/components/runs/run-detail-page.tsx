@@ -274,7 +274,12 @@ function QuestionBatch({
         reviseRunAnswer: { id: string; kind: "PLAN" | "SESSION" };
       }>(
         "mutation ReviseAnswer($batchId: ID!, $answers: JSON!, $stash: Boolean!, $rollback: Boolean!) { reviseRunAnswer(batchId: $batchId, answers: $answers, stash: $stash, rollback: $rollback) { id kind } }",
-        { batchId: batch.id, answers: value, stash: rollback && stash, rollback },
+        {
+          batchId: batch.id,
+          answers: value,
+          stash: rollback && stash,
+          rollback,
+        },
       );
       setEditOpen(false);
       router.push(
@@ -1276,7 +1281,9 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     onClick={() =>
                       void exportActivity("json").catch((value) =>
                         setError(
-                          value instanceof Error ? value.message : String(value),
+                          value instanceof Error
+                            ? value.message
+                            : String(value),
                         ),
                       )
                     }
@@ -1287,7 +1294,9 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     onClick={() =>
                       void exportActivity("markdown").catch((value) =>
                         setError(
-                          value instanceof Error ? value.message : String(value),
+                          value instanceof Error
+                            ? value.message
+                            : String(value),
                         ),
                       )
                     }
