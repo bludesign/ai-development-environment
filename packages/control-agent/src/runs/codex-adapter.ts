@@ -92,6 +92,10 @@ class CodexAppServer {
       );
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
+      // Turns are driven entirely by thread notifications, so a crash would
+      // otherwise leave their completion promise pending forever. Signal the
+      // disconnect to every listener so active runs fail instead of hanging.
+      this.broadcastDisconnect(error.message);
       this.process = undefined;
       this.initialized = undefined;
       void this.removeBundledModelCatalog(modelCatalogDirectory);
@@ -259,6 +263,16 @@ class CodexAppServer {
     };
   }
 
+  private broadcastDisconnect(message: string): void {
+    const notification: JsonRpcMessage = {
+      method: "$/serverDisconnected",
+      params: { message },
+    };
+    for (const listeners of this.threadListeners.values()) {
+      for (const listener of [...listeners]) listener(notification);
+    }
+  }
+
   async close(): Promise<void> {
     this.process?.kill("SIGTERM");
     this.process = undefined;
@@ -332,6 +346,10 @@ export class CodexAdapter implements ProviderAdapter {
     nativeDelete: true,
   } as const;
   private readonly server = new CodexAppServer();
+  private readonly hydrationCache = new Map<
+    string,
+    { updatedAt: string; kind: "PLAN" | "SESSION"; finalOutput?: string }
+  >();
 
   async catalog(): Promise<ProviderCatalog> {
     const models: ProviderCatalog["models"] = [];
@@ -408,6 +426,7 @@ export class CodexAdapter implements ProviderAdapter {
     let turnId = "";
     let stopReason: "PAUSED" | "CANCELLED" | null = null;
     let finalOutput = "";
+    let lastUsageSignature = "";
     const pendingQuestions = new Map<
       string,
       { rpcId: string | number; questions: ProviderQuestion[] }
@@ -420,6 +439,25 @@ export class CodexAdapter implements ProviderAdapter {
     const unsubscribe = this.server.listen(nativeId, (message) => {
       void (async () => {
         const params = asRecord(message.params);
+        if (message.method === "$/serverDisconnected") {
+          unsubscribe();
+          resolveCompletion(
+            stopReason
+              ? { status: stopReason, finalOutput }
+              : {
+                  status: "FAILED",
+                  finalOutput,
+                  error:
+                    firstString(params.message) ||
+                    "Codex app-server disconnected",
+                },
+          );
+          return;
+        }
+        if (message.method === "turn/started") {
+          const startedId = asRecord(params.turn).id;
+          if (typeof startedId === "string") turnId = startedId;
+        }
         if (
           message.method === "item/tool/requestUserInput" &&
           message.id !== undefined
@@ -452,25 +490,32 @@ export class CodexAdapter implements ProviderAdapter {
         if (message.method === "thread/tokenUsage/updated") {
           const usage = asRecord(params.tokenUsage ?? params.usage);
           const total = asRecord(usage.total ?? usage);
-          await callbacks.onUsage({
-            model: input.run.model,
-            inputTokens: Number(total.inputTokens ?? total.input_tokens ?? 0),
-            outputTokens: Number(
-              total.outputTokens ?? total.output_tokens ?? 0,
-            ),
-            reasoningTokens: Number(
-              total.reasoningTokens ?? total.reasoning_tokens ?? 0,
-            ),
-            cacheReadTokens: Number(
-              total.cachedInputTokens ?? total.cache_read_tokens ?? 0,
-            ),
-            cacheWriteTokens: Number(
-              total.cacheWriteTokens ?? total.cache_write_tokens ?? 0,
-            ),
-            pricingSource: "codex-app-server",
-          });
+          const usageSignature = JSON.stringify(total);
+          if (usageSignature !== lastUsageSignature) {
+            lastUsageSignature = usageSignature;
+            await callbacks.onUsage({
+              model: input.run.model,
+              inputTokens: Number(total.inputTokens ?? total.input_tokens ?? 0),
+              outputTokens: Number(
+                total.outputTokens ?? total.output_tokens ?? 0,
+              ),
+              reasoningTokens: Number(
+                total.reasoningTokens ?? total.reasoning_tokens ?? 0,
+              ),
+              cacheReadTokens: Number(
+                total.cachedInputTokens ?? total.cache_read_tokens ?? 0,
+              ),
+              cacheWriteTokens: Number(
+                total.cacheWriteTokens ?? total.cache_write_tokens ?? 0,
+              ),
+              pricingSource: "codex-app-server",
+            });
+          }
         }
-        if (message.method) {
+        // Streaming deltas arrive once per chunk; persisting each as its own
+        // event floods the journal. The text is accumulated into finalOutput
+        // and the matching completed item still emits a single event.
+        if (message.method && !message.method.endsWith("/delta")) {
           await callbacks.onEvent({
             type: message.method.toUpperCase().replaceAll("/", "_"),
             summary: (text || message.method).slice(0, 2_000),
@@ -585,25 +630,37 @@ export class CodexAdapter implements ProviderAdapter {
           const threads = Array.isArray(page.data) ? page.data : [];
           for (const value of threads) {
             const thread = asRecord(value);
+            const updatedAtKey = String(thread.updatedAt ?? "");
+            const cached = this.hydrationCache.get(String(thread.id));
             let finalOutput: string | undefined;
             let kind: "PLAN" | "SESSION" = "SESSION";
-            try {
-              const detail = asRecord(
-                await this.server.request("thread/read", {
-                  threadId: String(thread.id),
-                  includeTurns: true,
-                }),
-              );
-              const hydrated = asRecord(detail.thread);
-              const serialized = JSON.stringify(hydrated.turns ?? []);
-              if (serialized.includes('"type":"plan"')) kind = "PLAN";
-              finalOutput = firstString(
-                Array.isArray(hydrated.turns)
-                  ? [...hydrated.turns].reverse()
-                  : [],
-              );
-            } catch {
-              // Keep list metadata when a history cannot be fully hydrated.
+            if (cached && cached.updatedAt === updatedAtKey) {
+              kind = cached.kind;
+              finalOutput = cached.finalOutput;
+            } else {
+              try {
+                const detail = asRecord(
+                  await this.server.request("thread/read", {
+                    threadId: String(thread.id),
+                    includeTurns: true,
+                  }),
+                );
+                const hydrated = asRecord(detail.thread);
+                const serialized = JSON.stringify(hydrated.turns ?? []);
+                if (serialized.includes('"type":"plan"')) kind = "PLAN";
+                finalOutput = firstString(
+                  Array.isArray(hydrated.turns)
+                    ? [...hydrated.turns].reverse()
+                    : [],
+                );
+                this.hydrationCache.set(String(thread.id), {
+                  updatedAt: updatedAtKey,
+                  kind,
+                  finalOutput,
+                });
+              } catch {
+                // Keep list metadata when a history cannot be fully hydrated.
+              }
             }
             results.push({
               nativeId: String(thread.id),

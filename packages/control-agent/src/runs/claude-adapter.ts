@@ -32,6 +32,10 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
   > = [];
   private closed = false;
 
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   push(text: string, priority?: "now" | "next"): void {
     if (this.closed) throw new Error("Claude input stream is closed");
     const value = {
@@ -143,6 +147,10 @@ export class ClaudeAdapter implements ProviderAdapter {
     nativeDelete: true,
   } as const;
   private catalogPromise?: Promise<ProviderCatalog>;
+  private readonly hydrationCache = new Map<
+    string,
+    { lastModified: string; kind: "PLAN" | "SESSION"; finalOutput?: string }
+  >();
 
   catalog(): Promise<ProviderCatalog> {
     this.catalogPromise ??= (async () => {
@@ -314,9 +322,15 @@ export class ClaudeAdapter implements ProviderAdapter {
       completion,
       async interrupt(reason) {
         stopReason = reason;
+        // Settle any AskUserQuestion callback still awaiting an answer so its
+        // canUseTool promise resolves instead of leaking while the query is
+        // torn down.
+        for (const pending of pendingQuestions.values()) pending.resolve({});
+        pendingQuestions.clear();
         await activeQuery?.interrupt();
       },
       async steer(prompt, attachments) {
+        if (messages.isClosed) throw new Error("Claude run already completed");
         messages.push(promptWithAttachments(prompt, attachments), "now");
       },
       async answer(requestId, answers) {
@@ -339,18 +353,30 @@ export class ClaudeAdapter implements ProviderAdapter {
     for (const worktree of worktrees) {
       const sessions = await listSessions({ dir: worktree.folder, limit: 500 });
       for (const session of sessions) {
+        const lastModifiedKey = String(session.lastModified ?? "");
+        const cached = this.hydrationCache.get(session.sessionId);
         let kind: "PLAN" | "SESSION" = "SESSION";
         let finalOutput: string | undefined;
-        try {
-          const history = await getSessionMessages(session.sessionId, {
-            dir: worktree.folder,
-            limit: 500,
-          });
-          const serialized = JSON.stringify(history);
-          if (serialized.includes('"permissionMode":"plan"')) kind = "PLAN";
-          finalOutput = firstString([...history].reverse());
-        } catch {
-          // Metadata is still useful when an older history cannot be hydrated.
+        if (cached && cached.lastModified === lastModifiedKey) {
+          kind = cached.kind;
+          finalOutput = cached.finalOutput;
+        } else {
+          try {
+            const history = await getSessionMessages(session.sessionId, {
+              dir: worktree.folder,
+              limit: 500,
+            });
+            const serialized = JSON.stringify(history);
+            if (serialized.includes('"permissionMode":"plan"')) kind = "PLAN";
+            finalOutput = firstString([...history].reverse());
+            this.hydrationCache.set(session.sessionId, {
+              lastModified: lastModifiedKey,
+              kind,
+              finalOutput,
+            });
+          } catch {
+            // Metadata is still useful when an older history cannot be hydrated.
+          }
         }
         results.push({
           nativeId: session.sessionId,

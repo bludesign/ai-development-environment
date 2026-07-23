@@ -330,4 +330,101 @@ describe("run review regressions", () => {
       { id: "model-b", label: "Model B", efforts: ["high"] },
     ]);
   });
+
+  test("reaps runs whose agent went offline and releases their leases", async () => {
+    const now = Date.now();
+    const transaction = {
+      runAttempt: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      agentRun: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      runCommand: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      worktreeRunLease: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const prisma = {
+      agentRun: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "run-online", agentId: "agent-online" },
+          { id: "run-offline", agentId: "agent-offline" },
+          { id: "run-orphan", agentId: "agent-deleted" },
+        ]),
+      },
+      agent: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "agent-online",
+            lastSeenAt: new Date(now - 1_000),
+            disconnectedAt: null,
+            heartbeatIntervalSeconds: null,
+          },
+          {
+            id: "agent-offline",
+            lastSeenAt: new Date(now - 60 * 60_000),
+            disconnectedAt: null,
+            heartbeatIntervalSeconds: null,
+          },
+        ]),
+      },
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    const reaped = await new RunsService().reapOrphanedRuns(now);
+
+    expect(reaped).toBe(2);
+    expect(transaction.agentRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["run-offline", "run-orphan"] },
+        status: { notIn: ["COMPLETED", "CANCELLED", "FAILED"] },
+      },
+      data: {
+        status: "FAILED",
+        phase: "AGENT_OFFLINE",
+        error: "Agent went offline while this run was active",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(transaction.worktreeRunLease.deleteMany).toHaveBeenCalledWith({
+      where: { runId: { in: ["run-offline", "run-orphan"] } },
+    });
+  });
+
+  test("leaves runs untouched while their agent is still online", async () => {
+    const now = Date.now();
+    const transaction = {
+      runAttempt: { updateMany: vi.fn() },
+      agentRun: { updateMany: vi.fn() },
+      runCommand: { updateMany: vi.fn() },
+      worktreeRunLease: { deleteMany: vi.fn() },
+    };
+    const prisma = {
+      agentRun: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: "run-1", agentId: "agent-1" }]),
+      },
+      agent: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "agent-1",
+            lastSeenAt: new Date(now - 2_000),
+            disconnectedAt: null,
+            heartbeatIntervalSeconds: null,
+          },
+        ]),
+      },
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    const reaped = await new RunsService().reapOrphanedRuns(now);
+
+    expect(reaped).toBe(0);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(transaction.worktreeRunLease.deleteMany).not.toHaveBeenCalled();
+  });
 });

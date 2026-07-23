@@ -191,11 +191,22 @@ export class AgentGraphQLClient {
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
-    const body = (await response.json()) as GraphQLResponse<T>;
-    if (!response.ok || body.errors?.length || !body.data) {
+    // Read the body as text first. A proxy or gateway can answer with a
+    // non-JSON error page, and parsing that before checking the status would
+    // mask the real HTTP failure behind an opaque JSON syntax error.
+    const raw = await response.text();
+    let body: GraphQLResponse<T> | undefined;
+    try {
+      body = raw ? (JSON.parse(raw) as GraphQLResponse<T>) : undefined;
+    } catch {
+      body = undefined;
+    }
+    if (!response.ok || body?.errors?.length || !body?.data) {
+      const detail =
+        body?.errors?.map((error) => error.message).join("; ") ||
+        `HTTP ${response.status} ${response.statusText}`.trim();
       throw new Error(
-        body.errors?.map((error) => error.message).join("; ") ||
-          `HTTP ${response.status}`,
+        !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
       );
     }
     return body.data;

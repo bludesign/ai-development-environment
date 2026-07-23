@@ -24,7 +24,16 @@ import {
 const RUN_KINDS = ["PLAN", "SESSION"] as const;
 const PROVIDERS = ["CODEX", "CLAUDE", "OPENCODE"] as const;
 const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+const ATTEMPT_TERMINAL_STATUSES = [
+  "PAUSED",
+  "COMPLETED",
+  "CANCELLED",
+  "FAILED",
+  "SUPERSEDED",
+];
 const MAX_LIST_SIZE = 200;
+const RUN_REAPER_INTERVAL_MS = 60_000;
+const RUN_REAP_GRACE_MS = 2 * 60_000;
 
 type RunKind = (typeof RUN_KINDS)[number];
 type Provider = (typeof PROVIDERS)[number];
@@ -237,7 +246,110 @@ const runInclude = {
 } as const;
 
 export class RunsService {
+  private reaperTimer?: ReturnType<typeof setInterval>;
+
   constructor(private readonly notifications?: NotificationsService) {}
+
+  /**
+   * Periodically fail runs whose owning agent has gone offline. Without this a
+   * crashed or partitioned agent would leave its runs IN_PROGRESS forever and
+   * keep holding the worktree lease, blocking every future run on that
+   * worktree. Started once from the server-services singleton, never from the
+   * per-test constructor.
+   */
+  startReaper(intervalMs = RUN_REAPER_INTERVAL_MS): void {
+    if (this.reaperTimer) return;
+    this.reaperTimer = setInterval(() => {
+      void this.reapOrphanedRuns().catch((error) => {
+        console.error(
+          "Run reaper failed:",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }, intervalMs);
+    this.reaperTimer.unref();
+  }
+
+  stopReaper(): void {
+    if (this.reaperTimer) clearInterval(this.reaperTimer);
+    this.reaperTimer = undefined;
+  }
+
+  async reapOrphanedRuns(now = Date.now()): Promise<number> {
+    const prisma = await getPrismaClient();
+    const active = await prisma.agentRun.findMany({
+      where: { status: { in: ["QUEUED", "IN_PROGRESS"] } },
+      select: { id: true, agentId: true },
+    });
+    if (!active.length) return 0;
+    const agentIds = [
+      ...new Set(
+        active
+          .map((run) => run.agentId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const agents = agentIds.length
+      ? await prisma.agent.findMany({
+          where: { id: { in: agentIds } },
+          select: {
+            id: true,
+            lastSeenAt: true,
+            disconnectedAt: true,
+            heartbeatIntervalSeconds: true,
+          },
+        })
+      : [];
+    const onlineAgentIds = new Set(
+      agents
+        .filter(
+          (agent) =>
+            agent.disconnectedAt === null &&
+            agent.lastSeenAt !== null &&
+            now - agent.lastSeenAt.getTime() <=
+              agentOnlineWindowMs(agent) + RUN_REAP_GRACE_MS,
+        )
+        .map((agent) => agent.id),
+    );
+    const orphanedIds = active
+      .filter((run) => !run.agentId || !onlineAgentIds.has(run.agentId))
+      .map((run) => run.id);
+    if (!orphanedIds.length) return 0;
+    const finishedAt = new Date(now);
+    await prisma.$transaction(async (transaction) => {
+      await transaction.runAttempt.updateMany({
+        where: {
+          runId: { in: orphanedIds },
+          status: { notIn: ATTEMPT_TERMINAL_STATUSES },
+        },
+        data: { status: "FAILED", finishedAt },
+      });
+      await transaction.agentRun.updateMany({
+        where: {
+          id: { in: orphanedIds },
+          status: { notIn: [...TERMINAL_STATUSES] },
+        },
+        data: {
+          status: "FAILED",
+          phase: "AGENT_OFFLINE",
+          error: "Agent went offline while this run was active",
+          finishedAt,
+        },
+      });
+      await transaction.runCommand.updateMany({
+        where: {
+          runId: { in: orphanedIds },
+          status: { in: ["QUEUED", "RUNNING"] },
+        },
+        data: { status: "FAILED", error: "Agent went offline", finishedAt },
+      });
+      await transaction.worktreeRunLease.deleteMany({
+        where: { runId: { in: orphanedIds } },
+      });
+    });
+    for (const id of orphanedIds) publishRun(id);
+    return orphanedIds.length;
+  }
 
   async list(input: {
     kind: string;
@@ -1435,35 +1547,46 @@ export class RunsService {
     const run = await prisma.agentRun.findUnique({ where: { id: runId } });
     if (!run || run.agentId !== agentId)
       throw new Error("Run not found for this agent");
-    const saved = [];
-    for (const event of events.slice(0, 500)) {
+    const eventRows = events.slice(0, 500).map((event) => {
       const summary = requiredText(event.summary, "Event summary", 2_000);
-      const value = await prisma.runEvent.upsert({
-        where: { id: event.id },
-        create: {
-          id: event.id,
-          runId,
-          attemptId,
-          sequence: event.sequence,
-          type: requiredText(event.type, "Event type", 100).toUpperCase(),
-          summary,
-          searchText: optionalText(event.searchText, 100_000) ?? summary,
-          detailMarkdown: optionalText(event.detailMarkdown, 500_000),
-          rawJson: event.raw === undefined ? null : JSON.stringify(event.raw),
-          createdAt: parseDate(event.createdAt),
-        },
-        update: {},
+      return {
+        id: event.id,
+        runId,
+        attemptId,
+        sequence: event.sequence,
+        type: requiredText(event.type, "Event type", 100).toUpperCase(),
+        summary,
+        searchText: optionalText(event.searchText, 100_000) ?? summary,
+        detailMarkdown: optionalText(event.detailMarkdown, 500_000),
+        rawJson: event.raw === undefined ? null : JSON.stringify(event.raw),
+        createdAt: parseDate(event.createdAt),
+      };
+    });
+    if (!eventRows.length) return [];
+    // Persist the batch with a fixed number of round-trips instead of an
+    // upsert per event followed by a full recount: streaming providers can
+    // emit hundreds of events per flush, which the previous per-row loop did
+    // not scale to.
+    const saved = await prisma.$transaction(async (transaction) => {
+      const existing = await transaction.runEvent.findMany({
+        where: { id: { in: eventRows.map((row) => row.id) } },
+        select: { id: true },
       });
-      saved.push(value);
-      if (value.type.includes("TOOL") && !value.type.includes("QUESTION")) {
-        await prisma.runToolCall.upsert({
-          where: { id: `event:${value.id}` },
-          create: {
+      const existingIds = new Set(existing.map(({ id }) => id));
+      const freshEvents = eventRows.filter((row) => !existingIds.has(row.id));
+      if (freshEvents.length) {
+        await transaction.runEvent.createMany({ data: freshEvents });
+        const toolRows = freshEvents
+          .filter(
+            (value) =>
+              value.type.includes("TOOL") && !value.type.includes("QUESTION"),
+          )
+          .map((value) => ({
             id: `event:${value.id}`,
             runId,
             attemptId,
             sequence: value.sequence,
-            name: summary.split(/[\s:(]/, 1)[0] || value.type,
+            name: value.summary.split(/[\s:(]/, 1)[0] || value.type,
             status:
               value.type.includes("FAIL") || value.type.includes("ERROR")
                 ? "FAILED"
@@ -1474,21 +1597,30 @@ export class RunsService {
             inputJson: value.rawJson,
             error:
               value.type.includes("FAIL") || value.type.includes("ERROR")
-                ? summary
+                ? value.summary
                 : null,
             finishedAt: value.createdAt,
-          },
-          update: {},
-        });
+          }));
+        if (toolRows.length) {
+          await transaction.runToolCall.createMany({ data: toolRows });
+          await transaction.agentRun.update({
+            where: { id: runId },
+            data: {
+              toolCallCount: await transaction.runToolCall.count({
+                where: { runId },
+              }),
+            },
+          });
+        }
       }
+      return transaction.runEvent.findMany({
+        where: { id: { in: eventRows.map((row) => row.id) } },
+        orderBy: { sequence: "asc" },
+      });
+    });
+    for (const value of saved) {
       agentEventBus.publish(runEventTopic(runId), { runEventAdded: value });
     }
-    await prisma.agentRun.update({
-      where: { id: runId },
-      data: {
-        toolCallCount: await prisma.runToolCall.count({ where: { runId } }),
-      },
-    });
     publishRun(runId);
     return saved;
   }

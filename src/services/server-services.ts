@@ -69,6 +69,7 @@ function createServerServices(): ServerServices {
   );
   const notificationsService = new NotificationsService(credentialService);
   const runsService = new RunsService(notificationsService);
+  runsService.startReaper();
   const buildsService = new BuildsService(
     agentControlService,
     telemetryService,

@@ -37,6 +37,7 @@ type ActiveRun = {
   commandId: string;
   journal: RunJournal;
   settled: Promise<void>;
+  interrupted: boolean;
 };
 
 function safeFilename(value: string): string {
@@ -209,7 +210,7 @@ export class RunManager {
           }),
         );
       }
-      await this.client.completeRunCommand(
+      await this.completeCommand(
         claimed.id,
         "FAILED",
         "Control agent restarted; destructive work was not replayed",
@@ -247,7 +248,7 @@ export class RunManager {
           throw new Error(`Unsupported run command ${claimed.type}`);
       }
     } catch (error) {
-      await this.client.completeRunCommand(
+      await this.completeCommand(
         claimed.id,
         "FAILED",
         error instanceof Error ? error.message : String(error),
@@ -263,12 +264,19 @@ export class RunManager {
     const adapter = this.adapters.get(run.provider);
     if (!adapter) throw new Error(`Provider ${run.provider} is unavailable`);
 
-    const attempt = await this.client.beginRunAttempt(run.id);
+    const attempt = await this.retry(
+      () => this.client.beginRunAttempt(run.id),
+      5,
+    );
     if (command.type === "REVISE_ANSWER") {
-      await this.client.applyRunAnswerRevision(
-        String(command.payload.batchId ?? ""),
-        String(command.payload.revisionId ?? ""),
-        attempt.id,
+      await this.retry(
+        () =>
+          this.client.applyRunAnswerRevision(
+            String(command.payload.batchId ?? ""),
+            String(command.payload.revisionId ?? ""),
+            attempt.id,
+          ),
+        5,
       );
     }
     const journal = new RunJournal(run.id, attempt.id);
@@ -293,7 +301,10 @@ export class RunManager {
       run.id,
       command.type === "CONTINUE" ? "CONTINUE" : "START",
     );
-    await this.client.reportRunCheckpoint(run.id, attempt.id, baseline);
+    await this.retry(
+      () => this.client.reportRunCheckpoint(run.id, attempt.id, baseline),
+      5,
+    );
     const resumeNativeId =
       command.type === "CONTINUE"
         ? latestNativeId(run)
@@ -307,11 +318,15 @@ export class RunManager {
 
     const interruption = this.interruptionRequests.get(run.id);
     if (interruption) {
-      await this.client.finishRunAttempt(attempt.id, {
-        status: interruption,
-        phase: interruption,
-      });
-      await this.client.completeRunCommand(command.id, "SUCCEEDED");
+      await this.retry(
+        () =>
+          this.client.finishRunAttempt(attempt.id, {
+            status: interruption,
+            phase: interruption,
+          }),
+        5,
+      );
+      await this.completeCommand(command.id, "SUCCEEDED");
       await rm(join(dirname(configPath()), "runs", run.id, "attachments"), {
         recursive: true,
         force: true,
@@ -397,10 +412,14 @@ export class RunManager {
         callbacks,
       );
     } catch (error) {
-      await this.client.finishRunAttempt(attempt.id, {
-        status: "FAILED",
-        error: error instanceof Error ? error.message : String(error),
-      });
+      await this.retry(
+        () =>
+          this.client.finishRunAttempt(attempt.id, {
+            status: "FAILED",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        5,
+      );
       throw error;
     }
     const active: ActiveRun = {
@@ -409,6 +428,7 @@ export class RunManager {
       commandId: command.id,
       journal,
       settled: Promise.resolve(),
+      interrupted: false,
     };
     this.active.set(run.id, active);
     active.settled = this.finishRun(
@@ -420,7 +440,8 @@ export class RunManager {
       baseline,
     );
     const requestedAfterStart = this.interruptionRequests.get(run.id);
-    if (requestedAfterStart) await handle.interrupt(requestedAfterStart);
+    if (requestedAfterStart)
+      await this.interruptActive(active, requestedAfterStart);
     void active.settled;
   }
 
@@ -508,6 +529,15 @@ export class RunManager {
     }
   }
 
+  private async interruptActive(
+    active: ActiveRun,
+    reason: "PAUSED" | "CANCELLED",
+  ): Promise<void> {
+    if (active.interrupted) return;
+    active.interrupted = true;
+    await active.handle.interrupt(reason);
+  }
+
   private async interruptRun(command: RunCommand): Promise<void> {
     const active = this.active.get(command.runId);
     if (!active) {
@@ -515,13 +545,18 @@ export class RunManager {
         (left, right) => right.generation - left.generation,
       )[0];
       if (latest) {
-        await this.client.finishRunAttempt(latest.id, {
-          status: command.type === "PAUSE" ? "PAUSED" : "CANCELLED",
-          phase: command.type === "PAUSE" ? "RECOVERY_PAUSED" : "CANCELLED",
-        });
+        await this.retry(
+          () =>
+            this.client.finishRunAttempt(latest.id, {
+              status: command.type === "PAUSE" ? "PAUSED" : "CANCELLED",
+              phase: command.type === "PAUSE" ? "RECOVERY_PAUSED" : "CANCELLED",
+            }),
+          5,
+        );
       }
     } else {
-      await active.handle.interrupt(
+      await this.interruptActive(
+        active,
         command.type === "PAUSE" ? "PAUSED" : "CANCELLED",
       );
       await active.settled;
@@ -531,7 +566,7 @@ export class RunManager {
     this.deferredSteering.delete(command.runId);
     await Promise.all(
       deferred.map((entry) =>
-        this.client.completeRunCommand(
+        this.completeCommand(
           entry.id,
           "FAILED",
           "Run was interrupted before queued steering could be sent",
@@ -539,7 +574,7 @@ export class RunManager {
       ),
     );
     for (const entry of deferred) this.executingCommands.delete(entry.id);
-    await this.client.completeRunCommand(command.id, "SUCCEEDED");
+    await this.completeCommand(command.id, "SUCCEEDED");
   }
 
   private async steerRun(command: RunCommand): Promise<void> {
@@ -566,7 +601,7 @@ export class RunManager {
       input.attachments,
     );
     await active.handle.steer(input.prompt, attachments);
-    await this.client.completeRunCommand(command.id, "SUCCEEDED");
+    await this.completeCommand(command.id, "SUCCEEDED");
     this.executingCommands.delete(command.id);
   }
 
@@ -583,7 +618,7 @@ export class RunManager {
       this.deferredSteering.delete(command.runId);
       for (const steering of deferred) await this.sendSteering(steering);
     }
-    await this.client.completeRunCommand(command.id, "SUCCEEDED");
+    await this.completeCommand(command.id, "SUCCEEDED");
   }
 
   private checkpointFromCommand(command: RunCommand): GitCheckpointReference {
@@ -607,7 +642,7 @@ export class RunManager {
     if (!command.run.worktree) throw new Error("Run worktree is unavailable");
     const active = this.active.get(command.runId);
     if (active) {
-      await active.handle.interrupt("PAUSED");
+      await this.interruptActive(active, "PAUSED");
       await active.settled;
     }
     const current = await captureGitCheckpoint(
@@ -618,22 +653,30 @@ export class RunManager {
     const latestAttempt = [...command.run.attempts].sort(
       (left, right) => right.generation - left.generation,
     )[0];
-    await this.client.reportRunCheckpoint(
-      command.runId,
-      latestAttempt?.id ?? null,
-      current,
+    await this.retry(
+      () =>
+        this.client.reportRunCheckpoint(
+          command.runId,
+          latestAttempt?.id ?? null,
+          current,
+        ),
+      5,
     );
     const preview = await compareGitCheckpoint(
       command.run.worktree.folder,
       this.checkpointFromCommand(command),
       current,
     );
-    await this.client.reportRunAnswerRevisionPreview(
-      String(command.payload.batchId ?? ""),
-      preview.rollbackPatch,
-      preview.pushedCommitWarning,
+    await this.retry(
+      () =>
+        this.client.reportRunAnswerRevisionPreview(
+          String(command.payload.batchId ?? ""),
+          preview.rollbackPatch,
+          preview.pushedCommitWarning,
+        ),
+      5,
     );
-    await this.client.completeRunCommand(command.id, "SUCCEEDED");
+    await this.completeCommand(command.id, "SUCCEEDED");
   }
 
   private async reviseAnswer(command: RunCommand): Promise<void> {
@@ -644,7 +687,10 @@ export class RunManager {
         command.runId,
         "ANSWER_ROLLBACK",
       );
-      await this.client.reportRunCheckpoint(command.runId, null, preserved);
+      await this.retry(
+        () => this.client.reportRunCheckpoint(command.runId, null, preserved),
+        5,
+      );
       await this.startRun(command);
       return;
     }
@@ -661,10 +707,14 @@ export class RunManager {
       command.runId,
       "ANSWER_ROLLBACK",
     );
-    await this.client.reportRunCheckpoint(command.runId, null, {
-      ...restored,
-      stashRef,
-    });
+    await this.retry(
+      () =>
+        this.client.reportRunCheckpoint(command.runId, null, {
+          ...restored,
+          stashRef,
+        }),
+      5,
+    );
     await this.startRun(command);
   }
 
@@ -673,17 +723,21 @@ export class RunManager {
     const active = this.active.get(command.runId);
     if (active) {
       this.interruptionRequests.set(command.runId, "CANCELLED");
-      await active.handle.interrupt("CANCELLED");
+      await this.interruptActive(active, "CANCELLED");
       await active.settled;
     } else if (command.run.status === "IN_PROGRESS") {
       const latest = [...command.run.attempts].sort(
         (left, right) => right.generation - left.generation,
       )[0];
       if (latest) {
-        await this.client.finishRunAttempt(latest.id, {
-          status: "CANCELLED",
-          phase: "CANCELLED",
-        });
+        await this.retry(
+          () =>
+            this.client.finishRunAttempt(latest.id, {
+              status: "CANCELLED",
+              phase: "CANCELLED",
+            }),
+          5,
+        );
       }
     }
     this.pendingQuestions.delete(command.runId);
@@ -691,7 +745,7 @@ export class RunManager {
     this.deferredSteering.delete(command.runId);
     await Promise.all(
       deferred.map((entry) =>
-        this.client.completeRunCommand(
+        this.completeCommand(
           entry.id,
           "FAILED",
           "Run was deleted before queued steering could be sent",
@@ -712,7 +766,7 @@ export class RunManager {
           throw error;
       }
     }
-    await this.client.completeRunCommand(command.id, "SUCCEEDED");
+    await this.completeCommand(command.id, "SUCCEEDED");
   }
 
   private async stageAttachments(
@@ -820,17 +874,34 @@ export class RunManager {
     }
   }
 
-  private async retry<T>(operation: () => Promise<T>): Promise<T> {
+  private async retry<T>(
+    operation: () => Promise<T>,
+    attempts = Infinity,
+  ): Promise<T> {
     let delay = 1_000;
-    while (true) {
+    for (let attempt = 1; ; attempt += 1) {
       try {
         return await operation();
       } catch (error) {
-        if (this.stopped) throw error;
+        if (this.stopped || attempt >= attempts) throw error;
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 30_000);
       }
     }
+  }
+
+  private completeCommand(
+    id: string,
+    status: "SUCCEEDED" | "FAILED",
+    error?: string,
+  ): Promise<unknown> {
+    return this.retry(
+      () =>
+        error === undefined
+          ? this.client.completeRunCommand(id, status)
+          : this.client.completeRunCommand(id, status, error),
+      5,
+    );
   }
 
   async close(): Promise<void> {

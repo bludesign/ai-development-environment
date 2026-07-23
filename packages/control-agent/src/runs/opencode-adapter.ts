@@ -20,6 +20,7 @@ import {
 
 const QUESTION_RECONCILIATION_INTERVAL_MS = 1_000;
 const QUESTION_RECONCILIATION_TIMEOUT_MS = 5_000;
+const POST_ANSWER_COMPLETION_TIMEOUT_MS = 15 * 60_000;
 
 type OpenCodeQuestionSurface = "LEGACY" | "V2";
 
@@ -89,6 +90,16 @@ export function opencodeEventText(value: unknown): string | undefined {
     opencodeResponseText(body) ||
     firstString(body.part ?? body.message ?? body.info ?? body)
   );
+}
+
+export function opencodePartType(value: unknown): string | undefined {
+  const event = asRecord(value);
+  const payload = asRecord(event.payload);
+  const body = asRecord(
+    payload.properties ?? payload.data ?? event.properties ?? event.data,
+  );
+  const part = asRecord(body.part);
+  return typeof part.type === "string" ? part.type : undefined;
 }
 
 export function opencodeQuestions(
@@ -351,6 +362,13 @@ export class OpenCodeAdapter implements ProviderAdapter {
           const record = asRecord(event);
           const payload = asRecord(record.payload);
           const type = String(payload.type ?? record.type ?? "event");
+          // Text and reasoning parts stream one update per chunk; skip them so
+          // the journal is not flooded. Tool parts and the final
+          // message.updated event still record a single entry each.
+          if (type === "message.part.updated") {
+            const partType = opencodePartType(event);
+            if (partType === "text" || partType === "reasoning") continue;
+          }
           const text = opencodeEventText(event);
           await callbacks.onEvent({
             type: type.toUpperCase().replaceAll(".", "_"),
@@ -439,7 +457,8 @@ export class OpenCodeAdapter implements ProviderAdapter {
           await waitForPoll(streamController.signal);
         }
         if (!stopReason && sawQuestion) {
-          while (!stopReason) {
+          const busyDeadline = Date.now() + POST_ANSWER_COMPLETION_TIMEOUT_MS;
+          while (!stopReason && Date.now() < busyDeadline) {
             const statuses = asRecord(
               resultData(await client.session.status({ directory: cwd })),
             );
