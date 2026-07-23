@@ -81,6 +81,10 @@ export class RunManager {
   private readonly pendingQuestions = new Map<string, Set<string>>();
   private readonly deferredSteering = new Map<string, RunCommand[]>();
   private readonly runQueues = new Map<string, Promise<void>>();
+  private readonly interruptionRequests = new Map<
+    string,
+    "PAUSED" | "CANCELLED"
+  >();
   private importTimer?: ReturnType<typeof setTimeout>;
   private commandTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -128,7 +132,23 @@ export class RunManager {
   execute(command: RunCommand, startup = false): void {
     if (this.stopped || this.executingCommands.has(command.id)) return;
     this.executingCommands.add(command.id);
-    const previous = this.runQueues.get(command.runId) ?? Promise.resolve();
+    const interruption =
+      command.type === "CANCEL"
+        ? "CANCELLED"
+        : command.type === "PAUSE"
+          ? "PAUSED"
+          : null;
+    if (
+      interruption &&
+      (interruption === "CANCELLED" ||
+        !this.interruptionRequests.has(command.runId))
+    ) {
+      this.interruptionRequests.set(command.runId, interruption);
+    }
+    const priority = interruption !== null;
+    const previous = priority
+      ? Promise.resolve()
+      : (this.runQueues.get(command.runId) ?? Promise.resolve());
     const running = previous
       .catch(() => undefined)
       .then(() => this.runCommand(command, startup))
@@ -144,11 +164,17 @@ export class RunManager {
         );
         const active = this.active.get(command.runId)?.commandId === command.id;
         if (!deferred && !active) this.executingCommands.delete(command.id);
-        if (this.runQueues.get(command.runId) === running) {
+        if (!priority && this.runQueues.get(command.runId) === running) {
           this.runQueues.delete(command.runId);
         }
+        if (
+          !this.runQueues.has(command.runId) &&
+          !this.active.has(command.runId)
+        ) {
+          this.interruptionRequests.delete(command.runId);
+        }
       });
-    this.runQueues.set(command.runId, running);
+    if (!priority) this.runQueues.set(command.runId, running);
   }
 
   private async runCommand(
@@ -279,6 +305,20 @@ export class RunManager {
             ? latestNativeId(run.parentRun)
             : undefined;
 
+    const interruption = this.interruptionRequests.get(run.id);
+    if (interruption) {
+      await this.client.finishRunAttempt(attempt.id, {
+        status: interruption,
+        phase: interruption,
+      });
+      await this.client.completeRunCommand(command.id, "SUCCEEDED");
+      await rm(join(dirname(configPath()), "runs", run.id, "attachments"), {
+        recursive: true,
+        force: true,
+      }).catch(() => undefined);
+      return;
+    }
+
     const callbacks: ProviderCallbacks = {
       onNativeId: async (nativeId, providerVersion) => {
         await this.retry(() =>
@@ -372,6 +412,8 @@ export class RunManager {
       adapter,
       baseline,
     );
+    const requestedAfterStart = this.interruptionRequests.get(run.id);
+    if (requestedAfterStart) await handle.interrupt(requestedAfterStart);
     void active.settled;
   }
 
@@ -449,6 +491,7 @@ export class RunManager {
     } finally {
       if (this.active.get(run.id)?.attemptId === attemptId)
         this.active.delete(run.id);
+      this.interruptionRequests.delete(run.id);
       this.executingCommands.delete(command.id);
       await rm(join(dirname(configPath()), "runs", run.id, "attachments"), {
         recursive: true,

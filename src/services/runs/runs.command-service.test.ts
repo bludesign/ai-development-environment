@@ -85,7 +85,7 @@ describe("run command persistence", () => {
     });
   });
 
-  test("does not enqueue duplicate cancellation commands", async () => {
+  test("terminalizes an existing cancel request without enqueuing a duplicate", async () => {
     const run = {
       id: "run-1",
       agentId: "agent-1",
@@ -96,7 +96,15 @@ describe("run command persistence", () => {
     const transaction = {
       agentRun: {
         findUnique: vi.fn().mockResolvedValue(run),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({
+          ...run,
+          status: "CANCELLED",
+          phase: "CANCELLED",
+        }),
+      },
+      runAttempt: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      worktreeRunLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       runCommand: { create: vi.fn() },
     };
@@ -105,14 +113,89 @@ describe("run command persistence", () => {
         async (callback: (value: typeof transaction) => unknown) =>
           callback(transaction),
       ),
-      agentRun: { findUnique: vi.fn().mockResolvedValue(run) },
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...run,
+          status: "CANCELLED",
+          phase: "CANCELLED",
+        }),
+      },
     };
     mocks.getPrismaClient.mockResolvedValue(prisma);
 
     await new RunsService().lifecycle("run-1", "CANCEL");
 
-    expect(transaction.agentRun.update).not.toHaveBeenCalled();
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: {
+        status: "CANCELLED",
+        phase: "CANCELLED",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(transaction.runAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        runId: "run-1",
+        status: {
+          notIn: ["PAUSED", "COMPLETED", "CANCELLED", "FAILED"],
+        },
+      },
+      data: { status: "CANCELLED", finishedAt: expect.any(Date) },
+    });
+    expect(transaction.worktreeRunLease.deleteMany).toHaveBeenCalledWith({
+      where: { runId: "run-1" },
+    });
     expect(transaction.runCommand.create).not.toHaveBeenCalled();
+  });
+
+  test("terminalizes cancellation before enqueuing provider cleanup", async () => {
+    const run = {
+      id: "run-1",
+      agentId: "agent-1",
+      origin: "MANAGED",
+      status: "IN_PROGRESS",
+      phase: "RUNNING",
+    };
+    const cancelled = { ...run, status: "CANCELLED", phase: "CANCELLED" };
+    const command = { id: "command-1", runId: run.id, type: "CANCEL" };
+    const transaction = {
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue(run),
+        update: vi.fn().mockResolvedValue(cancelled),
+      },
+      runAttempt: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      worktreeRunLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      runCommand: {
+        findFirst: vi.fn().mockResolvedValue({ sequence: 2 }),
+        create: vi.fn().mockResolvedValue(command),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+      agentRun: { findUnique: vi.fn().mockResolvedValue(cancelled) },
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    await new RunsService().lifecycle("run-1", "CANCEL");
+
+    expect(transaction.agentRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: {
+        status: "CANCELLED",
+        phase: "CANCELLED",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(transaction.runCommand.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "CANCEL", sequence: 3 }),
+      }),
+    );
   });
 
   test("terminalizes a start command that fails before its first attempt", async () => {
@@ -133,7 +216,7 @@ describe("run command persistence", () => {
           error: "Run worktree is unavailable",
         }),
       },
-      agentRun: { update: vi.fn().mockResolvedValue({}) },
+      agentRun: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -147,8 +230,11 @@ describe("run command persistence", () => {
       "Run worktree is unavailable",
     );
 
-    expect(prisma.agentRun.update).toHaveBeenCalledWith({
-      where: { id: "run-1" },
+    expect(prisma.agentRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "run-1",
+        status: { notIn: ["COMPLETED", "CANCELLED", "FAILED"] },
+      },
       data: {
         error: "Run worktree is unavailable",
         phase: "START_FAILED",
@@ -159,5 +245,73 @@ describe("run command persistence", () => {
     expect(prisma.worktreeRunLease.deleteMany).toHaveBeenCalledWith({
       where: { runId: "run-1" },
     });
+  });
+
+  test("does not begin a new attempt after cancellation", async () => {
+    const create = vi.fn();
+    mocks.getPrismaClient.mockResolvedValue({
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          agentId: "agent-1",
+          status: "CANCELLED",
+          attempts: [],
+        }),
+      },
+      runAttempt: { create },
+    });
+
+    await expect(
+      new RunsService().beginAttempt("agent-1", "run-1"),
+    ).rejects.toThrow("Run is already finished");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  test("does not overwrite cancellation with a late provider completion", async () => {
+    const run = {
+      id: "run-1",
+      agentId: "agent-1",
+      kind: "SESSION",
+      displayNumber: 1,
+      status: "CANCELLED",
+      phase: "CANCELLED",
+      worktreeId: "worktree-1",
+      worktree: null,
+    };
+    const attempt = {
+      id: "attempt-1",
+      generation: 0,
+      runId: run.id,
+      run,
+    };
+    const transaction = {
+      runAttempt: {
+        findUnique: vi.fn().mockResolvedValue(attempt),
+        update: vi.fn().mockResolvedValue({ ...attempt, status: "CANCELLED" }),
+      },
+      agentRun: { update: vi.fn() },
+      worktreeRunLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+      agentRun: { findUnique: vi.fn().mockResolvedValue(run) },
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    await new RunsService().finishAttempt("agent-1", "attempt-1", {
+      status: "COMPLETED",
+      finalOutput: "Too late",
+    });
+
+    expect(transaction.runAttempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: { status: "CANCELLED", finishedAt: expect.any(Date) },
+    });
+    expect(transaction.agentRun.update).not.toHaveBeenCalled();
   });
 });

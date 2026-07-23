@@ -840,6 +840,9 @@ export class RunsService {
       if (!run || !run.agentId) throw new Error("Run not found");
       if (run.origin !== "MANAGED")
         throw new Error("Imported runs are read-only");
+      if (type === "CANCEL" && run.status === "CANCELLED") {
+        return { run, command: null };
+      }
       if (TERMINAL_STATUSES.has(run.status))
         throw new Error("Run is already finished");
       if (type === "PAUSE" && run.status !== "IN_PROGRESS") {
@@ -848,21 +851,39 @@ export class RunsService {
       if (type === "CONTINUE" && run.status !== "PAUSED") {
         throw new Error("Only a paused run can continue");
       }
-      if (
-        (type === "PAUSE" && run.phase === "PAUSE_REQUESTED") ||
-        (type === "CANCEL" && run.phase === "CANCEL_REQUESTED")
-      ) {
+      if (type === "PAUSE" && run.phase === "PAUSE_REQUESTED") {
         return { run, command: null };
+      }
+      if (type === "CANCEL") {
+        const finishedAt = new Date();
+        const cancelled = await transaction.agentRun.update({
+          where: { id: runId },
+          data: { status: "CANCELLED", phase: "CANCELLED", finishedAt },
+        });
+        await transaction.runAttempt.updateMany({
+          where: {
+            runId,
+            status: { notIn: ["PAUSED", "COMPLETED", "CANCELLED", "FAILED"] },
+          },
+          data: { status: "CANCELLED", finishedAt },
+        });
+        await transaction.worktreeRunLease.deleteMany({ where: { runId } });
+        if (run.phase === "CANCEL_REQUESTED") {
+          return { run: cancelled, command: null };
+        }
+        const command = await enqueueCommand(transaction, {
+          runId,
+          agentId: run.agentId,
+          type,
+        });
+        return { run: cancelled, command };
       }
       await transaction.agentRun.update({
         where: { id: runId },
         data:
           type === "CONTINUE"
             ? { status: "IN_PROGRESS", phase: "QUEUED", finishedAt: null }
-            : {
-                phase:
-                  type === "PAUSE" ? "PAUSE_REQUESTED" : "CANCEL_REQUESTED",
-              },
+            : { phase: "PAUSE_REQUESTED" },
       });
       const command = await enqueueCommand(transaction, {
         runId,
@@ -1199,8 +1220,11 @@ export class RunsService {
         await removeRunAttachmentFiles(paths);
       }
     } else if (updated.status === "FAILED") {
-      await prisma.agentRun.update({
-        where: { id: updated.runId },
+      await prisma.agentRun.updateMany({
+        where: {
+          id: updated.runId,
+          status: { notIn: [...TERMINAL_STATUSES] },
+        },
         data: {
           error: updated.error,
           phase: `${updated.type}_FAILED`,
@@ -1250,6 +1274,8 @@ export class RunsService {
     });
     if (!run || run.agentId !== agentId)
       throw new Error("Run not found for this agent");
+    if (TERMINAL_STATUSES.has(run.status))
+      throw new Error("Run is already finished");
     const generation = run.attempts.length;
     const attempt = await prisma.runAttempt.create({
       data: {
@@ -1580,31 +1606,36 @@ export class RunsService {
       });
       if (!attempt || attempt.run.agentId !== agentId)
         throw new Error("Attempt not found");
+      const persistedStatus = TERMINAL_STATUSES.has(attempt.run.status)
+        ? attempt.run.status
+        : status;
       await transaction.runAttempt.update({
         where: { id: attemptId },
-        data: { status, finishedAt: new Date() },
+        data: { status: persistedStatus, finishedAt: new Date() },
       });
-      const run = await transaction.agentRun.update({
-        where: { id: attempt.runId },
-        data: {
-          status,
-          phase: input.phase?.trim().toUpperCase() || status,
-          finalOutput: optionalText(input.finalOutput, 2_000_000),
-          error: optionalText(input.error, 20_000),
-          finishedAt: status === "PAUSED" ? null : new Date(),
-        },
-      });
-      if (TERMINAL_STATUSES.has(status)) {
+      const run = TERMINAL_STATUSES.has(attempt.run.status)
+        ? attempt.run
+        : await transaction.agentRun.update({
+            where: { id: attempt.runId },
+            data: {
+              status,
+              phase: input.phase?.trim().toUpperCase() || status,
+              finalOutput: optionalText(input.finalOutput, 2_000_000),
+              error: optionalText(input.error, 20_000),
+              finishedAt: status === "PAUSED" ? null : new Date(),
+            },
+          });
+      if (TERMINAL_STATUSES.has(persistedStatus)) {
         await transaction.worktreeRunLease.deleteMany({
           where: { runId: run.id },
         });
       }
       const typeKey =
-        status === "COMPLETED"
+        persistedStatus === "COMPLETED"
           ? "RUN_COMPLETED"
-          : status === "FAILED"
+          : persistedStatus === "FAILED"
             ? "RUN_FAILED"
-            : status === "CANCELLED"
+            : persistedStatus === "CANCELLED"
               ? "RUN_CANCELLED"
               : input.phase === "RECOVERY_PAUSED"
                 ? "RUN_RECOVERY_PAUSED"
@@ -1612,13 +1643,13 @@ export class RunsService {
       const notification =
         typeKey && this.notifications
           ? await this.notifications.recordInTransaction(transaction, {
-              dedupeKey: `run:${run.id}:status:${status}:${attempt.generation}`,
+              dedupeKey: `run:${run.id}:status:${persistedStatus}:${attempt.generation}`,
               typeKey,
-              title: `${run.kind === "PLAN" ? "Plan" : "Session"} #${run.displayNumber} ${status.toLowerCase()}`,
+              title: `${run.kind === "PLAN" ? "Plan" : "Session"} #${run.displayNumber} ${persistedStatus.toLowerCase()}`,
               body:
                 input.error ||
                 input.finalOutput?.slice(0, 1_000) ||
-                `The ${run.kind.toLowerCase()} is ${status.toLowerCase()}.`,
+                `The ${run.kind.toLowerCase()} is ${persistedStatus.toLowerCase()}.`,
               href: runHref(run),
               resourceKind: run.kind,
               resourceId: run.id,
