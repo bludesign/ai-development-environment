@@ -164,7 +164,7 @@ export function ModelEffortPicker({
                     {formatModelLabel(selectedModel.label)}
                   </span>
                   <span className="text-muted-foreground">·</span>
-                  <EffortIcon effort={effort} />
+                  <EffortIcon effort={effort} efforts={selectedModel.efforts} />
                   <span className="text-muted-foreground">{effort}</span>
                 </>
               ) : (
@@ -205,7 +205,10 @@ export function ModelEffortPicker({
                           className="flex items-center gap-1.5 text-muted-foreground"
                           data-slot="command-shortcut"
                         >
-                          <EffortIcon effort={preset.effort} />
+                          <EffortIcon
+                            effort={preset.effort}
+                            efforts={preseted.efforts}
+                          />
                           <span className="text-xs">{preset.effort}</span>
                         </span>
                       </CommandItem>
@@ -278,7 +281,10 @@ export function ModelEffortPicker({
                                 title={value}
                                 type="button"
                               >
-                                <EffortIcon effort={value} />
+                                <EffortIcon
+                                  effort={value}
+                                  efforts={modelEfforts}
+                                />
                               </button>
                             ))}
                           </span>
@@ -306,7 +312,7 @@ export function ModelEffortPicker({
                           type="button"
                           variant={effort === value ? "secondary" : "ghost"}
                         >
-                          <EffortIcon effort={value} />
+                          <EffortIcon effort={value} efforts={efforts} />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{value}</TooltipContent>
@@ -358,6 +364,7 @@ export function ModelEffortPicker({
               <EffortIcon
                 className="text-muted-foreground"
                 effort={preset.effort}
+                efforts={presetModel.efforts}
               />
             </Button>
           ))}
