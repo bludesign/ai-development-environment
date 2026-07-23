@@ -12,7 +12,7 @@ import {
   ChartNoAxesColumn,
   ChevronDown,
   ChevronRight,
-  Square,
+  CircleStop,
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -495,7 +495,7 @@ export function BuildDetailPage({
               onClick={() => void cancel()}
               variant="destructive"
             >
-              {busy ? <Spinner /> : <Square />} {t("cancelBuild")}
+              {busy ? <Spinner /> : <CircleStop />} {t("cancelBuild")}
             </Button>
           )}
           {build.status === "SUCCEEDED" && runnable && (

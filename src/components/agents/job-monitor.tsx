@@ -1,6 +1,6 @@
 "use client";
 
-import { Square } from "lucide-react";
+import { CircleStop } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -154,7 +154,7 @@ export function JobMonitor({
                 size="sm"
                 variant="destructive"
               >
-                <Square />
+                <CircleStop />
                 {t("cancel")}
               </Button>
             )}
