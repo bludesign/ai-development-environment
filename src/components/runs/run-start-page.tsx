@@ -105,7 +105,7 @@ export function RunStartPage({
         runProviderCatalog: ProviderCatalog[];
         runDraft?: RunDraftView | null;
       }>(
-        `query RunStartPage($draftId: ID!) {
+        `query RunStartPage${draftId ? "($draftId: ID!)" : ""} {
         worktreeOverview {
           agents {
             agent { name connectionStatus capabilities }
@@ -118,7 +118,7 @@ export function RunStartPage({
         runProviderCatalog { key label available supportsWebSearch models { id label efforts } }
         ${draftId ? `runDraft(id: $draftId) { ${RUN_DRAFT_FIELDS} }` : ""}
       }`,
-        { draftId: draftId ?? "unused" },
+        draftId ? { draftId } : undefined,
       );
       setCatalog(data.runProviderCatalog);
       if (!data.runDraft) {
