@@ -48,4 +48,5 @@ next-env.d.ts
 /src/generated/
 /prisma/*.db
 /prisma/*.db-*
+/prisma/run-data/
 /supergraph.graphql
