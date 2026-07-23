@@ -38,6 +38,7 @@ import {
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { formatProviderLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
@@ -312,7 +313,7 @@ export function DraftsPage() {
                         </Link>
                       </TableCell>
                       <TableCell>
-                        {draft.provider} · {draft.model}
+                        {formatProviderLabel(draft.provider)} · {draft.model}
                       </TableCell>
                       <TableCell>{draft.attachments.length}</TableCell>
                       <TableCell>

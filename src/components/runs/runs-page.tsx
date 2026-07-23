@@ -3,15 +3,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
-  BatteryFull,
-  BatteryLow,
-  BatteryMedium,
   Cpu,
   FilePenLine,
-  Gauge,
   Play,
   Plus,
   Search,
+  Signal,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  SignalZero,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -59,10 +60,13 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { formatModelLabel, formatProviderLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { RUN_LIST_FIELDS } from "./graphql-fields";
+import { ProviderIcon } from "./provider-icon";
+import { useRunLabels } from "./run-labels";
 import type { AgentRunView } from "./types";
 
 function IconAction({
@@ -100,21 +104,25 @@ function IconAction({
   );
 }
 
+/** Effort reads as signal strength: more bars, more thinking. */
 function EffortIcon({ effort }: { effort: string | null }) {
   const value = effort?.toLowerCase() ?? "auto";
   const Icon =
     value === "low"
-      ? BatteryLow
+      ? SignalLow
       : value === "medium"
-        ? BatteryMedium
-        : value === "high" || value === "xhigh" || value === "max"
-          ? BatteryFull
-          : Gauge;
-  return <Icon aria-hidden="true" className="size-4" />;
+        ? SignalMedium
+        : value === "high"
+          ? SignalHigh
+          : value === "xhigh" || value === "max" || value === "ultra"
+            ? Signal
+            : SignalZero;
+  return <Icon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
 export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const t = useTranslations("runs");
+  const labels = useRunLabels();
   const locale = useLocale();
   const [items, setItems] = useState<AgentRunView[]>([]);
   const [search, setSearch] = useState("");
@@ -397,7 +405,6 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                 <TableHead>{t("prompt")}</TableHead>
                 <TableHead>{t("cost")}</TableHead>
                 <TableHead>{t("modelEffort")}</TableHead>
-                <TableHead>{t("age")}</TableHead>
                 <TableHead>
                   <span className="sr-only">{t("actions")}</span>
                 </TableHead>
@@ -412,11 +419,11 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                       colSpan={
                         editMode
                           ? kind === "SESSION"
-                            ? 11
-                            : 10
-                          : kind === "SESSION"
                             ? 10
                             : 9
+                          : kind === "SESSION"
+                            ? 9
+                            : 8
                       }
                     >
                       {formatDateValue(group.value, "long", {
@@ -470,18 +477,15 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                                     : "secondary"
                               }
                             >
-                              {t(`statuses.${run.status}`)}
+                              {labels.status(run.status)}
                             </Badge>
                             {run.phase !== run.status && (
                               <Badge variant="outline">
-                                {run.phase.replaceAll("_", " ")}
+                                {labels.phase(run.phase)}
                               </Badge>
                             )}
                             <Badge variant="outline">
-                              {run.provider === "OPENCODE"
-                                ? "OpenCode"
-                                : run.provider[0] +
-                                  run.provider.slice(1).toLowerCase()}
+                              {formatProviderLabel(run.provider)}
                             </Badge>
                             {run.origin === "IMPORTED" && (
                               <Badge variant="secondary">{t("imported")}</Badge>
@@ -554,15 +558,15 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                             className="flex items-center gap-2"
                             title={`${run.model} · ${run.effort ?? "auto"}`}
                           >
-                            <Cpu className="size-4" />
-                            <span className="max-w-28 truncate text-xs">
-                              {run.model}
+                            <ProviderIcon provider={run.provider} />
+                            <span className="max-w-40 truncate text-xs">
+                              {formatModelLabel(run.model)}
                             </span>
                             <EffortIcon effort={run.effort} />
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <DateTime kind="relative" value={run.createdAt} />
+                          <div className="text-xs text-muted-foreground">
+                            <DateTime kind="relative" value={run.createdAt} />
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">

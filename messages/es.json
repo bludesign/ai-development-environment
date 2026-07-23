@@ -79,6 +79,14 @@
     "cancelAndTransfer": "Cancelar la ejecución principal y transferir el árbol de trabajo",
     "changesSnapshots": "Cambios",
     "changesSnapshotsDescription": "Puntos de control de Git capturados durante esta ejecución.",
+    "checkpointKinds": {
+      "ANSWER_ROLLBACK": "Reversión de la respuesta",
+      "CONTINUE": "Continuación",
+      "FINAL": "Final",
+      "PRE_ANSWER_REVISION": "Antes de la revisión",
+      "QUESTION": "Pregunta",
+      "START": "Inicio"
+    },
     "continue": "Continuar",
     "cost": "Coste",
     "crossProviderWarning": "El estado oculto del proveedor no se puede transferir entre herramientas. Elige como contexto la transcripción visible o el resumen final.",
@@ -99,9 +107,25 @@
     "empty": "No hay elementos: {kind}",
     "emptyDescription": "No se encontraron ejecuciones coincidentes.",
     "estimatedCost": "Coste estimado",
+    "eventTypes": {
+      "ASSISTANT": "Asistente",
+      "ERROR": "Error",
+      "QUESTION": "Pregunta",
+      "RESULT": "Resultado",
+      "SYSTEM": "Sistema",
+      "TOOL": "Herramienta",
+      "USER": "Usuario"
+    },
     "fileTooLarge": "{name} supera el límite de 25 MB por archivo.",
     "followUp": "Seguimiento",
     "followUpDescription": "Crea una ejecución relacionada con contexto reanudado, nuevo o reenviado.",
+    "followUpModes": {
+      "ANSWER_REVISION": "Revisión de la respuesta",
+      "FRESH": "Nuevo",
+      "PLAN_PLAY": "Ejecución del plan",
+      "RESEND": "Reenviar",
+      "RESUME": "Reanudar"
+    },
     "followUpPrompt": "Prompt de seguimiento",
     "fresh": "Nuevo",
     "id": "ID",
@@ -132,6 +156,37 @@
     "pause": "Pausar",
     "pausedFollowUpDescription": "Al iniciar una ejecución secundaria reanudada, se cancela esta sesión pausada y se transfiere atómicamente su reserva del árbol de trabajo.",
     "pausedFollowUpTitle": "Transferir sesión pausada",
+    "phases": {
+      "ANSWER_FAILED": "Error al responder",
+      "ANSWER_REVISION_PREPARING": "Preparando la revisión de la respuesta",
+      "ANSWER_REVISION_QUEUED": "Revisión de la respuesta en cola",
+      "ANSWER_REVISION_READY": "Revisión de la respuesta lista",
+      "CANCELLED": "Cancelado",
+      "CANCEL_FAILED": "Error al cancelar",
+      "CANCEL_REQUESTED": "Cancelación solicitada",
+      "COMPLETED": "Completado",
+      "CONTINUE_FAILED": "Error al continuar",
+      "DELETE_NATIVE_FAILED": "Error al eliminar en la herramienta",
+      "DELETE_REQUESTED": "Eliminación solicitada",
+      "FAILED": "Fallido",
+      "IMPORTED_ACTIVE_COLLISION": "Importado: conflicto de árbol de trabajo",
+      "IMPORTED_SYNCED": "Importado y sincronizado",
+      "IN_PROGRESS": "En curso",
+      "PAUSED": "Pausado",
+      "PAUSE_FAILED": "Error al pausar",
+      "PAUSE_REQUESTED": "Pausa solicitada",
+      "PLAY_PLAN_FAILED": "Error al ejecutar el plan",
+      "PREPARE_ANSWER_REVISION_FAILED": "Error al preparar la revisión de la respuesta",
+      "QUEUED": "En cola",
+      "RECOVERY_PAUSED": "Pausado tras la recuperación",
+      "REVISE_ANSWER_FAILED": "Error en la revisión de la respuesta",
+      "RUNNING": "En ejecución",
+      "START_FAILED": "Error al iniciar",
+      "STEER_FAILED": "Error al guiar",
+      "SUPERSEDED_BY_ANSWER_REVISION": "Reemplazado por la revisión de la respuesta",
+      "SUPERSEDED_BY_FOLLOW_UP": "Reemplazado por un seguimiento",
+      "WAITING_FOR_ANSWER": "Esperando respuesta"
+    },
     "plan": "Plan",
     "planMutationWarning": "Este plan de solo lectura modificó inesperadamente el árbol de trabajo seleccionado.",
     "plans": "Planes",
@@ -190,6 +245,11 @@
     "superseded": "Reemplazado",
     "ticket": "Incidencia",
     "tool": "Herramienta",
+    "toolCallStatuses": {
+      "COMPLETED": "Completado",
+      "FAILED": "Fallido",
+      "OBSERVED": "Observado"
+    },
     "toolCalls": "Llamadas a herramientas",
     "totalCost": "Coste total estimado",
     "unrestrictedWarning": "Las sesiones se ejecutan sin solicitudes de aprobación y con acceso sin restricciones mientras mantienen una reserva exclusiva del árbol de trabajo.",
@@ -297,7 +357,10 @@
         "description": "Un flujo de GitHub Actions termina con un error."
       }
     },
-    "categories": { "BUILDS": "Compilaciones", "GITHUB": "GitHub" }
+    "categories": {
+      "BUILDS": "Compilaciones",
+      "GITHUB": "GitHub"
+    }
   },
   "credentialEncryption": {
     "title": "Las credenciales de la base de datos no están cifradas",
@@ -325,7 +388,11 @@
     "updated": "Actualizado",
     "emptyTitle": "No hay credenciales guardadas",
     "emptyDescription": "Las credenciales aparecerán aquí después de guardarlas desde su formulario de configuración.",
-    "states": { "READY": "Listo", "WARNING": "Advertencia", "ERROR": "Error" },
+    "states": {
+      "READY": "Listo",
+      "WARNING": "Advertencia",
+      "ERROR": "Error"
+    },
     "backends": {
       "DATABASE": "Base de datos",
       "VAULT": "Vault de HashiCorp",

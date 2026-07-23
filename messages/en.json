@@ -79,6 +79,14 @@
     "cancelAndTransfer": "Cancel parent and transfer worktree",
     "changesSnapshots": "Changes",
     "changesSnapshotsDescription": "Git checkpoints captured during this run.",
+    "checkpointKinds": {
+      "ANSWER_ROLLBACK": "Answer rollback",
+      "CONTINUE": "Continue",
+      "FINAL": "Final",
+      "PRE_ANSWER_REVISION": "Before answer revision",
+      "QUESTION": "Question",
+      "START": "Start"
+    },
     "continue": "Continue",
     "cost": "Cost",
     "crossProviderWarning": "Hidden provider state cannot transfer between tools. Choose the visible transcript or final summary as context.",
@@ -99,9 +107,25 @@
     "empty": "No {kind}",
     "emptyDescription": "No matching runs were found.",
     "estimatedCost": "Estimated cost",
+    "eventTypes": {
+      "ASSISTANT": "Assistant",
+      "ERROR": "Error",
+      "QUESTION": "Question",
+      "RESULT": "Result",
+      "SYSTEM": "System",
+      "TOOL": "Tool",
+      "USER": "User"
+    },
     "fileTooLarge": "{name} exceeds the 25 MB file limit.",
     "followUp": "Follow Up",
     "followUpDescription": "Create a related run with resumed, fresh, or resent context.",
+    "followUpModes": {
+      "ANSWER_REVISION": "Answer revision",
+      "FRESH": "Fresh",
+      "PLAN_PLAY": "Plan run",
+      "RESEND": "Resend",
+      "RESUME": "Resume"
+    },
     "followUpPrompt": "Follow-up prompt",
     "fresh": "Fresh",
     "id": "ID",
@@ -132,6 +156,37 @@
     "pause": "Pause",
     "pausedFollowUpDescription": "Starting a resumed child cancels this paused Session and atomically transfers its worktree lease.",
     "pausedFollowUpTitle": "Transfer paused Session",
+    "phases": {
+      "ANSWER_FAILED": "Answer failed",
+      "ANSWER_REVISION_PREPARING": "Preparing answer revision",
+      "ANSWER_REVISION_QUEUED": "Answer revision queued",
+      "ANSWER_REVISION_READY": "Answer revision ready",
+      "CANCELLED": "Cancelled",
+      "CANCEL_FAILED": "Cancel failed",
+      "CANCEL_REQUESTED": "Cancel requested",
+      "COMPLETED": "Completed",
+      "CONTINUE_FAILED": "Continue failed",
+      "DELETE_NATIVE_FAILED": "Provider delete failed",
+      "DELETE_REQUESTED": "Delete requested",
+      "FAILED": "Failed",
+      "IMPORTED_ACTIVE_COLLISION": "Imported worktree conflict",
+      "IMPORTED_SYNCED": "Imported and synced",
+      "IN_PROGRESS": "In progress",
+      "PAUSED": "Paused",
+      "PAUSE_FAILED": "Pause failed",
+      "PAUSE_REQUESTED": "Pause requested",
+      "PLAY_PLAN_FAILED": "Plan run failed",
+      "PREPARE_ANSWER_REVISION_FAILED": "Answer revision preparation failed",
+      "QUEUED": "Queued",
+      "RECOVERY_PAUSED": "Paused after recovery",
+      "REVISE_ANSWER_FAILED": "Answer revision failed",
+      "RUNNING": "Running",
+      "START_FAILED": "Start failed",
+      "STEER_FAILED": "Steer failed",
+      "SUPERSEDED_BY_ANSWER_REVISION": "Superseded by answer revision",
+      "SUPERSEDED_BY_FOLLOW_UP": "Superseded by follow-up",
+      "WAITING_FOR_ANSWER": "Waiting for answer"
+    },
     "plan": "Plan",
     "planMutationWarning": "This read-only Plan unexpectedly changed the selected worktree.",
     "plans": "Plans",
@@ -190,6 +245,11 @@
     "superseded": "Superseded",
     "ticket": "Ticket",
     "tool": "Tool",
+    "toolCallStatuses": {
+      "COMPLETED": "Completed",
+      "FAILED": "Failed",
+      "OBSERVED": "Observed"
+    },
     "toolCalls": "Tool calls",
     "totalCost": "Total estimated cost",
     "unrestrictedWarning": "Sessions run without approval prompts and with unrestricted access while holding an exclusive worktree lease.",
@@ -297,7 +357,10 @@
         "description": "A GitHub Actions workflow finishes with a failure."
       }
     },
-    "categories": { "BUILDS": "Builds", "GITHUB": "GitHub" }
+    "categories": {
+      "BUILDS": "Builds",
+      "GITHUB": "GitHub"
+    }
   },
   "credentialEncryption": {
     "title": "Database credentials are not encrypted",

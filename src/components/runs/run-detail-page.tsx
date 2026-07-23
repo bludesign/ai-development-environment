@@ -73,6 +73,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { formatProviderLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -86,6 +87,7 @@ import {
   ModelEffortPicker,
   type ProviderCatalogEntry,
 } from "./model-effort-picker";
+import { useRunLabels } from "./run-labels";
 import type {
   AgentRunView,
   RunAttachmentView,
@@ -113,6 +115,7 @@ function eventIcon(type: string) {
 }
 
 function LinkedRun({ value }: { value: RunLinkView }) {
+  const labels = useRunLabels();
   const href = `/${value.kind === "PLAN" ? "plans" : "sessions"}/${value.id}`;
   return (
     <Link
@@ -124,10 +127,12 @@ function LinkedRun({ value }: { value: RunLinkView }) {
         {value.kind === "PLAN" ? "Plan" : "Session"} #{value.displayNumber}
       </span>
       {value.followUpMode && (
-        <Badge variant="outline">{value.followUpMode}</Badge>
+        <Badge variant="outline">
+          {labels.followUpMode(value.followUpMode)}
+        </Badge>
       )}
       <Badge className="ml-auto" variant="secondary">
-        {value.status}
+        {labels.status(value.status)}
       </Badge>
     </Link>
   );
@@ -431,6 +436,7 @@ function QuestionBatch({
 
 export function RunDetailPage({ runId }: { runId: string }) {
   const t = useTranslations("runs");
+  const labels = useRunLabels();
   const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<AgentRunView | null>(null);
@@ -784,9 +790,11 @@ export function RunDetailPage({ runId }: { runId: string }) {
                 {run.kind === "PLAN" ? t("plan") : t("session")}{" "}
                 <span className="font-mono">#{run.displayNumber}</span>
               </h1>
-              <Badge>{run.status}</Badge>
-              <Badge variant="outline">{run.phase.replaceAll("_", " ")}</Badge>
-              <Badge variant="secondary">{run.provider}</Badge>
+              <Badge>{labels.status(run.status)}</Badge>
+              <Badge variant="outline">{labels.phase(run.phase)}</Badge>
+              <Badge variant="secondary">
+                {formatProviderLabel(run.provider)}
+              </Badge>
               {run.origin === "IMPORTED" && (
                 <Badge variant="outline">{t("imported")}</Badge>
               )}
@@ -1066,7 +1074,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       <Wrench className="mr-2 inline size-4" />
                       {call.name}{" "}
                       <Badge className="ml-2" variant="outline">
-                        {call.status}
+                        {labels.toolCallStatus(call.status)}
                       </Badge>
                       {call.supersededAt && (
                         <Badge className="ml-2" variant="outline">
@@ -1160,7 +1168,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       </TableCell>
                       <TableCell className="h-8 py-1">
                         <Badge className="h-5 text-[10px]" variant="outline">
-                          {event.type}
+                          {labels.eventType(event.type)}
                         </Badge>
                       </TableCell>
                       <TableCell className="h-8 py-1">
@@ -1428,7 +1436,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
               <details className="rounded-lg border p-3" key={checkpoint.id}>
                 <summary className="cursor-pointer">
                   <ClipboardList className="mr-2 inline size-4" />
-                  {checkpoint.kind} · <DateTime value={checkpoint.createdAt} />
+                  {labels.checkpointKind(checkpoint.kind)} ·{" "}
+                  <DateTime value={checkpoint.createdAt} />
                   {checkpoint.branch && (
                     <Badge className="ml-2" variant="outline">
                       {checkpoint.branch}

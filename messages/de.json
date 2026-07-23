@@ -79,6 +79,14 @@
     "cancelAndTransfer": "Übergeordneten Lauf abbrechen und Arbeitsbaum übertragen",
     "changesSnapshots": "Änderungen",
     "changesSnapshotsDescription": "Während dieses Laufs erfasste Git-Prüfpunkte.",
+    "checkpointKinds": {
+      "ANSWER_ROLLBACK": "Antwort-Rollback",
+      "CONTINUE": "Fortsetzung",
+      "FINAL": "Abschluss",
+      "PRE_ANSWER_REVISION": "Vor Antwortkorrektur",
+      "QUESTION": "Frage",
+      "START": "Start"
+    },
     "continue": "Fortfahren",
     "cost": "Kosten",
     "crossProviderWarning": "Verborgener Anbieterzustand kann nicht zwischen Werkzeugen übertragen werden. Wählen Sie das sichtbare Transkript oder die abschließende Zusammenfassung als Kontext.",
@@ -99,9 +107,25 @@
     "empty": "Keine Einträge: {kind}",
     "emptyDescription": "Es wurden keine passenden Läufe gefunden.",
     "estimatedCost": "Geschätzte Kosten",
+    "eventTypes": {
+      "ASSISTANT": "Assistent",
+      "ERROR": "Fehler",
+      "QUESTION": "Frage",
+      "RESULT": "Ergebnis",
+      "SYSTEM": "System",
+      "TOOL": "Werkzeug",
+      "USER": "Benutzer"
+    },
     "fileTooLarge": "{name} überschreitet das Dateilimit von 25 MB.",
     "followUp": "Folgelauf",
     "followUpDescription": "Einen verknüpften Lauf mit fortgesetztem, frischem oder erneut gesendetem Kontext erstellen.",
+    "followUpModes": {
+      "ANSWER_REVISION": "Antwortkorrektur",
+      "FRESH": "Neu",
+      "PLAN_PLAY": "Plan-Ausführung",
+      "RESEND": "Erneut senden",
+      "RESUME": "Fortsetzen"
+    },
     "followUpPrompt": "Folge-Prompt",
     "fresh": "Frisch",
     "id": "ID",
@@ -132,6 +156,37 @@
     "pause": "Pausieren",
     "pausedFollowUpDescription": "Beim Start eines fortgesetzten untergeordneten Laufs wird diese pausierte Sitzung abgebrochen und ihre Arbeitsbaumreservierung atomar übertragen.",
     "pausedFollowUpTitle": "Pausierte Sitzung übertragen",
+    "phases": {
+      "ANSWER_FAILED": "Antwort fehlgeschlagen",
+      "ANSWER_REVISION_PREPARING": "Antwortkorrektur wird vorbereitet",
+      "ANSWER_REVISION_QUEUED": "Antwortkorrektur in Warteschlange",
+      "ANSWER_REVISION_READY": "Antwortkorrektur bereit",
+      "CANCELLED": "Abgebrochen",
+      "CANCEL_FAILED": "Abbrechen fehlgeschlagen",
+      "CANCEL_REQUESTED": "Abbruch angefordert",
+      "COMPLETED": "Abgeschlossen",
+      "CONTINUE_FAILED": "Fortsetzen fehlgeschlagen",
+      "DELETE_NATIVE_FAILED": "Löschen beim Werkzeug fehlgeschlagen",
+      "DELETE_REQUESTED": "Löschen angefordert",
+      "FAILED": "Fehlgeschlagen",
+      "IMPORTED_ACTIVE_COLLISION": "Importiert – Arbeitsbaum-Konflikt",
+      "IMPORTED_SYNCED": "Importiert und synchronisiert",
+      "IN_PROGRESS": "In Bearbeitung",
+      "PAUSED": "Pausiert",
+      "PAUSE_FAILED": "Pausieren fehlgeschlagen",
+      "PAUSE_REQUESTED": "Pause angefordert",
+      "PLAY_PLAN_FAILED": "Plan-Ausführung fehlgeschlagen",
+      "PREPARE_ANSWER_REVISION_FAILED": "Vorbereitung der Antwortkorrektur fehlgeschlagen",
+      "QUEUED": "In Warteschlange",
+      "RECOVERY_PAUSED": "Nach Wiederherstellung pausiert",
+      "REVISE_ANSWER_FAILED": "Antwortkorrektur fehlgeschlagen",
+      "RUNNING": "Läuft",
+      "START_FAILED": "Start fehlgeschlagen",
+      "STEER_FAILED": "Steuerung fehlgeschlagen",
+      "SUPERSEDED_BY_ANSWER_REVISION": "Durch Antwortkorrektur ersetzt",
+      "SUPERSEDED_BY_FOLLOW_UP": "Durch Folgelauf ersetzt",
+      "WAITING_FOR_ANSWER": "Wartet auf Antwort"
+    },
     "plan": "Plan",
     "planMutationWarning": "Dieser schreibgeschützte Plan hat den ausgewählten Arbeitsbaum unerwartet geändert.",
     "plans": "Plans",
@@ -190,6 +245,11 @@
     "superseded": "Ersetzt",
     "ticket": "Vorgang",
     "tool": "Werkzeug",
+    "toolCallStatuses": {
+      "COMPLETED": "Abgeschlossen",
+      "FAILED": "Fehlgeschlagen",
+      "OBSERVED": "Beobachtet"
+    },
     "toolCalls": "Werkzeugaufrufe",
     "totalCost": "Geschätzte Gesamtkosten",
     "unrestrictedWarning": "Sitzungen laufen ohne Genehmigungsdialoge und mit uneingeschränktem Zugriff, während sie eine exklusive Arbeitsbaumreservierung halten.",
@@ -297,7 +357,10 @@
         "description": "Ein GitHub-Actions-Workflow endet mit einem Fehler."
       }
     },
-    "categories": { "BUILDS": "Build-Prozesse", "GITHUB": "GitHub" }
+    "categories": {
+      "BUILDS": "Build-Prozesse",
+      "GITHUB": "GitHub"
+    }
   },
   "credentialEncryption": {
     "title": "Datenbank-Anmeldedaten sind nicht verschlüsselt",
@@ -325,7 +388,11 @@
     "updated": "Aktualisiert",
     "emptyTitle": "Keine Anmeldedaten gespeichert",
     "emptyDescription": "Anmeldedaten erscheinen hier, nachdem sie in den zugehörigen Einstellungen gespeichert wurden.",
-    "states": { "READY": "Bereit", "WARNING": "Warnung", "ERROR": "Fehler" },
+    "states": {
+      "READY": "Bereit",
+      "WARNING": "Warnung",
+      "ERROR": "Fehler"
+    },
     "backends": {
       "DATABASE": "Datenbank",
       "VAULT": "HashiCorp-Vault",
