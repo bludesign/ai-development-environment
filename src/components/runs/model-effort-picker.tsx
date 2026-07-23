@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronsUpDown, Pin, PinOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -51,6 +51,18 @@ type CatalogModel = ProviderCatalogEntry["models"][number];
 const providerOrder = ["CODEX", "CLAUDE", "OPENCODE"];
 
 /**
+ * Geometry of one effort chip, shared by the real strip and by the sizer that
+ * stands in for it. Keep in step with the chip's `p-0.5` around a `w-5` icon
+ * and the strip's `gap-0.5`.
+ */
+const effortChipWidth = 24;
+const effortChipGap = 2;
+
+function effortStripWidth(count: number) {
+  return count * effortChipWidth + Math.max(count - 1, 0) * effortChipGap;
+}
+
+/**
  * `data-selected` is the transient hover/keyboard highlight and already owns
  * the row background, so the persistent "this is what you have chosen" marker
  * has to be a different channel: an inset ring, which costs no layout. The
@@ -60,6 +72,64 @@ const providerOrder = ["CODEX", "CLAUDE", "OPENCODE"];
  */
 const checkedRow =
   "data-[checked=true]:ring-1 data-[checked=true]:ring-inset data-[checked=true]:ring-primary/40";
+
+/**
+ * The rail is a convenience beside the pill, so it yields space rather than
+ * claiming it: chips drop from the end until what is left fits on one line,
+ * and the pill — which is the control proper — always survives.
+ *
+ * Chip widths track model names, so a breakpoint guess would have to assume
+ * the longest name and would then waste most of the row on `Opus`. Measuring
+ * what is actually rendered fills the width instead. Chips that do not fit are
+ * hidden with `invisible` rather than unmounted, which keeps their widths
+ * measurable on the next resize and stops the count from oscillating: hiding a
+ * chip changes no geometry, so the observer cannot feed itself.
+ */
+function useRailFit(signature: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(0);
+  useEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+    const measure = () => {
+      const [pill, ...chips] = [...container.children] as HTMLElement[];
+      if (!pill) return;
+      const gap = Number.parseFloat(getComputedStyle(container).columnGap) || 0;
+      let used = pill.offsetWidth;
+      let fits = 0;
+      for (const chip of chips) {
+        const next = used + gap + chip.offsetWidth;
+        if (next > container.clientWidth) break;
+        used = next;
+        fits += 1;
+      }
+      setVisible(fits);
+    };
+    /*
+     * The observer catches the container changing without the window doing so
+     * — the navigation and notification panels both collapse beside this form.
+     * The window listener is the coarse backstop for the ordinary case, and
+     * keeps the rail correct wherever observer delivery is throttled. Neither
+     * is load-bearing for a first render, and jsdom ships no ResizeObserver at
+     * all, so the observer is optional rather than a hard dependency.
+     */
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(container);
+    if (observer) {
+      for (const child of container.children) observer.observe(child);
+    }
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [signature]);
+  return { railRef: ref, visible };
+}
 
 /**
  * Tool, model, and effort are one decision, so they are one control: a pill
@@ -150,13 +220,33 @@ export function ModelEffortPicker({
     if (selection) remember({ ...selection, effort: value });
   };
 
+  const shown = railPresets.slice(0, modelPresetRailLimit);
+  const { railRef, visible } = useRailFit(
+    [
+      selection && modelPresetKey(selection),
+      ...shown.map(({ preset }) => modelPresetKey(preset)),
+    ].join("|"),
+  );
+
   return (
     <div className="space-y-2">
       <Label>{t("modelEffort")}</Label>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2 overflow-hidden" ref={railRef}>
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger asChild>
-            <Button className="h-8 font-normal" type="button" variant="outline">
+            {/*
+             * Hidden chips keep their layout box so they stay measurable, so
+             * the row overflows by design. Nothing may shrink to absorb that —
+             * a shrinking pill would both look collapsed and feed a bogus width
+             * back into the measurement. `max-w-full` still caps the pill to
+             * the container on a narrow screen, where its label truncates and
+             * the measurement correctly concludes that no chip fits.
+             */}
+            <Button
+              className="h-8 min-w-0 max-w-full shrink-0 font-normal"
+              type="button"
+              variant="outline"
+            >
               {selectedProvider && selectedModel ? (
                 <>
                   <ProviderIcon provider={selectedProvider.key} />
@@ -177,8 +267,38 @@ export function ModelEffortPicker({
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            className="w-[min(32rem,calc(100vw-2rem))] p-0"
+            className="w-max max-w-[min(32rem,calc(100vw-2rem))] p-0"
           >
+            {/*
+             * `w-max` alone would resize the popover on every keystroke, since
+             * filtering changes which row is widest. This stands in for the
+             * unfiltered list — one zero-height replica per row, carrying the
+             * label and a spacer the width of that model's effort strip — so
+             * the popover settles on the width the whole catalog needs and then
+             * holds it. `max-w` caps it to the viewport, past which the labels
+             * truncate. `px-4` is the row's inherited padding: `p-1` on the
+             * command, `p-1` on the group, `px-2` on the item.
+             */}
+            <div aria-hidden="true" className="h-0 overflow-hidden">
+              {providers.flatMap((entry) =>
+                entry.models.map((entryModel) => (
+                  <div
+                    className="flex items-center gap-2 px-4 text-sm whitespace-nowrap"
+                    key={`${entry.key}/${entryModel.id}`}
+                  >
+                    <span className="size-4" />
+                    <span>{formatModelLabel(entryModel.label)}</span>
+                    <span
+                      style={{
+                        width: effortStripWidth(
+                          Math.max(entryModel.efforts.length, 1),
+                        ),
+                      }}
+                    />
+                  </div>
+                )),
+              )}
+            </div>
             <Command>
               <CommandInput
                 placeholder={t("search", { kind: t("model").toLowerCase() })}
@@ -347,13 +467,15 @@ export function ModelEffortPicker({
             </div>
           </PopoverContent>
         </Popover>
-        {railPresets
-          .slice(0, modelPresetRailLimit)
-          .map(({ preset, entry, model: presetModel }) => (
+        {shown.map(({ preset, entry, model: presetModel }, index) => {
+          const fits = index < visible;
+          return (
             <Button
-              className="h-8 font-normal"
+              aria-hidden={!fits}
+              className={cn("h-8 shrink-0 font-normal", !fits && "invisible")}
               key={modelPresetKey(preset)}
               onClick={() => apply(preset)}
+              tabIndex={fits ? undefined : -1}
               type="button"
               variant="ghost"
             >
@@ -367,7 +489,8 @@ export function ModelEffortPicker({
                 efforts={presetModel.efforts}
               />
             </Button>
-          ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -106,19 +106,34 @@ describe("RunStartPage", () => {
     expect(screen.getByRole("tab", { name: "Plan" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Session" })).toBeDefined();
 
-    const worktreeSelect = within(
-      screen.getByText("Worktree").parentElement!,
-    ).getByRole("combobox");
-    fireEvent.pointerDown(worktreeSelect, {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
+    fireEvent.click(
+      within(screen.getByText("Worktree").parentElement!).getByRole("button", {
+        name: "Select a worktree",
+      }),
+    );
     expect(
       await screen.findByRole("option", {
         name: "widgets · main · Builder",
       }),
     ).toBeDefined();
+  });
+
+  test("searches worktrees by folder from inside the dropdown", async () => {
+    render(<RunStartPage initialKind="PLAN" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select a worktree" }),
+    );
+    const search = await screen.findByPlaceholderText("Search worktrees");
+    fireEvent.change(search, { target: { value: "workspace/widgets" } });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "widgets · main · Builder" }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: /widgets · main · Builder/ }),
+    ).toBeDefined();
+    expect(screen.getByText("/workspace/widgets")).toBeDefined();
   });
 
   test("declares and supplies the draft variable while editing a draft", async () => {

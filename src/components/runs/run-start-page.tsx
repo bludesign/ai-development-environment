@@ -1,7 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ClipboardList, Play, Save, Search, Terminal } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ChevronsUpDown,
+  ClipboardList,
+  Play,
+  Save,
+  Terminal,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -14,20 +20,26 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
 
 import { RUN_DRAFT_FIELDS } from "./graphql-fields";
 import { AttachmentPicker } from "./attachment-picker";
@@ -71,7 +83,7 @@ export function RunStartPage({
   const [effort, setEffort] = useState("auto");
   const [webSearch, setWebSearch] = useState(true);
   const [attachments, setAttachments] = useState<RunAttachmentView[]>([]);
-  const [worktreeSearch, setWorktreeSearch] = useState("");
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"save" | "start" | "upload" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,16 +178,23 @@ export function RunStartPage({
       `runs.provider.${provider.toLowerCase()}`,
     ),
   );
-  const visibleWorktrees = useMemo(() => {
-    const term = worktreeSearch.trim().toLowerCase();
-    return worktrees.filter(
-      (worktree) =>
-        !term ||
-        `${worktree.repository} ${worktree.branch} ${worktree.folder} ${worktree.ticketKey}`
-          .toLowerCase()
-          .includes(term),
-    );
-  }, [worktreeSearch, worktrees]);
+  /**
+   * The searchable corpus, not the label: a worktree is often found by its
+   * folder or ticket rather than by the repository and branch the row shows.
+   */
+  const worktreeTerms = (worktree: WorktreeOption) =>
+    [
+      worktree.repository,
+      worktree.branch,
+      worktree.folder,
+      worktree.ticketKey,
+      worktree.ticketTitle,
+      worktree.agentName,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const worktreeLabel = (worktree: WorktreeOption) =>
+    `${worktree.repository} · ${worktree.branch ?? t("detached")} · ${worktree.agentName}`;
 
   const selectWorktree = (value: string | null) => {
     const id = value ?? "";
@@ -315,36 +334,59 @@ export function RunStartPage({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>{t("worktree")}</Label>
-              <div className="relative mb-2">
-                <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
-                <Input
-                  aria-label={t("searchWorktrees")}
-                  className="pl-9"
-                  onChange={(event) => setWorktreeSearch(event.target.value)}
-                  placeholder={t("searchWorktrees")}
-                  value={worktreeSearch}
-                />
-              </div>
-              <Select onValueChange={selectWorktree} value={worktreeId}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("selectWorktree")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {visibleWorktrees.map((worktree) => (
-                    <SelectItem
-                      disabled={
-                        !worktree.agentOnline ||
-                        worktree.availability !== "AVAILABLE"
-                      }
-                      key={worktree.id}
-                      value={worktree.id}
+              <Popover onOpenChange={setWorktreeOpen} open={worktreeOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    className="w-full justify-between font-normal"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span
+                      className={cn(
+                        "truncate",
+                        !selectedWorktree && "text-muted-foreground",
+                      )}
                     >
-                      {worktree.repository} · {worktree.branch ?? t("detached")}{" "}
-                      · {worktree.agentName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      {selectedWorktree
+                        ? worktreeLabel(selectedWorktree)
+                        : t("selectWorktree")}
+                    </span>
+                    <ChevronsUpDown className="text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-(--radix-popover-trigger-width) p-0"
+                >
+                  <Command>
+                    <CommandInput placeholder={t("searchWorktrees")} />
+                    <CommandList>
+                      <CommandEmpty>
+                        {t("empty", { kind: t("worktree") })}
+                      </CommandEmpty>
+                      {worktrees.map((worktree) => (
+                        <CommandItem
+                          data-checked={worktree.id === worktreeId}
+                          disabled={
+                            !worktree.agentOnline ||
+                            worktree.availability !== "AVAILABLE"
+                          }
+                          key={worktree.id}
+                          onSelect={() => {
+                            selectWorktree(worktree.id);
+                            setWorktreeOpen(false);
+                          }}
+                          value={worktreeTerms(worktree)}
+                        >
+                          <span className="min-w-0 flex-1 truncate">
+                            {worktreeLabel(worktree)}
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               {selectedWorktree && (
                 <p
                   className="truncate font-mono text-xs text-muted-foreground"

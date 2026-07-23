@@ -15,7 +15,12 @@ const changeEvent = "aide:model-presets";
 const separator = "\u0000";
 const recentLimit = 6;
 
-export const modelPresetRailLimit = 4;
+/**
+ * An upper bound on chips rendered, not on chips shown — the rail measures
+ * what fits and hides the rest. It only caps how much the picker builds and
+ * measures on a very wide screen.
+ */
+export const modelPresetRailLimit = 6;
 
 type PresetStore = { pinned: ModelPreset[]; recent: ModelPreset[] };
 
