@@ -21,6 +21,13 @@ export default defineConfig({
         replacement: path.resolve(rootDirectory, "test/mocks/server-only.ts"),
       },
       {
+        find: /^.+\.svg$/,
+        replacement: path.resolve(
+          rootDirectory,
+          "test/mocks/svg-component.tsx",
+        ),
+      },
+      {
         find: /^next-intl$/,
         replacement: path.resolve(rootDirectory, "src/__mocks__/next-intl.js"),
       },

@@ -8,11 +8,6 @@ import {
   Play,
   Plus,
   Search,
-  Signal,
-  SignalHigh,
-  SignalLow,
-  SignalMedium,
-  Sparkles,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -65,6 +60,7 @@ import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { RUN_LIST_FIELDS } from "./graphql-fields";
+import { EffortIcon } from "./effort-icon";
 import { ProviderIcon } from "./provider-icon";
 import { useRunLabels } from "./run-labels";
 import type { AgentRunView } from "./types";
@@ -102,26 +98,6 @@ function IconAction({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
-}
-
-/**
- * Effort reads as signal strength: more bars, more thinking. `auto` has no
- * place on that scale — empty bars would read as "none" — so it keeps the
- * sparkles the model picker already uses for a provider-chosen effort.
- */
-function EffortIcon({ effort }: { effort: string | null }) {
-  const value = effort?.toLowerCase() ?? "auto";
-  const Icon =
-    value === "low"
-      ? SignalLow
-      : value === "medium"
-        ? SignalMedium
-        : value === "high"
-          ? SignalHigh
-          : value === "xhigh" || value === "max" || value === "ultra"
-            ? Signal
-            : Sparkles;
-  return <Icon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
 export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {

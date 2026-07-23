@@ -87,6 +87,7 @@
       "QUESTION": "Question",
       "START": "Start"
     },
+    "chooseModel": "Choose a model",
     "continue": "Continue",
     "cost": "Cost",
     "crossProviderWarning": "Hidden provider state cannot transfer between tools. Choose the visible transcript or final summary as context.",
@@ -186,6 +187,7 @@
       "SUPERSEDED_BY_FOLLOW_UP": "Superseded by follow-up",
       "WAITING_FOR_ANSWER": "Waiting for answer"
     },
+    "pinPreset": "Pin as preset",
     "plan": "Plan",
     "planMutationWarning": "This read-only Plan unexpectedly changed the selected worktree.",
     "plans": "Plans",
@@ -251,6 +253,7 @@
     },
     "toolCalls": "Tool calls",
     "totalCost": "Total estimated cost",
+    "unpinPreset": "Unpin preset",
     "unrestrictedWarning": "Sessions run without approval prompts and with unrestricted access while holding an exclusive worktree lease.",
     "uploadFailed": "Attachment upload failed.",
     "usageCost": "Usage and estimated cost",

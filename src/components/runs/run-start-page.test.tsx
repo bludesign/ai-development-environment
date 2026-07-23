@@ -92,10 +92,12 @@ describe("RunStartPage", () => {
     expect(query).not.toContain("$draftId");
     expect(variables).toBeUndefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    fireEvent.click(screen.getByRole("button", { name: "GPT-5.6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "GPT-5.6" }));
 
-    expect(screen.getByRole("button", { name: "Effort: high" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: /GPT-5\.6/ }).textContent,
+    ).toContain("high");
     expect(
       screen
         .getByRole("checkbox", { name: /Web search/ })
@@ -151,14 +153,14 @@ describe("RunStartPage", () => {
     expect(variables).toEqual({ draftId: "draft-1" });
   });
 
-  test("searches and favorites models from the More picker", async () => {
+  test("searches the palette and pins the chosen model as a preset", async () => {
     request.mockResolvedValue({
       ...pageData,
       runProviderCatalog: [
         {
           ...pageData.runProviderCatalog[0],
           models: [
-            { id: "model-1", label: "Model One", efforts: ["auto"] },
+            { id: "model-1", label: "Model One", efforts: ["auto", "high"] },
             { id: "model-2", label: "Model Two", efforts: ["auto"] },
             { id: "model-3", label: "Model Three", efforts: ["auto"] },
             { id: "model-4", label: "Model Four", efforts: ["auto"] },
@@ -169,19 +171,49 @@ describe("RunStartPage", () => {
 
     render(<RunStartPage initialKind="PLAN" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose a model" }),
+    );
     const search = await screen.findByPlaceholderText("Search model");
     fireEvent.change(search, { target: { value: "Four" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Model Four" }));
+
+    expect(
+      JSON.parse(window.localStorage.getItem("aide.model-presets.v1") ?? "{}"),
+    ).toEqual({
+      pinned: [],
+      recent: [{ provider: "CODEX", model: "model-4", effort: "auto" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Model Four/ }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Favorite Model Four" }),
+      await screen.findByRole("button", { name: "Pin as preset" }),
     );
 
     expect(
-      JSON.parse(
-        window.localStorage.getItem("aide.favorite-models.v1") ?? "{}",
-      ),
-    ).toEqual({ CODEX: ["model-4"] });
+      JSON.parse(window.localStorage.getItem("aide.model-presets.v1") ?? "{}"),
+    ).toEqual({
+      pinned: [{ provider: "CODEX", model: "model-4", effort: "auto" }],
+      recent: [],
+    });
+  });
+
+  test("switches the whole triple from a preset chip", async () => {
+    window.localStorage.setItem(
+      "aide.model-presets.v1",
+      JSON.stringify({
+        pinned: [{ provider: "CODEX", model: "gpt-5.6", effort: "high" }],
+        recent: [],
+      }),
+    );
+
+    render(<RunStartPage initialKind="PLAN" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /GPT-5\.6/ }));
+
+    const pill = screen.getByRole("button", { name: /GPT-5\.6/ });
+    expect(pill.textContent).toContain("high");
+    expect(screen.queryByRole("button", { name: "Choose a model" })).toBeNull();
   });
 
   test("uploads files dropped on the attachment picker", async () => {

@@ -87,6 +87,7 @@
       "QUESTION": "Frage",
       "START": "Start"
     },
+    "chooseModel": "Modell wählen",
     "continue": "Fortfahren",
     "cost": "Kosten",
     "crossProviderWarning": "Verborgener Anbieterzustand kann nicht zwischen Werkzeugen übertragen werden. Wählen Sie das sichtbare Transkript oder die abschließende Zusammenfassung als Kontext.",
@@ -186,6 +187,7 @@
       "SUPERSEDED_BY_FOLLOW_UP": "Durch Folgelauf ersetzt",
       "WAITING_FOR_ANSWER": "Wartet auf Antwort"
     },
+    "pinPreset": "Als Voreinstellung anheften",
     "plan": "Plan",
     "planMutationWarning": "Dieser schreibgeschützte Plan hat den ausgewählten Arbeitsbaum unerwartet geändert.",
     "plans": "Plans",
@@ -251,6 +253,7 @@
     },
     "toolCalls": "Werkzeugaufrufe",
     "totalCost": "Geschätzte Gesamtkosten",
+    "unpinPreset": "Voreinstellung lösen",
     "unrestrictedWarning": "Sitzungen laufen ohne Genehmigungsdialoge und mit uneingeschränktem Zugriff, während sie eine exklusive Arbeitsbaumreservierung halten.",
     "uploadFailed": "Hochladen des Anhangs fehlgeschlagen.",
     "usageCost": "Nutzung und geschätzte Kosten",

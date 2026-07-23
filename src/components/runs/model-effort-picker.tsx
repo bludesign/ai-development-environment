@@ -1,25 +1,14 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-import {
-  Bot,
-  ChevronDown,
-  Code2,
-  Feather,
-  Flame,
-  Gauge,
-  Rocket,
-  Sparkles,
-  Star,
-  Terminal,
-  Zap,
-} from "lucide-react";
+import { useState } from "react";
+import { ChevronsUpDown, Pin, PinOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandEmpty,
+  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -31,19 +20,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { formatModelLabel } from "@/lib/enum-label";
+
+import { EffortIcon } from "./effort-icon";
+import {
+  modelPresetKey,
+  modelPresetRailLimit,
+  sameModelPreset,
+  useModelPresets,
+  type ModelPreset,
+} from "./model-presets";
+import { ProviderIcon } from "./provider-icon";
 
 export type ProviderCatalogEntry = {
   key: string;
@@ -53,59 +45,18 @@ export type ProviderCatalogEntry = {
   models: Array<{ id: string; label: string; efforts: string[] }>;
 };
 
+type CatalogModel = ProviderCatalogEntry["models"][number];
+
 const providerOrder = ["CODEX", "CLAUDE", "OPENCODE"];
-const favoriteStorageKey = "aide.favorite-models.v1";
-const favoriteChangeEvent = "aide:model-favorites";
 
-function favoriteSnapshot() {
-  if (typeof window === "undefined") return "{}";
-  try {
-    return window.localStorage.getItem(favoriteStorageKey) ?? "{}";
-  } catch {
-    return "{}";
-  }
-}
-
-function subscribeToFavorites(onChange: () => void) {
-  window.addEventListener("storage", onChange);
-  window.addEventListener(favoriteChangeEvent, onChange);
-  return () => {
-    window.removeEventListener("storage", onChange);
-    window.removeEventListener(favoriteChangeEvent, onChange);
-  };
-}
-
-function parseFavorites(value: string): Record<string, string[]> {
-  try {
-    return JSON.parse(value) as Record<string, string[]>;
-  } catch {
-    return {};
-  }
-}
-
-function ProviderIcon({ provider }: { provider: string }) {
-  const Icon =
-    provider === "CODEX" ? Bot : provider === "CLAUDE" ? Sparkles : Terminal;
-  return <Icon aria-hidden="true" />;
-}
-
-function EffortIcon({ effort }: { effort: string }) {
-  const value = effort.toLowerCase();
-  const Icon =
-    value === "low"
-      ? Feather
-      : value === "medium"
-        ? Gauge
-        : value === "high"
-          ? Zap
-          : value === "xhigh"
-            ? Flame
-            : value === "max" || value === "ultra"
-              ? Rocket
-              : Sparkles;
-  return <Icon aria-hidden="true" />;
-}
-
+/**
+ * Tool, model, and effort are one decision, so they are one control: a pill
+ * holding the current triple that opens a searchable cross-provider palette,
+ * preceded by a rail of one-click presets. The rail is what makes the palette
+ * affordable — switching between the two or three setups someone actually uses
+ * never costs more than a click, so the full catalog can stay behind a search
+ * box instead of spread across three dropdowns.
+ */
 export function ModelEffortPicker({
   catalog,
   provider,
@@ -126,13 +77,8 @@ export function ModelEffortPicker({
   isProviderDisabled?: (entry: ProviderCatalogEntry) => boolean;
 }) {
   const t = useTranslations("runs");
-  const favoriteValue = useSyncExternalStore(
-    subscribeToFavorites,
-    favoriteSnapshot,
-    () => "{}",
-  );
-  const favorites = parseFavorites(favoriteValue);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const { rail, isPinned, togglePin, remember } = useModelPresets();
+  const [open, setOpen] = useState(false);
 
   const providers = [...catalog].sort((left, right) => {
     const leftIndex = providerOrder.indexOf(left.key);
@@ -142,232 +88,180 @@ export function ModelEffortPicker({
       (rightIndex < 0 ? providerOrder.length : rightIndex)
     );
   });
-  const selectedProvider = providers.find(({ key }) => key === provider);
-  const selectedModel = selectedProvider?.models.find(({ id }) => id === model);
-  const providerFavorites = favorites[provider] ?? [];
-  const models = [...(selectedProvider?.models ?? [])].sort((left, right) => {
-    const leftIndex = providerFavorites.indexOf(left.id);
-    const rightIndex = providerFavorites.indexOf(right.id);
-    if (leftIndex >= 0 || rightIndex >= 0) {
-      if (leftIndex < 0) return 1;
-      if (rightIndex < 0) return -1;
-      return leftIndex - rightIndex;
-    }
-    return 0;
-  });
-
-  const chooseModel = (value: string) => {
-    const entry = selectedProvider?.models.find(({ id }) => id === value);
-    onModelChange(value);
-    onEffortChange(
-      entry?.efforts.includes("auto") ? "auto" : (entry?.efforts[0] ?? "auto"),
-    );
-    setMoreOpen(false);
-  };
-  const toggleFavorite = (value: string) => {
-    const current = new Set(favorites[provider] ?? []);
-    if (current.has(value)) current.delete(value);
-    else current.add(value);
-    const next = { ...favorites, [provider]: [...current] };
-    try {
-      window.localStorage.setItem(favoriteStorageKey, JSON.stringify(next));
-      window.dispatchEvent(new Event(favoriteChangeEvent));
-    } catch {
-      // A private browsing policy may make local storage unavailable.
-    }
-  };
   const disabled = (entry: ProviderCatalogEntry) =>
     !entry.available || Boolean(isProviderDisabled?.(entry));
-
-  if (!selectedProvider) {
-    return (
-      <div className="space-y-2">
-        <Label>{t("tool")}</Label>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {providers.slice(0, 3).map((entry) => (
-            <Button
-              className="h-11 justify-start"
-              disabled={disabled(entry)}
-              key={entry.key}
-              onClick={() => onProviderChange(entry.key)}
-              type="button"
-              variant="outline"
-            >
-              <ProviderIcon provider={entry.key} />
-              {entry.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (!selectedModel) {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-end gap-2">
-          <div className="w-40 space-y-1.5">
-            <Label>{t("tool")}</Label>
-            <Select
-              onValueChange={(value) => onProviderChange(value ?? "")}
-              value={provider}
-            >
-              <SelectTrigger className="h-8">
-                <ProviderIcon provider={provider} />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((entry) => (
-                  <SelectItem
-                    disabled={disabled(entry)}
-                    key={entry.key}
-                    value={entry.key}
-                  >
-                    {entry.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="pb-1 text-sm text-muted-foreground">{t("model")}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {models.slice(0, 3).map((entry) => (
-            <Button
-              key={entry.id}
-              onClick={() => chooseModel(entry.id)}
-              type="button"
-              variant="outline"
-            >
-              <Code2 /> {entry.label}
-              {providerFavorites.includes(entry.id) && (
-                <Star className="fill-current" />
-              )}
-            </Button>
-          ))}
-          {models.length > 3 && (
-            <Popover onOpenChange={setMoreOpen} open={moreOpen}>
-              <PopoverTrigger asChild>
-                <Button type="button" variant="ghost">
-                  More <ChevronDown />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-80 p-0">
-                <Command>
-                  <CommandInput
-                    placeholder={t("search", {
-                      kind: t("model").toLowerCase(),
-                    })}
-                  />
-                  <CommandList>
-                    <CommandEmpty>
-                      {t("empty", { kind: t("model") })}
-                    </CommandEmpty>
-                    {models.map((entry) => {
-                      const favorite = providerFavorites.includes(entry.id);
-                      return (
-                        <CommandItem
-                          key={entry.id}
-                          onSelect={() => chooseModel(entry.id)}
-                          value={`${entry.label} ${entry.id}`}
-                        >
-                          <span className="min-w-0 flex-1 truncate">
-                            {entry.label}
-                          </span>
-                          <button
-                            aria-label={`${favorite ? "Unfavorite" : "Favorite"} ${entry.label}`}
-                            className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              toggleFavorite(entry.id);
-                            }}
-                            type="button"
-                          >
-                            <Star className={cn(favorite && "fill-current")} />
-                          </button>
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const efforts = selectedModel.efforts.length
+  const selectedProvider = providers.find(({ key }) => key === provider);
+  const selectedModel = selectedProvider?.models.find(({ id }) => id === model);
+  const selection: ModelPreset | null = selectedModel
+    ? { provider, model, effort }
+    : null;
+  const efforts = selectedModel?.efforts.length
     ? selectedModel.efforts
     : ["auto"];
+
+  /**
+   * A preset outlives the catalog that produced it: agents go offline and
+   * providers drop models between syncs, so anything that no longer resolves
+   * to a usable model is left out rather than offered and then rejected.
+   */
+  const resolved = rail.flatMap((preset) => {
+    const entry = providers.find(({ key }) => key === preset.provider);
+    const found = entry?.models.find(({ id }) => id === preset.model);
+    if (!entry || !found || disabled(entry)) return [];
+    if (selection && sameModelPreset(preset, selection)) return [];
+    return [{ preset, entry, model: found }];
+  });
+
+  const apply = (preset: ModelPreset) => {
+    if (preset.provider !== provider) onProviderChange(preset.provider);
+    onModelChange(preset.model);
+    onEffortChange(preset.effort);
+    remember(preset);
+  };
+  /** Effort carries across a model switch when the target supports it. */
+  const chooseModel = (entry: ProviderCatalogEntry, next: CatalogModel) => {
+    apply({
+      provider: entry.key,
+      model: next.id,
+      effort: next.efforts.includes(effort)
+        ? effort
+        : next.efforts.includes("auto")
+          ? "auto"
+          : (next.efforts[0] ?? "auto"),
+    });
+    setOpen(false);
+  };
+  const chooseEffort = (value: string) => {
+    onEffortChange(value);
+    if (selection) remember({ ...selection, effort: value });
+  };
+
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <div className="w-36 space-y-1.5">
-        <Label>{t("tool")}</Label>
-        <Select
-          onValueChange={(value) => onProviderChange(value ?? "")}
-          value={provider}
-        >
-          <SelectTrigger className="h-8">
-            <ProviderIcon provider={provider} />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {providers.map((entry) => (
-              <SelectItem
-                disabled={disabled(entry)}
-                key={entry.key}
-                value={entry.key}
-              >
-                {entry.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="min-w-44 flex-1 space-y-1.5">
-        <Label>{t("model")}</Label>
-        <Select
-          onValueChange={(value) => chooseModel(value ?? "")}
-          value={model}
-        >
-          <SelectTrigger className="h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {models.map((entry) => (
-              <SelectItem key={entry.id} value={entry.id}>
-                {entry.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("effort")}</Label>
-        <TooltipProvider>
-          <div className="flex h-8 items-center rounded-lg border bg-background p-0.5">
-            {efforts.map((value) => (
-              <Tooltip key={value}>
-                <TooltipTrigger asChild>
-                  <Button
-                    aria-label={`${t("effort")}: ${value}`}
-                    className="size-6"
-                    onClick={() => onEffortChange(value)}
-                    size="icon-xs"
-                    type="button"
-                    variant={effort === value ? "secondary" : "ghost"}
-                  >
-                    <EffortIcon effort={value} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{value}</TooltipContent>
-              </Tooltip>
-            ))}
-          </div>
-        </TooltipProvider>
+    <div className="space-y-2">
+      <Label>{t("modelEffort")}</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Popover onOpenChange={setOpen} open={open}>
+          <PopoverTrigger asChild>
+            <Button className="h-8 font-normal" type="button" variant="outline">
+              {selectedProvider && selectedModel ? (
+                <>
+                  <ProviderIcon provider={selectedProvider.key} />
+                  <span className="max-w-48 truncate">
+                    {formatModelLabel(selectedModel.label)}
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <EffortIcon effort={effort} />
+                  <span className="text-muted-foreground">{effort}</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  {t("chooseModel")}
+                </span>
+              )}
+              <ChevronsUpDown className="text-muted-foreground" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80 p-0">
+            <Command>
+              <CommandInput
+                placeholder={t("search", { kind: t("model").toLowerCase() })}
+              />
+              <CommandList>
+                <CommandEmpty>{t("empty", { kind: t("model") })}</CommandEmpty>
+                {providers.map((entry) => (
+                  <CommandGroup heading={entry.label} key={entry.key}>
+                    {entry.models.map((entryModel) => (
+                      <CommandItem
+                        data-checked={
+                          entry.key === provider && entryModel.id === model
+                        }
+                        disabled={disabled(entry)}
+                        key={`${entry.key}/${entryModel.id}`}
+                        onSelect={() => chooseModel(entry, entryModel)}
+                        value={`${entry.label} ${entryModel.label} ${entryModel.id}`}
+                      >
+                        <ProviderIcon provider={entry.key} />
+                        <span className="min-w-0 flex-1 truncate">
+                          {formatModelLabel(entryModel.label)}
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ))}
+              </CommandList>
+            </Command>
+            <div className="flex items-center gap-2 border-t p-2">
+              <span className="text-xs text-muted-foreground">
+                {t("effort")}
+              </span>
+              <TooltipProvider>
+                <div className="flex items-center gap-0.5">
+                  {efforts.map((value) => (
+                    <Tooltip key={value}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          aria-label={`${t("effort")}: ${value}`}
+                          disabled={!selectedModel}
+                          onClick={() => chooseEffort(value)}
+                          size="icon-xs"
+                          type="button"
+                          variant={effort === value ? "secondary" : "ghost"}
+                        >
+                          <EffortIcon effort={value} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{value}</TooltipContent>
+                    </Tooltip>
+                  ))}
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      aria-label={
+                        selection && isPinned(selection)
+                          ? t("unpinPreset")
+                          : t("pinPreset")
+                      }
+                      className="ml-auto"
+                      disabled={!selection}
+                      onClick={() => selection && togglePin(selection)}
+                      size="icon-xs"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {selection && isPinned(selection) ? <PinOff /> : <Pin />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {selection && isPinned(selection)
+                      ? t("unpinPreset")
+                      : t("pinPreset")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </PopoverContent>
+        </Popover>
+        {resolved
+          .slice(0, modelPresetRailLimit)
+          .map(({ preset, entry, model: presetModel }) => (
+            <Button
+              className="h-8 font-normal"
+              key={modelPresetKey(preset)}
+              onClick={() => apply(preset)}
+              type="button"
+              variant="ghost"
+            >
+              <ProviderIcon provider={entry.key} />
+              <span className="max-w-32 truncate">
+                {formatModelLabel(presetModel.label)}
+              </span>
+              <EffortIcon
+                className="text-muted-foreground"
+                effort={preset.effort}
+              />
+            </Button>
+          ))}
       </div>
     </div>
   );

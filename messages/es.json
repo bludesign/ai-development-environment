@@ -87,6 +87,7 @@
       "QUESTION": "Pregunta",
       "START": "Inicio"
     },
+    "chooseModel": "Elegir un modelo",
     "continue": "Continuar",
     "cost": "Coste",
     "crossProviderWarning": "El estado oculto del proveedor no se puede transferir entre herramientas. Elige como contexto la transcripción visible o el resumen final.",
@@ -186,6 +187,7 @@
       "SUPERSEDED_BY_FOLLOW_UP": "Reemplazado por un seguimiento",
       "WAITING_FOR_ANSWER": "Esperando respuesta"
     },
+    "pinPreset": "Fijar como preajuste",
     "plan": "Plan",
     "planMutationWarning": "Este plan de solo lectura modificó inesperadamente el árbol de trabajo seleccionado.",
     "plans": "Planes",
@@ -251,6 +253,7 @@
     },
     "toolCalls": "Llamadas a herramientas",
     "totalCost": "Coste total estimado",
+    "unpinPreset": "Quitar preajuste",
     "unrestrictedWarning": "Las sesiones se ejecutan sin solicitudes de aprobación y con acceso sin restricciones mientras mantienen una reserva exclusiva del árbol de trabajo.",
     "uploadFailed": "No se pudo subir el archivo adjunto.",
     "usageCost": "Uso y coste estimado",
