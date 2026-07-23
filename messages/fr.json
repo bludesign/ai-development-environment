@@ -119,6 +119,9 @@
       "TOOL": "Outil",
       "USER": "Utilisateur"
     },
+    "export": "Exporter",
+    "exportJson": "Exporter en JSON",
+    "exportMarkdown": "Exporter en Markdown",
     "fileTooLarge": "{name} dépasse la limite de 25 Mo.",
     "followUp": "Suivi",
     "followUpDescription": "Créer une exécution liée avec un contexte repris, nouveau ou renvoyé.",

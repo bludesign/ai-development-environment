@@ -18,6 +18,7 @@ import {
   CircleStop,
   ClipboardList,
   Code2,
+  Download,
   File,
   FileDiff,
   GitFork,
@@ -56,6 +57,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -528,6 +535,83 @@ export function RunDetailPage({ runId }: { runId: string }) {
     if (!container || !activityPinnedRef.current) return;
     container.scrollTop = container.scrollHeight;
   }, [events]);
+  const exportActivity = useCallback(
+    async (format: "json" | "markdown") => {
+      const all: RunEventView[] = [];
+      let afterSequence = -1;
+      // Paginate the full, unfiltered history (search-independent, including
+      // superseded events); the query caps each page at 500.
+      for (;;) {
+        const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
+          `query RunActivityExport($runId: ID!, $afterSequence: Int!) { runEvents(runId: $runId, afterSequence: $afterSequence, first: 500, includeSuperseded: true) { ${RUN_EVENT_FIELDS} } }`,
+          { runId, afterSequence },
+        );
+        const page = data.runEvents;
+        all.push(...page);
+        if (page.length < 500) break;
+        afterSequence = page[page.length - 1]!.sequence;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const base = `run-${runId}-activity-${stamp}`;
+      let content: string;
+      let mime: string;
+      let filename: string;
+      if (format === "json") {
+        content = JSON.stringify(
+          all.map((event) => ({
+            id: event.id,
+            sequence: event.sequence,
+            type: event.type,
+            summary: event.summary,
+            detailMarkdown: event.detailMarkdown,
+            raw: event.raw,
+            createdAt: event.createdAt,
+            supersededAt: event.supersededAt,
+          })),
+          null,
+          2,
+        );
+        mime = "application/json";
+        filename = `${base}.json`;
+      } else {
+        content = all
+          .map((event) => {
+            const lines = [
+              `## ${event.summary}`,
+              "",
+              `- **Type:** ${event.type}`,
+              `- **Time:** ${event.createdAt}`,
+            ];
+            if (event.supersededAt) {
+              lines.push(`- **Superseded:** ${event.supersededAt}`);
+            }
+            if (event.detailMarkdown) lines.push("", event.detailMarkdown);
+            if (event.raw !== null && event.raw !== undefined) {
+              lines.push(
+                "",
+                "```json",
+                JSON.stringify(event.raw, null, 2),
+                "```",
+              );
+            }
+            return lines.join("\n");
+          })
+          .join("\n\n---\n\n");
+        mime = "text/markdown";
+        filename = `${base}.md`;
+      }
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    },
+    [runId],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -1170,15 +1254,48 @@ export function RunDetailPage({ runId }: { runId: string }) {
               <CardTitle>{t("activity")}</CardTitle>
               <CardDescription>{t("activityDescription")}</CardDescription>
             </div>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute top-1.5 left-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label={t("searchActivity")}
-                className="h-7 pl-8 text-xs"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t("searchActivity")}
-                value={search}
-              />
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute top-1.5 left-2.5 size-4 text-muted-foreground" />
+                <Input
+                  aria-label={t("searchActivity")}
+                  className="h-7 pl-8 text-xs"
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t("searchActivity")}
+                  value={search}
+                />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="shrink-0" size="xs" variant="outline">
+                    <Download /> {t("export")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() =>
+                      void exportActivity("json").catch((value) =>
+                        setError(
+                          value instanceof Error ? value.message : String(value),
+                        ),
+                      )
+                    }
+                  >
+                    {t("exportJson")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      void exportActivity("markdown").catch((value) =>
+                        setError(
+                          value instanceof Error ? value.message : String(value),
+                        ),
+                      )
+                    }
+                  >
+                    {t("exportMarkdown")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
@@ -1187,7 +1304,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
           onScroll={handleActivityScroll}
           ref={activityScrollRef}
         >
-          <Table>
+          <Table className="table-fixed">
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
                 <TableHead className="h-7 w-10" />
@@ -1251,7 +1368,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                           className="bg-muted/10 px-4 py-3"
                           colSpan={4}
                         >
-                          <div className="space-y-2">
+                          <div className="w-full min-w-0 space-y-2 break-words">
                             {event.detailMarkdown && !raw && (
                               <MarkdownView
                                 showActions={false}
@@ -1273,7 +1390,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                               <Code2 /> {raw ? t("rendered") : t("raw")}
                             </Button>
                             {raw && (
-                              <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs">
+                              <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs break-words whitespace-pre-wrap">
                                 {JSON.stringify(event.raw, null, 2)}
                               </pre>
                             )}

@@ -119,6 +119,9 @@
       "TOOL": "Werkzeug",
       "USER": "Benutzer"
     },
+    "export": "Exportieren",
+    "exportJson": "Als JSON exportieren",
+    "exportMarkdown": "Als Markdown exportieren",
     "fileTooLarge": "{name} überschreitet das Dateilimit von 25 MB.",
     "followUp": "Folgelauf",
     "followUpDescription": "Einen verknüpften Lauf mit fortgesetztem, frischem oder erneut gesendetem Kontext erstellen.",
