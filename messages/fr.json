@@ -3165,6 +3165,8 @@
     "cacheWritePrice": "Écriture de cache / MTok",
     "contextWindow": "Contexte",
     "noModels": "Aucun modèle correspondant n’a été trouvé.",
-    "showingCount": "Charger plus ({shown} sur {total})"
+    "showingCount": "{shown} sur {total} affichés",
+    "sortBy": "Trier par {column}",
+    "loadingMore": "Chargement…"
   }
 }

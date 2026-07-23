@@ -1,5 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
-import type { ModelCostsService } from "@/services/model-costs";
+import type {
+  ModelCostSortDirection,
+  ModelCostSortKey,
+  ModelCostsService,
+} from "@/services/model-costs";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -62,6 +66,8 @@ export const createModelCostResolvers = (service: ModelCostsService) => ({
         search?: string | null;
         first?: number | null;
         offset?: number | null;
+        sortKey?: ModelCostSortKey | null;
+        direction?: ModelCostSortDirection | null;
       },
       context: GraphQLContext,
     ) => {

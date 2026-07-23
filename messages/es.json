@@ -3165,6 +3165,8 @@
     "cacheWritePrice": "Escritura de caché / MTok",
     "contextWindow": "Contexto",
     "noModels": "No se encontraron modelos coincidentes.",
-    "showingCount": "Cargar más ({shown} de {total})"
+    "showingCount": "Mostrando {shown} de {total}",
+    "sortBy": "Ordenar por {column}",
+    "loadingMore": "Cargando más…"
   }
 }

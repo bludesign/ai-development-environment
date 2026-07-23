@@ -60,6 +60,41 @@ vi.mock("@/data/prisma-client", () => {
       return false;
     });
   };
+  /**
+   * Honours both `orderBy` shapes the service emits — a bare direction, and the
+   * `{ sort, nulls }` form — so the ordering assertions test the service's own
+   * choices rather than the mock's.
+   */
+  const compare = (
+    left: EntryRow,
+    right: EntryRow,
+    orderBy: Record<string, unknown>[],
+  ): number => {
+    for (const clause of orderBy) {
+      const [field, spec] = Object.entries(clause)[0]!;
+      const direction =
+        typeof spec === "string"
+          ? spec
+          : ((spec as Record<string, unknown>).sort as string);
+      const nulls =
+        typeof spec === "string"
+          ? "first"
+          : ((spec as Record<string, unknown>).nulls as string) || "first";
+      const a = left[field as keyof EntryRow];
+      const b = right[field as keyof EntryRow];
+      if (a === b) continue;
+      if (a === null || b === null) {
+        const nullLast = nulls === "last" ? 1 : -1;
+        return a === null ? nullLast : -nullLast;
+      }
+      const order =
+        typeof a === "string" && typeof b === "string"
+          ? a.localeCompare(b)
+          : Number(a) - Number(b);
+      if (order !== 0) return direction === "desc" ? -order : order;
+    }
+    return 0;
+  };
   const client = {
     modelCostSettings: {
       upsert: async ({
@@ -103,16 +138,18 @@ vi.mock("@/data/prisma-client", () => {
       },
       findMany: async ({
         where = {},
+        orderBy = [{ model: "asc" }],
         skip = 0,
         take = 100,
       }: {
         where?: Record<string, unknown>;
+        orderBy?: Record<string, unknown>[];
         skip?: number;
         take?: number;
       } = {}) =>
         state.entries
           .filter((row) => matches(row, where))
-          .sort((left, right) => left.model.localeCompare(right.model))
+          .sort((left, right) => compare(left, right, orderBy))
           .slice(skip, skip + take),
       count: async ({ where = {} }: { where?: Record<string, unknown> } = {}) =>
         state.entries.filter((row) => matches(row, where)).length,
@@ -143,6 +180,11 @@ const catalogPayload = {
     litellm_provider: "openrouter",
     input_cost_per_token: 0.0000005,
     output_cost_per_token: 0.0000025,
+  },
+  /** Output-only pricing, so its input column is the null the ordering has to place. */
+  "embed-only": {
+    litellm_provider: "voyage",
+    output_cost_per_token: 0.00000002,
   },
 };
 
@@ -198,11 +240,12 @@ describe("ModelCostsService", () => {
     const service = new ModelCostsService();
     const catalog = await service.refresh();
     expect(catalog.error).toBeNull();
-    expect(catalog.entryCount).toBe(2);
+    expect(catalog.entryCount).toBe(3);
     expect(catalog.stale).toBe(false);
     const { items } = await service.listEntries({});
     expect(items.map(({ model }) => model)).toEqual([
       "claude-sonnet-4-5",
+      "embed-only",
       "openrouter/moonshot/kimi-k2",
     ]);
   });
@@ -214,7 +257,7 @@ describe("ModelCostsService", () => {
     mockFetch(null, false);
     const catalog = await service.refresh();
     expect(catalog.error).toContain("503");
-    expect(state.entries).toHaveLength(2);
+    expect(state.entries).toHaveLength(3);
   });
 
   test("matches a run's model name by suffix when the catalog key is prefixed", async () => {
@@ -290,6 +333,70 @@ describe("ModelCostsService", () => {
     ).toBe(1);
     expect((await service.listEntries({ search: "nothing" })).totalCount).toBe(
       0,
+    );
+  });
+
+  test("sorts by a chosen column in both directions", async () => {
+    mockFetch(catalogPayload);
+    const service = new ModelCostsService();
+    await service.refresh();
+    const models = async (
+      sortKey: Parameters<typeof service.listEntries>[0]["sortKey"],
+      direction: Parameters<typeof service.listEntries>[0]["direction"],
+    ) =>
+      (await service.listEntries({ sortKey, direction })).items.map(
+        ({ model }) => model,
+      );
+    expect(await models("OUTPUT_COST", "ASC")).toEqual([
+      "embed-only",
+      "openrouter/moonshot/kimi-k2",
+      "claude-sonnet-4-5",
+    ]);
+    expect(await models("OUTPUT_COST", "DESC")).toEqual([
+      "claude-sonnet-4-5",
+      "openrouter/moonshot/kimi-k2",
+      "embed-only",
+    ]);
+    expect(await models("MODEL", "DESC")).toEqual([
+      "openrouter/moonshot/kimi-k2",
+      "embed-only",
+      "claude-sonnet-4-5",
+    ]);
+  });
+
+  test("sinks unpriced models to the bottom whichever way the column is sorted", async () => {
+    mockFetch(catalogPayload);
+    const service = new ModelCostsService();
+    await service.refresh();
+    for (const direction of ["ASC", "DESC"] as const) {
+      const { items } = await service.listEntries({
+        sortKey: "INPUT_COST",
+        direction,
+      });
+      expect(items.at(-1)?.model).toBe("embed-only");
+    }
+  });
+
+  test("pages a sorted list without repeating or skipping a row", async () => {
+    mockFetch(catalogPayload);
+    const service = new ModelCostsService();
+    await service.refresh();
+    const first = await service.listEntries({
+      sortKey: "INPUT_COST",
+      direction: "DESC",
+      first: 2,
+    });
+    const second = await service.listEntries({
+      sortKey: "INPUT_COST",
+      direction: "DESC",
+      first: 2,
+      offset: 2,
+    });
+    expect(first.items).toHaveLength(2);
+    expect(second.items).toHaveLength(1);
+    expect(first.totalCount).toBe(3);
+    expect([...first.items, ...second.items].map(({ model }) => model)).toEqual(
+      ["claude-sonnet-4-5", "openrouter/moonshot/kimi-k2", "embed-only"],
     );
   });
 });

@@ -6,6 +6,8 @@ import type {
   ModelCostCatalogView,
   ModelCostEntryPageView,
   ModelCostEntryView,
+  ModelCostSortDirection,
+  ModelCostSortKey,
   ModelCostUsage,
 } from "./types";
 
@@ -102,6 +104,29 @@ function parseCatalog(payload: unknown): ParsedEntry[] {
 function bareModel(model: string): string {
   const index = model.lastIndexOf("/");
   return index < 0 ? model : model.slice(index + 1);
+}
+
+const SORT_FIELDS: Record<ModelCostSortKey, keyof ParsedEntry> = {
+  MODEL: "model",
+  PROVIDER: "provider",
+  INPUT_COST: "inputCostPerToken",
+  OUTPUT_COST: "outputCostPerToken",
+  CACHE_READ_COST: "cacheReadCostPerToken",
+  CACHE_WRITE_COST: "cacheWriteCostPerToken",
+  CONTEXT_WINDOW: "maxInputTokens",
+};
+
+/**
+ * Every sortable column except the model name is nullable, and a page of blanks
+ * is not what someone sorting by price is after, so unpriced rows sink to the
+ * bottom in both directions. The model name breaks ties, which is what keeps
+ * paging stable — without a total order the same row can arrive on two pages.
+ */
+function sortOrder(key: ModelCostSortKey, direction: ModelCostSortDirection) {
+  const sort = direction === "DESC" ? ("desc" as const) : ("asc" as const);
+  const field = SORT_FIELDS[key] ?? "model";
+  if (field === "model") return [{ model: sort }];
+  return [{ [field]: { sort, nulls: "last" as const } }, { model: sort }];
 }
 
 function toView(entry: StoredEntry): ModelCostEntryView {
@@ -257,10 +282,14 @@ export class ModelCostsService {
     search,
     first = 100,
     offset = 0,
+    sortKey = "MODEL",
+    direction = "ASC",
   }: {
     search?: string | null;
     first?: number | null;
     offset?: number | null;
+    sortKey?: ModelCostSortKey | null;
+    direction?: ModelCostSortDirection | null;
   }): Promise<ModelCostEntryPageView> {
     await this.ensureFresh();
     const prisma = await getPrismaClient();
@@ -275,7 +304,7 @@ export class ModelCostsService {
     const [items, totalCount] = await Promise.all([
       prisma.modelCostEntry.findMany({
         where,
-        orderBy: { model: "asc" },
+        orderBy: sortOrder(sortKey ?? "MODEL", direction ?? "ASC"),
         skip,
         take,
       }),

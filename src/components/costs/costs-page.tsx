@@ -2,9 +2,10 @@
 
 import { RefreshCw, RotateCcw, Save, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
+import { SortableTableHead } from "@/components/common/sortable-table-head";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -34,10 +34,14 @@ import {
   perMillion,
   type ModelCostCatalogView,
   type ModelCostEntryView,
+  type ModelCostSortDirection,
+  type ModelCostSortKey,
 } from "./types";
 
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 250;
+
+type Sort = { key: ModelCostSortKey; direction: ModelCostSortDirection };
 
 /**
  * Prices run from single-digit cents to hundreds of dollars per million tokens,
@@ -60,10 +64,13 @@ export function CostsPage() {
   const [entries, setEntries] = useState<ModelCostEntryView[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<Sort>({ key: "MODEL", direction: "ASC" });
   const [urlDraft, setUrlDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"save" | "refresh" | "more" | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [busy, setBusy] = useState<"save" | "refresh" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
   const applyCatalog = useCallback((value: ModelCostCatalogView) => {
     setCatalog(value);
@@ -71,7 +78,7 @@ export function CostsPage() {
   }, []);
 
   const load = useCallback(
-    async (term: string) => {
+    async (term: string, order: Sort) => {
       try {
         const data = await controlPlaneRequest<{
           modelCostCatalog: ModelCostCatalogView;
@@ -80,14 +87,19 @@ export function CostsPage() {
             totalCount: number;
           };
         }>(
-          `query CostsPage($search: String, $first: Int!) {
+          `query CostsPage($search: String, $first: Int!, $sortKey: ModelCostSortKey!, $direction: ModelCostSortDirection!) {
             modelCostCatalog { ${MODEL_COST_CATALOG_FIELDS} }
-            modelCostEntries(search: $search, first: $first) {
+            modelCostEntries(search: $search, first: $first, sortKey: $sortKey, direction: $direction) {
               items { ${MODEL_COST_ENTRY_FIELDS} }
               totalCount
             }
           }`,
-          { search: term || null, first: PAGE_SIZE },
+          {
+            search: term || null,
+            first: PAGE_SIZE,
+            sortKey: order.key,
+            direction: order.direction,
+          },
         );
         applyCatalog(data.modelCostCatalog);
         setEntries(data.modelCostEntries.items);
@@ -102,24 +114,32 @@ export function CostsPage() {
     [applyCatalog],
   );
 
-  /** The query itself is what waits out the typing, so there is no second copy
-   * of the term to keep in step with the box. */
+  /**
+   * The query itself is what waits out the typing, so there is no second copy
+   * of the term to keep in step with the box. Re-sorting goes through the same
+   * path — the order is the server's to decide across every page — but a click
+   * is a finished intent rather than a half-typed one, so only a changed search
+   * term is worth coalescing. The first load is immediate for the same reason.
+   */
+  const loadedSearch = useRef(search);
   useEffect(() => {
+    const typing = loadedSearch.current !== search;
+    loadedSearch.current = search;
     const timer = window.setTimeout(
-      () => void load(search),
-      SEARCH_DEBOUNCE_MS,
+      () => void load(search, sort),
+      typing ? SEARCH_DEBOUNCE_MS : 0,
     );
     return () => window.clearTimeout(timer);
-  }, [load, search]);
+  }, [load, search, sort]);
 
-  const loadMore = async () => {
-    setBusy("more");
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
     try {
       const data = await controlPlaneRequest<{
         modelCostEntries: { items: ModelCostEntryView[]; totalCount: number };
       }>(
-        `query MoreModelCosts($search: String, $first: Int!, $offset: Int!) {
-          modelCostEntries(search: $search, first: $first, offset: $offset) {
+        `query MoreModelCosts($search: String, $first: Int!, $offset: Int!, $sortKey: ModelCostSortKey!, $direction: ModelCostSortDirection!) {
+          modelCostEntries(search: $search, first: $first, offset: $offset, sortKey: $sortKey, direction: $direction) {
             items { ${MODEL_COST_ENTRY_FIELDS} }
             totalCount
           }
@@ -128,16 +148,70 @@ export function CostsPage() {
           search: search || null,
           first: PAGE_SIZE,
           offset: entries.length,
+          sortKey: sort.key,
+          direction: sort.direction,
         },
       );
-      setEntries((current) => [...current, ...data.modelCostEntries.items]);
+      /*
+       * The offset is taken from what is already on screen, so a page that
+       * arrives after a re-sort can overlap the one before it. Keying by model
+       * — which the catalog makes unique — drops the duplicates rather than
+       * rendering a row twice.
+       */
+      setEntries((current) => {
+        const seen = new Set(current.map(({ model }) => model));
+        return [
+          ...current,
+          ...data.modelCostEntries.items.filter(
+            ({ model }) => !seen.has(model),
+          ),
+        ];
+      });
       setTotalCount(data.modelCostEntries.totalCount);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setBusy(null);
+      setLoadingMore(false);
     }
-  };
+  }, [entries.length, search, sort]);
+
+  /**
+   * Hidden rows load as the reader approaches them rather than on a click. The
+   * margin starts the fetch before the sentinel is actually visible, so the
+   * table usually grows without the reader meeting its end.
+   */
+  useEffect(() => {
+    if (loading || loadingMore || error) return;
+    if (entries.length >= totalCount) return;
+    const trigger = loadMoreTriggerRef.current;
+    if (!trigger) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (!records.some((record) => record.isIntersecting)) return;
+        void loadMore();
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [entries.length, error, loadMore, loading, loadingMore, totalCount]);
+
+  const selectSort = (key: ModelCostSortKey) =>
+    setSort((current) =>
+      current.key === key
+        ? {
+            key,
+            direction: current.direction === "ASC" ? "DESC" : "ASC",
+          }
+        : /*
+           * A name reads naturally A→Z, while someone sorting by a price or a
+           * context window is looking for the extreme, so those open descending.
+           */
+          {
+            key,
+            direction: key === "MODEL" || key === "PROVIDER" ? "ASC" : "DESC",
+          },
+    );
 
   const saveUrl = async (event: FormEvent) => {
     event.preventDefault();
@@ -168,7 +242,7 @@ export function CostsPage() {
           refreshModelCosts { ${MODEL_COST_CATALOG_FIELDS} }
         }`,
       );
-      await load(search);
+      await load(search, sort);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -288,19 +362,38 @@ export function CostsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-4">{t("model")}</TableHead>
-                <TableHead>{t("provider")}</TableHead>
-                <TableHead className="text-right">{t("inputPrice")}</TableHead>
-                <TableHead className="text-right">{t("outputPrice")}</TableHead>
-                <TableHead className="text-right">
-                  {t("cacheReadPrice")}
-                </TableHead>
-                <TableHead className="text-right">
-                  {t("cacheWritePrice")}
-                </TableHead>
-                <TableHead className="pr-4 text-right">
-                  {t("contextWindow")}
-                </TableHead>
+                {(
+                  [
+                    ["MODEL", t("model"), "left", "pl-3"],
+                    ["PROVIDER", t("provider"), "left", undefined],
+                    ["INPUT_COST", t("inputPrice"), "right", undefined],
+                    ["OUTPUT_COST", t("outputPrice"), "right", undefined],
+                    [
+                      "CACHE_READ_COST",
+                      t("cacheReadPrice"),
+                      "right",
+                      undefined,
+                    ],
+                    [
+                      "CACHE_WRITE_COST",
+                      t("cacheWritePrice"),
+                      "right",
+                      undefined,
+                    ],
+                    ["CONTEXT_WINDOW", t("contextWindow"), "right", "pr-3"],
+                  ] as const
+                ).map(([key, label, align, className]) => (
+                  <SortableTableHead
+                    active={sort.key === key}
+                    align={align}
+                    ariaLabel={t("sortBy", { column: label })}
+                    className={className}
+                    direction={sort.direction === "ASC" ? "asc" : "desc"}
+                    key={key}
+                    label={label}
+                    onSort={() => selectSort(key)}
+                  />
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -344,19 +437,29 @@ export function CostsPage() {
             </TableBody>
           </Table>
         </div>
-        {entries.length < totalCount && (
-          <div className="flex justify-center border-t p-3">
-            <Button
-              disabled={busy !== null}
-              onClick={() => void loadMore()}
-              variant="outline"
-            >
-              {busy === "more" ? <Spinner /> : null}{" "}
-              {t("showingCount", {
-                shown: entries.length,
-                total: totalCount,
-              })}
-            </Button>
+        {entries.length > 0 && (
+          <div className="flex flex-col items-center gap-2 border-t p-3 text-sm text-muted-foreground">
+            <span>
+              {t("showingCount", { shown: entries.length, total: totalCount })}
+            </span>
+            {/*
+             * The sentinel is what the observer watches, so it only exists
+             * while there is more to fetch — once the table is complete there
+             * is nothing left to trip.
+             */}
+            {entries.length < totalCount && (
+              <div
+                className="flex min-h-6 items-center gap-2"
+                ref={loadMoreTriggerRef}
+                role="status"
+              >
+                {loadingMore && (
+                  <>
+                    <Spinner /> {t("loadingMore")}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

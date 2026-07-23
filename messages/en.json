@@ -3165,6 +3165,8 @@
     "cacheWritePrice": "Cache write / MTok",
     "contextWindow": "Context",
     "noModels": "No matching models were found.",
-    "showingCount": "Load more ({shown} of {total})"
+    "showingCount": "Showing {shown} of {total}",
+    "sortBy": "Sort by {column}",
+    "loadingMore": "Loading more…"
   }
 }

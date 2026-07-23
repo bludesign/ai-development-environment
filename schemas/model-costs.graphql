@@ -18,6 +18,22 @@ type ModelCostEntryPage {
   totalCount: Int!
 }
 
+"A sortable column of the model price table."
+enum ModelCostSortKey {
+  MODEL
+  PROVIDER
+  INPUT_COST
+  OUTPUT_COST
+  CACHE_READ_COST
+  CACHE_WRITE_COST
+  CONTEXT_WINDOW
+}
+
+enum ModelCostSortDirection {
+  ASC
+  DESC
+}
+
 "Where model prices are fetched from, and the state of the last fetch."
 type ModelCostCatalog {
   "The URL a refresh would fetch: the custom one when set, otherwise the default."
@@ -50,6 +66,8 @@ extend type Query {
     search: String
     first: Int = 100
     offset: Int = 0
+    sortKey: ModelCostSortKey = MODEL
+    direction: ModelCostSortDirection = ASC
   ): ModelCostEntryPage!
 }
 

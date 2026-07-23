@@ -9,6 +9,17 @@ export const MODEL_COST_CATALOG_FIELDS = `
   url defaultUrl customUrl fetchedAt entryCount error stale
 `;
 
+export type ModelCostSortKey =
+  | "MODEL"
+  | "PROVIDER"
+  | "INPUT_COST"
+  | "OUTPUT_COST"
+  | "CACHE_READ_COST"
+  | "CACHE_WRITE_COST"
+  | "CONTEXT_WINDOW";
+
+export type ModelCostSortDirection = "ASC" | "DESC";
+
 export type ModelCostEntryView = {
   model: string;
   provider: string | null;
