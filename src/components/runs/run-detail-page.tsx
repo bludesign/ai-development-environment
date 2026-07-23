@@ -1,35 +1,21 @@
 "use client";
 
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
-  Bot,
-  ChevronDown,
   ChevronLeft,
-  CircleHelp,
   CircleStop,
   ClipboardList,
-  Code2,
   Download,
   File,
-  FileDiff,
   GitFork,
-  MessageSquare,
   Pause,
   Pencil,
   Play,
   RotateCcw,
   Search,
   Send,
-  Terminal,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -97,6 +83,7 @@ import {
 } from "@/lib/worktree-highlight";
 
 import { RUN_DETAIL_FIELDS, RUN_EVENT_FIELDS } from "./graphql-fields";
+import { ActivityRows } from "./activity-rows";
 import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
 import {
@@ -137,17 +124,6 @@ type ProviderCatalog = ProviderCatalogEntry & {
   supportsResume: boolean;
   supportsNativeDelete: boolean;
 };
-
-function eventIcon(type: string) {
-  const value = type.toUpperCase();
-  if (value.includes("QUESTION")) return CircleHelp;
-  if (value.includes("COMMAND") || value.includes("TERMINAL")) return Terminal;
-  if (value.includes("TOOL")) return Wrench;
-  if (value.includes("FILE") || value.includes("DIFF")) return FileDiff;
-  if (value.includes("USER")) return MessageSquare;
-  if (value.includes("ERROR") || value.includes("FAIL")) return AlertTriangle;
-  return Bot;
-}
 
 function LinkedRun({ value }: { value: RunLinkView }) {
   const labels = useRunLabels();
@@ -525,8 +501,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
-  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
-  const [expandedRaw, setExpandedRaw] = useState<Set<string>>(new Set());
   const [promptRaw, setPromptRaw] = useState(false);
   const [outputRaw, setOutputRaw] = useState(false);
   const [costSource, setCostSource] = useState<"REPORTED" | "CATALOG">(
@@ -974,13 +948,22 @@ export function RunDetailPage({ runId }: { runId: string }) {
           return {
             input: total.input + usage.inputTokens,
             output: total.output + usage.outputTokens,
-            cache: total.cache + usage.cacheReadTokens + usage.cacheWriteTokens,
+            cacheRead: total.cacheRead + usage.cacheReadTokens,
+            cacheWrite: total.cacheWrite + usage.cacheWriteTokens,
             cost: total.cost + (cost ?? 0),
             priced: total.priced || cost !== null,
             superseded,
           };
         },
-        { input: 0, output: 0, cache: 0, cost: 0, priced: false, superseded },
+        {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0,
+          priced: false,
+          superseded,
+        },
       ),
   );
 
@@ -1203,10 +1186,12 @@ export function RunDetailPage({ runId }: { runId: string }) {
               [t("inputTokens"), run.inputTokens.toLocaleString(locale)],
               [t("outputTokens"), run.outputTokens.toLocaleString(locale)],
               [
-                t("cacheTokens"),
-                (run.cacheReadTokens + run.cacheWriteTokens).toLocaleString(
-                  locale,
-                ),
+                t("cacheReadTokens"),
+                run.cacheReadTokens.toLocaleString(locale),
+              ],
+              [
+                t("cacheWriteTokens"),
+                run.cacheWriteTokens.toLocaleString(locale),
               ],
               [
                 t("reasoningTokens"),
@@ -1229,7 +1214,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("usageState")}</TableHead>
                   <TableHead>{t("inputTokens")}</TableHead>
                   <TableHead>{t("outputTokens")}</TableHead>
-                  <TableHead>{t("cacheTokens")}</TableHead>
+                  <TableHead>{t("cacheReadTokens")}</TableHead>
+                  <TableHead>{t("cacheWriteTokens")}</TableHead>
                   <TableHead>{t("cost")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1241,7 +1227,12 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     </TableCell>
                     <TableCell>{usage.input.toLocaleString(locale)}</TableCell>
                     <TableCell>{usage.output.toLocaleString(locale)}</TableCell>
-                    <TableCell>{usage.cache.toLocaleString(locale)}</TableCell>
+                    <TableCell>
+                      {usage.cacheRead.toLocaleString(locale)}
+                    </TableCell>
+                    <TableCell>
+                      {usage.cacheWrite.toLocaleString(locale)}
+                    </TableCell>
                     <TableCell>
                       {usage.priced ? `≈${currency.format(usage.cost)}` : "—"}
                     </TableCell>
@@ -1257,7 +1248,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("model")}</TableHead>
                   <TableHead>{t("inputTokens")}</TableHead>
                   <TableHead>{t("outputTokens")}</TableHead>
-                  <TableHead>{t("cacheTokens")}</TableHead>
+                  <TableHead>{t("cacheReadTokens")}</TableHead>
+                  <TableHead>{t("cacheWriteTokens")}</TableHead>
                   <TableHead>{t("cost")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1279,9 +1271,10 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       {usage.outputTokens.toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
-                      {(
-                        usage.cacheReadTokens + usage.cacheWriteTokens
-                      ).toLocaleString(locale)}
+                      {usage.cacheReadTokens.toLocaleString(locale)}
+                    </TableCell>
+                    <TableCell>
+                      {usage.cacheWriteTokens.toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
                       {(() => {
@@ -1451,113 +1444,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {events.map((event) => {
-                const Icon = eventIcon(event.type);
-                const raw = expandedRaw.has(event.id);
-                const expanded = expandedEvents.has(event.id);
-                return (
-                  <Fragment key={event.id}>
-                    <TableRow
-                      aria-expanded={expanded}
-                      className={cn(
-                        "cursor-pointer",
-                        event.supersededAt && "opacity-60",
-                      )}
-                      onClick={() =>
-                        setExpandedEvents((current) => {
-                          const next = new Set(current);
-                          if (next.has(event.id)) next.delete(event.id);
-                          else next.add(event.id);
-                          return next;
-                        })
-                      }
-                    >
-                      <TableCell className="h-8 py-1">
-                        <span className="flex items-center gap-1">
-                          <ChevronDown
-                            className={cn(
-                              "size-3 transition-transform",
-                              expanded && "rotate-180",
-                            )}
-                          />
-                          <Icon className="size-3.5" />
-                        </span>
-                      </TableCell>
-                      <TableCell className="h-8 max-w-0 py-1 text-xs">
-                        <span className="block truncate">{event.summary}</span>
-                      </TableCell>
-                      {/*
-                       * `table-fixed` sizes the column but does not clip it, so
-                       * a long event type would otherwise run the badge under
-                       * the age beside it. The cell clips and the badge yields.
-                       */}
-                      <TableCell className="h-8 overflow-hidden py-1">
-                        <Badge
-                          className="h-5 max-w-full text-[10px]"
-                          variant="outline"
-                        >
-                          <span className="min-w-0 truncate">
-                            {labels.eventType(event.type)}
-                          </span>
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="h-8 py-1">
-                        <DateTime
-                          className="text-xs"
-                          kind="time"
-                          value={event.createdAt}
-                        />
-                      </TableCell>
-                    </TableRow>
-                    {expanded && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell
-                          className="bg-muted/10 px-4 py-3"
-                          colSpan={4}
-                        >
-                          <div className="w-full min-w-0 space-y-2 break-words">
-                            {event.detailMarkdown && !raw && (
-                              <MarkdownView
-                                showActions={false}
-                                value={event.detailMarkdown}
-                              />
-                            )}
-                            <Button
-                              onClick={() =>
-                                setExpandedRaw((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(event.id)) next.delete(event.id);
-                                  else next.add(event.id);
-                                  return next;
-                                })
-                              }
-                              size="xs"
-                              variant="outline"
-                            >
-                              <Code2 /> {raw ? t("rendered") : t("raw")}
-                            </Button>
-                            {raw && (
-                              <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs break-words whitespace-pre-wrap">
-                                {JSON.stringify(event.raw, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {!events.length && (
-                <TableRow>
-                  <TableCell
-                    className="h-20 text-center text-muted-foreground"
-                    colSpan={4}
-                  >
-                    {t("noActivity")}
-                  </TableCell>
-                </TableRow>
-              )}
+              <ActivityRows events={events} />
             </TableBody>
           </Table>
         </div>
