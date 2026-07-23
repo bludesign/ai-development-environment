@@ -172,11 +172,13 @@
     "startFollowUp": "Iniciar seguimiento",
     "startTitle": "Iniciar un prompt",
     "status": "Estado",
-    "status.CANCELLED": "Cancelado",
-    "status.COMPLETED": "Completado",
-    "status.FAILED": "Fallido",
-    "status.IN_PROGRESS": "En curso",
-    "status.PAUSED": "Pausado",
+    "statuses": {
+      "CANCELLED": "Cancelado",
+      "COMPLETED": "Completado",
+      "FAILED": "Fallido",
+      "IN_PROGRESS": "En curso",
+      "PAUSED": "Pausado"
+    },
     "stashBeforeRollback": "Guardar en el stash los cambios actuales, con y sin seguimiento, antes de restaurar",
     "stashCreated": "Stash creado",
     "steer": "Guiar",

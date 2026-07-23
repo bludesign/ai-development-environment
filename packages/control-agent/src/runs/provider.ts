@@ -124,24 +124,35 @@ export function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export function firstString(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim()) return value;
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const found = firstString(entry);
-      if (found) return found;
-    }
-  }
-  const record = asRecord(value);
-  for (const key of [
+  const keys = [
     "text",
     "result",
     "message",
     "summary",
     "content",
     "output",
-  ]) {
-    const found = firstString(record[key]);
-    if (found) return found;
+  ] as const;
+  const pending = [value];
+  const visited = new WeakSet<object>();
+
+  while (pending.length) {
+    const candidate = pending.pop();
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+    if (!candidate || typeof candidate !== "object") continue;
+    if (visited.has(candidate)) continue;
+    visited.add(candidate);
+
+    if (Array.isArray(candidate)) {
+      for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        pending.push(candidate[index]);
+      }
+      continue;
+    }
+
+    const record = asRecord(candidate);
+    for (let index = keys.length - 1; index >= 0; index -= 1) {
+      pending.push(record[keys[index]]);
+    }
   }
   return undefined;
 }

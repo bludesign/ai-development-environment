@@ -172,11 +172,13 @@
     "startFollowUp": "Folgelauf starten",
     "startTitle": "Prompt starten",
     "status": "Status",
-    "status.CANCELLED": "Abgebrochen",
-    "status.COMPLETED": "Abgeschlossen",
-    "status.FAILED": "Fehlgeschlagen",
-    "status.IN_PROGRESS": "In Bearbeitung",
-    "status.PAUSED": "Pausiert",
+    "statuses": {
+      "CANCELLED": "Abgebrochen",
+      "COMPLETED": "Abgeschlossen",
+      "FAILED": "Fehlgeschlagen",
+      "IN_PROGRESS": "In Bearbeitung",
+      "PAUSED": "Pausiert"
+    },
     "stashBeforeRollback": "Aktuelle versionierte und nicht versionierte Änderungen vor der Wiederherstellung stashen",
     "stashCreated": "Stash erstellt",
     "steer": "Steuern",

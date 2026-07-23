@@ -172,11 +172,13 @@
     "startFollowUp": "Démarrer le suivi",
     "startTitle": "Démarrer une consigne",
     "status": "État",
-    "status.CANCELLED": "Annulé",
-    "status.COMPLETED": "Terminé",
-    "status.FAILED": "Échec",
-    "status.IN_PROGRESS": "En cours",
-    "status.PAUSED": "En pause",
+    "statuses": {
+      "CANCELLED": "Annulé",
+      "COMPLETED": "Terminé",
+      "FAILED": "Échec",
+      "IN_PROGRESS": "En cours",
+      "PAUSED": "En pause"
+    },
     "stashBeforeRollback": "Mettre de côté les modifications suivies et non suivies avant la restauration",
     "stashCreated": "Mise de côté créée",
     "steer": "Guider",

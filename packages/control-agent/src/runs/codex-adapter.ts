@@ -1,5 +1,13 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  execFile,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 
 import {
   answerArrays,
@@ -26,6 +34,17 @@ type JsonRpcMessage = {
 };
 
 export const SUPPORTED_CODEX_APP_SERVER_MINORS = ["0.144", "0.145"] as const;
+const execFileAsync = promisify(execFile);
+
+export function codexAppServerArgs(modelCatalogPath: string): string[] {
+  return [
+    "app-server",
+    "-c",
+    `model_catalog_json=${JSON.stringify(modelCatalogPath)}`,
+    "--listen",
+    "stdio://",
+  ];
+}
 
 export function codexVersionFromUserAgent(userAgent: string): string | null {
   return userAgent.match(/\/(\d+\.\d+\.\d+)(?:\s|$)/)?.[1] ?? null;
@@ -52,6 +71,7 @@ class CodexAppServer {
     Set<(message: JsonRpcMessage) => void>
   >();
   private initialized?: Promise<void>;
+  private modelCatalogDirectory?: string;
 
   private ensureStarted(): Promise<void> {
     this.initialized ??= this.start();
@@ -59,7 +79,9 @@ class CodexAppServer {
   }
 
   private async start(): Promise<void> {
-    const child = spawn("codex", ["app-server", "--listen", "stdio://"], {
+    const modelCatalogPath = await this.createBundledModelCatalog();
+    const modelCatalogDirectory = this.modelCatalogDirectory;
+    const child = spawn("codex", codexAppServerArgs(modelCatalogPath), {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -72,6 +94,10 @@ class CodexAppServer {
       this.pending.clear();
       this.process = undefined;
       this.initialized = undefined;
+      void this.removeBundledModelCatalog(modelCatalogDirectory);
+    });
+    child.on("error", () => {
+      void this.removeBundledModelCatalog(modelCatalogDirectory);
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {
@@ -123,6 +149,44 @@ class CodexAppServer {
         "Codex app-server does not expose plan collaboration mode",
       );
     }
+  }
+
+  private async createBundledModelCatalog(): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), "aide-codex-models-"));
+    try {
+      // App-server expects a rich remote catalog that OpenAI-compatible model
+      // proxies do not expose. A startup catalog avoids that incompatible
+      // refresh without changing the configured provider used for inference.
+      const { stdout } = await execFileAsync(
+        "codex",
+        ["debug", "models", "--bundled"],
+        {
+          encoding: "utf8",
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      const catalogPath = join(directory, "models.json");
+      await writeFile(catalogPath, stdout, "utf8");
+      this.modelCatalogDirectory = directory;
+      return catalogPath;
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+      throw error;
+    }
+  }
+
+  private async removeBundledModelCatalog(
+    directory = this.modelCatalogDirectory,
+  ): Promise<void> {
+    if (!directory) return;
+    if (this.modelCatalogDirectory === directory) {
+      this.modelCatalogDirectory = undefined;
+    }
+    await rm(directory, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
   }
 
   private receive(line: string): void {
@@ -199,6 +263,7 @@ class CodexAppServer {
     this.process?.kill("SIGTERM");
     this.process = undefined;
     this.initialized = undefined;
+    await this.removeBundledModelCatalog();
   }
 }
 

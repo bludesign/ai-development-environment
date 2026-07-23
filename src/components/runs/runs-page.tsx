@@ -470,7 +470,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                                     : "secondary"
                               }
                             >
-                              {t(`status.${run.status}`)}
+                              {t(`statuses.${run.status}`)}
                             </Badge>
                             {run.phase !== run.status && (
                               <Badge variant="outline">
