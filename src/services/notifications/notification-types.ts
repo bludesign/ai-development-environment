@@ -35,6 +35,52 @@ export const NOTIFICATION_TYPES = {
     defaultBrowserEnabled: true,
     defaultWebPushEnabled: false,
   },
+  RUN_NEEDS_ANSWER: {
+    key: "RUN_NEEDS_ANSWER",
+    category: "RUNS",
+    label: "Plan or session needs an answer",
+    description: "A managed plan or session asks for user input.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
+  RUN_COMPLETED: {
+    key: "RUN_COMPLETED",
+    category: "RUNS",
+    label: "Plan or session completed",
+    description: "A managed plan or session completes successfully.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
+  RUN_FAILED: {
+    key: "RUN_FAILED",
+    category: "RUNS",
+    label: "Plan or session failed",
+    description: "A managed plan or session fails.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
+  RUN_CANCELLED: {
+    key: "RUN_CANCELLED",
+    category: "RUNS",
+    label: "Plan or session cancelled",
+    description: "A managed plan or session is cancelled.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: false,
+    defaultWebPushEnabled: false,
+  },
+  RUN_RECOVERY_PAUSED: {
+    key: "RUN_RECOVERY_PAUSED",
+    category: "RUNS",
+    label: "Plan or session paused after recovery",
+    description:
+      "A managed plan or session is paused after its agent restarts.",
+    defaultSidebarEnabled: true,
+    defaultBrowserEnabled: true,
+    defaultWebPushEnabled: false,
+  },
 } as const;
 
 export type NotificationTypeKey = keyof typeof NOTIFICATION_TYPES;

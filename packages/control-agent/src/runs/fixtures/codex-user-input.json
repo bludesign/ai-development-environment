@@ -1,0 +1,19 @@
+{
+  "threadId": "thread-1",
+  "turnId": "turn-1",
+  "itemId": "item-1",
+  "questions": [
+    {
+      "id": "database",
+      "header": "Database",
+      "question": "Which database should be used?",
+      "isOther": true,
+      "isSecret": false,
+      "options": [
+        { "label": "SQLite", "description": "Local and embedded" },
+        { "label": "Postgres", "description": "Shared server" }
+      ]
+    }
+  ],
+  "autoResolutionMs": null
+}

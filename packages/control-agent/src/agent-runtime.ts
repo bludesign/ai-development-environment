@@ -16,6 +16,7 @@ import { collectInventory } from "./inventory.js";
 import { JobExecutor } from "./job-executor.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
+import { RunManager } from "./runs/run-manager.js";
 
 function configuredIntervalMs(
   value: number,
@@ -43,6 +44,7 @@ export async function runAgent(
   const repositoryCoordinator = new RepositoryCoordinator();
   const executor = new JobExecutor(client, repositoryCoordinator);
   const codebaseMonitor = new CodebaseMonitor(client, repositoryCoordinator);
+  const runManager = new RunManager(client);
   let heartbeatIntervalMs = DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS * 1_000;
   let jobReconciliationIntervalMs =
     DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS * 1_000;
@@ -210,6 +212,7 @@ export async function runAgent(
   await refreshCadence();
   await heartbeat();
   await runJobReconciliation();
+  await runManager.start();
   void reconcileCodebases();
 
   const subscriptionClient = createAgentSubscriptionClient(config);
@@ -222,6 +225,8 @@ export async function runAgent(
         executor.cancel(event.job.id);
       } else if (event.type === "CODEBASE_RECONCILE_REQUESTED") {
         requestCodebaseReconcile();
+      } else if (event.type === "RUN_COMMAND_AVAILABLE") {
+        runManager.execute(event.runCommand);
       } else {
         void refreshCadence().then(() => {
           scheduleHeartbeat();
@@ -243,4 +248,5 @@ export async function runAgent(
   unsubscribe();
   await subscriptionClient.dispose();
   await executor.cancelAll();
+  await runManager.close();
 }

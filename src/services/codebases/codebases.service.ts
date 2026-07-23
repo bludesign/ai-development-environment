@@ -183,7 +183,13 @@ export class CodebasesService {
         },
         worktrees: {
           where: { missingAt: null },
-          select: { gitDirectory: true, baseBranchOverride: true },
+          select: {
+            id: true,
+            folder: true,
+            branch: true,
+            gitDirectory: true,
+            baseBranchOverride: true,
+          },
         },
       },
     });

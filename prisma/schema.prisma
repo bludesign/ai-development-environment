@@ -58,6 +58,10 @@ model Agent {
   signingProfiles          SigningProfileAsset[]
   signingCertificates      SigningCertificateAsset[]
   signingOperationItems    SigningOperationItem[]
+  runs                     AgentRun[]
+  runDrafts                RunDraft[]
+  runCommands              RunCommand[]
+  runProviderSyncs         RunProviderSync[]
 }
 
 model AgentEnrollmentToken {
@@ -283,10 +287,358 @@ model Worktree {
   sourceObservations       BuildSourceObservation[]
   builds                   Build[]
   notifications            AppNotification[]
+  runs                     AgentRun[]
+  runDrafts                RunDraft[]
+  runLease                 WorktreeRunLease?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model AgentRun {
+  id                       String             @id
+  kind                     String
+  displayNumber            Int
+  status                   String             @default("IN_PROGRESS")
+  phase                    String             @default("QUEUED")
+  origin                   String             @default("MANAGED")
+  provider                 String
+  providerVersion          String?
+  worktreeId               String?
+  agentId                  String?
+  jiraIssueKey             String?
+  jiraSummary              String?
+  repositoryName           String
+  branch                   String?
+  model                    String
+  effort                   String?
+  webSearchEnabled         Boolean            @default(false)
+  initialPrompt            String
+  finalOutput              String?
+  error                    String?
+  estimatedCost            Float?
+  pricingSource            String?
+  pricingUpdatedAt         DateTime?
+  inputTokens              Int                @default(0)
+  outputTokens             Int                @default(0)
+  reasoningTokens          Int                @default(0)
+  cacheReadTokens          Int                @default(0)
+  cacheWriteTokens         Int                @default(0)
+  toolCallCount            Int                @default(0)
+  sourcePlanId             String?            @unique
+  sourcePlanNumber         Int?
+  playedAt                 DateTime?
+  playedSessionNumber      Int?
+  parentRunId              String?
+  parentRunNumber          Int?
+  followUpMode             String?
+  archivedAt               DateTime?
+  nativeArchivedAt         DateTime?
+  startedAt                DateTime?
+  finishedAt               DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  worktree                 Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  agent                    Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  sourcePlan               AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
+  playedSession            AgentRun?          @relation("PlanSession")
+  parentRun                AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
+  followUps                AgentRun[]          @relation("RunFollowUps")
+  attempts                 RunAttempt[]
+  inputs                   RunInput[]
+  events                   RunEvent[]
+  toolCalls                RunToolCall[]
+  modelUsage               RunModelUsage[]
+  questionBatches          RunQuestionBatch[]
+  checkpoints              RunCheckpoint[]
+  commands                 RunCommand[]
+  lease                    WorktreeRunLease?
+
+  @@unique([kind, displayNumber])
+  @@index([kind, archivedAt, createdAt])
+  @@index([worktreeId, status, createdAt])
+  @@index([agentId, provider, createdAt])
+  @@index([parentRunId, createdAt])
+}
+
+model RunAttempt {
+  id                  String             @id
+  runId               String
+  generation          Int
+  nativeId            String?
+  nativeKey           String?            @unique
+  status              String             @default("STARTING")
+  resumeStrategy      String?
+  rawMetadataJson     String?
+  startedAt           DateTime           @default(now())
+  finishedAt          DateTime?
+  supersededAt        DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  run                 AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  events              RunEvent[]
+  toolCalls           RunToolCall[]
+  modelUsage          RunModelUsage[]
+  questionBatches     RunQuestionBatch[]
+  checkpoints         RunCheckpoint[]
+
+  @@unique([runId, generation])
+  @@index([runId, status])
+}
+
+model RunInput {
+  id          String          @id
+  runId       String
+  sequence    Int
+  kind        String
+  prompt      String
+  createdAt   DateTime        @default(now())
+  run         AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attachments RunAttachment[]
+
+  @@unique([runId, sequence])
+  @@index([runId, createdAt])
+}
+
+model RunDraft {
+  id               String          @id
+  kind             String
+  worktreeId       String?
+  agentId          String?
+  jiraIssueKey     String?
+  jiraSummary      String?
+  provider         String
+  model            String
+  effort           String?
+  webSearchEnabled Boolean         @default(false)
+  prompt           String
+  archivedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  worktree         Worktree?       @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  agent            Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  attachments      RunAttachment[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([worktreeId, updatedAt])
+}
+
+model RunAttachment {
+  id          String    @id
+  inputId     String?
+  draftId     String?
+  sha256      String
+  filename    String
+  contentType String
+  size        Int
+  storagePath String
+  createdAt   DateTime  @default(now())
+  input       RunInput? @relation(fields: [inputId], references: [id], onDelete: Cascade)
+  draft       RunDraft? @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([inputId])
+  @@index([draftId])
+  @@index([sha256])
+}
+
+model RunEvent {
+  id             String      @id
+  runId          String
+  attemptId      String?
+  sequence       Int
+  type           String
+  summary        String
+  searchText     String
+  detailMarkdown String?
+  rawJson        String?
+  createdAt      DateTime    @default(now())
+  supersededAt   DateTime?
+  run            AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt        RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([runId, sequence])
+  @@index([runId, supersededAt, sequence])
+}
+
+model RunToolCall {
+  id             String      @id
+  runId          String
+  attemptId      String?
+  sequence       Int
+  name           String
+  status         String
+  inputJson      String?
+  outputJson     String?
+  error          String?
+  startedAt      DateTime    @default(now())
+  finishedAt     DateTime?
+  supersededAt   DateTime?
+  run         AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt     RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([runId, sequence])
+  @@index([runId, startedAt])
+}
+
+model RunModelUsage {
+  id               String      @id
+  runId            String
+  attemptId        String?
+  model             String
+  inputTokens       Int         @default(0)
+  outputTokens      Int         @default(0)
+  reasoningTokens   Int         @default(0)
+  cacheReadTokens   Int         @default(0)
+  cacheWriteTokens  Int         @default(0)
+  estimatedCost     Float?
+  superseded        Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  run               AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt           RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([runId, attemptId, model])
+  @@index([runId, model])
+}
+
+model RunQuestionBatch {
+  id                  String              @id
+  runId               String
+  attemptId           String?
+  nativeRequestId     String?
+  eventSequence       Int?
+  status              String              @default("PENDING")
+  createdAt           DateTime            @default(now())
+  answeredAt          DateTime?
+  supersededAt        DateTime?
+  revisionPreparedAt  DateTime?
+  rollbackPatch       String?
+  pushedCommitWarning String?
+  run                 AgentRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt             RunAttempt?         @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  questions           RunQuestion[]
+  answerRevisions     RunAnswerRevision[]
+  checkpoint          RunCheckpoint?
+
+  @@index([runId, status, createdAt])
+  @@unique([runId, nativeRequestId])
+}
+
+model RunQuestion {
+  id           String              @id
+  batchId      String
+  position     Int
+  header       String?
+  prompt       String
+  multiSelect  Boolean             @default(false)
+  allowCustom  Boolean             @default(true)
+  batch        RunQuestionBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  options      RunQuestionOption[]
+
+  @@unique([batchId, position])
+}
+
+model RunQuestionOption {
+  id          String      @id
+  questionId  String
+  position    Int
+  label       String
+  description String?
+  question    RunQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, position])
+}
+
+model RunAnswerRevision {
+  id                   String           @id
+  batchId              String
+  revision             Int
+  answersJson          String
+  createdAt            DateTime         @default(now())
+  supersededAt         DateTime?
+  replacementAttemptId String?
+  batch                RunQuestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, revision])
+}
+
+model RunCheckpoint {
+  id              String            @id
+  runId           String
+  attemptId       String?
+  questionBatchId String?           @unique
+  kind            String
+  headSha         String?
+  branch          String?
+  upstreamSha     String?
+  indexTree       String?
+  worktreeTree    String?
+  refName         String?
+  manifestJson    String?
+  diffSummary     String?
+  diffPatch       String?
+  stashRef        String?
+  createdAt       DateTime          @default(now())
+  run             AgentRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt         RunAttempt?       @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  questionBatch   RunQuestionBatch? @relation(fields: [questionBatchId], references: [id], onDelete: SetNull)
+
+  @@index([runId, createdAt])
+}
+
+model RunCommand {
+  id             String    @id
+  runId          String
+  agentId        String
+  sequence       Int
+  type           String
+  payloadJson    String
+  status         String    @default("QUEUED")
+  idempotencyKey String    @unique
+  error          String?
+  createdAt      DateTime  @default(now())
+  claimedAt      DateTime?
+  finishedAt     DateTime?
+  run            AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  agent          Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([agentId, status, createdAt])
+}
+
+model RunNumberSequence {
+  kind      String   @id
+  nextValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model WorktreeRunLease {
+  worktreeId String   @id
+  runId      String   @unique
+  acquiredAt DateTime @default(now())
+  worktree   Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  run        AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model RunProviderSync {
+  id               String    @id
+  agentId          String
+  provider         String
+  cursor           String?
+  status           String    @default("IDLE")
+  lastStartedAt    DateTime?
+  lastCompletedAt  DateTime?
+  lastError        String?
+  importedCount    Int       @default(0)
+  unmatchedCount   Int       @default(0)
+  catalogJson      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  agent            Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, provider])
+  @@index([status, updatedAt])
 }
 
 model AppNotification {

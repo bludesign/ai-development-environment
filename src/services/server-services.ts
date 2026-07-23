@@ -22,6 +22,7 @@ import { PushNotificationsService } from "@/services/push-notifications";
 import { CredentialService } from "@/services/credentials";
 import { NotificationsService } from "@/services/notifications";
 import { PollingService } from "@/services/polling";
+import { RunsService } from "@/services/runs";
 
 export type ServerServices = {
   prismaService: PrismaService;
@@ -45,6 +46,7 @@ export type ServerServices = {
   pushNotificationsService: PushNotificationsService;
   notificationsService: NotificationsService;
   pollingService: PollingService;
+  runsService: RunsService;
 };
 
 function createServerServices(): ServerServices {
@@ -66,6 +68,7 @@ function createServerServices(): ServerServices {
     pollingService,
   );
   const notificationsService = new NotificationsService(credentialService);
+  const runsService = new RunsService(notificationsService);
   const buildsService = new BuildsService(
     agentControlService,
     telemetryService,
@@ -119,6 +122,7 @@ function createServerServices(): ServerServices {
     pushNotificationsService,
     notificationsService,
     pollingService,
+    runsService,
     toolsService: new ToolsService(
       codebaseToolsService,
       buildsService,

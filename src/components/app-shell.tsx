@@ -7,6 +7,7 @@ import {
   Bell,
   ChartNoAxesCombined,
   Combine,
+  ClipboardList,
   Cpu,
   Database,
   DatabaseZap,
@@ -15,9 +16,11 @@ import {
   HardDrive,
   Hammer,
   FolderGit2,
+  FilePenLine,
   House,
   KeyRound,
   MessageSquareText,
+  MessagesSquare,
   MousePointerClick,
   PanelLeft,
   PanelRight,
@@ -328,6 +331,57 @@ function NavigationSidebar() {
                   >
                     <GitBranch />
                     <span>{t("worktrees")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/plans")}
+                >
+                  <Link
+                    href="/plans"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ClipboardList />
+                    <span>{t("plans")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/sessions")}
+                >
+                  <Link
+                    href="/sessions"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <MessagesSquare />
+                    <span>{t("sessions")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={
+                    pathname.startsWith("/drafts") ||
+                    pathname.startsWith("/runs/new")
+                  }
+                >
+                  <Link
+                    href="/drafts"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <FilePenLine />
+                    <span>{t("drafts")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
