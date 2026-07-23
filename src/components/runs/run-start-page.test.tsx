@@ -74,7 +74,11 @@ beforeEach(() => {
   Element.prototype.releasePointerCapture = vi.fn();
   Element.prototype.scrollIntoView = vi.fn();
   request.mockReset();
-  request.mockResolvedValue(pageData as never);
+  request.mockImplementation(async (query) =>
+    String(query).includes("query RunProviderCatalog")
+      ? ({ runProviderCatalog: pageData.runProviderCatalog } as never)
+      : (pageData as never),
+  );
 });
 
 afterEach(() => {
@@ -86,8 +90,10 @@ describe("RunStartPage", () => {
   test("progressively selects a tool, model, and effort with web search enabled", async () => {
     render(<RunStartPage initialKind="PLAN" />);
 
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-    const [query, variables] = request.mock.calls[0]!;
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    const [query, variables] = request.mock.calls.find(([operation]) =>
+      String(operation).includes("query RunStartPage"),
+    )!;
     expect(query).toContain("query RunStartPage {");
     expect(query).not.toContain("$draftId");
     expect(variables).toBeUndefined();
@@ -134,6 +140,16 @@ describe("RunStartPage", () => {
       screen.getByRole("button", { name: /widgets · main · Builder/ }),
     ).toBeDefined();
     expect(screen.getByText("/workspace/widgets")).toBeDefined();
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query RunProviderCatalog") &&
+            (variables as { worktreeId?: string } | undefined)?.worktreeId ===
+              "worktree-1",
+        ),
+      ).toBe(true),
+    );
   });
 
   test("declares and supplies the draft variable while editing a draft", async () => {
@@ -161,8 +177,16 @@ describe("RunStartPage", () => {
 
     render(<RunStartPage draftId="draft-1" initialKind="PLAN" />);
 
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-    const [query, variables] = request.mock.calls[0]!;
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(([operation]) =>
+          String(operation).includes("query RunStartPage"),
+        ),
+      ).toBe(true),
+    );
+    const [query, variables] = request.mock.calls.find(([operation]) =>
+      String(operation).includes("query RunStartPage"),
+    )!;
     expect(query).toContain("query RunStartPage($draftId: ID!) {");
     expect(query).toContain("runDraft(id: $draftId)");
     expect(variables).toEqual({ draftId: "draft-1" });
@@ -245,7 +269,7 @@ describe("RunStartPage", () => {
     vi.stubGlobal("fetch", upload);
 
     render(<RunStartPage initialKind="PLAN" />);
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     const dropTarget = screen.getByText("Attach files").closest("label")!;
     fireEvent.drop(dropTarget, {
       dataTransfer: {

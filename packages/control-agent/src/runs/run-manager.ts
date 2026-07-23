@@ -524,7 +524,9 @@ export class RunManager {
       await active.handle.interrupt(
         command.type === "PAUSE" ? "PAUSED" : "CANCELLED",
       );
+      await active.settled;
     }
+    this.pendingQuestions.delete(command.runId);
     const deferred = this.deferredSteering.get(command.runId) ?? [];
     this.deferredSteering.delete(command.runId);
     await Promise.all(
@@ -668,6 +670,35 @@ export class RunManager {
 
   private async deleteNative(command: RunCommand): Promise<void> {
     if (!command.run.worktree) throw new Error("Run worktree is unavailable");
+    const active = this.active.get(command.runId);
+    if (active) {
+      this.interruptionRequests.set(command.runId, "CANCELLED");
+      await active.handle.interrupt("CANCELLED");
+      await active.settled;
+    } else if (command.run.status === "IN_PROGRESS") {
+      const latest = [...command.run.attempts].sort(
+        (left, right) => right.generation - left.generation,
+      )[0];
+      if (latest) {
+        await this.client.finishRunAttempt(latest.id, {
+          status: "CANCELLED",
+          phase: "CANCELLED",
+        });
+      }
+    }
+    this.pendingQuestions.delete(command.runId);
+    const deferred = this.deferredSteering.get(command.runId) ?? [];
+    this.deferredSteering.delete(command.runId);
+    await Promise.all(
+      deferred.map((entry) =>
+        this.client.completeRunCommand(
+          entry.id,
+          "FAILED",
+          "Run was deleted before queued steering could be sent",
+        ),
+      ),
+    );
+    for (const entry of deferred) this.executingCommands.delete(entry.id);
     const adapter = this.adapters.get(command.run.provider);
     if (!adapter)
       throw new Error(`Provider ${command.run.provider} is unavailable`);

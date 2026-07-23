@@ -125,7 +125,7 @@ describe("RunDetailPage", () => {
     subscriptions.mockReturnValue({
       subscribe: vi.fn(() => vi.fn()),
     } as never);
-    request.mockImplementation(async (query) => {
+    request.mockImplementation(async (query, variables) => {
       const operation = String(query);
       if (operation.includes("query AgentRunDetail")) {
         return {
@@ -146,7 +146,15 @@ describe("RunDetailPage", () => {
         } as never;
       }
       if (operation.includes("query RunActivity")) {
-        return { runEvents: eventData } as never;
+        const afterSequence = Number(
+          (variables as { afterSequence?: number } | undefined)
+            ?.afterSequence ?? -1,
+        );
+        return {
+          runEvents: eventData
+            .filter(({ sequence }) => sequence > afterSequence)
+            .slice(0, 500),
+        } as never;
       }
       throw new Error(`Unexpected operation: ${operation}`);
     });
@@ -298,5 +306,32 @@ describe("RunDetailPage", () => {
     )!;
     fireEvent.click(changedFile.closest("button")!);
     expect(await screen.findByText("+new")).toBeDefined();
+  });
+
+  test("loads activity beyond the first 500 events", async () => {
+    eventData = Array.from({ length: 501 }, (_, sequence) => ({
+      id: `event-${sequence}`,
+      runId: runData.id,
+      attemptId: null,
+      sequence,
+      type: "PROVIDER_DELTA",
+      summary: `Event ${sequence}`,
+      detailMarkdown: null,
+      raw: null,
+      createdAt: "2026-07-23T12:43:30.000Z",
+      supersededAt: null,
+    }));
+
+    render(<RunDetailPage runId="run-353" />);
+
+    expect(await screen.findByText("Event 500")).toBeDefined();
+    expect(
+      request.mock.calls.some(
+        ([query, variables]) =>
+          String(query).includes("query RunActivity") &&
+          (variables as { afterSequence?: number } | undefined)
+            ?.afterSequence === 499,
+      ),
+    ).toBe(true);
   });
 });

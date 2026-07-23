@@ -106,6 +106,9 @@ describe("run command persistence", () => {
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      runQuestionBatch: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       runCommand: { create: vi.fn() },
     };
     const prisma = {
@@ -166,6 +169,9 @@ describe("run command persistence", () => {
       runAttempt: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      runQuestionBatch: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       runCommand: {
         findFirst: vi.fn().mockResolvedValue({ sequence: 2 }),
@@ -363,6 +369,9 @@ describe("run command persistence", () => {
         findUnique: vi.fn().mockResolvedValue(attempt),
         update: vi.fn().mockResolvedValue({ ...attempt, status: "CANCELLED" }),
       },
+      runQuestionBatch: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       agentRun: { update: vi.fn() },
       worktreeRunLease: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -387,6 +396,10 @@ describe("run command persistence", () => {
       data: { status: "CANCELLED", finishedAt: expect.any(Date) },
     });
     expect(transaction.agentRun.update).not.toHaveBeenCalled();
+    expect(transaction.runQuestionBatch.updateMany).toHaveBeenCalledWith({
+      where: { runId: run.id, status: "PENDING" },
+      data: { status: "SUPERSEDED", supersededAt: expect.any(Date) },
+    });
   });
 
   test("applies an answer revision to its linked replacement Session", async () => {

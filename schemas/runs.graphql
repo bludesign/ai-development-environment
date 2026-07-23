@@ -445,7 +445,7 @@ extend type Query {
     after: ID
   ): RunDraftPage!
   runDraft(id: ID!): RunDraft
-  runProviderCatalog: [RunProviderCatalogEntry!]!
+  runProviderCatalog(runId: ID, worktreeId: ID): [RunProviderCatalogEntry!]!
   runProviderImportStatus: [RunProviderImportStatus!]!
   pendingRunCommands: [RunCommand!]!
 }

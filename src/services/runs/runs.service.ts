@@ -801,12 +801,43 @@ export class RunsService {
     let affected = 0;
     for (const run of runs) {
       const native = run.attempts.filter(({ nativeId }) => nativeId);
-      if (native.length && run.agentId) {
+      const requiresAgentCleanup =
+        Boolean(run.agentId) &&
+        (native.length > 0 || run.status === "IN_PROGRESS");
+      if (requiresAgentCleanup) {
         const command = await prisma.$transaction(async (transaction) => {
           await transaction.agentRun.update({
             where: { id: run.id },
             data: { phase: "DELETE_REQUESTED" },
           });
+          await transaction.runQuestionBatch.updateMany({
+            where: { runId: run.id, status: "PENDING" },
+            data: { status: "SUPERSEDED", supersededAt: new Date() },
+          });
+          const idempotencyKey = `${run.id}:delete-native`;
+          const existing = await transaction.runCommand.findUnique({
+            where: { idempotencyKey },
+            include: runCommandInclude,
+          });
+          if (existing?.status === "FAILED") {
+            return transaction.runCommand.update({
+              where: { id: existing.id },
+              data: {
+                status: "QUEUED",
+                payloadJson: JSON.stringify({
+                  attempts: native.map(({ id, nativeId }) => ({
+                    id,
+                    nativeId,
+                  })),
+                }),
+                error: null,
+                claimedAt: null,
+                finishedAt: null,
+              },
+              include: runCommandInclude,
+            });
+          }
+          if (existing) return existing;
           return enqueueCommand(transaction, {
             runId: run.id,
             agentId: run.agentId!,
@@ -814,10 +845,10 @@ export class RunsService {
             payload: {
               attempts: native.map(({ id, nativeId }) => ({ id, nativeId })),
             },
-            idempotencyKey: `${run.id}:delete-native`,
+            idempotencyKey,
           });
         });
-        publishCommand(command, run.agentId);
+        if (command.status === "QUEUED") publishCommand(command, run.agentId!);
       } else {
         const paths = run.inputs.flatMap((entry) =>
           entry.attachments.map(({ storagePath }) => storagePath),
@@ -840,6 +871,12 @@ export class RunsService {
       if (!run || !run.agentId) throw new Error("Run not found");
       if (run.origin !== "MANAGED")
         throw new Error("Imported runs are read-only");
+      if (type !== "CONTINUE") {
+        await transaction.runQuestionBatch.updateMany({
+          where: { runId, status: "PENDING" },
+          data: { status: "SUPERSEDED", supersededAt: new Date() },
+        });
+      }
       if (type === "CANCEL" && run.status === "CANCELLED") {
         return { run, command: null };
       }
@@ -965,6 +1002,14 @@ export class RunsService {
       }
       if (batch.status !== "PENDING")
         throw new Error("Question was already answered");
+      if (
+        batch.run.status !== "IN_PROGRESS" ||
+        ["PAUSE_REQUESTED", "CANCEL_REQUESTED", "DELETE_REQUESTED"].includes(
+          batch.run.phase,
+        )
+      ) {
+        throw new Error("Run is not active");
+      }
       const revision = batch.answerRevisions.length;
       await transaction.runAnswerRevision.create({
         data: {
@@ -1344,26 +1389,39 @@ export class RunsService {
     providerVersion?: string | null,
   ) {
     const prisma = await getPrismaClient();
-    const attempt = await prisma.runAttempt.findUnique({
-      where: { id: attemptId },
-      include: { run: true },
-    });
-    if (!attempt || attempt.run.agentId !== agentId)
-      throw new Error("Attempt not found");
-    const updated = await prisma.runAttempt.update({
-      where: { id: attemptId },
-      data: {
-        nativeId,
-        nativeKey: `${agentId}:${attempt.run.provider}:${nativeId}`,
-      },
-    });
-    if (providerVersion) {
-      await prisma.agentRun.update({
-        where: { id: attempt.runId },
-        data: { providerVersion },
+    const updated = await prisma.$transaction(async (transaction) => {
+      const attempt = await transaction.runAttempt.findUnique({
+        where: { id: attemptId },
+        include: { run: true },
       });
-    }
-    publishRun(attempt.runId);
+      if (!attempt || attempt.run.agentId !== agentId)
+        throw new Error("Attempt not found");
+      const nativeKey = `${agentId}:${attempt.run.provider}:${nativeId}`;
+      const owner = await transaction.runAttempt.findUnique({
+        where: { nativeKey },
+      });
+      if (owner && owner.id !== attemptId) {
+        if (owner.runId !== attempt.runId) {
+          throw new Error("Native provider session belongs to another run");
+        }
+        await transaction.runAttempt.update({
+          where: { id: owner.id },
+          data: { nativeKey: null },
+        });
+      }
+      const result = await transaction.runAttempt.update({
+        where: { id: attemptId },
+        data: { nativeId, nativeKey },
+      });
+      if (providerVersion) {
+        await transaction.agentRun.update({
+          where: { id: attempt.runId },
+          data: { providerVersion },
+        });
+      }
+      return result;
+    });
+    publishRun(updated.runId);
     return updated;
   }
 
@@ -1655,6 +1713,10 @@ export class RunsService {
         where: { id: attemptId },
         data: { status: persistedStatus, finishedAt: new Date() },
       });
+      await transaction.runQuestionBatch.updateMany({
+        where: { runId: attempt.runId, status: "PENDING" },
+        data: { status: "SUPERSEDED", supersededAt: new Date() },
+      });
       const run = TERMINAL_STATUSES.has(attempt.run.status)
         ? attempt.run
         : await transaction.agentRun.update({
@@ -1916,7 +1978,7 @@ export class RunsService {
     const provider = enumValue(PROVIDERS, providerValue, "Provider");
     const prisma = await getPrismaClient();
     let imported = 0;
-    for (const record of records.slice(0, 500)) {
+    for (const record of records) {
       const nativeKey = `${agentId}:${provider}:${requiredText(record.nativeId, "Native ID", 500)}`;
       const importedStatus = (() => {
         const value = record.status?.toUpperCase() ?? "COMPLETED";
@@ -2062,20 +2124,45 @@ export class RunsService {
     return imported;
   }
 
-  async providerCatalog() {
+  async providerCatalog(
+    args: { runId?: string | null; worktreeId?: string | null } = {},
+  ) {
     const prisma = await getPrismaClient();
-    const agents = await prisma.agent.findMany({
-      select: {
-        id: true,
-        capabilitiesJson: true,
-        lastSeenAt: true,
-        disconnectedAt: true,
-        heartbeatIntervalSeconds: true,
-      },
-    });
-    const catalogs = await prisma.runProviderSync.findMany({
-      orderBy: { updatedAt: "desc" },
-    });
+    const scoped = Boolean(args.runId || args.worktreeId);
+    const selectedAgentId = args.runId
+      ? (
+          await prisma.agentRun.findUnique({
+            where: { id: args.runId },
+            select: { agentId: true },
+          })
+        )?.agentId
+      : args.worktreeId
+        ? (
+            await prisma.worktree.findUnique({
+              where: { id: args.worktreeId },
+              select: { codebase: { select: { agentId: true } } },
+            })
+          )?.codebase.agentId
+        : null;
+    const [agents, catalogs] =
+      scoped && !selectedAgentId
+        ? [[], []]
+        : await Promise.all([
+            prisma.agent.findMany({
+              where: selectedAgentId ? { id: selectedAgentId } : undefined,
+              select: {
+                id: true,
+                capabilitiesJson: true,
+                lastSeenAt: true,
+                disconnectedAt: true,
+                heartbeatIntervalSeconds: true,
+              },
+            }),
+            prisma.runProviderSync.findMany({
+              where: selectedAgentId ? { agentId: selectedAgentId } : undefined,
+              orderBy: { updatedAt: "desc" },
+            }),
+          ]);
     return PROVIDERS.map((key) => {
       const capability = `runs.provider.${key.toLowerCase()}`;
       const available = agents.some((agent) => {

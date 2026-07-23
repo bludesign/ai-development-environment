@@ -28,4 +28,22 @@ describe("firstString", () => {
 
     expect(firstString(payload)).toBe("complete");
   });
+
+  test("traverses Codex turn items", () => {
+    expect(
+      firstString({
+        id: "turn-1",
+        items: [{ type: "agent_message", text: "Imported Codex output" }],
+      }),
+    ).toBe("Imported Codex output");
+  });
+
+  test("traverses OpenCode message parts", () => {
+    expect(
+      firstString({
+        info: { role: "assistant" },
+        parts: [{ type: "text", text: "Imported OpenCode output" }],
+      }),
+    ).toBe("Imported OpenCode output");
+  });
 });

@@ -141,6 +141,8 @@ export function firstString(value: unknown): string | undefined {
     "summary",
     "content",
     "output",
+    "items",
+    "parts",
   ] as const;
   const pending = [value];
   const visited = new WeakSet<object>();

@@ -111,7 +111,6 @@ export function RunStartPage({
             }>;
           }>;
         };
-        runProviderCatalog: ProviderCatalogEntry[];
         runDraft?: RunDraftView | null;
       }>(
         `query RunStartPage${draftId ? "($draftId: ID!)" : ""} {
@@ -124,12 +123,10 @@ export function RunStartPage({
             }
           }
         }
-        runProviderCatalog { key label available supportsWebSearch models { id label efforts group } }
         ${draftId ? `runDraft(id: $draftId) { ${RUN_DRAFT_FIELDS} }` : ""}
       }`,
         draftId ? { draftId } : undefined,
       );
-      setCatalog(data.runProviderCatalog);
       setWorktrees(
         data.worktreeOverview.agents.flatMap(({ agent, codebases }) =>
           codebases.flatMap(({ repository, worktrees }) =>
@@ -169,10 +166,34 @@ export function RunStartPage({
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void controlPlaneRequest<{
+        runProviderCatalog: ProviderCatalogEntry[];
+      }>(
+        `query RunProviderCatalog($worktreeId: ID) { runProviderCatalog(worktreeId: $worktreeId) { key label available supportsWebSearch models { id label efforts group } } }`,
+        { worktreeId: worktreeId || null },
+      )
+        .then((data) => {
+          if (!cancelled) setCatalog(data.runProviderCatalog);
+        })
+        .catch((value) => {
+          if (!cancelled)
+            setError(value instanceof Error ? value.message : String(value));
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [worktreeId]);
+
   const selectedWorktree = worktrees.find(({ id }) => id === worktreeId);
   const selectedProvider = catalog.find(({ key }) => key === provider);
   const providerUsable = Boolean(
     selectedProvider?.available &&
+    selectedProvider.models.some(({ id }) => id === model) &&
     selectedWorktree?.agentOnline &&
     selectedWorktree.capabilities.includes(
       `runs.provider.${provider.toLowerCase()}`,
@@ -198,6 +219,7 @@ export function RunStartPage({
 
   const selectWorktree = (value: string | null) => {
     const id = value ?? "";
+    setCatalog([]);
     setWorktreeId(id);
     const worktree = worktrees.find((entry) => entry.id === id);
     if (worktree?.ticketKey) {

@@ -624,7 +624,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
         agentRun: AgentRunView | null;
         runProviderCatalog: ProviderCatalog[];
       }>(
-        `query AgentRunDetail($id: ID!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts group } } }`,
+        `query AgentRunDetail($id: ID!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog(runId: $id) { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts group } } }`,
         { id: runId },
       );
       setRun(data.agentRun);
@@ -644,11 +644,21 @@ export function RunDetailPage({ runId }: { runId: string }) {
   }, [followProvider, runId]);
   const refreshEvents = useCallback(async () => {
     try {
-      const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
-        `query RunActivity($runId: ID!, $search: String) { runEvents(runId: $runId, search: $search, first: 500) { ${RUN_EVENT_FIELDS} } }`,
-        { runId, search: search.trim() || null },
-      );
-      setEvents(data.runEvents);
+      const all: RunEventView[] = [];
+      let afterSequence = -1;
+      for (;;) {
+        const data = await controlPlaneRequest<{ runEvents: RunEventView[] }>(
+          `query RunActivity($runId: ID!, $search: String, $afterSequence: Int!) { runEvents(runId: $runId, search: $search, afterSequence: $afterSequence, first: 500) { ${RUN_EVENT_FIELDS} } }`,
+          { runId, search: search.trim() || null, afterSequence },
+        );
+        const page = data.runEvents;
+        all.push(...page);
+        if (page.length < 500) break;
+        const nextSequence = page[page.length - 1]!.sequence;
+        if (nextSequence <= afterSequence) break;
+        afterSequence = nextSequence;
+      }
+      setEvents(all);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     }

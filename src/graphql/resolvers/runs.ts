@@ -166,11 +166,11 @@ export const createRunResolvers = (service: RunsService) => ({
     },
     runProviderCatalog: (
       _root: unknown,
-      _args: unknown,
+      args: Parameters<RunsService["providerCatalog"]>[0],
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.providerCatalog();
+      return service.providerCatalog(args);
     },
     runProviderImportStatus: (
       _root: unknown,
