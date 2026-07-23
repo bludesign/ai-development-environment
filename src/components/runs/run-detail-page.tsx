@@ -61,6 +61,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -110,6 +111,25 @@ import type {
   RunLinkView,
   RunQuestionBatchView,
 } from "./types";
+
+// AI tools whose native session transcript is stored per-event as JSONL and
+// can therefore be re-exported as the tool's original session file.
+const NATIVE_JSONL_PROVIDERS = ["CLAUDE", "CODEX", "OPENCODE"];
+
+// AI tools that persist a single untouched .jsonl file on disk, which the agent
+// can read back verbatim. OpenCode stores messages separately, so it is absent.
+const NATIVE_SESSION_FILE_PROVIDERS = ["CLAUDE", "CODEX"];
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 type ProviderCatalog = ProviderCatalogEntry & {
   supportsPause: boolean;
@@ -541,7 +561,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
     container.scrollTop = container.scrollHeight;
   }, [events]);
   const exportActivity = useCallback(
-    async (format: "json" | "markdown") => {
+    async (format: "json" | "markdown" | "jsonl") => {
       const all: RunEventView[] = [];
       let afterSequence = -1;
       // Paginate the full, unfiltered history (search-independent, including
@@ -578,6 +598,15 @@ export function RunDetailPage({ runId }: { runId: string }) {
         );
         mime = "application/json";
         filename = `${base}.json`;
+      } else if (format === "jsonl") {
+        // The native session file from the AI tool: each event's raw payload is
+        // one line of the provider's original JSONL transcript.
+        content = all
+          .filter((event) => event.raw !== null && event.raw !== undefined)
+          .map((event) => JSON.stringify(event.raw))
+          .join("\n");
+        mime = "application/x-ndjson";
+        filename = `run-${runId}-session-${stamp}.jsonl`;
       } else {
         content = all
           .map((event) => {
@@ -605,18 +634,26 @@ export function RunDetailPage({ runId }: { runId: string }) {
         mime = "text/markdown";
         filename = `${base}.md`;
       }
-      const blob = new Blob([content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      downloadBlob(new Blob([content], { type: mime }), filename);
     },
     [runId],
   );
+
+  const exportNativeSessionFile = useCallback(async () => {
+    const data = await controlPlaneRequest<{
+      runNativeSessionFile: { filename: string; contentBase64: string };
+    }>(
+      `query RunNativeSessionFile($runId: ID!) { runNativeSessionFile(runId: $runId) { filename contentBase64 } }`,
+      { runId },
+    );
+    const { filename, contentBase64 } = data.runNativeSessionFile;
+    const binary = atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    downloadBlob(new Blob([bytes], { type: "application/x-ndjson" }), filename);
+  }, [runId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -1313,6 +1350,44 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   >
                     {t("exportMarkdown")}
                   </DropdownMenuItem>
+                  {run && NATIVE_JSONL_PROVIDERS.includes(run.provider) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() =>
+                          void exportActivity("jsonl").catch((value) =>
+                            setError(
+                              value instanceof Error
+                                ? value.message
+                                : String(value),
+                            ),
+                          )
+                        }
+                      >
+                        {t("exportSession", {
+                          tool: formatProviderLabel(run.provider),
+                        })}
+                      </DropdownMenuItem>
+                      {NATIVE_SESSION_FILE_PROVIDERS.includes(run.provider) &&
+                        run.agentId && (
+                          <DropdownMenuItem
+                            onClick={() =>
+                              void exportNativeSessionFile().catch((value) =>
+                                setError(
+                                  value instanceof Error
+                                    ? value.message
+                                    : String(value),
+                                ),
+                              )
+                            }
+                          >
+                            {t("exportSessionFile", {
+                              tool: formatProviderLabel(run.provider),
+                            })}
+                          </DropdownMenuItem>
+                        )}
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

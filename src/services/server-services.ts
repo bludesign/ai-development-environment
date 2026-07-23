@@ -68,7 +68,10 @@ function createServerServices(): ServerServices {
     pollingService,
   );
   const notificationsService = new NotificationsService(credentialService);
-  const runsService = new RunsService(notificationsService);
+  const runsService = new RunsService(
+    notificationsService,
+    agentControlService,
+  );
   runsService.startReaper();
   const buildsService = new BuildsService(
     agentControlService,

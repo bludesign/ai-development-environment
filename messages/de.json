@@ -122,6 +122,8 @@
     "export": "Exportieren",
     "exportJson": "Als JSON exportieren",
     "exportMarkdown": "Als Markdown exportieren",
+    "exportSession": "{tool}-Sitzung exportieren (JSONL)",
+    "exportSessionFile": "Originaldatei von {tool} herunterladen",
     "fileTooLarge": "{name} überschreitet das Dateilimit von 25 MB.",
     "followUp": "Folgelauf",
     "followUpDescription": "Einen verknüpften Lauf mit fortgesetztem, frischem oder erneut gesendetem Kontext erstellen.",

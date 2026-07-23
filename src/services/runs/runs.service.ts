@@ -9,10 +9,13 @@ import {
   agentOnlineWindowMs,
   agentEventBus,
   agentEventsTopic,
+  agentJobChangedTopic,
   runChangedTopic,
   runEventTopic,
   runQuestionTopic,
 } from "@/services/agent-control";
+import type { AgentControlService } from "@/services/agent-control";
+import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import type { NotificationsService } from "@/services/notifications";
 
 import {
@@ -245,10 +248,142 @@ const runInclude = {
   checkpoints: { orderBy: { createdAt: "asc" as const } },
 } as const;
 
+const SESSION_FILE_JOB_TIMEOUT_MS = 60_000;
+
+function agentOnline(agent: {
+  lastSeenAt: Date | null;
+  disconnectedAt: Date | null;
+  heartbeatIntervalSeconds: number | null;
+}): boolean {
+  return (
+    agent.lastSeenAt !== null &&
+    Date.now() - agent.lastSeenAt.getTime() <= agentOnlineWindowMs(agent) &&
+    agent.disconnectedAt === null
+  );
+}
+
+function agentCapabilities(agent: { capabilitiesJson: string }): string[] {
+  try {
+    const value: unknown = JSON.parse(agent.capabilitiesJson);
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function jobResultObject(job: {
+  status: string;
+  resultJson: string | null;
+  error: string | null;
+}): Record<string, unknown> {
+  if (job.status !== "SUCCEEDED" || !job.resultJson) {
+    throw new Error(job.error || "Agent job failed");
+  }
+  const value: unknown = JSON.parse(job.resultJson);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Agent job returned an invalid result");
+  }
+  return value as Record<string, unknown>;
+}
+
 export class RunsService {
   private reaperTimer?: ReturnType<typeof setInterval>;
 
-  constructor(private readonly notifications?: NotificationsService) {}
+  constructor(
+    private readonly notifications?: NotificationsService,
+    private readonly agentControl?: AgentControlService,
+  ) {}
+
+  private async waitForJob(jobId: string) {
+    const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
+    const deadline = Date.now() + SESSION_FILE_JOB_TIMEOUT_MS;
+    try {
+      while (Date.now() < deadline) {
+        const job = await this.agentControl!.getJob(jobId);
+        if (!job) throw new Error("Agent job disappeared");
+        if (
+          ["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(job.status)
+        ) {
+          return job;
+        }
+        await Promise.race([
+          events.next(),
+          new Promise((resolve) => setTimeout(resolve, deadline - Date.now())),
+        ]);
+      }
+      await this.agentControl!.cancelJob(jobId);
+      throw new Error("Agent did not respond in time");
+    } finally {
+      await events.return?.();
+    }
+  }
+
+  /**
+   * Returns the provider's untouched on-disk session transcript by dispatching a
+   * short-lived job to the agent that owns the run. Only Claude and Codex keep a
+   * single JSONL file per session; other providers have no file to hand back.
+   */
+  async nativeSessionFile(runId: string) {
+    if (!this.agentControl) {
+      throw new Error("Agent control is unavailable");
+    }
+    const prisma = await getPrismaClient();
+    const run = await prisma.agentRun.findUnique({
+      where: { id: runId },
+      include: {
+        attempts: { orderBy: { generation: "desc" } },
+        worktree: true,
+        agent: true,
+      },
+    });
+    if (!run) throw new Error("Run not found");
+    if (run.provider !== "CLAUDE" && run.provider !== "CODEX") {
+      throw new Error("This provider does not store a session file");
+    }
+    const nativeId = run.attempts.find((attempt) => attempt.nativeId)?.nativeId;
+    if (!nativeId) throw new Error("This run has no native session yet");
+    if (!run.worktree) throw new Error("This run has no worktree");
+    if (!run.agent || !run.agentId) {
+      throw new Error("This run is not associated with an agent");
+    }
+    if (!agentOnline(run.agent)) throw new Error("Agent is offline");
+    if (!agentCapabilities(run.agent).includes(RUN_SESSION_READ_JOB_KIND)) {
+      throw new Error("Agent must be updated to export session files");
+    }
+    const job = await this.agentControl.createJob({
+      agentId: run.agentId,
+      kind: RUN_SESSION_READ_JOB_KIND,
+      payload: {
+        provider: run.provider,
+        nativeId,
+        folder: run.worktree.folder,
+      },
+      idempotencyKey: `runs:session:read:${runId}:${nativeId}`,
+      timeoutSeconds: 60,
+      visibility: "SYSTEM",
+    });
+    try {
+      const result = jobResultObject(await this.waitForJob(job.id));
+      const contentBase64 =
+        typeof result.contentBase64 === "string" ? result.contentBase64 : null;
+      if (!contentBase64) {
+        throw new Error("Agent returned an invalid session file");
+      }
+      return {
+        filename:
+          typeof result.filename === "string" && result.filename
+            ? result.filename
+            : `${nativeId}.jsonl`,
+        contentBase64,
+      };
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
 
   /**
    * Periodically fail runs whose owning agent has gone offline. Without this a
