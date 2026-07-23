@@ -19,6 +19,32 @@ afterEach(async () => {
 });
 
 describe("RunJournal", () => {
+  test("persists concurrent events without colliding temporary files", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "aide-run-journal-concurrency-test-"),
+    );
+    directories.push(directory);
+    process.env.CONTROL_AGENT_CONFIG = join(directory, "config.json");
+    const journal = new RunJournal("run-concurrent", "attempt-1");
+
+    const events = await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        journal.append({ type: "SYSTEM", summary: `event-${index}` }),
+      ),
+    );
+
+    expect(events.map(({ sequence }) => sequence)).toEqual(
+      Array.from({ length: 20 }, (_, index) => index),
+    );
+
+    const appendRunEvents = vi.fn().mockResolvedValue({ appendRunEvents: [] });
+    const replay = new RunJournal("run-concurrent", "attempt-1");
+    await replay.flush({ appendRunEvents } as unknown as AgentGraphQLClient);
+
+    expect(appendRunEvents).toHaveBeenCalledOnce();
+    expect(appendRunEvents.mock.calls[0]![2]).toHaveLength(20);
+  });
+
   test("preserves monotonic ordering and replays unacknowledged events after reconnect", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aide-run-journal-test-"));
     directories.push(directory);

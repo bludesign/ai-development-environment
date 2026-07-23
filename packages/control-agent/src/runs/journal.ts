@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -22,6 +23,9 @@ export class RunJournal {
   private nextSequence = 0;
   private acknowledged = -1;
   private loaded = false;
+  private loading?: Promise<void>;
+  private appending: Promise<void> = Promise.resolve();
+  private saving: Promise<void> = Promise.resolve();
   private flushing?: Promise<void>;
 
   constructor(
@@ -47,6 +51,15 @@ export class RunJournal {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
+    if (!this.loading) {
+      this.loading = this.loadState().finally(() => {
+        this.loading = undefined;
+      });
+    }
+    await this.loading;
+  }
+
+  private async loadState(): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     try {
       const state = JSON.parse(await readFile(this.statePath, "utf8")) as {
@@ -67,19 +80,26 @@ export class RunJournal {
   }
 
   async append(event: ProviderEvent): Promise<JournalEvent> {
-    await this.load();
-    const value: JournalEvent = {
-      ...event,
-      id: randomUUID(),
-      sequence: this.nextSequence++,
-      attemptId: this.attemptId,
-    };
-    await appendFile(this.eventsPath, `${JSON.stringify(value)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
+    const operation = this.appending.then(async () => {
+      await this.load();
+      const value: JournalEvent = {
+        ...event,
+        id: randomUUID(),
+        sequence: this.nextSequence++,
+        attemptId: this.attemptId,
+      };
+      await appendFile(this.eventsPath, `${JSON.stringify(value)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await this.saveState();
+      return value;
     });
-    await this.saveState();
-    return value;
+    this.appending = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
   }
 
   async latestSequence(): Promise<number> {
@@ -138,13 +158,19 @@ export class RunJournal {
     }
   }
 
-  private async saveState(): Promise<void> {
-    const temporary = `${this.statePath}.${process.pid}.tmp`;
-    await writeFile(
-      temporary,
-      `${JSON.stringify({ acknowledged: this.acknowledged, nextSequence: this.nextSequence })}\n`,
-      { mode: 0o600 },
-    );
-    await rename(temporary, this.statePath);
+  private saveState(): Promise<void> {
+    const contents = `${JSON.stringify({ acknowledged: this.acknowledged, nextSequence: this.nextSequence })}\n`;
+    const operation = this.saving.then(async () => {
+      const temporary = `${this.statePath}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, contents, { mode: 0o600 });
+        await rename(temporary, this.statePath);
+      } catch (error) {
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+      }
+    });
+    this.saving = operation.catch(() => undefined);
+    return operation;
   }
 }
