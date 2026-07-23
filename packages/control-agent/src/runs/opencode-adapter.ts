@@ -19,6 +19,7 @@ import {
 } from "./provider.js";
 
 const QUESTION_RECONCILIATION_INTERVAL_MS = 1_000;
+const QUESTION_RECONCILIATION_TIMEOUT_MS = 5_000;
 
 type OpenCodeQuestionSurface = "LEGACY" | "V2";
 
@@ -293,26 +294,28 @@ export class OpenCodeAdapter implements ProviderAdapter {
       }
     };
 
-    const reconcileQuestions = async () => {
-      const [legacy, v2] = await Promise.allSettled([
-        client.question.list({ directory: cwd }),
-        client.v2.session.question.list({ sessionID: nativeId }),
-      ]);
-      if (legacy.status === "fulfilled") {
-        for (const value of responseItems(legacy.value)) {
-          const request = opencodeQuestionRequest(value, "LEGACY");
-          if (request?.sessionId === nativeId) await reportQuestion(request);
-        }
+    const reconcileLegacyQuestions = async () => {
+      const response = await client.question.list(
+        { directory: cwd },
+        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
+      );
+      const items = responseItems(response);
+      for (const value of items) {
+        const request = opencodeQuestionRequest(value, "LEGACY");
+        if (request?.sessionId === nativeId) await reportQuestion(request);
       }
-      if (v2.status === "fulfilled") {
-        for (const value of responseItems(v2.value)) {
-          const request = opencodeQuestionRequest(value, "V2");
-          if (request && (!request.sessionId || request.sessionId === nativeId))
-            await reportQuestion(request);
-        }
+    };
+
+    const reconcileV2Questions = async () => {
+      const response = await client.v2.session.question.list(
+        { sessionID: nativeId },
+        { signal: AbortSignal.timeout(QUESTION_RECONCILIATION_TIMEOUT_MS) },
+      );
+      for (const value of responseItems(response)) {
+        const request = opencodeQuestionRequest(value, "V2");
+        if (request && (!request.sessionId || request.sessionId === nativeId))
+          await reportQuestion(request);
       }
-      if (legacy.status === "rejected" && v2.status === "rejected")
-        throw legacy.reason;
     };
 
     const eventTask = (async () => {
@@ -348,28 +351,40 @@ export class OpenCodeAdapter implements ProviderAdapter {
       }
     })();
 
-    const questionReconciliationTask = (async () => {
-      let errorReported = false;
-      while (!streamController.signal.aborted) {
-        try {
-          await reconcileQuestions();
-          errorReported = false;
-        } catch (error) {
-          if (!errorReported) {
-            errorReported = true;
-            try {
-              await callbacks.onEvent({
-                type: "ERROR",
-                summary: `OpenCode question reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
-              });
-            } catch {
-              // The live event path may still deliver the question.
+    const questionReconciliationTask = (
+      surface: OpenCodeQuestionSurface,
+      reconcile: () => Promise<void>,
+    ) =>
+      (async () => {
+        let errorReported = false;
+        while (!streamController.signal.aborted) {
+          try {
+            await reconcile();
+            errorReported = false;
+          } catch (error) {
+            if (!errorReported) {
+              errorReported = true;
+              try {
+                await callbacks.onEvent({
+                  type: "ERROR",
+                  summary: `OpenCode ${surface.toLowerCase()} question reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              } catch {
+                // The live event path may still deliver the question.
+              }
             }
           }
+          await waitForPoll(streamController.signal);
         }
-        await waitForPoll(streamController.signal);
-      }
-    })();
+      })();
+    const legacyQuestionReconciliationTask = questionReconciliationTask(
+      "LEGACY",
+      reconcileLegacyQuestions,
+    );
+    const v2QuestionReconciliationTask = questionReconciliationTask(
+      "V2",
+      reconcileV2Questions,
+    );
 
     const send = async (prompt: string, attachments: StagedAttachment[]) => {
       const response = await client.session.prompt({
@@ -398,7 +413,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
     const completion = (async (): Promise<ProviderCompletion> => {
       try {
         let response = await send(input.prompt, input.attachments);
-        await reconcileQuestions();
+        await Promise.allSettled([
+          reconcileLegacyQuestions(),
+          reconcileV2Questions(),
+        ]);
         while (!stopReason && pendingQuestions.size) {
           await waitForPoll(streamController.signal);
         }
@@ -444,7 +462,11 @@ export class OpenCodeAdapter implements ProviderAdapter {
             };
       } finally {
         streamController.abort();
-        await Promise.allSettled([eventTask, questionReconciliationTask]);
+        await Promise.allSettled([
+          eventTask,
+          legacyQuestionReconciliationTask,
+          v2QuestionReconciliationTask,
+        ]);
       }
     })();
 

@@ -70,7 +70,9 @@ describe("OpenCodeAdapter questions", () => {
         session: {
           interrupt: vi.fn(async () => ({ data: true })),
           question: {
-            list: vi.fn(async () => ({ data: { data: [] } })),
+            list: vi.fn(async () => {
+              throw new Error("v2 question surface unavailable");
+            }),
             reply: vi.fn(async () => ({ data: true })),
           },
         },

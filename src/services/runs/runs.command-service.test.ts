@@ -267,6 +267,80 @@ describe("run command persistence", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  test("namespaces repeated provider question IDs by batch", async () => {
+    const questionIds: string[] = [];
+    const transaction = {
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          agentId: "agent-1",
+          kind: "SESSION",
+          displayNumber: 1,
+          worktree: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      runQuestionBatch: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(
+          async ({
+            data,
+          }: {
+            data: {
+              id: string;
+              runId: string;
+              questions: { create: Array<{ id: string }> };
+            };
+          }) => {
+            questionIds.push(
+              ...data.questions.create.map(
+                (question: { id: string }) => question.id,
+              ),
+            );
+            return { id: data.id, runId: data.runId, questions: [] };
+          },
+        ),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+    const service = new RunsService();
+    const question = {
+      id: "0",
+      prompt: "Which API approach should be used?",
+      options: [{ label: "REST API" }],
+    };
+
+    await service.reportQuestion(
+      "agent-1",
+      "run-1",
+      "attempt-1",
+      "request-1",
+      1,
+      [question],
+    );
+    await service.reportQuestion(
+      "agent-1",
+      "run-1",
+      "attempt-1",
+      "request-2",
+      2,
+      [question],
+    );
+
+    expect(questionIds).toHaveLength(2);
+    expect(new Set(questionIds).size).toBe(2);
+    expect(questionIds).toEqual([
+      expect.stringMatching(/:0:0$/),
+      expect.stringMatching(/:0:0$/),
+    ]);
+  });
+
   test("does not overwrite cancellation with a late provider completion", async () => {
     const run = {
       id: "run-1",

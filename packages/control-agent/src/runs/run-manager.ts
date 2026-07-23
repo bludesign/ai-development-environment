@@ -344,11 +344,6 @@ export class RunManager {
         const pending = this.pendingQuestions.get(run.id) ?? new Set<string>();
         pending.add(nativeRequestId);
         this.pendingQuestions.set(run.id, pending);
-        const checkpoint = await captureGitCheckpoint(
-          run.worktree!.folder,
-          run.id,
-          "QUESTION",
-        );
         const eventSequence = await journal.latestSequence();
         const batch = await this.retry(() =>
           this.client.reportRunQuestion({
@@ -359,12 +354,24 @@ export class RunManager {
             questions,
           }),
         );
-        await this.retry(() =>
-          this.client.reportRunCheckpoint(run.id, attempt.id, {
-            ...checkpoint,
-            questionBatchId: batch.id,
-          }),
-        );
+        try {
+          const checkpoint = await captureGitCheckpoint(
+            run.worktree!.folder,
+            run.id,
+            "QUESTION",
+          );
+          await this.retry(() =>
+            this.client.reportRunCheckpoint(run.id, attempt.id, {
+              ...checkpoint,
+              questionBatchId: batch.id,
+            }),
+          );
+        } catch (error) {
+          console.error(
+            `Run ${run.id} question checkpoint failed:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
       },
       onUsage: async (usage) => {
         await this.retry(() =>

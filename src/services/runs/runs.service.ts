@@ -1436,7 +1436,7 @@ export class RunsService {
               : null,
           questions: {
             create: questions.map((question, position) => ({
-              id: question.id || randomUUID(),
+              id: `${id}:${position}:${question.id || "question"}`,
               position,
               header: optionalText(question.header, 200),
               prompt: requiredText(question.prompt, "Question", 10_000),
