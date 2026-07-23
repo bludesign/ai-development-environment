@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatModelLabel } from "@/lib/enum-label";
+import { cn } from "@/lib/utils";
 
 import { EffortIcon } from "./effort-icon";
 import {
@@ -48,6 +49,17 @@ export type ProviderCatalogEntry = {
 type CatalogModel = ProviderCatalogEntry["models"][number];
 
 const providerOrder = ["CODEX", "CLAUDE", "OPENCODE"];
+
+/**
+ * `data-selected` is the transient hover/keyboard highlight and already owns
+ * the row background, so the persistent "this is what you have chosen" marker
+ * has to be a different channel: an inset ring, which costs no layout. The
+ * trailing checkmark the primitive would otherwise draw reserves its column on
+ * every row to mark one, so each row hands it a `command-shortcut` slot —
+ * the escape hatch `CommandItem` already watches for — to suppress it.
+ */
+const checkedRow =
+  "data-[checked=true]:ring-1 data-[checked=true]:ring-inset data-[checked=true]:ring-primary/40";
 
 /**
  * Tool, model, and effort are one decision, so they are one control: a pill
@@ -77,7 +89,7 @@ export function ModelEffortPicker({
   isProviderDisabled?: (entry: ProviderCatalogEntry) => boolean;
 }) {
   const t = useTranslations("runs");
-  const { rail, isPinned, togglePin, remember } = useModelPresets();
+  const { rail, pinned, isPinned, togglePin, remember } = useModelPresets();
   const [open, setOpen] = useState(false);
 
   const providers = [...catalog].sort((left, right) => {
@@ -104,13 +116,17 @@ export function ModelEffortPicker({
    * providers drop models between syncs, so anything that no longer resolves
    * to a usable model is left out rather than offered and then rejected.
    */
-  const resolved = rail.flatMap((preset) => {
-    const entry = providers.find(({ key }) => key === preset.provider);
-    const found = entry?.models.find(({ id }) => id === preset.model);
-    if (!entry || !found || disabled(entry)) return [];
-    if (selection && sameModelPreset(preset, selection)) return [];
-    return [{ preset, entry, model: found }];
-  });
+  const resolve = (presets: ModelPreset[]) =>
+    presets.flatMap((preset) => {
+      const entry = providers.find(({ key }) => key === preset.provider);
+      const found = entry?.models.find(({ id }) => id === preset.model);
+      if (!entry || !found || disabled(entry)) return [];
+      return [{ preset, entry, model: found }];
+    });
+  const railPresets = resolve(rail).filter(
+    ({ preset }) => !selection || !sameModelPreset(preset, selection),
+  );
+  const pinnedPresets = resolve(pinned);
 
   const apply = (preset: ModelPreset) => {
     if (preset.provider !== provider) onProviderChange(preset.provider);
@@ -119,16 +135,14 @@ export function ModelEffortPicker({
     remember(preset);
   };
   /** Effort carries across a model switch when the target supports it. */
-  const chooseModel = (entry: ProviderCatalogEntry, next: CatalogModel) => {
-    apply({
-      provider: entry.key,
-      model: next.id,
-      effort: next.efforts.includes(effort)
-        ? effort
-        : next.efforts.includes("auto")
-          ? "auto"
-          : (next.efforts[0] ?? "auto"),
-    });
+  const carriedEffort = (next: CatalogModel) =>
+    next.efforts.includes(effort)
+      ? effort
+      : next.efforts.includes("auto")
+        ? "auto"
+        : (next.efforts[0] ?? "auto");
+  const choose = (preset: ModelPreset) => {
+    apply(preset);
     setOpen(false);
   };
   const chooseEffort = (value: string) => {
@@ -161,31 +175,116 @@ export function ModelEffortPicker({
               <ChevronsUpDown className="text-muted-foreground" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-80 p-0">
+          <PopoverContent
+            align="start"
+            className="w-[min(32rem,calc(100vw-2rem))] p-0"
+          >
             <Command>
               <CommandInput
                 placeholder={t("search", { kind: t("model").toLowerCase() })}
               />
               <CommandList>
                 <CommandEmpty>{t("empty", { kind: t("model") })}</CommandEmpty>
-                {providers.map((entry) => (
-                  <CommandGroup heading={entry.label} key={entry.key}>
-                    {entry.models.map((entryModel) => (
+                {pinnedPresets.length > 0 && (
+                  <CommandGroup heading={t("presets")}>
+                    {pinnedPresets.map(({ preset, entry, model: preseted }) => (
                       <CommandItem
-                        data-checked={
-                          entry.key === provider && entryModel.id === model
-                        }
-                        disabled={disabled(entry)}
-                        key={`${entry.key}/${entryModel.id}`}
-                        onSelect={() => chooseModel(entry, entryModel)}
-                        value={`${entry.label} ${entryModel.label} ${entryModel.id}`}
+                        className={checkedRow}
+                        data-checked={Boolean(
+                          selection && sameModelPreset(preset, selection),
+                        )}
+                        key={modelPresetKey(preset)}
+                        onSelect={() => choose(preset)}
+                        value={`${entry.label} ${preseted.label} ${preseted.id} ${preset.effort}`}
                       >
                         <ProviderIcon provider={entry.key} />
                         <span className="min-w-0 flex-1 truncate">
-                          {formatModelLabel(entryModel.label)}
+                          {formatModelLabel(preseted.label)}
+                        </span>
+                        <span
+                          className="flex items-center gap-1.5 text-muted-foreground"
+                          data-slot="command-shortcut"
+                        >
+                          <EffortIcon effort={preset.effort} />
+                          <span className="text-xs">{preset.effort}</span>
                         </span>
                       </CommandItem>
                     ))}
+                  </CommandGroup>
+                )}
+                {providers.map((entry) => (
+                  <CommandGroup heading={entry.label} key={entry.key}>
+                    {entry.models.map((entryModel) => {
+                      const current =
+                        entry.key === provider && entryModel.id === model;
+                      const modelEfforts = entryModel.efforts.length
+                        ? entryModel.efforts
+                        : ["auto"];
+                      return (
+                        <CommandItem
+                          className={checkedRow}
+                          data-checked={current}
+                          disabled={disabled(entry)}
+                          key={`${entry.key}/${entryModel.id}`}
+                          onSelect={() =>
+                            choose({
+                              provider: entry.key,
+                              model: entryModel.id,
+                              effort: carriedEffort(entryModel),
+                            })
+                          }
+                          value={`${entry.label} ${entryModel.label} ${entryModel.id}`}
+                        >
+                          <ProviderIcon provider={entry.key} />
+                          <span className="min-w-0 flex-1 truncate">
+                            {formatModelLabel(entryModel.label)}
+                          </span>
+                          {/*
+                           * A pointer can set model and effort in one click, so
+                           * the strip rides the row's hover/keyboard highlight.
+                           * It stays in the layout while hidden to keep labels
+                           * from reflowing row to row, shows unconditionally
+                           * where there is no hover to reveal it, and is hidden
+                           * from assistive tech in favour of the footer strip —
+                           * which is the keyboard and screen-reader path.
+                           */}
+                          <span
+                            aria-hidden="true"
+                            className="invisible flex items-center gap-0.5 group-data-[selected=true]/command-item:visible pointer-coarse:visible"
+                            data-slot="command-shortcut"
+                          >
+                            {modelEfforts.map((value) => (
+                              <button
+                                className={cn(
+                                  "rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground",
+                                  current &&
+                                    effort === value &&
+                                    "bg-background text-foreground",
+                                )}
+                                key={value}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  choose({
+                                    provider: entry.key,
+                                    model: entryModel.id,
+                                    effort: value,
+                                  });
+                                }}
+                                onPointerDown={(event) =>
+                                  event.stopPropagation()
+                                }
+                                tabIndex={-1}
+                                title={value}
+                                type="button"
+                              >
+                                <EffortIcon effort={value} />
+                              </button>
+                            ))}
+                          </span>
+                        </CommandItem>
+                      );
+                    })}
                   </CommandGroup>
                 ))}
               </CommandList>
@@ -242,7 +341,7 @@ export function ModelEffortPicker({
             </div>
           </PopoverContent>
         </Popover>
-        {resolved
+        {railPresets
           .slice(0, modelPresetRailLimit)
           .map(({ preset, entry, model: presetModel }) => (
             <Button

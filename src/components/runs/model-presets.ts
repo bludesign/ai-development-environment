@@ -121,6 +121,7 @@ export function useModelPresets() {
     store.pinned.some((entry) => sameModelPreset(entry, preset));
   return {
     isPinned,
+    pinned: store.pinned,
     rail: [
       ...store.pinned,
       ...store.recent.filter((entry) => !isPinned(entry)),

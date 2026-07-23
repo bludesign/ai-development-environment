@@ -192,6 +192,7 @@
     "planMutationWarning": "This read-only Plan unexpectedly changed the selected worktree.",
     "plans": "Plans",
     "play": "Run Plan",
+    "presets": "Presets",
     "prompt": "Prompt",
     "promptPlaceholder": "Describe what the agent should do…",
     "prepareRevision": "Preparing rollback…",

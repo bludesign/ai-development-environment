@@ -192,6 +192,7 @@
     "planMutationWarning": "Este plan de solo lectura modificó inesperadamente el árbol de trabajo seleccionado.",
     "plans": "Planes",
     "play": "Ejecutar plan",
+    "presets": "Preajustes",
     "prompt": "Prompt",
     "promptPlaceholder": "Describe lo que debe hacer el agente…",
     "prepareRevision": "Preparando la reversión…",

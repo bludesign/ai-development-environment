@@ -192,6 +192,7 @@
     "planMutationWarning": "Dieser schreibgeschützte Plan hat den ausgewählten Arbeitsbaum unerwartet geändert.",
     "plans": "Plans",
     "play": "Plan ausführen",
+    "presets": "Voreinstellungen",
     "prompt": "Prompt",
     "promptPlaceholder": "Beschreiben Sie, was der Agent tun soll…",
     "prepareRevision": "Wiederherstellung wird vorbereitet…",
