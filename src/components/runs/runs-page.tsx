@@ -66,6 +66,12 @@ import {
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { formatModelLabel } from "@/lib/enum-label";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
+import {
+  DEFAULT_RUN_FILTERS,
+  writeRunFilterCookie,
+  type RunFilterState,
+  type RunKind,
+} from "@/lib/run-filter-state";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
@@ -110,16 +116,22 @@ function IconAction({
   );
 }
 
-export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
+export function RunsPage({
+  initialFilters = DEFAULT_RUN_FILTERS,
+  kind,
+}: {
+  initialFilters?: RunFilterState;
+  kind: RunKind;
+}) {
   const t = useTranslations("runs");
   const labels = useRunLabels();
   const locale = useLocale();
   const router = useRouter();
   const [items, setItems] = useState<AgentRunView[]>([]);
   const [search, setSearch] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState("ACTIVE");
-  const [provider, setProvider] = useState("ALL");
-  const [origin, setOrigin] = useState("ALL");
+  const [archiveFilter, setArchiveFilter] = useState(initialFilters.archive);
+  const [provider, setProvider] = useState(initialFilters.provider);
+  const [origin, setOrigin] = useState(initialFilters.origin);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +142,14 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const [totalCount, setTotalCount] = useState(0);
   const [drawerIssueKey, setDrawerIssueKey] = useState<string | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    writeRunFilterCookie(kind, {
+      archive: archiveFilter,
+      provider,
+      origin,
+    });
+  }, [archiveFilter, kind, origin, provider]);
 
   const refresh = useCallback(async () => {
     try {

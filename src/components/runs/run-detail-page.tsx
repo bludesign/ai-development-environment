@@ -375,13 +375,26 @@ function QuestionBatch({
                     )}
                     <p className="font-medium">{question.prompt}</p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {t("answer")}
+                    </p>
                     {(latestAnswers[question.id] ?? []).length ? (
-                      latestAnswers[question.id]!.map((answer) => (
-                        <Badge key={answer} variant="secondary">
-                          {answer}
-                        </Badge>
-                      ))
+                      latestAnswers[question.id]!.map((answer) => {
+                        const description = question.options.find(
+                          (option) => option.label === answer,
+                        )?.description;
+                        return (
+                          <div key={answer}>
+                            <p className="font-medium">{answer}</p>
+                            {description && (
+                              <p className="text-sm text-muted-foreground">
+                                {description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
                     ) : (
                       <span className="text-sm text-muted-foreground">—</span>
                     )}
