@@ -5,7 +5,11 @@ import { describe, expect, test } from "vitest";
 
 import { questionsFromInput, claudeEnvironment } from "./claude-adapter.js";
 import { codexQuestions } from "./codex-adapter.js";
-import { opencodeQuestions } from "./opencode-adapter.js";
+import {
+  opencodeEventText,
+  opencodeQuestions,
+  opencodeResponseText,
+} from "./opencode-adapter.js";
 
 async function fixture(name: string): Promise<unknown> {
   return JSON.parse(
@@ -58,5 +62,30 @@ describe("provider protocol fixtures", () => {
         }),
       ],
     });
+  });
+
+  test("collects OpenCode response text parts as final output", () => {
+    expect(
+      opencodeResponseText({
+        info: { role: "assistant" },
+        parts: [
+          { type: "text", text: "First paragraph." },
+          { type: "tool", name: "git_status" },
+          { type: "text", text: "Second paragraph." },
+        ],
+      }),
+    ).toBe("First paragraph.\n\nSecond paragraph.");
+  });
+
+  test("extracts text from OpenCode v2 message part events", () => {
+    expect(
+      opencodeEventText({
+        type: "message.part.updated",
+        data: {
+          sessionID: "session-1",
+          part: { type: "text", text: "Changed files listed." },
+        },
+      }),
+    ).toBe("Changed files listed.");
   });
 });

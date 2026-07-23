@@ -52,6 +52,33 @@ function eventSessionId(value: unknown): string | undefined {
   return undefined;
 }
 
+export function opencodeResponseText(value: unknown): string {
+  const response = asRecord(value);
+  const parts = Array.isArray(response.parts) ? response.parts : [];
+  const text = parts
+    .map((part) => {
+      const record = asRecord(part);
+      return record.type === "text" && typeof record.text === "string"
+        ? record.text.trim()
+        : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  return text || firstString(response.structured ?? response.output) || "";
+}
+
+export function opencodeEventText(value: unknown): string | undefined {
+  const event = asRecord(value);
+  const payload = asRecord(event.payload);
+  const body = asRecord(
+    payload.properties ?? payload.data ?? event.properties ?? event.data,
+  );
+  return (
+    opencodeResponseText(body) ||
+    firstString(body.part ?? body.message ?? body.info ?? body)
+  );
+}
+
 export function opencodeQuestions(
   value: unknown,
 ): { id: string; questions: ProviderQuestion[] } | null {
@@ -187,7 +214,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
           const record = asRecord(event);
           const payload = asRecord(record.payload);
           const type = String(payload.type ?? record.type ?? "event");
-          const text = firstString(payload.properties ?? record);
+          const text = opencodeEventText(event);
           await callbacks.onEvent({
             type: type.toUpperCase().replaceAll(".", "_"),
             summary: (text || type).slice(0, 2_000),
@@ -232,7 +259,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
     const completion = (async (): Promise<ProviderCompletion> => {
       try {
         const response = await send(input.prompt, input.attachments);
-        const finalOutput = firstString(response) || "";
+        const finalOutput = opencodeResponseText(response);
         const info = asRecord(asRecord(response).info);
         const tokens = asRecord(info.tokens);
         await callbacks.onUsage({

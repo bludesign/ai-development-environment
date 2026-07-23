@@ -167,6 +167,18 @@ async function nextCommandSequence(
   return (last?.sequence ?? -1) + 1;
 }
 
+const runCommandInclude = {
+  run: {
+    include: {
+      worktree: true,
+      inputs: { include: { attachments: true } },
+      attempts: true,
+      sourcePlan: { include: { attempts: true } },
+      parentRun: { include: { attempts: true } },
+    },
+  },
+} as const;
+
 async function enqueueCommand(
   transaction: Prisma.TransactionClient,
   input: {
@@ -189,6 +201,7 @@ async function enqueueCommand(
       idempotencyKey:
         input.idempotencyKey ?? `${input.runId}:${sequence}:${input.type}`,
     },
+    include: runCommandInclude,
   });
 }
 
@@ -835,6 +848,12 @@ export class RunsService {
       if (type === "CONTINUE" && run.status !== "PAUSED") {
         throw new Error("Only a paused run can continue");
       }
+      if (
+        (type === "PAUSE" && run.phase === "PAUSE_REQUESTED") ||
+        (type === "CANCEL" && run.phase === "CANCEL_REQUESTED")
+      ) {
+        return { run, command: null };
+      }
       await transaction.agentRun.update({
         where: { id: runId },
         data:
@@ -857,7 +876,7 @@ export class RunsService {
       return { run, command };
     });
     publishRun(runId);
-    publishCommand(result.command, result.run.agentId!);
+    if (result.command) publishCommand(result.command, result.run.agentId!);
     return this.get(runId);
   }
 
@@ -1126,14 +1145,7 @@ export class RunsService {
       where: { agentId, status: { in: ["QUEUED", "RUNNING"] } },
       orderBy: [{ createdAt: "asc" }, { sequence: "asc" }],
       take: 200,
-      include: {
-        run: {
-          include: {
-            inputs: { include: { attachments: true } },
-            attempts: true,
-          },
-        },
-      },
+      include: runCommandInclude,
     });
   }
 
@@ -1145,14 +1157,7 @@ export class RunsService {
     });
     const command = await prisma.runCommand.findUnique({
       where: { id: commandId },
-      include: {
-        run: {
-          include: {
-            inputs: { include: { attachments: true } },
-            attempts: true,
-          },
-        },
-      },
+      include: runCommandInclude,
     });
     if (!command || command.agentId !== agentId)
       throw new Error("Run command not found");
@@ -1199,6 +1204,9 @@ export class RunsService {
         data: {
           error: updated.error,
           phase: `${updated.type}_FAILED`,
+          ...(["START", "PLAY_PLAN", "CONTINUE"].includes(updated.type)
+            ? { status: "FAILED", finishedAt: new Date() }
+            : {}),
           ...(["PREPARE_ANSWER_REVISION", "REVISE_ANSWER"].includes(
             updated.type,
           )
@@ -1206,6 +1214,29 @@ export class RunsService {
             : {}),
         },
       });
+      if (["START", "PLAY_PLAN", "CONTINUE"].includes(updated.type)) {
+        await prisma.worktreeRunLease.deleteMany({
+          where: { runId: updated.runId },
+        });
+      }
+    } else if (["PAUSE", "CANCEL"].includes(updated.type)) {
+      const terminal = updated.type === "CANCEL";
+      await prisma.agentRun.updateMany({
+        where: {
+          id: updated.runId,
+          status: { notIn: [...TERMINAL_STATUSES] },
+        },
+        data: {
+          status: terminal ? "CANCELLED" : "PAUSED",
+          phase: terminal ? "CANCELLED" : "PAUSED",
+          finishedAt: terminal ? new Date() : null,
+        },
+      });
+      if (terminal) {
+        await prisma.worktreeRunLease.deleteMany({
+          where: { runId: updated.runId },
+        });
+      }
     }
     publishRun(updated.runId);
     return updated;
