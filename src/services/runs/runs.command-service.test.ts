@@ -388,4 +388,210 @@ describe("run command persistence", () => {
     });
     expect(transaction.agentRun.update).not.toHaveBeenCalled();
   });
+
+  test("applies an answer revision to its linked replacement Session", async () => {
+    const sourceRun = { id: "run-old", agentId: "agent-1" };
+    const replacementRun = {
+      id: "run-new",
+      parentRunId: sourceRun.id,
+      followUpMode: "ANSWER_REVISION",
+    };
+    const updateRun = vi.fn().mockResolvedValue(replacementRun);
+    const transaction = {
+      runQuestionBatch: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "batch-1",
+          runId: sourceRun.id,
+          run: sourceRun,
+          attempt: { id: "attempt-old", generation: 0 },
+          eventSequence: 2,
+          createdAt: new Date("2026-07-23T12:00:00.000Z"),
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      runAttempt: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "attempt-new",
+          runId: replacementRun.id,
+          run: replacementRun,
+        }),
+        findMany: vi.fn().mockResolvedValue([{ id: "attempt-old" }]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      runAnswerRevision: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "revision-1",
+          batchId: "batch-1",
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({ id: "revision-1" }),
+      },
+      runEvent: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      runToolCall: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      runModelUsage: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      agentRun: { update: updateRun },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+      agentRun: { findUnique: vi.fn().mockResolvedValue(replacementRun) },
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    await expect(
+      new RunsService().applyAnswerRevision(
+        "agent-1",
+        "batch-1",
+        "revision-1",
+        "attempt-new",
+      ),
+    ).resolves.toEqual(replacementRun);
+
+    expect(transaction.runAnswerRevision.update).toHaveBeenCalledWith({
+      where: { id: "revision-1" },
+      data: { replacementAttemptId: "attempt-new" },
+    });
+    expect(updateRun).toHaveBeenCalledWith({
+      where: { id: sourceRun.id },
+      data: {
+        status: "CANCELLED",
+        phase: "SUPERSEDED_BY_ANSWER_REVISION",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(updateRun).toHaveBeenCalledWith({
+      where: { id: replacementRun.id },
+      data: { status: "IN_PROGRESS", phase: "RUNNING" },
+    });
+  });
+
+  test("creates a linked replacement Session for an edited answer", async () => {
+    let createdRun: Record<string, unknown> | null = null;
+    let createdRunId = "";
+    const sourceRun = {
+      id: "run-old",
+      kind: "SESSION",
+      displayNumber: 12,
+      agentId: "agent-1",
+      worktreeId: "worktree-1",
+      origin: "MANAGED",
+      provider: "CODEX",
+      jiraIssueKey: "AIDE-66",
+      jiraSummary: "Improve run questions",
+      repositoryName: "aide",
+      branch: "feature/questions",
+      model: "gpt-5.6-sol",
+      effort: "high",
+      webSearchEnabled: true,
+      inputs: [{ kind: "INITIAL", prompt: "Build the feature" }],
+      events: [
+        {
+          sequence: 1,
+          type: "QUESTION",
+          summary: "Choose an API",
+          detailMarkdown: null,
+          createdAt: new Date("2026-07-23T12:00:00.000Z"),
+        },
+      ],
+    };
+    const batch = {
+      id: "batch-1",
+      runId: sourceRun.id,
+      run: sourceRun,
+      status: "ANSWERED",
+      revisionPreparedAt: new Date(),
+      eventSequence: 1,
+      createdAt: new Date("2026-07-23T12:00:01.000Z"),
+      checkpoint: { id: "checkpoint-1", refName: "refs/aide/checkpoint" },
+      questions: [{ prompt: "Which API should we use?" }],
+      answerRevisions: [{ id: "revision-0" }],
+    };
+    const findLease = vi
+      .fn()
+      .mockResolvedValueOnce({ runId: sourceRun.id })
+      .mockResolvedValueOnce(null);
+    const updateRun = vi.fn();
+    const transaction = {
+      runQuestionBatch: { findUnique: vi.fn().mockResolvedValue(batch) },
+      worktreeRunLease: {
+        findUnique: findLease,
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        create: vi.fn().mockResolvedValue({ id: "lease-1" }),
+      },
+      runAnswerRevision: {
+        create: vi.fn().mockResolvedValue({ id: "revision-1" }),
+      },
+      runNumberSequence: {
+        upsert: vi.fn().mockResolvedValue({ nextValue: 43 }),
+      },
+      agentRun: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          createdRun = data;
+          createdRunId = String(data.id);
+          return data;
+        }),
+        update: updateRun,
+      },
+      runCommand: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...data,
+          run: createdRun,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => unknown) =>
+          callback(transaction),
+      ),
+      agentRun: {
+        findUnique: vi.fn(async () => createdRun),
+      },
+    };
+    mocks.getPrismaClient.mockResolvedValue(prisma);
+
+    const replacement = await new RunsService().reviseAnswer(
+      "batch-1",
+      { "question-1": { answers: ["GraphQL"] } },
+      false,
+    );
+
+    expect(replacement).toEqual(createdRun);
+    expect(createdRun).toEqual(
+      expect.objectContaining({
+        kind: "SESSION",
+        displayNumber: 42,
+        parentRunId: sourceRun.id,
+        parentRunNumber: sourceRun.displayNumber,
+        followUpMode: "ANSWER_REVISION",
+        phase: "ANSWER_REVISION_QUEUED",
+      }),
+    );
+    expect(updateRun).toHaveBeenCalledWith({
+      where: { id: sourceRun.id },
+      data: {
+        status: "CANCELLED",
+        phase: "SUPERSEDED_BY_ANSWER_REVISION",
+        finishedAt: expect.any(Date),
+      },
+    });
+    expect(transaction.worktreeRunLease.create).toHaveBeenCalledWith({
+      data: {
+        worktreeId: sourceRun.worktreeId,
+        runId: createdRunId,
+      },
+    });
+    expect(transaction.runCommand.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          runId: createdRunId,
+          type: "REVISE_ANSWER",
+        }),
+      }),
+    );
+  });
 });

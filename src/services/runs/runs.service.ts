@@ -490,7 +490,7 @@ export class RunsService {
           provider,
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
-          webSearchEnabled: Boolean(input.webSearchEnabled),
+          webSearchEnabled: input.webSearchEnabled !== false,
           prompt,
         },
         update: {
@@ -502,7 +502,7 @@ export class RunsService {
           provider,
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
-          webSearchEnabled: Boolean(input.webSearchEnabled),
+          webSearchEnabled: input.webSearchEnabled !== false,
           prompt,
         },
       });
@@ -611,7 +611,7 @@ export class RunsService {
           branch: worktree.branch,
           model,
           effort: optionalText(input.effort, 100),
-          webSearchEnabled: Boolean(input.webSearchEnabled),
+          webSearchEnabled: input.webSearchEnabled !== false,
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -1111,7 +1111,7 @@ export class RunsService {
         )
         .join("\n\n");
       const revisedPrompt = [
-        "Continue this run from the question below using the revised answer. Treat the visible transcript as context; hidden provider state from the superseded attempt is unavailable.",
+        "Continue from the linked Session at the question below using the revised answer. Treat the visible transcript as context; hidden provider state from the previous Session is unavailable.",
         previousInputs,
         transcript,
         `Questions:\n${batch.questions.map((question) => `- ${question.prompt}`).join("\n")}`,
@@ -1120,29 +1120,64 @@ export class RunsService {
         .filter(Boolean)
         .join("\n\n")
         .slice(0, 2_000_000);
-      const lastInput = batch.run.inputs.at(-1);
+      const displayNumber = await nextDisplayNumber(transaction, "SESSION");
+      const runId = randomUUID();
       const inputId = randomUUID();
-      await transaction.runInput.create({
+      const now = new Date();
+      const run = await transaction.agentRun.create({
         data: {
-          id: inputId,
-          runId: batch.runId,
-          sequence: (lastInput?.sequence ?? -1) + 1,
-          kind: "ANSWER_REVISION",
-          prompt: revisedPrompt,
+          id: runId,
+          kind: "SESSION",
+          displayNumber,
+          status: "IN_PROGRESS",
+          phase: "ANSWER_REVISION_QUEUED",
+          provider: batch.run.provider,
+          worktreeId: batch.run.worktreeId,
+          agentId: batch.run.agentId,
+          jiraIssueKey: batch.run.jiraIssueKey,
+          jiraSummary: batch.run.jiraSummary,
+          repositoryName: batch.run.repositoryName,
+          branch: batch.run.branch,
+          model: batch.run.model,
+          effort: batch.run.effort,
+          webSearchEnabled: batch.run.webSearchEnabled,
+          initialPrompt: revisedPrompt,
+          parentRunId: batch.runId,
+          parentRunNumber: batch.run.displayNumber,
+          followUpMode: "ANSWER_REVISION",
+          inputs: {
+            create: {
+              id: inputId,
+              sequence: 0,
+              kind: "ANSWER_REVISION",
+              prompt: revisedPrompt,
+            },
+          },
         },
+      });
+      await transaction.worktreeRunLease.deleteMany({
+        where: {
+          worktreeId: batch.run.worktreeId,
+          runId: batch.runId,
+        },
+      });
+      const competingLease = await transaction.worktreeRunLease.findUnique({
+        where: { worktreeId: batch.run.worktreeId },
+      });
+      if (competingLease) throw new Error("Another Session owns this worktree");
+      await transaction.worktreeRunLease.create({
+        data: { worktreeId: batch.run.worktreeId, runId },
       });
       await transaction.agentRun.update({
         where: { id: batch.runId },
         data: {
-          status: "IN_PROGRESS",
-          phase: "ANSWER_REVISION_QUEUED",
-          finalOutput: null,
-          error: null,
-          finishedAt: null,
+          status: "CANCELLED",
+          phase: "SUPERSEDED_BY_ANSWER_REVISION",
+          finishedAt: now,
         },
       });
       const command = await enqueueCommand(transaction, {
-        runId: batch.runId,
+        runId,
         agentId: batch.run.agentId,
         type: "REVISE_ANSWER",
         payload: {
@@ -1153,11 +1188,12 @@ export class RunsService {
           checkpoint: batch.checkpoint,
         },
       });
-      return { batch, command };
+      return { batch, run, command };
     });
     publishRun(result.batch.runId);
+    publishRun(result.run.id);
     publishCommand(result.command, result.batch.run.agentId!);
-    return this.get(result.batch.runId);
+    return this.get(result.run.id);
   }
 
   async pendingCommands(agentId: string) {
@@ -1768,13 +1804,14 @@ export class RunsService {
     replacementAttemptId: string,
   ) {
     const prisma = await getPrismaClient();
-    const runId = await prisma.$transaction(async (transaction) => {
+    const runIds = await prisma.$transaction(async (transaction) => {
       const batch = await transaction.runQuestionBatch.findUnique({
         where: { id: batchId },
         include: { run: true, attempt: true },
       });
       const replacement = await transaction.runAttempt.findUnique({
         where: { id: replacementAttemptId },
+        include: { run: true },
       });
       const revision = await transaction.runAnswerRevision.findUnique({
         where: { id: revisionId },
@@ -1784,7 +1821,8 @@ export class RunsService {
         batch.run.agentId !== agentId ||
         !batch.attempt ||
         !replacement ||
-        replacement.runId !== batch.runId ||
+        replacement.run.parentRunId !== batch.runId ||
+        replacement.run.followUpMode !== "ANSWER_REVISION" ||
         !revision ||
         revision.batchId !== batchId
       ) {
@@ -1795,7 +1833,6 @@ export class RunsService {
         where: {
           runId: batch.runId,
           generation: { gte: batch.attempt.generation },
-          id: { not: replacementAttemptId },
         },
         select: { id: true },
       });
@@ -1845,12 +1882,24 @@ export class RunsService {
       });
       await transaction.agentRun.update({
         where: { id: batch.runId },
+        data: {
+          status: "CANCELLED",
+          phase: "SUPERSEDED_BY_ANSWER_REVISION",
+          finishedAt: now,
+        },
+      });
+      await transaction.agentRun.update({
+        where: { id: replacement.runId },
         data: { status: "IN_PROGRESS", phase: "RUNNING" },
       });
-      return batch.runId;
+      return {
+        sourceRunId: batch.runId,
+        replacementRunId: replacement.runId,
+      };
     });
-    publishRun(runId);
-    return this.get(runId);
+    publishRun(runIds.sourceRunId);
+    publishRun(runIds.replacementRunId);
+    return this.get(runIds.replacementRunId);
   }
 
   async importRuns(

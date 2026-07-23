@@ -60,6 +60,15 @@ const pageData = {
 };
 
 beforeEach(() => {
+  window.localStorage.clear();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   Element.prototype.hasPointerCapture = vi.fn(() => false);
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
@@ -70,10 +79,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("RunStartPage", () => {
-  test("loads worktrees, tools, and efforts without declaring an unused draft variable", async () => {
+  test("progressively selects a tool, model, and effort with web search enabled", async () => {
     render(<RunStartPage initialKind="PLAN" />);
 
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
@@ -82,14 +92,17 @@ describe("RunStartPage", () => {
     expect(query).not.toContain("$draftId");
     expect(variables).toBeUndefined();
 
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "GPT-5.6" }));
+
+    expect(screen.getByRole("button", { name: "Effort: high" })).toBeDefined();
     expect(
-      within(screen.getByText("Tool").parentElement!).getByRole("combobox")
-        .textContent,
-    ).toContain("Codex");
-    expect(
-      within(screen.getByText("Effort").parentElement!).getByRole("combobox")
-        .textContent,
-    ).toContain("high");
+      screen
+        .getByRole("checkbox", { name: /Web search/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.getByRole("tab", { name: "Plan" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Session" })).toBeDefined();
 
     const worktreeSelect = within(
       screen.getByText("Worktree").parentElement!,
@@ -136,5 +149,67 @@ describe("RunStartPage", () => {
     expect(query).toContain("query RunStartPage($draftId: ID!) {");
     expect(query).toContain("runDraft(id: $draftId)");
     expect(variables).toEqual({ draftId: "draft-1" });
+  });
+
+  test("searches and favorites models from the More picker", async () => {
+    request.mockResolvedValue({
+      ...pageData,
+      runProviderCatalog: [
+        {
+          ...pageData.runProviderCatalog[0],
+          models: [
+            { id: "model-1", label: "Model One", efforts: ["auto"] },
+            { id: "model-2", label: "Model Two", efforts: ["auto"] },
+            { id: "model-3", label: "Model Three", efforts: ["auto"] },
+            { id: "model-4", label: "Model Four", efforts: ["auto"] },
+          ],
+        },
+      ],
+    } as never);
+
+    render(<RunStartPage initialKind="PLAN" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const search = await screen.findByPlaceholderText("Search model");
+    fireEvent.change(search, { target: { value: "Four" } });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Favorite Model Four" }),
+    );
+
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("aide.favorite-models.v1") ?? "{}",
+      ),
+    ).toEqual({ CODEX: ["model-4"] });
+  });
+
+  test("uploads files dropped on the attachment picker", async () => {
+    const upload = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "attachment-1",
+        filename: "notes.txt",
+        contentType: "text/plain",
+        size: 5,
+        sha256: "hash",
+      }),
+    });
+    vi.stubGlobal("fetch", upload);
+
+    render(<RunStartPage initialKind="PLAN" />);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    const dropTarget = screen.getByText("Attach files").closest("label")!;
+    fireEvent.drop(dropTarget, {
+      dataTransfer: {
+        files: [new File(["hello"], "notes.txt", { type: "text/plain" })],
+      },
+    });
+
+    expect(await screen.findByText("notes.txt")).toBeDefined();
+    expect(upload).toHaveBeenCalledWith(
+      "/api/run-attachments",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

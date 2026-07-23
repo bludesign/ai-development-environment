@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { File, Play, Save, Search, Trash2, Upload } from "lucide-react";
+import { ClipboardList, Play, Save, Search, Terminal } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,11 +24,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { RUN_DRAFT_FIELDS } from "./graphql-fields";
+import { AttachmentPicker } from "./attachment-picker";
+import {
+  ModelEffortPicker,
+  type ProviderCatalogEntry,
+} from "./model-effort-picker";
 import type { RunAttachmentView, RunDraftView } from "./types";
 
 type WorktreeOption = {
@@ -45,14 +50,6 @@ type WorktreeOption = {
   capabilities: string[];
 };
 
-type ProviderCatalog = {
-  key: string;
-  label: string;
-  available: boolean;
-  supportsWebSearch: boolean;
-  models: Array<{ id: string; label: string; efforts: string[] }>;
-};
-
 export function RunStartPage({
   initialKind,
   draftId,
@@ -64,15 +61,15 @@ export function RunStartPage({
   const router = useRouter();
   const [kind, setKind] = useState(initialKind);
   const [worktrees, setWorktrees] = useState<WorktreeOption[]>([]);
-  const [catalog, setCatalog] = useState<ProviderCatalog[]>([]);
+  const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [worktreeId, setWorktreeId] = useState("");
   const [jiraIssueKey, setJiraIssueKey] = useState("");
   const [jiraSummary, setJiraSummary] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [provider, setProvider] = useState("CODEX");
-  const [model, setModel] = useState("default");
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
   const [effort, setEffort] = useState("auto");
-  const [webSearch, setWebSearch] = useState(false);
+  const [webSearch, setWebSearch] = useState(true);
   const [attachments, setAttachments] = useState<RunAttachmentView[]>([]);
   const [worktreeSearch, setWorktreeSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -102,7 +99,7 @@ export function RunStartPage({
             }>;
           }>;
         };
-        runProviderCatalog: ProviderCatalog[];
+        runProviderCatalog: ProviderCatalogEntry[];
         runDraft?: RunDraftView | null;
       }>(
         `query RunStartPage${draftId ? "($draftId: ID!)" : ""} {
@@ -121,19 +118,6 @@ export function RunStartPage({
         draftId ? { draftId } : undefined,
       );
       setCatalog(data.runProviderCatalog);
-      if (!data.runDraft) {
-        const initialProvider =
-          data.runProviderCatalog.find(
-            ({ key, available }) => key === "CODEX" && available,
-          ) ??
-          data.runProviderCatalog.find(({ available }) => available) ??
-          data.runProviderCatalog[0];
-        if (initialProvider) {
-          setProvider(initialProvider.key);
-          setModel(initialProvider.models[0]?.id ?? "default");
-          setEffort(initialProvider.models[0]?.efforts[0] ?? "auto");
-        }
-      }
       setWorktrees(
         data.worktreeOverview.agents.flatMap(({ agent, codebases }) =>
           codebases.flatMap(({ repository, worktrees }) =>
@@ -182,9 +166,6 @@ export function RunStartPage({
       `runs.provider.${provider.toLowerCase()}`,
     ),
   );
-  const selectedModel =
-    selectedProvider?.models.find(({ id }) => id === model) ??
-    selectedProvider?.models[0];
   const visibleWorktrees = useMemo(() => {
     const term = worktreeSearch.trim().toLowerCase();
     return worktrees.filter(
@@ -209,12 +190,12 @@ export function RunStartPage({
     }
   };
 
-  const uploadFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const uploadFiles = async (files: File[]) => {
+    if (!files.length) return;
     setBusy("upload");
     try {
       const next = [...attachments];
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         if (file.size > 25 * 1024 * 1024)
           throw new Error(t("fileTooLarge", { name: file.name }));
         if (
@@ -315,24 +296,23 @@ export function RunStartPage({
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+          <div className="space-y-2">
+            <Label>{t("mode")}</Label>
+            <Tabs
+              onValueChange={(value) => setKind(value as "PLAN" | "SESSION")}
+              value={kind}
+            >
+              <TabsList className="grid w-full grid-cols-2 sm:w-80">
+                <TabsTrigger value="PLAN">
+                  <ClipboardList /> {t("plan")}
+                </TabsTrigger>
+                <TabsTrigger value="SESSION">
+                  <Terminal /> {t("session")}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>{t("mode")}</Label>
-              <Select
-                onValueChange={(value) =>
-                  setKind((value ?? "PLAN") as "PLAN" | "SESSION")
-                }
-                value={kind}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PLAN">{t("plan")}</SelectItem>
-                  <SelectItem value="SESSION">{t("session")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label>{t("worktree")}</Label>
               <div className="relative mb-2">
@@ -407,123 +387,40 @@ export function RunStartPage({
           </div>
           <div className="space-y-3">
             <Label>{t("attachments")}</Label>
-            <div className="flex flex-wrap gap-2">
-              {attachments.map((attachment) => (
-                <Badge
-                  className="gap-1 py-1"
-                  key={attachment.id}
-                  variant="secondary"
-                >
-                  <File className="size-3" />
-                  <span className="max-w-56 truncate">
-                    {attachment.filename}
-                  </span>
-                  <button
-                    aria-label={t("removeAttachment", {
-                      name: attachment.filename,
-                    })}
-                    onClick={() =>
-                      setAttachments((current) =>
-                        current.filter(({ id }) => id !== attachment.id),
-                      )
-                    }
-                    type="button"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <Button asChild disabled={busy === "upload"} variant="outline">
-              <label>
-                {busy === "upload" ? <Spinner /> : <Upload />}{" "}
-                {t("attachFiles")}
-                <input
-                  className="sr-only"
-                  multiple
-                  onChange={(event) => void uploadFiles(event.target.files)}
-                  type="file"
-                />
-              </label>
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              {t("attachmentLimits")}
-            </p>
+            <AttachmentPicker
+              attachments={attachments}
+              onFiles={uploadFiles}
+              onRemove={(id) =>
+                setAttachments((current) =>
+                  current.filter((attachment) => attachment.id !== id),
+                )
+              }
+              uploading={busy === "upload"}
+            />
           </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label>{t("tool")}</Label>
-              <Select
-                onValueChange={(value) => {
-                  const next = value ?? "CODEX";
-                  setProvider(next);
-                  const entry = catalog.find(({ key }) => key === next);
-                  setModel(entry?.models[0]?.id ?? "default");
-                  setEffort("auto");
-                }}
-                value={provider}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {catalog.map((entry) => (
-                    <SelectItem
-                      disabled={
-                        !entry.available ||
-                        Boolean(
-                          selectedWorktree &&
-                          !selectedWorktree.capabilities.includes(
-                            `runs.provider.${entry.key.toLowerCase()}`,
-                          ),
-                        )
-                      }
-                      key={entry.key}
-                      value={entry.key}
-                    >
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>{t("model")}</Label>
-              <Select
-                onValueChange={(value) => setModel(value ?? "default")}
-                value={model}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectedProvider?.models.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>{t("effort")}</Label>
-              <Select
-                onValueChange={(value) => setEffort(value ?? "auto")}
-                value={effort}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(selectedModel?.efforts ?? ["auto"]).map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <ModelEffortPicker
+            catalog={catalog}
+            effort={effort}
+            isProviderDisabled={(entry) =>
+              Boolean(
+                selectedWorktree &&
+                !selectedWorktree.capabilities.includes(
+                  `runs.provider.${entry.key.toLowerCase()}`,
+                ),
+              )
+            }
+            model={model}
+            onEffortChange={setEffort}
+            onModelChange={setModel}
+            onProviderChange={(next) => {
+              const entry = catalog.find(({ key }) => key === next);
+              setProvider(next);
+              setModel("");
+              setEffort("auto");
+              setWebSearch(Boolean(entry?.supportsWebSearch));
+            }}
+            provider={provider}
+          />
           <label className="flex items-center gap-3 rounded-lg border p-3">
             <Checkbox
               checked={webSearch}
@@ -544,7 +441,13 @@ export function RunStartPage({
           )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button
-              disabled={Boolean(busy) || !worktreeId || !prompt.trim()}
+              disabled={
+                Boolean(busy) ||
+                !worktreeId ||
+                !prompt.trim() ||
+                !provider ||
+                !model
+              }
               onClick={() => void save()}
               variant="outline"
             >
@@ -555,6 +458,7 @@ export function RunStartPage({
                 Boolean(busy) ||
                 !worktreeId ||
                 !prompt.trim() ||
+                !model ||
                 !providerUsable
               }
               onClick={() => void start()}

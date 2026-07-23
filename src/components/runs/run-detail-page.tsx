@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Archive,
   Bot,
+  ChevronDown,
   ChevronLeft,
   CircleHelp,
   CircleStop,
@@ -28,7 +29,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
-import { PatchView } from "@/components/common/patch-view";
+import { ExpandablePatchView } from "@/components/common/patch-view";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,12 @@ import {
 } from "@/lib/worktree-highlight";
 
 import { RUN_DETAIL_FIELDS, RUN_EVENT_FIELDS } from "./graphql-fields";
-import { MarkdownView } from "./markdown-view";
+import { AttachmentPicker } from "./attachment-picker";
+import { MarkdownActions, MarkdownView } from "./markdown-view";
+import {
+  ModelEffortPicker,
+  type ProviderCatalogEntry,
+} from "./model-effort-picker";
 import type {
   AgentRunView,
   RunAttachmentView,
@@ -88,16 +94,11 @@ import type {
   RunQuestionBatchView,
 } from "./types";
 
-type ProviderCatalog = {
-  key: string;
-  label: string;
-  available: boolean;
-  supportsWebSearch: boolean;
+type ProviderCatalog = ProviderCatalogEntry & {
   supportsPause: boolean;
   supportsSteering: boolean;
   supportsResume: boolean;
   supportsNativeDelete: boolean;
-  models: Array<{ id: string; label: string; efforts: string[] }>;
 };
 
 function eventIcon(type: string) {
@@ -160,6 +161,7 @@ function QuestionBatch({
   onAnswered: () => Promise<void>;
 }) {
   const t = useTranslations("runs");
+  const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -247,12 +249,16 @@ function QuestionBatch({
           return [question.id, { answers: selected }];
         }),
       );
-      await controlPlaneRequest(
-        "mutation ReviseAnswer($batchId: ID!, $answers: JSON!, $stash: Boolean!) { reviseRunAnswer(batchId: $batchId, answers: $answers, stash: $stash) { id } }",
+      const data = await controlPlaneRequest<{
+        reviseRunAnswer: { id: string; kind: "PLAN" | "SESSION" };
+      }>(
+        "mutation ReviseAnswer($batchId: ID!, $answers: JSON!, $stash: Boolean!) { reviseRunAnswer(batchId: $batchId, answers: $answers, stash: $stash) { id kind } }",
         { batchId: batch.id, answers: value, stash },
       );
       setEditOpen(false);
-      await onAnswered();
+      router.push(
+        `/${data.reviseRunAnswer.kind === "PLAN" ? "plans" : "sessions"}/${data.reviseRunAnswer.id}`,
+      );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -310,6 +316,7 @@ function QuestionBatch({
       )}
     </div>
   ));
+  const latestAnswers = answerValues(latest?.answers);
   return (
     <>
       <Card
@@ -350,9 +357,29 @@ function QuestionBatch({
           {batch.status === "PENDING" ? (
             answerEditor
           ) : (
-            <pre className="overflow-auto rounded-lg bg-muted p-3 text-xs">
-              {JSON.stringify(latest?.answers ?? {}, null, 2)}
-            </pre>
+            <div className="divide-y rounded-lg border">
+              {batch.questions.map((question) => (
+                <div className="space-y-2 p-3" key={question.id}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {question.header && (
+                      <Badge variant="outline">{question.header}</Badge>
+                    )}
+                    <p className="font-medium">{question.prompt}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(latestAnswers[question.id] ?? []).length ? (
+                      latestAnswers[question.id]!.map((answer) => (
+                        <Badge key={answer} variant="secondary">
+                          {answer}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
           {batch.status === "PENDING" && (
             <Button disabled={busy} onClick={() => void submit()}>
@@ -409,7 +436,10 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
+  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [expandedRaw, setExpandedRaw] = useState<Set<string>>(new Set());
+  const [promptRaw, setPromptRaw] = useState(false);
+  const [outputRaw, setOutputRaw] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -551,13 +581,14 @@ export function RunDetailPage({ runId }: { runId: string }) {
   };
 
   const upload = async (
-    files: FileList | null,
+    files: File[],
     setter: React.Dispatch<React.SetStateAction<RunAttachmentView[]>>,
   ) => {
-    if (!files) return;
+    if (!files.length) return;
+    setBusy("upload");
     try {
       const uploaded: RunAttachmentView[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const response = await fetch("/api/run-attachments", {
           method: "POST",
           headers: {
@@ -579,6 +610,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
       setter((current) => [...current, ...uploaded]);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -710,9 +743,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
     .find(({ diffPatch }) => diffPatch)?.diffPatch;
   const followCatalog = catalog.find(({ key }) => key === followProvider);
   const runCatalog = catalog.find(({ key }) => key === run.provider);
-  const followModelEntry =
-    followCatalog?.models.find(({ id }) => id === followModel) ??
-    followCatalog?.models[0];
   const usageBreakdown = [false, true].map((superseded) =>
     run.modelUsage
       .filter((usage) => usage.superseded === superseded)
@@ -871,10 +901,22 @@ export function RunDetailPage({ runId }: { runId: string }) {
       )}
       <Card>
         <CardHeader>
-          <CardTitle>{t("prompt")}</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>{t("prompt")}</CardTitle>
+            <MarkdownActions
+              onRawChange={setPromptRaw}
+              raw={promptRaw}
+              value={run.initialPrompt}
+            />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <MarkdownView value={run.initialPrompt} />
+          <MarkdownView
+            onRawChange={setPromptRaw}
+            raw={promptRaw}
+            showActions={false}
+            value={run.initialPrompt}
+          />
           {run.inputs[0]?.attachments.length ? (
             <div className="flex flex-wrap gap-2">
               {run.inputs[0].attachments.map((attachment) => (
@@ -1051,91 +1093,160 @@ export function RunDetailPage({ runId }: { runId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("activity")}</CardTitle>
-          <CardDescription>{t("activityDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="relative">
-            <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
-            <Input
-              aria-label={t("searchActivity")}
-              className="pl-9"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("searchActivity")}
-              value={search}
-            />
+      <Card className="gap-0 overflow-hidden py-0">
+        <CardHeader className="border-b py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>{t("activity")}</CardTitle>
+              <CardDescription>{t("activityDescription")}</CardDescription>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute top-1.5 left-2.5 size-4 text-muted-foreground" />
+              <Input
+                aria-label={t("searchActivity")}
+                className="h-7 pl-8 text-xs"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("searchActivity")}
+                value={search}
+              />
+            </div>
           </div>
-          <div className="max-h-[48rem] space-y-1 overflow-y-auto rounded-lg border p-2">
-            {events.map((event) => {
-              const Icon = eventIcon(event.type);
-              const raw = expandedRaw.has(event.id);
-              return (
-                <details
-                  className={cn(
-                    "rounded-md border px-3 py-2",
-                    event.supersededAt && "opacity-60",
-                  )}
-                  key={event.id}
-                >
-                  <summary className="flex cursor-pointer list-none items-center gap-2">
-                    <Icon className="size-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {event.summary}
-                    </span>
-                    <Badge variant="outline">{event.type}</Badge>
-                    <DateTime
-                      className="text-xs"
-                      kind="time"
-                      value={event.createdAt}
-                    />
-                  </summary>
-                  <div className="mt-3 space-y-2 border-t pt-3">
-                    {event.detailMarkdown && !raw && (
-                      <MarkdownView value={event.detailMarkdown} />
-                    )}
-                    <Button
+        </CardHeader>
+        <div className="max-h-[48rem] overflow-y-auto">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-background">
+              <TableRow>
+                <TableHead className="h-7 w-10" />
+                <TableHead className="h-7">{t("activity")}</TableHead>
+                <TableHead className="h-7 w-40">{t("status")}</TableHead>
+                <TableHead className="h-7 w-24">{t("age")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {events.map((event) => {
+                const Icon = eventIcon(event.type);
+                const raw = expandedRaw.has(event.id);
+                const expanded = expandedEvents.has(event.id);
+                return (
+                  <Fragment key={event.id}>
+                    <TableRow
+                      aria-expanded={expanded}
+                      className={cn(
+                        "cursor-pointer",
+                        event.supersededAt && "opacity-60",
+                      )}
                       onClick={() =>
-                        setExpandedRaw((current) => {
+                        setExpandedEvents((current) => {
                           const next = new Set(current);
                           if (next.has(event.id)) next.delete(event.id);
                           else next.add(event.id);
                           return next;
                         })
                       }
-                      size="sm"
-                      variant="outline"
                     >
-                      <Code2 /> {raw ? t("rendered") : t("raw")}
-                    </Button>
-                    {raw && (
-                      <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs">
-                        {JSON.stringify(event.raw, null, 2)}
-                      </pre>
+                      <TableCell className="h-8 py-1">
+                        <span className="flex items-center gap-1">
+                          <ChevronDown
+                            className={cn(
+                              "size-3 transition-transform",
+                              expanded && "rotate-180",
+                            )}
+                          />
+                          <Icon className="size-3.5" />
+                        </span>
+                      </TableCell>
+                      <TableCell className="h-8 max-w-0 py-1 text-xs">
+                        <span className="block truncate">{event.summary}</span>
+                      </TableCell>
+                      <TableCell className="h-8 py-1">
+                        <Badge className="h-5 text-[10px]" variant="outline">
+                          {event.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="h-8 py-1">
+                        <DateTime
+                          className="text-xs"
+                          kind="time"
+                          value={event.createdAt}
+                        />
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          className="bg-muted/10 px-4 py-3"
+                          colSpan={4}
+                        >
+                          <div className="space-y-2">
+                            {event.detailMarkdown && !raw && (
+                              <MarkdownView
+                                showActions={false}
+                                value={event.detailMarkdown}
+                              />
+                            )}
+                            <Button
+                              onClick={() =>
+                                setExpandedRaw((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(event.id)) next.delete(event.id);
+                                  else next.add(event.id);
+                                  return next;
+                                })
+                              }
+                              size="xs"
+                              variant="outline"
+                            >
+                              <Code2 /> {raw ? t("rendered") : t("raw")}
+                            </Button>
+                            {raw && (
+                              <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs">
+                                {JSON.stringify(event.raw, null, 2)}
+                              </pre>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </div>
-                </details>
-              );
-            })}
-            {!events.length && (
-              <p className="p-6 text-center text-muted-foreground">
-                {t("noActivity")}
-              </p>
-            )}
-          </div>
-        </CardContent>
+                  </Fragment>
+                );
+              })}
+              {!events.length && (
+                <TableRow>
+                  <TableCell
+                    className="h-20 text-center text-muted-foreground"
+                    colSpan={4}
+                  >
+                    {t("noActivity")}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {run.finalOutput && terminal && (
         <Card>
           <CardHeader>
-            <CardTitle>
-              {run.kind === "PLAN" ? t("plan") : t("summary")}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>
+                {run.kind === "PLAN" ? t("plan") : t("summary")}
+              </CardTitle>
+              <MarkdownActions
+                copy
+                onRawChange={setOutputRaw}
+                raw={outputRaw}
+                value={run.finalOutput}
+              />
+            </div>
           </CardHeader>
           <CardContent>
-            <MarkdownView copy value={run.finalOutput} />
+            <MarkdownView
+              onRawChange={setOutputRaw}
+              raw={outputRaw}
+              showActions={false}
+              value={run.finalOutput}
+            />
           </CardContent>
         </Card>
       )}
@@ -1153,25 +1264,18 @@ export function RunDetailPage({ runId }: { runId: string }) {
                 placeholder={t("steerPlaceholder")}
                 value={steering}
               />
-              <div className="flex flex-wrap gap-2">
-                {steeringAttachments.map((attachment) => (
-                  <Badge key={attachment.id}>{attachment.filename}</Badge>
-                ))}
-              </div>
-              <div className="flex justify-between">
-                <Button asChild variant="outline">
-                  <label>
-                    <File /> {t("attachFiles")}
-                    <input
-                      className="sr-only"
-                      multiple
-                      onChange={(event) =>
-                        void upload(event.target.files, setSteeringAttachments)
-                      }
-                      type="file"
-                    />
-                  </label>
-                </Button>
+              <AttachmentPicker
+                attachments={steeringAttachments}
+                compact
+                onFiles={(files) => upload(files, setSteeringAttachments)}
+                onRemove={(id) =>
+                  setSteeringAttachments((current) =>
+                    current.filter((attachment) => attachment.id !== id),
+                  )
+                }
+                uploading={busy === "upload"}
+              />
+              <div className="flex justify-end">
                 <Button
                   disabled={!steering.trim() || Boolean(busy)}
                   onClick={() => void steer()}
@@ -1189,7 +1293,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
           <CardDescription>{t("followUpDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="flex flex-wrap items-end gap-3">
             <Select
               onValueChange={(value) => {
                 const next = value ?? "RESUME";
@@ -1198,7 +1302,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
               }}
               value={followMode}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-label={t("followUp")} className="w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1215,61 +1319,23 @@ export function RunDetailPage({ runId }: { runId: string }) {
                 <SelectItem value="RESEND">{t("resend")}</SelectItem>
               </SelectContent>
             </Select>
-            <Select
-              onValueChange={(value) => {
-                const next = value ?? run.provider;
-                setFollowProvider(next);
-                const entry = catalog.find(({ key }) => key === next);
-                setFollowModel(entry?.models[0]?.id ?? "default");
-                setFollowEffort("auto");
-              }}
-              value={followProvider}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {catalog.map((entry) => (
-                  <SelectItem
-                    disabled={!entry.available}
-                    key={entry.key}
-                    value={entry.key}
-                  >
-                    {entry.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              onValueChange={(value) => setFollowModel(value ?? "default")}
-              value={followModel}
-            >
-              <SelectTrigger aria-label={t("model")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {followCatalog?.models.map((entry) => (
-                  <SelectItem key={entry.id} value={entry.id}>
-                    {entry.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              onValueChange={(value) => setFollowEffort(value ?? "auto")}
-              value={followEffort}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(followModelEntry?.efforts ?? ["auto"]).map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="min-w-0 flex-1">
+              <ModelEffortPicker
+                catalog={catalog}
+                effort={followEffort}
+                model={followModel}
+                onEffortChange={setFollowEffort}
+                onModelChange={setFollowModel}
+                onProviderChange={(next) => {
+                  const entry = catalog.find(({ key }) => key === next);
+                  setFollowProvider(next);
+                  setFollowModel("");
+                  setFollowEffort("auto");
+                  setFollowWebSearch(Boolean(entry?.supportsWebSearch));
+                }}
+                provider={followProvider}
+              />
+            </div>
           </div>
           {followMode === "RESUME" && followProvider !== run.provider && (
             <div className="space-y-2">
@@ -1300,23 +1366,18 @@ export function RunDetailPage({ runId }: { runId: string }) {
             }
             value={followPrompt}
           />
+          <AttachmentPicker
+            attachments={followAttachments}
+            compact
+            onFiles={(files) => upload(files, setFollowAttachments)}
+            onRemove={(id) =>
+              setFollowAttachments((current) =>
+                current.filter((attachment) => attachment.id !== id),
+              )
+            }
+            uploading={busy === "upload"}
+          />
           <div className="flex flex-wrap items-center gap-2">
-            {followAttachments.map((attachment) => (
-              <Badge key={attachment.id}>{attachment.filename}</Badge>
-            ))}
-            <Button asChild size="sm" variant="outline">
-              <label>
-                <File /> {t("attachFiles")}
-                <input
-                  className="sr-only"
-                  multiple
-                  onChange={(event) =>
-                    void upload(event.target.files, setFollowAttachments)
-                  }
-                  type="file"
-                />
-              </label>
-            </Button>
             <label className="ml-auto flex items-center gap-2">
               <Checkbox
                 checked={followWebSearch}
@@ -1331,6 +1392,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
               disabled={
                 !followPrompt.trim() ||
                 Boolean(busy) ||
+                !followModel ||
                 !followCatalog?.available
               }
               onClick={() =>
@@ -1361,7 +1423,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                 <AlertDescription>{t("planMutationWarning")}</AlertDescription>
               </Alert>
             )}
-            {finalPatch && <PatchView patch={finalPatch} />}
+            {finalPatch && <ExpandablePatchView patch={finalPatch} />}
             {run.checkpoints.map((checkpoint) => (
               <details className="rounded-lg border p-3" key={checkpoint.id}>
                 <summary className="cursor-pointer">
@@ -1378,7 +1440,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     HEAD {checkpoint.headSha ?? "—"}
                   </p>
                   {checkpoint.diffPatch ? (
-                    <PatchView patch={checkpoint.diffPatch} />
+                    <ExpandablePatchView patch={checkpoint.diffPatch} />
                   ) : checkpoint.diffSummary ? (
                     <pre className="overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap">
                       {checkpoint.diffSummary}

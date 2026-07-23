@@ -311,7 +311,7 @@ input RunConfigurationInput {
   provider: String!
   model: String!
   effort: String
-  webSearchEnabled: Boolean = false
+  webSearchEnabled: Boolean = true
   prompt: String!
   attachmentIds: [ID!] = []
   draftId: ID
@@ -330,7 +330,7 @@ input SaveRunDraftInput {
   provider: String!
   model: String!
   effort: String
-  webSearchEnabled: Boolean = false
+  webSearchEnabled: Boolean = true
   prompt: String!
   attachmentIds: [ID!] = []
 }
