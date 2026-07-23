@@ -37,7 +37,17 @@ export type ProviderUsage = {
 };
 
 export type ProviderCatalog = {
-  models: Array<{ id: string; label: string; efforts: string[] }>;
+  /**
+   * `group` names the sub-catalog a model came from, for providers that front
+   * more than one. The picker sections its models by it and falls back to the
+   * provider's own heading where it is absent.
+   */
+  models: Array<{
+    id: string;
+    label: string;
+    efforts: string[];
+    group?: string;
+  }>;
 };
 
 export type ProviderCapabilities = {

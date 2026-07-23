@@ -14,6 +14,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -117,6 +118,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
+  const [drawerIssueKey, setDrawerIssueKey] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -242,6 +244,8 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
 
   const title = kind === "PLAN" ? t("plans") : t("sessions");
   const detailBase = kind === "PLAN" ? "/plans" : "/sessions";
+  /** Sessions carry a source-plan column that Plans do not. */
+  const session = kind === "SESSION";
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
@@ -373,20 +377,38 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
         </Empty>
       ) : (
         <Card className="gap-0 overflow-hidden py-0">
-          <Table>
+          {/*
+           * An auto layout sizes columns to their content and hands every
+           * spare pixel to the gaps, so a wider window left the same truncated
+           * text sitting further apart. A fixed layout divides the whole width
+           * between the columns, which means the cells below can size to their
+           * column with `w-full` and only truncate when the column is genuinely
+           * too narrow. Percentages, so they keep sharing at any width.
+           */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 {editMode && <TableHead className="w-10" />}
-                <TableHead>{t("id")}</TableHead>
-                <TableHead>{t("status")}</TableHead>
-                <TableHead>{t("repoBranch")}</TableHead>
-                <TableHead>{t("ticket")}</TableHead>
-                {kind === "SESSION" && <TableHead>{t("plan")}</TableHead>}
-                <TableHead>{t("prompt")}</TableHead>
-                <TableHead>{t("cost")}</TableHead>
-                <TableHead>{t("modelEffort")}</TableHead>
-                <TableHead>
-                  <span className="sr-only">{t("actions")}</span>
+                <TableHead className="w-[5%]">{t("id")}</TableHead>
+                <TableHead className={session ? "w-[11%]" : "w-[12%]"}>
+                  {t("status")}
+                </TableHead>
+                <TableHead className={session ? "w-[18%]" : "w-[19%]"}>
+                  {t("repoBranch")}
+                </TableHead>
+                <TableHead className="w-[7%]">{t("ticket")}</TableHead>
+                {session && (
+                  <TableHead className="w-[5%]">{t("plan")}</TableHead>
+                )}
+                <TableHead className={session ? "w-[24%]" : "w-[25%]"}>
+                  {t("prompt")}
+                </TableHead>
+                <TableHead className="w-[6%]">{t("cost")}</TableHead>
+                <TableHead className="w-[15%]">{t("modelEffort")}</TableHead>
+                <TableHead
+                  className={cn("text-right", session ? "w-[9%]" : "w-[11%]")}
+                >
+                  {t("actions")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -396,15 +418,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableCell
                       className="py-2 font-medium"
-                      colSpan={
-                        editMode
-                          ? kind === "SESSION"
-                            ? 10
-                            : 9
-                          : kind === "SESSION"
-                            ? 9
-                            : 8
-                      }
+                      colSpan={8 + (session ? 1 : 0) + (editMode ? 1 : 0)}
                     >
                       {formatDateValue(group.value, "long", {
                         locale,
@@ -447,7 +461,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                           </Link>
                         </TableCell>
                         <TableCell>
-                          <div className="flex max-w-48 flex-wrap gap-1">
+                          <div className="flex flex-wrap gap-1">
                             <Badge
                               variant={
                                 run.status === "FAILED"
@@ -474,26 +488,34 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="max-w-48">
-                            <p className="truncate">{run.repositoryName}</p>
-                            <p className="truncate font-mono text-xs text-muted-foreground">
+                          <div className="min-w-0">
+                            <p className="truncate" title={run.repositoryName}>
+                              {run.repositoryName}
+                            </p>
+                            <p
+                              className="truncate font-mono text-xs text-muted-foreground"
+                              title={run.branch ?? undefined}
+                            >
                               {run.branch ?? "—"}
                             </p>
                           </div>
                         </TableCell>
                         <TableCell>
                           {run.jiraIssueKey ? (
-                            <Link
-                              className="hover:underline"
-                              href={`/jira/tickets/${encodeURIComponent(run.jiraIssueKey)}`}
+                            <button
+                              className="truncate hover:underline"
+                              onClick={() =>
+                                setDrawerIssueKey(run.jiraIssueKey)
+                              }
+                              type="button"
                             >
                               {run.jiraIssueKey}
-                            </Link>
+                            </button>
                           ) : (
                             "—"
                           )}
                         </TableCell>
-                        {kind === "SESSION" && (
+                        {session && (
                           <TableCell>
                             {run.sourcePlan ? (
                               <Link
@@ -511,9 +533,11 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                             )}
                           </TableCell>
                         )}
-                        <TableCell>
+                        {/* Cells are `whitespace-nowrap` by default, which no
+                            amount of clamping can wrap. */}
+                        <TableCell className="whitespace-normal">
                           <Link
-                            className="block max-w-72 truncate hover:underline"
+                            className="line-clamp-2 hover:underline"
                             href={`${detailBase}/${run.id}`}
                             title={run.initialPrompt}
                           >
@@ -531,7 +555,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                             title={`${run.model} · ${run.effort ?? "auto"}`}
                           >
                             <ProviderIcon provider={run.provider} />
-                            <span className="max-w-40 truncate text-xs">
+                            <span className="min-w-0 flex-1 truncate text-xs">
                               {formatModelLabel(run.model)}
                             </span>
                             <EffortIcon effort={run.effort} />
@@ -610,6 +634,10 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
         }}
         open={deleteIds.length > 0}
         title={t("deleteTitle")}
+      />
+      <JiraTicketDrawer
+        issueKey={drawerIssueKey}
+        onClose={() => setDrawerIssueKey(null)}
       />
     </div>
   );

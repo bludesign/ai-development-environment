@@ -124,7 +124,7 @@ export function RunStartPage({
             }
           }
         }
-        runProviderCatalog { key label available supportsWebSearch models { id label efforts } }
+        runProviderCatalog { key label available supportsWebSearch models { id label efforts group } }
         ${draftId ? `runDraft(id: $draftId) { ${RUN_DRAFT_FIELDS} }` : ""}
       }`,
         draftId ? { draftId } : undefined,

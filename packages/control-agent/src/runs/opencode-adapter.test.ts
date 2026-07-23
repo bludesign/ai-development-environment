@@ -145,3 +145,60 @@ describe("OpenCodeAdapter questions", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 });
+
+describe("OpenCodeAdapter catalog", () => {
+  test("lists every authenticated provider newest first, not just zen", async () => {
+    const providers = vi.fn(async () => ({
+      data: {
+        providers: [
+          {
+            id: "opencode-go",
+            name: "OpenCode Go",
+            models: {
+              "glm-5.1": { name: "GLM-5.1", release_date: "2026-04-07" },
+              "kimi-k3": {
+                name: "Kimi K3",
+                release_date: "2026-07-16",
+                variants: { max: { reasoningEffort: "max" } },
+              },
+            },
+          },
+          {
+            id: "opencode",
+            name: "OpenCode Zen",
+            models: {
+              "big-pickle": { name: "Big Pickle", release_date: "2025-10-17" },
+            },
+          },
+        ],
+      },
+    }));
+    sdk.createOpencode.mockResolvedValue({
+      client: { config: { providers } },
+      server: { close: vi.fn() },
+    });
+
+    await expect(new OpenCodeAdapter().catalog()).resolves.toEqual({
+      models: [
+        {
+          id: "opencode-go/kimi-k3",
+          label: "Kimi K3",
+          efforts: ["auto", "max"],
+          group: "OpenCode Go",
+        },
+        {
+          id: "opencode-go/glm-5.1",
+          label: "GLM-5.1",
+          efforts: ["auto"],
+          group: "OpenCode Go",
+        },
+        {
+          id: "opencode/big-pickle",
+          label: "Big Pickle",
+          efforts: ["auto"],
+          group: "OpenCode Zen",
+        },
+      ],
+    });
+  });
+});

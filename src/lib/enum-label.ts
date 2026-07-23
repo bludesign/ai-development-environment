@@ -31,3 +31,19 @@ export function formatProviderLabel(provider: string): string {
 export function formatModelLabel(model: string): string {
   return model.replace(/^opencode-go\//i, "");
 }
+
+/**
+ * Some catalogs carry a tier onto the end of the model name — OpenCode Zen
+ * ships `MiniMax-M3 Free` beside Go's `MiniMax-M3`. The suffix is what tells
+ * the two apart, so it has to survive, but it is not part of the name and
+ * should not read with the same weight. Splitting it lets callers set it in
+ * quieter type; everything without a suffix comes back as name alone.
+ */
+export function splitModelLabel(model: string): {
+  name: string;
+  qualifier?: string;
+} {
+  const label = formatModelLabel(model);
+  const match = /^(.+?)\s+(Free)$/i.exec(label);
+  return match ? { name: match[1], qualifier: match[2] } : { name: label };
+}

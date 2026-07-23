@@ -58,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -476,7 +477,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
         agentRun: AgentRunView | null;
         runProviderCatalog: ProviderCatalog[];
       }>(
-        `query AgentRunDetail($id: ID!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts } } }`,
+        `query AgentRunDetail($id: ID!) { agentRun(id: $id) { ${RUN_DETAIL_FIELDS} } runProviderCatalog { key label available supportsWebSearch supportsPause supportsSteering supportsResume supportsNativeDelete models { id label efforts group } } }`,
         { id: runId },
       );
       setRun(data.agentRun);
@@ -1304,8 +1305,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
           <CardDescription>{t("followUpDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <Select
+          <div className="flex flex-wrap items-center gap-3">
+            <Tabs
               onValueChange={(value) => {
                 const next = value ?? "RESUME";
                 setFollowMode(next);
@@ -1313,11 +1314,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
               }}
               value={followMode}
             >
-              <SelectTrigger aria-label={t("followUp")} className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
+              <TabsList aria-label={t("followUp")}>
+                <TabsTrigger
                   disabled={
                     followProvider === run.provider &&
                     !followCatalog?.supportsResume
@@ -1325,11 +1323,11 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   value="RESUME"
                 >
                   {t("resume")}
-                </SelectItem>
-                <SelectItem value="FRESH">{t("fresh")}</SelectItem>
-                <SelectItem value="RESEND">{t("resend")}</SelectItem>
-              </SelectContent>
-            </Select>
+                </TabsTrigger>
+                <TabsTrigger value="FRESH">{t("fresh")}</TabsTrigger>
+                <TabsTrigger value="RESEND">{t("resend")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <div className="min-w-0 flex-1">
               <ModelEffortPicker
                 catalog={catalog}

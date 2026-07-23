@@ -13,7 +13,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -25,7 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatModelLabel } from "@/lib/enum-label";
+import { splitModelLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
 
 import { EffortIcon } from "./effort-icon";
@@ -43,12 +42,58 @@ export type ProviderCatalogEntry = {
   label: string;
   available: boolean;
   supportsWebSearch: boolean;
-  models: Array<{ id: string; label: string; efforts: string[] }>;
+  models: Array<{
+    id: string;
+    label: string;
+    efforts: string[];
+    group?: string | null;
+  }>;
 };
 
 type CatalogModel = ProviderCatalogEntry["models"][number];
 
 const providerOrder = ["CODEX", "CLAUDE", "OPENCODE"];
+
+/**
+ * A provider may front several catalogs — OpenCode serves Go and Zen from one
+ * agent — and the difference between them is a billing one the reader has to
+ * see before choosing. Each `group` therefore gets its own heading, in the
+ * order the catalog reports them, while providers that name no group keep the
+ * single heading they had.
+ */
+function sections(entry: ProviderCatalogEntry) {
+  const byGroup = new Map<string, CatalogModel[]>();
+  for (const model of entry.models) {
+    const heading = model.group || entry.label;
+    byGroup.set(heading, [...(byGroup.get(heading) ?? []), model]);
+  }
+  return [...byGroup].map(([heading, models]) => ({ heading, models }));
+}
+
+/**
+ * The tier suffix is the only thing separating `MiniMax-M3 Free` from Go's
+ * `MiniMax-M3`, so it stays on the row — just set quieter than the name it
+ * qualifies, so a scan reads the model first and the tier second.
+ */
+function ModelLabel({ label }: { label: string }) {
+  const { name, qualifier } = splitModelLabel(label);
+  /*
+   * The space is a real character rather than a margin so the accessible name
+   * reads `MiniMax-M3 Free` — a margin leaves the two words run together for
+   * anyone listening to the row instead of looking at it.
+   */
+  return (
+    <>
+      {name}
+      {qualifier && (
+        <>
+          {" "}
+          <span className="text-xs text-muted-foreground">{qualifier}</span>
+        </>
+      )}
+    </>
+  );
+}
 
 /**
  * Geometry of one effort chip, shared by the real strip and by the sizer that
@@ -229,115 +274,117 @@ export function ModelEffortPicker({
   );
 
   return (
-    <div className="space-y-2">
-      <Label>{t("modelEffort")}</Label>
-      <div className="flex items-center gap-2 overflow-hidden" ref={railRef}>
-        <Popover onOpenChange={setOpen} open={open}>
-          <PopoverTrigger asChild>
-            {/*
-             * Hidden chips keep their layout box so they stay measurable, so
-             * the row overflows by design. Nothing may shrink to absorb that —
-             * a shrinking pill would both look collapsed and feed a bogus width
-             * back into the measurement. `max-w-full` still caps the pill to
-             * the container on a narrow screen, where its label truncates and
-             * the measurement correctly concludes that no chip fits.
-             */}
-            <Button
-              className="h-8 min-w-0 max-w-full shrink-0 font-normal"
-              type="button"
-              variant="outline"
-            >
-              {selectedProvider && selectedModel ? (
-                <>
-                  <ProviderIcon provider={selectedProvider.key} />
-                  <span className="max-w-48 truncate">
-                    {formatModelLabel(selectedModel.label)}
-                  </span>
-                  <span className="text-muted-foreground">·</span>
-                  <EffortIcon effort={effort} efforts={selectedModel.efforts} />
-                  <span className="text-muted-foreground">{effort}</span>
-                </>
-              ) : (
-                <span className="text-muted-foreground">
-                  {t("chooseModel")}
-                </span>
-              )}
-              <ChevronsUpDown className="text-muted-foreground" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className="w-max max-w-[min(32rem,calc(100vw-2rem))] p-0"
+    <div className="flex items-center gap-2 overflow-hidden" ref={railRef}>
+      <Popover onOpenChange={setOpen} open={open}>
+        <PopoverTrigger asChild>
+          {/*
+           * Hidden chips keep their layout box so they stay measurable, so
+           * the row overflows by design. Nothing may shrink to absorb that —
+           * a shrinking pill would both look collapsed and feed a bogus width
+           * back into the measurement. `max-w-full` still caps the pill to
+           * the container on a narrow screen, where its label truncates and
+           * the measurement correctly concludes that no chip fits.
+           */}
+          <Button
+            className="h-8 min-w-0 max-w-full shrink-0 font-normal"
+            type="button"
+            variant="outline"
           >
-            {/*
-             * `w-max` alone would resize the popover on every keystroke, since
-             * filtering changes which row is widest. This stands in for the
-             * unfiltered list — one zero-height replica per row, carrying the
-             * label and a spacer the width of that model's effort strip — so
-             * the popover settles on the width the whole catalog needs and then
-             * holds it. `max-w` caps it to the viewport, past which the labels
-             * truncate. `px-4` is the row's inherited padding: `p-1` on the
-             * command, `p-1` on the group, `px-2` on the item.
-             */}
-            <div aria-hidden="true" className="h-0 overflow-hidden">
-              {providers.flatMap((entry) =>
-                entry.models.map((entryModel) => (
-                  <div
-                    className="flex items-center gap-2 px-4 text-sm whitespace-nowrap"
-                    key={`${entry.key}/${entryModel.id}`}
-                  >
-                    <span className="size-4" />
-                    <span>{formatModelLabel(entryModel.label)}</span>
-                    <span
-                      style={{
-                        width: effortStripWidth(
-                          Math.max(entryModel.efforts.length, 1),
-                        ),
-                      }}
-                    />
-                  </div>
-                )),
-              )}
-            </div>
-            <Command>
-              <CommandInput
-                placeholder={t("search", { kind: t("model").toLowerCase() })}
-              />
-              <CommandList>
-                <CommandEmpty>{t("empty", { kind: t("model") })}</CommandEmpty>
-                {pinnedPresets.length > 0 && (
-                  <CommandGroup heading={t("presets")}>
-                    {pinnedPresets.map(({ preset, entry, model: preseted }) => (
-                      <CommandItem
-                        className={checkedRow}
-                        data-checked={Boolean(
-                          selection && sameModelPreset(preset, selection),
-                        )}
-                        key={modelPresetKey(preset)}
-                        onSelect={() => choose(preset)}
-                        value={`${entry.label} ${preseted.label} ${preseted.id} ${preset.effort}`}
+            {selectedProvider && selectedModel ? (
+              <>
+                <ProviderIcon provider={selectedProvider.key} />
+                <span className="max-w-48 truncate">
+                  <ModelLabel label={selectedModel.label} />
+                </span>
+                <span className="text-muted-foreground">·</span>
+                <EffortIcon effort={effort} efforts={selectedModel.efforts} />
+                <span className="text-muted-foreground">{effort}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">{t("chooseModel")}</span>
+            )}
+            <ChevronsUpDown className="text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-max max-w-[min(32rem,calc(100vw-2rem))] p-0"
+        >
+          {/*
+           * `w-max` alone would resize the popover on every keystroke, since
+           * filtering changes which row is widest. This stands in for the
+           * unfiltered list — one zero-height replica per row, carrying the
+           * label and a spacer the width of that model's effort strip — so
+           * the popover settles on the width the whole catalog needs and then
+           * holds it. `max-w` caps it to the viewport, past which the labels
+           * truncate. `px-4` is the row's inherited padding: `p-1` on the
+           * command, `p-1` on the group, `px-2` on the item.
+           */}
+          <div aria-hidden="true" className="h-0 overflow-hidden">
+            {providers.flatMap((entry) =>
+              entry.models.map((entryModel) => (
+                <div
+                  className="flex items-center gap-2 px-4 text-sm whitespace-nowrap"
+                  key={`${entry.key}/${entryModel.id}`}
+                >
+                  <span className="size-4" />
+                  <span>
+                    <ModelLabel label={entryModel.label} />
+                  </span>
+                  <span
+                    style={{
+                      width: effortStripWidth(
+                        Math.max(entryModel.efforts.length, 1),
+                      ),
+                    }}
+                  />
+                </div>
+              )),
+            )}
+          </div>
+          <Command>
+            <CommandInput
+              placeholder={t("search", { kind: t("model").toLowerCase() })}
+            />
+            <CommandList>
+              <CommandEmpty>{t("empty", { kind: t("model") })}</CommandEmpty>
+              {pinnedPresets.length > 0 && (
+                <CommandGroup heading={t("presets")}>
+                  {pinnedPresets.map(({ preset, entry, model: preseted }) => (
+                    <CommandItem
+                      className={checkedRow}
+                      data-checked={Boolean(
+                        selection && sameModelPreset(preset, selection),
+                      )}
+                      key={modelPresetKey(preset)}
+                      onSelect={() => choose(preset)}
+                      value={`${entry.label} ${preseted.label} ${preseted.id} ${preset.effort}`}
+                    >
+                      <ProviderIcon provider={entry.key} />
+                      <span className="min-w-0 flex-1 truncate">
+                        <ModelLabel label={preseted.label} />
+                      </span>
+                      <span
+                        className="flex items-center gap-1.5 text-muted-foreground"
+                        data-slot="command-shortcut"
                       >
-                        <ProviderIcon provider={entry.key} />
-                        <span className="min-w-0 flex-1 truncate">
-                          {formatModelLabel(preseted.label)}
-                        </span>
-                        <span
-                          className="flex items-center gap-1.5 text-muted-foreground"
-                          data-slot="command-shortcut"
-                        >
-                          <EffortIcon
-                            effort={preset.effort}
-                            efforts={preseted.efforts}
-                          />
-                          <span className="text-xs">{preset.effort}</span>
-                        </span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                )}
-                {providers.map((entry) => (
-                  <CommandGroup heading={entry.label} key={entry.key}>
-                    {entry.models.map((entryModel) => {
+                        <EffortIcon
+                          effort={preset.effort}
+                          efforts={preseted.efforts}
+                        />
+                        <span className="text-xs">{preset.effort}</span>
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+              {providers.flatMap((entry) =>
+                sections(entry).map(({ heading, models }) => (
+                  <CommandGroup
+                    heading={heading}
+                    key={`${entry.key}/${heading}`}
+                  >
+                    {models.map((entryModel) => {
                       const current =
                         entry.key === provider && entryModel.id === model;
                       const modelEfforts = entryModel.efforts.length
@@ -356,11 +403,11 @@ export function ModelEffortPicker({
                               effort: carriedEffort(entryModel),
                             })
                           }
-                          value={`${entry.label} ${entryModel.label} ${entryModel.id}`}
+                          value={`${heading} ${entryModel.label} ${entryModel.id}`}
                         >
                           <ProviderIcon provider={entry.key} />
                           <span className="min-w-0 flex-1 truncate">
-                            {formatModelLabel(entryModel.label)}
+                            <ModelLabel label={entryModel.label} />
                           </span>
                           {/*
                            * A pointer can set model and effort in one click, so
@@ -412,86 +459,84 @@ export function ModelEffortPicker({
                       );
                     })}
                   </CommandGroup>
+                )),
+              )}
+            </CommandList>
+          </Command>
+          <div className="flex items-center gap-2 border-t p-2">
+            <span className="text-xs text-muted-foreground">{t("effort")}</span>
+            <TooltipProvider>
+              <div className="flex items-center gap-0.5">
+                {efforts.map((value) => (
+                  <Tooltip key={value}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        aria-label={`${t("effort")}: ${value}`}
+                        disabled={!selectedModel}
+                        onClick={() => chooseEffort(value)}
+                        size="icon-xs"
+                        type="button"
+                        variant={effort === value ? "secondary" : "ghost"}
+                      >
+                        <EffortIcon effort={value} efforts={efforts} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{value}</TooltipContent>
+                  </Tooltip>
                 ))}
-              </CommandList>
-            </Command>
-            <div className="flex items-center gap-2 border-t p-2">
-              <span className="text-xs text-muted-foreground">
-                {t("effort")}
-              </span>
-              <TooltipProvider>
-                <div className="flex items-center gap-0.5">
-                  {efforts.map((value) => (
-                    <Tooltip key={value}>
-                      <TooltipTrigger asChild>
-                        <Button
-                          aria-label={`${t("effort")}: ${value}`}
-                          disabled={!selectedModel}
-                          onClick={() => chooseEffort(value)}
-                          size="icon-xs"
-                          type="button"
-                          variant={effort === value ? "secondary" : "ghost"}
-                        >
-                          <EffortIcon effort={value} efforts={efforts} />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{value}</TooltipContent>
-                    </Tooltip>
-                  ))}
-                </div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      aria-label={
-                        selection && isPinned(selection)
-                          ? t("unpinPreset")
-                          : t("pinPreset")
-                      }
-                      className="ml-auto"
-                      disabled={!selection}
-                      onClick={() => selection && togglePin(selection)}
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {selection && isPinned(selection) ? <PinOff /> : <Pin />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {selection && isPinned(selection)
-                      ? t("unpinPreset")
-                      : t("pinPreset")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </PopoverContent>
-        </Popover>
-        {shown.map(({ preset, entry, model: presetModel }, index) => {
-          const fits = index < visible;
-          return (
-            <Button
-              aria-hidden={!fits}
-              className={cn("h-8 shrink-0 font-normal", !fits && "invisible")}
-              key={modelPresetKey(preset)}
-              onClick={() => apply(preset)}
-              tabIndex={fits ? undefined : -1}
-              type="button"
-              variant="ghost"
-            >
-              <ProviderIcon provider={entry.key} />
-              <span className="max-w-32 truncate">
-                {formatModelLabel(presetModel.label)}
-              </span>
-              <EffortIcon
-                className="text-muted-foreground"
-                effort={preset.effort}
-                efforts={presetModel.efforts}
-              />
-            </Button>
-          );
-        })}
-      </div>
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={
+                      selection && isPinned(selection)
+                        ? t("unpinPreset")
+                        : t("pinPreset")
+                    }
+                    className="ml-auto"
+                    disabled={!selection}
+                    onClick={() => selection && togglePin(selection)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {selection && isPinned(selection) ? <PinOff /> : <Pin />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {selection && isPinned(selection)
+                    ? t("unpinPreset")
+                    : t("pinPreset")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </PopoverContent>
+      </Popover>
+      {shown.map(({ preset, entry, model: presetModel }, index) => {
+        const fits = index < visible;
+        return (
+          <Button
+            aria-hidden={!fits}
+            className={cn("h-8 shrink-0 font-normal", !fits && "invisible")}
+            key={modelPresetKey(preset)}
+            onClick={() => apply(preset)}
+            tabIndex={fits ? undefined : -1}
+            type="button"
+            variant="ghost"
+          >
+            <ProviderIcon provider={entry.key} />
+            <span className="max-w-32 truncate">
+              <ModelLabel label={presetModel.label} />
+            </span>
+            <EffortIcon
+              className="text-muted-foreground"
+              effort={preset.effort}
+              efforts={presetModel.efforts}
+            />
+          </Button>
+        );
+      })}
     </div>
   );
 }

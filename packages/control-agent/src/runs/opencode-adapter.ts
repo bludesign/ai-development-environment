@@ -215,25 +215,43 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   async catalog(): Promise<ProviderCatalog> {
     const client = await this.client();
-    const response = asRecord(resultData(await client.v2.model.list()));
-    const models = Array.isArray(response.data) ? response.data : [];
+    // `v2.model.list` only reports the anonymous OpenCode Zen catalog — it
+    // leaves out every authenticated provider, OpenCode Go included. The
+    // config endpoint is the one that resolves auth, so ask it instead.
+    const response = asRecord(resultData(await client.config.providers()));
+    const providers = Array.isArray(response.providers)
+      ? response.providers
+      : [];
     return {
-      models: models
-        .map((value) => {
-          const model = asRecord(value);
-          const variants = Array.isArray(model.variants)
-            ? model.variants
-                .map((variant) => String(asRecord(variant).id))
-                .filter(Boolean)
-            : [];
-          return {
-            id: `${String(model.providerID)}/${String(model.id)}`,
-            label: String(model.name ?? model.id),
-            efforts: [
-              "auto",
-              ...variants.filter((variant) => variant !== "auto"),
-            ],
-          };
+      models: providers
+        .flatMap((value) => {
+          const provider = asRecord(value);
+          const providerId = String(provider.id);
+          const released = (value: unknown) =>
+            String(asRecord(value).release_date ?? "");
+          return Object.entries(asRecord(provider.models))
+            .sort(([, left], [, right]) =>
+              released(right).localeCompare(released(left)),
+            )
+            .map(([modelId, value]) => {
+              const model = asRecord(value);
+              const variants = Object.keys(asRecord(model.variants));
+              return {
+                id: `${providerId}/${modelId}`,
+                label: String(model.name ?? modelId),
+                efforts: [
+                  "auto",
+                  ...variants.filter((variant) => variant !== "auto"),
+                ],
+                /*
+                 * OpenCode fronts several catalogs — Go and Zen today — that
+                 * the picker shows under one provider. Carrying each one's
+                 * own name lets it split them into sections without the UI
+                 * having to recognise provider ids.
+                 */
+                group: String(provider.name ?? providerId),
+              };
+            });
         })
         .filter(({ id }) => !id.includes("undefined")),
     };

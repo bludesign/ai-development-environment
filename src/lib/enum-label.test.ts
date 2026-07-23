@@ -4,6 +4,7 @@ import {
   formatEnumLabel,
   formatModelLabel,
   formatProviderLabel,
+  splitModelLabel,
 } from "./enum-label";
 
 describe("formatEnumLabel", () => {
@@ -43,5 +44,31 @@ describe("formatModelLabel", () => {
     expect(formatModelLabel("opencode/deepseek-v4-flash-free")).toBe(
       "opencode/deepseek-v4-flash-free",
     );
+  });
+});
+
+describe("splitModelLabel", () => {
+  test("peels a trailing tier off the model name", () => {
+    expect(splitModelLabel("MiniMax-M3 Free")).toEqual({
+      name: "MiniMax-M3",
+      qualifier: "Free",
+    });
+    expect(splitModelLabel("Laguna S 2.1 Free")).toEqual({
+      name: "Laguna S 2.1",
+      qualifier: "Free",
+    });
+  });
+
+  test("returns the name alone where there is no tier", () => {
+    expect(splitModelLabel("GLM-5.2")).toEqual({ name: "GLM-5.2" });
+    expect(splitModelLabel("Kimi K3 (2x usage)")).toEqual({
+      name: "Kimi K3 (2x usage)",
+    });
+  });
+
+  test("still drops the opencode-go namespace", () => {
+    expect(splitModelLabel("opencode-go/grok-code")).toEqual({
+      name: "grok-code",
+    });
   });
 });

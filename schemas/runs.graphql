@@ -257,6 +257,8 @@ type RunProviderModel {
   id: String!
   label: String!
   efforts: [String!]!
+  "Sub-catalog this model belongs to, where the provider fronts several."
+  group: String
 }
 
 type RunProviderCatalogEntry {

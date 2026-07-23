@@ -2092,7 +2092,12 @@ export class RunsService {
       )?.catalogJson;
       const catalog = discovered
         ? (JSON.parse(discovered) as {
-            models?: Array<{ id: string; label: string; efforts: string[] }>;
+            models?: Array<{
+              id: string;
+              label: string;
+              efforts: string[];
+              group?: string;
+            }>;
             capabilities?: {
               webSearch?: boolean;
               questions?: boolean;
