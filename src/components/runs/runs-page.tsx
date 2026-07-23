@@ -50,13 +50,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { formatModelLabel } from "@/lib/enum-label";
+import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
@@ -105,6 +106,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const t = useTranslations("runs");
   const labels = useRunLabels();
   const locale = useLocale();
+  const router = useRouter();
   const [items, setItems] = useState<AgentRunView[]>([]);
   const [search, setSearch] = useState("");
   const [archiveFilter, setArchiveFilter] = useState("ACTIVE");
@@ -246,6 +248,13 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
   const detailBase = kind === "PLAN" ? "/plans" : "/sessions";
   /** Sessions carry a source-plan column that Plans do not. */
   const session = kind === "SESSION";
+  const toggleSelected = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
@@ -385,7 +394,21 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
            * column with `w-full` and only truncate when the column is genuinely
            * too narrow. Percentages, so they keep sharing at any width.
            */}
-          <Table className="table-fixed">
+          {/*
+           * Percentages alone would keep dividing a phone-width table into
+           * columns too narrow to read anything in. The floor is the sum of
+           * what each column actually needs — roughly 50px for the id, 122 for
+           * the status badges, 160 for the repository, 200 for a two-line
+           * prompt, 156 for a model name, and 114 for the action buttons — so
+           * below it the container's `overflow-x-auto` takes over and the
+           * table scrolls at full legibility instead of shrinking.
+           */}
+          <Table
+            className={cn(
+              "table-fixed",
+              editMode ? "min-w-[67rem]" : "min-w-[64rem]",
+            )}
+          >
             <TableHeader>
               <TableRow>
                 {editMode && <TableHead className="w-10" />}
@@ -396,14 +419,24 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                 <TableHead className={session ? "w-[18%]" : "w-[19%]"}>
                   {t("repoBranch")}
                 </TableHead>
-                <TableHead className="w-[7%]">{t("ticket")}</TableHead>
+                {/* Sized for a longer key than this workspace happens to use
+                    today — `PROJ-12345` needs ~98px with padding, where
+                    `AIDE-66` needs 69 — so a bigger project or issue number
+                    does not start truncating the one column nobody can guess
+                    the rest of from context. */}
+                <TableHead className="w-[10%]">{t("ticket")}</TableHead>
                 {session && (
                   <TableHead className="w-[5%]">{t("plan")}</TableHead>
                 )}
-                <TableHead className={session ? "w-[24%]" : "w-[25%]"}>
+                <TableHead className={session ? "w-[21%]" : "w-[22%]"}>
                   {t("prompt")}
                 </TableHead>
-                <TableHead className="w-[6%]">{t("cost")}</TableHead>
+                {/* Money right-aligns so the digits line up and the column
+                    reads tight against its neighbour rather than trailing off. */}
+                <TableHead className="w-[6%] text-right">{t("cost")}</TableHead>
+                {/* Wide enough for the common model names to read in full;
+                    only the `opencode/…` namespaced ones still truncate, and
+                    the cell carries the full name as a tooltip. */}
                 <TableHead className="w-[15%]">{t("modelEffort")}</TableHead>
                 <TableHead
                   className={cn("text-right", session ? "w-[9%]" : "w-[11%]")}
@@ -433,7 +466,17 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                         ]
                       : undefined;
                     return (
-                      <TableRow className={cn(highlighted)} key={run.id}>
+                      <TableRow
+                        className={cn("cursor-pointer", highlighted)}
+                        key={run.id}
+                        /* In edit mode the row is a selection target, so it
+                           toggles rather than navigating away mid-selection. */
+                        onClick={(event) => {
+                          if (!isRowActivation(event)) return;
+                          if (editMode) toggleSelected(run.id);
+                          else router.push(`${detailBase}/${run.id}`);
+                        }}
+                      >
                         {editMode && (
                           <TableCell>
                             <Checkbox
@@ -454,7 +497,10 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                         )}
                         <TableCell>
                           <Link
-                            className="font-mono font-medium hover:underline"
+                            className={cn(
+                              rowLinkClass,
+                              "inline-block font-mono font-medium",
+                            )}
                             href={`${detailBase}/${run.id}`}
                           >
                             #{run.displayNumber}
@@ -488,22 +534,46 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="min-w-0">
-                            <p className="truncate" title={run.repositoryName}>
-                              {run.repositoryName}
-                            </p>
-                            <p
-                              className="truncate font-mono text-xs text-muted-foreground"
-                              title={run.branch ?? undefined}
+                          {/* Only a run whose worktree still exists can open
+                              one; imported and cleaned-up runs keep the plain
+                              text so the link never dead-ends. */}
+                          {run.worktree ? (
+                            <Link
+                              className={cn(rowLinkClass, "block min-w-0")}
+                              href={`/worktrees/${run.worktree.id}`}
+                              title={run.worktree.folder}
                             >
-                              {run.branch ?? "—"}
-                            </p>
-                          </div>
+                              <span className="block truncate">
+                                {run.repositoryName}
+                              </span>
+                              <span className="block truncate font-mono text-xs text-muted-foreground">
+                                {run.branch ?? "—"}
+                              </span>
+                            </Link>
+                          ) : (
+                            <div className="min-w-0">
+                              <p
+                                className="truncate"
+                                title={run.repositoryName}
+                              >
+                                {run.repositoryName}
+                              </p>
+                              <p
+                                className="truncate font-mono text-xs text-muted-foreground"
+                                title={run.branch ?? undefined}
+                              >
+                                {run.branch ?? "—"}
+                              </p>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           {run.jiraIssueKey ? (
                             <button
-                              className="truncate hover:underline"
+                              className={cn(
+                                rowLinkClass,
+                                "max-w-full truncate",
+                              )}
                               onClick={() =>
                                 setDrawerIssueKey(run.jiraIssueKey)
                               }
@@ -519,7 +589,10 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                           <TableCell>
                             {run.sourcePlan ? (
                               <Link
-                                className="font-mono hover:underline"
+                                className={cn(
+                                  rowLinkClass,
+                                  "inline-block font-mono",
+                                )}
                                 href={`/plans/${run.sourcePlan.id}`}
                               >
                                 #{run.sourcePlan.displayNumber}
@@ -537,14 +610,17 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                             amount of clamping can wrap. */}
                         <TableCell className="whitespace-normal">
                           <Link
-                            className="line-clamp-2 hover:underline"
+                            className={cn(rowLinkClass, "line-clamp-2")}
                             href={`${detailBase}/${run.id}`}
                             title={run.initialPrompt}
                           >
                             {run.initialPrompt}
                           </Link>
                         </TableCell>
-                        <TableCell title={t("estimatedCost")}>
+                        <TableCell
+                          className="text-right"
+                          title={t("estimatedCost")}
+                        >
                           {run.estimatedCost === null
                             ? "—"
                             : currency.format(run.estimatedCost)}
@@ -555,7 +631,11 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                             title={`${run.model} · ${run.effort ?? "auto"}`}
                           >
                             <ProviderIcon provider={run.provider} />
-                            <span className="min-w-0 flex-1 truncate text-xs">
+                            {/* No `flex-1`: it would stretch a short name to
+                                the full column and strand the effort icon at
+                                the far edge. Shrink-to-fit, truncate only when
+                                the name genuinely runs out of room. */}
+                            <span className="min-w-0 truncate text-xs">
                               {formatModelLabel(run.model)}
                             </span>
                             <EffortIcon effort={run.effort} />

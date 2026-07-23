@@ -35,10 +35,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { formatProviderLabel } from "@/lib/enum-label";
+import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
@@ -48,6 +49,7 @@ import type { RunDraftView } from "./types";
 export function DraftsPage() {
   const t = useTranslations("runs");
   const locale = useLocale();
+  const router = useRouter();
   const [items, setItems] = useState<RunDraftView[]>([]);
   const [search, setSearch] = useState("");
   const [archiveFilter, setArchiveFilter] = useState("ACTIVE");
@@ -131,6 +133,14 @@ export function DraftsPage() {
     }
     return result;
   }, [items]);
+
+  const toggleSelected = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const mutate = async (query: string, variables: Record<string, unknown>) => {
     try {
@@ -268,12 +278,20 @@ export function DraftsPage() {
                   {group.items.map((draft) => (
                     <TableRow
                       className={cn(
+                        "cursor-pointer",
                         draft.worktree?.highlightColor &&
                           worktreeHighlightBackgroundClasses[
                             draft.worktree.highlightColor
                           ],
                       )}
                       key={draft.id}
+                      /* In edit mode the row is a selection target, so it
+                         toggles rather than navigating away mid-selection. */
+                      onClick={(event) => {
+                        if (!isRowActivation(event)) return;
+                        if (editMode) toggleSelected(draft.id);
+                        else router.push(`/runs/new?draft=${draft.id}`);
+                      }}
                     >
                       {editMode && (
                         <TableCell>
@@ -297,15 +315,30 @@ export function DraftsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <p>{draft.worktree?.branch ?? "—"}</p>
-                        <p className="max-w-56 truncate font-mono text-xs text-muted-foreground">
-                          {draft.worktree?.folder}
-                        </p>
+                        {draft.worktree ? (
+                          <Link
+                            className={cn(rowLinkClass, "block min-w-0")}
+                            href={`/worktrees/${draft.worktree.id}`}
+                            title={draft.worktree.folder}
+                          >
+                            <span className="block truncate">
+                              {draft.worktree.branch ?? "—"}
+                            </span>
+                            <span className="block max-w-56 truncate font-mono text-xs text-muted-foreground">
+                              {draft.worktree.folder}
+                            </span>
+                          </Link>
+                        ) : (
+                          <p>—</p>
+                        )}
                       </TableCell>
                       <TableCell>{draft.jiraIssueKey ?? "—"}</TableCell>
                       <TableCell>
                         <Link
-                          className="block max-w-96 truncate hover:underline"
+                          className={cn(
+                            rowLinkClass,
+                            "block max-w-96 truncate",
+                          )}
                           href={`/runs/new?draft=${draft.id}`}
                           title={draft.prompt}
                         >
