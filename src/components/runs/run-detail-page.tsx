@@ -331,10 +331,13 @@ function QuestionBatch({
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                <CircleHelp />{" "}
-                {batch.status === "PENDING"
-                  ? t("answerNeeded")
-                  : t("answeredQuestions")}
+                {batch.status === "PENDING" ? (
+                  <>
+                    <CircleHelp /> {t("answerNeeded")}
+                  </>
+                ) : (
+                  t("answeredQuestions")
+                )}
               </CardTitle>
               <CardDescription>
                 <DateTime value={batch.createdAt} />
@@ -1122,7 +1125,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
         </CardHeader>
         <div className="max-h-[48rem] overflow-y-auto">
           <Table>
-            <TableHeader className="sticky top-0 z-10 bg-background">
+            <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
                 <TableHead className="h-7 w-10" />
                 <TableHead className="h-7">{t("activity")}</TableHead>

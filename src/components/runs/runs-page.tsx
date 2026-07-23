@@ -12,7 +12,7 @@ import {
   SignalHigh,
   SignalLow,
   SignalMedium,
-  SignalZero,
+  Sparkles,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -60,7 +60,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
-import { formatModelLabel, formatProviderLabel } from "@/lib/enum-label";
+import { formatModelLabel } from "@/lib/enum-label";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
@@ -104,7 +104,11 @@ function IconAction({
   );
 }
 
-/** Effort reads as signal strength: more bars, more thinking. */
+/**
+ * Effort reads as signal strength: more bars, more thinking. `auto` has no
+ * place on that scale — empty bars would read as "none" — so it keeps the
+ * sparkles the model picker already uses for a provider-chosen effort.
+ */
 function EffortIcon({ effort }: { effort: string | null }) {
   const value = effort?.toLowerCase() ?? "auto";
   const Icon =
@@ -116,7 +120,7 @@ function EffortIcon({ effort }: { effort: string | null }) {
           ? SignalHigh
           : value === "xhigh" || value === "max" || value === "ultra"
             ? Signal
-            : SignalZero;
+            : Sparkles;
   return <Icon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
@@ -473,31 +477,23 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                                 run.status === "FAILED"
                                   ? "destructive"
                                   : run.status === "COMPLETED"
-                                    ? "default"
+                                    ? "success"
                                     : "secondary"
                               }
                             >
                               {labels.status(run.status)}
                             </Badge>
-                            {run.phase !== run.status && (
-                              <Badge variant="outline">
-                                {labels.phase(run.phase)}
-                              </Badge>
-                            )}
-                            <Badge variant="outline">
-                              {formatProviderLabel(run.provider)}
-                            </Badge>
+                            {run.phase !== run.status &&
+                              run.phase !== "IMPORTED_SYNCED" && (
+                                <Badge variant="outline">
+                                  {labels.phase(run.phase)}
+                                </Badge>
+                              )}
                             {run.origin === "IMPORTED" && (
                               <Badge variant="secondary">{t("imported")}</Badge>
                             )}
-                            {kind === "PLAN" && (
-                              <Badge
-                                variant={run.playedAt ? "default" : "outline"}
-                              >
-                                {run.playedAt
-                                  ? t("sessionCreated")
-                                  : t("notRun")}
-                              </Badge>
+                            {kind === "PLAN" && run.playedAt && (
+                              <Badge variant="default">{t("run")}</Badge>
                             )}
                           </div>
                         </TableCell>
@@ -551,7 +547,7 @@ export function RunsPage({ kind }: { kind: "PLAN" | "SESSION" }) {
                         <TableCell title={t("estimatedCost")}>
                           {run.estimatedCost === null
                             ? "—"
-                            : `≈${currency.format(run.estimatedCost)}`}
+                            : currency.format(run.estimatedCost)}
                         </TableCell>
                         <TableCell>
                           <div
