@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronDown, Code2, Copy } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -28,26 +28,33 @@ function toggleKey(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-/** A monospaced dump of the untouched payload with a one-click copy. */
-function RawJson({ value }: { value: unknown }) {
+/**
+ * A monospaced dump of the untouched payload with a one-click copy. `action`
+ * shares the toolbar row so the rendered/raw toggle sits beside the copy button
+ * instead of stacking above it.
+ */
+function RawJson({ value, action }: { value: unknown; action?: ReactNode }) {
   const t = useTranslations("runs");
   const [copied, setCopied] = useState(false);
   const json = JSON.stringify(value, null, 2);
   return (
     <div className="space-y-2">
-      <Button
-        onClick={() =>
-          void copyText(json).then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1_500);
-          })
-        }
-        size="xs"
-        type="button"
-        variant="outline"
-      >
-        {copied ? <Check /> : <Copy />} {copied ? t("copied") : t("copy")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {action}
+        <Button
+          onClick={() =>
+            void copyText(json).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1_500);
+            })
+          }
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          {copied ? <Check /> : <Copy />} {copied ? t("copied") : t("copy")}
+        </Button>
+      </div>
       <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs break-words whitespace-pre-wrap">
         {json}
       </pre>
@@ -94,20 +101,24 @@ function ActivityDetail({
     return <p className="text-xs text-muted-foreground">{t("noDetail")}</p>;
   if (!hasRendered) return <RawJson value={event.raw} />;
 
+  const rawToggle = hasRaw ? (
+    <Button onClick={onToggleRaw} size="xs" type="button" variant="outline">
+      <Code2 /> {showRaw ? t("rendered") : t("raw")}
+    </Button>
+  ) : null;
+
   return (
     <div className="space-y-2">
-      {hasRaw && (
-        <Button onClick={onToggleRaw} size="xs" type="button" variant="outline">
-          <Code2 /> {showRaw ? t("rendered") : t("raw")}
-        </Button>
-      )}
       {showRaw && hasRaw ? (
-        <RawJson value={event.raw} />
+        <RawJson action={rawToggle} value={event.raw} />
       ) : (
-        <div className="space-y-3">
-          {rows.length > 0 && <DetailRows rows={rows} />}
-          {markdown && <MarkdownView showActions={false} value={markdown} />}
-        </div>
+        <>
+          {rawToggle}
+          <div className="space-y-3">
+            {rows.length > 0 && <DetailRows rows={rows} />}
+            {markdown && <MarkdownView showActions={false} value={markdown} />}
+          </div>
+        </>
       )}
     </div>
   );
