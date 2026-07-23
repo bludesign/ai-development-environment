@@ -11,6 +11,7 @@ import { DateTime } from "./date-time";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-07-25T16:00:00.000Z"));
 });
 
 afterEach(() => {

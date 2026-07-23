@@ -102,6 +102,24 @@ export function questionsFromInput(value: unknown): ProviderQuestion[] {
   });
 }
 
+export function claudeAnswers(
+  toolInput: unknown,
+  value: unknown,
+): Record<string, string> {
+  const questions = questionsFromInput(toolInput);
+  const answersById = asRecord(value);
+  const answersByPosition = answerArrays(value);
+
+  return Object.fromEntries(
+    questions.map((question, index) => {
+      const selected = Object.hasOwn(answersById, question.id)
+        ? (answerArrays([answersById[question.id]])[0] ?? [])
+        : (answersByPosition[index] ?? []);
+      return [question.prompt, selected.join(", ")];
+    }),
+  );
+}
+
 export function claudeEnvironment(): Record<string, string> {
   return {
     ...Object.fromEntries(
@@ -204,7 +222,10 @@ export class ClaudeAdapter implements ProviderAdapter {
           });
           return {
             behavior: "allow",
-            updatedInput: { ...toolInput, answers: answerArrays(answers) },
+            updatedInput: {
+              ...toolInput,
+              answers: claudeAnswers(toolInput, answers),
+            },
           };
         },
       },

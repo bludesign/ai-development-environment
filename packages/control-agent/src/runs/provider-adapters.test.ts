@@ -3,7 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { questionsFromInput, claudeEnvironment } from "./claude-adapter.js";
+import {
+  claudeAnswers,
+  claudeEnvironment,
+  questionsFromInput,
+} from "./claude-adapter.js";
 import { codexQuestions } from "./codex-adapter.js";
 import {
   opencodeEventText,
@@ -47,6 +51,20 @@ describe("provider protocol fixtures", () => {
       prompt: "Add integration tests?",
     });
     expect(claudeEnvironment().CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+  });
+
+  test("formats Claude answers as a question-text record", async () => {
+    const input = await fixture("claude-ask-user-question.json");
+
+    expect(
+      claudeAnswers(input, {
+        tests: { answers: ["No"] },
+        scope: { answers: ["API", "UI"] },
+      }),
+    ).toEqual({
+      "Which scope should be changed?": "API, UI",
+      "Add integration tests?": "No",
+    });
   });
 
   test("normalizes the OpenCode v2 question surface", async () => {
