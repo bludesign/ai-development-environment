@@ -636,6 +636,16 @@ export class RunManager {
 
   private async reviseAnswer(command: RunCommand): Promise<void> {
     if (!command.run.worktree) throw new Error("Run worktree is unavailable");
+    if (command.payload.rollback === false) {
+      const preserved = await captureGitCheckpoint(
+        command.run.worktree.folder,
+        command.runId,
+        "ANSWER_ROLLBACK",
+      );
+      await this.client.reportRunCheckpoint(command.runId, null, preserved);
+      await this.startRun(command);
+      return;
+    }
     const stashRef = await restoreGitCheckpoint(
       command.run.worktree.folder,
       this.checkpointFromCommand(command),

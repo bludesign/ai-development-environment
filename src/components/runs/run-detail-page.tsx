@@ -1,6 +1,13 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   Archive,
@@ -175,6 +182,7 @@ function QuestionBatch({
   const [preparing, setPreparing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [stash, setStash] = useState(false);
+  const [rollback, setRollback] = useState(true);
   const submit = async () => {
     setBusy(true);
     try {
@@ -258,8 +266,8 @@ function QuestionBatch({
       const data = await controlPlaneRequest<{
         reviseRunAnswer: { id: string; kind: "PLAN" | "SESSION" };
       }>(
-        "mutation ReviseAnswer($batchId: ID!, $answers: JSON!, $stash: Boolean!) { reviseRunAnswer(batchId: $batchId, answers: $answers, stash: $stash) { id kind } }",
-        { batchId: batch.id, answers: value, stash },
+        "mutation ReviseAnswer($batchId: ID!, $answers: JSON!, $stash: Boolean!, $rollback: Boolean!) { reviseRunAnswer(batchId: $batchId, answers: $answers, stash: $stash, rollback: $rollback) { id kind } }",
+        { batchId: batch.id, answers: value, stash: rollback && stash, rollback },
       );
       setEditOpen(false);
       router.push(
@@ -375,24 +383,25 @@ function QuestionBatch({
                     )}
                     <p className="font-medium">{question.prompt}</p>
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {t("answer")}
-                    </p>
+                  <div className="space-y-1.5">
                     {(latestAnswers[question.id] ?? []).length ? (
                       latestAnswers[question.id]!.map((answer) => {
                         const description = question.options.find(
                           (option) => option.label === answer,
                         )?.description;
                         return (
-                          <div key={answer}>
-                            <p className="font-medium">{answer}</p>
+                          <p className="text-sm" key={answer}>
+                            <span className="mr-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              {t("answer")}
+                            </span>
+                            <span className="font-semibold">{answer}</span>
                             {description && (
-                              <p className="text-sm text-muted-foreground">
+                              <span className="text-muted-foreground">
+                                {" — "}
                                 {description}
-                              </p>
+                              </span>
                             )}
-                          </div>
+                          </p>
                         );
                       })
                     ) : (
@@ -414,35 +423,57 @@ function QuestionBatch({
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{t("editAnswer")}</DialogTitle>
-            <DialogDescription>{t("revisionDescription")}</DialogDescription>
+            <DialogDescription>
+              {rollback
+                ? t("revisionDescription")
+                : t("revisionDescriptionNoRollback")}
+            </DialogDescription>
           </DialogHeader>
-          {batch.pushedCommitWarning && (
+          {rollback && batch.pushedCommitWarning && (
             <Alert variant="destructive">
               <AlertTriangle />
               <AlertDescription>{batch.pushedCommitWarning}</AlertDescription>
             </Alert>
           )}
-          <div className="space-y-2">
-            <Label>{t("rollbackDiff")}</Label>
-            <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-              {batch.rollbackPatch || t("noRollbackChanges")}
-            </pre>
-          </div>
-          <div className="space-y-5">{answerEditor}</div>
-          <label className="flex items-center gap-3 rounded-lg border p-3">
+          <label className="flex items-start gap-3 rounded-lg border p-3">
             <Checkbox
-              checked={stash}
-              onCheckedChange={(value) => setStash(Boolean(value))}
+              checked={rollback}
+              className="mt-0.5"
+              onCheckedChange={(value) => setRollback(Boolean(value))}
             />
-            <span>{t("stashBeforeRollback")}</span>
+            <span>
+              <span className="block font-medium">{t("rollbackChanges")}</span>
+              <span className="text-sm text-muted-foreground">
+                {t("rollbackChangesHint")}
+              </span>
+            </span>
           </label>
+          {rollback && (
+            <div className="space-y-2">
+              <Label>{t("rollbackDiff")}</Label>
+              <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+                {batch.rollbackPatch || t("noRollbackChanges")}
+              </pre>
+            </div>
+          )}
+          <div className="space-y-5">{answerEditor}</div>
+          {rollback && (
+            <label className="flex items-center gap-3 rounded-lg border p-3">
+              <Checkbox
+                checked={stash}
+                onCheckedChange={(value) => setStash(Boolean(value))}
+              />
+              <span>{t("stashBeforeRollback")}</span>
+            </label>
+          )}
           <DialogFooter showCloseButton>
             <Button
               disabled={busy}
               onClick={() => void revise()}
-              variant="destructive"
+              variant={rollback ? "destructive" : "default"}
             >
-              {busy ? <Spinner /> : <RotateCcw />} {t("confirmRevision")}
+              {busy ? <Spinner /> : rollback ? <RotateCcw /> : <Send />}{" "}
+              {t("confirmRevision")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -483,6 +514,20 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [contextMode, setContextMode] = useState("NORMALIZED");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [followConfirm, setFollowConfirm] = useState(false);
+  const activityScrollRef = useRef<HTMLDivElement>(null);
+  const activityPinnedRef = useRef(true);
+  const handleActivityScroll = useCallback(() => {
+    const container = activityScrollRef.current;
+    if (!container) return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    activityPinnedRef.current = distanceFromBottom <= 24;
+  }, []);
+  useEffect(() => {
+    const container = activityScrollRef.current;
+    if (!container || !activityPinnedRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [events]);
 
   const refresh = useCallback(async () => {
     try {
@@ -1137,7 +1182,11 @@ export function RunDetailPage({ runId }: { runId: string }) {
             </div>
           </div>
         </CardHeader>
-        <div className="max-h-[48rem] overflow-y-auto">
+        <div
+          className="h-[24rem] overflow-y-auto"
+          onScroll={handleActivityScroll}
+          ref={activityScrollRef}
+        >
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>

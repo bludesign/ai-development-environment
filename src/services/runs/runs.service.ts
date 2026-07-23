@@ -1053,7 +1053,12 @@ export class RunsService {
     return this.get(result.batch.runId);
   }
 
-  async reviseAnswer(batchId: string, answers: unknown, stash: boolean) {
+  async reviseAnswer(
+    batchId: string,
+    answers: unknown,
+    stash: boolean,
+    rollback = true,
+  ) {
     const prisma = await getPrismaClient();
     const result = await prisma.$transaction(async (transaction) => {
       const batch = await transaction.runQuestionBatch.findUnique({
@@ -1185,6 +1190,7 @@ export class RunsService {
           revisionId,
           inputId,
           stash: Boolean(stash),
+          rollback,
           checkpoint: batch.checkpoint,
         },
       });

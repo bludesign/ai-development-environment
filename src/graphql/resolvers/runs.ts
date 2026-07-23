@@ -309,11 +309,22 @@ export const createRunResolvers = (service: RunsService) => ({
         batchId,
         answers,
         stash,
-      }: { batchId: string; answers: unknown; stash?: boolean },
+        rollback,
+      }: {
+        batchId: string;
+        answers: unknown;
+        stash?: boolean;
+        rollback?: boolean;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.reviseAnswer(batchId, answers, Boolean(stash));
+      return service.reviseAnswer(
+        batchId,
+        answers,
+        Boolean(stash),
+        rollback !== false,
+      );
     },
     claimRunCommand: (
       _root: unknown,

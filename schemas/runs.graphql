@@ -469,6 +469,7 @@ extend type Mutation {
     batchId: ID!
     answers: JSON!
     stash: Boolean = false
+    rollback: Boolean = true
   ): AgentRun!
 
   claimRunCommand(id: ID!): RunCommand!
