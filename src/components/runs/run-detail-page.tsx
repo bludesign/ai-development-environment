@@ -830,6 +830,12 @@ export function RunDetailPage({ runId }: { runId: string }) {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+        {run.error && (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription>{run.error}</AlertDescription>
+          </Alert>
+        )}
         {run.phase === "IMPORTED_ACTIVE_COLLISION" && (
           <Alert variant="destructive">
             <AlertTriangle />
