@@ -38,7 +38,11 @@ export function MarkdownView({
           {value}
         </pre>
       ) : (
-        <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border p-4">
+        // Long words, code fences and GFM tables must not widen the container
+        // they render into — inside the activity feed that would force the
+        // whole table to scroll sideways. Prose wraps; the two block types that
+        // cannot wrap scroll within their own box instead.
+        <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden rounded-lg border p-4 break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
         </div>
       )}

@@ -242,6 +242,20 @@ describe("ActivityRows", () => {
     expect(screen.getByRole("button", { name: "Raw" })).toBeDefined();
   });
 
+  test("wraps expanded detail instead of widening the activity table", () => {
+    const { container } = renderRows([
+      codexEvent("thread/status/changed", { status: { type: "idle" } }, "s1"),
+    ]);
+    fireEvent.click(screen.getByText("Idle"));
+    const detail = container.querySelector("td[colspan='4']");
+    expect(detail).not.toBeNull();
+    // `TableCell` defaults to `whitespace-nowrap`, which would push the whole
+    // feed into a horizontal scroll once the panel holds long content.
+    const classes = detail!.className.split(" ");
+    expect(classes).toContain("whitespace-normal");
+    expect(classes).not.toContain("whitespace-nowrap");
+  });
+
   test("shows Claude result metrics in the row and expanded table", () => {
     renderRows([
       claudeEvent(

@@ -1188,9 +1188,16 @@ export function NotificationsPage() {
                                 />
                               </TableCell>
                             )}
+                            {/*
+                             * The message is the point of the row, so it wraps
+                             * onto as many lines as it needs rather than
+                             * stretching the table: `TableCell` defaults to
+                             * `whitespace-nowrap`, which kept long bodies on a
+                             * single runaway line.
+                             */}
                             <TableCell
                               className={cn(
-                                "min-w-80",
+                                "w-full min-w-80 align-top break-words whitespace-normal",
                                 !editMode && "border-l-4 pl-2",
                                 !editMode &&
                                   (color
@@ -1204,11 +1211,11 @@ export function NotificationsPage() {
                               >
                                 {notification.title}
                               </Link>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
+                              <p className="mt-0.5 text-xs break-words text-muted-foreground">
                                 {notification.body}
                               </p>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-top">
                               <div className="flex flex-wrap gap-1">
                                 {notification.sidebarRequested && (
                                   <Badge variant="outline">
@@ -1227,7 +1234,7 @@ export function NotificationsPage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">
+                            <TableCell className="align-top text-right text-xs text-muted-foreground">
                               <DateTime
                                 kind="time"
                                 value={notification.createdAt}

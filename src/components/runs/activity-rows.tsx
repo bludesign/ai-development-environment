@@ -21,6 +21,16 @@ import { MarkdownView } from "./markdown-view";
 import { useRunLabels } from "./run-labels";
 import type { RunEventView } from "./types";
 
+/**
+ * The expanded panel spans every column of a `table-fixed` table, so it may
+ * never be wider than the collapsed row. `TableCell` defaults to
+ * `whitespace-nowrap` for the summary rows, which would otherwise cascade into
+ * the detail and push the feed into a horizontal scroll; detail content wraps
+ * instead, and anything genuinely unwrappable scrolls inside its own box.
+ */
+const DETAIL_CELL_CLASS =
+  "bg-muted/10 px-4 py-3 align-top break-words whitespace-normal";
+
 function toggleKey(set: Set<string>, key: string): Set<string> {
   const next = new Set(set);
   if (next.has(key)) next.delete(key);
@@ -63,14 +73,17 @@ function RawJson({ value, action }: { value: unknown; action?: ReactNode }) {
 }
 
 function DetailRows({ rows }: { rows: ActivityDetailRow[] }) {
+  // `table-fixed` keeps the nested table inside the width the outer activity
+  // table allocates: an auto-layout table refuses to shrink below its widest
+  // cell's content, which is what pushed the whole feed sideways.
   if (rows.length >= 3)
     return (
       <div className="overflow-hidden rounded-md border">
-        <table className="w-full text-xs">
+        <table className="w-full table-fixed text-xs">
           <tbody className="divide-y">
             {rows.map((row, index) => (
               <tr className="align-top" key={`${row.label}:${index}`}>
-                <th className="w-40 bg-muted/30 px-3 py-2 text-left font-medium text-muted-foreground">
+                <th className="w-40 bg-muted/30 px-3 py-2 text-left font-medium break-words text-muted-foreground">
                   {row.label}
                 </th>
                 <td className="min-w-0 px-3 py-2 break-words whitespace-pre-wrap">
@@ -87,7 +100,7 @@ function DetailRows({ rows }: { rows: ActivityDetailRow[] }) {
     <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-1 text-xs">
       {rows.map((row, index) => (
         <Fragment key={`${row.label}:${index}`}>
-          <dt className="text-muted-foreground">{row.label}</dt>
+          <dt className="break-words text-muted-foreground">{row.label}</dt>
           <dd className="min-w-0 break-words whitespace-pre-wrap">
             {row.value}
           </dd>
@@ -204,7 +217,7 @@ function ActivityRow({
       </TableRow>
       {expanded && (
         <TableRow className="hover:bg-transparent">
-          <TableCell className="bg-muted/10 px-4 py-3" colSpan={4}>
+          <TableCell className={DETAIL_CELL_CLASS} colSpan={4}>
             <div
               className={cn(
                 "w-full min-w-0 space-y-2 break-words",
@@ -321,7 +334,7 @@ export function ActivityRows({ events }: { events: RunEventView[] }) {
             </TableRow>
             {groupExpanded && node.detailMode === "representative" && (
               <TableRow className="hover:bg-transparent">
-                <TableCell className="bg-muted/10 px-4 py-3" colSpan={4}>
+                <TableCell className={DETAIL_CELL_CLASS} colSpan={4}>
                   <div className="w-full min-w-0 space-y-2 break-words">
                     <ActivityDetail
                       event={node.representative}
