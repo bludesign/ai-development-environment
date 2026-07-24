@@ -34,6 +34,45 @@ function codexEvent(
   };
 }
 
+function opencodeEvent(
+  type: string,
+  properties: unknown,
+  id: string,
+  sequence = 0,
+): RunEventView {
+  return {
+    id,
+    runId: "run",
+    attemptId: null,
+    sequence,
+    type: type.toUpperCase().replaceAll(".", "_"),
+    summary: type,
+    detailMarkdown: null,
+    raw: { id: `raw:${id}`, type, properties },
+    createdAt: "2026-07-23T19:41:36.000Z",
+    supersededAt: null,
+  };
+}
+
+function claudeEvent(
+  type: string,
+  raw: Record<string, unknown>,
+  id: string,
+): RunEventView {
+  return {
+    id,
+    runId: "run",
+    attemptId: null,
+    sequence: 0,
+    type: type.toUpperCase(),
+    summary: type,
+    detailMarkdown: null,
+    raw: { type, session_id: "session", uuid: id, ...raw },
+    createdAt: "2026-07-23T19:41:36.000Z",
+    supersededAt: null,
+  };
+}
+
 afterEach(() => cleanup());
 
 describe("ActivityRows", () => {
@@ -119,5 +158,110 @@ describe("ActivityRows", () => {
     expect(toggle).toBeDefined();
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "Copy" })).toBeDefined();
+  });
+
+  test("shows OpenCode message deltas as one expandable rendered message", () => {
+    renderRows([
+      opencodeEvent(
+        "message.part.delta",
+        {
+          messageID: "message",
+          partID: "part",
+          field: "text",
+          delta: "The user",
+        },
+        "a",
+        1,
+      ),
+      opencodeEvent(
+        "message.part.delta",
+        {
+          messageID: "message",
+          partID: "part",
+          field: "text",
+          delta: " wants a commit.",
+        },
+        "b",
+        2,
+      ),
+      opencodeEvent(
+        "message.updated",
+        { info: { id: "message", role: "assistant", finish: "tool-calls" } },
+        "c",
+        3,
+      ),
+    ]);
+    expect(screen.getByText("The user wants a commit.")).toBeDefined();
+    expect(screen.getByText("Reasoning")).toBeDefined();
+    expect(screen.queryByText("Message Text Delta")).toBeNull();
+    fireEvent.click(screen.getByText("The user wants a commit."));
+    expect(screen.getByRole("button", { name: "Raw" })).toBeDefined();
+    expect(screen.queryByText("Message Text Delta")).toBeNull();
+  });
+
+  test("expands an OpenCode tool lifecycle into a structured result table", () => {
+    renderRows([
+      opencodeEvent(
+        "message.part.updated",
+        {
+          part: {
+            id: "part",
+            messageID: "message",
+            type: "tool",
+            tool: "bash",
+            state: { status: "pending", input: {} },
+          },
+        },
+        "a",
+        1,
+      ),
+      opencodeEvent(
+        "message.part.updated",
+        {
+          part: {
+            id: "part",
+            messageID: "message",
+            type: "tool",
+            tool: "bash",
+            state: {
+              status: "completed",
+              title: "git status",
+              input: { command: "git status" },
+              output: "On branch feature/activity",
+              metadata: { exit: 0 },
+            },
+          },
+        },
+        "b",
+        2,
+      ),
+    ]);
+    fireEvent.click(screen.getByText(/git status · Completed/));
+    expect(screen.getByText("Output")).toBeDefined();
+    expect(screen.getByText("On branch feature/activity")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Raw" })).toBeDefined();
+  });
+
+  test("shows Claude result metrics in the row and expanded table", () => {
+    renderRows([
+      claudeEvent(
+        "result",
+        {
+          subtype: "success",
+          is_error: false,
+          duration_ms: 16_137,
+          duration_api_ms: 13_518,
+          ttft_ms: 1_818,
+          num_turns: 3,
+          total_cost_usd: 0.0749253,
+          usage: { input_tokens: 6, output_tokens: 1_118 },
+        },
+        "result",
+      ),
+    ]);
+    fireEvent.click(screen.getByText("Success · 16.1s · 3 turns · $0.07"));
+    expect(screen.getByText("API duration")).toBeDefined();
+    expect(screen.getByText("13.5s")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Raw" })).toBeDefined();
   });
 });

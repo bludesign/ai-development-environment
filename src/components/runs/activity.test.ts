@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { Brain, Gauge, MessageSquare, Server } from "lucide-react";
+import {
+  Brain,
+  CheckCircle2,
+  Gauge,
+  MessageSquare,
+  Server,
+  Terminal,
+} from "lucide-react";
 
 import {
   codexMethod,
@@ -34,6 +41,31 @@ function codex(
   return event({
     type: method.toUpperCase().replaceAll("/", "_"),
     raw: { method, params },
+    ...overrides,
+  });
+}
+
+function opencode(
+  type: string,
+  properties: unknown,
+  overrides: Partial<RunEventView> = {},
+) {
+  return event({
+    type: type.toUpperCase().replaceAll(".", "_"),
+    summary: type,
+    raw: { id: `raw:${overrides.id ?? "event"}`, type, properties },
+    ...overrides,
+  });
+}
+
+function claude(
+  type: string,
+  raw: Record<string, unknown>,
+  overrides: Partial<RunEventView> = {},
+) {
+  return event({
+    type: type.toUpperCase(),
+    raw: { type, session_id: "session", uuid: "uuid", ...raw },
     ...overrides,
   });
 }
@@ -212,6 +244,108 @@ describe("describeActivity", () => {
     expect(descriptor.methodTitle).toBeNull();
     expect(descriptor.line).toBe("Working on it");
   });
+
+  test("parses a completed OpenCode tool part", () => {
+    const descriptor = describeActivity(
+      opencode("message.part.updated", {
+        part: {
+          id: "part_1",
+          messageID: "message_1",
+          type: "tool",
+          tool: "bash",
+          state: {
+            status: "completed",
+            title: "git status",
+            input: { command: "git status" },
+            output: "On branch feature/activity",
+            metadata: { exit: 0 },
+            time: { start: 1_000, end: 1_128 },
+          },
+        },
+      }),
+    );
+    expect(descriptor.icon).toBe(Terminal);
+    expect(descriptor.methodTitle).toBe("Bash Tool");
+    expect(descriptor.line).toBe("git status · Completed · 128ms · exit 0");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "Output",
+      value: "On branch feature/activity",
+    });
+  });
+
+  test("summarizes OpenCode step usage and cost", () => {
+    const descriptor = describeActivity(
+      opencode("message.part.updated", {
+        part: {
+          id: "part_1",
+          messageID: "message_1",
+          type: "step-finish",
+          reason: "tool-calls",
+          tokens: { total: 10_019, input: 9_887, output: 111, reasoning: 21 },
+          cost: 0.00142114,
+        },
+      }),
+      "en-US",
+    );
+    expect(descriptor.methodTitle).toBe("Step Finished");
+    expect(descriptor.line).toContain("↑9,887");
+    expect(descriptor.line).toContain("$0.001421");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "Reasoning tokens",
+      value: "21",
+    });
+  });
+
+  test("formats Claude initialization metadata", () => {
+    const descriptor = describeActivity(
+      claude("system", {
+        subtype: "init",
+        model: "claude-sonnet-5",
+        claude_code_version: "2.1.216",
+        permissionMode: "bypassPermissions",
+        cwd: "/repo",
+        tools: ["Bash", "Read"],
+        agents: ["Explore", "Plan"],
+        skills: ["verify"],
+        plugins: [{ name: "review" }],
+        mcp_servers: [{ name: "codegraph", status: "connected" }],
+      }),
+    );
+    expect(descriptor.methodTitle).toBe("Claude Initialization");
+    expect(descriptor.line).toContain("claude-sonnet-5");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "MCP servers",
+      value: "codegraph · Connected",
+    });
+  });
+
+  test("formats a Claude result as execution metrics instead of repeated output", () => {
+    const descriptor = describeActivity(
+      claude("result", {
+        subtype: "success",
+        is_error: false,
+        duration_ms: 16_137,
+        duration_api_ms: 13_518,
+        ttft_ms: 1_818,
+        num_turns: 3,
+        total_cost_usd: 0.0749253,
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 6,
+          output_tokens: 1_118,
+          cache_read_input_tokens: 50_051,
+        },
+      }),
+      "en-US",
+    );
+    expect(descriptor.icon).toBe(CheckCircle2);
+    expect(descriptor.methodTitle).toBe("Result");
+    expect(descriptor.line).toBe("Success · 16.1s · 3 turns · $0.07");
+    expect(descriptor.detailRows).toContainEqual({
+      label: "Cache read tokens",
+      value: "50,051",
+    });
+  });
 });
 
 describe("truncateJson", () => {
@@ -292,5 +426,114 @@ describe("groupActivity", () => {
       "group",
       "single",
     ]);
+  });
+
+  test("combines OpenCode deltas by part id into one rendered result", () => {
+    const nodes = groupActivity([
+      opencode(
+        "message.part.delta",
+        {
+          messageID: "message_1",
+          partID: "part_1",
+          field: "text",
+          delta: "The user",
+        },
+        { id: "a", sequence: 1 },
+      ),
+      opencode(
+        "message.part.delta",
+        {
+          messageID: "message_1",
+          partID: "part_1",
+          field: "text",
+          delta: " wants a commit.",
+        },
+        { id: "b", sequence: 2 },
+      ),
+      opencode(
+        "message.updated",
+        { info: { id: "message_1", role: "assistant", finish: "tool-calls" } },
+        { id: "c", sequence: 3 },
+      ),
+    ]);
+    expect(nodes).toHaveLength(2);
+    const group = nodes[0]!;
+    expect(group.kind).toBe("group");
+    if (group.kind !== "group") return;
+    expect(group.detailMode).toBe("representative");
+    expect(group.children).toHaveLength(2);
+    expect(group.representative.type).toBe("REASONING");
+    expect(group.representative.summary).toBe("The user wants a commit.");
+    expect(group.representative.raw).toHaveLength(2);
+  });
+
+  test("uses the last of multiple OpenCode text parts as the assistant message", () => {
+    const nodes = groupActivity([
+      opencode(
+        "message.part.delta",
+        { messageID: "message_1", partID: "reasoning", delta: "Done." },
+        { id: "a", sequence: 1 },
+      ),
+      opencode(
+        "message.part.delta",
+        { messageID: "message_1", partID: "answer", delta: "Committed " },
+        { id: "b", sequence: 2 },
+      ),
+      opencode(
+        "message.part.delta",
+        { messageID: "message_1", partID: "answer", delta: "successfully." },
+        { id: "c", sequence: 3 },
+      ),
+    ]);
+    expect(nodes).toHaveLength(2);
+    const answer = nodes[1]!;
+    expect(answer.kind).toBe("group");
+    if (answer.kind !== "group") return;
+    expect(answer.representative.type).toBe("ASSISTANT_MESSAGE");
+    expect(itemGroupTitle(answer.representative)).toBe("Assistant Message");
+    expect(answer.representative.summary).toBe("Committed successfully.");
+  });
+
+  test("folds OpenCode tool updates into their completed state", () => {
+    const nodes = groupActivity([
+      opencode(
+        "message.part.updated",
+        {
+          part: {
+            id: "part_1",
+            messageID: "message_1",
+            type: "tool",
+            tool: "bash",
+            state: { status: "pending", input: {} },
+          },
+        },
+        { id: "a", sequence: 1 },
+      ),
+      opencode(
+        "message.part.updated",
+        {
+          part: {
+            id: "part_1",
+            messageID: "message_1",
+            type: "tool",
+            tool: "bash",
+            state: {
+              status: "completed",
+              title: "git status",
+              input: { command: "git status" },
+              output: "clean",
+            },
+          },
+        },
+        { id: "b", sequence: 2 },
+      ),
+    ]);
+    expect(nodes).toHaveLength(1);
+    const group = nodes[0]!;
+    expect(group.kind).toBe("group");
+    if (group.kind !== "group") return;
+    expect(group.detailMode).toBe("representative");
+    expect(group.representative.id).toBe("b");
+    expect(describeActivity(group.representative).line).toContain("Completed");
   });
 });

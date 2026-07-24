@@ -63,12 +63,34 @@ function RawJson({ value, action }: { value: unknown; action?: ReactNode }) {
 }
 
 function DetailRows({ rows }: { rows: ActivityDetailRow[] }) {
+  if (rows.length >= 3)
+    return (
+      <div className="overflow-hidden rounded-md border">
+        <table className="w-full text-xs">
+          <tbody className="divide-y">
+            {rows.map((row, index) => (
+              <tr className="align-top" key={`${row.label}:${index}`}>
+                <th className="w-40 bg-muted/30 px-3 py-2 text-left font-medium text-muted-foreground">
+                  {row.label}
+                </th>
+                <td className="min-w-0 px-3 py-2 break-words whitespace-pre-wrap">
+                  {row.value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+
   return (
     <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-1 text-xs">
-      {rows.map((row) => (
-        <Fragment key={row.label}>
+      {rows.map((row, index) => (
+        <Fragment key={`${row.label}:${index}`}>
           <dt className="text-muted-foreground">{row.label}</dt>
-          <dd className="min-w-0 break-words">{row.value}</dd>
+          <dd className="min-w-0 break-words whitespace-pre-wrap">
+            {row.value}
+          </dd>
         </Fragment>
       ))}
     </dl>
@@ -204,8 +226,8 @@ function ActivityRow({
 
 /**
  * Renders the grouped activity feed as `<TableBody>` rows. Codex item lifecycles
- * collapse into one expandable row whose children are the underlying
- * notifications; everything else renders as a single expandable row.
+ * expose their underlying notifications; OpenCode text and tool lifecycles
+ * expand directly into their combined or completed structured result.
  */
 export function ActivityRows({ events }: { events: RunEventView[] }) {
   const t = useTranslations("runs");
@@ -297,7 +319,21 @@ export function ActivityRows({ events }: { events: RunEventView[] }) {
                 />
               </TableCell>
             </TableRow>
+            {groupExpanded && node.detailMode === "representative" && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell className="bg-muted/10 px-4 py-3" colSpan={4}>
+                  <div className="w-full min-w-0 space-y-2 break-words">
+                    <ActivityDetail
+                      event={node.representative}
+                      onToggleRaw={() => toggleRaw(node.key)}
+                      showRaw={rawShown.has(node.key)}
+                    />
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
             {groupExpanded &&
+              node.detailMode === "children" &&
               node.children.map((child) => {
                 const childDescriptor = describeActivity(child, locale);
                 return (
