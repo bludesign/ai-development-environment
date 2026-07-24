@@ -106,16 +106,19 @@ import {
   RawConfigEditor,
 } from "./config-fields/config-fields-editor";
 import { hasConfigDescriptor } from "./config-fields/descriptors";
+import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
 import {
   workflowFlowElements,
   workflowNodeTypes,
   type WorkflowFlowNode,
 } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import {
   emptyDefinition,
   type WorkflowCatalogEntry,
   type WorkflowDefinition,
   type WorkflowDiagnostic,
+  type WorkflowHandleLayout,
   type WorkflowNodeDefinition,
   type WorkflowSummary,
   type WorkflowTriggerCatalogEntry,
@@ -234,6 +237,7 @@ function providesByNodeMap(
 
 function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -262,6 +266,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
+  // Off by default: laying a workflow out means panning and zooming around a
+  // canvas bigger than the pane, which a fit lock would fight.
+  const [locked, setLocked] = useState(false);
 
   const categories = useMemo(
     () =>
@@ -748,6 +755,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       ) ?? [],
     [catalog, search],
   );
+  // Adding or removing a step re-fits a locked canvas; moving one does not.
+  const fitSignature = useMemo(
+    () =>
+      `${definition.triggers.map(({ id }) => id).join()}|${definition.nodes
+        .map(({ id }) => id)
+        .join()}|${definition.edges.map(({ id }) => id).join()}|${
+        definition.editor.handleLayout ?? "SIDES"
+      }`,
+    [definition],
+  );
   const stepGroups = useMemo(
     () => [...groupByCategory(filteredSteps)],
     [filteredSteps],
@@ -973,7 +990,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                       {entry.label}
                                     </ItemTitle>
                                     <ItemDescription className="text-[10px]">
-                                      {entry.kind}
+                                      {labels.kind(entry.kind)}
                                     </ItemDescription>
                                   </ItemContent>
                                 </button>
@@ -1012,8 +1029,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                             type="button"
                           >
                             <ItemContent>
-                              <ItemTitle>{entry.name ?? entry.kind}</ItemTitle>
-                              <ItemDescription>{entry.kind}</ItemDescription>
+                              <ItemTitle>
+                                {entry.name ?? labels.kind(entry.kind)}
+                              </ItemTitle>
+                              <ItemDescription>
+                                {labels.kind(entry.kind)}
+                              </ItemDescription>
                             </ItemContent>
                           </button>
                         </Item>
@@ -1102,11 +1123,22 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 removeItems(removed.map(({ id }) => id))
               }
               onPaneClick={() => setSelectedEdgeId(null)}
+              panOnDrag={!locked}
+              preventScrolling={!locked}
               proOptions={{ hideAttribution: true }}
+              zoomOnDoubleClick={!locked}
+              zoomOnPinch={!locked}
+              zoomOnScroll={!locked}
             >
               <Background gap={20} size={1} />
-              <Controls />
-              <MiniMap pannable zoomable />
+              <Controls showFitView={!locked} showZoom={!locked}>
+                <WorkflowFitLockButton
+                  locked={locked}
+                  onToggle={() => setLocked((current) => !current)}
+                />
+              </Controls>
+              <WorkflowFitLock locked={locked} signature={fitSignature} />
+              {!locked && <MiniMap pannable zoomable />}
             </ReactFlow>
           </div>
           {diagnostics.length > 0 && (
@@ -1143,7 +1175,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                 : "outline"
                             }
                           >
-                            {diagnostic.code}
+                            {labels.diagnosticCode(diagnostic.code)}
                           </Badge>
                         </ItemActions>
                       </button>
@@ -1211,6 +1243,35 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               </Select>
             </Field>
             <Field>
+              <FieldLabel htmlFor="workflow-handle-layout">
+                {t("connectorLayout")}
+              </FieldLabel>
+              <Select
+                onValueChange={(value) =>
+                  commitDefinition({
+                    ...definition,
+                    editor: {
+                      ...definition.editor,
+                      handleLayout: value as WorkflowHandleLayout,
+                    },
+                  })
+                }
+                value={definition.editor.handleLayout ?? "SIDES"}
+              >
+                <SelectTrigger className="w-full" id="workflow-handle-layout">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SIDES">
+                    {t("connectorLayouts.SIDES")}
+                  </SelectItem>
+                  <SelectItem value="TOP_BOTTOM">
+                    {t("connectorLayouts.TOP_BOTTOM")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
               <FieldLabel htmlFor="workflow-concurrency">
                 {t("maxConcurrentRuns")}
               </FieldLabel>
@@ -1246,8 +1307,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>{selected.name ?? selected.kind}</SheetTitle>
-                <SheetDescription>{selected.kind}</SheetDescription>
+                <SheetTitle>
+                  {selected.name ?? labels.kind(selected.kind)}
+                </SheetTitle>
+                <SheetDescription>
+                  {labels.kind(selected.kind)}
+                </SheetDescription>
               </SheetHeader>
               <FieldGroup className="gap-4 px-4">
                 <Field>

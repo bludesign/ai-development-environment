@@ -73,6 +73,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun } from "./types";
 
 const RUN_DETAIL_FIELDS = `
@@ -147,6 +148,7 @@ function jsonText(value: unknown) {
 
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -374,7 +376,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                 {run.workflow.name} #{run.displayNumber}
               </h1>
               <Badge variant={workflowStatusVariant(run.status)}>
-                {run.status}
+                {labels.status(run.status)}
               </Badge>
               <Badge variant="outline">v{run.version.version}</Badge>
               <Badge variant="outline">
@@ -382,7 +384,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {run.triggerKind} · {run.triggerSubjectKey}
+              {labels.kind(run.triggerKind)} · {run.triggerSubjectKey}
             </p>
           </div>
         </div>
@@ -478,7 +480,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         return (
           <Card key={String(batch.id)}>
             <CardHeader>
-              <CardTitle>{t("questionFrom", { step: attempt.kind })}</CardTitle>
+              <CardTitle>
+                {t("questionFrom", { step: labels.kind(attempt.kind) })}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {questions.map((question) => (
@@ -627,7 +631,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                 <SelectContent>
                   {run.version.definition.nodes.map((node) => (
                     <SelectItem key={node.id} value={node.id}>
-                      {node.name ?? node.kind}
+                      {node.name ?? labels.kind(node.kind)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -730,7 +734,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                     <div className="z-10 mt-1 size-6 rounded-full border bg-background" />
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{event.type}</Badge>
+                        <Badge variant="outline">
+                          {labels.eventType(event.type)}
+                        </Badge>
                         <DateTime kind="relative" value={event.createdAt} />
                       </div>
                       <p className="mt-1 text-sm">{event.message}</p>
@@ -779,7 +785,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                         key={attempt.id}
                       >
                         <TableCell>
-                          <p className="font-medium">{attempt.kind}</p>
+                          <p className="font-medium">
+                            {labels.kind(attempt.kind)}
+                          </p>
                           <p className="font-mono text-[10px] text-muted-foreground">
                             {attempt.nodeId}
                           </p>
@@ -788,7 +796,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                           <Badge
                             variant={workflowStatusVariant(attempt.status)}
                           >
-                            {attempt.status}
+                            {labels.status(attempt.status)}
                           </Badge>
                         </TableCell>
                         <TableCell>{attempt.generation}</TableCell>

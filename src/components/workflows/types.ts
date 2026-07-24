@@ -1,5 +1,12 @@
 export type WorkflowPosition = { x: number; y: number };
 
+/**
+ * Which edges of a step card its connectors sit on: `SIDES` runs the graph
+ * left to right, `TOP_BOTTOM` runs it downwards. Whole-workflow, so every step
+ * agrees and edges never cut across a card.
+ */
+export type WorkflowHandleLayout = "SIDES" | "TOP_BOTTOM";
+
 export type WorkflowTriggerDefinition = {
   id: string;
   kind: string;
@@ -40,7 +47,10 @@ export type WorkflowDefinition = {
   triggers: WorkflowTriggerDefinition[];
   nodes: WorkflowNodeDefinition[];
   edges: WorkflowEdgeDefinition[];
-  editor: { viewport?: { x: number; y: number; zoom: number } };
+  editor: {
+    viewport?: { x: number; y: number; zoom: number };
+    handleLayout?: WorkflowHandleLayout;
+  };
 };
 
 export type WorkflowCatalogEntry = {

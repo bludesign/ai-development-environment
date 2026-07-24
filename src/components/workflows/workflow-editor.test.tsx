@@ -24,8 +24,11 @@ vi.mock("@xyflow/react", async () => {
   return {
     addEdge: (edge: unknown, current: unknown[]) => [...current, edge],
     Background: () => null,
+    ControlButton: () => null,
     Controls: () => null,
     MiniMap: () => null,
+    useReactFlow: () => ({ fitView: vi.fn() }),
+    useStore: () => 0,
     ReactFlow: ({
       children,
       onEdgeClick,

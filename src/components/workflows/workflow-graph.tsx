@@ -12,16 +12,20 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { GitFork, Play, RotateCcw } from "lucide-react";
-import { useMemo } from "react";
+import { RotateCcw } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
+import { workflowCategory, WorkflowCategoryIcon } from "./workflow-icons";
+import { useWorkflowLabels } from "./workflow-labels";
 import type {
   WorkflowAttempt,
   WorkflowDefinition,
   WorkflowDiagnostic,
+  WorkflowHandleLayout,
 } from "./types";
 
 type WorkflowNodeData = {
@@ -29,6 +33,7 @@ type WorkflowNodeData = {
   kind: string;
   category: string;
   trigger: boolean;
+  handleLayout: WorkflowHandleLayout;
   status: string | null;
   phase: string | null;
   attemptLabel: string | null;
@@ -91,7 +96,9 @@ function sourceHandles(kind: string): Array<{ id: string; label: string }> {
 }
 
 function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
+  const labels = useWorkflowLabels();
   const handles = sourceHandles(data.kind);
+  const vertical = data.handleLayout === "TOP_BOTTOM";
   return (
     <div
       className={cn(
@@ -104,22 +111,22 @@ function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
         <Handle
           className="size-3! border-2! border-background! bg-muted-foreground!"
           id="input"
-          position={Position.Left}
+          position={vertical ? Position.Top : Position.Left}
           type="target"
         />
       )}
       <div className="flex items-start gap-2">
         <div className="mt-0.5 rounded-md bg-muted p-1.5">
-          {data.trigger ? (
-            <Play className="size-3.5" />
-          ) : (
-            <GitFork className="size-3.5" />
-          )}
+          <WorkflowCategoryIcon
+            category={data.category}
+            className="size-3.5"
+            trigger={data.trigger}
+          />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{data.label}</p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {data.category} · {data.kind}
+            {data.category} · {labels.kind(data.kind)}
           </p>
         </div>
       </div>
@@ -130,7 +137,7 @@ function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
               className="text-[10px]"
               variant={workflowStatusVariant(data.status)}
             >
-              {data.status}
+              {labels.status(data.status)}
             </Badge>
           )}
           {data.attemptLabel && (
@@ -172,8 +179,14 @@ function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
           )}
           id={handle.id}
           key={handle.id}
-          position={Position.Right}
-          style={{ top: `${35 + index * 28}%` }}
+          position={vertical ? Position.Bottom : Position.Right}
+          /* The two outcomes share one edge of the card, so they are spread
+             along it — down the side, or across the bottom. */
+          style={
+            vertical
+              ? { left: `${35 + index * 28}%` }
+              : { top: `${35 + index * 28}%` }
+          }
           title={handle.label}
           type="source"
         />
@@ -213,6 +226,7 @@ export function workflowFlowElements(
     iterations.set(attempt.nodeId, values);
   }
   const diagnostics = options.diagnostics ?? [];
+  const handleLayout = definition.editor.handleLayout ?? "SIDES";
   const nodes: WorkflowFlowNode[] = [
     ...definition.triggers.map((trigger) => ({
       id: trigger.id,
@@ -221,8 +235,9 @@ export function workflowFlowElements(
       data: {
         label: trigger.name ?? trigger.kind,
         kind: trigger.kind,
-        category: "Trigger",
+        category: workflowCategory(trigger.kind, true),
         trigger: true,
+        handleLayout,
         status: null,
         phase: null,
         attemptLabel: null,
@@ -256,8 +271,11 @@ export function workflowFlowElements(
         data: {
           label: node.name ?? node.kind,
           kind: node.kind,
-          category: options.categories?.get(node.kind) ?? "Step",
+          category:
+            options.categories?.get(node.kind) ??
+            workflowCategory(node.kind, false),
           trigger: false,
+          handleLayout,
           status: base?.status ?? null,
           phase: base?.phase ?? null,
           attemptLabel: labelParts.length ? labelParts.join(" · ") : null,
@@ -313,6 +331,17 @@ export function WorkflowGraph({
       }),
     [attempts, categories, definition, diagnostics, generation],
   );
+  // A read-only graph is there to be read, so it starts pinned to the pane:
+  // no stray scroll wheel zooming it into a corner, nothing to fit back. The
+  // control stack keeps one button to hand panning and zooming back.
+  const [locked, setLocked] = useState(true);
+  const signature = useMemo(
+    () =>
+      `${elements.nodes.map(({ id }) => id).join()}|${elements.edges
+        .map(({ id }) => id)
+        .join()}|${definition.editor.handleLayout ?? "SIDES"}`,
+    [definition, elements],
+  );
   return (
     <div
       className={cn(
@@ -331,11 +360,27 @@ export function WorkflowGraph({
         nodesConnectable={false}
         nodesDraggable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
+        panOnDrag={!locked}
+        panOnScroll={false}
+        preventScrolling={!locked}
         proOptions={{ hideAttribution: true }}
+        zoomOnDoubleClick={!locked}
+        zoomOnPinch={!locked}
+        zoomOnScroll={!locked}
       >
         <Background gap={20} size={1} />
-        <Controls showInteractive={false} />
-        {!compact && <MiniMap pannable zoomable />}
+        <Controls
+          showFitView={!locked}
+          showInteractive={false}
+          showZoom={!locked}
+        >
+          <WorkflowFitLockButton
+            locked={locked}
+            onToggle={() => setLocked((current) => !current)}
+          />
+        </Controls>
+        <WorkflowFitLock locked={locked} signature={signature} />
+        {!compact && !locked && <MiniMap pannable zoomable />}
       </ReactFlow>
     </div>
   );

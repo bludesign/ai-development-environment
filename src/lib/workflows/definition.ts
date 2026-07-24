@@ -964,8 +964,13 @@ export const workflowDefinitionSchema = z.object({
       viewport: z
         .object({ x: z.number(), y: z.number(), zoom: z.number().positive() })
         .optional(),
+      // Which edges of a step card its connectors sit on. Presentation only —
+      // handle ids are unchanged, so existing edges survive a switch — but it
+      // travels with the definition so a published run draws the way its
+      // author laid it out.
+      handleLayout: z.enum(["SIDES", "TOP_BOTTOM"]).default("SIDES"),
     })
-    .default({}),
+    .default({ handleLayout: "SIDES" }),
 });
 
 export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;

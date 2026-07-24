@@ -30,6 +30,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun } from "./types";
 
 type AcceptedWorkflow = {
@@ -58,6 +59,7 @@ export function WorkflowResourcePanel({
   sessionData: Record<string, unknown>;
 }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [workflows, setWorkflows] = useState<AcceptedWorkflow[]>([]);
   const [triggering, setTriggering] = useState<string | null>(null);
@@ -183,7 +185,7 @@ export function WorkflowResourcePanel({
                   {current.workflow.name} #{current.displayNumber}
                 </Link>
                 <Badge variant={workflowStatusVariant(current.status)}>
-                  {current.status}
+                  {labels.status(current.status)}
                 </Badge>
               </div>
               <Button asChild size="sm" variant="ghost">
@@ -203,7 +205,7 @@ export function WorkflowResourcePanel({
                 {runs.slice(1, 6).map((run) => (
                   <Button asChild key={run.id} size="sm" variant="ghost">
                     <Link href={`/workflows/runs/${run.id}`}>
-                      #{run.displayNumber} · {run.status}
+                      #{run.displayNumber} · {labels.status(run.status)}
                     </Link>
                   </Button>
                 ))}

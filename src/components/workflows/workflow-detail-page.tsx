@@ -43,6 +43,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -82,6 +83,7 @@ function downloadJson(value: unknown, filename: string) {
 
 export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
@@ -299,7 +301,9 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
             <CardTitle>{t("overlapPolicy")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Badge variant="outline">{workflow.overlapPolicy}</Badge>
+            <Badge variant="outline">
+              {labels.overlapPolicy(workflow.overlapPolicy)}
+            </Badge>
           </CardContent>
         </Card>
         <Card>
@@ -350,10 +354,10 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                       </TableCell>
                       <TableCell>
                         <Badge variant={workflowStatusVariant(run.status)}>
-                          {run.status}
+                          {labels.status(run.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{run.triggerKind}</TableCell>
+                      <TableCell>{labels.kind(run.triggerKind)}</TableCell>
                       <TableCell>
                         {run.startedAt ? (
                           <DateTime kind="relative" value={run.startedAt} />
