@@ -120,7 +120,11 @@ import {
   RawConfigEditor,
 } from "./config-fields/config-fields-editor";
 import { hasConfigDescriptor } from "./config-fields/descriptors";
-import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
+import {
+  WorkflowFitLock,
+  WorkflowFitLockButton,
+  workflowFitLockPaneClass,
+} from "./workflow-fit-lock";
 import {
   MINIMAP_NODE_RADIUS,
   workflowFlowElements,
@@ -1209,6 +1213,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             )}
             <WorkflowNodeActionsContext value={nodeActions}>
               <ReactFlow
+                className={locked ? workflowFitLockPaneClass : undefined}
                 colorMode="system"
                 deleteKeyCode={["Backspace", "Delete"]}
                 edges={edges}

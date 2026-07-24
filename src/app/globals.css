@@ -121,6 +121,17 @@
   }
 }
 
+/* React Flow pins `touch-action: none` on its pane so it can own every touch
+   gesture. A graph locked to fit has panning and zooming turned off, so it
+   owns nothing — but the pane still swallows the drag, leaving the gesture
+   dead: the graph will not move and the page underneath cannot scroll past it.
+   This hands the gesture back to the browser. It sits outside `@layer` on
+   purpose: React Flow's stylesheet is imported unlayered above, and unlayered
+   rules beat layered ones, so a Tailwind utility could not override it. */
+.workflow-fit-locked .react-flow__pane {
+  touch-action: auto;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

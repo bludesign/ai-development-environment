@@ -27,7 +27,11 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 
-import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
+import {
+  WorkflowFitLock,
+  WorkflowFitLockButton,
+  workflowFitLockPaneClass,
+} from "./workflow-fit-lock";
 import { workflowCategory, WorkflowCategoryIcon } from "./workflow-icons";
 import { useWorkflowLabels } from "./workflow-labels";
 import type {
@@ -413,6 +417,7 @@ export function WorkflowGraph({
       )}
     >
       <ReactFlow
+        className={cn(locked && workflowFitLockPaneClass)}
         colorMode="system"
         edges={elements.edges}
         fitView

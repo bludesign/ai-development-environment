@@ -40,6 +40,18 @@ export function WorkflowFitLock({
 }
 
 /**
+ * Class for the `<ReactFlow>` wrapper of a locked graph. React Flow disables
+ * panning in JavaScript, but its stylesheet pins `touch-action: none` on the
+ * pane unconditionally, so on a touch screen a drag that starts over the graph
+ * is swallowed: the graph refuses to move and the page underneath cannot
+ * scroll. The rule this hooks into lives in `globals.css` rather than being a
+ * Tailwind utility, because React Flow's stylesheet is imported unlayered and
+ * would outrank anything in `@layer utilities`. Cards sit outside the pane and
+ * are unaffected, so a tap still selects a step.
+ */
+export const workflowFitLockPaneClass = "workflow-fit-locked";
+
+/**
  * The lock toggle, styled as one more button in React Flow's control stack.
  * It always names the action rather than the state: locked shows "unlock",
  * which is the only control left on screen while the zoom and fit buttons are
