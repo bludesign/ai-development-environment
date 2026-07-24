@@ -9,13 +9,21 @@ import {
   Position,
   ReactFlow,
   useStoreApi,
+  type Dimensions,
   type Edge,
   type Node,
+  type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
 import { Copy, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { createContext, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -398,6 +406,42 @@ export function WorkflowGraph({
       }),
     [attempts, categories, definition, diagnostics, generation],
   );
+  // React Flow measures each card in the DOM and reports the size back through
+  // `onNodesChange`. A graph that hands it a `nodes` array and drops those
+  // changes never gets the sizes into that array, and everything reading it
+  // rather than React Flow's internal copy — the minimap, the check for whether
+  // the graph is ready to be fitted — sees a graph of zero-sized steps. The
+  // editor keeps its whole array in state for editing; a read-only graph only
+  // needs the measurements back, so it holds those and stays a plain function
+  // of the definition it was handed.
+  const [sizes, setSizes] = useState<Record<string, Dimensions>>({});
+  const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {
+    setSizes((current) => {
+      let next = current;
+      for (const change of changes) {
+        if (change.type !== "dimensions" || !change.dimensions) continue;
+        const previous = current[change.id];
+        if (
+          previous?.width === change.dimensions.width &&
+          previous.height === change.dimensions.height
+        )
+          continue;
+        // Re-measuring settles within a frame or two of mounting, so a fresh
+        // object here would restart the render it came from over and over.
+        next = next === current ? { ...current } : next;
+        next[change.id] = change.dimensions;
+      }
+      return next;
+    });
+  }, []);
+  const nodes = useMemo(
+    () =>
+      elements.nodes.map((node) => {
+        const measured = sizes[node.id];
+        return measured ? { ...node, measured } : node;
+      }),
+    [elements, sizes],
+  );
   // A read-only graph is there to be read, so it starts pinned to the pane:
   // no stray scroll wheel zooming it into a corner, nothing to fit back. The
   // control stack keeps one button to hand panning and zooming back.
@@ -420,14 +464,19 @@ export function WorkflowGraph({
         className={cn(locked && workflowFitLockPaneClass)}
         colorMode="system"
         edges={elements.edges}
+        // Steps here are read, not picked: a click opens whatever the page
+        // hangs off `onNodeClick`, which fires either way, and nothing acts on
+        // a selection, so a card should not wear a selected ring.
+        elementsSelectable={false}
         fitView
         maxZoom={1.5}
         minZoom={0.2}
         nodeTypes={workflowNodeTypes}
-        nodes={elements.nodes}
+        nodes={nodes}
         nodesConnectable={false}
         nodesDraggable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
+        onNodesChange={onNodesChange}
         panOnDrag={!locked}
         panOnScroll={false}
         preventScrolling={!locked}
