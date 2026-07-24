@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  computeWorkflowPathAvailability,
   emptyWorkflowDefinition,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
@@ -200,6 +201,28 @@ describe("workflow definition validation", () => {
         }),
       ]),
     );
+  });
+
+  test("computeWorkflowPathAvailability scopes availability to reachable branches", () => {
+    const value = definition([node("left"), node("right")]);
+    value.edges.push({
+      id: "start-right",
+      source: "manual",
+      target: "right",
+      sourceHandle: "success",
+      targetHandle: "input",
+    });
+    const { availableBefore, provides } =
+      computeWorkflowPathAvailability(value);
+
+    expect(provides.get("left")).toContain("steps.left.*");
+    expect(provides.get("left")).toContain("ticket.*");
+
+    const rightAvailable = availableBefore.get("right") ?? [];
+    // The parallel branch cannot see the sibling's step output...
+    expect(rightAvailable).not.toContain("steps.left.*");
+    // ...but always has the guaranteed workflow identity.
+    expect(rightAvailable).toContain("workflow.*");
   });
 
   test("strips secret literals and machine paths from exports", () => {

@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
 import { getConfigDescriptor } from "./descriptors";
 import type { ConfigFieldDescriptor, ConfigFieldScope } from "./types";
@@ -50,7 +51,7 @@ type FieldProps = {
   config: Record<string, unknown>;
   value: unknown;
   onChange: (next: unknown) => void;
-  sessionPaths: readonly string[];
+  sessionPaths: readonly SessionFieldInfo[];
 };
 
 function EnumField({ field, value, onChange }: FieldProps) {
@@ -594,7 +595,7 @@ export function ConfigFieldsEditor({
   scope: ConfigFieldScope;
   config: Record<string, unknown>;
   onChange: (config: Record<string, unknown>) => void;
-  sessionPaths: readonly string[];
+  sessionPaths: readonly SessionFieldInfo[];
 }) {
   const t = useTranslations("workflows");
   const descriptor = getConfigDescriptor(kind, scope);

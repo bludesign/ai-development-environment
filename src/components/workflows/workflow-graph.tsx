@@ -33,7 +33,10 @@ type WorkflowNodeData = {
   phase: string | null;
   attemptLabel: string | null;
   diagnostics: WorkflowDiagnostic[];
+  provides: string[];
 };
+
+const MAX_PROVIDES_CHIPS = 3;
 
 export type WorkflowFlowNode = Node<WorkflowNodeData, "workflow">;
 
@@ -142,6 +145,23 @@ function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
           {data.diagnostics[0]!.message}
         </p>
       )}
+      {data.provides.length > 0 && (
+        <div className="mt-2 flex max-w-56 flex-wrap gap-1">
+          {data.provides.slice(0, MAX_PROVIDES_CHIPS).map((path) => (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+              key={path}
+            >
+              {path}
+            </span>
+          ))}
+          {data.provides.length > MAX_PROVIDES_CHIPS && (
+            <span className="px-1 py-0.5 text-[9px] text-muted-foreground">
+              +{data.provides.length - MAX_PROVIDES_CHIPS}
+            </span>
+          )}
+        </div>
+      )}
       {handles.map((handle, index) => (
         <Handle
           className={cn(
@@ -182,6 +202,7 @@ export function workflowFlowElements(
     generation?: number;
     diagnostics?: WorkflowDiagnostic[];
     categories?: Map<string, string>;
+    provides?: Map<string, string[]>;
   } = {},
 ): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
   const attempts = latestAttempts(options.attempts ?? [], options.generation);
@@ -208,6 +229,7 @@ export function workflowFlowElements(
         diagnostics: diagnostics.filter(
           ({ triggerId }) => triggerId === trigger.id,
         ),
+        provides: options.provides?.get(trigger.id) ?? [],
       },
     })),
     ...definition.nodes.map((node) => {
@@ -240,6 +262,7 @@ export function workflowFlowElements(
           phase: base?.phase ?? null,
           attemptLabel: labelParts.length ? labelParts.join(" · ") : null,
           diagnostics: diagnostics.filter(({ nodeId }) => nodeId === node.id),
+          provides: options.provides?.get(node.id) ?? [],
         },
       };
     }),

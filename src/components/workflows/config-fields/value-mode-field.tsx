@@ -7,6 +7,7 @@ import { useId, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
 export type FieldValueMode = "literal" | "session";
 
@@ -61,7 +62,7 @@ export function ValueModeField({
   sessionEnabled: boolean;
   value: unknown;
   onChange: (next: unknown) => void;
-  sessionPaths: readonly string[];
+  sessionPaths: readonly SessionFieldInfo[];
   children: (
     current: unknown,
     onLiteralChange: (next: unknown) => void,
@@ -116,8 +117,8 @@ export function ValueModeField({
           />
           {sessionPaths.length > 0 && (
             <datalist id={listId}>
-              {sessionPaths.map((path) => (
-                <option key={path} value={path} />
+              {sessionPaths.map(({ path, description }) => (
+                <option key={path} label={description} value={path} />
               ))}
             </datalist>
           )}

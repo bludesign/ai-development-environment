@@ -53,6 +53,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  computeWorkflowPathAvailability,
+  type WorkflowPathLookup,
+} from "@/lib/workflows/definition";
+import {
+  expandSessionPaths,
+  type SessionFieldInfo,
+} from "@/lib/workflows/session-schema";
 
 import {
   ConfigFieldsEditor,
@@ -137,6 +145,55 @@ function defaultNode(
   };
 }
 
+/** Path lookup backed by the GraphQL catalog, for the reachability walk. */
+function buildPathLookup(catalog: Catalog | null): WorkflowPathLookup {
+  const steps = new Map(
+    catalog?.steps.map((entry) => [entry.kind, entry]) ?? [],
+  );
+  const triggers = new Map(
+    catalog?.triggers.map((entry) => [entry.kind, entry]) ?? [],
+  );
+  return {
+    stepPaths: (kind) => {
+      const entry = steps.get(kind as WorkflowCatalogEntry["kind"]);
+      return {
+        requiredPaths: entry?.requiredPaths ?? [],
+        providedPaths: entry?.providedPaths ?? [],
+      };
+    },
+    triggerSeedPaths: (kind) =>
+      triggers.get(kind as WorkflowTriggerCatalogEntry["kind"])?.seedPaths ??
+      [],
+  };
+}
+
+/**
+ * Concrete paths a node adds, for the "Adds to session data" display. Drops the
+ * generic `steps.<id>.*` bookkeeping wildcard unless it is the node's only
+ * output (e.g. TERMINAL_RUN), where its expansion is the meaningful result.
+ */
+function displayProvidedPaths(
+  nodeId: string,
+  provides: Map<string, string[]>,
+): SessionFieldInfo[] {
+  const all = provides.get(nodeId) ?? [];
+  const domain = all.filter((path) => path !== `steps.${nodeId}.*`);
+  return expandSessionPaths(domain.length ? domain : all);
+}
+
+function providesByNodeMap(
+  availability: ReturnType<typeof computeWorkflowPathAvailability>,
+): Map<string, string[]> {
+  return new Map(
+    [...availability.provides.keys()].map((nodeId) => [
+      nodeId,
+      displayProvidedPaths(nodeId, availability.provides).map(
+        (info) => info.path,
+      ),
+    ]),
+  );
+}
+
 function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const t = useTranslations("workflows");
   const router = useRouter();
@@ -171,16 +228,27 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [catalog],
   );
 
+  const availability = useMemo(
+    () => computeWorkflowPathAvailability(definition, buildPathLookup(catalog)),
+    [catalog, definition],
+  );
+
   const rebuildGraph = useCallback(
     (nextDefinition: WorkflowDefinition, nextDiagnostics = diagnostics) => {
       const elements = workflowFlowElements(nextDefinition, {
         diagnostics: nextDiagnostics,
         categories,
+        provides: providesByNodeMap(
+          computeWorkflowPathAvailability(
+            nextDefinition,
+            buildPathLookup(catalog),
+          ),
+        ),
       });
       setNodes(elements.nodes);
       setEdges(elements.edges);
     },
-    [categories, diagnostics, setEdges, setNodes],
+    [catalog, categories, diagnostics, setEdges, setNodes],
   );
 
   useEffect(() => {
@@ -205,6 +273,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         );
         const elements = workflowFlowElements(next, {
           categories: categoryMap,
+          provides: providesByNodeMap(
+            computeWorkflowPathAvailability(
+              next,
+              buildPathLookup(data.workflowCatalog),
+            ),
+          ),
         });
         setNodes(elements.nodes);
         setEdges(elements.edges);
@@ -224,7 +298,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     definition.triggers.find(({ id }) => id === selectedId) ?? null;
   const selected = selectedNode ?? selectedTrigger;
 
-  const sessionPaths = useMemo(() => {
+  // Whole-definition path list, used as the value-picker fallback for triggers
+  // and unreachable steps where per-step availability isn't meaningful.
+  const allSessionPaths = useMemo(() => {
     const paths = new Set<string>();
     for (const input of definition.inputs) {
       if (input.path) paths.add(input.path);
@@ -233,21 +309,37 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       catalog?.triggers.map((entry) => [entry.kind, entry]) ?? [],
     );
     for (const trigger of definition.triggers) {
-      for (const path of triggerCatalog.get(trigger.kind)?.seedPaths ?? []) {
+      for (const path of triggerCatalog.get(trigger.kind)?.seedPaths ?? [])
         paths.add(path);
-      }
     }
-    const stepCatalog = new Map(
-      catalog?.steps.map((entry) => [entry.kind, entry]) ?? [],
-    );
-    for (const node of definition.nodes) {
-      for (const path of stepCatalog.get(node.kind)?.providedPaths ?? []) {
-        paths.add(path);
-      }
-      for (const path of node.providedPaths) paths.add(path);
+    for (const provided of availability.provides.values()) {
+      for (const path of provided) paths.add(path);
     }
-    return [...paths].sort((left, right) => left.localeCompare(right));
-  }, [catalog, definition]);
+    return [...paths];
+  }, [availability, catalog, definition]);
+
+  // Concrete session-path suggestions for the value picker, scoped to what is
+  // reachable before the selected step (falling back to the whole definition).
+  const sessionPaths = useMemo<SessionFieldInfo[]>(() => {
+    const before = selectedNode
+      ? availability.availableBefore.get(selectedNode.id)
+      : undefined;
+    return expandSessionPaths(before ?? allSessionPaths);
+  }, [availability, allSessionPaths, selectedNode]);
+
+  // Concrete keys the selected node contributes to session data (step outputs
+  // or trigger seeds), for the read-only "Adds to session data" inspector list.
+  const sessionAdditions = useMemo<SessionFieldInfo[]>(() => {
+    if (selectedNode)
+      return displayProvidedPaths(selectedNode.id, availability.provides);
+    if (selectedTrigger) {
+      const seeds =
+        catalog?.triggers.find((entry) => entry.kind === selectedTrigger.kind)
+          ?.seedPaths ?? [];
+      return expandSessionPaths(seeds);
+    }
+    return [];
+  }, [availability, catalog, selectedNode, selectedTrigger]);
 
   const commitDefinition = useCallback(
     (next: WorkflowDefinition) => {
@@ -972,6 +1064,29 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     />
                   </div>
                 )}
+                <div className="space-y-1.5">
+                  <Label>
+                    {selectedNode ? t("addsToSession") : t("seedsSession")}
+                  </Label>
+                  {sessionAdditions.length > 0 ? (
+                    <ul className="space-y-1 rounded-lg border bg-muted/30 p-2">
+                      {sessionAdditions.map((info) => (
+                        <li key={info.path}>
+                          <code className="text-[11px]">{info.path}</code>
+                          {info.description && (
+                            <span className="ml-2 text-[10px] text-muted-foreground">
+                              {info.description}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("addsToSessionEmpty")}
+                    </p>
+                  )}
+                </div>
                 {selectedNode && (
                   <>
                     <div className="space-y-1.5">

@@ -937,7 +937,7 @@ export function sanitizeWorkflowExportDefinition(
 }
 
 function expandedPaths(
-  node: WorkflowNodeDefinition,
+  node: { id: string },
   paths: readonly string[],
 ): string[] {
   return paths.map((path) => path.replaceAll("<stepId>", node.id));
@@ -961,6 +961,192 @@ function intersection(sets: Set<string>[]): Set<string> {
 
 function hasPath(available: Set<string>, required: string): boolean {
   return [...available].some((provided) => pathCovers(provided, required));
+}
+
+/**
+ * Supplies the required/provided/seed paths for a kind. The default reads the
+ * in-memory catalog (server); the editor passes a lookup backed by the catalog
+ * it fetches over GraphQL so the same reachability walk runs client-side.
+ */
+export type WorkflowPathLookup = {
+  stepPaths(kind: string): { requiredPaths: string[]; providedPaths: string[] };
+  triggerSeedPaths(kind: string): string[];
+};
+
+const defaultPathLookup: WorkflowPathLookup = {
+  stepPaths(kind) {
+    const entry = WORKFLOW_STEP_BY_KIND.get(kind as WorkflowStepKind);
+    return {
+      requiredPaths: entry?.requiredPaths ?? [],
+      providedPaths: entry?.providedPaths ?? [],
+    };
+  },
+  triggerSeedPaths(kind) {
+    return (
+      WORKFLOW_TRIGGER_BY_KIND.get(kind as WorkflowTriggerKind)?.seedPaths ?? []
+    );
+  },
+};
+
+export type WorkflowRequirementViolation = {
+  nodeId: string;
+  triggerId: string;
+  triggerName: string;
+  path: string;
+};
+
+/**
+ * Structural shape of a definition the availability walk needs. Deliberately
+ * loose so both the zod-inferred `WorkflowDefinition` (server) and the client
+ * editor's hand-written definition type satisfy it.
+ */
+export type WorkflowAvailabilityInput = {
+  inputs: readonly { path: string; required: boolean }[];
+  triggers: readonly { id: string; kind: string; name?: string }[];
+  nodes: readonly {
+    id: string;
+    kind: string;
+    config: unknown;
+    requiredPaths: readonly string[];
+    providedPaths: readonly string[];
+  }[];
+  edges: readonly { source: string; target: string }[];
+};
+
+/**
+ * Walks the workflow DAG from every trigger and computes, per step node, the
+ * session paths guaranteed to exist *before* it runs (`availableBefore`, the
+ * cross-trigger intersection — exactly what a step may bind its config to) and
+ * the paths it contributes (`provides`). Also surfaces requirement violations
+ * so `validateWorkflowDefinition` can raise `REQUIREMENT_UNSATISFIED`.
+ */
+export function computeWorkflowPathAvailability(
+  definition: WorkflowAvailabilityInput,
+  lookup: WorkflowPathLookup = defaultPathLookup,
+): {
+  availableBefore: Map<string, string[]>;
+  provides: Map<string, string[]>;
+  requirementViolations: WorkflowRequirementViolation[];
+} {
+  const nodeIds = new Set(definition.nodes.map(({ id }) => id));
+  const nodeById = new Map(definition.nodes.map((node) => [node.id, node]));
+  const outgoing = new Map<string, string[]>();
+  const incoming = new Map<string, string[]>();
+  for (const edge of definition.edges) {
+    outgoing.set(edge.source, [
+      ...(outgoing.get(edge.source) ?? []),
+      edge.target,
+    ]);
+    incoming.set(edge.target, [
+      ...(incoming.get(edge.target) ?? []),
+      edge.source,
+    ]);
+  }
+
+  const indegree = new Map(definition.nodes.map((node) => [node.id, 0]));
+  for (const edge of definition.edges) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
+  }
+  const queue = [...indegree]
+    .filter(([, degree]) => degree === 0)
+    .map(([id]) => id);
+  const topological: string[] = [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    topological.push(id);
+    for (const target of outgoing.get(id) ?? []) {
+      if (!nodeIds.has(target)) continue;
+      const next = (indegree.get(target) ?? 0) - 1;
+      indegree.set(target, next);
+      if (next === 0) queue.push(target);
+    }
+  }
+
+  const walk = (start: string): Set<string> => {
+    const visited = new Set<string>();
+    const pending = [...(outgoing.get(start) ?? [])];
+    while (pending.length) {
+      const id = pending.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      pending.push(...(outgoing.get(id) ?? []));
+    }
+    return visited;
+  };
+  const reachability = new Map<string, Set<string>>();
+  for (const item of [...definition.triggers, ...definition.nodes])
+    reachability.set(item.id, walk(item.id));
+
+  const provides = new Map<string, string[]>();
+  for (const node of definition.nodes) {
+    const catalog = lookup.stepPaths(node.kind);
+    provides.set(node.id, [
+      ...expandedPaths(node, catalog.providedPaths),
+      ...node.providedPaths,
+      `steps.${node.id}.*`,
+    ]);
+  }
+
+  const guaranteedInputs = new Set(
+    definition.inputs
+      .filter(({ required }) => required)
+      .map(({ path }) => path),
+  );
+  guaranteedInputs.add("workflow.*");
+
+  const availableBefore = new Map<string, Set<string>>();
+  const requirementViolations: WorkflowRequirementViolation[] = [];
+  for (const triggerDefinition of definition.triggers) {
+    const seed = new Set(guaranteedInputs);
+    for (const path of lookup.triggerSeedPaths(triggerDefinition.kind))
+      seed.add(path);
+    const availableAfter = new Map<string, Set<string>>();
+    for (const nodeId of topological) {
+      if (!reachability.get(triggerDefinition.id)?.has(nodeId)) continue;
+      const node = nodeById.get(nodeId)!;
+      const sources = (incoming.get(nodeId) ?? []).filter(
+        (source) =>
+          source === triggerDefinition.id || availableAfter.has(source),
+      );
+      if (!sources.length) continue;
+      const available = intersection(
+        sources.map((source) =>
+          source === triggerDefinition.id ? seed : availableAfter.get(source)!,
+        ),
+      );
+      const existing = availableBefore.get(nodeId);
+      availableBefore.set(
+        nodeId,
+        existing ? intersection([existing, available]) : new Set(available),
+      );
+      const required = new Set([
+        ...expandedPaths(node, lookup.stepPaths(node.kind).requiredPaths),
+        ...node.requiredPaths,
+        ...workflowValueSessionPaths(node.config),
+      ]);
+      for (const path of required) {
+        if (!hasPath(available, path))
+          requirementViolations.push({
+            nodeId: node.id,
+            triggerId: triggerDefinition.id,
+            triggerName: triggerDefinition.name ?? triggerDefinition.kind,
+            path,
+          });
+      }
+      const after = new Set(available);
+      for (const path of provides.get(nodeId) ?? []) after.add(path);
+      availableAfter.set(nodeId, after);
+    }
+  }
+
+  return {
+    availableBefore: new Map(
+      [...availableBefore].map(([id, set]) => [id, [...set]]),
+    ),
+    provides,
+    requirementViolations,
+  };
 }
 
 function hasSensitiveLiteral(value: unknown, key = ""): boolean {
@@ -1112,7 +1298,6 @@ export function validateWorkflowDefinition(value: unknown): {
       message: "Workflow graphs cannot contain free-form cycles",
     });
 
-  const nodeById = new Map(definition.nodes.map((node) => [node.id, node]));
   const reachability = new Map<string, Set<string>>();
   const walk = (start: string): Set<string> => {
     const visited = new Set<string>();
@@ -1233,57 +1418,16 @@ export function validateWorkflowDefinition(value: unknown): {
     }
   }
 
-  const guaranteedInputs = new Set(
-    definition.inputs
-      .filter(({ required }) => required)
-      .map(({ path }) => path),
-  );
-  guaranteedInputs.add("workflow.*");
-  for (const triggerDefinition of definition.triggers) {
-    const seed = new Set(guaranteedInputs);
-    for (const path of WORKFLOW_TRIGGER_BY_KIND.get(triggerDefinition.kind)
-      ?.seedPaths ?? [])
-      seed.add(path);
-    const availableAfter = new Map<string, Set<string>>();
-    for (const nodeId of topological) {
-      if (!reachability.get(triggerDefinition.id)?.has(nodeId)) continue;
-      const node = nodeById.get(nodeId)!;
-      const sources = (incoming.get(nodeId) ?? []).filter(
-        (source) =>
-          source === triggerDefinition.id || availableAfter.has(source),
-      );
-      if (!sources.length) continue;
-      const available = intersection(
-        sources.map((source) =>
-          source === triggerDefinition.id ? seed : availableAfter.get(source)!,
-        ),
-      );
-      const catalog = WORKFLOW_STEP_BY_KIND.get(node.kind)!;
-      const required = new Set([
-        ...expandedPaths(node, catalog.requiredPaths),
-        ...node.requiredPaths,
-        ...workflowValueSessionPaths(node.config),
-      ]);
-      for (const path of required) {
-        if (!hasPath(available, path))
-          diagnostics.push({
-            severity: "ERROR",
-            code: "REQUIREMENT_UNSATISFIED",
-            message: `${path} is not guaranteed on the path from ${triggerDefinition.name ?? triggerDefinition.kind}`,
-            nodeId: node.id,
-            triggerId: triggerDefinition.id,
-            path,
-          });
-      }
-      const after = new Set(available);
-      for (const path of [
-        ...expandedPaths(node, catalog.providedPaths),
-        ...node.providedPaths,
-        `steps.${node.id}.*`,
-      ])
-        after.add(path);
-      availableAfter.set(nodeId, after);
-    }
+  for (const violation of computeWorkflowPathAvailability(definition)
+    .requirementViolations) {
+    diagnostics.push({
+      severity: "ERROR",
+      code: "REQUIREMENT_UNSATISFIED",
+      message: `${violation.path} is not guaranteed on the path from ${violation.triggerName}`,
+      nodeId: violation.nodeId,
+      triggerId: violation.triggerId,
+      path: violation.path,
+    });
   }
 
   for (
