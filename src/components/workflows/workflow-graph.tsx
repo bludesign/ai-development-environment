@@ -321,6 +321,7 @@ export function WorkflowGraph({
       )}
     >
       <ReactFlow
+        colorMode="system"
         edges={elements.edges}
         fitView
         maxZoom={1.5}

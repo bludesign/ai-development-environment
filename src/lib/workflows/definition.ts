@@ -131,6 +131,63 @@ export const WORKFLOW_TRIGGER_KINDS = [
 
 export type WorkflowTriggerKind = (typeof WORKFLOW_TRIGGER_KINDS)[number];
 
+/**
+ * Resource kinds a RESOURCE_MANUAL trigger can be launched from. Each kind maps
+ * to the session-data paths the resource page seeds when it starts the run (see
+ * `RESOURCE_KIND_SEED_PATHS` and `src/app/[locale]/*​/page.tsx` →
+ * workflow-resource-panel). A trigger targets exactly one kind; to accept
+ * several resource types, add one RESOURCE_MANUAL trigger per kind.
+ */
+export const WORKFLOW_RESOURCE_KINDS = [
+  "BUILD",
+  "CODEBASE",
+  "JIRA_TICKET",
+  "AGENT_RUN",
+  "PULL_REQUEST",
+  "WORKTREE",
+] as const;
+
+export type WorkflowResourceKind = (typeof WORKFLOW_RESOURCE_KINDS)[number];
+
+/**
+ * The session paths each resource kind guarantees for a run launched from it.
+ * These mirror the `sessionData` the resource pages pass to `triggerWorkflow`,
+ * and are what a RESOURCE_MANUAL trigger contributes to path availability.
+ */
+const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
+  BUILD: ["build.*"],
+  CODEBASE: ["codebase.*"],
+  JIRA_TICKET: ["ticket.*"],
+  AGENT_RUN: ["run.*"],
+  PULL_REQUEST: ["pr.*", "repo.*"],
+  WORKTREE: ["worktree.*"],
+};
+
+/** The resource kind a RESOURCE_MANUAL trigger config targets, if valid. */
+export function workflowResourceKind(
+  config: unknown,
+): WorkflowResourceKind | null {
+  const value = (config as { resourceKind?: unknown } | null)?.resourceKind;
+  return typeof value === "string" &&
+    (WORKFLOW_RESOURCE_KINDS as readonly string[]).includes(value)
+    ? (value as WorkflowResourceKind)
+    : null;
+}
+
+/**
+ * Seed paths a trigger contributes on top of `workflow.*`. RESOURCE_MANUAL
+ * derives them from its configured resource kind; every other kind uses the
+ * static catalog seeds.
+ */
+export function resourceManualSeedPaths(
+  kind: string,
+  config: unknown,
+): string[] {
+  if (kind !== "RESOURCE_MANUAL") return [];
+  const resourceKind = workflowResourceKind(config);
+  return resourceKind ? RESOURCE_KIND_SEED_PATHS[resourceKind] : [];
+}
+
 export type WorkflowCatalogEntry = {
   kind: WorkflowStepKind;
   category: string;
@@ -671,16 +728,9 @@ const trigger = (
 export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
   [
     trigger("MANUAL", "Manual", "Manual run"),
-    trigger("RESOURCE_MANUAL", "Manual", "Run from a resource", [
-      "repo.*",
-      "codebase.*",
-      "ticket.*",
-      "worktree.*",
-      "pr.*",
-      "pipeline.*",
-      "build.*",
-      "run.*",
-    ]),
+    // Seed paths are derived per-trigger from the configured resource kind
+    // (see `resourceManualSeedPaths`), not declared statically here.
+    trigger("RESOURCE_MANUAL", "Manual", "Run from a resource"),
     trigger("SCHEDULE", "Schedule", "On a schedule"),
     trigger("WORKFLOW_FINISHED", "Workflows", "Another workflow finished", [
       "workflow.*",
@@ -860,16 +910,6 @@ const sessionPath = z
   .regex(/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_*\[\]-]+)*$/);
 const objectConfig = z.record(z.string(), z.unknown()).default({});
 
-export const workflowInputSchema = z.object({
-  id: identifier,
-  path: sessionPath,
-  label: z.string().min(1).max(200),
-  type: z.enum(["STRING", "NUMBER", "BOOLEAN", "JSON", "ID"]),
-  required: z.boolean().default(false),
-  defaultValue: z.unknown().optional(),
-  acceptedResourceKind: z.string().max(100).optional(),
-});
-
 export const workflowTriggerSchema = z.object({
   id: identifier,
   kind: z.enum(WORKFLOW_TRIGGER_KINDS),
@@ -909,7 +949,6 @@ export const workflowDefinitionSchema = z.object({
   schemaVersion: z.literal(WORKFLOW_SCHEMA_VERSION),
   name: z.string().min(1).max(200),
   description: z.string().max(2_000).default(""),
-  inputs: z.array(workflowInputSchema).max(100).default([]),
   triggers: z.array(workflowTriggerSchema).max(100).default([]),
   nodes: z.array(workflowNodeSchema).max(1_000).default([]),
   edges: z.array(workflowEdgeSchema).max(5_000).default([]),
@@ -943,7 +982,6 @@ export function emptyWorkflowDefinition(
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     name,
     description: "",
-    inputs: [],
     triggers: [
       { id: "manual", kind: "MANUAL", position: { x: 0, y: 100 }, config: {} },
     ],
@@ -1055,8 +1093,12 @@ export type WorkflowRequirementViolation = {
  * editor's hand-written definition type satisfy it.
  */
 export type WorkflowAvailabilityInput = {
-  inputs: readonly { path: string; required: boolean }[];
-  triggers: readonly { id: string; kind: string; name?: string }[];
+  triggers: readonly {
+    id: string;
+    kind: string;
+    name?: string;
+    config?: unknown;
+  }[];
   nodes: readonly {
     id: string;
     kind: string;
@@ -1142,18 +1184,18 @@ export function computeWorkflowPathAvailability(
     ]);
   }
 
-  const guaranteedInputs = new Set(
-    definition.inputs
-      .filter(({ required }) => required)
-      .map(({ path }) => path),
-  );
-  guaranteedInputs.add("workflow.*");
-
   const availableBefore = new Map<string, Set<string>>();
   const requirementViolations: WorkflowRequirementViolation[] = [];
   for (const triggerDefinition of definition.triggers) {
-    const seed = new Set(guaranteedInputs);
+    // Every run carries the workflow identity; a trigger adds its own seeds,
+    // and a RESOURCE_MANUAL trigger adds the paths of its configured resource.
+    const seed = new Set<string>(["workflow.*"]);
     for (const path of lookup.triggerSeedPaths(triggerDefinition.kind))
+      seed.add(path);
+    for (const path of resourceManualSeedPaths(
+      triggerDefinition.kind,
+      triggerDefinition.config,
+    ))
       seed.add(path);
     const availableAfter = new Map<string, Set<string>>();
     for (const nodeId of topological) {
@@ -1441,6 +1483,17 @@ export function validateWorkflowDefinition(value: unknown): {
         severity: "ERROR",
         code: "SESSION_BINDING_INVALID",
         message,
+        triggerId: triggerDefinition.id,
+      });
+    if (
+      triggerDefinition.kind === "RESOURCE_MANUAL" &&
+      !workflowResourceKind(triggerDefinition.config)
+    )
+      diagnostics.push({
+        severity: "ERROR",
+        code: "RESOURCE_KIND_REQUIRED",
+        message:
+          "Resource triggers must target a single resource kind; add one trigger per kind",
         triggerId: triggerDefinition.id,
       });
     if (triggerDefinition.kind === "GITHUB_ISSUE_COMMAND") {

@@ -37,15 +37,6 @@ export type WorkflowDefinition = {
   schemaVersion: 1;
   name: string;
   description: string;
-  inputs: Array<{
-    id: string;
-    path: string;
-    label: string;
-    type: "STRING" | "NUMBER" | "BOOLEAN" | "JSON" | "ID";
-    required: boolean;
-    defaultValue?: unknown;
-    acceptedResourceKind?: string;
-  }>;
   triggers: WorkflowTriggerDefinition[];
   nodes: WorkflowNodeDefinition[];
   edges: WorkflowEdgeDefinition[];
@@ -183,7 +174,6 @@ export function emptyDefinition(
     schemaVersion: 1,
     name,
     description: "",
-    inputs: [],
     triggers: [
       {
         id: "manual",

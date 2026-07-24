@@ -55,6 +55,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   computeWorkflowPathAvailability,
+  resourceManualSeedPaths,
   type WorkflowPathLookup,
 } from "@/lib/workflows/definition";
 import {
@@ -67,7 +68,6 @@ import {
   RawConfigEditor,
 } from "./config-fields/config-fields-editor";
 import { hasConfigDescriptor } from "./config-fields/descriptors";
-import { WorkflowInputsEditor } from "./workflow-inputs-editor";
 import {
   workflowFlowElements,
   workflowNodeTypes,
@@ -302,14 +302,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   // and unreachable steps where per-step availability isn't meaningful.
   const allSessionPaths = useMemo(() => {
     const paths = new Set<string>();
-    for (const input of definition.inputs) {
-      if (input.path) paths.add(input.path);
-    }
     const triggerCatalog = new Map(
       catalog?.triggers.map((entry) => [entry.kind, entry]) ?? [],
     );
     for (const trigger of definition.triggers) {
       for (const path of triggerCatalog.get(trigger.kind)?.seedPaths ?? [])
+        paths.add(path);
+      for (const path of resourceManualSeedPaths(trigger.kind, trigger.config))
         paths.add(path);
     }
     for (const provided of availability.provides.values()) {
@@ -803,15 +802,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   value={maxConcurrentRuns}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label>{t("typedInputs")}</Label>
-                <WorkflowInputsEditor
-                  onChange={(inputs) =>
-                    setDefinition((current) => ({ ...current, inputs }))
-                  }
-                  value={definition.inputs}
-                />
-              </div>
               <Button
                 className="w-full"
                 onClick={() => void validate()}
@@ -927,6 +917,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             ref={wrapperRef}
           >
             <ReactFlow
+              colorMode="system"
               deleteKeyCode={["Backspace", "Delete"]}
               edges={edges}
               fitView

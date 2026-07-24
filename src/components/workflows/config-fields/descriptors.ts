@@ -5,9 +5,10 @@ import {
   WORKTREE_OPERATIONS,
 } from "@ai-development-environment/agent-contract/worktrees";
 
-import type {
-  WorkflowStepKind,
-  WorkflowTriggerKind,
+import {
+  WORKFLOW_RESOURCE_KINDS,
+  type WorkflowStepKind,
+  type WorkflowTriggerKind,
 } from "@/lib/workflows/definition";
 
 import type {
@@ -769,6 +770,19 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
   ALL_TRIGGER_KINDS.map((kind) => {
+    if (kind === "RESOURCE_MANUAL") {
+      return [
+        kind,
+        triggerWithFilters([
+          enumField(
+            "resourceKind",
+            "Resource kind",
+            staticOptions(WORKFLOW_RESOURCE_KINDS),
+            { required: true },
+          ),
+        ]),
+      ];
+    }
     if (kind === "SCHEDULE") {
       return [
         kind,

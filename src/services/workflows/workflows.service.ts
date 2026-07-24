@@ -21,6 +21,7 @@ import {
   WORKFLOW_STEP_BY_KIND,
   WORKFLOW_STEP_CATALOG,
   WORKFLOW_TRIGGER_CATALOG,
+  workflowResourceKind,
   type WorkflowDefinition,
   type WorkflowDiagnostic,
   type WorkflowNodeDefinition,
@@ -1481,9 +1482,10 @@ export class WorkflowsService {
       const definition = parseWorkflowDefinition(
         json(workflow.activeVersion.definitionJson),
       );
-      return definition.inputs.some(
-        ({ acceptedResourceKind }) =>
-          acceptedResourceKind?.toUpperCase() === normalized,
+      return definition.triggers.some(
+        (trigger) =>
+          trigger.kind === "RESOURCE_MANUAL" &&
+          workflowResourceKind(trigger.config) === normalized,
       );
     });
   }
@@ -1506,10 +1508,21 @@ export class WorkflowsService {
       throw new Error("Workflow is paused");
     }
     const wantedKind = input.resourceKind ? "RESOURCE_MANUAL" : "MANUAL";
-    const trigger =
-      workflow.activeVersion.triggers.find(({ kind }) => kind === wantedKind) ??
-      workflow.activeVersion.triggers.find(({ kind }) => kind === "MANUAL") ??
-      null;
+    const { triggers } = workflow.activeVersion;
+    const trigger = input.resourceKind
+      ? (triggers.find(
+          (candidate) =>
+            candidate.kind === "RESOURCE_MANUAL" &&
+            workflowResourceKind(
+              parseObject(json(candidate.configJson), "Trigger configuration"),
+            ) === input.resourceKind!.toUpperCase(),
+        ) ?? null)
+      : (triggers.find(({ kind }) => kind === "MANUAL") ?? null);
+    if (input.resourceKind && !trigger) {
+      throw new Error(
+        `No resource trigger accepts ${input.resourceKind} resources`,
+      );
+    }
     const subjectKey =
       input.subjectKey?.trim() ||
       (input.resourceKind && input.resourceId

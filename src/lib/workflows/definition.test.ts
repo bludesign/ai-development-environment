@@ -225,6 +225,45 @@ describe("workflow definition validation", () => {
     expect(rightAvailable).toContain("workflow.*");
   });
 
+  test("resource-manual triggers seed only their configured resource kind", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.nodes[0]!.config = { body: "PR {{pr.number}}" };
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "PULL_REQUEST" },
+    };
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+
+    const { availableBefore } = computeWorkflowPathAvailability(value);
+    const before = availableBefore.get("notify") ?? [];
+    // PULL_REQUEST seeds pr.* and repo.* — but not another kind's paths.
+    expect(before).toContain("pr.*");
+    expect(before).toContain("repo.*");
+    expect(before).not.toContain("ticket.*");
+  });
+
+  test("resource-manual triggers require a resource kind", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.nodes[0]!.config = { body: "PR {{pr.number}}" };
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: {},
+    };
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "RESOURCE_KIND_REQUIRED" }),
+        // ...and without a kind the resource paths are no longer guaranteed.
+        expect.objectContaining({
+          code: "REQUIREMENT_UNSATISFIED",
+          path: "pr.number",
+        }),
+      ]),
+    );
+  });
+
   test("strips secret literals and machine paths from exports", () => {
     const value = definition([node("terminal", "TERMINAL_RUN")]);
     value.nodes[0]!.config = {
