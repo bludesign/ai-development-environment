@@ -307,16 +307,19 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/builds")}
+                  isActive={
+                    pathname.startsWith("/agents") ||
+                    pathname.startsWith("/jobs")
+                  }
                 >
                   <Link
-                    href="/builds"
+                    href="/agents"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <Hammer />
-                    <span>{t("builds")}</span>
+                    <Cpu />
+                    <span>{t("agents")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -339,22 +342,6 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/worktrees")}
-                >
-                  <Link
-                    href="/worktrees"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <GitBranch />
-                    <span>{t("worktrees")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
                   isActive={pathname.startsWith("/codebases")}
                 >
                   <Link
@@ -371,51 +358,32 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={
-                    pathname.startsWith("/agents") ||
-                    pathname.startsWith("/jobs")
-                  }
+                  isActive={pathname.startsWith("/worktrees")}
                 >
                   <Link
-                    href="/agents"
+                    href="/worktrees"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <Cpu />
-                    <span>{t("agents")}</span>
+                    <GitBranch />
+                    <span>{t("worktrees")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/usage")}
+                  isActive={pathname.startsWith("/builds")}
                 >
                   <Link
-                    href="/usage"
+                    href="/builds"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <ChartNoAxesCombined />
-                    <span>{t("usage")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/costs")}
-                >
-                  <Link
-                    href="/costs"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <CircleDollarSign />
-                    <span>{t("costs")}</span>
+                    <Hammer />
+                    <span>{t("builds")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -474,6 +442,54 @@ function NavigationSidebar() {
                   >
                     <FilePenLine />
                     <span>{t("drafts")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/usage")}
+                >
+                  <Link
+                    href="/usage"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ChartNoAxesCombined />
+                    <span>{t("usage")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/costs")}
+                >
+                  <Link
+                    href="/costs"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <CircleDollarSign />
+                    <span>{t("costs")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/skills")}
+                >
+                  <Link
+                    href="/skills"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Sparkles />
+                    <span>{t("skills")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -730,22 +746,6 @@ function NavigationSidebar() {
                   >
                     <Smartphone />
                     <span>{t("devices")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/skills")}
-                >
-                  <Link
-                    href="/skills"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Sparkles />
-                    <span>{t("skills")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
