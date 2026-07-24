@@ -180,6 +180,11 @@ describe("RunStartPage", () => {
       await screen.findByText("Resolve Jira tickets from run keys"),
     ).toBeDefined();
     expect(screen.getByText("In Progress")).toBeDefined();
+    expect(
+      screen
+        .getByText("Resolve Jira tickets from run keys")
+        .closest('[data-slot="card"]')?.className,
+    ).toContain("py-0");
     expect(screen.queryByLabelText("Jira summary")).toBeNull();
     expect(
       request.mock.calls.some(

@@ -493,7 +493,7 @@ export function RunStartPage({
                   <AlertDescription>{ticketPreview.error}</AlertDescription>
                 </Alert>
               ) : ticketPreview.ticket ? (
-                <Card size="sm">
+                <Card className="py-0" size="sm">
                   <CardHeader>
                     <div className="flex flex-wrap items-center gap-2">
                       <CardTitle>{ticketPreview.ticket.key}</CardTitle>
