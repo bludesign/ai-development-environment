@@ -1,6 +1,6 @@
 "use client";
 
-import { CirclePlay, Zap } from "lucide-react";
+import { CirclePlay } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -69,9 +69,6 @@ export function WorkflowQuickActions({
 
   return (
     <div className="w-full space-y-2 border-t pt-3">
-      <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Zap className="size-3.5" /> {t("quickActions")}
-      </p>
       <div className="flex flex-wrap gap-2">
         {workflows.map((workflow) => (
           <Button
