@@ -11,6 +11,7 @@ import {
   useNodesState,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -489,6 +490,23 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       }));
     },
     [setEdges],
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      onEdgesChange(changes);
+      const removedIds = new Set(
+        changes.flatMap((change) =>
+          change.type === "remove" ? [change.id] : [],
+        ),
+      );
+      if (removedIds.size === 0) return;
+      setDefinition((current) => ({
+        ...current,
+        edges: current.edges.filter(({ id }) => !removedIds.has(id)),
+      }));
+    },
+    [onEdgesChange],
   );
 
   const save = async (): Promise<boolean> => {
@@ -1023,7 +1041,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               nodeTypes={workflowNodeTypes}
               nodes={nodes}
               onConnect={onConnect}
-              onEdgesChange={onEdgesChange}
+              onEdgesChange={handleEdgesChange}
               onInit={(value) =>
                 setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
               }
