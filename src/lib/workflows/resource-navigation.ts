@@ -7,9 +7,11 @@ import {
 type AttemptWithResourceLinks = {
   id: string;
   nodeId: string;
+  kind?: string;
   generation: number;
   iterationKey: string;
   attempt: number;
+  output?: unknown;
   resourceLinks: WorkflowResourceLinkLike[];
 };
 
@@ -21,6 +23,71 @@ type RunWithResourceLinks = {
     WorkflowResourceLinkLike & { attemptId?: string | null }
   >;
 };
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function identifier(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+/**
+ * Older attempts predate resource-link persistence, but their durable output
+ * still contains the primary domain resource. Derive only high-confidence
+ * links here so those graphs remain useful without mutating run history.
+ */
+function inferredAttemptResourceLink(
+  attempt: AttemptWithResourceLinks,
+): WorkflowResourceLinkLike | null {
+  const kind = attempt.kind?.trim().toUpperCase() ?? "";
+  const output = record(attempt.output);
+  const value = record(output.value);
+  const valuePatch = record(value.sessionPatch);
+  const sessionPatch = {
+    ...valuePatch,
+    ...record(output.sessionPatch),
+  };
+
+  if (kind.startsWith("JIRA_")) {
+    const resourceId =
+      identifier(value.key) ??
+      identifier(record(value.ticket).key) ??
+      identifier(record(sessionPatch.ticket).key);
+    return resourceId ? { kind: "JIRA_TICKET", resourceId } : null;
+  }
+
+  if (kind.startsWith("RUN_")) {
+    const resourceId = identifier(value.id);
+    const runKind = identifier(value.kind)?.toUpperCase();
+    return resourceId && (runKind === "PLAN" || runKind === "SESSION")
+      ? { kind: "AGENT_RUN", resourceId, metadata: { runKind } }
+      : null;
+  }
+
+  if (kind.startsWith("WORKTREE_")) {
+    const resourceId = identifier(record(sessionPatch.worktree).id);
+    return resourceId ? { kind: "WORKTREE", resourceId } : null;
+  }
+
+  if (kind.startsWith("CODEBASE_")) {
+    const resourceId =
+      identifier(record(sessionPatch.codebase).id) ?? identifier(value.id);
+    return resourceId ? { kind: "CODEBASE", resourceId } : null;
+  }
+
+  if (kind.startsWith("BUILD_")) {
+    const resourceId =
+      identifier(record(sessionPatch.build).id) ?? identifier(value.id);
+    return resourceId ? { kind: "BUILD", resourceId } : null;
+  }
+
+  return null;
+}
 
 function sameResource(
   link: WorkflowResourceLinkLike,
@@ -74,8 +141,9 @@ export function workflowRunNodeDestinations(
   );
   for (const attempt of attempts) {
     if (result.has(attempt.nodeId)) continue;
+    const inferred = inferredAttemptResourceLink(attempt);
     const destination = preferredWorkflowResourceDestination(
-      attempt.resourceLinks,
+      inferred ? [...attempt.resourceLinks, inferred] : attempt.resourceLinks,
     );
     if (destination) result.set(attempt.nodeId, destination);
   }

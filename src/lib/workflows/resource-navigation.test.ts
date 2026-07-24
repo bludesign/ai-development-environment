@@ -63,4 +63,46 @@ describe("workflow resource graph projection", () => {
       ]),
     );
   });
+
+  test("derives primary destinations from durable output for older runs", () => {
+    expect(
+      workflowRunNodeDestinations({
+        generation: 0,
+        trigger: null,
+        attempts: [
+          {
+            id: "jira-attempt",
+            nodeId: "jira",
+            kind: "JIRA_LOAD_TICKET",
+            generation: 0,
+            iterationKey: "",
+            attempt: 0,
+            output: { value: { id: "15457", key: "AIDE-69" } },
+            resourceLinks: [],
+          },
+          {
+            id: "worktree-attempt",
+            nodeId: "stage",
+            kind: "WORKTREE_OPERATION",
+            generation: 0,
+            iterationKey: "",
+            attempt: 0,
+            output: {
+              value: { jobId: "job-1" },
+              sessionPatch: { worktree: { id: "worktree-1" } },
+            },
+            resourceLinks: [
+              { kind: "AGENT_JOB", resourceId: "job-1" },
+            ],
+          },
+        ],
+        resourceLinks: [],
+      }),
+    ).toEqual(
+      new Map([
+        ["jira", { href: "/jira/tickets/AIDE-69", external: false }],
+        ["stage", { href: "/worktrees/worktree-1", external: false }],
+      ]),
+    );
+  });
 });

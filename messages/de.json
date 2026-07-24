@@ -295,7 +295,8 @@
     "viewRun": "Lauf anzeigen",
     "runNamed": "{name} ausführen",
     "fullRun": "Vollständiger Lauf",
-    "currentPage": "Aktuelle Seite"
+    "currentPage": "Aktuelle Seite",
+    "openLinkedResource": "Verknüpfte Details öffnen"
   },
   "runs": {
     "actions": "Aktionen",

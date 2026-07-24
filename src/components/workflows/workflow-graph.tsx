@@ -15,7 +15,14 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { Copy, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  Link2,
+  Pencil,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -157,6 +164,11 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
           "bg-primary/5 outline-2 outline-offset-2 outline-primary/70",
         data.navigationEnabled && data.destination && "cursor-pointer",
       )}
+      title={
+        data.navigationEnabled && data.destination
+          ? t("openLinkedResource")
+          : undefined
+      }
     >
       {!data.trigger && (
         <Handle
@@ -180,6 +192,14 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
             {data.category} · {labels.kind(data.kind)}
           </p>
         </div>
+        {data.navigationEnabled && data.destination && (
+          <span
+            aria-hidden="true"
+            className="rounded-md bg-primary/10 p-1 text-primary"
+          >
+            <ExternalLink className="size-3.5" />
+          </span>
+        )}
       </div>
       {(data.status || data.attemptLabel) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
