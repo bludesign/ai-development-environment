@@ -225,9 +225,7 @@ export class WorkflowEventBridge {
             ),
           }
         : {}),
-      ...(run.jiraIssueKey
-        ? { ticket: { key: run.jiraIssueKey, title: run.jiraSummary } }
-        : {}),
+      ...(run.jiraIssueKey ? { ticket: { key: run.jiraIssueKey } } : {}),
     };
     const correlation = owner
       ? {

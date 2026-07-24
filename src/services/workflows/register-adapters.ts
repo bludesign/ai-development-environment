@@ -1132,11 +1132,6 @@ function createRunInput(
         getSessionValue(context.sessionData, "ticket.key"),
       100,
     ),
-    jiraSummary: optionalText(
-      context.node.config.jiraSummary ??
-        getSessionValue(context.sessionData, "ticket.title"),
-      1_000,
-    ),
     provider: text(context.node.config.provider ?? "CODEX", "Provider", 50),
     model: text(context.node.config.model, "Model", 200),
     effort: optionalText(context.node.config.effort, 50),

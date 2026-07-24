@@ -296,7 +296,6 @@
     "imported": "Importé",
     "importedCollisionWarning": "Cette Session gérée à l’extérieur est active dans une arborescence déjà verrouillée par une autre Session gérée. L’application ne peut pas contrôler cette concurrence.",
     "inputTokens": "Jetons d’entrée",
-    "jiraSummary": "Résumé Jira",
     "jiraTicket": "Ticket Jira",
     "linkedItems": "Éléments liés",
     "linkedItemsDescription": "Plan source, parent et exécutions enfants associés à cette exécution.",

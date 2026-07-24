@@ -997,6 +997,34 @@ export class WorktreesService {
     };
   }
 
+  /**
+   * The Jira ticket key a live worktree's branch resolves to, or null when the
+   * branch matches no ticket pattern. Mirrors the derivation `view` performs for
+   * the overview, but as a focused lookup so callers (e.g. workflow triggers)
+   * can seed the linked ticket without loading the full worktree payload.
+   */
+  async ticketKeyForWorktree(worktreeId: string): Promise<string | null> {
+    const prisma = await getPrismaClient();
+    const [worktree, settings] = await Promise.all([
+      prisma.worktree.findFirst({
+        where: { id: worktreeId, missingAt: null },
+        select: {
+          branch: true,
+          codebase: {
+            select: { repository: { select: { jiraBranchRegex: true } } },
+          },
+        },
+      }),
+      prisma.codebaseSettings.findUnique({ where: { id: SETTINGS_ID } }),
+    ]);
+    if (!worktree) return null;
+    const pattern =
+      worktree.codebase.repository.jiraBranchRegex ??
+      settings?.defaultJiraBranchRegex ??
+      "";
+    return ticketKey(worktree.branch, pattern);
+  }
+
   private async resolveBranchSelection(
     codebase: RunnableCodebase,
     selection: WorktreeBranchSelection,

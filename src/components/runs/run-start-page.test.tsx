@@ -21,6 +21,21 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 const request = vi.mocked(controlPlaneRequest);
+const jiraTicket = {
+  id: "jira-123",
+  key: "AIDE-123",
+  summary: "Resolve Jira tickets from run keys",
+  statusId: "status-1",
+  status: "In Progress",
+  statusCategory: "indeterminate",
+  issueType: "Story",
+  priority: "High",
+  assignee: "Ada Lovelace",
+  assigneeAccountId: "ada",
+  assigneeAvatarUrl: null,
+  projectKey: "AIDE",
+  updatedAt: "2026-07-24T12:00:00.000Z",
+};
 const pageData = {
   worktreeOverview: {
     agents: [
@@ -74,11 +89,14 @@ beforeEach(() => {
   Element.prototype.releasePointerCapture = vi.fn();
   Element.prototype.scrollIntoView = vi.fn();
   request.mockReset();
-  request.mockImplementation(async (query) =>
-    String(query).includes("query RunProviderCatalog")
-      ? ({ runProviderCatalog: pageData.runProviderCatalog } as never)
-      : (pageData as never),
-  );
+  request.mockImplementation(async (query) => {
+    const operation = String(query);
+    if (operation.includes("query RunProviderCatalog"))
+      return { runProviderCatalog: pageData.runProviderCatalog } as never;
+    if (operation.includes("query RunJiraTicket"))
+      return { jiraTicket } as never;
+    return pageData as never;
+  });
 });
 
 afterEach(() => {
@@ -152,6 +170,67 @@ describe("RunStartPage", () => {
     );
   });
 
+  test("loads a Jira ticket card from a typed ticket key", async () => {
+    render(<RunStartPage initialKind="PLAN" />);
+
+    const input = await screen.findByLabelText("Jira ticket");
+    fireEvent.change(input, { target: { value: "aide-123" } });
+
+    expect(
+      await screen.findByText("Resolve Jira tickets from run keys"),
+    ).toBeDefined();
+    expect(screen.getByText("In Progress")).toBeDefined();
+    expect(screen.queryByLabelText("Jira summary")).toBeNull();
+    expect(
+      request.mock.calls.some(
+        ([operation, variables]) =>
+          String(operation).includes("query RunJiraTicket") &&
+          (variables as { issueKey?: string } | undefined)?.issueKey ===
+            "AIDE-123",
+      ),
+    ).toBe(true);
+  });
+
+  test("loads a Jira ticket card from the selected worktree key", async () => {
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query RunProviderCatalog"))
+        return { runProviderCatalog: pageData.runProviderCatalog } as never;
+      if (operation.includes("query RunJiraTicket"))
+        return { jiraTicket } as never;
+      return {
+        ...pageData,
+        worktreeOverview: {
+          agents: pageData.worktreeOverview.agents.map((agent) => ({
+            ...agent,
+            codebases: agent.codebases.map((codebase) => ({
+              ...codebase,
+              worktrees: codebase.worktrees.map((worktree) => ({
+                ...worktree,
+                ticketKey: "AIDE-123",
+                ticketTitle: "Cached title must not be stored",
+              })),
+            })),
+          })),
+        },
+      } as never;
+    });
+    render(<RunStartPage initialKind="PLAN" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select a worktree" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "widgets · main · Builder" }),
+    );
+
+    expect(await screen.findByDisplayValue("AIDE-123")).toBeDefined();
+    expect(
+      await screen.findByText("Resolve Jira tickets from run keys"),
+    ).toBeDefined();
+    expect(screen.queryByText("Cached title must not be stored")).toBeNull();
+  });
+
   test("declares and supplies the draft variable while editing a draft", async () => {
     request.mockResolvedValue({
       ...pageData,
@@ -162,7 +241,6 @@ describe("RunStartPage", () => {
         agentId: "agent-1",
         worktree: null,
         jiraIssueKey: null,
-        jiraSummary: null,
         provider: "CODEX",
         model: "gpt-5.6",
         effort: "high",

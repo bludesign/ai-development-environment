@@ -5,7 +5,7 @@ export const RUN_LINK_FIELDS = `
 export const RUN_LIST_FIELDS = `
   id kind displayNumber status phase origin provider providerVersion
   worktreeId agentId worktree { id folder branch highlightColor }
-  jiraIssueKey jiraSummary repositoryName branch model effort webSearchEnabled
+  jiraIssueKey repositoryName branch model effort webSearchEnabled
   initialPrompt finalOutput estimatedCost pricingSource sourcePlanId sourcePlanNumber
   playedAt playedSessionNumber
   sourcePlan { ${RUN_LINK_FIELDS} }
@@ -55,7 +55,7 @@ export const RUN_EVENT_FIELDS = `
 
 export const RUN_DRAFT_FIELDS = `
   id kind worktreeId agentId worktree { id folder branch highlightColor }
-  jiraIssueKey jiraSummary provider model effort webSearchEnabled prompt
+  jiraIssueKey provider model effort webSearchEnabled prompt
   attachments { id filename contentType size sha256 downloadPath createdAt }
   archivedAt createdAt updatedAt
 `;

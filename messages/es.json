@@ -296,7 +296,6 @@
     "imported": "Importado",
     "importedCollisionWarning": "Esta sesión administrada externamente está activa en un árbol de trabajo reservado por otra sesión administrada. La aplicación no puede controlar su concurrencia.",
     "inputTokens": "Tokens de entrada",
-    "jiraSummary": "Resumen de Jira",
     "jiraTicket": "Incidencia de Jira",
     "linkedItems": "Elementos vinculados",
     "linkedItemsDescription": "Plan de origen y ejecuciones principales y secundarias relacionadas con esta ejecución.",

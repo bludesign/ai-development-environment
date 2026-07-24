@@ -244,6 +244,73 @@ describe("workflow definition validation", () => {
     expect(before).not.toContain("ticket.*");
   });
 
+  test("a loader step may optionally read the namespace it provides", () => {
+    // JIRA_LOAD_TICKET establishes `ticket.*`. Binding its issueKey to the
+    // (optional) seeded ticket key is the runtime "unwrap" — it must publish
+    // even though ticket.key is not guaranteed, and still guarantee ticket.*
+    // for a downstream consumer.
+    const load = node("load", "JIRA_LOAD_TICKET");
+    load.config = { issueKey: { source: "SESSION", path: "ticket.key" } };
+    const notify = node("notify", "NOTIFICATION_SEND");
+    notify.config = { body: "{{ticket.status}}" };
+    const value = definition([load, notify]);
+    value.edges.push({
+      id: "load-notify",
+      source: "load",
+      target: "notify",
+      sourceHandle: "success",
+      targetHandle: "input",
+    });
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+
+    const { availableBefore } = computeWorkflowPathAvailability(value);
+    expect(availableBefore.get("notify") ?? []).toContain("ticket.*");
+  });
+
+  test("non-provider steps still hard-require their session bindings", () => {
+    // JIRA_TRANSITION does not provide ticket.*, so a ticket.key binding stays
+    // a publish requirement — the unwrap relaxation is scoped to self-provides.
+    const value = definition([node("move", "JIRA_TRANSITION")]);
+    value.nodes[0]!.config = {
+      issueKey: { source: "SESSION", path: "ticket.key" },
+      transitionId: "31",
+    };
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "CODEBASE" },
+    };
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "REQUIREMENT_UNSATISFIED",
+          path: "ticket.key",
+        }),
+      ]),
+    );
+  });
+
+  test("worktree resource-manual triggers seed the linked ticket", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.nodes[0]!.config = { body: "{{worktree.branch}} — {{ticket.key}}" };
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "WORKTREE" },
+    };
+
+    // The worktree's optional Jira ticket is part of the seed contract, so a
+    // step binding to ticket.* validates alongside worktree.*.
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+
+    const before =
+      computeWorkflowPathAvailability(value).availableBefore.get("notify") ??
+      [];
+    expect(before).toContain("worktree.*");
+    expect(before).toContain("ticket.*");
+  });
+
   test("resource-manual triggers require a resource kind", () => {
     const value = definition([node("notify", "NOTIFICATION_SEND")]);
     value.nodes[0]!.config = { body: "PR {{pr.number}}" };

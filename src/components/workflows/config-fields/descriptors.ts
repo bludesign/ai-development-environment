@@ -230,7 +230,6 @@ const runInputFields = (): ConfigFieldDescriptor[] => [
   resource("jiraIssueKey", "Jira issue key", "jiraTicket", {
     placeholder: "APP-123",
   }),
-  text("jiraSummary", "Jira summary"),
   modelField(),
   bool("webSearchEnabled", "Enable web search"),
   multiline("prompt", "Prompt", { required: true }),

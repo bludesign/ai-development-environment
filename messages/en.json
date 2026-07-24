@@ -296,7 +296,6 @@
     "imported": "Imported",
     "importedCollisionWarning": "This externally managed Session is active in a worktree currently leased by another managed Session. It cannot be concurrency-controlled by this application.",
     "inputTokens": "Input tokens",
-    "jiraSummary": "Jira summary",
     "jiraTicket": "Jira ticket",
     "linkedItems": "Linked Items",
     "linkedItemsDescription": "Source Plan, parent, and child runs related to this run.",

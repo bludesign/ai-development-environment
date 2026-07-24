@@ -308,7 +308,6 @@ model AgentRun {
   worktreeId          String?
   agentId             String?
   jiraIssueKey        String?
-  jiraSummary         String?
   repositoryName      String
   branch              String?
   model               String
@@ -407,7 +406,6 @@ model RunDraft {
   worktreeId       String?
   agentId          String?
   jiraIssueKey     String?
-  jiraSummary      String?
   provider         String
   model            String
   effort           String?

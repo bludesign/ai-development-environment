@@ -272,6 +272,9 @@ export class WorkflowsService {
     private readonly agentControl?: AgentControlService,
     private readonly notifications?: NotificationsService,
     private readonly runsService?: RunsService,
+    private readonly worktrees?: {
+      ticketKeyForWorktree(id: string): Promise<string | null>;
+    },
   ) {
     if (this.agentControl) {
       this.executor.register("TERMINAL_RUN", (context) =>
@@ -1494,6 +1497,30 @@ export class WorkflowsService {
     return this.events.record(input);
   }
 
+  /**
+   * Enriches a resource-launched run's seed with data derived from the resource
+   * itself. A worktree may carry a Jira ticket resolved from its branch, so a
+   * WORKTREE trigger seeds `ticket.key` when one exists — letting worktree
+   * workflows drive Jira steps without an explicit ticket resource. Any
+   * caller-provided ticket data wins over the derived link.
+   */
+  private async hydrateResourceSessionData(
+    resourceKind: string | null | undefined,
+    resourceId: string | null | undefined,
+    sessionData: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (
+      resourceKind?.toUpperCase() !== "WORKTREE" ||
+      !resourceId ||
+      !this.worktrees
+    ) {
+      return sessionData;
+    }
+    const ticketKey = await this.worktrees.ticketKeyForWorktree(resourceId);
+    if (!ticketKey) return sessionData;
+    return mergeSessionData({ ticket: { key: ticketKey } }, sessionData);
+  }
+
   async trigger(input: TriggerWorkflowInput) {
     const prisma = await getPrismaClient();
     const workflow = await prisma.workflow.findUnique({
@@ -1529,7 +1556,11 @@ export class WorkflowsService {
         ? `${input.resourceKind}:${input.resourceId}`
         : `manual:${randomUUID()}`);
     const payload = {
-      sessionData: input.sessionData ?? {},
+      sessionData: await this.hydrateResourceSessionData(
+        input.resourceKind,
+        input.resourceId,
+        input.sessionData ?? {},
+      ),
       resourceKind: input.resourceKind ?? null,
       resourceId: input.resourceId ?? null,
       manual: true,

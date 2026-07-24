@@ -153,6 +153,13 @@ export type WorkflowResourceKind = (typeof WORKFLOW_RESOURCE_KINDS)[number];
  * The session paths each resource kind guarantees for a run launched from it.
  * These mirror the `sessionData` the resource pages pass to `triggerWorkflow`,
  * and are what a RESOURCE_MANUAL trigger contributes to path availability.
+ *
+ * WORKTREE also seeds `ticket.*`: a worktree may have a Jira ticket derived
+ * from its branch, which `WorkflowsService.trigger` hydrates into the run's
+ * session data when present (see `hydrateResourceSessionData`). The link is
+ * optional, so — like `worktree.*` guaranteeing only `worktree.id` at runtime —
+ * the seed is an optimistic contract; a step bound to `ticket.key` on a
+ * worktree with no matching ticket resolves to `undefined` at run time.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   BUILD: ["build.*"],
@@ -160,7 +167,7 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   JIRA_TICKET: ["ticket.*"],
   AGENT_RUN: ["run.*"],
   PULL_REQUEST: ["pr.*", "repo.*"],
-  WORKTREE: ["worktree.*"],
+  WORKTREE: ["worktree.*", "ticket.*"],
 };
 
 /** The resource kind a RESOURCE_MANUAL trigger config targets, if valid. */
@@ -1216,10 +1223,21 @@ export function computeWorkflowPathAvailability(
         nodeId,
         existing ? intersection([existing, available]) : new Set(available),
       );
+      // Config session bindings normally become hard requirements, but a step
+      // that *provides* a namespace may optionally read from it: a loader like
+      // JIRA_LOAD_TICKET binds `issueKey` to `{{ticket.key}}` to establish
+      // `ticket.*`. Such self-referential bindings are the "unwrap" point — the
+      // step resolves the optional value at run time and fails if it is absent
+      // (see `jiraKey` in register-adapters) — so they must not block publish.
+      // Explicit `requiredPaths` (catalog + node) stay strict.
+      const selfProvided = new Set(provides.get(nodeId) ?? []);
+      const configRequired = [...workflowValueSessionPaths(node.config)].filter(
+        (path) => !hasPath(selfProvided, path),
+      );
       const required = new Set([
         ...expandedPaths(node, lookup.stepPaths(node.kind).requiredPaths),
         ...node.requiredPaths,
-        ...workflowValueSessionPaths(node.config),
+        ...configRequired,
       ]);
       for (const path of required) {
         if (!hasPath(available, path))

@@ -142,6 +142,7 @@ function createServerServices(): ServerServices {
     agentControlService,
     notificationsService,
     runsService,
+    worktreesService,
   );
   registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
     agentControl: agentControlService,

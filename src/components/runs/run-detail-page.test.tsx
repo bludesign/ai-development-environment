@@ -60,7 +60,6 @@ const failedRun: AgentRunView = {
     highlightColor: null,
   },
   jiraIssueKey: "AIDE-66",
-  jiraSummary: "Plans and sessions support",
   repositoryName: "ai-development-environment",
   branch: "feature/AIDE-66-plans-and-sessions-support",
   model: "gpt-5.6",

@@ -14,6 +14,7 @@ describe("workflow config descriptors", () => {
       control: "resource",
       options: { kind: "resource", resource: "jiraTicket" },
     });
+    expect(runFields?.find(({ key }) => key === "jiraSummary")).toBeUndefined();
 
     for (const kind of [
       "JIRA_LOAD_TICKET",

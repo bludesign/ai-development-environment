@@ -179,7 +179,6 @@ type AgentRun {
   agentId: ID
   worktree: RunWorktreeRef
   jiraIssueKey: String
-  jiraSummary: String
   repositoryName: String!
   branch: String
   model: String!
@@ -235,7 +234,6 @@ type RunDraft {
   agentId: ID
   worktree: RunWorktreeRef
   jiraIssueKey: String
-  jiraSummary: String
   provider: String!
   model: String!
   effort: String
@@ -309,7 +307,6 @@ input RunConfigurationInput {
   kind: RunKind!
   worktreeId: ID!
   jiraIssueKey: String
-  jiraSummary: String
   provider: String!
   model: String!
   effort: String
@@ -328,7 +325,6 @@ input SaveRunDraftInput {
   kind: RunKind!
   worktreeId: ID!
   jiraIssueKey: String
-  jiraSummary: String
   provider: String!
   model: String!
   effort: String

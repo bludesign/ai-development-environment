@@ -179,7 +179,11 @@ export function JiraTicketActions({
                 <ChevronsUpDown className="opacity-50" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent ref={popoverRef} align="start" className="w-72 space-y-2 p-2">
+            <PopoverContent
+              ref={popoverRef}
+              align="start"
+              className="w-72 space-y-2 p-2"
+            >
               <Input
                 aria-label={t("searchAssignees")}
                 autoFocus

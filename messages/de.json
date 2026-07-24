@@ -296,7 +296,6 @@
     "imported": "Importiert",
     "importedCollisionWarning": "Diese extern verwaltete Sitzung ist in einem Arbeitsbaum aktiv, der derzeit von einer anderen verwalteten Sitzung reserviert ist. Die Anwendung kann ihre Parallelität nicht steuern.",
     "inputTokens": "Eingabe-Token",
-    "jiraSummary": "Jira-Zusammenfassung",
     "jiraTicket": "Jira-Vorgang",
     "linkedItems": "Verknüpfte Elemente",
     "linkedItemsDescription": "Quellplan sowie über- und untergeordnete Läufe, die mit diesem Lauf verknüpft sind.",
