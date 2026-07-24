@@ -9,12 +9,13 @@ export default async function SessionDetailRoute({
   const runId = (await params).runId;
   return (
     <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
-      <RunDetailPage runId={runId} />
-      <WorkflowResourcePanel
-        resourceId={runId}
-        resourceKind="AGENT_RUN"
-        sessionData={{ run: { id: runId, kind: "SESSION" } }}
-      />
+      <RunDetailPage runId={runId}>
+        <WorkflowResourcePanel
+          resourceId={runId}
+          resourceKind="AGENT_RUN"
+          sessionData={{ run: { id: runId, kind: "SESSION" } }}
+        />
+      </RunDetailPage>
     </div>
   );
 }

@@ -56,7 +56,7 @@ const terminal = new Set([
 export function workflowStatusVariant(status: string) {
   if (status === "FAILED" || status === "BLOCKED")
     return "destructive" as const;
-  if (status === "SUCCEEDED") return "secondary" as const;
+  if (status === "SUCCEEDED") return "success" as const;
   return "outline" as const;
 }
 

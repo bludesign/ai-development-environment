@@ -102,6 +102,8 @@
     "settings": "Einstellungen",
     "lockToFit": "An Ansicht fixieren",
     "unlockView": "Ansicht entsperren",
+    "showSessionData": "Sitzungsdaten einblenden",
+    "hideSessionData": "Sitzungsdaten ausblenden",
     "name": "Name",
     "description": "Beschreibung",
     "overlapPolicy": "Überlappungsregel",

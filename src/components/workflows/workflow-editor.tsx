@@ -3,6 +3,7 @@
 import {
   addEdge,
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   ReactFlow,
@@ -19,6 +20,8 @@ import {
   ArrowLeft,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   GripVertical,
   Plus,
   Search,
@@ -29,7 +32,14 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -235,6 +245,40 @@ function providesByNodeMap(
   );
 }
 
+/**
+ * Whether a click came from a finger or a pen rather than a mouse. Clicks are
+ * PointerEvents in every browser React Flow supports; anything else — an older
+ * engine, a synthesized event — reads as a mouse, which only costs one extra
+ * click on a device that had the precision for it anyway.
+ */
+function touchLike(event: ReactMouseEvent): boolean {
+  const pointerType = (event.nativeEvent as Partial<PointerEvent>).pointerType;
+  return pointerType !== undefined && pointerType !== "mouse";
+}
+
+/**
+ * Toggles the session-data chips the editor adds under each step card, so the
+ * canvas can be read the way it renders everywhere else. Styled as one more
+ * button in React Flow's control stack, and named for the action it performs.
+ */
+function WorkflowSessionDataButton({
+  onToggle,
+  shown,
+}: {
+  onToggle: () => void;
+  shown: boolean;
+}) {
+  const t = useTranslations("workflows");
+  const label = shown ? t("hideSessionData") : t("showSessionData");
+  // React Flow fills any svg in a control button; Lucide draws in strokes.
+  const icon = "fill-none!";
+  return (
+    <ControlButton aria-label={label} onClick={onToggle} title={label}>
+      {shown ? <EyeOff className={icon} /> : <Eye className={icon} />}
+    </ControlButton>
+  );
+}
+
 function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
@@ -269,6 +313,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   // Off by default: laying a workflow out means panning and zooming around a
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
+  const [showSessionData, setShowSessionData] = useState(true);
 
   const categories = useMemo(
     () =>
@@ -756,14 +801,29 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [catalog, search],
   );
   // Adding or removing a step re-fits a locked canvas; moving one does not.
+  // Hiding the session-data chips resizes every card, so it re-fits too.
   const fitSignature = useMemo(
     () =>
       `${definition.triggers.map(({ id }) => id).join()}|${definition.nodes
         .map(({ id }) => id)
         .join()}|${definition.edges.map(({ id }) => id).join()}|${
         definition.editor.handleLayout ?? "SIDES"
-      }`,
-    [definition],
+      }|${showSessionData}`,
+    [definition, showSessionData],
+  );
+  // The chips are an editing aid layered onto the same card the run and detail
+  // views render, so they are dropped on the way to the canvas rather than left
+  // out of the graph — the definition and its rebuilds stay untouched.
+  const canvasNodes = useMemo(
+    () =>
+      showSessionData
+        ? nodes
+        : nodes.map((node) =>
+            node.data.provides.length
+              ? { ...node, data: { ...node.data, provides: [] } }
+              : node,
+          ),
+    [nodes, showSessionData],
   );
   const stepGroups = useMemo(
     () => [...groupByCategory(filteredSteps)],
@@ -1089,7 +1149,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               edges={edges}
               fitView
               nodeTypes={workflowNodeTypes}
-              nodes={nodes}
+              nodes={canvasNodes}
               onConnect={onConnect}
               onEdgeClick={(_event, edge) => {
                 setSelectedId(null);
@@ -1099,7 +1159,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               onInit={(value) =>
                 setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
               }
-              onNodeClick={(_event, node) => {
+              onNodeClick={(event, node) => {
+                setSelectedEdgeId(null);
+                // A single click only picks the card up for dragging; opening
+                // the inspector takes a double click, so laying out a workflow
+                // does not keep throwing the panel over the canvas. Touch has
+                // no such distinction — a double tap is a poor target and the
+                // panel covers the canvas anyway — so a tap opens it there.
+                if (touchLike(event)) setSelectedId(node.id);
+              }}
+              onNodeDoubleClick={(_event, node) => {
                 setSelectedEdgeId(null);
                 setSelectedId(node.id);
               }}
@@ -1126,7 +1195,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               panOnDrag={!locked}
               preventScrolling={!locked}
               proOptions={{ hideAttribution: true }}
-              zoomOnDoubleClick={!locked}
+              /* Double click belongs to the step inspector here. React Flow's
+                 own double-click zoom sits on the pane and fires for clicks
+                 that bubble up from a card, so it would zoom on every open. */
+              zoomOnDoubleClick={false}
               zoomOnPinch={!locked}
               zoomOnScroll={!locked}
             >
@@ -1135,6 +1207,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 <WorkflowFitLockButton
                   locked={locked}
                   onToggle={() => setLocked((current) => !current)}
+                />
+                <WorkflowSessionDataButton
+                  onToggle={() => setShowSessionData((current) => !current)}
+                  shown={showSessionData}
                 />
               </Controls>
               <WorkflowFitLock locked={locked} signature={fitSignature} />

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
   Archive,
@@ -493,7 +500,14 @@ function QuestionBatch({
   );
 }
 
-export function RunDetailPage({ runId }: { runId: string }) {
+export function RunDetailPage({
+  children,
+  runId,
+}: {
+  /** Rendered directly under the run's header, above the run's own content. */
+  children?: ReactNode;
+  runId: string;
+}) {
   const t = useTranslations("runs");
   const labels = useRunLabels();
   const locale = useLocale();
@@ -1076,6 +1090,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
           </Alert>
         )}
       </div>
+
+      {children}
 
       {(linked.length > 0 || relationSnapshots.length > 0) && (
         <Card>

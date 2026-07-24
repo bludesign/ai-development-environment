@@ -102,6 +102,8 @@
     "settings": "Ajustes",
     "lockToFit": "Fijar al encuadre",
     "unlockView": "Desbloquear la vista",
+    "showSessionData": "Mostrar los datos de sesión",
+    "hideSessionData": "Ocultar los datos de sesión",
     "name": "Nombre",
     "description": "Descripción",
     "overlapPolicy": "Política de solapamiento",

@@ -102,6 +102,8 @@
     "settings": "Settings",
     "lockToFit": "Lock to fit",
     "unlockView": "Unlock view",
+    "showSessionData": "Show session data",
+    "hideSessionData": "Hide session data",
     "name": "Name",
     "description": "Description",
     "overlapPolicy": "Overlap policy",

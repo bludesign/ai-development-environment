@@ -102,6 +102,8 @@
     "settings": "Paramètres",
     "lockToFit": "Verrouiller sur la vue",
     "unlockView": "Déverrouiller la vue",
+    "showSessionData": "Afficher les données de session",
+    "hideSessionData": "Masquer les données de session",
     "name": "Nom",
     "description": "Description",
     "overlapPolicy": "Politique de chevauchement",

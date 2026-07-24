@@ -1,7 +1,13 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { WorkflowEditor } from "./workflow-editor";
 import { emptyDefinition } from "./types";
@@ -19,26 +25,37 @@ vi.mock("@/i18n/navigation", async () => {
   };
 });
 
+const canvas = vi.hoisted(() => ({
+  nodes: [] as { id: string; data: { provides: string[] } }[],
+}));
+
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
   return {
     addEdge: (edge: unknown, current: unknown[]) => [...current, edge],
     Background: () => null,
-    ControlButton: () => null,
-    Controls: () => null,
+    ControlButton: ({
+      children,
+      ...props
+    }: React.ButtonHTMLAttributes<HTMLButtonElement>) =>
+      React.createElement("button", { type: "button", ...props }, children),
+    Controls: ({ children }: { children: React.ReactNode }) => children,
     MiniMap: () => null,
     useReactFlow: () => ({ fitView: vi.fn() }),
     useStore: () => 0,
     ReactFlow: ({
       children,
+      nodes,
       onEdgeClick,
       onEdgesChange,
     }: {
       children: React.ReactNode;
+      nodes: { id: string; data: { provides: string[] } }[];
       onEdgeClick: (event: unknown, edge: { id: string }) => void;
       onEdgesChange: (changes: { id: string; type: "remove" }[]) => void;
-    }) =>
-      React.createElement(
+    }) => {
+      canvas.nodes = nodes;
+      return React.createElement(
         "div",
         null,
         React.createElement(
@@ -59,7 +76,8 @@ vi.mock("@xyflow/react", async () => {
           "Remove test edge",
         ),
         children,
-      ),
+      );
+    },
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) =>
       children,
     useEdgesState: (initial: unknown[]) => {
@@ -74,12 +92,18 @@ vi.mock("@xyflow/react", async () => {
 });
 
 vi.mock("./workflow-graph", () => ({
-  workflowFlowElements: (definition: {
-    nodes: unknown[];
-    triggers: unknown[];
-    edges: unknown[];
-  }) => ({
-    nodes: [...definition.triggers, ...definition.nodes],
+  workflowFlowElements: (
+    definition: {
+      nodes: { id: string }[];
+      triggers: { id: string }[];
+      edges: unknown[];
+    },
+    options: { provides?: Map<string, string[]> } = {},
+  ) => ({
+    nodes: [...definition.triggers, ...definition.nodes].map((entry) => ({
+      ...entry,
+      data: { provides: options.provides?.get(entry.id) ?? [] },
+    })),
     edges: definition.edges,
   }),
   workflowNodeTypes: {},
@@ -92,6 +116,8 @@ class ResizeObserverMock {
   unobserve() {}
   disconnect() {}
 }
+
+afterEach(() => cleanup());
 
 describe("workflow editor edge deletion", () => {
   beforeEach(() => {
@@ -179,5 +205,68 @@ describe("workflow editor edge deletion", () => {
         }),
       ),
     );
+  });
+});
+
+describe("workflow editor session data toggle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.ResizeObserver = ResizeObserverMock;
+    canvas.nodes = [];
+  });
+
+  test("drops the session data chips from the cards and puts them back", async () => {
+    const definition = emptyDefinition("Session data");
+    definition.nodes.push({
+      id: "session",
+      kind: "RUN_CREATE_SESSION",
+      name: "Run AI session and wait",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: ["session.custom.value"],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+
+    request.mockResolvedValue({
+      workflowCatalog: {
+        schemaVersion: 1,
+        globalConcurrency: 1,
+        steps: [],
+        triggers: [],
+      },
+      workflow: {
+        id: "workflow-1",
+        name: definition.name,
+        description: definition.description,
+        draftDefinition: definition,
+        activeVersionId: null,
+        enabled: false,
+        overlapPolicy: "QUEUE",
+        maxConcurrentRuns: 1,
+        archivedAt: null,
+        versionCount: 0,
+        runCount: 0,
+        createdAt: "2026-07-24T00:00:00.000Z",
+        updatedAt: "2026-07-24T00:00:00.000Z",
+      },
+    } as never);
+
+    render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+
+    const provided = () =>
+      canvas.nodes.flatMap((node) => node.data.provides ?? []);
+    await waitFor(() => expect(provided()).toContain("session.custom.value"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide session data" }));
+    expect(provided()).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show session data" }));
+    expect(provided()).toContain("session.custom.value");
   });
 });
