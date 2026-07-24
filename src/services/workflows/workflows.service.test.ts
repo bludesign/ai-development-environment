@@ -17,9 +17,14 @@ const prisma = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    findMany: vi.fn(),
   },
   workflowRunNumberSequence: { upsert: vi.fn() },
-  workflowRunResourceLink: { create: vi.fn(), createMany: vi.fn() },
+  workflowRunResourceLink: {
+    create: vi.fn(),
+    createMany: vi.fn(),
+    findMany: vi.fn(),
+  },
   workflowStepAttempt: { update: vi.fn(), updateMany: vi.fn() },
   workflowWait: { create: vi.fn(), findMany: vi.fn() },
   workflowResourceLease: { deleteMany: vi.fn() },
@@ -329,5 +334,27 @@ describe("workflow runtime lifecycle guards", () => {
         resourceId: "worktree-1",
       }),
     });
+  });
+
+  test("loads attempt resource links for resource-panel runs", async () => {
+    prisma.workflowRunResourceLink.findMany.mockResolvedValue([
+      { runId: "run-1" },
+    ]);
+    prisma.workflowRun.findMany.mockResolvedValue([]);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.runsForResource("WORKTREE", "worktree-1");
+
+    expect(prisma.workflowRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          attempts: expect.objectContaining({
+            include: {
+              resourceLinks: { orderBy: { createdAt: "asc" } },
+            },
+          }),
+        }),
+      }),
+    );
   });
 });

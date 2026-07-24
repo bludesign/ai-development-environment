@@ -1462,7 +1462,12 @@ export class WorkflowsService {
         workflow: true,
         version: true,
         trigger: true,
-        attempts: { orderBy: [{ generation: "asc" }, { createdAt: "asc" }] },
+        attempts: {
+          orderBy: [{ generation: "asc" }, { createdAt: "asc" }],
+          include: {
+            resourceLinks: { orderBy: { createdAt: "asc" } },
+          },
+        },
         resourceLinks: { orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
