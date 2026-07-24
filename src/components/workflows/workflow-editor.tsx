@@ -22,6 +22,7 @@ import {
   Plus,
   Save,
   Send,
+  Settings,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -31,7 +32,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -211,6 +225,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     Edge
   > | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteView, setPaletteView] = useState<"palette" | "outline">(
+    "palette",
+  );
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -709,6 +727,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             ref={fileRef}
             type="file"
           />
+          <Button onClick={() => setSettingsOpen(true)} variant="outline">
+            <Settings /> {t("settings")}
+          </Button>
           <Button onClick={() => fileRef.current?.click()} variant="outline">
             <Upload /> {t("import")}
           </Button>
@@ -745,157 +766,118 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       )}
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("workflowSettings")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="workflow-name">{t("name")}</Label>
-                <Input
-                  id="workflow-name"
-                  onChange={(event) =>
-                    setDefinition((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  value={definition.name}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="workflow-description">{t("description")}</Label>
-                <Textarea
-                  id="workflow-description"
-                  onChange={(event) =>
-                    setDefinition((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  value={definition.description}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("overlapPolicy")}</Label>
-                <Select onValueChange={setOverlapPolicy} value={overlapPolicy}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="QUEUE">{t("overlap.QUEUE")}</SelectItem>
-                    <SelectItem value="CONCURRENT">
-                      {t("overlap.CONCURRENT")}
-                    </SelectItem>
-                    <SelectItem value="COALESCE_LATEST">
-                      {t("overlap.COALESCE_LATEST")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="workflow-concurrency">
-                  {t("maxConcurrentRuns")}
-                </Label>
-                <Input
-                  id="workflow-concurrency"
-                  max={32}
-                  min={1}
-                  onChange={(event) =>
-                    setMaxConcurrentRuns(Number(event.target.value))
-                  }
-                  type="number"
-                  value={maxConcurrentRuns}
-                />
-              </div>
+        <Card className="flex h-[min(78vh,860px)] min-h-[520px] flex-col">
+          <CardHeader>
+            <CardTitle>
+              {paletteView === "palette" ? t("steps") : t("outline")}
+            </CardTitle>
+            <CardAction>
               <Button
-                className="w-full"
-                onClick={() => void validate()}
+                onClick={() =>
+                  setPaletteView((current) =>
+                    current === "palette" ? "outline" : "palette",
+                  )
+                }
+                size="sm"
                 variant="outline"
               >
-                {t("validate")}
+                {paletteView === "palette" ? t("viewOutline") : t("viewPalette")}
               </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("palette")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Input
-                aria-label={t("searchSteps")}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t("searchSteps")}
-                value={search}
-              />
-              <div className="max-h-[48vh] space-y-4 overflow-y-auto pr-1">
-                {[...groupByCategory(filteredSteps)].map(
-                  ([category, entries]) => (
-                    <div key={category}>
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                        {category}
-                      </p>
-                      <div className="space-y-1">
-                        {entries.map((entry) => (
-                          <button
-                            className="flex w-full cursor-grab items-center gap-2 rounded-lg border bg-background px-2.5 py-2 text-left text-xs hover:bg-muted"
-                            draggable
-                            key={entry.kind}
-                            onClick={() => addStep(entry)}
-                            onDragStart={(event) => {
-                              event.dataTransfer.setData(
-                                "application/aide-workflow-step",
-                                entry.kind,
-                              );
-                              event.dataTransfer.effectAllowed = "copy";
-                            }}
-                            type="button"
-                          >
-                            <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate font-medium">
-                                {entry.label}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
+            {paletteView === "palette" ? (
+              <>
+                <Input
+                  aria-label={t("searchSteps")}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t("searchSteps")}
+                  value={search}
+                />
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                  {[...groupByCategory(filteredSteps)].map(
+                    ([category, entries]) => (
+                      <div key={category}>
+                        <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                          {category}
+                        </p>
+                        <div className="space-y-1">
+                          {entries.map((entry) => (
+                            <button
+                              className="flex w-full cursor-grab items-center gap-2 rounded-lg border bg-background px-2.5 py-2 text-left text-xs hover:bg-muted"
+                              draggable
+                              key={entry.kind}
+                              onClick={() => addStep(entry)}
+                              onDragStart={(event) => {
+                                event.dataTransfer.setData(
+                                  "application/aide-workflow-step",
+                                  entry.kind,
+                                );
+                                event.dataTransfer.effectAllowed = "copy";
+                              }}
+                              type="button"
+                            >
+                              <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium">
+                                  {entry.label}
+                                </span>
+                                <span className="block truncate text-[10px] text-muted-foreground">
+                                  {entry.execution}
+                                </span>
                               </span>
-                              <span className="block truncate text-[10px] text-muted-foreground">
-                                {entry.execution}
-                              </span>
-                            </span>
-                            {(entry.mutatesExternal ||
-                              entry.mutatesWorktree) && (
-                              <Badge className="text-[9px]" variant="outline">
-                                {t("mutates")}
-                              </Badge>
-                            )}
-                          </button>
-                        ))}
+                              {(entry.mutatesExternal ||
+                                entry.mutatesWorktree) && (
+                                <Badge className="text-[9px]" variant="outline">
+                                  {t("mutates")}
+                                </Badge>
+                              )}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                    ),
+                  )}
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                      {t("triggers")}
+                    </p>
+                    <div className="space-y-1">
+                      {catalog.triggers.map((entry) => (
+                        <Button
+                          className="w-full justify-start"
+                          key={entry.kind}
+                          onClick={() => addTrigger(entry)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <Plus /> {entry.label}
+                        </Button>
+                      ))}
                     </div>
-                  ),
-                )}
-                <div>
-                  <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                    {t("triggers")}
-                  </p>
-                  <div className="space-y-1">
-                    {catalog.triggers.map((entry) => (
-                      <Button
-                        className="w-full justify-start"
-                        key={entry.kind}
-                        onClick={() => addTrigger(entry)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <Plus /> {entry.label}
-                      </Button>
-                    ))}
                   </div>
                 </div>
+              </>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div className="flex flex-wrap gap-2" role="list">
+                  {[...definition.triggers, ...definition.nodes].map((entry) => (
+                    <Button
+                      aria-current={entry.id === selectedId}
+                      key={entry.id}
+                      onClick={() => setSelectedId(entry.id)}
+                      role="listitem"
+                      size="sm"
+                      variant={entry.id === selectedId ? "default" : "outline"}
+                    >
+                      {entry.name ?? entry.kind}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="min-w-0 space-y-3">
           <div
@@ -962,27 +944,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               <MiniMap pannable zoomable />
             </ReactFlow>
           </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("outlineFallback")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2" role="list">
-                {[...definition.triggers, ...definition.nodes].map((entry) => (
-                  <Button
-                    aria-current={entry.id === selectedId}
-                    key={entry.id}
-                    onClick={() => setSelectedId(entry.id)}
-                    role="listitem"
-                    size="sm"
-                    variant={entry.id === selectedId ? "default" : "outline"}
-                  >
-                    {entry.name ?? entry.kind}
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
           {diagnostics.length > 0 && (
             <Card>
               <CardHeader>
@@ -1015,6 +976,82 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           )}
         </div>
       </div>
+
+      <Dialog onOpenChange={setSettingsOpen} open={settingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workflowSettings")}</DialogTitle>
+            <DialogDescription>{t("editorDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="workflow-name">{t("name")}</Label>
+              <Input
+                id="workflow-name"
+                onChange={(event) =>
+                  setDefinition((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+                value={definition.name}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="workflow-description">{t("description")}</Label>
+              <Textarea
+                id="workflow-description"
+                onChange={(event) =>
+                  setDefinition((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+                value={definition.description}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t("overlapPolicy")}</Label>
+              <Select onValueChange={setOverlapPolicy} value={overlapPolicy}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="QUEUE">{t("overlap.QUEUE")}</SelectItem>
+                  <SelectItem value="CONCURRENT">
+                    {t("overlap.CONCURRENT")}
+                  </SelectItem>
+                  <SelectItem value="COALESCE_LATEST">
+                    {t("overlap.COALESCE_LATEST")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="workflow-concurrency">
+                {t("maxConcurrentRuns")}
+              </Label>
+              <Input
+                id="workflow-concurrency"
+                max={32}
+                min={1}
+                onChange={(event) =>
+                  setMaxConcurrentRuns(Number(event.target.value))
+                }
+                type="number"
+                value={maxConcurrentRuns}
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => void validate()}
+              variant="outline"
+            >
+              {t("validate")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Sheet
         onOpenChange={(open) => {
