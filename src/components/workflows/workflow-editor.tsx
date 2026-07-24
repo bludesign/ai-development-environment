@@ -10,6 +10,8 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useStore,
+  useStoreApi,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -23,6 +25,8 @@ import {
   Eye,
   EyeOff,
   GripVertical,
+  MousePointer2,
+  MousePointer2Off,
   Plus,
   Search,
   Save,
@@ -256,6 +260,43 @@ function providesByNodeMap(
 function touchLike(event: ReactMouseEvent): boolean {
   const pointerType = (event.nativeEvent as Partial<PointerEvent>).pointerType;
   return pointerType !== undefined && pointerType !== "mouse";
+}
+
+/**
+ * Replaces React Flow's own interactivity toggle, which draws a padlock all but
+ * identical to the fit lock sitting right above it. A pointer says the same
+ * thing about whether steps can be grabbed, without the second lock.
+ */
+function WorkflowInteractivityButton() {
+  const t = useTranslations("workflows");
+  const store = useStoreApi();
+  const interactive = useStore(
+    (state) =>
+      state.nodesDraggable ||
+      state.nodesConnectable ||
+      state.elementsSelectable,
+  );
+  const label = interactive ? t("lockSteps") : t("unlockSteps");
+  const icon = "fill-none!";
+  return (
+    <ControlButton
+      aria-label={label}
+      onClick={() =>
+        store.setState({
+          elementsSelectable: !interactive,
+          nodesConnectable: !interactive,
+          nodesDraggable: !interactive,
+        })
+      }
+      title={label}
+    >
+      {interactive ? (
+        <MousePointer2Off className={icon} />
+      ) : (
+        <MousePointer2 className={icon} />
+      )}
+    </ControlButton>
+  );
 }
 
 /**
@@ -1226,11 +1267,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 zoomOnScroll={!locked}
               >
                 <Background gap={20} size={1} />
-                <Controls showFitView={!locked} showZoom={!locked}>
+                <Controls
+                  showFitView={!locked}
+                  showInteractive={false}
+                  showZoom={!locked}
+                >
                   <WorkflowFitLockButton
                     locked={locked}
                     onToggle={() => setLocked((current) => !current)}
                   />
+                  <WorkflowInteractivityButton />
                   <WorkflowSessionDataButton
                     onToggle={() => setShowSessionData((current) => !current)}
                     shown={showSessionData}

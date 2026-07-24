@@ -43,6 +43,7 @@ vi.mock("@xyflow/react", async () => {
     MiniMap: () => null,
     useReactFlow: () => ({ fitView: vi.fn() }),
     useStore: () => 0,
+    useStoreApi: () => ({ getState: () => ({}), setState: vi.fn() }),
     ReactFlow: ({
       children,
       nodes,

@@ -104,6 +104,8 @@
     "unlockView": "Unlock view",
     "showSessionData": "Show session data",
     "hideSessionData": "Hide session data",
+    "lockSteps": "Lock steps in place",
+    "unlockSteps": "Unlock steps",
     "name": "Name",
     "description": "Description",
     "overlapPolicy": "Overlap policy",

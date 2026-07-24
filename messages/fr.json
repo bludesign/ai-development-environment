@@ -104,6 +104,8 @@
     "unlockView": "Déverrouiller la vue",
     "showSessionData": "Afficher les données de session",
     "hideSessionData": "Masquer les données de session",
+    "lockSteps": "Figer les étapes",
+    "unlockSteps": "Déverrouiller les étapes",
     "name": "Nom",
     "description": "Description",
     "overlapPolicy": "Politique de chevauchement",

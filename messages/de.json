@@ -104,6 +104,8 @@
     "unlockView": "Ansicht entsperren",
     "showSessionData": "Sitzungsdaten einblenden",
     "hideSessionData": "Sitzungsdaten ausblenden",
+    "lockSteps": "Schritte fixieren",
+    "unlockSteps": "Schritte entsperren",
     "name": "Name",
     "description": "Beschreibung",
     "overlapPolicy": "Überlappungsregel",
