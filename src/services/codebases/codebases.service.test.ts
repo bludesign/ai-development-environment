@@ -695,6 +695,56 @@ describe("CodebasesService", () => {
     });
   });
 
+  test("replaces repository-wide quick action workflows", async () => {
+    const repository = {
+      id: "repository-1",
+      name: "Codex",
+      description: "Developer tooling",
+      jiraBranchRegex: null,
+      keepBaseBranchUpToDate: true,
+    };
+    const workflowQuickActionRepository = {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      createMany: vi.fn().mockResolvedValue({ count: 2 }),
+    };
+    const transactionClient = { workflowQuickActionRepository };
+    const prisma = {
+      codebaseRepository: {
+        update: vi.fn().mockResolvedValue(repository),
+      },
+      workflow: { count: vi.fn().mockResolvedValue(2) },
+      workflowQuickActionRepository,
+      $transaction: vi.fn(
+        async (operation: (transaction: unknown) => Promise<unknown>) =>
+          operation(transactionClient),
+      ),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new CodebasesService(control());
+
+    await service.updateRepository(
+      "repository-1",
+      "Codex",
+      "Developer tooling",
+      null,
+      true,
+      undefined,
+      ["workflow-1", "workflow-2", "workflow-1"],
+    );
+
+    expect(
+      prisma.workflowQuickActionRepository.deleteMany,
+    ).toHaveBeenCalledWith({ where: { repositoryId: "repository-1" } });
+    expect(
+      prisma.workflowQuickActionRepository.createMany,
+    ).toHaveBeenCalledWith({
+      data: [
+        { workflowId: "workflow-1", repositoryId: "repository-1" },
+        { workflowId: "workflow-2", repositoryId: "repository-1" },
+      ],
+    });
+  });
+
   test("validates and persists the agent refresh interval", async () => {
     const updatedAt = new Date(0);
     const prisma = {

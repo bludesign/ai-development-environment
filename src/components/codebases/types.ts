@@ -46,6 +46,13 @@ export type CodebaseRepository = {
   jiraBranchRegex: string | null;
   keepBaseBranchUpToDate: boolean;
   skillGroups?: Array<{ id: string; name: string }>;
+  quickActionWorkflows?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    enabled: boolean;
+    globalQuickAction: boolean;
+  }>;
   codebases: Codebase[];
   createdAt: string;
   updatedAt: string;

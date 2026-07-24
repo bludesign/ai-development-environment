@@ -415,25 +415,28 @@ export function WorkflowGraph({
   // needs the measurements back, so it holds those and stays a plain function
   // of the definition it was handed.
   const [sizes, setSizes] = useState<Record<string, Dimensions>>({});
-  const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {
-    setSizes((current) => {
-      let next = current;
-      for (const change of changes) {
-        if (change.type !== "dimensions" || !change.dimensions) continue;
-        const previous = current[change.id];
-        if (
-          previous?.width === change.dimensions.width &&
-          previous.height === change.dimensions.height
-        )
-          continue;
-        // Re-measuring settles within a frame or two of mounting, so a fresh
-        // object here would restart the render it came from over and over.
-        next = next === current ? { ...current } : next;
-        next[change.id] = change.dimensions;
-      }
-      return next;
-    });
-  }, []);
+  const onNodesChange = useCallback(
+    (changes: NodeChange<WorkflowFlowNode>[]) => {
+      setSizes((current) => {
+        let next = current;
+        for (const change of changes) {
+          if (change.type !== "dimensions" || !change.dimensions) continue;
+          const previous = current[change.id];
+          if (
+            previous?.width === change.dimensions.width &&
+            previous.height === change.dimensions.height
+          )
+            continue;
+          // Re-measuring settles within a frame or two of mounting, so a fresh
+          // object here would restart the render it came from over and over.
+          next = next === current ? { ...current } : next;
+          next[change.id] = change.dimensions;
+        }
+        return next;
+      });
+    },
+    [],
+  );
   const nodes = useMemo(
     () =>
       elements.nodes.map((node) => {

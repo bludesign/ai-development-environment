@@ -34,6 +34,7 @@ type CodebaseRepository {
   jiraBranchRegex: String
   keepBaseBranchUpToDate: Boolean!
   skillGroups: [SkillGroup!]!
+  quickActionWorkflows: [Workflow!]!
   codebases: [Codebase!]!
   createdAt: String!
   updatedAt: String!
@@ -216,6 +217,7 @@ input UpdateCodebaseRepositoryInput {
   jiraBranchRegex: String
   keepBaseBranchUpToDate: Boolean!
   skillGroupIds: [ID!]
+  quickActionWorkflowIds: [ID!]
 }
 
 input UpdateCodebaseSettingsInput {

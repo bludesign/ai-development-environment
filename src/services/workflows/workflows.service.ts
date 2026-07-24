@@ -427,6 +427,7 @@ export class WorkflowsService {
       },
       include: {
         activeVersion: true,
+        quickActionRepositories: { include: { repository: true } },
         _count: { select: { versions: true, runs: true } },
       },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -447,6 +448,7 @@ export class WorkflowsService {
       include: {
         activeVersion: true,
         versions: { orderBy: { version: "desc" } },
+        quickActionRepositories: { include: { repository: true } },
         _count: { select: { runs: true } },
       },
     });
@@ -685,6 +687,47 @@ export class WorkflowsService {
     await prisma.workflow.update({ where: { id }, data: { enabled } });
     publishWorkflowChanged(id);
     return this.get(id);
+  }
+
+  async setQuickAction(input: {
+    id: string;
+    global: boolean;
+    repositoryIds: string[];
+  }) {
+    const prisma = await getPrismaClient();
+    const repositoryIds = [
+      ...new Set(input.repositoryIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+    const [workflow, repositoryCount] = await Promise.all([
+      prisma.workflow.findUnique({
+        where: { id: input.id },
+        select: { id: true },
+      }),
+      prisma.codebaseRepository.count({ where: { id: { in: repositoryIds } } }),
+    ]);
+    if (!workflow) throw new Error("Workflow not found");
+    if (repositoryCount !== repositoryIds.length) {
+      throw new Error("One or more repositories were not found");
+    }
+    await prisma.$transaction(async (transaction) => {
+      await transaction.workflow.update({
+        where: { id: input.id },
+        data: { globalQuickAction: input.global },
+      });
+      await transaction.workflowQuickActionRepository.deleteMany({
+        where: { workflowId: input.id },
+      });
+      if (repositoryIds.length) {
+        await transaction.workflowQuickActionRepository.createMany({
+          data: repositoryIds.map((repositoryId) => ({
+            workflowId: input.id,
+            repositoryId,
+          })),
+        });
+      }
+    });
+    publishWorkflowChanged(input.id);
+    return this.get(input.id);
   }
 
   async archive(id: string, archived: boolean) {
@@ -1495,6 +1538,43 @@ export class WorkflowsService {
         (trigger) =>
           trigger.kind === "RESOURCE_MANUAL" &&
           workflowResourceKind(trigger.config) === normalized,
+      );
+    });
+  }
+
+  async quickActions(worktreeId: string) {
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      select: { codebase: { select: { repositoryId: true } } },
+    });
+    if (!worktree) throw new Error("Worktree not found");
+    const workflows = await prisma.workflow.findMany({
+      where: {
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+        OR: [
+          { globalQuickAction: true },
+          {
+            quickActionRepositories: {
+              some: { repositoryId: worktree.codebase.repositoryId },
+            },
+          },
+        ],
+      },
+      include: { activeVersion: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    return workflows.filter((workflow) => {
+      if (!workflow.activeVersion) return false;
+      const definition = parseWorkflowDefinition(
+        json(workflow.activeVersion.definitionJson),
+      );
+      return definition.triggers.some(
+        (trigger) =>
+          trigger.kind === "RESOURCE_MANUAL" &&
+          workflowResourceKind(trigger.config) === "WORKTREE",
       );
     });
   }

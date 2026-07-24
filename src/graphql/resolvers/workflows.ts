@@ -31,6 +31,10 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     }) => value._count?.versions ?? value.versions?.length ?? 0,
     runCount: (value: { _count?: { runs?: number } }) =>
       value._count?.runs ?? 0,
+    quickActionRepositories: (value: {
+      quickActionRepositories?: Array<{ repository: unknown }>;
+    }) =>
+      value.quickActionRepositories?.map(({ repository }) => repository) ?? [],
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
@@ -179,6 +183,14 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       requireControlPlane(context);
       return service.acceptingResource(kind);
     },
+    workflowQuickActions: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.quickActions(worktreeId);
+    },
     exportWorkflow: (
       _root: unknown,
       { id, versionId }: { id: string; versionId?: string | null },
@@ -241,6 +253,18 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.setEnabled(args.id, args.enabled);
+    },
+    setWorkflowQuickAction: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: { id: string; global: boolean; repositoryIds: string[] };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.setQuickAction(input);
     },
     archiveWorkflow: (
       _root: unknown,

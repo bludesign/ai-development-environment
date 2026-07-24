@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -69,7 +70,8 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction
+  quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
 `;
 
@@ -374,6 +376,12 @@ export function WorkflowsPage() {
                     <Badge variant="outline">
                       {labels.overlapPolicy(workflow.overlapPolicy)}
                     </Badge>
+                    {(workflow.globalQuickAction ||
+                      (workflow.quickActionRepositories?.length ?? 0) > 0) && (
+                      <Badge variant="outline">
+                        <Zap /> {t("quickActions")}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{t("runCount", { count: workflow.runCount })}</span>

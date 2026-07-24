@@ -146,6 +146,21 @@ describe("WorktreesService", () => {
       },
     };
     const findMany = vi.fn().mockResolvedValue([worktree]);
+    const quickActionWorkflow = {
+      id: "workflow-1",
+      name: "Prepare review",
+      description: "",
+      globalQuickAction: false,
+      activeVersion: {
+        triggers: [
+          {
+            kind: "RESOURCE_MANUAL",
+            configJson: JSON.stringify({ resourceKind: "WORKTREE" }),
+          },
+        ],
+      },
+      quickActionRepositories: [{ repositoryId: "repository-1" }],
+    };
     getPrismaClient.mockResolvedValue({
       worktree: {
         deleteMany: vi.fn(),
@@ -161,6 +176,7 @@ describe("WorktreesService", () => {
       },
       codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
       worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
+      workflow: { findMany: vi.fn().mockResolvedValue([quickActionWorkflow]) },
     });
     const worktrees = new WorktreesService(
       {
@@ -192,6 +208,9 @@ describe("WorktreesService", () => {
     expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.pullRequest).toEqual(
       pullRequest,
     );
+    expect(initial.agents[0]?.codebases[0]?.quickActions).toEqual([
+      quickActionWorkflow,
+    ]);
     await worktrees.overview();
     expect(pullRequestsForOrigin).toHaveBeenCalledOnce();
 

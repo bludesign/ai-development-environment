@@ -27,6 +27,8 @@ type Workflow {
   enabled: Boolean!
   overlapPolicy: WorkflowOverlapPolicy!
   maxConcurrentRuns: Int!
+  globalQuickAction: Boolean!
+  quickActionRepositories: [CodebaseRepository!]!
   archivedAt: String
   versions: [WorkflowVersion!]!
   versionCount: Int!
@@ -265,6 +267,12 @@ input TriggerWorkflowInput {
   subjectKey: String
 }
 
+input SetWorkflowQuickActionInput {
+  id: ID!
+  global: Boolean!
+  repositoryIds: [ID!]!
+}
+
 input ImportWorkflowInput {
   payload: JSON!
   name: String
@@ -297,6 +305,7 @@ extend type Query {
   ): [WorkflowRunEvent!]!
   workflowRunsForResource(kind: String!, resourceId: ID!): [WorkflowRun!]!
   workflowsAcceptingResource(kind: String!): [Workflow!]!
+  workflowQuickActions(worktreeId: ID!): [Workflow!]!
   exportWorkflow(id: ID!, versionId: ID): JSON!
   prepareWorkflowReplay(runId: ID!, nodeId: ID!): WorkflowReplayPreview!
   workflowJobSecrets(jobId: ID!): [WorkflowJobSecret!]!
@@ -308,6 +317,7 @@ extend type Mutation {
   importWorkflow(input: ImportWorkflowInput!): Workflow!
   publishWorkflow(id: ID!): WorkflowVersion!
   setWorkflowEnabled(id: ID!, enabled: Boolean!): Workflow!
+  setWorkflowQuickAction(input: SetWorkflowQuickActionInput!): Workflow!
   archiveWorkflow(id: ID!, archived: Boolean!): Workflow!
   deleteWorkflow(id: ID!): Boolean!
   triggerWorkflow(input: TriggerWorkflowInput!): WorkflowRun!

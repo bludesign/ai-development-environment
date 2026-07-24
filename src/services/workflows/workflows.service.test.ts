@@ -9,7 +9,13 @@ import { WorkflowsService } from "./workflows.service";
 
 const prisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
-  workflow: { findUnique: vi.fn() },
+  workflow: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  codebaseRepository: { count: vi.fn() },
+  worktree: { findUnique: vi.fn() },
+  workflowQuickActionRepository: {
+    deleteMany: vi.fn(),
+    createMany: vi.fn(),
+  },
   workflowVersion: { findMany: vi.fn() },
   workflowRun: {
     findUnique: vi.fn(),
@@ -69,6 +75,97 @@ function subworkflowDefinition(
     ],
   };
 }
+
+describe("workflow quick actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+  });
+
+  test("returns enabled worktree actions inherited from the repository", async () => {
+    const accepted = emptyWorkflowDefinition("Accepted");
+    accepted.triggers = [
+      {
+        id: "worktree",
+        kind: "RESOURCE_MANUAL",
+        position: { x: 0, y: 0 },
+        config: { resourceKind: "WORKTREE" },
+      },
+    ];
+    const ignored = emptyWorkflowDefinition("Ignored");
+    prisma.worktree.findUnique.mockResolvedValue({
+      codebase: { repositoryId: "repository-1" },
+    });
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow-accepted",
+        activeVersion: { definitionJson: JSON.stringify(accepted) },
+      },
+      {
+        id: "workflow-ignored",
+        activeVersion: { definitionJson: JSON.stringify(ignored) },
+      },
+    ]);
+
+    const result = await new WorkflowsService(
+      new WorkflowEventsService(),
+    ).quickActions("worktree-1");
+
+    expect(result.map(({ id }) => id)).toEqual(["workflow-accepted"]);
+    expect(prisma.workflow.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { globalQuickAction: true },
+            {
+              quickActionRepositories: {
+                some: { repositoryId: "repository-1" },
+              },
+            },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  test("replaces global and repository assignments atomically", async () => {
+    prisma.workflow.findUnique.mockResolvedValue({ id: "workflow-1" });
+    prisma.codebaseRepository.count.mockResolvedValue(2);
+    prisma.workflow.update.mockResolvedValue({ id: "workflow-1" });
+    prisma.workflowQuickActionRepository.deleteMany.mockResolvedValue({
+      count: 0,
+    });
+    prisma.workflowQuickActionRepository.createMany.mockResolvedValue({
+      count: 2,
+    });
+
+    await new WorkflowsService(new WorkflowEventsService()).setQuickAction({
+      id: "workflow-1",
+      global: true,
+      repositoryIds: ["repository-1", "repository-2", "repository-1"],
+    });
+
+    expect(prisma.workflow.update).toHaveBeenCalledWith({
+      where: { id: "workflow-1" },
+      data: { globalQuickAction: true },
+    });
+    expect(
+      prisma.workflowQuickActionRepository.createMany,
+    ).toHaveBeenCalledWith({
+      data: [
+        { workflowId: "workflow-1", repositoryId: "repository-1" },
+        { workflowId: "workflow-1", repositoryId: "repository-2" },
+      ],
+    });
+  });
+});
 
 describe("workflow sub-workflow validation", () => {
   beforeEach(() => {

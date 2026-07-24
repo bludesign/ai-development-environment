@@ -74,6 +74,11 @@ export type WorktreeCodebaseGroup = {
   repository: CodebaseRepository;
   worktrees: Worktree[];
   iosBuildConfigured?: boolean;
+  quickActions?: Array<{
+    id: string;
+    name: string;
+    description: string;
+  }>;
 };
 
 export type WorktreeAgentGroup = {
