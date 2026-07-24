@@ -177,6 +177,7 @@
     "applyRepair": "Reparatur anwenden",
     "questionFrom": "Frage von {step}",
     "answer": "Antworten",
+    "customAnswer": "Benutzerdefinierte Antwort",
     "replay": "Wiederholen und zurückspulen",
     "replayDescription": "Vor einer neuen, unveränderlichen Generation die betroffenen Nachfolger prüfen.",
     "selectReplayStep": "Schritt auswählen",

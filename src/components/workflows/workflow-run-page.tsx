@@ -18,7 +18,31 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -26,7 +50,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -37,6 +61,11 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -84,6 +113,34 @@ type ReplayPreview = {
   warning: string | null;
 };
 
+export type WorkflowQuestion = {
+  id: string;
+  header?: string | null;
+  prompt: string;
+  multiSelect: boolean;
+  allowCustom: boolean;
+  options: Array<{
+    id: string;
+    label: string;
+    description?: string | null;
+  }>;
+};
+
+export function workflowQuestionAnswerPayload(
+  questions: WorkflowQuestion[],
+  answers: Record<string, string[]>,
+  customAnswers: Record<string, string>,
+) {
+  return Object.fromEntries(
+    questions.map((question) => {
+      const selected = [...(answers[question.id] ?? [])];
+      const custom = customAnswers[question.id]?.trim();
+      if (custom) selected.push(custom);
+      return [question.id, { answers: selected }];
+    }),
+  );
+}
+
 function jsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -95,7 +152,10 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [repairText, setRepairText] = useState("{}");
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [customAnswers, setCustomAnswers] = useState<Record<string, string>>(
+    {},
+  );
   const [replayNodeId, setReplayNodeId] = useState<string>("");
   const [preview, setPreview] = useState<ReplayPreview | null>(null);
 
@@ -188,12 +248,14 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
 
   const answerQuestion = async (
     batchId: string,
-    questions: Array<{ id: string }>,
+    questions: WorkflowQuestion[],
   ) => {
     setBusy(true);
     try {
-      const value = Object.fromEntries(
-        questions.map(({ id }) => [id, answers[id] ?? ""]),
+      const value = workflowQuestionAnswerPayload(
+        questions,
+        answers,
+        customAnswers,
       );
       await controlPlaneRequest(
         `mutation AnswerWorkflowQuestion($batchId: ID!, $answers: JSON!) { answerWorkflowQuestion(batchId: $batchId, answers: $answers) { id status } }`,
@@ -261,8 +323,13 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
 
   if (loading)
     return (
-      <div className="flex min-h-80 items-center justify-center">
-        <Spinner />
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <Skeleton className="h-[min(68vh,760px)] min-h-96" />
+        <Skeleton className="h-64" />
       </div>
     );
   if (!run)
@@ -286,11 +353,21 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2">
-          <Button asChild aria-label={t("back")} size="icon" variant="ghost">
-            <Link href={`/workflows/${run.workflowId}`}>
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                aria-label={t("back")}
+                size="icon"
+                variant="ghost"
+              >
+                <Link href={`/workflows/${run.workflowId}`}>
+                  <ArrowLeft />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("back")}</TooltipContent>
+          </Tooltip>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">
@@ -310,14 +387,19 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            aria-label={t("refresh")}
-            onClick={() => void load()}
-            size="icon"
-            variant="outline"
-          >
-            <RefreshCw />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={t("refresh")}
+                onClick={() => void load()}
+                size="icon"
+                variant="outline"
+              >
+                <RefreshCw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
           {canPause && (
             <Button
               disabled={busy}
@@ -392,16 +474,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
       )}
 
       {pendingQuestions.map(({ attempt, batch }) => {
-        const questions = batch.questions as Array<{
-          id: string;
-          header?: string | null;
-          prompt: string;
-          options?: Array<{
-            id: string;
-            label: string;
-            description?: string | null;
-          }>;
-        }>;
+        const questions = batch.questions as WorkflowQuestion[];
         return (
           <Card key={String(batch.id)}>
             <CardHeader>
@@ -409,49 +482,120 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
             </CardHeader>
             <CardContent className="space-y-4">
               {questions.map((question) => (
-                <div className="space-y-2" key={question.id}>
-                  <Label htmlFor={`answer-${question.id}`}>
+                <FieldSet key={question.id}>
+                  <FieldLegend>
                     {question.header || question.prompt}
-                  </Label>
+                  </FieldLegend>
                   {question.header && (
-                    <p className="text-sm text-muted-foreground">
-                      {question.prompt}
-                    </p>
+                    <FieldDescription>{question.prompt}</FieldDescription>
                   )}
-                  {question.options?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {question.options.map((option) => (
-                        <Button
-                          key={option.id}
-                          onClick={() =>
+                  {question.options.length > 0 && question.multiSelect && (
+                    <FieldGroup data-slot="checkbox-group" className="gap-2">
+                      {question.options.map((option) => {
+                        const id = `answer-${question.id}-${option.id}`;
+                        const checked =
+                          answers[question.id]?.includes(option.label) ?? false;
+                        return (
+                          <FieldLabel
+                            className="w-full cursor-pointer"
+                            htmlFor={id}
+                            key={option.id}
+                          >
+                            <Item size="sm" variant="outline">
+                              <Checkbox
+                                checked={checked}
+                                id={id}
+                                onCheckedChange={(next) =>
+                                  setAnswers((current) => {
+                                    const selected = new Set(
+                                      current[question.id] ?? [],
+                                    );
+                                    if (next) selected.add(option.label);
+                                    else selected.delete(option.label);
+                                    return {
+                                      ...current,
+                                      [question.id]: [...selected],
+                                    };
+                                  })
+                                }
+                              />
+                              <ItemContent>
+                                <ItemTitle>{option.label}</ItemTitle>
+                                {option.description && (
+                                  <ItemDescription>
+                                    {option.description}
+                                  </ItemDescription>
+                                )}
+                              </ItemContent>
+                            </Item>
+                          </FieldLabel>
+                        );
+                      })}
+                    </FieldGroup>
+                  )}
+                  {question.options.length > 0 && !question.multiSelect && (
+                    <RadioGroup
+                      onValueChange={(value) => {
+                        setAnswers((current) => ({
+                          ...current,
+                          [question.id]: [value],
+                        }));
+                        setCustomAnswers((current) => ({
+                          ...current,
+                          [question.id]: "",
+                        }));
+                      }}
+                      value={answers[question.id]?.[0] ?? ""}
+                    >
+                      {question.options.map((option) => {
+                        const id = `answer-${question.id}-${option.id}`;
+                        return (
+                          <FieldLabel
+                            className="w-full cursor-pointer"
+                            htmlFor={id}
+                            key={option.id}
+                          >
+                            <Item size="sm" variant="outline">
+                              <RadioGroupItem id={id} value={option.label} />
+                              <ItemContent>
+                                <ItemTitle>{option.label}</ItemTitle>
+                                {option.description && (
+                                  <ItemDescription>
+                                    {option.description}
+                                  </ItemDescription>
+                                )}
+                              </ItemContent>
+                            </Item>
+                          </FieldLabel>
+                        );
+                      })}
+                    </RadioGroup>
+                  )}
+                  {question.allowCustom && (
+                    <Field>
+                      <FieldLabel htmlFor={`answer-${question.id}-custom`}>
+                        {t("customAnswer")}
+                      </FieldLabel>
+                      <Textarea
+                        id={`answer-${question.id}-custom`}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setCustomAnswers((current) => ({
+                            ...current,
+                            [question.id]: value,
+                          }));
+                          if (value.trim() && !question.multiSelect) {
                             setAnswers((current) => ({
                               ...current,
-                              [question.id]: option.label,
-                            }))
+                              [question.id]: [],
+                            }));
                           }
-                          size="sm"
-                          variant={
-                            answers[question.id] === option.label
-                              ? "default"
-                              : "outline"
-                          }
-                        >
-                          {option.label}
-                        </Button>
-                      ))}
-                    </div>
-                  ) : null}
-                  <Textarea
-                    id={`answer-${question.id}`}
-                    onChange={(event) =>
-                      setAnswers((current) => ({
-                        ...current,
-                        [question.id]: event.target.value,
-                      }))
-                    }
-                    value={answers[question.id] ?? ""}
-                  />
-                </div>
+                        }}
+                        value={customAnswers[question.id] ?? ""}
+                      />
+                    </Field>
+                  )}
+                </FieldSet>
               ))}
               <Button
                 disabled={busy}
@@ -512,9 +656,11 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                   </Alert>
                 )}
                 {preview.gitComparison && (
-                  <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
-                    {jsonText(preview.gitComparison)}
-                  </pre>
+                  <ScrollArea className="h-64 rounded-lg bg-muted">
+                    <pre className="min-w-max p-3 text-xs">
+                      {jsonText(preview.gitComparison)}
+                    </pre>
+                  </ScrollArea>
                 )}
                 {preview.externalEffects.length > 0 && (
                   <Alert variant="destructive">
@@ -589,17 +735,22 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                       </div>
                       <p className="mt-1 text-sm">{event.message}</p>
                       {event.detail ? (
-                        <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-muted p-2 text-xs">
-                          {jsonText(event.detail)}
-                        </pre>
+                        <ScrollArea className="mt-2 h-48 rounded-lg bg-muted">
+                          <pre className="min-w-max p-2 text-xs">
+                            {jsonText(event.detail)}
+                          </pre>
+                        </ScrollArea>
                       ) : null}
                     </div>
                   </div>
                 ))}
                 {!run.events.length && (
-                  <p className="py-12 text-center text-sm text-muted-foreground">
-                    {t("noEvents")}
-                  </p>
+                  <Empty className="py-12">
+                    <EmptyHeader>
+                      <EmptyTitle>{t("noEvents")}</EmptyTitle>
+                      <EmptyDescription>{t("timeline")}</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 )}
               </div>
             </CardContent>
@@ -660,6 +811,13 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                     ))}
                   </TableBody>
                 </Table>
+                {!run.attempts.length && (
+                  <Empty className="py-12">
+                    <EmptyHeader>
+                      <EmptyTitle>{t("stepAttempts")}</EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -667,39 +825,45 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         <TabsContent value="data">
           <Card>
             <CardContent className="pt-6">
-              <pre className="max-h-[60vh] overflow-auto rounded-xl bg-muted p-4 text-xs">
-                {jsonText(run.sessionData)}
-              </pre>
+              <ScrollArea className="h-[60vh] rounded-xl bg-muted">
+                <pre className="min-w-max p-4 text-xs">
+                  {jsonText(run.sessionData)}
+                </pre>
+              </ScrollArea>
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="resources">
           <Card>
-            <CardContent className="space-y-2 pt-6">
-              {run.resourceLinks.map((link) => (
-                <div
-                  className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                  key={link.id}
-                >
-                  <div>
-                    <p className="font-medium">{link.label ?? link.kind}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {link.kind} · {link.resourceId}
-                    </p>
-                  </div>
-                  {link.url && (
-                    <Button asChild size="sm" variant="outline">
-                      <Link href={link.url}>
-                        <ExternalLink /> {t("open")}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
-              ))}
+            <CardContent className="pt-6">
+              <ItemGroup className="gap-2">
+                {run.resourceLinks.map((link) => (
+                  <Item key={link.id} variant="outline">
+                    <ItemContent>
+                      <ItemTitle>{link.label ?? link.kind}</ItemTitle>
+                      <ItemDescription>
+                        {link.kind} · {link.resourceId}
+                      </ItemDescription>
+                    </ItemContent>
+                    {link.url && (
+                      <ItemActions>
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={link.url}>
+                            <ExternalLink /> {t("open")}
+                          </Link>
+                        </Button>
+                      </ItemActions>
+                    )}
+                  </Item>
+                ))}
+              </ItemGroup>
               {!run.resourceLinks.length && (
-                <p className="py-12 text-center text-sm text-muted-foreground">
-                  {t("noResources")}
-                </p>
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>{t("noResources")}</EmptyTitle>
+                    <EmptyDescription>{t("resources")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
             </CardContent>
           </Card>

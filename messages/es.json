@@ -177,6 +177,7 @@
     "applyRepair": "Aplicar reparación",
     "questionFrom": "Pregunta de {step}",
     "answer": "Responder",
+    "customAnswer": "Respuesta personalizada",
     "replay": "Repetir y rebobinar",
     "replayDescription": "Previsualiza los descendientes afectados antes de crear una nueva generación inmutable.",
     "selectReplayStep": "Seleccionar un paso",

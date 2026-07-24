@@ -4,9 +4,18 @@ import { CirclePlay, ExternalLink, Waypoints } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -129,21 +138,34 @@ export function WorkflowResourcePanel({
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         {workflows.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <ItemGroup className="gap-2">
             {workflows.map((workflow) => (
-              <Button
-                disabled={!workflow.enabled}
-                key={workflow.id}
-                onClick={() => void trigger(workflow.id)}
-                size="sm"
-                variant="outline"
-              >
-                <CirclePlay /> {t("runNamed", { name: workflow.name })}
-              </Button>
+              <Item key={workflow.id} size="sm" variant="outline">
+                <ItemContent>
+                  <ItemTitle>{workflow.name}</ItemTitle>
+                  {workflow.description && (
+                    <ItemDescription>{workflow.description}</ItemDescription>
+                  )}
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    disabled={!workflow.enabled}
+                    onClick={() => void trigger(workflow.id)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <CirclePlay /> {t("run")}
+                  </Button>
+                </ItemActions>
+              </Item>
             ))}
-          </div>
+          </ItemGroup>
         )}
         {current && (
           <div className="space-y-3">

@@ -4,9 +4,14 @@ import { Braces, PenLine } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, type ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/common/searchable-select";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
 export type FieldValueMode = "literal" | "session";
@@ -42,6 +47,54 @@ export function detectValueMode(value: unknown): FieldValueMode {
   return isSessionBinding(value) ? "session" : "literal";
 }
 
+export function ValueModeToggle({
+  mode,
+  onValueChange,
+}: {
+  mode: FieldValueMode;
+  onValueChange: (mode: FieldValueMode) => void;
+}) {
+  const t = useTranslations("workflows");
+  return (
+    <ToggleGroup
+      aria-label={t("valueModeToggle")}
+      onValueChange={(value) => {
+        if (value === "literal" || value === "session") onValueChange(value);
+      }}
+      size="sm"
+      spacing={0}
+      type="single"
+      value={mode}
+      variant="outline"
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ToggleGroupItem
+            aria-label={t("valueModeLiteral")}
+            className="size-7 px-0"
+            value="literal"
+          >
+            <PenLine className="size-3.5" />
+          </ToggleGroupItem>
+        </TooltipTrigger>
+        <TooltipContent>{t("valueModeLiteral")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ToggleGroupItem
+            aria-label={t("valueModeSession")}
+            className="size-7 px-0"
+            value="session"
+          >
+            <Braces className="size-3.5" />
+          </ToggleGroupItem>
+        </TooltipTrigger>
+        <TooltipContent>{t("valueModeSession")}</TooltipContent>
+      </Tooltip>
+    </ToggleGroup>
+  );
+}
+
 /**
  * Wraps a field control with a compact literal/session mode switch. When the
  * field allows session bindings, an icon toggle sits to the right of the label.
@@ -66,72 +119,59 @@ export function ValueModeField({
   children: (
     current: unknown,
     onLiteralChange: (next: unknown) => void,
+    controlId: string,
   ) => ReactNode;
 }) {
   const t = useTranslations("workflows");
-  const listId = useId();
+  const controlId = useId();
   const mode = detectValueMode(value);
-
-  const toggle = () => {
-    if (mode === "session") {
-      onChange("");
-    } else {
-      onChange({ source: "SESSION", path: "" });
-    }
-  };
+  const sessionOptions = sessionPaths.map(({ path, description }) => ({
+    value: path,
+    label: path,
+    description,
+  }));
 
   return (
-    <div className="space-y-1.5">
+    <Field>
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs">{label}</Label>
+        <FieldLabel className="text-xs" htmlFor={controlId}>
+          {label}
+        </FieldLabel>
         {sessionEnabled && (
-          <Button
-            aria-label={t("valueModeToggle")}
-            className="size-6"
-            onClick={toggle}
-            size="icon"
-            title={
-              mode === "session" ? t("valueModeLiteral") : t("valueModeSession")
+          <ValueModeToggle
+            mode={mode}
+            onValueChange={(nextMode) =>
+              onChange(
+                nextMode === "session" ? { source: "SESSION", path: "" } : "",
+              )
             }
-            type="button"
-            variant="ghost"
-          >
-            {mode === "session" ? (
-              <PenLine className="size-3.5" />
-            ) : (
-              <Braces className="size-3.5" />
-            )}
-          </Button>
+          />
         )}
       </div>
       {mode === "session" ? (
         <>
-          <Input
-            aria-label={t("sessionBindingLabel")}
-            list={sessionPaths.length ? listId : undefined}
-            onChange={(event) =>
-              onChange({ source: "SESSION", path: event.target.value })
-            }
+          <SearchableSelect
+            allowCustomValue
+            ariaLabel={t("sessionBindingLabel")}
+            emptyMessage={t("noOptions")}
+            onValueChange={(path) => onChange({ source: "SESSION", path })}
+            options={sessionOptions}
             placeholder={t("sessionPathPlaceholder")}
+            searchPlaceholder={t("searchPlaceholder")}
             value={isSessionBinding(value) ? value.path : ""}
           />
-          {sessionPaths.length > 0 && (
-            <datalist id={listId}>
-              {sessionPaths.map(({ path, description }) => (
-                <option key={path} label={description} value={path} />
-              ))}
-            </datalist>
-          )}
-          <p className="text-[10px] text-muted-foreground">
+          <FieldDescription className="text-[10px]">
             {t("sessionBindingHelp")}
-          </p>
+          </FieldDescription>
         </>
       ) : (
         <>
-          {children(literalValue(value), onChange)}
-          {help && <p className="text-[10px] text-muted-foreground">{help}</p>}
+          {children(literalValue(value), onChange, controlId)}
+          {help && (
+            <FieldDescription className="text-[10px]">{help}</FieldDescription>
+          )}
         </>
       )}
-    </div>
+    </Field>
   );
 }

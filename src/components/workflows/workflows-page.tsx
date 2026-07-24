@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,8 +24,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -34,6 +45,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -217,26 +233,50 @@ export function WorkflowsPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
-          <Input
-            className="w-64"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("search")}
-            value={search}
-          />
-          <Button
-            aria-label={t("refresh")}
-            onClick={() => void load()}
-            size="icon"
-            variant="outline"
-          >
-            <RefreshCw />
-          </Button>
+          <InputGroup className="w-64">
+            <InputGroupAddon>
+              <Search />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label={t("search")}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t("search")}
+              value={search}
+            />
+          </InputGroup>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={t("refresh")}
+                onClick={() => void load()}
+                size="icon"
+                variant="outline"
+              >
+                <RefreshCw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex min-h-72 items-center justify-center">
-          <Spinner />
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {[0, 1, 2].map((item) => (
+            <Card key={item}>
+              <CardHeader>
+                <Skeleton className="h-5 w-2/5" />
+                <Skeleton className="h-4 w-4/5" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Skeleton className="h-5 w-16" />
+                  <Skeleton className="h-5 w-20" />
+                </div>
+                <Skeleton className="h-8 w-full" />
+              </CardContent>
+            </Card>
+          ))}
         </div>
       ) : tab === "workflows" ? (
         filteredWorkflows.length ? (
@@ -258,15 +298,20 @@ export function WorkflowsPage() {
                     </p>
                   </div>
                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        aria-label={t("actions")}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <MoreHorizontal />
-                      </Button>
-                    </DropdownMenuTrigger>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            aria-label={t("actions")}
+                            size="icon"
+                            variant="ghost"
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("actions")}</TooltipContent>
+                    </Tooltip>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem asChild>
                         <Link href={`/workflows/${workflow.id}/edit`}>
@@ -319,9 +364,11 @@ export function WorkflowsPage() {
             ))}
           </div>
         ) : (
-          <p className="py-16 text-center text-sm text-muted-foreground">
-            {t("empty")}
-          </p>
+          <Empty className="border py-16">
+            <EmptyHeader>
+              <EmptyTitle>{t("empty")}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         )
       ) : (
         <div className="overflow-x-auto rounded-xl border">
@@ -374,9 +421,12 @@ export function WorkflowsPage() {
             </TableBody>
           </Table>
           {!filteredRuns.length && (
-            <p className="py-16 text-center text-sm text-muted-foreground">
-              {t("noRuns")}
-            </p>
+            <Empty className="py-16">
+              <EmptyHeader>
+                <EmptyTitle>{t("noRuns")}</EmptyTitle>
+                <EmptyDescription>{t("descriptionLong")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       )}

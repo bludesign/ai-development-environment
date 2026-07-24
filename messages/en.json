@@ -177,6 +177,7 @@
     "applyRepair": "Apply repair",
     "questionFrom": "Question from {step}",
     "answer": "Answer",
+    "customAnswer": "Custom answer",
     "replay": "Replay and rewind",
     "replayDescription": "Prepare a descendant preview before creating a new append-only generation.",
     "selectReplayStep": "Select a step",

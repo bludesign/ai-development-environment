@@ -1,6 +1,6 @@
 "use client";
 
-import { Braces, ChevronDown, PenLine, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -14,8 +14,29 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -24,12 +45,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
 import { getConfigDescriptor } from "./descriptors";
 import type { ConfigFieldDescriptor, ConfigFieldScope } from "./types";
 import { useResourceOptions } from "./use-resource-options";
 import {
+  ValueModeToggle,
   ValueModeField,
   isSessionBinding,
   literalValue,
@@ -62,15 +89,18 @@ type FieldProps = {
 
 function EnumField({ field, value, onChange }: FieldProps) {
   const t = useTranslations("workflows");
+  const id = useId();
   const options = field.options?.kind === "static" ? field.options.options : [];
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{field.label}</Label>
+    <Field>
+      <FieldLabel className="text-xs" htmlFor={id}>
+        {field.label}
+      </FieldLabel>
       <Select
         onValueChange={(next) => onChange(next)}
         value={asString(literalValue(value))}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" id={id}>
           <SelectValue placeholder={t("selectPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
@@ -82,9 +112,11 @@ function EnumField({ field, value, onChange }: FieldProps) {
         </SelectContent>
       </Select>
       {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -98,16 +130,18 @@ function TextField({ field, value, onChange, sessionPaths }: FieldProps) {
       sessionPaths={sessionPaths}
       value={value}
     >
-      {(current, onLiteral) =>
+      {(current, onLiteral, controlId) =>
         field.multiline ? (
           <Textarea
             className="min-h-20 text-sm"
+            id={controlId}
             onChange={(event) => onLiteral(event.target.value)}
             placeholder={field.placeholder}
             value={asString(current)}
           />
         ) : (
           <Input
+            id={controlId}
             onChange={(event) => onLiteral(event.target.value)}
             placeholder={field.placeholder}
             value={asString(current)}
@@ -128,8 +162,9 @@ function NumberField({ field, value, onChange, sessionPaths }: FieldProps) {
       sessionPaths={sessionPaths}
       value={value}
     >
-      {(current, onLiteral) => (
+      {(current, onLiteral, controlId) => (
         <Input
+          id={controlId}
           onChange={(event) =>
             onLiteral(
               event.target.value === ""
@@ -153,21 +188,23 @@ function NumberField({ field, value, onChange, sessionPaths }: FieldProps) {
 function BooleanField({ field, value, onChange }: FieldProps) {
   const id = useId();
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={literalValue(value) === true}
-          id={id}
-          onCheckedChange={(checked) => onChange(checked === true)}
-        />
-        <Label className="text-xs" htmlFor={id}>
+    <Field orientation="horizontal">
+      <Checkbox
+        checked={literalValue(value) === true}
+        id={id}
+        onCheckedChange={(checked) => onChange(checked === true)}
+      />
+      <FieldContent>
+        <FieldLabel className="text-xs" htmlFor={id}>
           {field.label}
-        </Label>
-      </div>
-      {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
-      )}
-    </div>
+        </FieldLabel>
+        {field.help && (
+          <FieldDescription className="text-[10px]">
+            {field.help}
+          </FieldDescription>
+        )}
+      </FieldContent>
+    </Field>
   );
 }
 
@@ -181,7 +218,7 @@ function ResourceField({
   const t = useTranslations("workflows");
   const source = field.options?.kind === "resource" ? field.options : null;
   const scope = literalScope(config, source?.scopeFrom);
-  const { options, loading, fallback } = useResourceOptions(
+  const { options, loading } = useResourceOptions(
     source?.resource ?? "codebase",
     scope,
   );
@@ -194,25 +231,19 @@ function ResourceField({
       sessionPaths={sessionPaths}
       value={value}
     >
-      {(current, onLiteral) =>
-        fallback || loading ? (
-          <Input
-            onChange={(event) => onLiteral(event.target.value)}
-            placeholder={field.placeholder ?? t("selectPlaceholder")}
-            value={asString(current)}
-          />
-        ) : (
-          <SearchableSelect
-            ariaLabel={field.label}
-            emptyMessage={t("noOptions")}
-            onValueChange={onLiteral}
-            options={options}
-            placeholder={t("selectPlaceholder")}
-            searchPlaceholder={t("searchPlaceholder")}
-            value={asString(current)}
-          />
-        )
-      }
+      {(current, onLiteral) => (
+        <SearchableSelect
+          allowCustomValue
+          ariaLabel={field.label}
+          disabled={loading}
+          emptyMessage={t("noOptions")}
+          onValueChange={onLiteral}
+          options={options}
+          placeholder={field.placeholder ?? t("selectPlaceholder")}
+          searchPlaceholder={t("searchPlaceholder")}
+          value={asString(current)}
+        />
+      )}
     </ValueModeField>
   );
 }
@@ -221,7 +252,7 @@ function ResourceMultiField({ field, config, value, onChange }: FieldProps) {
   const t = useTranslations("workflows");
   const source = field.options?.kind === "resource" ? field.options : null;
   const scope = literalScope(config, source?.scopeFrom);
-  const { options, fallback } = useResourceOptions(
+  const { options, loading } = useResourceOptions(
     source?.resource ?? "codebase",
     scope,
   );
@@ -240,53 +271,53 @@ function ResourceMultiField({ field, config, value, onChange }: FieldProps) {
   };
 
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{field.label}</Label>
-      <div className="space-y-1.5">
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <ItemGroup className="gap-1.5">
         {selected.map((id) => (
-          <div className="flex items-center gap-2" key={id}>
-            <span className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-2 py-1 text-xs">
-              {labelFor(id)}
-            </span>
-            <Button
-              aria-label={t("removeRow")}
-              className="size-7"
-              onClick={() => remove(id)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
+          <Item key={id} size="xs" variant="muted">
+            <ItemContent className="min-w-0">
+              <ItemTitle className="block truncate text-xs">
+                {labelFor(id)}
+              </ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("removeRow")}
+                    className="size-7"
+                    onClick={() => remove(id)}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("removeRow")}</TooltipContent>
+              </Tooltip>
+            </ItemActions>
+          </Item>
         ))}
-        {fallback ? (
-          <Input
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                add(event.currentTarget.value.trim());
-                event.currentTarget.value = "";
-              }
-            }}
-            placeholder={field.placeholder ?? t("addRow")}
-          />
-        ) : (
-          <SearchableSelect
-            ariaLabel={field.label}
-            emptyMessage={t("noOptions")}
-            onValueChange={add}
-            options={remaining}
-            placeholder={t("addRow")}
-            searchPlaceholder={t("searchPlaceholder")}
-            value=""
-          />
-        )}
-      </div>
+      </ItemGroup>
+      <SearchableSelect
+        allowCustomValue
+        ariaLabel={field.label}
+        disabled={loading}
+        emptyMessage={t("noOptions")}
+        onValueChange={add}
+        options={remaining}
+        placeholder={field.placeholder ?? t("addRow")}
+        searchPlaceholder={t("searchPlaceholder")}
+        value=""
+      />
       {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -301,29 +332,33 @@ function StringListField({ field, value, onChange }: FieldProps) {
     onChange(items.filter((_entry, position) => position !== index));
 
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{field.label}</Label>
-      <div className="space-y-1.5">
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <FieldGroup className="gap-1.5">
         {items.map((entry, index) => (
-          <div className="flex items-center gap-2" key={index}>
-            <Input
+          <InputGroup key={index}>
+            <InputGroupInput
               onChange={(event) => setItem(index, event.target.value)}
               placeholder={field.placeholder}
               value={entry}
             />
-            <Button
-              aria-label={t("removeRow")}
-              className="size-7 shrink-0"
-              onClick={() => removeItem(index)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
+            <InputGroupAddon align="inline-end">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <InputGroupButton
+                    aria-label={t("removeRow")}
+                    onClick={() => removeItem(index)}
+                    size="icon-xs"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </InputGroupButton>
+                </TooltipTrigger>
+                <TooltipContent>{t("removeRow")}</TooltipContent>
+              </Tooltip>
+            </InputGroupAddon>
+          </InputGroup>
         ))}
-      </div>
+      </FieldGroup>
       <Button
         onClick={() => onChange([...items, ""])}
         size="sm"
@@ -333,9 +368,11 @@ function StringListField({ field, value, onChange }: FieldProps) {
         <Plus className="size-3.5" /> {t("addRow")}
       </Button>
       {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -357,9 +394,9 @@ function RecordField({ field, value, onChange }: FieldProps) {
   };
 
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{field.label}</Label>
-      <div className="space-y-1.5">
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <FieldGroup className="gap-1.5">
         {entries.map(([key, entry], index) => (
           <div className="flex items-center gap-2" key={index}>
             <Input
@@ -390,21 +427,28 @@ function RecordField({ field, value, onChange }: FieldProps) {
               placeholder={t("recordValuePlaceholder")}
               value={asString(entry)}
             />
-            <Button
-              aria-label={t("removeRow")}
-              className="size-7 shrink-0"
-              onClick={() =>
-                commit(entries.filter((_pair, position) => position !== index))
-              }
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={t("removeRow")}
+                  className="size-7 shrink-0"
+                  onClick={() =>
+                    commit(
+                      entries.filter((_pair, position) => position !== index),
+                    )
+                  }
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("removeRow")}</TooltipContent>
+            </Tooltip>
           </div>
         ))}
-      </div>
+      </FieldGroup>
       <Button
         onClick={() => commit([...entries, ["", ""] as const])}
         size="sm"
@@ -414,13 +458,16 @@ function RecordField({ field, value, onChange }: FieldProps) {
         <Plus className="size-3.5" /> {t("addRow")}
       </Button>
       {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
       )}
-    </div>
+    </Field>
   );
 }
 
 function JsonField({ field, value, onChange }: FieldProps) {
+  const id = useId();
   const [text, setText] = useState(() =>
     value === undefined ? "" : JSON.stringify(value, null, 2),
   );
@@ -456,22 +503,28 @@ function JsonField({ field, value, onChange }: FieldProps) {
   };
 
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{field.label}</Label>
+    <Field data-invalid={Boolean(error)}>
+      <FieldLabel className="text-xs" htmlFor={id}>
+        {field.label}
+      </FieldLabel>
       <Textarea
+        aria-invalid={Boolean(error)}
         className="min-h-24 font-mono text-xs"
+        id={id}
         onChange={(event) => onText(event.target.value)}
         placeholder={field.placeholder}
         value={text}
       />
       {error ? (
-        <p className="text-[10px] text-destructive">{error}</p>
+        <FieldError className="text-[10px]">{error}</FieldError>
       ) : (
         field.help && (
-          <p className="text-[10px] text-muted-foreground">{field.help}</p>
+          <FieldDescription className="text-[10px]">
+            {field.help}
+          </FieldDescription>
         )
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -514,7 +567,6 @@ function ModelField({
   sessionPaths: readonly SessionFieldInfo[];
 }) {
   const t = useTranslations("workflows");
-  const listId = useId();
   const keys = field.modelKeys ?? DEFAULT_MODEL_KEYS;
 
   const latest = useRef(config);
@@ -563,57 +615,49 @@ function ModelField({
     { key: keys.model, label: t("modelModel"), value: modelValue },
     { key: keys.effort, label: t("modelEffort"), value: effortValue },
   ];
+  const sessionOptions = sessionPaths.map(({ path, description }) => ({
+    value: path,
+    label: path,
+    description,
+  }));
 
   return (
-    <div className="space-y-1.5">
+    <Field>
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs">{field.label}</Label>
-        <Button
-          aria-label={t("valueModeToggle")}
-          className="size-6"
-          onClick={sessionMode ? toSelector : toSession}
-          size="icon"
-          title={sessionMode ? t("valueModeLiteral") : t("valueModeSession")}
-          type="button"
-          variant="ghost"
-        >
-          {sessionMode ? (
-            <PenLine className="size-3.5" />
-          ) : (
-            <Braces className="size-3.5" />
-          )}
-        </Button>
+        <FieldLabel className="text-xs">{field.label}</FieldLabel>
+        <ValueModeToggle
+          mode={sessionMode ? "session" : "literal"}
+          onValueChange={(mode) =>
+            mode === "session" ? toSession() : toSelector()
+          }
+        />
       </div>
       {sessionMode ? (
         <>
-          <div className="space-y-1.5">
+          <FieldGroup className="gap-1.5">
             {sessionInputs.map(({ key, label, value }) => (
-              <div className="space-y-1" key={key}>
-                <Label className="text-[10px] text-muted-foreground">
+              <Field key={key}>
+                <FieldLabel className="text-[10px] text-muted-foreground">
                   {label}
-                </Label>
-                <Input
-                  aria-label={label}
-                  list={sessionPaths.length ? listId : undefined}
-                  onChange={(event) =>
-                    patch({ [key]: { source: "SESSION", path: event.target.value } })
+                </FieldLabel>
+                <SearchableSelect
+                  allowCustomValue
+                  ariaLabel={label}
+                  emptyMessage={t("noOptions")}
+                  onValueChange={(path) =>
+                    patch({ [key]: { source: "SESSION", path } })
                   }
+                  options={sessionOptions}
                   placeholder={t("sessionPathPlaceholder")}
+                  searchPlaceholder={t("searchPlaceholder")}
                   value={pathOf(value)}
                 />
-              </div>
+              </Field>
             ))}
-          </div>
-          {sessionPaths.length > 0 && (
-            <datalist id={listId}>
-              {sessionPaths.map(({ path, description }) => (
-                <option key={path} label={description} value={path} />
-              ))}
-            </datalist>
-          )}
-          <p className="text-[10px] text-muted-foreground">
+          </FieldGroup>
+          <FieldDescription className="text-[10px]">
             {t("sessionBindingHelp")}
-          </p>
+          </FieldDescription>
         </>
       ) : (
         <ModelEffortPicker
@@ -628,9 +672,11 @@ function ModelField({
         />
       )}
       {field.help && (
-        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
       )}
-    </div>
+    </Field>
   );
 }
 
@@ -727,16 +773,17 @@ export function RawConfigEditor({
       <CollapsibleContent className="space-y-1.5 pt-1.5">
         <Textarea
           aria-label={t("advancedJson")}
+          aria-invalid={Boolean(error)}
           className="min-h-40 font-mono text-xs"
           onChange={(event) => onText(event.target.value)}
           value={text}
         />
         {error ? (
-          <p className="text-[10px] text-destructive">{error}</p>
+          <FieldError className="text-[10px]">{error}</FieldError>
         ) : (
-          <p className="text-[10px] text-muted-foreground">
+          <FieldDescription className="text-[10px]">
             {t("advancedJsonHelp")}
-          </p>
+          </FieldDescription>
         )}
       </CollapsibleContent>
     </Collapsible>
@@ -792,10 +839,10 @@ export function ConfigFieldsEditor({
   };
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs font-medium text-muted-foreground">
+    <FieldGroup className="gap-3">
+      <FieldTitle className="text-xs text-muted-foreground">
         {t("configuration")}
-      </p>
+      </FieldTitle>
       {descriptor.fields.map((field) =>
         field.control === "model" ? (
           <ModelField
@@ -822,6 +869,6 @@ export function ConfigFieldsEditor({
         extraKeyCount={extraKeys.length}
         onChange={onChange}
       />
-    </div>
+    </FieldGroup>
   );
 }

@@ -139,4 +139,22 @@ describe("SearchableSelect", () => {
       ),
     ).toEqual(["Codex", "Studio Mac", "/repos/codex"]);
   });
+
+  test("preserves a selected value that is not in the current option page", () => {
+    renderSelect(vi.fn(), { value: "workflow.id" });
+
+    expect(
+      screen.getByRole("combobox", { name: "Destination" }).textContent,
+    ).toContain("workflow.id");
+  });
+
+  test("accepts a custom value through the command combobox", () => {
+    const onValueChange = renderSelect(vi.fn(), { allowCustomValue: true });
+    const search = openSelect();
+
+    fireEvent.change(search, { target: { value: "APP-404" } });
+    fireEvent.click(screen.getByRole("option", { name: "APP-404" }));
+
+    expect(onValueChange).toHaveBeenCalledWith("APP-404");
+  });
 });

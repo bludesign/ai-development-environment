@@ -20,6 +20,7 @@ import {
   Download,
   GripVertical,
   Plus,
+  Search,
   Save,
   Send,
   Settings,
@@ -32,13 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -46,8 +41,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -55,6 +70,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
@@ -64,7 +81,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
@@ -679,11 +702,35 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       ) ?? [],
     [catalog, search],
   );
+  const filteredTriggers = useMemo(
+    () =>
+      catalog?.triggers.filter((entry) =>
+        `${entry.label} ${entry.kind} ${entry.category}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ) ?? [],
+    [catalog, search],
+  );
+  const stepGroups = useMemo(
+    () => [...groupByCategory(filteredSteps)],
+    [filteredSteps],
+  );
+  const triggerGroups = useMemo(
+    () => [...groupByCategory(filteredTriggers)],
+    [filteredTriggers],
+  );
 
   if (loading) {
     return (
-      <div className="flex min-h-80 items-center justify-center">
-        <Spinner />
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <Skeleton className="h-[min(78vh,860px)] min-h-[520px]" />
+          <Skeleton className="h-[min(78vh,860px)] min-h-[520px]" />
+        </div>
       </div>
     );
   }
@@ -698,14 +745,19 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
-          <Button asChild size="icon" variant="ghost">
-            <Link
-              href={workflow ? `/workflows/${workflow.id}` : "/workflows"}
-              aria-label={t("back")}
-            >
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild size="icon" variant="ghost">
+                <Link
+                  href={workflow ? `/workflows/${workflow.id}` : "/workflows"}
+                  aria-label={t("back")}
+                >
+                  <ArrowLeft />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("back")}</TooltipContent>
+          </Tooltip>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               {t("editor")}
@@ -766,117 +818,175 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       )}
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <Card className="flex h-[min(78vh,860px)] min-h-[520px] flex-col">
-          <CardHeader>
-            <CardTitle>
-              {paletteView === "palette" ? t("steps") : t("outline")}
-            </CardTitle>
-            <CardAction>
-              <Button
-                onClick={() =>
-                  setPaletteView((current) =>
-                    current === "palette" ? "outline" : "palette",
-                  )
-                }
-                size="sm"
-                variant="outline"
+        <Card
+          className="flex h-[min(78vh,860px)] min-h-[520px] flex-col gap-0 py-0"
+          size="sm"
+        >
+          <Tabs
+            className="flex min-h-0 flex-1 gap-0"
+            onValueChange={(value) =>
+              setPaletteView(value as "palette" | "outline")
+            }
+            value={paletteView}
+          >
+            <div className="border-b p-2">
+              <TabsList className="w-full">
+                <TabsTrigger value="palette">{t("steps")}</TabsTrigger>
+                <TabsTrigger value="outline">{t("outline")}</TabsTrigger>
+              </TabsList>
+            </div>
+            <CardContent className="flex min-h-0 flex-1 flex-col p-2">
+              <TabsContent
+                className="flex min-h-0 flex-1 flex-col gap-2"
+                value="palette"
               >
-                {paletteView === "palette" ? t("viewOutline") : t("viewPalette")}
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
-            {paletteView === "palette" ? (
-              <>
-                <Input
-                  aria-label={t("searchSteps")}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t("searchSteps")}
-                  value={search}
-                />
-                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                  {[...groupByCategory(filteredSteps)].map(
-                    ([category, entries]) => (
-                      <div key={category}>
-                        <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                          {category}
-                        </p>
-                        <div className="space-y-1">
-                          {entries.map((entry) => (
-                            <button
-                              className="flex w-full cursor-grab items-center gap-2 rounded-lg border bg-background px-2.5 py-2 text-left text-xs hover:bg-muted"
-                              draggable
-                              key={entry.kind}
-                              onClick={() => addStep(entry)}
-                              onDragStart={(event) => {
-                                event.dataTransfer.setData(
-                                  "application/aide-workflow-step",
-                                  entry.kind,
-                                );
-                                event.dataTransfer.effectAllowed = "copy";
-                              }}
-                              type="button"
-                            >
-                              <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate font-medium">
-                                  {entry.label}
-                                </span>
-                                <span className="block truncate text-[10px] text-muted-foreground">
-                                  {entry.execution}
-                                </span>
-                              </span>
-                              {(entry.mutatesExternal ||
-                                entry.mutatesWorktree) && (
-                                <Badge className="text-[9px]" variant="outline">
-                                  {t("mutates")}
-                                </Badge>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ),
-                  )}
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                      {t("triggers")}
-                    </p>
-                    <div className="space-y-1">
-                      {catalog.triggers.map((entry) => (
-                        <Button
-                          className="w-full justify-start"
-                          key={entry.kind}
-                          onClick={() => addTrigger(entry)}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <Plus /> {entry.label}
-                        </Button>
+                <InputGroup>
+                  <InputGroupAddon>
+                    <Search />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    aria-label={t("searchSteps")}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t("searchSteps")}
+                    value={search}
+                  />
+                </InputGroup>
+                {stepGroups.length || triggerGroups.length ? (
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div className="space-y-3 pr-2 pb-1">
+                      {stepGroups.map(([category, entries]) => (
+                        <section key={`step:${category}`}>
+                          <div className="px-1 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                            {category}
+                          </div>
+                          <ItemGroup className="gap-1">
+                            {entries.map((entry) => (
+                              <Item
+                                asChild
+                                className="gap-1.5 px-1.5 py-1"
+                                key={entry.kind}
+                                size="xs"
+                                variant="outline"
+                              >
+                                <button
+                                  className="cursor-grab text-left"
+                                  draggable
+                                  onClick={() => addStep(entry)}
+                                  onDragStart={(event) => {
+                                    event.dataTransfer.setData(
+                                      "application/aide-workflow-step",
+                                      entry.kind,
+                                    );
+                                    event.dataTransfer.effectAllowed = "copy";
+                                  }}
+                                  type="button"
+                                >
+                                  <ItemMedia>
+                                    <GripVertical className="size-3.5 text-muted-foreground" />
+                                  </ItemMedia>
+                                  <ItemContent className="min-w-0">
+                                    <ItemTitle className="text-xs">
+                                      {entry.label}
+                                    </ItemTitle>
+                                    <ItemDescription className="text-[10px]">
+                                      {entry.execution}
+                                    </ItemDescription>
+                                  </ItemContent>
+                                  {(entry.mutatesExternal ||
+                                    entry.mutatesWorktree) && (
+                                    <ItemActions>
+                                      <Badge
+                                        className="text-[9px]"
+                                        variant="outline"
+                                      >
+                                        {t("mutates")}
+                                      </Badge>
+                                    </ItemActions>
+                                  )}
+                                </button>
+                              </Item>
+                            ))}
+                          </ItemGroup>
+                        </section>
+                      ))}
+                      {triggerGroups.map(([category, entries]) => (
+                        <section key={`trigger:${category}`}>
+                          <div className="px-1 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                            {t("triggers")} · {category}
+                          </div>
+                          <ItemGroup className="gap-1">
+                            {entries.map((entry) => (
+                              <Item
+                                asChild
+                                className="gap-1.5 px-1.5 py-1"
+                                key={entry.kind}
+                                size="xs"
+                                variant="outline"
+                              >
+                                <button
+                                  className="text-left"
+                                  onClick={() => addTrigger(entry)}
+                                  type="button"
+                                >
+                                  <ItemMedia>
+                                    <Plus className="size-3.5 text-muted-foreground" />
+                                  </ItemMedia>
+                                  <ItemContent className="min-w-0">
+                                    <ItemTitle className="text-xs">
+                                      {entry.label}
+                                    </ItemTitle>
+                                    <ItemDescription className="text-[10px]">
+                                      {entry.kind}
+                                    </ItemDescription>
+                                  </ItemContent>
+                                </button>
+                              </Item>
+                            ))}
+                          </ItemGroup>
+                        </section>
                       ))}
                     </div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                <div className="flex flex-wrap gap-2" role="list">
-                  {[...definition.triggers, ...definition.nodes].map((entry) => (
-                    <Button
-                      aria-current={entry.id === selectedId}
-                      key={entry.id}
-                      onClick={() => setSelectedId(entry.id)}
-                      role="listitem"
-                      size="sm"
-                      variant={entry.id === selectedId ? "default" : "outline"}
-                    >
-                      {entry.name ?? entry.kind}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
+                  </ScrollArea>
+                ) : (
+                  <Empty className="py-10">
+                    <EmptyHeader>
+                      <EmptyTitle>{t("noOptions")}</EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                )}
+              </TabsContent>
+              <TabsContent className="min-h-0" value="outline">
+                <ScrollArea className="h-full">
+                  <ItemGroup className="gap-1 pr-2 pb-1">
+                    {[...definition.triggers, ...definition.nodes].map(
+                      (entry) => (
+                        <Item
+                          asChild
+                          className="px-1.5 py-1"
+                          key={entry.id}
+                          size="xs"
+                          variant={
+                            entry.id === selectedId ? "muted" : "outline"
+                          }
+                        >
+                          <button
+                            aria-current={entry.id === selectedId}
+                            onClick={() => setSelectedId(entry.id)}
+                            type="button"
+                          >
+                            <ItemContent>
+                              <ItemTitle>{entry.name ?? entry.kind}</ItemTitle>
+                              <ItemDescription>{entry.kind}</ItemDescription>
+                            </ItemContent>
+                          </button>
+                        </Item>
+                      ),
+                    )}
+                  </ItemGroup>
+                </ScrollArea>
+              </TabsContent>
+            </CardContent>
+          </Tabs>
         </Card>
 
         <div className="min-w-0 space-y-3">
@@ -949,28 +1059,42 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               <CardHeader>
                 <CardTitle>{t("diagnostics")}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
-                {diagnostics.map((diagnostic, index) => (
-                  <button
-                    className="block w-full rounded-lg border p-2 text-left text-sm hover:bg-muted"
-                    key={`${diagnostic.code}-${index}`}
-                    onClick={() =>
-                      setSelectedId(diagnostic.nodeId ?? diagnostic.triggerId)
-                    }
-                    type="button"
-                  >
-                    <Badge
-                      variant={
-                        diagnostic.severity === "ERROR"
-                          ? "destructive"
-                          : "outline"
-                      }
+              <CardContent>
+                <ItemGroup className="gap-2">
+                  {diagnostics.map((diagnostic, index) => (
+                    <Item
+                      asChild
+                      key={`${diagnostic.code}-${index}`}
+                      size="sm"
+                      variant="outline"
                     >
-                      {diagnostic.code}
-                    </Badge>
-                    <span className="ml-2">{diagnostic.message}</span>
-                  </button>
-                ))}
+                      <button
+                        className="text-left"
+                        onClick={() =>
+                          setSelectedId(
+                            diagnostic.nodeId ?? diagnostic.triggerId,
+                          )
+                        }
+                        type="button"
+                      >
+                        <ItemContent>
+                          <ItemTitle>{diagnostic.message}</ItemTitle>
+                        </ItemContent>
+                        <ItemActions>
+                          <Badge
+                            variant={
+                              diagnostic.severity === "ERROR"
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            {diagnostic.code}
+                          </Badge>
+                        </ItemActions>
+                      </button>
+                    </Item>
+                  ))}
+                </ItemGroup>
               </CardContent>
             </Card>
           )}
@@ -983,9 +1107,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             <DialogTitle>{t("workflowSettings")}</DialogTitle>
             <DialogDescription>{t("editorDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="workflow-name">{t("name")}</Label>
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel htmlFor="workflow-name">{t("name")}</FieldLabel>
               <Input
                 id="workflow-name"
                 onChange={(event) =>
@@ -996,9 +1120,11 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 }
                 value={definition.name}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="workflow-description">{t("description")}</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="workflow-description">
+                {t("description")}
+              </FieldLabel>
               <Textarea
                 id="workflow-description"
                 onChange={(event) =>
@@ -1009,11 +1135,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 }
                 value={definition.description}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("overlapPolicy")}</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="workflow-overlap-policy">
+                {t("overlapPolicy")}
+              </FieldLabel>
               <Select onValueChange={setOverlapPolicy} value={overlapPolicy}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full" id="workflow-overlap-policy">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1026,11 +1154,11 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   </SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="workflow-concurrency">
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="workflow-concurrency">
                 {t("maxConcurrentRuns")}
-              </Label>
+              </FieldLabel>
               <Input
                 id="workflow-concurrency"
                 max={32}
@@ -1041,7 +1169,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 type="number"
                 value={maxConcurrentRuns}
               />
-            </div>
+            </Field>
             <Button
               className="w-full"
               onClick={() => void validate()}
@@ -1049,7 +1177,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             >
               {t("validate")}
             </Button>
-          </div>
+          </FieldGroup>
         </DialogContent>
       </Dialog>
 
@@ -1066,9 +1194,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 <SheetTitle>{selected.name ?? selected.kind}</SheetTitle>
                 <SheetDescription>{selected.kind}</SheetDescription>
               </SheetHeader>
-              <div className="space-y-4 px-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="node-name">{t("name")}</Label>
+              <FieldGroup className="gap-4 px-4">
+                <Field>
+                  <FieldLabel htmlFor="node-name">{t("name")}</FieldLabel>
                   <Input
                     id="node-name"
                     onChange={(event) =>
@@ -1076,7 +1204,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     }
                     value={selected.name ?? ""}
                   />
-                </div>
+                </Field>
                 {hasConfigDescriptor(
                   selected.kind,
                   selectedNode ? "step" : "trigger",
@@ -1090,44 +1218,50 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     sessionPaths={sessionPaths}
                   />
                 ) : (
-                  <div className="space-y-1.5" key={selected.id}>
-                    <Label>{t("configuration")}</Label>
+                  <Field key={selected.id}>
+                    <FieldTitle>{t("configuration")}</FieldTitle>
                     <RawConfigEditor
                       config={selected.config}
                       defaultOpen
                       onChange={(config) => updateSelected({ config })}
                     />
-                  </div>
+                  </Field>
                 )}
-                <div className="space-y-1.5">
-                  <Label>
+                <Field>
+                  <FieldTitle>
                     {selectedNode ? t("addsToSession") : t("seedsSession")}
-                  </Label>
+                  </FieldTitle>
                   {sessionAdditions.length > 0 ? (
-                    <ul className="space-y-1 rounded-lg border bg-muted/30 p-2">
+                    <ItemGroup className="gap-1 rounded-lg border bg-muted/30 p-2">
                       {sessionAdditions.map((info) => (
-                        <li key={info.path}>
-                          <code className="text-[11px]">{info.path}</code>
-                          {info.description && (
-                            <span className="ml-2 text-[10px] text-muted-foreground">
-                              {info.description}
-                            </span>
-                          )}
-                        </li>
+                        <Item className="px-1 py-0" key={info.path} size="xs">
+                          <ItemContent>
+                            <ItemTitle>
+                              <code className="text-[11px]">{info.path}</code>
+                            </ItemTitle>
+                            {info.description && (
+                              <ItemDescription className="text-[10px]">
+                                {info.description}
+                              </ItemDescription>
+                            )}
+                          </ItemContent>
+                        </Item>
                       ))}
-                    </ul>
+                    </ItemGroup>
                   ) : (
-                    <p className="text-[10px] text-muted-foreground">
-                      {t("addsToSessionEmpty")}
-                    </p>
+                    <Empty className="py-6">
+                      <EmptyHeader>
+                        <EmptyTitle>{t("addsToSessionEmpty")}</EmptyTitle>
+                      </EmptyHeader>
+                    </Empty>
                   )}
-                </div>
+                </Field>
                 {selectedNode && (
                   <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="required-paths">
+                    <Field>
+                      <FieldLabel htmlFor="required-paths">
                         {t("requiredPaths")}
-                      </Label>
+                      </FieldLabel>
                       <Input
                         id="required-paths"
                         onChange={(event) =>
@@ -1140,11 +1274,11 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                         }
                         value={selectedNode.requiredPaths.join(", ")}
                       />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="provided-paths">
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="provided-paths">
                         {t("providedPaths")}
-                      </Label>
+                      </FieldLabel>
                       <Input
                         id="provided-paths"
                         onChange={(event) =>
@@ -1157,10 +1291,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                         }
                         value={selectedNode.providedPaths.join(", ")}
                       />
-                    </div>
+                    </Field>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="retry-count">{t("maxAttempts")}</Label>
+                      <Field>
+                        <FieldLabel htmlFor="retry-count">
+                          {t("maxAttempts")}
+                        </FieldLabel>
                         <Input
                           id="retry-count"
                           max={20}
@@ -1176,9 +1312,11 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                           type="number"
                           value={selectedNode.retry.maxAttempts}
                         />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>{t("failurePolicy")}</Label>
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="failure-policy">
+                          {t("failurePolicy")}
+                        </FieldLabel>
                         <Select
                           onValueChange={(value) =>
                             updateSelected({
@@ -1187,7 +1325,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                           }
                           value={selectedNode.failurePolicy}
                         >
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger className="w-full" id="failure-policy">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1199,7 +1337,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                             </SelectItem>
                           </SelectContent>
                         </Select>
-                      </div>
+                      </Field>
                     </div>
                     {catalog.steps.find(
                       ({ kind }) => kind === selectedNode.kind,
@@ -1212,7 +1350,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     )}
                   </>
                 )}
-              </div>
+              </FieldGroup>
               <SheetFooter>
                 {selectedNode && (
                   <Button onClick={duplicateSelected} variant="outline">

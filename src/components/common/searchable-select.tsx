@@ -45,6 +45,7 @@ export function SearchableSelect({
   disabled,
   className,
   showSelectedDetails = false,
+  allowCustomValue = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -56,12 +57,30 @@ export function SearchableSelect({
   disabled?: boolean;
   className?: string;
   showSelectedDetails?: boolean;
+  allowCustomValue?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const selected = options.find((option) => option.value === value);
+  const displayValue = selected?.label ?? (value || placeholder);
+  const customValue = query.trim();
+  const showCustomValue =
+    allowCustomValue &&
+    customValue.length > 0 &&
+    !options.some(
+      (option) =>
+        option.value.toLowerCase() === customValue.toLowerCase() ||
+        option.label.toLowerCase() === customValue.toLowerCase(),
+    );
 
   return (
-    <Popover onOpenChange={setOpen} open={open}>
+    <Popover
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setQuery("");
+      }}
+      open={open}
+    >
       <PopoverTrigger asChild>
         <Button
           aria-expanded={open}
@@ -91,26 +110,45 @@ export function SearchableSelect({
               )}
             </span>
           ) : (
-            <span className="min-w-0 truncate">
-              {selected?.label ?? placeholder}
-            </span>
+            <span className="min-w-0 truncate">{displayValue}</span>
           )}
           <ChevronsUpDown className="shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="z-70 w-(--radix-popover-trigger-width) p-0"
+        className="z-70 max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-hidden p-0"
       >
         <Command label={searchPlaceholder}>
           <CommandInput
             aria-label={searchPlaceholder}
             autoFocus
+            onValueChange={setQuery}
             placeholder={searchPlaceholder}
+            value={query}
           />
-          <CommandList>
+          <CommandList className="max-h-64 overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
+              {showCustomValue && (
+                <CommandItem
+                  aria-label={customValue}
+                  onSelect={() => {
+                    onValueChange(customValue);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  value={customValue}
+                >
+                  <Item className="min-w-0 flex-1 border-0 p-0" size="xs">
+                    <ItemContent className="min-w-0">
+                      <ItemTitle className="block truncate">
+                        {customValue}
+                      </ItemTitle>
+                    </ItemContent>
+                  </Item>
+                </CommandItem>
+              )}
               {options.map((option) => (
                 <CommandItem
                   aria-label={[
@@ -133,6 +171,7 @@ export function SearchableSelect({
                   ]}
                   onSelect={() => {
                     onValueChange(option.value);
+                    setQuery("");
                     setOpen(false);
                   }}
                   value={option.value}

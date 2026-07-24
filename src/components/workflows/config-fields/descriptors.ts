@@ -227,7 +227,9 @@ const modelField = (): ConfigFieldDescriptor => ({
 
 const runInputFields = (): ConfigFieldDescriptor[] => [
   resource("worktreeId", "Worktree", "worktree"),
-  text("jiraIssueKey", "Jira issue key", { placeholder: "APP-123" }),
+  resource("jiraIssueKey", "Jira issue key", "jiraTicket", {
+    placeholder: "APP-123",
+  }),
   text("jiraSummary", "Jira summary"),
   modelField(),
   bool("webSearchEnabled", "Enable web search"),
@@ -244,19 +246,25 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   // -- Jira ------------------------------------------------------------------
   JIRA_LOAD_TICKET: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       bool("force", "Bypass cache"),
     ],
   },
   JIRA_TRANSITION: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       text("transitionId", "Transition ID", { required: true }),
     ],
   },
   JIRA_COMMENT: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       multiline("content", "Comment", { required: true }),
       enumField(
         "format",
@@ -270,7 +278,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   JIRA_ASSIGN: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       resource("accountId", "Assignee", "jiraUser", {
         scopeFrom: "issueKey",
         help: "Leave empty to unassign the ticket.",
@@ -279,7 +289,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   JIRA_UPDATE_FIELDS: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       json("fields", "Fields", {
         placeholder: '{ "labels": ["ready"] }',
       }),
@@ -287,7 +299,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   JIRA_RESOLVE_BRANCH: {
     fields: [
-      text("issueKey", "Issue key", { placeholder: "APP-123" }),
+      resource("issueKey", "Issue key", "jiraTicket", {
+        placeholder: "APP-123",
+      }),
       resource("codebaseId", "Codebase", "codebase"),
     ],
   },

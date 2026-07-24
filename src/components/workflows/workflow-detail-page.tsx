@@ -16,7 +16,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -25,6 +31,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -167,8 +178,17 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
 
   if (loading)
     return (
-      <div className="flex min-h-80 items-center justify-center">
-        <Spinner />
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
+            <Skeleton className="h-32" key={item} />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
       </div>
     );
   if (!workflow)
@@ -184,11 +204,21 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2">
-          <Button asChild aria-label={t("back")} size="icon" variant="ghost">
-            <Link href="/workflows">
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                aria-label={t("back")}
+                size="icon"
+                variant="ghost"
+              >
+                <Link href="/workflows">
+                  <ArrowLeft />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("back")}</TooltipContent>
+          </Tooltip>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">
@@ -209,14 +239,19 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => void load()}
-            size="icon"
-            variant="outline"
-            aria-label={t("refresh")}
-          >
-            <RefreshCw />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={() => void load()}
+                size="icon"
+                variant="outline"
+                aria-label={t("refresh")}
+              >
+                <RefreshCw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
           <Button onClick={() => void exportWorkflow()} variant="outline">
             <Download /> {t("export")}
           </Button>
@@ -331,9 +366,12 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                 </TableBody>
               </Table>
               {!runs.length && (
-                <p className="py-12 text-center text-sm text-muted-foreground">
-                  {t("noRuns")}
-                </p>
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>{t("noRuns")}</EmptyTitle>
+                    <EmptyDescription>{t("recentRuns")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
             </div>
           </CardContent>
@@ -364,25 +402,34 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                         <DateTime kind="relative" value={version.publishedAt} />
                       </TableCell>
                       <TableCell>
-                        <Button
-                          aria-label={t("exportVersion", {
-                            version: version.version,
-                          })}
-                          onClick={() => void exportWorkflow(version.id)}
-                          size="icon"
-                          variant="ghost"
-                        >
-                          <Download />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              aria-label={t("exportVersion", {
+                                version: version.version,
+                              })}
+                              onClick={() => void exportWorkflow(version.id)}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <Download />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t("exportVersion", { version: version.version })}
+                          </TooltipContent>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
               {!workflow.versions.length && (
-                <p className="py-12 text-center text-sm text-muted-foreground">
-                  {t("unpublished")}
-                </p>
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>{t("unpublished")}</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               )}
             </div>
           </CardContent>
