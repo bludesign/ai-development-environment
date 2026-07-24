@@ -55,6 +55,12 @@ import { Link, useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import {
+  ConfigFieldsEditor,
+  RawConfigEditor,
+} from "./config-fields/config-fields-editor";
+import { hasConfigDescriptor } from "./config-fields/descriptors";
+import { WorkflowInputsEditor } from "./workflow-inputs-editor";
+import {
   workflowFlowElements,
   workflowNodeTypes,
   type WorkflowFlowNode,
@@ -156,8 +162,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
-  const [configText, setConfigText] = useState("{}");
-  const [inputsText, setInputsText] = useState("[]");
 
   const categories = useMemo(
     () =>
@@ -191,7 +195,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setCatalog(data.workflowCatalog);
         setWorkflow(data.workflow);
         setDefinition(next);
-        setInputsText(JSON.stringify(next.inputs, null, 2));
         setOverlapPolicy(data.workflow?.overlapPolicy ?? "QUEUE");
         setMaxConcurrentRuns(data.workflow?.maxConcurrentRuns ?? 1);
         const categoryMap = new Map(
@@ -221,13 +224,30 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     definition.triggers.find(({ id }) => id === selectedId) ?? null;
   const selected = selectedNode ?? selectedTrigger;
 
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => setConfigText(JSON.stringify(selected?.config ?? {}, null, 2)),
-      0,
+  const sessionPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const input of definition.inputs) {
+      if (input.path) paths.add(input.path);
+    }
+    const triggerCatalog = new Map(
+      catalog?.triggers.map((entry) => [entry.kind, entry]) ?? [],
     );
-    return () => window.clearTimeout(timer);
-  }, [selectedId, selected?.config]);
+    for (const trigger of definition.triggers) {
+      for (const path of triggerCatalog.get(trigger.kind)?.seedPaths ?? []) {
+        paths.add(path);
+      }
+    }
+    const stepCatalog = new Map(
+      catalog?.steps.map((entry) => [entry.kind, entry]) ?? [],
+    );
+    for (const node of definition.nodes) {
+      for (const path of stepCatalog.get(node.kind)?.providedPaths ?? []) {
+        paths.add(path);
+      }
+      for (const path of node.providedPaths) paths.add(path);
+    }
+    return [...paths].sort((left, right) => left.localeCompare(right));
+  }, [catalog, definition]);
 
   const commitDefinition = useCallback(
     (next: WorkflowDefinition) => {
@@ -337,8 +357,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     setError(null);
     setNotice(null);
     try {
-      const inputs = JSON.parse(inputsText) as WorkflowDefinition["inputs"];
-      const next = { ...definition, inputs };
+      const next = definition;
       if (workflow) {
         const data = await controlPlaneRequest<{
           saveWorkflowDraft: WorkflowSummary;
@@ -509,7 +528,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         throw new Error(t("invalidImport"));
       const next = imported as WorkflowDefinition;
       setDefinition(next);
-      setInputsText(JSON.stringify(next.inputs ?? [], null, 2));
       rebuildGraph(next);
       setNotice(t("importLoaded"));
     } catch (value) {
@@ -534,16 +552,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       ),
     };
     commitDefinition(next);
-  };
-
-  const applyConfig = () => {
-    try {
-      const config = JSON.parse(configText) as Record<string, unknown>;
-      updateSelected({ config });
-      setError(null);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
   };
 
   const filteredSteps = useMemo(
@@ -704,12 +712,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="workflow-inputs">{t("typedInputsJson")}</Label>
-                <Textarea
-                  className="min-h-28 font-mono text-xs"
-                  id="workflow-inputs"
-                  onChange={(event) => setInputsText(event.target.value)}
-                  value={inputsText}
+                <Label>{t("typedInputs")}</Label>
+                <WorkflowInputsEditor
+                  onChange={(inputs) =>
+                    setDefinition((current) => ({ ...current, inputs }))
+                  }
+                  value={definition.inputs}
                 />
               </div>
               <Button
@@ -942,18 +950,28 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     value={selected.name ?? ""}
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="node-config">{t("configurationJson")}</Label>
-                  <Textarea
-                    className="min-h-52 font-mono text-xs"
-                    id="node-config"
-                    onChange={(event) => setConfigText(event.target.value)}
-                    value={configText}
+                {hasConfigDescriptor(
+                  selected.kind,
+                  selectedNode ? "step" : "trigger",
+                ) ? (
+                  <ConfigFieldsEditor
+                    config={selected.config}
+                    key={selected.id}
+                    kind={selected.kind}
+                    onChange={(config) => updateSelected({ config })}
+                    scope={selectedNode ? "step" : "trigger"}
+                    sessionPaths={sessionPaths}
                   />
-                  <Button onClick={applyConfig} size="sm" variant="outline">
-                    {t("applyConfiguration")}
-                  </Button>
-                </div>
+                ) : (
+                  <div className="space-y-1.5" key={selected.id}>
+                    <Label>{t("configuration")}</Label>
+                    <RawConfigEditor
+                      config={selected.config}
+                      defaultOpen
+                      onChange={(config) => updateSelected({ config })}
+                    />
+                  </div>
+                )}
                 {selectedNode && (
                   <>
                     <div className="space-y-1.5">
