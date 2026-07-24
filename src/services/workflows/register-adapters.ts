@@ -35,6 +35,7 @@ import { getSessionValue } from "@/lib/workflows/session";
 import type {
   WorkflowExecutionContext,
   WorkflowExecutionResult,
+  WorkflowResourceLinkInput,
   WorkflowStepExecutor,
 } from "./step-executor";
 import type { WorkflowsService } from "./workflows.service";
@@ -104,6 +105,7 @@ const runResult = (
             resourceId: run.id,
             label: typeof run.kind === "string" ? run.kind : "Agent run",
             url: `/${run.kind === "PLAN" ? "plans" : "sessions"}/${run.id}`,
+            metadata: { runKind: run.kind },
           },
         ]
       : undefined,
@@ -120,10 +122,12 @@ const runResult = (
 const jobResult = (
   job: { id: string; timeoutSeconds?: number | null },
   sessionPatch?: Record<string, unknown>,
+  resourceLinks: WorkflowResourceLinkInput[] = [],
 ): WorkflowExecutionResult => ({
   output: { jobId: job.id },
   sessionPatch,
   links: [
+    ...resourceLinks,
     {
       kind: "AGENT_JOB",
       resourceId: job.id,
@@ -140,6 +144,74 @@ const jobResult = (
     ),
   },
 });
+
+const detailLink = (
+  kind: string,
+  resourceId: string,
+  label?: string,
+  url?: string,
+  metadata?: Record<string, unknown>,
+): WorkflowResourceLinkInput => ({
+  kind,
+  resourceId,
+  label,
+  url,
+  metadata,
+});
+
+const jiraLink = (issueKey: string, label?: string) =>
+  detailLink("JIRA_TICKET", issueKey, label ?? issueKey);
+const worktreeLink = (id: string) => detailLink("WORKTREE", id, "Worktree");
+const codebaseLink = (id: string) => detailLink("CODEBASE", id, "Codebase");
+const buildLink = (id: string, url?: string) =>
+  detailLink("BUILD", id, "Build", url);
+
+function pullRequestLink(
+  context: WorkflowExecutionContext,
+  label?: string,
+  providerUrl?: string,
+): WorkflowResourceLinkInput {
+  const repository = githubCoordinates(context);
+  return detailLink(
+    "PULL_REQUEST",
+    pullRequestResourceId(
+      repository.owner,
+      repository.name,
+      pullRequestNumber(context),
+    ),
+    label ?? "Pull request",
+    providerUrl,
+  );
+}
+
+function githubWorkflowRunLink(
+  context: WorkflowExecutionContext,
+): WorkflowResourceLinkInput | null {
+  const id =
+    context.node.config.workflowRunId ??
+    getSessionValue(context.sessionData, "pipeline.runId");
+  const url = getSessionValue(context.sessionData, "pipeline.url");
+  return (typeof id === "string" || typeof id === "number") &&
+    typeof url === "string" &&
+    url
+    ? detailLink("GITHUB_WORKFLOW_RUN", String(id), "Workflow run", url)
+    : null;
+}
+
+function contextualAgentRunLink(
+  context: WorkflowExecutionContext,
+): WorkflowResourceLinkInput | null {
+  const id = agentRunId(context);
+  const kind = getSessionValue(context.sessionData, "run.kind");
+  if (kind !== "PLAN" && kind !== "SESSION") return null;
+  return detailLink(
+    "AGENT_RUN",
+    id,
+    kind,
+    `/${kind === "PLAN" ? "plans" : "sessions"}/${id}`,
+    { runKind: kind },
+  );
+}
 
 function githubCoordinates(context: WorkflowExecutionContext): {
   owner: string;
@@ -433,7 +505,16 @@ function registerJiraAdapters(
       context.node.config.force === true,
     );
     const normalized = normalizeTicket(ticket);
-    return { output: normalized, sessionPatch: { ticket: normalized } };
+    return {
+      output: normalized,
+      sessionPatch: { ticket: normalized },
+      links: [
+        jiraLink(
+          String(normalized.key),
+          String(normalized.title ?? normalized.key),
+        ),
+      ],
+    };
   });
   executor.register("JIRA_TRANSITION", async (context) => {
     const ticket = await services.jira.transitionTicket(
@@ -441,7 +522,16 @@ function registerJiraAdapters(
       text(context.node.config.transitionId, "Jira transition ID", 200),
     );
     const normalized = normalizeTicket(ticket);
-    return { output: normalized, sessionPatch: { ticket: normalized } };
+    return {
+      output: normalized,
+      sessionPatch: { ticket: normalized },
+      links: [
+        jiraLink(
+          String(normalized.key),
+          String(normalized.title ?? normalized.key),
+        ),
+      ],
+    };
   });
   executor.register("JIRA_COMMENT", async (context) => {
     const ticket = await services.jira.addComment(jiraKey(context), {
@@ -449,7 +539,16 @@ function registerJiraAdapters(
       format:
         context.node.config.format === "JIRA_WIKI" ? "JIRA_WIKI" : "MARKDOWN",
     });
-    return { output: normalizeTicket(ticket) };
+    const normalized = normalizeTicket(ticket);
+    return {
+      output: normalized,
+      links: [
+        jiraLink(
+          String(normalized.key),
+          String(normalized.title ?? normalized.key),
+        ),
+      ],
+    };
   });
   executor.register("JIRA_ASSIGN", async (context) => {
     const accountId =
@@ -461,7 +560,16 @@ function registerJiraAdapters(
       accountId,
     );
     const normalized = normalizeTicket(ticket);
-    return { output: normalized, sessionPatch: { ticket: normalized } };
+    return {
+      output: normalized,
+      sessionPatch: { ticket: normalized },
+      links: [
+        jiraLink(
+          String(normalized.key),
+          String(normalized.title ?? normalized.key),
+        ),
+      ],
+    };
   });
   executor.register("JIRA_UPDATE_FIELDS", async (context) => {
     const fields = object(context.node.config.fields ?? {}, "Jira fields");
@@ -470,7 +578,16 @@ function registerJiraAdapters(
       ...fields,
     } as Parameters<JiraService["updateTicket"]>[0]);
     const normalized = normalizeTicket(ticket);
-    return { output: normalized, sessionPatch: { ticket: normalized } };
+    return {
+      output: normalized,
+      sessionPatch: { ticket: normalized },
+      links: [
+        jiraLink(
+          String(normalized.key),
+          String(normalized.title ?? normalized.key),
+        ),
+      ],
+    };
   });
   executor.register("JIRA_RESOLVE_BRANCH", async (context) => {
     const preview = await services.worktrees.previewTicketBranch({
@@ -496,6 +613,7 @@ function registerJiraAdapters(
           type: preview.ticketType,
         },
       },
+      links: [jiraLink(preview.ticketKey, preview.ticketTitle)],
     };
   });
 }
@@ -528,17 +646,16 @@ function registerGitHubAdapters(
       output: normalized,
       sessionPatch: { pr: normalized },
       links: [
-        {
-          kind: "PULL_REQUEST",
-          resourceId: pullRequestResourceId(
+        detailLink(
+          "PULL_REQUEST",
+          pullRequestResourceId(
             repository.owner,
             repository.name,
             pullRequest.number,
           ),
-          label: pullRequest.title,
-          url: pullRequest.url,
-          metadata: { repository: pullRequest.repositoryNameWithOwner },
-        },
+          pullRequest.title,
+          pullRequest.url,
+        ),
       ],
     };
   });
@@ -573,7 +690,11 @@ function registerGitHubAdapters(
           ? context.node.config.authorEmail
           : null,
     });
-    return { output: result, sessionPatch: { pr: { state: result.state } } };
+    return {
+      output: result,
+      sessionPatch: { pr: { state: result.state } },
+      links: [pullRequestLink(context)],
+    };
   });
   executor.register("GITHUB_COLLECT_REVIEW_THREADS", async (context) => {
     const repository = githubCoordinates(context);
@@ -589,6 +710,7 @@ function registerGitHubAdapters(
     return {
       output: unresolved,
       sessionPatch: { pr: { unresolvedThreads: unresolved } },
+      links: [pullRequestLink(context, pullRequest.title, pullRequest.url)],
     };
   });
   executor.register("GITHUB_REPLY_REVIEW_THREAD", async (context) => {
@@ -596,13 +718,14 @@ function registerGitHubAdapters(
       text(context.node.config.threadId, "Review thread ID", 500),
       text(context.node.config.body, "Review reply", 100_000),
     );
-    return { output: result };
+    return { output: result, links: [pullRequestLink(context)] };
   });
   executor.register("GITHUB_SET_REVIEW_THREAD_RESOLVED", async (context) => ({
     output: await services.github.setReviewThreadResolved(
       text(context.node.config.threadId, "Review thread ID", 500),
       context.node.config.resolved !== false,
     ),
+    links: [pullRequestLink(context)],
   }));
   executor.register("GITHUB_CREATE_PR", async (context) => {
     const repository = githubCoordinates(context);
@@ -637,16 +760,16 @@ function registerGitHubAdapters(
       output: normalized,
       sessionPatch: { pr: normalized },
       links: [
-        {
-          kind: "PULL_REQUEST",
-          resourceId: pullRequestResourceId(
+        detailLink(
+          "PULL_REQUEST",
+          pullRequestResourceId(
             repository.owner,
             repository.name,
             pullRequest.number,
           ),
-          label: pullRequest.title,
-          url: pullRequest.url,
-        },
+          pullRequest.title,
+          pullRequest.url,
+        ),
       ],
     };
   });
@@ -663,6 +786,7 @@ function registerGitHubAdapters(
     return {
       output: pullRequest.labels,
       sessionPatch: { pr: { labels: pullRequest.labels } },
+      links: [pullRequestLink(context)],
     };
   });
   executor.register("GITHUB_RETRY_PIPELINE", async (context) => {
@@ -681,21 +805,25 @@ function registerGitHubAdapters(
       ),
       { actor: "workflow", ipAddress: null },
     );
+    const link = githubWorkflowRunLink(context);
     return {
       output: result,
       sessionPatch: { pipeline: { status: result.status } },
+      links: link ? [link] : undefined,
     };
   });
-  executor.register("GITHUB_RETRY_JOB", async (context) => ({
-    output: await services.github.retryWorkflowJob(
+  executor.register("GITHUB_RETRY_JOB", async (context) => {
+    const output = await services.github.retryWorkflowJob(
       text(context.node.config.repositoryId, "GitHub repository ID", 500),
       text(context.node.config.checkSuiteId, "Check suite ID", 500),
       text(context.node.config.jobId, "Workflow job ID", 500),
       { actor: "workflow", ipAddress: null },
-    ),
-  }));
-  executor.register("GITHUB_CANCEL_WORKFLOW_RUN", async (context) => ({
-    output: await services.github.cancelActionsWorkflowRun(
+    );
+    const link = githubWorkflowRunLink(context);
+    return { output, links: link ? [link] : undefined };
+  });
+  executor.register("GITHUB_CANCEL_WORKFLOW_RUN", async (context) => {
+    const output = await services.github.cancelActionsWorkflowRun(
       text(
         context.node.config.codebaseRepositoryId ??
           getSessionValue(context.sessionData, "repo.id"),
@@ -710,9 +838,14 @@ function registerGitHubAdapters(
       ),
       context.node.config.force === true,
       { actor: "workflow", ipAddress: null },
-    ),
-    sessionPatch: { pipeline: { status: "CANCELLED" } },
-  }));
+    );
+    const link = githubWorkflowRunLink(context);
+    return {
+      output,
+      sessionPatch: { pipeline: { status: "CANCELLED" } },
+      links: link ? [link] : undefined,
+    };
+  });
   executor.register("GITHUB_SAVE_AUTO_RETRY", async (context) => ({
     output: await services.github.saveAutoRetryRule(
       object(context.node.config.input, "Auto-retry rule") as Parameters<
@@ -733,7 +866,9 @@ function registerGitHubAdapters(
       "Workflow run ID",
       500,
     );
+    const link = githubWorkflowRunLink(context);
     return {
+      links: link ? [link] : undefined,
       wait: {
         kind: "GITHUB_CHECKS",
         externalKey: JSON.stringify({ repositoryId, workflowRunId }),
@@ -828,19 +963,24 @@ function registerWorktreeAdapters(
     });
   });
   executor.register("WORKTREE_CHANGE_BRANCH", async (context) => {
+    const id = worktreeId(context);
     const selection = branchSelection(context);
     const job = await services.worktrees.changeWorktreeBranch({
-      worktreeId: worktreeId(context),
+      worktreeId: id,
       selection,
       requestId: requestId(context, "change-branch"),
       stashOnFailure: context.node.config.stashOnFailure === true,
     });
-    return jobResult(job, {
-      worktree: {
-        branch: selection.branchName,
-        baseBranch: selection.baseBranch,
+    return jobResult(
+      job,
+      {
+        worktree: {
+          branch: selection.branchName,
+          baseBranch: selection.baseBranch,
+        },
       },
-    });
+      [worktreeLink(id)],
+    );
   });
   executor.register("WORKTREE_OPERATION", async (context) => {
     const operation = String(
@@ -852,12 +992,13 @@ function registerWorktreeAdapters(
     ) {
       throw new Error("Worktree operation is invalid for workflow execution");
     }
+    const id = worktreeId(context);
     const job = await services.worktrees.runOperation(
-      worktreeId(context),
+      id,
       operation as WorktreeOperation,
       requestId(context, operation.toLowerCase()),
     );
-    return jobResult(job);
+    return jobResult(job, undefined, [worktreeLink(id)]);
   });
   executor.register("WORKTREE_DELETE", async (context) => {
     const job = await services.worktrees.deleteWorktree({
@@ -879,9 +1020,13 @@ function registerWorktreeAdapters(
       deleteSource: context.node.config.deleteSource === true,
       requestId: requestId(context, "move"),
     });
+    const linkedWorktreeId =
+      move.targetWorktreeId ??
+      (context.node.config.deleteSource === true ? null : worktreeId(context));
     return {
       output: move,
       links: [
+        ...(linkedWorktreeId ? [worktreeLink(linkedWorktreeId)] : []),
         {
           kind: "WORKTREE_MOVE",
           resourceId: move.id,
@@ -910,16 +1055,19 @@ function registerWorktreeAdapters(
           branchChanges: detail.branchChanges,
         },
       },
+      links: [worktreeLink(id)],
     };
   });
   executor.register("WORKTREE_INSPECT_GIT", async (context) => {
+    const id = worktreeId(context);
     const state = await services.worktrees.inspectGitState(
-      worktreeId(context),
+      id,
       requestId(context, "inspect-git"),
     );
     return {
       output: state,
       sessionPatch: { worktree: { ...state } },
+      links: [worktreeLink(id)],
     };
   });
   executor.register("WORKTREE_GIT_OPERATION", async (context) => {
@@ -929,27 +1077,32 @@ function registerWorktreeAdapters(
     if (!WORKTREE_GIT_OPERATIONS.includes(operation as WorktreeGitOperation)) {
       throw new Error("Worktree Git operation is invalid");
     }
+    const id = worktreeId(context);
     const job = await services.worktrees.runGitOperation({
-      worktreeId: worktreeId(context),
+      worktreeId: id,
       operation: operation as WorktreeGitOperation,
       branch: optionalText(context.node.config.branch, 500),
       stashOid: optionalText(context.node.config.stashOid, 200),
       stashChanges: context.node.config.stashChanges === true,
       requestId: requestId(context, operation.toLowerCase()),
     });
-    return jobResult(job);
+    return jobResult(job, undefined, [worktreeLink(id)]);
   });
-  executor.register("WORKTREE_WAIT_PUSH_READY", async (context) => ({
-    wait: {
-      kind: "WORKTREE_PUSH_READY",
-      externalKey: worktreeId(context),
-      resumeAfter: new Date(Date.now() + 1_000),
-      timeoutAt:
-        typeof context.node.config.timeoutSeconds === "number"
-          ? new Date(Date.now() + context.node.config.timeoutSeconds * 1_000)
-          : null,
-    },
-  }));
+  executor.register("WORKTREE_WAIT_PUSH_READY", async (context) => {
+    const id = worktreeId(context);
+    return {
+      links: [worktreeLink(id)],
+      wait: {
+        kind: "WORKTREE_PUSH_READY",
+        externalKey: id,
+        resumeAfter: new Date(Date.now() + 1_000),
+        timeoutAt:
+          typeof context.node.config.timeoutSeconds === "number"
+            ? new Date(Date.now() + context.node.config.timeoutSeconds * 1_000)
+            : null,
+      },
+    };
+  });
 }
 
 function registerCodebaseAdapters(
@@ -957,13 +1110,14 @@ function registerCodebaseAdapters(
   services: WorkflowAdapterServices,
 ): void {
   executor.register("CODEBASE_FETCH_REFRESH", async (context) => {
+    const id = codebaseId(context);
     const kind =
       context.node.config.operation === "REFRESH"
         ? CODEBASE_REFRESH_JOB_KIND
         : CODEBASE_FETCH_JOB_KIND;
     const result = await services.codebases.runOperation(
       kind,
-      [codebaseId(context)],
+      [id],
       requestId(context, kind),
     );
     const job = result.jobs[0];
@@ -972,16 +1126,18 @@ function registerCodebaseAdapters(
         result.skipped[0]?.reason ?? "Codebase operation was skipped",
       );
     }
-    return jobResult(job);
+    return jobResult(job, undefined, [codebaseLink(id)]);
   });
   executor.register("CODEBASE_INSPECT_GIT", async (context) => {
+    const id = codebaseId(context);
     const state = await services.codebases.inspectGitState(
-      codebaseId(context),
+      id,
       requestId(context, "inspect-git"),
     );
     return {
       output: state,
       sessionPatch: { codebase: { ...state } },
+      links: [codebaseLink(id)],
     };
   });
   executor.register("CODEBASE_GIT_OPERATION", async (context) => {
@@ -991,15 +1147,16 @@ function registerCodebaseAdapters(
     if (!CODEBASE_GIT_OPERATIONS.includes(operation as CodebaseGitOperation)) {
       throw new Error("Codebase Git operation is invalid");
     }
+    const id = codebaseId(context);
     const job = await services.codebases.runGitOperation({
-      codebaseId: codebaseId(context),
+      codebaseId: id,
       operation: operation as CodebaseGitOperation,
       branch: optionalText(context.node.config.branch, 500),
       stashOid: optionalText(context.node.config.stashOid, 200),
       stashChanges: context.node.config.stashChanges === true,
       requestId: requestId(context, operation.toLowerCase()),
     });
-    return jobResult(job);
+    return jobResult(job, undefined, [codebaseLink(id)]);
   });
 }
 
@@ -1056,7 +1213,8 @@ function registerBuildAdapters(
     };
   });
   executor.register("BUILD_READ_TEST_RESULTS", async (context) => {
-    const report = (await services.builds.reportsForBuild(buildId(context)))
+    const id = buildId(context);
+    const report = (await services.builds.reportsForBuild(id))
       .filter(
         ({ kind, status }) => kind === "TEST_RESULTS" && status === "READY",
       )
@@ -1069,10 +1227,12 @@ function registerBuildAdapters(
       sessionPatch: {
         build: { testSummary: summary, tests: data.tests ?? [] },
       },
+      links: [buildLink(id)],
     };
   });
   executor.register("BUILD_READ_COVERAGE", async (context) => {
-    const report = (await services.builds.reportsForBuild(buildId(context)))
+    const id = buildId(context);
+    const report = (await services.builds.reportsForBuild(id))
       .filter(
         ({ kind, status }) => kind === "CODE_COVERAGE" && status === "READY",
       )
@@ -1093,11 +1253,13 @@ function registerBuildAdapters(
           changedCoverageFiles: data.changedFiles ?? [],
         },
       },
+      links: [buildLink(id, `/builds/${id}/coverage`)],
     };
   });
   executor.register("BUILD_EXPORT", async (context) => {
+    const id = buildId(context);
     const result = await services.builds.exportArchive({
-      buildId: buildId(context),
+      buildId: id,
       requestId: requestId(context, "export"),
       settings: object(context.node.config.settings, "Export settings"),
     });
@@ -1107,12 +1269,14 @@ function registerBuildAdapters(
           {
             build: { exportId: result.id },
           },
+          [buildLink(id)],
         )
-      : { output: result };
+      : { output: result, links: [buildLink(id)] };
   });
   executor.register("BUILD_DEPLOY", async (context) => {
+    const id = buildId(context);
     const deployments = await services.builds.runBuild({
-      buildId: buildId(context),
+      buildId: id,
       destinations: Array.isArray(context.node.config.destinations)
         ? context.node.config.destinations
         : [],
@@ -1120,14 +1284,18 @@ function registerBuildAdapters(
     });
     const jobId = deployments.find(({ jobId }) => Boolean(jobId))?.jobId;
     return jobId
-      ? jobResult({ id: jobId, timeoutSeconds: 3_600 })
-      : { output: deployments };
+      ? jobResult({ id: jobId, timeoutSeconds: 3_600 }, undefined, [
+          buildLink(id),
+        ])
+      : { output: deployments, links: [buildLink(id)] };
   });
   executor.register("BUILD_CANCEL", async (context) => {
-    const build = await services.builds.cancelBuild(buildId(context));
+    const id = buildId(context);
+    const build = await services.builds.cancelBuild(id);
     return {
       output: build,
       sessionPatch: { build: { id: build?.id, status: build?.status } },
+      links: [buildLink(id)],
     };
   });
 }
@@ -1251,7 +1419,9 @@ function registerRunAdapters(
       return runResult(context, run as unknown as Record<string, unknown>);
     }
     await services.runs.prepareAnswerRevision(batchId);
+    const link = contextualAgentRunLink(context);
     return {
+      links: link ? [link] : undefined,
       wait: {
         kind: "RUN_ANSWER_REVISION",
         externalKey: JSON.stringify({
@@ -1288,12 +1458,14 @@ function registerRunAdapters(
       orderBy: { createdAt: "desc" },
     });
     if (!checkpoint) throw new Error("Run has no captured checkpoint");
+    const runLink = contextualAgentRunLink(context);
     return {
       output: checkpoint,
       sessionPatch: {
         steps: { [context.node.id]: { snapshotId: checkpoint.id } },
       },
       links: [
+        ...(runLink ? [runLink] : []),
         {
           kind: "CHECKPOINT",
           resourceId: checkpoint.id,
@@ -1304,14 +1476,15 @@ function registerRunAdapters(
   });
   executor.register("RUN_ARCHIVE_DELETE", async (context) => {
     const id = agentRunId(context);
-    const affected =
-      context.node.config.delete === true
-        ? await services.runs.deleteRuns([id])
-        : await services.runs.archive(
-            [id],
-            context.node.config.archived !== false,
-          );
-    return { output: { id, affected } };
+    const deleting = context.node.config.delete === true;
+    const affected = deleting
+      ? await services.runs.deleteRuns([id])
+      : await services.runs.archive(
+          [id],
+          context.node.config.archived !== false,
+        );
+    const link = deleting ? null : contextualAgentRunLink(context);
+    return { output: { id, affected }, links: link ? [link] : undefined };
   });
 }
 
@@ -1328,7 +1501,14 @@ function registerMiscellaneousAdapters(
     if (!run) throw new Error("Skill sync could not be prepared");
     return {
       output: run,
-      links: [{ kind: "SKILL_RUN", resourceId: run.id, label: "Skill sync" }],
+      links: [
+        {
+          kind: "SKILL_RUN",
+          resourceId: run.id,
+          label: "Skill sync",
+          url: `/skills/sync/${run.id}`,
+        },
+      ],
       wait: {
         kind: "SKILL_RUN",
         externalKey: run.id,

@@ -15,7 +15,7 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { Copy, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Link2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -34,6 +34,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import type { WorkflowResourceDestination } from "@/lib/workflows/resources";
 
 import {
   WorkflowFitLock,
@@ -60,6 +61,9 @@ type WorkflowNodeData = {
   attemptLabel: string | null;
   diagnostics: WorkflowDiagnostic[];
   provides: string[];
+  currentPage: boolean;
+  destination: WorkflowResourceDestination | null;
+  navigationEnabled: boolean;
 };
 
 const MAX_PROVIDES_CHIPS = 3;
@@ -149,6 +153,9 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
         "relative min-w-52 rounded-xl border bg-card p-3 text-card-foreground shadow-sm",
         statusClass(data.status, data.diagnostics.length > 0),
         selected && "ring-2 ring-primary/35",
+        data.currentPage &&
+          "bg-primary/5 outline-2 outline-offset-2 outline-primary/70",
+        data.navigationEnabled && data.destination && "cursor-pointer",
       )}
     >
       {!data.trigger && (
@@ -189,6 +196,13 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
               <RotateCcw className="size-3" /> {data.attemptLabel}
             </span>
           )}
+        </div>
+      )}
+      {data.currentPage && (
+        <div className="mt-2">
+          <Badge className="gap-1 text-[10px]" variant="secondary">
+            <Link2 className="size-3" /> {t("currentPage")}
+          </Badge>
         </div>
       )}
       {data.diagnostics.length > 0 && (
@@ -291,6 +305,9 @@ export function workflowFlowElements(
     diagnostics?: WorkflowDiagnostic[];
     categories?: Map<string, string>;
     provides?: Map<string, string[]>;
+    currentPageNodeIds?: ReadonlySet<string>;
+    destinations?: ReadonlyMap<string, WorkflowResourceDestination>;
+    navigationEnabled?: boolean;
   } = {},
 ): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
   const attempts = latestAttempts(options.attempts ?? [], options.generation);
@@ -320,6 +337,9 @@ export function workflowFlowElements(
           ({ triggerId }) => triggerId === trigger.id,
         ),
         provides: options.provides?.get(trigger.id) ?? [],
+        currentPage: options.currentPageNodeIds?.has(trigger.id) ?? false,
+        destination: options.destinations?.get(trigger.id) ?? null,
+        navigationEnabled: options.navigationEnabled ?? false,
       },
     })),
     ...definition.nodes.map((node) => {
@@ -356,6 +376,9 @@ export function workflowFlowElements(
           attemptLabel: labelParts.length ? labelParts.join(" · ") : null,
           diagnostics: diagnostics.filter(({ nodeId }) => nodeId === node.id),
           provides: options.provides?.get(node.id) ?? [],
+          currentPage: options.currentPageNodeIds?.has(node.id) ?? false,
+          destination: options.destinations?.get(node.id) ?? null,
+          navigationEnabled: options.navigationEnabled ?? false,
         },
       };
     }),
@@ -386,6 +409,8 @@ export function WorkflowGraph({
   diagnostics = [],
   categories,
   compact = false,
+  currentPageNodeIds,
+  destinations,
   onNodeClick,
 }: {
   definition: WorkflowDefinition;
@@ -394,8 +419,20 @@ export function WorkflowGraph({
   diagnostics?: WorkflowDiagnostic[];
   categories?: Map<string, string>;
   compact?: boolean;
-  onNodeClick?: (nodeId: string) => void;
+  currentPageNodeIds?: ReadonlySet<string>;
+  destinations?: ReadonlyMap<string, WorkflowResourceDestination>;
+  onNodeClick?: (
+    nodeId: string,
+    details: {
+      destination: WorkflowResourceDestination | null;
+      locked: boolean;
+      trigger: boolean;
+    },
+  ) => void;
 }) {
+  // Locked graphs use their nodes as detail links. Once unlocked, node clicks
+  // are handed back to the page for interactions such as replay selection.
+  const [locked, setLocked] = useState(true);
   const elements = useMemo(
     () =>
       workflowFlowElements(definition, {
@@ -403,8 +440,20 @@ export function WorkflowGraph({
         generation,
         diagnostics,
         categories,
+        currentPageNodeIds,
+        destinations,
+        navigationEnabled: locked,
       }),
-    [attempts, categories, definition, diagnostics, generation],
+    [
+      attempts,
+      categories,
+      currentPageNodeIds,
+      definition,
+      destinations,
+      diagnostics,
+      generation,
+      locked,
+    ],
   );
   // React Flow measures each card in the DOM and reports the size back through
   // `onNodesChange`. A graph that hands it a `nodes` array and drops those
@@ -448,7 +497,6 @@ export function WorkflowGraph({
   // A read-only graph is there to be read, so it starts pinned to the pane:
   // no stray scroll wheel zooming it into a corner, nothing to fit back. The
   // control stack keeps one button to hand panning and zooming back.
-  const [locked, setLocked] = useState(true);
   const signature = useMemo(
     () =>
       `${elements.nodes.map(({ id }) => id).join()}|${elements.edges
@@ -478,7 +526,13 @@ export function WorkflowGraph({
         nodes={nodes}
         nodesConnectable={false}
         nodesDraggable={false}
-        onNodeClick={(_event, node) => onNodeClick?.(node.id)}
+        onNodeClick={(_event, node) =>
+          onNodeClick?.(node.id, {
+            destination: node.data.destination,
+            locked,
+            trigger: node.data.trigger,
+          })
+        }
         onNodesChange={onNodesChange}
         panOnDrag={!locked}
         panOnScroll={false}

@@ -143,6 +143,8 @@ export type WorkflowAttempt = {
 
 export type WorkflowResourceLink = {
   id: string;
+  runId?: string;
+  attemptId?: string | null;
   kind: string;
   resourceId: string;
   label: string | null;
@@ -158,6 +160,7 @@ export type WorkflowRun = {
   workflow: { id: string; name: string };
   versionId: string;
   version: WorkflowVersion;
+  trigger?: { nodeId: string } | null;
   triggerKind: string;
   triggerSubjectKey: string;
   status: string;

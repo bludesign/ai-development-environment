@@ -439,6 +439,41 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
+  test("links event-triggered runs to the resource that caused the event", async () => {
+    const version = { id: "version-1", name: "Run workflow" };
+    prisma.workflowRun.findUnique.mockResolvedValue(null);
+    prisma.workflowRunNumberSequence.upsert.mockResolvedValue({ nextValue: 3 });
+    prisma.workflowRun.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).createRunForTrigger(
+      {
+        id: "workflow-1",
+        overlapPolicy: "CONCURRENT",
+        activeVersion: version,
+      },
+      version,
+      null,
+      null,
+      "RUN_COMPLETED",
+      "agent-run-1",
+      {
+        sessionData: { run: { id: "agent-run-1", kind: "PLAN" } },
+      },
+      "idempotency-2",
+    );
+
+    expect(prisma.workflowRunResourceLink.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "AGENT_RUN",
+        resourceId: "agent-run-1",
+        metadataJson: JSON.stringify({ runKind: "PLAN" }),
+      }),
+    });
+  });
+
   test("loads attempt resource links for resource-panel runs", async () => {
     prisma.workflowRunResourceLink.findMany.mockResolvedValue([
       { runId: "run-1" },

@@ -294,7 +294,8 @@
     "quickActionStarted": "Started {name}.",
     "viewRun": "View run",
     "runNamed": "Run {name}",
-    "fullRun": "Full run"
+    "fullRun": "Full run",
+    "currentPage": "Current page"
   },
   "runs": {
     "actions": "Actions",

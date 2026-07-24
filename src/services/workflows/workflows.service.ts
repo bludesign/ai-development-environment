@@ -40,6 +40,7 @@ import {
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
   agentEventBus,
   type AgentControlService,
@@ -1769,23 +1770,19 @@ export class WorkflowsService {
           sessionDataJson: serializedSession,
         },
       });
-      const resourceKind =
-        triggerKind === "RESOURCE_MANUAL" &&
-        typeof payload.resourceKind === "string"
-          ? payload.resourceKind.trim().toUpperCase()
-          : "";
-      const resourceId =
-        triggerKind === "RESOURCE_MANUAL" &&
-        typeof payload.resourceId === "string"
-          ? payload.resourceId.trim()
-          : "";
-      if (resourceKind && resourceId) {
+      const triggerLink = workflowTriggerResourceLink(triggerKind, payload);
+      if (triggerLink) {
         await transaction.workflowRunResourceLink.create({
           data: {
             id: randomUUID(),
             runId: run.id,
-            kind: resourceKind,
-            resourceId,
+            kind: triggerLink.kind.toUpperCase(),
+            resourceId: triggerLink.resourceId,
+            label: triggerLink.label ?? null,
+            url: triggerLink.url ?? null,
+            metadataJson: triggerLink.metadata
+              ? JSON.stringify(triggerLink.metadata)
+              : null,
           },
         });
       }

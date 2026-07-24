@@ -86,4 +86,36 @@ describe("workflow run graph projection", () => {
       result.nodes.find(({ id }) => id === "blocked")?.data.diagnostics,
     ).toHaveLength(1);
   });
+
+  test("projects current-page and navigation state onto triggers and steps", () => {
+    const definition = emptyDefinition("Linked graph");
+    definition.nodes.push({
+      id: "ticket",
+      kind: "JIRA_LOAD_TICKET",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+    const result = workflowFlowElements(definition, {
+      currentPageNodeIds: new Set(["manual", "ticket"]),
+      destinations: new Map([
+        ["ticket", { href: "/jira/tickets/AIDE-1", external: false }],
+      ]),
+      navigationEnabled: true,
+    });
+
+    expect(
+      result.nodes.find(({ id }) => id === "manual")?.data.currentPage,
+    ).toBe(true);
+    expect(result.nodes.find(({ id }) => id === "ticket")?.data).toEqual(
+      expect.objectContaining({
+        currentPage: true,
+        destination: { href: "/jira/tickets/AIDE-1", external: false },
+        navigationEnabled: true,
+      }),
+    );
+  });
 });

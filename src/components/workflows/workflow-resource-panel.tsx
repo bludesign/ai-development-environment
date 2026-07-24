@@ -2,7 +2,7 @@
 
 import { CirclePlay, ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { currentPageWorkflowNodeIds } from "@/lib/workflows/resource-navigation";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
@@ -44,9 +45,10 @@ const LINKED_RUN_FIELDS = `
   id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt
   workflow { id name }
+  trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
-  attempts { id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt resourceLinks { id kind resourceId label url metadata createdAt } }
-  resourceLinks { id kind resourceId label url metadata createdAt }
+  attempts { id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt resourceLinks { id attemptId kind resourceId label url metadata createdAt } }
+  resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
 export function WorkflowResourcePanel({
@@ -131,8 +133,15 @@ export function WorkflowResourcePanel({
     }
   };
 
-  if (!runs.length && !workflows.length && !error) return null;
   const current = runs[0];
+  const currentPageNodeIds = useMemo(
+    () =>
+      current
+        ? currentPageWorkflowNodeIds(current, resourceKind, resourceId)
+        : new Set<string>(),
+    [current, resourceId, resourceKind],
+  );
+  if (!runs.length && !workflows.length && !error) return null;
   return (
     <Card>
       <CardHeader>
@@ -197,6 +206,7 @@ export function WorkflowResourcePanel({
             <WorkflowGraph
               attempts={current.attempts}
               compact
+              currentPageNodeIds={currentPageNodeIds}
               definition={current.version.definition}
               generation={current.generation}
             />

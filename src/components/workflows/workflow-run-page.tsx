@@ -66,11 +66,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { workflowRunNodeDestinations } from "@/lib/workflows/resource-navigation";
+import { workflowResourceDestination } from "@/lib/workflows/resources";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
@@ -80,11 +82,12 @@ const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
   workflow { id name }
+  trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
   attempts {
     id nodeId kind generation iterationKey attempt status phase input output error requiredPaths providedPaths
     resourceLockKey idempotencyKey startedAt finishedAt supersededAt replayedFromId createdAt updatedAt
-    resourceLinks { id kind resourceId label url metadata createdAt }
+    resourceLinks { id attemptId kind resourceId label url metadata createdAt }
     questionBatches {
       id nativeRequestId eventSequence status createdAt answeredAt supersededAt revisionPreparedAt rollbackPatch pushedCommitWarning
       questions { id position header prompt multiSelect allowCustom options { id position label description } }
@@ -95,7 +98,7 @@ const RUN_DETAIL_FIELDS = `
   }
   waits { id attemptId kind status predicate externalKey resumeAfter timeoutAt result createdAt resolvedAt updatedAt }
   events { id attemptId sequence type message detail createdAt }
-  resourceLinks { id kind resourceId label url metadata createdAt }
+  resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
 type ReplayPreview = {
@@ -149,6 +152,7 @@ function jsonText(value: unknown) {
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
+  const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +164,10 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   );
   const [replayNodeId, setReplayNodeId] = useState<string>("");
   const [preview, setPreview] = useState<ReplayPreview | null>(null);
+  const nodeDestinations = useMemo(
+    () => (run ? workflowRunNodeDestinations(run) : new Map()),
+    [run],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -446,9 +454,23 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           <WorkflowGraph
             attempts={run.attempts}
             definition={run.version.definition}
+            destinations={nodeDestinations}
             generation={run.generation}
-            onNodeClick={(nodeId) => {
-              if (canReplay) setReplayNodeId(nodeId);
+            onNodeClick={(nodeId, { destination, locked, trigger }) => {
+              if (locked) {
+                if (!destination) return;
+                if (destination.external) {
+                  window.open(
+                    destination.href,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                } else {
+                  router.push(destination.href);
+                }
+                return;
+              }
+              if (canReplay && !trigger) setReplayNodeId(nodeId);
             }}
           />
         </CardContent>
@@ -845,25 +867,38 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           <Card>
             <CardContent className="pt-6">
               <ItemGroup className="gap-2">
-                {run.resourceLinks.map((link) => (
-                  <Item key={link.id} variant="outline">
-                    <ItemContent>
-                      <ItemTitle>{link.label ?? link.kind}</ItemTitle>
-                      <ItemDescription>
-                        {link.kind} · {link.resourceId}
-                      </ItemDescription>
-                    </ItemContent>
-                    {link.url && (
-                      <ItemActions>
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={link.url}>
-                            <ExternalLink /> {t("open")}
-                          </Link>
-                        </Button>
-                      </ItemActions>
-                    )}
-                  </Item>
-                ))}
+                {run.resourceLinks.map((link) => {
+                  const destination = workflowResourceDestination(link);
+                  return (
+                    <Item key={link.id} variant="outline">
+                      <ItemContent>
+                        <ItemTitle>{link.label ?? link.kind}</ItemTitle>
+                        <ItemDescription>
+                          {link.kind} · {link.resourceId}
+                        </ItemDescription>
+                      </ItemContent>
+                      {destination && (
+                        <ItemActions>
+                          <Button asChild size="sm" variant="outline">
+                            <Link
+                              href={destination.href}
+                              rel={
+                                destination.external
+                                  ? "noopener noreferrer"
+                                  : undefined
+                              }
+                              target={
+                                destination.external ? "_blank" : undefined
+                              }
+                            >
+                              <ExternalLink /> {t("open")}
+                            </Link>
+                          </Button>
+                        </ItemActions>
+                      )}
+                    </Item>
+                  );
+                })}
               </ItemGroup>
               {!run.resourceLinks.length && (
                 <Empty className="py-12">
