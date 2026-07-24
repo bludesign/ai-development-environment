@@ -77,6 +77,7 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "pushStatus", description: "Push readiness status" },
     { name: "commits", description: "Commits on the branch" },
     { name: "changes", description: "Pending file changes" },
+    { name: "dirty", description: "Whether the working tree has changes" },
   ],
   pipeline: [
     { name: "runId", description: "CI run id" },

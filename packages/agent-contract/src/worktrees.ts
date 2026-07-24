@@ -1,7 +1,13 @@
-import type { CodebaseSyncState } from "./codebases.ts";
+import type {
+  CodebaseGitState,
+  CodebaseStashDiff,
+  CodebaseSyncState,
+} from "./codebases.ts";
 
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
+export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
+export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
@@ -12,6 +18,8 @@ export const WORKTREE_DIFF_ASSET_JOB_KIND = "worktree.diff.asset";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
@@ -20,6 +28,26 @@ export const WORKTREE_JOB_KINDS = [
   WORKTREE_DIFF_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
 ] as const;
+
+/**
+ * A worktree shares its repository's object store, so branch and stash
+ * operations are the same set the codebase exposes — only the working
+ * directory they target differs. Kept as a standalone list (rather than
+ * re-exporting `CODEBASE_GIT_OPERATIONS`) so this module carries no runtime
+ * dependency on `codebases.ts`; the web bundler resolves each contract module
+ * independently through the package export map. Keep the two lists in sync.
+ */
+export const WORKTREE_GIT_OPERATIONS = [
+  "SWITCH_BRANCH",
+  "DELETE_BRANCH",
+  "DELETE_REMOTE_BRANCH",
+  "PULL_BRANCH",
+  "APPLY_STASH",
+  "DELETE_STASH",
+] as const;
+export type WorktreeGitOperation = (typeof WORKTREE_GIT_OPERATIONS)[number];
+export type WorktreeGitState = CodebaseGitState;
+export type WorktreeStashDiff = CodebaseStashDiff;
 
 export const DEFAULT_WORKTREE_FETCH_INTERVAL_SECONDS = 300;
 export const MIN_WORKTREE_FETCH_INTERVAL_SECONDS = 60;
@@ -208,6 +236,14 @@ function stringValue(value: unknown, name: string): string {
 function nullableString(value: unknown, name: string): string | null {
   if (value === null || value === undefined) return null;
   return stringValue(value, name);
+}
+
+function stashOid(value: unknown, name: string): string {
+  const oid = stringValue(value, name);
+  if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(oid)) {
+    throw new Error(`${name} must be a Git object ID`);
+  }
+  return oid.toLowerCase();
 }
 
 function safeRelativePath(value: unknown, name: string): string {
@@ -782,6 +818,182 @@ export function worktreeJobPayload(value: unknown): {
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
+  };
+}
+
+export function worktreeGitInspectPayload(value: unknown):
+  | {
+      action: "STATE";
+      codebaseId: string;
+      folder: string;
+      gitDirectory: string;
+      expectedOrigin: string;
+    }
+  | {
+      action: "STASH_DIFF";
+      codebaseId: string;
+      folder: string;
+      gitDirectory: string;
+      expectedOrigin: string;
+      stashOid: string;
+    } {
+  const payload = objectValue(value, "worktree Git inspect payload");
+  const allowed = new Set([
+    "action",
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "stashOid",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree Git inspect payload field: ${unexpected}`,
+    );
+  }
+  if (payload.action !== "STATE" && payload.action !== "STASH_DIFF") {
+    throw new Error("worktree Git inspect payload.action is invalid");
+  }
+  const common = {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree Git inspect payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree Git inspect payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree Git inspect payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree Git inspect payload.expectedOrigin",
+    ),
+  };
+  if (payload.action === "STATE") {
+    if (payload.stashOid !== undefined) {
+      throw new Error("STATE inspection cannot include stashOid");
+    }
+    return { action: payload.action, ...common };
+  }
+  return {
+    action: payload.action,
+    ...common,
+    stashOid: stashOid(
+      payload.stashOid,
+      "worktree Git inspect payload.stashOid",
+    ),
+  };
+}
+
+export function worktreeGitOperationPayload(value: unknown): {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string | null;
+  defaultBranch: string | null;
+  operation: WorktreeGitOperation;
+  branch?: string;
+  stashOid?: string;
+  stashChanges?: boolean;
+} {
+  const payload = objectValue(value, "worktree Git operation payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "defaultBranch",
+    "operation",
+    "branch",
+    "stashOid",
+    "stashChanges",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree Git operation payload field: ${unexpected}`,
+    );
+  }
+  if (
+    typeof payload.operation !== "string" ||
+    !WORKTREE_GIT_OPERATIONS.includes(payload.operation as WorktreeGitOperation)
+  ) {
+    throw new Error("worktree Git operation payload.operation is invalid");
+  }
+  const operation = payload.operation as WorktreeGitOperation;
+  const common = {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree Git operation payload.codebaseId",
+    ),
+    folder: stringValue(
+      payload.folder,
+      "worktree Git operation payload.folder",
+    ),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree Git operation payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree Git operation payload.expectedOrigin",
+    ),
+    baseBranch: nullableString(
+      payload.baseBranch,
+      "worktree Git operation payload.baseBranch",
+    ),
+    defaultBranch: nullableString(
+      payload.defaultBranch,
+      "worktree Git operation payload.defaultBranch",
+    ),
+    operation,
+  };
+  const branchOperation = [
+    "SWITCH_BRANCH",
+    "DELETE_BRANCH",
+    "DELETE_REMOTE_BRANCH",
+    "PULL_BRANCH",
+  ].includes(operation);
+  if (branchOperation) {
+    const branch = stringValue(
+      payload.branch,
+      "worktree Git operation payload.branch",
+    );
+    if (!validGitBranchName(branch)) {
+      throw new Error("Invalid Git branch name");
+    }
+    if (payload.stashOid !== undefined) {
+      throw new Error(`${operation} cannot include stashOid`);
+    }
+    if (operation !== "SWITCH_BRANCH" && payload.stashChanges !== undefined) {
+      throw new Error(`${operation} cannot include stashChanges`);
+    }
+    if (
+      payload.stashChanges !== undefined &&
+      typeof payload.stashChanges !== "boolean"
+    ) {
+      throw new Error("stashChanges must be a boolean");
+    }
+    return {
+      ...common,
+      branch,
+      ...(operation === "SWITCH_BRANCH"
+        ? { stashChanges: Boolean(payload.stashChanges) }
+        : {}),
+    };
+  }
+  if (payload.branch !== undefined || payload.stashChanges !== undefined) {
+    throw new Error(`${operation} cannot include branch or stashChanges`);
+  }
+  return {
+    ...common,
+    stashOid: stashOid(
+      payload.stashOid,
+      "worktree Git operation payload.stashOid",
+    ),
   };
 }
 

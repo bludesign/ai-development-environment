@@ -12,6 +12,7 @@ import {
   MAX_CODEBASE_STASH_PATCH_BYTES,
   normalizeGitOrigin,
   type CodebaseDirectoryListing,
+  type CodebaseGitOperation,
   type CodebaseGitState,
   type CodebaseSnapshot,
   type CodebaseStash,
@@ -720,7 +721,7 @@ export async function inspectCodebaseGitState(
   };
 }
 
-async function resolveStashSelector(
+export async function resolveStashSelector(
   folder: string,
   oid: string,
   timeoutMs: number,
@@ -760,6 +761,35 @@ function truncateUtf8(value: string, maxBytes: number) {
   };
 }
 
+export async function inspectCodebaseStashDiff(
+  folder: string,
+  oid: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<{ oid: string; patch: string; truncated: boolean }> {
+  await resolveStashSelector(folder, oid, timeoutMs, signal);
+  const result = requireSuccess(
+    await git(
+      folder,
+      [
+        "stash",
+        "show",
+        "--stat",
+        "--patch",
+        "--include-untracked",
+        "--no-color",
+        "--no-ext-diff",
+        oid,
+      ],
+      timeoutMs,
+      signal,
+    ),
+    "Could not inspect the stash",
+  );
+  const patch = truncateUtf8(result.stdout, MAX_CODEBASE_STASH_PATCH_BYTES);
+  return { oid, patch: patch.value, truncated: patch.truncated };
+}
+
 export const inspectCodebaseGit: AgentJobHandler = async (
   payload,
   timeoutMs,
@@ -778,33 +808,14 @@ export const inspectCodebaseGit: AgentJobHandler = async (
       state: await inspectCodebaseGitState(folder, timeoutMs, signal),
     };
   }
-  await resolveStashSelector(folder, input.stashOid, timeoutMs, signal);
-  const result = requireSuccess(
-    await git(
+  return {
+    ...successfulProcess,
+    diff: await inspectCodebaseStashDiff(
       folder,
-      [
-        "stash",
-        "show",
-        "--stat",
-        "--patch",
-        "--include-untracked",
-        "--no-color",
-        "--no-ext-diff",
-        input.stashOid,
-      ],
+      input.stashOid,
       timeoutMs,
       signal,
     ),
-    "Could not inspect the stash",
-  );
-  const patch = truncateUtf8(result.stdout, MAX_CODEBASE_STASH_PATCH_BYTES);
-  return {
-    ...successfulProcess,
-    diff: {
-      oid: input.stashOid,
-      patch: patch.value,
-      truncated: patch.truncated,
-    },
   };
 };
 
@@ -982,18 +993,23 @@ export async function deleteCodebaseRemoteBranch(
   );
 }
 
-export const operateCodebaseGit: AgentJobHandler = async (
-  payload,
-  timeoutMs,
-  signal,
-) => {
-  const input = codebaseGitOperationPayload(payload);
-  const folder = await validateGitCodebase(
-    input.folder,
-    input.expectedOrigin,
-    timeoutMs,
-    signal,
-  );
+/**
+ * Runs a single Git branch/stash operation against `folder`. The logic is
+ * working-directory-relative, so worktree handlers reuse it verbatim — only
+ * their validation and result projection differ.
+ */
+export async function runCodebaseGitOperation(
+  folder: string,
+  input: {
+    operation: CodebaseGitOperation;
+    branch?: string;
+    stashOid?: string;
+    stashChanges?: boolean;
+    defaultBranch: string | null;
+  },
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
   switch (input.operation) {
     case "SWITCH_BRANCH":
       await runSwitchBranch(
@@ -1056,6 +1072,21 @@ export const operateCodebaseGit: AgentJobHandler = async (
       break;
     }
   }
+}
+
+export const operateCodebaseGit: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = codebaseGitOperationPayload(payload);
+  const folder = await validateGitCodebase(
+    input.folder,
+    input.expectedOrigin,
+    timeoutMs,
+    signal,
+  );
+  await runCodebaseGitOperation(folder, input, timeoutMs, signal);
   return {
     ...successfulProcess,
     snapshot: await inspectCodebase(

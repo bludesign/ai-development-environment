@@ -73,6 +73,8 @@ import {
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_JOB_KINDS,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
@@ -82,6 +84,8 @@ import {
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
+  worktreeGitInspectPayload,
+  worktreeGitOperationPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
   worktreeWatchJobPayload,
@@ -266,6 +270,14 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === WORKTREE_DELETE_JOB_KIND) {
     worktreeDeleteJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_GIT_INSPECT_JOB_KIND) {
+    worktreeGitInspectPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_GIT_OPERATION_JOB_KIND) {
+    worktreeGitOperationPayload(value);
     return;
   }
   if (

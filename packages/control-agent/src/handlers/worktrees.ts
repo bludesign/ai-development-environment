@@ -9,6 +9,8 @@ import {
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
+  worktreeGitInspectPayload,
+  worktreeGitOperationPayload,
   worktreeJobPayload,
   worktreeMoveCheckoutJobPayload,
   worktreeMovePushJobPayload,
@@ -24,6 +26,11 @@ import {
 
 import { captureCommand, type CaptureResult } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
+import {
+  inspectCodebaseGitState,
+  inspectCodebaseStashDiff,
+  runCodebaseGitOperation,
+} from "./codebases.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
 
 const successfulProcess = {
@@ -324,11 +331,9 @@ async function origin(
   return normalizeGitOrigin(result.stdout.trim()).canonicalOrigin;
 }
 
-async function validateWorktree(
-  input: ReturnType<typeof worktreeJobPayload>,
-  timeoutMs: number,
-  signal: AbortSignal,
-): Promise<string> {
+async function validateWorktree<
+  T extends { folder: string; gitDirectory: string; expectedOrigin: string },
+>(input: T, timeoutMs: number, signal: AbortSignal): Promise<string> {
   const folder = await realpath(input.folder);
   if (!(await stat(folder)).isDirectory())
     throw new Error("Worktree is missing");
@@ -1461,6 +1466,56 @@ export const inspectWorktree: AgentJobHandler = async (
       folder,
       input.baseBranch,
       timeoutMs,
+      signal,
+    ),
+  };
+};
+
+export const inspectWorktreeGit: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeGitInspectPayload(payload);
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  if (input.action === "STATE") {
+    return {
+      ...successfulProcess,
+      state: await inspectCodebaseGitState(folder, timeoutMs, signal),
+    };
+  }
+  return {
+    ...successfulProcess,
+    diff: await inspectCodebaseStashDiff(
+      folder,
+      input.stashOid,
+      timeoutMs,
+      signal,
+    ),
+  };
+};
+
+export const operateWorktreeGit: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeGitOperationPayload(payload);
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  await runCodebaseGitOperation(folder, input, timeoutMs, signal);
+  return {
+    ...successfulProcess,
+    worktree: await inspectWorktreeItem(
+      folder,
+      folder,
+      input.baseBranch,
+      false,
+      Math.min(timeoutMs, 30_000),
+      signal,
+    ),
+    state: await inspectCodebaseGitState(
+      folder,
+      Math.min(timeoutMs, 30_000),
       signal,
     ),
   };

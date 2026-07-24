@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
+import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -8,6 +9,9 @@ import {
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
+  WORKTREE_GIT_OPERATIONS,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
@@ -19,6 +23,7 @@ import {
   type CodebaseWorktreeReport,
   type WorktreeActivityReport,
   type WorktreeEditorVariant,
+  type WorktreeGitOperation,
   type WorktreeOperation,
   type WorktreeDiffScope,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -276,6 +281,10 @@ export class WorktreesService {
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
+      (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_GIT_OPERATION_JOB_KIND,
       (job) => this.projectOperation(job),
     );
     this.agentControl.registerCompletionHandler(
@@ -1578,6 +1587,82 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
+    });
+  }
+
+  async inspectGitState(id: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_GIT_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "STATE",
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      idempotencyKey: `worktree:git:state:${requestId}:${id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseCodebaseGitState(resultObject(completed).state);
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async runGitOperation(input: {
+    worktreeId: string;
+    operation: WorktreeGitOperation;
+    branch?: string | null;
+    stashOid?: string | null;
+    stashChanges?: boolean | null;
+    requestId: string;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    if (!WORKTREE_GIT_OPERATIONS.includes(input.operation)) {
+      throw new Error("Unknown worktree Git operation");
+    }
+    const worktree = await this.requireRunnable(
+      input.worktreeId,
+      WORKTREE_GIT_OPERATION_JOB_KIND,
+    );
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_OPERATION_JOB_KIND,
+      payload: {
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+        baseBranch:
+          worktree.baseBranchOverride ??
+          worktree.codebase.defaultBranch ??
+          null,
+        defaultBranch: worktree.codebase.defaultBranch,
+        operation: input.operation,
+        ...(input.branch ? { branch: input.branch } : {}),
+        ...(input.stashOid ? { stashOid: input.stashOid } : {}),
+        ...(input.operation === "SWITCH_BRANCH"
+          ? { stashChanges: Boolean(input.stashChanges) }
+          : {}),
+      },
+      idempotencyKey: `worktree:git:${input.operation}:${input.requestId}:${input.worktreeId}`,
+      timeoutSeconds: input.operation === "PULL_BRANCH" ? 300 : 60,
     });
   }
 

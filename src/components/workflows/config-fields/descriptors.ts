@@ -1,6 +1,9 @@
 import { BUILD_ACTIONS } from "@ai-development-environment/agent-contract/builds";
 import { CODEBASE_GIT_OPERATIONS } from "@ai-development-environment/agent-contract/codebases";
-import { WORKTREE_OPERATIONS } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_GIT_OPERATIONS,
+  WORKTREE_OPERATIONS,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 import type {
   WorkflowStepKind,
@@ -415,6 +418,22 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   WORKTREE_INSPECT: {
     fields: [resource("worktreeId", "Worktree", "worktree")],
+  },
+  WORKTREE_INSPECT_GIT: {
+    fields: [resource("worktreeId", "Worktree", "worktree")],
+  },
+  WORKTREE_GIT_OPERATION: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      enumField(
+        "operation",
+        "Operation",
+        staticOptions(WORKTREE_GIT_OPERATIONS),
+      ),
+      text("branch", "Branch"),
+      text("stashOid", "Stash OID"),
+      bool("stashChanges", "Stash changes first"),
+    ],
   },
   WORKTREE_WAIT_PUSH_READY: {
     fields: [

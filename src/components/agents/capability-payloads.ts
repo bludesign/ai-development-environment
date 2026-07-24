@@ -10,6 +10,8 @@ import {
 import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
@@ -68,6 +70,26 @@ export function samplePayloadForCapability(
       return worktreeContext();
     case WORKTREE_OPERATION_JOB_KIND:
       return { ...worktreeContext(), operation: "SYNC" };
+    case WORKTREE_GIT_INSPECT_JOB_KIND:
+      return {
+        action: "STATE",
+        codebaseId: "",
+        folder: "",
+        gitDirectory: "",
+        expectedOrigin: "",
+      };
+    case WORKTREE_GIT_OPERATION_JOB_KIND:
+      return {
+        codebaseId: "",
+        folder: "",
+        gitDirectory: "",
+        expectedOrigin: "",
+        baseBranch: null,
+        defaultBranch: null,
+        operation: "SWITCH_BRANCH",
+        branch: "",
+        stashChanges: false,
+      };
     case WORKTREE_WATCH_JOB_KIND:
       return {
         ...worktreeContext(),

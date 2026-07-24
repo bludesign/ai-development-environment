@@ -11,7 +11,9 @@ import {
   type CodebaseGitOperation,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
+  WORKTREE_GIT_OPERATIONS,
   WORKTREE_OPERATIONS,
+  type WorktreeGitOperation,
   type WorktreeOperation,
 } from "@ai-development-environment/agent-contract/worktrees";
 
@@ -879,6 +881,33 @@ function registerWorktreeAdapters(
         },
       },
     };
+  });
+  executor.register("WORKTREE_INSPECT_GIT", async (context) => {
+    const state = await services.worktrees.inspectGitState(
+      worktreeId(context),
+      requestId(context, "inspect-git"),
+    );
+    return {
+      output: state,
+      sessionPatch: { worktree: { ...state } },
+    };
+  });
+  executor.register("WORKTREE_GIT_OPERATION", async (context) => {
+    const operation = String(
+      context.node.config.operation ?? "PULL_BRANCH",
+    ).toUpperCase();
+    if (!WORKTREE_GIT_OPERATIONS.includes(operation as WorktreeGitOperation)) {
+      throw new Error("Worktree Git operation is invalid");
+    }
+    const job = await services.worktrees.runGitOperation({
+      worktreeId: worktreeId(context),
+      operation: operation as WorktreeGitOperation,
+      branch: optionalText(context.node.config.branch, 500),
+      stashOid: optionalText(context.node.config.stashOid, 200),
+      stashChanges: context.node.config.stashChanges === true,
+      requestId: requestId(context, operation.toLowerCase()),
+    });
+    return jobResult(job);
   });
   executor.register("WORKTREE_WAIT_PUSH_READY", async (context) => ({
     wait: {
