@@ -8,7 +8,7 @@ export default async function WorktreeDetailRoute({
 }) {
   const { worktreeId } = await params;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <WorktreeDetailPage worktreeId={worktreeId} />
       <WorkflowResourcePanel
         resourceId={worktreeId}

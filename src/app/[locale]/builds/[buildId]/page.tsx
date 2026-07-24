@@ -12,7 +12,7 @@ export default async function BuildDetailRoute({
   const { buildId } = await params;
   const publicOrigin = resolvePublicOrigin(await headers());
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <BuildDetailPage buildId={buildId} publicOrigin={publicOrigin} />
       <WorkflowResourcePanel
         resourceId={buildId}

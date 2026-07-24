@@ -51,6 +51,8 @@ export type ConfigOptionSource =
   | {
       kind: "resource";
       resource: ResourceKind;
+      /** Canonical session path whose value identifies this resource. */
+      sessionPath?: string;
       /**
        * Sibling config key that provides a required scoping argument for the
        * resource query (e.g. `configurationId` needs `codebaseId`). When the

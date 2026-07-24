@@ -8,11 +8,19 @@ describe("workflow config descriptors", () => {
 
     expect(runFields?.find(({ key }) => key === "worktreeId")).toMatchObject({
       control: "resource",
-      options: { kind: "resource", resource: "worktree" },
+      options: {
+        kind: "resource",
+        resource: "worktree",
+        sessionPath: "worktree.id",
+      },
     });
     expect(runFields?.find(({ key }) => key === "jiraIssueKey")).toMatchObject({
       control: "resource",
-      options: { kind: "resource", resource: "jiraTicket" },
+      options: {
+        kind: "resource",
+        resource: "jiraTicket",
+        sessionPath: "ticket.key",
+      },
     });
     expect(runFields?.find(({ key }) => key === "jiraSummary")).toBeUndefined();
 

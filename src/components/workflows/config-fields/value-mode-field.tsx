@@ -104,6 +104,8 @@ export function ValueModeToggle({
 export function ValueModeField({
   label,
   help,
+  allowCustomSessionPath = true,
+  defaultSessionPath,
   sessionEnabled,
   value,
   onChange,
@@ -112,6 +114,8 @@ export function ValueModeField({
 }: {
   label: string;
   help?: string;
+  allowCustomSessionPath?: boolean;
+  defaultSessionPath?: string;
   sessionEnabled: boolean;
   value: unknown;
   onChange: (next: unknown) => void;
@@ -142,7 +146,17 @@ export function ValueModeField({
             mode={mode}
             onValueChange={(nextMode) =>
               onChange(
-                nextMode === "session" ? { source: "SESSION", path: "" } : "",
+                nextMode === "session"
+                  ? {
+                      source: "SESSION",
+                      path:
+                        sessionPaths.find(
+                          ({ path }) => path === defaultSessionPath,
+                        )?.path ??
+                        sessionPaths[0]?.path ??
+                        "",
+                    }
+                  : "",
               )
             }
           />
@@ -151,7 +165,7 @@ export function ValueModeField({
       {mode === "session" ? (
         <>
           <SearchableSelect
-            allowCustomValue
+            allowCustomValue={allowCustomSessionPath}
             ariaLabel={t("sessionBindingLabel")}
             emptyMessage={t("noOptions")}
             onValueChange={(path) => onChange({ source: "SESSION", path })}

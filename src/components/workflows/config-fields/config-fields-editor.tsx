@@ -222,13 +222,26 @@ function ResourceField({
     source?.resource ?? "codebase",
     scope,
   );
+  const resourceSessionPath = source?.sessionPath;
+  const resourceSessionPaths = resourceSessionPath
+    ? sessionPaths.filter(({ path }) => {
+        const [namespace, sessionField] = resourceSessionPath.split(".");
+        return (
+          path === resourceSessionPath ||
+          (path.startsWith(`${namespace}.`) &&
+            path.endsWith(`.${sessionField}`))
+        );
+      })
+    : sessionPaths;
   return (
     <ValueModeField
+      allowCustomSessionPath={!resourceSessionPath}
+      defaultSessionPath={resourceSessionPath}
       help={field.help}
       label={field.label}
       onChange={onChange}
       sessionEnabled={sessionModes(field)}
-      sessionPaths={sessionPaths}
+      sessionPaths={resourceSessionPaths}
       value={value}
     >
       {(current, onLiteral) => (

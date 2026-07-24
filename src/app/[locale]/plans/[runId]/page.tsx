@@ -8,7 +8,7 @@ export default async function PlanDetailRoute({
 }) {
   const runId = (await params).runId;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <RunDetailPage runId={runId} />
       <WorkflowResourcePanel
         resourceId={runId}

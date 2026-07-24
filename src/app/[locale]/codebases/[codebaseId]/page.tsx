@@ -8,7 +8,7 @@ export default async function CodebaseDetailRoute({
 }) {
   const { codebaseId } = await params;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <CodebaseDetailPage codebaseId={codebaseId} />
       <WorkflowResourcePanel
         resourceId={codebaseId}

@@ -742,6 +742,27 @@ function worktreeId(context: WorkflowExecutionContext): string {
   return configuredId(context, "worktreeId", "worktree.id", "Worktree ID");
 }
 
+/**
+ * Older workflow versions could bind a worktree resource field to any session
+ * path. If one was accidentally bound to `workflow.id`, resolution has already
+ * replaced the binding by the time the adapter runs. Recover only that known
+ * cross-resource mismatch; all other configured worktree overrides remain
+ * authoritative.
+ */
+function runWorktreeId(context: WorkflowExecutionContext): string {
+  const configured = context.node.config.worktreeId;
+  const sessionWorktreeId = getSessionValue(context.sessionData, "worktree.id");
+  if (
+    typeof configured === "string" &&
+    configured === context.run.workflowId &&
+    typeof sessionWorktreeId === "string" &&
+    sessionWorktreeId !== configured
+  ) {
+    return text(sessionWorktreeId, "Worktree ID", 500);
+  }
+  return worktreeId(context);
+}
+
 function codebaseId(context: WorkflowExecutionContext): string {
   return configuredId(context, "codebaseId", "codebase.id", "Codebase ID");
 }
@@ -1126,7 +1147,7 @@ function createRunInput(
 ): RunConfigurationInput {
   return {
     kind,
-    worktreeId: worktreeId(context),
+    worktreeId: runWorktreeId(context),
     jiraIssueKey: optionalText(
       context.node.config.jiraIssueKey ??
         getSessionValue(context.sessionData, "ticket.key"),

@@ -9,7 +9,7 @@ export default async function JiraTicketDetailRoute({
   const { issueKey } = await params;
   const decoded = decodeURIComponent(issueKey);
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <JiraTicketDetailPage issueKey={decoded} />
       <WorkflowResourcePanel
         resourceId={decoded}

@@ -15,7 +15,7 @@ export default async function EnrollDevicePage() {
   const enabled = Boolean(origin?.secure && !origin.loopback);
 
   return (
-    <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+    <section className="flex w-full flex-col gap-6">
       <div>
         <Link className="text-sm text-primary hover:underline" href="/devices">
           {t("back")}

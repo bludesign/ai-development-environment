@@ -11,7 +11,7 @@ export default async function PullRequestDetailRoute({
   const decodedRepository = decodeURIComponent(repository);
   const pullRequestNumber = Number(number);
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
       <PullRequestDetailPage
         number={pullRequestNumber}
         owner={decodedOwner}

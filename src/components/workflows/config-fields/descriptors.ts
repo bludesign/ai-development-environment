@@ -49,11 +49,26 @@ function listOptions(
   return { kind: "static", options };
 }
 
+const RESOURCE_SESSION_PATHS: Partial<Record<ResourceKind, string>> = {
+  codebase: "codebase.id",
+  worktree: "worktree.id",
+  githubRepository: "repo.id",
+  githubPullRequest: "pr.number",
+  jiraTicket: "ticket.key",
+  agentRun: "run.id",
+  githubWorkflowRun: "pipeline.runId",
+};
+
 function resourceOptions(
   resource: ResourceKind,
   scopeFrom?: string,
 ): Extract<ConfigOptionSource, { kind: "resource" }> {
-  return { kind: "resource", resource, scopeFrom };
+  return {
+    kind: "resource",
+    resource,
+    scopeFrom,
+    sessionPath: RESOURCE_SESSION_PATHS[resource],
+  };
 }
 
 const text = (

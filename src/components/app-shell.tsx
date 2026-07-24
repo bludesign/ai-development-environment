@@ -128,7 +128,10 @@ function ShellContent({
       >
         <AppHeader leftSidebar={leftSidebar} rightSidebar={rightSidebar} />
         <main className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          <div className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+          <div
+            className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none"
+            data-slot="page-content"
+          >
             {children}
           </div>
         </main>

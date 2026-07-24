@@ -1,6 +1,6 @@
 "use client";
 
-import { CirclePlay, ExternalLink, Waypoints } from "lucide-react";
+import { CirclePlay, ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -126,9 +126,7 @@ export function WorkflowResourcePanel({
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-3">
         <div>
-          <CardTitle className="flex items-center gap-2">
-            <Waypoints className="size-4" /> {t("resourceWorkflows")}
-          </CardTitle>
+          <CardTitle>{t("resourceWorkflows")}</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("resourceWorkflowsDescription")}
           </p>
