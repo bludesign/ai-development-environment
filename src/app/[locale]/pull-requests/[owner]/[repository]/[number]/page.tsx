@@ -1,5 +1,6 @@
 import { PullRequestDetailPage } from "@/components/github/pull-request-detail-page";
 import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
+import { pullRequestResourceId } from "@/lib/workflows/resources";
 
 export default async function PullRequestDetailRoute({
   params,
@@ -18,7 +19,11 @@ export default async function PullRequestDetailRoute({
         repository={decodedRepository}
       />
       <WorkflowResourcePanel
-        resourceId={number}
+        resourceId={pullRequestResourceId(
+          decodedOwner,
+          decodedRepository,
+          pullRequestNumber,
+        )}
         resourceKind="PULL_REQUEST"
         sessionData={{
           pr: { number: pullRequestNumber },

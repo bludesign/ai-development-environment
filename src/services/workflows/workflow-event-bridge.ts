@@ -554,13 +554,15 @@ export class WorkflowEventBridge {
       },
     };
     const common = { cursorValue: observedAt.toISOString() };
-    await this.record(
-      "WORKTREE_BEHIND",
-      worktree.id,
-      `worktree-behind:${worktree.id}:${observedAt.toISOString()}`,
-      sessionData,
-      common,
-    );
+    if ((worktree.baseBehind ?? 0) > 0) {
+      await this.record(
+        "WORKTREE_BEHIND",
+        worktree.id,
+        `worktree-behind:${worktree.id}:${observedAt.toISOString()}`,
+        sessionData,
+        common,
+      );
+    }
     await this.record(
       "WORKTREE_DIRTY_DURATION",
       worktree.id,

@@ -1,10 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   filterJiraTicketBoard,
   normalizeJiraSiteUrl,
   parseJiraBoardUrl,
   stableStringify,
+  JiraService,
 } from "./jira.service";
 import type { JiraTicketBoard } from "./types";
 
@@ -124,5 +125,44 @@ describe("Jira service input helpers", () => {
         "me",
       ).tickets.map((item) => item.key),
     ).toEqual(["APP-2"]);
+  });
+});
+
+describe("Jira workflow events", () => {
+  const ticket = (assigneeAccountId: string | null) => ({
+    key: "APP-1",
+    summary: "Ticket",
+    issueType: "Task",
+    status: "In Progress",
+    statusId: "doing",
+    statusCategory: "indeterminate",
+    assignee: assigneeAccountId,
+    assigneeAccountId,
+    labels: [],
+    sprintNames: [],
+    jiraUrl: "https://example.atlassian.net/browse/APP-1",
+    comments: [],
+    cache: { fetchedAt: "2026-07-24T12:00:00.000Z" },
+  });
+
+  test("emits assigned-self only for the current Jira account", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const service = new JiraService(undefined, { record } as never);
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.currentAccountId = vi.fn().mockResolvedValue("me");
+    const recordTicketWorkflowEvents = runtime.recordTicketWorkflowEvents as (
+      value: unknown,
+    ) => Promise<void>;
+
+    await recordTicketWorkflowEvents.call(service, ticket("other"));
+    expect(record.mock.calls.map(([input]) => input.kind)).not.toContain(
+      "JIRA_ASSIGNED_SELF",
+    );
+
+    record.mockClear();
+    await recordTicketWorkflowEvents.call(service, ticket("me"));
+    expect(record.mock.calls.map(([input]) => input.kind)).toContain(
+      "JIRA_ASSIGNED_SELF",
+    );
   });
 });

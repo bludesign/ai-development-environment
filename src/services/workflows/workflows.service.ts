@@ -86,6 +86,7 @@ const TERMINAL_ATTEMPT_STATUSES = new Set([
   "SKIPPED",
   "SUPERSEDED",
 ]);
+const SCHEDULING_RUN_STATUSES = new Set(["RUNNING", "WAITING"]);
 const MAX_DEFINITION_BYTES = 2 * 1024 * 1024;
 const MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const GLOBAL_CONCURRENCY = 4;
@@ -1642,7 +1643,7 @@ export class WorkflowsService {
       );
       const serializedSession = JSON.stringify(sessionData);
       assertSize(serializedSession, "Workflow session data", MAX_SESSION_BYTES);
-      return transaction.workflowRun.create({
+      const run = await transaction.workflowRun.create({
         data: {
           id,
           displayNumber: await nextDisplayNumber(transaction),
@@ -1658,6 +1659,27 @@ export class WorkflowsService {
           sessionDataJson: serializedSession,
         },
       });
+      const resourceKind =
+        triggerKind === "RESOURCE_MANUAL" &&
+        typeof payload.resourceKind === "string"
+          ? payload.resourceKind.trim().toUpperCase()
+          : "";
+      const resourceId =
+        triggerKind === "RESOURCE_MANUAL" &&
+        typeof payload.resourceId === "string"
+          ? payload.resourceId.trim()
+          : "";
+      if (resourceKind && resourceId) {
+        await transaction.workflowRunResourceLink.create({
+          data: {
+            id: randomUUID(),
+            runId: run.id,
+            kind: resourceKind,
+            resourceId,
+          },
+        });
+      }
+      return run;
     });
   }
 
@@ -1949,10 +1971,22 @@ export class WorkflowsService {
       if (!new Set(["RUNNING", "WAITING", "BLOCKED"]).has(run.status)) {
         throw new Error("Only an active workflow run can be paused");
       }
-      await prisma.workflowRun.update({
-        where: { id: runId },
-        data: { status: "PAUSING", phase: "DRAINING" },
+      const requested = await prisma.$transaction(async (transaction) => {
+        const updated = await transaction.workflowRun.updateMany({
+          where: {
+            id: runId,
+            status: { in: ["RUNNING", "WAITING", "BLOCKED"] },
+          },
+          data: { status: "PAUSING", phase: "DRAINING" },
+        });
+        if (!updated.count) return false;
+        await transaction.workflowStepAttempt.updateMany({
+          where: { runId, status: "READY" },
+          data: { status: "PENDING", phase: "PAUSED_PENDING" },
+        });
+        return true;
       });
+      if (!requested) return this.run(runId);
       await this.controlLinkedAgentRuns(runId, "PAUSE");
       await this.appendEvent(
         runId,
@@ -1964,10 +1998,11 @@ export class WorkflowsService {
       if (run.status !== "PAUSED") {
         throw new Error("Only a paused workflow run can be resumed");
       }
-      await prisma.workflowRun.update({
-        where: { id: runId },
+      const resumed = await prisma.workflowRun.updateMany({
+        where: { id: runId, status: "PAUSED" },
         data: { status: "RUNNING", phase: "SCHEDULING", pausedAt: null },
       });
+      if (!resumed.count) return this.run(runId);
       await this.controlLinkedAgentRuns(runId, "CONTINUE");
       await this.appendEvent(runId, null, "RUN_RESUMED", "Workflow resumed");
     } else {
@@ -1980,16 +2015,20 @@ export class WorkflowsService {
         });
         if (attempt?.runId === runId) controller.abort();
       }
-      await prisma.$transaction([
-        prisma.workflowRun.update({
-          where: { id: runId },
+      const cancelled = await prisma.$transaction(async (transaction) => {
+        const updated = await transaction.workflowRun.updateMany({
+          where: {
+            id: runId,
+            status: { notIn: [...TERMINAL_RUN_STATUSES] },
+          },
           data: {
             status: "CANCELLED",
             phase: "CANCELLED",
             finishedAt: new Date(),
           },
-        }),
-        prisma.workflowStepAttempt.updateMany({
+        });
+        if (!updated.count) return false;
+        await transaction.workflowStepAttempt.updateMany({
           where: {
             runId,
             status: { notIn: [...TERMINAL_ATTEMPT_STATUSES] },
@@ -2001,13 +2040,17 @@ export class WorkflowsService {
             claimOwner: null,
             claimExpiresAt: null,
           },
-        }),
-        prisma.workflowWait.updateMany({
+        });
+        await transaction.workflowWait.updateMany({
           where: { runId, status: "PENDING" },
           data: { status: "CANCELLED", resolvedAt: new Date() },
-        }),
-        prisma.workflowResourceLease.deleteMany({ where: { runId } }),
-      ]);
+        });
+        await transaction.workflowResourceLease.deleteMany({
+          where: { runId },
+        });
+        return true;
+      });
+      if (!cancelled) return this.run(runId);
       await this.appendEvent(
         runId,
         null,
@@ -2306,6 +2349,10 @@ export class WorkflowsService {
     });
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return;
     if (run.status === "PAUSING") {
+      await prisma.workflowStepAttempt.updateMany({
+        where: { runId, status: "READY" },
+        data: { status: "PENDING", phase: "PAUSED_PENDING" },
+      });
       const drainingWaitKinds = new Set([
         "AGENT_JOB",
         "BUILD",
@@ -2323,20 +2370,22 @@ export class WorkflowsService {
       );
       const active = run.attempts.some(
         ({ id, status }) =>
-          new Set(["RUNNING", "READY"]).has(status) ||
+          status === "RUNNING" ||
           (status === "WAITING" && drainingAttemptIds.has(id)),
       );
       if (!active) {
-        await prisma.workflowRun.update({
-          where: { id: runId },
+        const paused = await prisma.workflowRun.updateMany({
+          where: { id: runId, status: "PAUSING" },
           data: {
             status: "PAUSED",
             phase: "PAUSED",
             pausedAt: new Date(),
           },
         });
-        await this.appendEvent(runId, null, "RUN_PAUSED", "Workflow paused");
-        publishRunChanged(runId);
+        if (paused.count) {
+          await this.appendEvent(runId, null, "RUN_PAUSED", "Workflow paused");
+          publishRunChanged(runId);
+        }
       }
       return;
     }
@@ -2476,17 +2525,20 @@ export class WorkflowsService {
     const unfinished = values.some(
       ({ status }) => !TERMINAL_ATTEMPT_STATUSES.has(status),
     );
-    if (unfinished) {
+    if (pendingWaits || unfinished) {
       const nextStatus = pendingWaits ? "WAITING" : "RUNNING";
       if (run.status !== nextStatus) {
-        await prisma.workflowRun.update({
-          where: { id: runId },
+        const updated = await prisma.workflowRun.updateMany({
+          where: {
+            id: runId,
+            status: { in: [...SCHEDULING_RUN_STATUSES] },
+          },
           data: {
             status: nextStatus,
             phase: pendingWaits ? "WAITING" : "SCHEDULING",
           },
         });
-        publishRunChanged(runId);
+        if (updated.count) publishRunChanged(runId);
       }
       return;
     }
@@ -2516,18 +2568,26 @@ export class WorkflowsService {
     error: string | null,
   ): Promise<void> {
     const prisma = await getPrismaClient();
-    await prisma.$transaction([
-      prisma.workflowRun.update({
-        where: { id: run.id },
+    const finished = await prisma.$transaction(async (transaction) => {
+      const result = await transaction.workflowRun.updateMany({
+        where: {
+          id: run.id,
+          status: { in: [...SCHEDULING_RUN_STATUSES] },
+        },
         data: {
           status,
           phase: status,
           error,
           finishedAt: new Date(),
         },
-      }),
-      prisma.workflowResourceLease.deleteMany({ where: { runId: run.id } }),
-    ]);
+      });
+      if (!result.count) return false;
+      await transaction.workflowResourceLease.deleteMany({
+        where: { runId: run.id },
+      });
+      return true;
+    });
+    if (!finished) return;
     await this.appendEvent(
       run.id,
       null,
@@ -2576,7 +2636,11 @@ export class WorkflowsService {
     for (const attempt of candidates) {
       if (slots <= 0) break;
       const claimed = await prisma.workflowStepAttempt.updateMany({
-        where: { id: attempt.id, status: "READY" },
+        where: {
+          id: attempt.id,
+          status: "READY",
+          run: { status: "RUNNING" },
+        },
         data: {
           status: "RUNNING",
           phase: "RUNNING",
@@ -3288,9 +3352,14 @@ export class WorkflowsService {
     if (!wait) throw new Error("Workflow wait is missing");
     const prisma = await getPrismaClient();
     const waitId = randomUUID();
-    await prisma.$transaction(async (transaction) => {
-      await transaction.workflowStepAttempt.update({
-        where: { id: attempt.id },
+    const parked = await prisma.$transaction(async (transaction) => {
+      const run = await transaction.workflowRun.findUnique({
+        where: { id: attempt.runId },
+        select: { status: true },
+      });
+      if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return false;
+      const claimed = await transaction.workflowStepAttempt.updateMany({
+        where: { id: attempt.id, status: "RUNNING" },
         data: {
           status: "WAITING",
           phase: wait.kind,
@@ -3303,6 +3372,7 @@ export class WorkflowsService {
           claimExpiresAt: null,
         },
       });
+      if (!claimed.count) return false;
       await transaction.workflowWait.create({
         data: {
           id: waitId,
@@ -3329,14 +3399,19 @@ export class WorkflowsService {
           })),
         });
       }
-      await transaction.workflowRun.update({
-        where: { id: attempt.runId },
+      await transaction.workflowRun.updateMany({
+        where: {
+          id: attempt.runId,
+          status: { in: [...SCHEDULING_RUN_STATUSES] },
+        },
         data: { status: "WAITING", phase: wait.kind },
       });
       await transaction.workflowResourceLease.deleteMany({
         where: { attemptId: attempt.id },
       });
+      return true;
     });
+    if (!parked) return;
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -3353,11 +3428,12 @@ export class WorkflowsService {
     result: WorkflowExecutionResult,
   ): Promise<void> {
     const prisma = await getPrismaClient();
-    await prisma.$transaction(async (transaction) => {
+    const completed = await prisma.$transaction(async (transaction) => {
       const run = await transaction.workflowRun.findUnique({
         where: { id: attempt.runId },
       });
       if (!run) throw new Error("Workflow run disappeared");
+      if (TERMINAL_RUN_STATUSES.has(run.status)) return false;
       let sessionData = workflowSessionData(run.sessionDataJson);
       if (attempt.iterationKey) {
         sessionData = setSessionValue(
@@ -3383,8 +3459,11 @@ export class WorkflowsService {
       }
       const serialized = JSON.stringify(sessionData);
       assertSize(serialized, "Workflow session data", MAX_SESSION_BYTES);
-      await transaction.workflowStepAttempt.update({
-        where: { id: attempt.id },
+      const claimed = await transaction.workflowStepAttempt.updateMany({
+        where: {
+          id: attempt.id,
+          status: { in: ["RUNNING", "WAITING"] },
+        },
         data: {
           status: "SUCCEEDED",
           phase: "SUCCEEDED",
@@ -3399,6 +3478,7 @@ export class WorkflowsService {
           claimExpiresAt: null,
         },
       });
+      if (!claimed.count) return false;
       if (result.links?.length) {
         await transaction.workflowRunResourceLink.createMany({
           data: result.links.map((link) => ({
@@ -3418,14 +3498,21 @@ export class WorkflowsService {
         data: {
           sessionDataJson: serialized,
           sessionRevision: { increment: 1 },
-          status: "RUNNING",
-          phase: "SCHEDULING",
         },
+      });
+      await transaction.workflowRun.updateMany({
+        where: {
+          id: attempt.runId,
+          status: { in: [...SCHEDULING_RUN_STATUSES] },
+        },
+        data: { status: "RUNNING", phase: "SCHEDULING" },
       });
       await transaction.workflowResourceLease.deleteMany({
         where: { attemptId: attempt.id },
       });
+      return true;
     });
+    if (!completed) return;
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -3467,11 +3554,11 @@ export class WorkflowsService {
             : retry.delaySeconds,
         )
       : 0;
-    await prisma.$transaction(async (transaction) => {
+    const failed = await prisma.$transaction(async (transaction) => {
       const run = await transaction.workflowRun.findUnique({
         where: { id: attempt.runId },
       });
-      if (!run) return;
+      if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return false;
       let sessionData = workflowSessionData(run.sessionDataJson);
       if (!attempt.iterationKey) {
         sessionData = setSessionValue(sessionData, `steps.${attempt.nodeId}`, {
@@ -3479,8 +3566,11 @@ export class WorkflowsService {
           error: error.message,
         });
       }
-      await transaction.workflowStepAttempt.update({
-        where: { id: attempt.id },
+      const claimed = await transaction.workflowStepAttempt.updateMany({
+        where: {
+          id: attempt.id,
+          status: { in: ["RUNNING", "WAITING"] },
+        },
         data: {
           status: "FAILED",
           phase: shouldRetry ? "RETRY_SCHEDULED" : "FAILED",
@@ -3490,6 +3580,7 @@ export class WorkflowsService {
           claimExpiresAt: null,
         },
       });
+      if (!claimed.count) return false;
       if (shouldRetry) {
         await transaction.workflowWait.create({
           data: {
@@ -3506,6 +3597,14 @@ export class WorkflowsService {
         data: {
           sessionDataJson: JSON.stringify(sessionData),
           sessionRevision: { increment: 1 },
+        },
+      });
+      await transaction.workflowRun.updateMany({
+        where: {
+          id: attempt.runId,
+          status: { in: [...SCHEDULING_RUN_STATUSES] },
+        },
+        data: {
           status: shouldRetry ? "WAITING" : "RUNNING",
           phase: shouldRetry ? "RETRY_WAIT" : "SCHEDULING",
         },
@@ -3513,7 +3612,9 @@ export class WorkflowsService {
       await transaction.workflowResourceLease.deleteMany({
         where: { attemptId: attempt.id },
       });
+      return true;
     });
+    if (!failed) return;
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -3529,9 +3630,22 @@ export class WorkflowsService {
   private async resolveDueWaits(): Promise<void> {
     const prisma = await getPrismaClient();
     const now = new Date();
+    const updatePendingWait = (
+      id: string,
+      data: Parameters<typeof prisma.workflowWait.updateMany>[0]["data"],
+    ) =>
+      prisma.workflowWait.updateMany({
+        where: {
+          id,
+          status: "PENDING",
+          run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
+        },
+        data,
+      });
     const waits = await prisma.workflowWait.findMany({
       where: {
         status: "PENDING",
+        run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
         OR: [{ resumeAfter: { lte: now } }, { timeoutAt: { lte: now } }],
       },
       include: {
@@ -3547,10 +3661,11 @@ export class WorkflowsService {
         wait.kind !== "RETRY" &&
         wait.kind !== "DELAY"
       ) {
-        await prisma.workflowWait.update({
-          where: { id: wait.id },
-          data: { status: "TIMED_OUT", resolvedAt: now },
+        const timedOut = await updatePendingWait(wait.id, {
+          status: "TIMED_OUT",
+          resolvedAt: now,
         });
+        if (!timedOut.count) continue;
         await this.failAttempt(
           wait.attempt,
           parseWorkflowDefinition(
@@ -3562,12 +3677,17 @@ export class WorkflowsService {
       }
       if (wait.kind === "RETRY") {
         const nextAttempt = wait.attempt.attempt + 1;
-        await prisma.$transaction([
-          prisma.workflowWait.update({
-            where: { id: wait.id },
+        const resumed = await prisma.$transaction(async (transaction) => {
+          const resolved = await transaction.workflowWait.updateMany({
+            where: {
+              id: wait.id,
+              status: "PENDING",
+              run: { status: { in: [...SCHEDULING_RUN_STATUSES] } },
+            },
             data: { status: "RESOLVED", resolvedAt: now },
-          }),
-          prisma.workflowStepAttempt.create({
+          });
+          if (!resolved.count) return false;
+          await transaction.workflowStepAttempt.create({
             data: {
               id: randomUUID(),
               runId: wait.runId,
@@ -3584,18 +3704,26 @@ export class WorkflowsService {
               idempotencyKey: `${wait.runId}:${wait.attempt.nodeId}:${wait.attempt.generation}:${wait.attempt.iterationKey}:${nextAttempt}`,
               replayedFromId: wait.attempt.id,
             },
-          }),
-          prisma.workflowRun.update({
-            where: { id: wait.runId },
+          });
+          const run = await transaction.workflowRun.updateMany({
+            where: {
+              id: wait.runId,
+              status: { in: [...SCHEDULING_RUN_STATUSES] },
+            },
             data: { status: "RUNNING", phase: "SCHEDULING" },
-          }),
-        ]);
-        publishRunChanged(wait.runId);
-      } else if (wait.kind === "DELAY") {
-        await prisma.workflowWait.update({
-          where: { id: wait.id },
-          data: { status: "RESOLVED", resolvedAt: now },
+          });
+          if (!run.count) {
+            throw new Error("Workflow lifecycle changed while resuming retry");
+          }
+          return true;
         });
+        if (resumed) publishRunChanged(wait.runId);
+      } else if (wait.kind === "DELAY") {
+        const resolved = await updatePendingWait(wait.id, {
+          status: "RESOLVED",
+          resolvedAt: now,
+        });
+        if (!resolved.count) continue;
         await this.completeWaitingAttempt(wait.attemptId, { delayed: true });
       } else if (wait.kind === "PREDICATE") {
         const predicate = wait.predicateJson
@@ -3604,47 +3732,37 @@ export class WorkflowsService {
         const condition = predicate.condition as WorkflowCondition | undefined;
         const data = workflowSessionData(wait.attempt.run.sessionDataJson);
         if (condition && evaluateWorkflowCondition(condition, data)) {
-          await prisma.workflowWait.update({
-            where: { id: wait.id },
-            data: {
-              status: "RESOLVED",
-              resultJson: JSON.stringify({ matched: true }),
-              resolvedAt: now,
-            },
+          const resolved = await updatePendingWait(wait.id, {
+            status: "RESOLVED",
+            resultJson: JSON.stringify({ matched: true }),
+            resolvedAt: now,
           });
+          if (!resolved.count) continue;
           await this.completeWaitingAttempt(wait.attemptId, { matched: true });
         } else {
           const cadenceSeconds = Math.max(
             1,
             Number(predicate.cadenceSeconds ?? 15),
           );
-          await prisma.workflowWait.update({
-            where: { id: wait.id },
-            data: {
-              resumeAfter: new Date(Date.now() + cadenceSeconds * 1_000),
-            },
+          await updatePendingWait(wait.id, {
+            resumeAfter: new Date(Date.now() + cadenceSeconds * 1_000),
           });
         }
       } else if (wait.externalKey && this.waitPollers.has(wait.kind)) {
         const polled = await this.waitPollers.get(wait.kind)!(wait.externalKey);
         if (polled.pending) {
-          await prisma.workflowWait.update({
-            where: { id: wait.id },
-            data: {
-              resumeAfter: new Date(
-                Date.now() + Math.max(1, polled.pollAfterSeconds ?? 15) * 1_000,
-              ),
-            },
+          await updatePendingWait(wait.id, {
+            resumeAfter: new Date(
+              Date.now() + Math.max(1, polled.pollAfterSeconds ?? 15) * 1_000,
+            ),
           });
         } else {
-          await prisma.workflowWait.update({
-            where: { id: wait.id },
-            data: {
-              status: polled.error ? "FAILED" : "RESOLVED",
-              resultJson: JSON.stringify(polled.result ?? {}),
-              resolvedAt: new Date(),
-            },
+          const resolved = await updatePendingWait(wait.id, {
+            status: polled.error ? "FAILED" : "RESOLVED",
+            resultJson: JSON.stringify(polled.result ?? {}),
+            resolvedAt: new Date(),
           });
+          if (!resolved.count) continue;
           if (polled.error) {
             const node = parseWorkflowDefinition(
               json(wait.attempt.run.version.definitionJson),

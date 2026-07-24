@@ -30,6 +30,7 @@ import type { SkillsService } from "@/services/skills";
 import type { ToolsService } from "@/services/tools";
 import type { WorktreesService } from "@/services/worktrees";
 import type { RunConfigurationInput } from "@/services/runs";
+import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue } from "@/lib/workflows/session";
 import type {
   WorkflowExecutionContext,
@@ -529,7 +530,11 @@ function registerGitHubAdapters(
       links: [
         {
           kind: "PULL_REQUEST",
-          resourceId: String(pullRequest.number),
+          resourceId: pullRequestResourceId(
+            repository.owner,
+            repository.name,
+            pullRequest.number,
+          ),
           label: pullRequest.title,
           url: pullRequest.url,
           metadata: { repository: pullRequest.repositoryNameWithOwner },
@@ -634,7 +639,11 @@ function registerGitHubAdapters(
       links: [
         {
           kind: "PULL_REQUEST",
-          resourceId: String(pullRequest.number),
+          resourceId: pullRequestResourceId(
+            repository.owner,
+            repository.name,
+            pullRequest.number,
+          ),
           label: pullRequest.title,
           url: pullRequest.url,
         },

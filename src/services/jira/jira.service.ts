@@ -457,13 +457,18 @@ export class JiraService {
         : null,
     };
     const observedAt = ticket.cache.fetchedAt;
-    const observations = [
+    const currentAccountId = ticket.assigneeAccountId
+      ? await this.currentAccountId().catch(() => null)
+      : null;
+    const observations: Array<readonly [string, string]> = [
       ["JIRA_STATUS", ticket.statusId],
       ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
-      ["JIRA_ASSIGNED_SELF", ticket.assigneeAccountId ?? "unassigned"],
       ["JIRA_MENTION", latestComment?.id ?? "none"],
       ["JIRA_SPRINT_STARTED", JSON.stringify([...ticket.sprintNames].sort())],
-    ] as const;
+    ];
+    if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
+      observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
+    }
     await Promise.allSettled(
       observations.map(([kind, cursorValue]) =>
         this.workflowEvents!.record({
