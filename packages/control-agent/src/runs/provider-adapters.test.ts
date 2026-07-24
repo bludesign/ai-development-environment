@@ -6,9 +6,10 @@ import { describe, expect, test } from "vitest";
 import {
   claudeAnswers,
   claudeEnvironment,
+  claudeModelUsages,
   questionsFromInput,
 } from "./claude-adapter.js";
-import { codexQuestions } from "./codex-adapter.js";
+import { codexQuestions, codexTokenUsage } from "./codex-adapter.js";
 import {
   opencodeEventText,
   opencodeQuestions,
@@ -38,6 +39,28 @@ describe("provider protocol fixtures", () => {
         ],
       }),
     ]);
+  });
+
+  test("separates cached input from Codex's inclusive input total", () => {
+    expect(
+      codexTokenUsage(
+        {
+          inputTokens: 12_774,
+          cachedInputTokens: 10_000,
+          outputTokens: 500,
+          reasoningTokens: 200,
+        },
+        "gpt-5.2-codex",
+      ),
+    ).toEqual({
+      model: "gpt-5.2-codex",
+      inputTokens: 2_774,
+      outputTokens: 500,
+      reasoningTokens: 200,
+      cacheReadTokens: 10_000,
+      cacheWriteTokens: 0,
+      pricingSource: "codex-app-server",
+    });
   });
 
   test("normalizes every question in a Claude AskUserQuestion batch", async () => {
@@ -105,5 +128,69 @@ describe("provider protocol fixtures", () => {
         },
       }),
     ).toBe("Changed files listed.");
+  });
+});
+
+describe("claudeModelUsages", () => {
+  test("lifts the per-model breakdown with real ids and cache split", () => {
+    expect(
+      claudeModelUsages(
+        {
+          num_turns: 2,
+          total_cost_usd: 0.1297152,
+          usage: { input_tokens: 4, output_tokens: 200 },
+          modelUsage: {
+            "claude-sonnet-5": {
+              inputTokens: 4,
+              outputTokens: 200,
+              cacheReadInputTokens: 19904,
+              cacheCreationInputTokens: 20122,
+              costUSD: 0.1297152,
+            },
+          },
+        },
+        "sonnet",
+      ),
+    ).toEqual([
+      {
+        model: "claude-sonnet-5",
+        inputTokens: 4,
+        outputTokens: 200,
+        cacheReadTokens: 19904,
+        cacheWriteTokens: 20122,
+        estimatedCost: 0.1297152,
+        toolCallCount: 2,
+        pricingSource: "claude-agent-sdk",
+      },
+    ]);
+  });
+
+  test("falls back to the run model and aggregate usage without a breakdown", () => {
+    expect(
+      claudeModelUsages(
+        {
+          num_turns: 1,
+          total_cost_usd: 0.02,
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 5,
+            cache_creation_input_tokens: 6,
+          },
+        },
+        "sonnet",
+      ),
+    ).toEqual([
+      {
+        model: "sonnet",
+        inputTokens: 10,
+        outputTokens: 20,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 6,
+        estimatedCost: 0.02,
+        toolCallCount: 1,
+        pricingSource: "claude-agent-sdk",
+      },
+    ]);
   });
 });

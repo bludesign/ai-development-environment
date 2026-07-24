@@ -413,6 +413,15 @@ input ImportedRunInput {
   rawMetadata: JSON
 }
 
+"""
+The untouched on-disk session transcript from the AI tool (Claude Code or Codex),
+base64-encoded. Read live off the agent host, so it requires an online agent.
+"""
+type RunNativeSessionFile {
+  filename: String!
+  contentBase64: String!
+}
+
 extend type Query {
   agentRuns(
     kind: RunKind!
@@ -437,6 +446,7 @@ extend type Query {
     after: ID
   ): RunQuestionBatchPage!
   runUsage(runId: ID!): RunUsageSummary
+  runNativeSessionFile(runId: ID!): RunNativeSessionFile!
   runLinkedItems(runId: ID!): [AgentRun!]!
   runDrafts(
     search: String

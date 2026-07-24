@@ -9,6 +9,7 @@
     "./builds": "./src/builds.ts",
     "./codebases": "./src/codebases.ts",
     "./plist": "./src/plist.ts",
+    "./runs": "./src/runs.ts",
     "./skills": "./src/skills.ts",
     "./signing-assets": "./src/signing-assets.ts",
     "./worktrees": "./src/worktrees.ts"

@@ -87,6 +87,7 @@ class GraphQLServerService {
       this.services.credentialService,
       this.services.notificationsService,
       this.services.pollingService,
+      this.services.modelCostsService,
       this.services.runsService,
     );
 

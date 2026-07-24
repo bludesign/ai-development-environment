@@ -140,6 +140,14 @@ export const createRunResolvers = (service: RunsService) => ({
       requireControlPlane(context);
       return service.usage(runId);
     },
+    runNativeSessionFile: (
+      _root: unknown,
+      { runId }: { runId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.nativeSessionFile(runId);
+    },
     runLinkedItems: (
       _root: unknown,
       { runId }: { runId: string },

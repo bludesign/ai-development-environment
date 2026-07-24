@@ -8,6 +8,7 @@ import {
   ChartNoAxesCombined,
   Combine,
   ClipboardList,
+  CircleDollarSign,
   Cpu,
   Database,
   DatabaseZap,
@@ -382,6 +383,22 @@ function NavigationSidebar() {
                   >
                     <ChartNoAxesCombined />
                     <span>{t("usage")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/costs")}
+                >
+                  <Link
+                    href="/costs"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <CircleDollarSign />
+                    <span>{t("costs")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

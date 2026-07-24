@@ -43,7 +43,9 @@ import {
   SKILL_READ_JOB_KIND,
   SKILL_SCAN_JOB_KIND,
 } from "@ai-development-environment/agent-contract/skills";
+import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import { applySkills, readSkills, scanSkills } from "./skills.js";
+import { readRunSession } from "./runs.js";
 import {
   inspectWorktree,
   inspectWorktreeDiff,
@@ -165,6 +167,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [SKILL_SCAN_JOB_KIND]: scanSkills,
   [SKILL_READ_JOB_KIND]: readSkills,
   [SKILL_APPLY_JOB_KIND]: applySkills,
+  [RUN_SESSION_READ_JOB_KIND]: readRunSession,
   [IOS_SOURCE_DISCOVER_JOB_KIND]: discoverBuildSources,
   [IOS_SOURCE_PARSE_JOB_KIND]: parseBuildSourceMetadata,
   [IOS_DESTINATIONS_JOB_KIND]: inspectBuildDestinations,

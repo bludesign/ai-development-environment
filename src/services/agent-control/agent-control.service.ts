@@ -96,6 +96,10 @@ import {
   parseSkillScanPayload,
 } from "@ai-development-environment/agent-contract/skills";
 import {
+  RUN_SESSION_READ_JOB_KIND,
+  parseRunSessionReadPayload,
+} from "@ai-development-environment/agent-contract/runs";
+import {
   SIGNING_ASSET_JOB_KINDS,
   SIGNING_ASSETS_SCAN_JOB_KIND,
   SIGNING_IDENTITY_DELETE_JOB_KIND,
@@ -279,6 +283,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === SKILL_READ_JOB_KIND) {
     parseSkillReadPayload(payload);
+    return;
+  }
+  if (kind === RUN_SESSION_READ_JOB_KIND) {
+    parseRunSessionReadPayload(payload);
     return;
   }
   if (kind === SKILL_APPLY_JOB_KIND) {

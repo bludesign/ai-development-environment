@@ -22,6 +22,7 @@ import {
   type ProviderImportWorktree,
   type ProviderQuestion,
   type ProviderStartInput,
+  type ProviderUsage,
   type StagedAttachment,
 } from "./provider.js";
 
@@ -133,6 +134,49 @@ export function claudeEnvironment(): Record<string, string> {
     ),
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   };
+}
+
+/**
+ * A Claude result reports usage per real model id (`claude-sonnet-5`), each with
+ * its own cache-read and cache-creation token counts and reported cost. Those
+ * ids price against the cost catalog where the run's own alias (`sonnet`) does
+ * not, so the breakdown is preferred; a result without one falls back to a
+ * single aggregate row under the run's model.
+ */
+export function claudeModelUsages(
+  record: Record<string, unknown>,
+  fallbackModel: string,
+): ProviderUsage[] {
+  const toolCallCount = Number(record.num_turns ?? 0);
+  const entries = Object.entries(asRecord(record.modelUsage)).filter(
+    (entry): entry is [string, Record<string, unknown>] =>
+      Boolean(entry[1]) && typeof entry[1] === "object",
+  );
+  if (entries.length) {
+    return entries.map(([model, usage]) => ({
+      model,
+      inputTokens: Number(usage.inputTokens ?? 0),
+      outputTokens: Number(usage.outputTokens ?? 0),
+      cacheReadTokens: Number(usage.cacheReadInputTokens ?? 0),
+      cacheWriteTokens: Number(usage.cacheCreationInputTokens ?? 0),
+      estimatedCost: Number(usage.costUSD ?? 0),
+      toolCallCount,
+      pricingSource: "claude-agent-sdk",
+    }));
+  }
+  const usage = asRecord(record.usage);
+  return [
+    {
+      model: fallbackModel,
+      inputTokens: Number(usage.input_tokens ?? 0),
+      outputTokens: Number(usage.output_tokens ?? 0),
+      cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
+      cacheWriteTokens: Number(usage.cache_creation_input_tokens ?? 0),
+      estimatedCost: Number(record.total_cost_usd ?? 0),
+      toolCallCount,
+      pricingSource: "claude-agent-sdk",
+    },
+  ];
 }
 
 export class ClaudeAdapter implements ProviderAdapter {
@@ -278,17 +322,9 @@ export class ClaudeAdapter implements ProviderAdapter {
           if (record.type === "result") {
             finalOutput =
               typeof record.result === "string" ? record.result : finalOutput;
-            const usage = asRecord(record.usage);
-            await callbacks.onUsage({
-              model: input.run.model,
-              inputTokens: Number(usage.input_tokens ?? 0),
-              outputTokens: Number(usage.output_tokens ?? 0),
-              cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
-              cacheWriteTokens: Number(usage.cache_creation_input_tokens ?? 0),
-              estimatedCost: Number(record.total_cost_usd ?? 0),
-              toolCallCount: Number(record.num_turns ?? 0),
-              pricingSource: "claude-agent-sdk",
-            });
+            for (const usage of claudeModelUsages(record, input.run.model)) {
+              await callbacks.onUsage(usage);
+            }
             if (record.is_error) {
               const errors = Array.isArray(record.errors)
                 ? record.errors.map(String).join("; ")

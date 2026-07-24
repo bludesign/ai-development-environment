@@ -1,17 +1,10 @@
 "use client";
 
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUp,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronRight,
-  Search,
-} from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SortableTableHead } from "@/components/common/sortable-table-head";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -466,52 +459,6 @@ function SortableCoverageHead({
       label={label}
       onSort={() => onSort(sortKey)}
     />
-  );
-}
-
-function SortableTableHead({
-  active,
-  align,
-  ariaLabel,
-  direction,
-  label,
-  onSort,
-}: {
-  active: boolean;
-  align: "left" | "right";
-  ariaLabel: string;
-  direction: "asc" | "desc";
-  label: string;
-  onSort: () => void;
-}) {
-  return (
-    <TableHead
-      aria-sort={
-        active ? (direction === "asc" ? "ascending" : "descending") : "none"
-      }
-      className="h-8 px-2"
-    >
-      <Button
-        aria-label={ariaLabel}
-        className={`-mx-2 h-7 px-2 text-xs ${align === "right" ? "w-[calc(100%+1rem)] justify-end" : "justify-start"}`}
-        onClick={onSort}
-        size="sm"
-        title={ariaLabel}
-        type="button"
-        variant="ghost"
-      >
-        {label}
-        {active ? (
-          direction === "asc" ? (
-            <ArrowUp />
-          ) : (
-            <ArrowDown />
-          )
-        ) : (
-          <ArrowUpDown />
-        )}
-      </Button>
-    </TableHead>
   );
 }
 

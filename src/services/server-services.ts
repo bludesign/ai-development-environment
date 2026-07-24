@@ -22,6 +22,7 @@ import { PushNotificationsService } from "@/services/push-notifications";
 import { CredentialService } from "@/services/credentials";
 import { NotificationsService } from "@/services/notifications";
 import { PollingService } from "@/services/polling";
+import { ModelCostsService } from "@/services/model-costs";
 import { RunsService } from "@/services/runs";
 
 export type ServerServices = {
@@ -46,6 +47,7 @@ export type ServerServices = {
   pushNotificationsService: PushNotificationsService;
   notificationsService: NotificationsService;
   pollingService: PollingService;
+  modelCostsService: ModelCostsService;
   runsService: RunsService;
 };
 
@@ -62,13 +64,17 @@ function createServerServices(): ServerServices {
     credentialService,
   );
   const pollingService = new PollingService();
+  const modelCostsService = new ModelCostsService();
   const pushNotificationsService = new PushNotificationsService(
     undefined,
     credentialService,
     pollingService,
   );
   const notificationsService = new NotificationsService(credentialService);
-  const runsService = new RunsService(notificationsService);
+  const runsService = new RunsService(
+    notificationsService,
+    agentControlService,
+  );
   runsService.startReaper();
   const buildsService = new BuildsService(
     agentControlService,
@@ -123,6 +129,7 @@ function createServerServices(): ServerServices {
     pushNotificationsService,
     notificationsService,
     pollingService,
+    modelCostsService,
     runsService,
     toolsService: new ToolsService(
       codebaseToolsService,

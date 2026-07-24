@@ -52,7 +52,8 @@
     "sessions": "Sitzungen",
     "drafts": "Entwürfe",
     "credentials": "Anmeldedaten",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "costs": "Kosten"
   },
   "runs": {
     "actions": "Aktionen",
@@ -76,7 +77,9 @@
     "attachmentsTooLarge": "Die ausgewählten Anhänge überschreiten das Eingabelimit von 100 MB.",
     "auto": "Automatisch",
     "backTo": "Zurück zu {kind}",
+    "cacheReadTokens": "Cache-Lesevorgänge",
     "cacheTokens": "Cache-Token",
+    "cacheWriteTokens": "Cache-Schreibvorgänge",
     "cancel": "Abbrechen",
     "cancelAndTransfer": "Übergeordneten Lauf abbrechen und Arbeitsbaum übertragen",
     "changesSnapshots": "Änderungen",
@@ -91,6 +94,8 @@
     },
     "chooseModel": "Modell wählen",
     "continue": "Fortfahren",
+    "copied": "Kopiert",
+    "copy": "Kopieren",
     "cost": "Kosten",
     "crossProviderWarning": "Verborgener Anbieterzustand kann nicht zwischen Werkzeugen übertragen werden. Wählen Sie das sichtbare Transkript oder die abschließende Zusammenfassung als Kontext.",
     "customAnswer": "Eigene Antwort",
@@ -103,6 +108,7 @@
     "detached": "Losgelöster HEAD",
     "done": "Fertig",
     "drafts": "Entwürfe",
+    "draftsDescription": "Gespeicherte Prompts, die du später als Plan oder Sitzung starten kannst.",
     "edit": "Bearbeiten",
     "editAnswer": "Antwort bearbeiten",
     "editDraft": "Entwurf bearbeiten",
@@ -122,6 +128,8 @@
     "export": "Exportieren",
     "exportJson": "Als JSON exportieren",
     "exportMarkdown": "Als Markdown exportieren",
+    "exportSession": "{tool}-Sitzung exportieren (JSONL)",
+    "exportSessionFile": "Originaldatei von {tool} herunterladen",
     "fileTooLarge": "{name} überschreitet das Dateilimit von 25 MB.",
     "followUp": "Folgelauf",
     "followUpDescription": "Einen verknüpften Lauf mit fortgesetztem, frischem oder erneut gesendetem Kontext erstellen.",
@@ -153,6 +161,7 @@
     "newRun": "Neu: {kind}",
     "noActivity": "Keine Aktivität entspricht dieser Suche.",
     "noChanges": "Es sind keine Git-Prüfpunkte verfügbar.",
+    "noDetail": "Keine weiteren Details",
     "noDrafts": "Es wurden keine passenden Entwürfe gefunden.",
     "noRollbackChanges": "Es werden keine Inhaltsänderungen im Arbeitsbaum rückgängig gemacht.",
     "normalizedContext": "Sichtbares Transkript",
@@ -164,9 +173,9 @@
     "pausedFollowUpTitle": "Pausierte Sitzung übertragen",
     "phases": {
       "ANSWER_FAILED": "Antwort fehlgeschlagen",
-      "ANSWER_REVISION_PREPARING": "Antwortkorrektur wird vorbereitet",
-      "ANSWER_REVISION_QUEUED": "Antwortkorrektur in Warteschlange",
-      "ANSWER_REVISION_READY": "Antwortkorrektur bereit",
+      "ANSWER_REVISION_PREPARING": "Korrektur wird vorbereitet",
+      "ANSWER_REVISION_QUEUED": "Korrektur in Warteschlange",
+      "ANSWER_REVISION_READY": "Korrektur bereit",
       "CANCELLED": "Abgebrochen",
       "CANCEL_FAILED": "Abbrechen fehlgeschlagen",
       "CANCEL_REQUESTED": "Abbruch angefordert",
@@ -182,10 +191,10 @@
       "PAUSE_FAILED": "Pausieren fehlgeschlagen",
       "PAUSE_REQUESTED": "Pause angefordert",
       "PLAY_PLAN_FAILED": "Plan-Ausführung fehlgeschlagen",
-      "PREPARE_ANSWER_REVISION_FAILED": "Vorbereitung der Antwortkorrektur fehlgeschlagen",
+      "PREPARE_ANSWER_REVISION_FAILED": "Vorbereitung fehlgeschlagen",
       "QUEUED": "In Warteschlange",
       "RECOVERY_PAUSED": "Nach Wiederherstellung pausiert",
-      "REVISE_ANSWER_FAILED": "Antwortkorrektur fehlgeschlagen",
+      "REVISE_ANSWER_FAILED": "Korrektur fehlgeschlagen",
       "RUNNING": "Läuft",
       "START_FAILED": "Start fehlgeschlagen",
       "STEER_FAILED": "Steuerung fehlgeschlagen",
@@ -197,8 +206,10 @@
     "plan": "Plan",
     "planMutationWarning": "Dieser schreibgeschützte Plan hat den ausgewählten Arbeitsbaum unerwartet geändert.",
     "plans": "Plans",
+    "plansDescription": "Schreibgeschützte Pläne, die eine Codebasis untersuchen und Arbeit vorschlagen, ohne sie zu ändern.",
     "play": "Plan ausführen",
     "presets": "Voreinstellungen",
+    "recentModels": "Zuletzt verwendet",
     "prompt": "Prompt",
     "promptPlaceholder": "Beschreiben Sie, was der Agent tun soll…",
     "prepareRevision": "Wiederherstellung wird vorbereitet…",
@@ -233,6 +244,7 @@
     "session": "Sitzung",
     "showingCount": "{count} von {total} werden angezeigt",
     "sessions": "Sitzungen",
+    "sessionsDescription": "Verwaltete Provider-Sitzungen, die gegen einen Worktree laufen.",
     "start": "Starten",
     "startDescription": "Einen verwalteten Plan oder eine verwaltete Sitzung im ausgewählten Arbeitsbaum starten.",
     "startFollowUp": "Folgelauf starten",
@@ -262,7 +274,6 @@
       "OBSERVED": "Beobachtet"
     },
     "toolCalls": "Werkzeugaufrufe",
-    "totalCost": "Geschätzte Gesamtkosten",
     "unpinPreset": "Voreinstellung lösen",
     "unrestrictedWarning": "Sitzungen laufen ohne Genehmigungsdialoge und mit uneingeschränktem Zugriff, während sie eine exklusive Arbeitsbaumreservierung halten.",
     "uploadFailed": "Hochladen des Anhangs fehlgeschlagen.",
@@ -270,7 +281,9 @@
     "usageState": "Nutzung der Versuche",
     "webSearch": "Websuche",
     "webSearchDescription": "Das native Websuchwerkzeug des Anbieters aktivieren, sofern unterstützt.",
-    "worktree": "Arbeitsbaum"
+    "worktree": "Arbeitsbaum",
+    "reportedCost": "Vom Anbieter gemeldet",
+    "catalogCost": "Modellkostenkatalog"
   },
   "notifications": {
     "title": "Benachrichtigungen",
@@ -367,11 +380,32 @@
       "GITHUB_ACTIONS_FAILED": {
         "title": "GitHub Actions fehlgeschlagen",
         "description": "Ein GitHub-Actions-Workflow endet mit einem Fehler."
+      },
+      "RUN_NEEDS_ANSWER": {
+        "title": "Plan oder Sitzung braucht eine Antwort",
+        "description": "Ein verwalteter Plan oder eine Sitzung fragt nach einer Eingabe."
+      },
+      "RUN_COMPLETED": {
+        "title": "Plan oder Sitzung abgeschlossen",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird erfolgreich abgeschlossen."
+      },
+      "RUN_FAILED": {
+        "title": "Plan oder Sitzung fehlgeschlagen",
+        "description": "Ein verwalteter Plan oder eine Sitzung schlägt fehl."
+      },
+      "RUN_CANCELLED": {
+        "title": "Plan oder Sitzung abgebrochen",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird abgebrochen."
+      },
+      "RUN_RECOVERY_PAUSED": {
+        "title": "Plan oder Sitzung nach Wiederherstellung pausiert",
+        "description": "Ein verwalteter Plan oder eine Sitzung wird nach einem Neustart des Agenten pausiert."
       }
     },
     "categories": {
       "BUILDS": "Build-Prozesse",
-      "GITHUB": "GitHub"
+      "GITHUB": "GitHub",
+      "RUNS": "Pläne und Sitzungen"
     }
   },
   "credentialEncryption": {
@@ -3104,5 +3138,36 @@
     "failed": "Fehlgeschlagen",
     "cancelled": "Abgebrochen",
     "timed_out": "Zeitüberschreitung"
+  },
+  "costs": {
+    "title": "Kosten",
+    "description": "Modellpreise zur Schätzung der Kosten von Plänen und Sitzungen.",
+    "sourceTitle": "Preiskatalog",
+    "sourceDescription": "Woher die Modellpreise geladen werden. Leer lassen, um den Standardkatalog zu verwenden. Preise werden einmal täglich automatisch aktualisiert.",
+    "catalogUrl": "URL für Modellkosten",
+    "save": "Speichern",
+    "useDefault": "Standard verwenden",
+    "fetchLatest": "Aktuelle Daten laden",
+    "lastFetched": "Zuletzt geladen",
+    "never": "Nie",
+    "modelCount": "{count, plural, =0 {Keine Modelle} one {# Modell} other {# Modelle}}",
+    "customSource": "Eigene Quelle",
+    "defaultSource": "Standardquelle",
+    "staleCatalog": "Aktualisierung fällig",
+    "lastFetchFailed": "Der letzte Abruf ist fehlgeschlagen: {error}",
+    "modelsTitle": "Modellpreise",
+    "modelsDescription": "Preise pro Million Token, wie vom Katalog veröffentlicht.",
+    "searchModels": "Modelle suchen",
+    "model": "Modell",
+    "provider": "Anbieter",
+    "inputPrice": "Eingabe / MTok",
+    "outputPrice": "Ausgabe / MTok",
+    "cacheReadPrice": "Cache-Lesen / MTok",
+    "cacheWritePrice": "Cache-Schreiben / MTok",
+    "contextWindow": "Kontext",
+    "noModels": "Keine passenden Modelle gefunden.",
+    "showingCount": "{shown} von {total} werden angezeigt",
+    "sortBy": "Nach {column} sortieren",
+    "loadingMore": "Weitere werden geladen…"
   }
 }

@@ -15,7 +15,7 @@ export const RUN_LIST_FIELDS = `
 
 export const RUN_DETAIL_FIELDS = `
   ${RUN_LIST_FIELDS}
-  finalOutput error pricingUpdatedAt inputTokens outputTokens reasoningTokens
+  finalOutput error pricingUpdatedAt catalogCost inputTokens outputTokens reasoningTokens
   cacheReadTokens cacheWriteTokens toolCallCount parentRunId parentRunNumber
   parentRun { ${RUN_LINK_FIELDS} }
   followUps { ${RUN_LINK_FIELDS} }
@@ -26,7 +26,7 @@ export const RUN_DETAIL_FIELDS = `
   }
   modelUsage {
     id model inputTokens outputTokens reasoningTokens cacheReadTokens
-    cacheWriteTokens estimatedCost superseded
+    cacheWriteTokens estimatedCost catalogCost superseded
   }
   toolCalls {
     id sequence name status input output error startedAt finishedAt supersededAt

@@ -1,35 +1,21 @@
 "use client";
 
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
-  Bot,
-  ChevronDown,
   ChevronLeft,
-  CircleHelp,
   CircleStop,
   ClipboardList,
-  Code2,
   Download,
   File,
-  FileDiff,
   GitFork,
-  MessageSquare,
   Pause,
   Pencil,
   Play,
   RotateCcw,
   Search,
   Send,
-  Terminal,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -61,6 +47,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -96,6 +83,7 @@ import {
 } from "@/lib/worktree-highlight";
 
 import { RUN_DETAIL_FIELDS, RUN_EVENT_FIELDS } from "./graphql-fields";
+import { ActivityRows } from "./activity-rows";
 import { AttachmentPicker } from "./attachment-picker";
 import { MarkdownActions, MarkdownView } from "./markdown-view";
 import {
@@ -111,23 +99,31 @@ import type {
   RunQuestionBatchView,
 } from "./types";
 
+// AI tools whose native session transcript is stored per-event as JSONL and
+// can therefore be re-exported as the tool's original session file.
+const NATIVE_JSONL_PROVIDERS = ["CLAUDE", "CODEX", "OPENCODE"];
+
+// AI tools that persist a single untouched .jsonl file on disk, which the agent
+// can read back verbatim. OpenCode stores messages separately, so it is absent.
+const NATIVE_SESSION_FILE_PROVIDERS = ["CLAUDE", "CODEX"];
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 type ProviderCatalog = ProviderCatalogEntry & {
   supportsPause: boolean;
   supportsSteering: boolean;
   supportsResume: boolean;
   supportsNativeDelete: boolean;
 };
-
-function eventIcon(type: string) {
-  const value = type.toUpperCase();
-  if (value.includes("QUESTION")) return CircleHelp;
-  if (value.includes("COMMAND") || value.includes("TERMINAL")) return Terminal;
-  if (value.includes("TOOL")) return Wrench;
-  if (value.includes("FILE") || value.includes("DIFF")) return FileDiff;
-  if (value.includes("USER")) return MessageSquare;
-  if (value.includes("ERROR") || value.includes("FAIL")) return AlertTriangle;
-  return Bot;
-}
 
 function LinkedRun({ value }: { value: RunLinkView }) {
   const labels = useRunLabels();
@@ -352,13 +348,9 @@ function QuestionBatch({
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                {batch.status === "PENDING" ? (
-                  <>
-                    <CircleHelp /> {t("answerNeeded")}
-                  </>
-                ) : (
-                  t("answeredQuestions")
-                )}
+                {batch.status === "PENDING"
+                  ? t("answerNeeded")
+                  : t("answeredQuestions")}
               </CardTitle>
               <CardDescription>
                 <DateTime value={batch.createdAt} />
@@ -463,9 +455,16 @@ function QuestionBatch({
           {rollback && (
             <div className="space-y-2">
               <Label>{t("rollbackDiff")}</Label>
-              <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
-                {batch.rollbackPatch || t("noRollbackChanges")}
-              </pre>
+              {batch.rollbackPatch ? (
+                <ExpandablePatchView
+                  className="max-h-64 overflow-y-auto"
+                  patch={batch.rollbackPatch}
+                />
+              ) : (
+                <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+                  {t("noRollbackChanges")}
+                </p>
+              )}
             </div>
           )}
           <div className="space-y-5">{answerEditor}</div>
@@ -502,8 +501,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
   const [run, setRun] = useState<AgentRunView | null>(null);
   const [events, setEvents] = useState<RunEventView[]>([]);
   const [search, setSearch] = useState("");
-  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
-  const [expandedRaw, setExpandedRaw] = useState<Set<string>>(new Set());
   const [promptRaw, setPromptRaw] = useState(false);
   const [outputRaw, setOutputRaw] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -541,7 +538,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
     container.scrollTop = container.scrollHeight;
   }, [events]);
   const exportActivity = useCallback(
-    async (format: "json" | "markdown") => {
+    async (format: "json" | "markdown" | "jsonl") => {
       const all: RunEventView[] = [];
       let afterSequence = -1;
       // Paginate the full, unfiltered history (search-independent, including
@@ -578,6 +575,15 @@ export function RunDetailPage({ runId }: { runId: string }) {
         );
         mime = "application/json";
         filename = `${base}.json`;
+      } else if (format === "jsonl") {
+        // The native session file from the AI tool: each event's raw payload is
+        // one line of the provider's original JSONL transcript.
+        content = all
+          .filter((event) => event.raw !== null && event.raw !== undefined)
+          .map((event) => JSON.stringify(event.raw))
+          .join("\n");
+        mime = "application/x-ndjson";
+        filename = `run-${runId}-session-${stamp}.jsonl`;
       } else {
         content = all
           .map((event) => {
@@ -605,18 +611,26 @@ export function RunDetailPage({ runId }: { runId: string }) {
         mime = "text/markdown";
         filename = `${base}.md`;
       }
-      const blob = new Blob([content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      downloadBlob(new Blob([content], { type: mime }), filename);
     },
     [runId],
   );
+
+  const exportNativeSessionFile = useCallback(async () => {
+    const data = await controlPlaneRequest<{
+      runNativeSessionFile: { filename: string; contentBase64: string };
+    }>(
+      `query RunNativeSessionFile($runId: ID!) { runNativeSessionFile(runId: $runId) { filename contentBase64 } }`,
+      { runId },
+    );
+    const { filename, contentBase64 } = data.runNativeSessionFile;
+    const binary = atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    downloadBlob(new Blob([bytes], { type: "application/x-ndjson" }), filename);
+  }, [runId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -910,6 +924,14 @@ export function RunDetailPage({ runId }: { runId: string }) {
     .find(({ diffPatch }) => diffPatch)?.diffPatch;
   const followCatalog = catalog.find(({ key }) => key === followProvider);
   const runCatalog = catalog.find(({ key }) => key === run.provider);
+  /**
+   * Both figures stand on their own: the provider's is the one that will appear
+   * on a bill, and the catalog's prices every run the same way regardless of
+   * which tool ran it. Showing them side by side beats picking one, since the
+   * gap between them is itself worth seeing.
+   */
+  const money = (value: number | null) =>
+    value === null ? "—" : `≈${currency.format(value)}`;
   const usageBreakdown = [false, true].map((superseded) =>
     run.modelUsage
       .filter((usage) => usage.superseded === superseded)
@@ -917,12 +939,25 @@ export function RunDetailPage({ runId }: { runId: string }) {
         (total, usage) => ({
           input: total.input + usage.inputTokens,
           output: total.output + usage.outputTokens,
-          cache: total.cache + usage.cacheReadTokens + usage.cacheWriteTokens,
-          cost: total.cost + (usage.estimatedCost ?? 0),
-          priced: total.priced || usage.estimatedCost !== null,
+          cacheRead: total.cacheRead + usage.cacheReadTokens,
+          cacheWrite: total.cacheWrite + usage.cacheWriteTokens,
+          reported: total.reported + (usage.estimatedCost ?? 0),
+          catalog: total.catalog + (usage.catalogCost ?? 0),
+          hasReported: total.hasReported || usage.estimatedCost !== null,
+          hasCatalog: total.hasCatalog || usage.catalogCost !== null,
           superseded,
         }),
-        { input: 0, output: 0, cache: 0, cost: 0, priced: false, superseded },
+        {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reported: 0,
+          catalog: 0,
+          hasReported: false,
+          hasCatalog: false,
+          superseded,
+        },
       ),
   );
 
@@ -1073,6 +1108,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
           <div className="flex items-center justify-between gap-3">
             <CardTitle>{t("prompt")}</CardTitle>
             <MarkdownActions
+              copy
               onRawChange={setPromptRaw}
               raw={promptRaw}
               value={run.initialPrompt}
@@ -1099,19 +1135,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
           ) : null}
         </CardContent>
       </Card>
-      {run.questionBatches.map((batch) => (
-        <QuestionBatch
-          batch={batch}
-          editable={
-            run.origin === "MANAGED" &&
-            !batch.supersededAt &&
-            Boolean(batch.checkpoint)
-          }
-          key={batch.id}
-          onAnswered={refresh}
-        />
-      ))}
-
       <Card>
         <CardHeader>
           <CardTitle>{t("usageCost")}</CardTitle>
@@ -1120,19 +1143,17 @@ export function RunDetailPage({ runId }: { runId: string }) {
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              [
-                t("totalCost"),
-                run.estimatedCost === null
-                  ? "—"
-                  : `≈${currency.format(run.estimatedCost)}`,
-              ],
+              [t("reportedCost"), money(run.estimatedCost)],
+              [t("catalogCost"), money(run.catalogCost)],
               [t("inputTokens"), run.inputTokens.toLocaleString(locale)],
               [t("outputTokens"), run.outputTokens.toLocaleString(locale)],
               [
-                t("cacheTokens"),
-                (run.cacheReadTokens + run.cacheWriteTokens).toLocaleString(
-                  locale,
-                ),
+                t("cacheReadTokens"),
+                run.cacheReadTokens.toLocaleString(locale),
+              ],
+              [
+                t("cacheWriteTokens"),
+                run.cacheWriteTokens.toLocaleString(locale),
               ],
               [
                 t("reasoningTokens"),
@@ -1155,8 +1176,10 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("usageState")}</TableHead>
                   <TableHead>{t("inputTokens")}</TableHead>
                   <TableHead>{t("outputTokens")}</TableHead>
-                  <TableHead>{t("cacheTokens")}</TableHead>
-                  <TableHead>{t("cost")}</TableHead>
+                  <TableHead>{t("cacheReadTokens")}</TableHead>
+                  <TableHead>{t("cacheWriteTokens")}</TableHead>
+                  <TableHead>{t("reportedCost")}</TableHead>
+                  <TableHead>{t("catalogCost")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1167,9 +1190,17 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     </TableCell>
                     <TableCell>{usage.input.toLocaleString(locale)}</TableCell>
                     <TableCell>{usage.output.toLocaleString(locale)}</TableCell>
-                    <TableCell>{usage.cache.toLocaleString(locale)}</TableCell>
                     <TableCell>
-                      {usage.priced ? `≈${currency.format(usage.cost)}` : "—"}
+                      {usage.cacheRead.toLocaleString(locale)}
+                    </TableCell>
+                    <TableCell>
+                      {usage.cacheWrite.toLocaleString(locale)}
+                    </TableCell>
+                    <TableCell>
+                      {money(usage.hasReported ? usage.reported : null)}
+                    </TableCell>
+                    <TableCell>
+                      {money(usage.hasCatalog ? usage.catalog : null)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1183,8 +1214,10 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   <TableHead>{t("model")}</TableHead>
                   <TableHead>{t("inputTokens")}</TableHead>
                   <TableHead>{t("outputTokens")}</TableHead>
-                  <TableHead>{t("cacheTokens")}</TableHead>
-                  <TableHead>{t("cost")}</TableHead>
+                  <TableHead>{t("cacheReadTokens")}</TableHead>
+                  <TableHead>{t("cacheWriteTokens")}</TableHead>
+                  <TableHead>{t("reportedCost")}</TableHead>
+                  <TableHead>{t("catalogCost")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1205,15 +1238,13 @@ export function RunDetailPage({ runId }: { runId: string }) {
                       {usage.outputTokens.toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
-                      {(
-                        usage.cacheReadTokens + usage.cacheWriteTokens
-                      ).toLocaleString(locale)}
+                      {usage.cacheReadTokens.toLocaleString(locale)}
                     </TableCell>
                     <TableCell>
-                      {usage.estimatedCost === null
-                        ? "—"
-                        : `≈${currency.format(usage.estimatedCost)}`}
+                      {usage.cacheWriteTokens.toLocaleString(locale)}
                     </TableCell>
+                    <TableCell>{money(usage.estimatedCost)}</TableCell>
+                    <TableCell>{money(usage.catalogCost)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1286,7 +1317,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
                     <Download /> {t("export")}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="w-72">
                   <DropdownMenuItem
                     onClick={() =>
                       void exportActivity("json").catch((value) =>
@@ -1313,6 +1344,44 @@ export function RunDetailPage({ runId }: { runId: string }) {
                   >
                     {t("exportMarkdown")}
                   </DropdownMenuItem>
+                  {run && NATIVE_JSONL_PROVIDERS.includes(run.provider) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() =>
+                          void exportActivity("jsonl").catch((value) =>
+                            setError(
+                              value instanceof Error
+                                ? value.message
+                                : String(value),
+                            ),
+                          )
+                        }
+                      >
+                        {t("exportSession", {
+                          tool: formatProviderLabel(run.provider),
+                        })}
+                      </DropdownMenuItem>
+                      {NATIVE_SESSION_FILE_PROVIDERS.includes(run.provider) &&
+                        run.agentId && (
+                          <DropdownMenuItem
+                            onClick={() =>
+                              void exportNativeSessionFile().catch((value) =>
+                                setError(
+                                  value instanceof Error
+                                    ? value.message
+                                    : String(value),
+                                ),
+                              )
+                            }
+                          >
+                            {t("exportSessionFile", {
+                              tool: formatProviderLabel(run.provider),
+                            })}
+                          </DropdownMenuItem>
+                        )}
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1333,103 +1402,7 @@ export function RunDetailPage({ runId }: { runId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {events.map((event) => {
-                const Icon = eventIcon(event.type);
-                const raw = expandedRaw.has(event.id);
-                const expanded = expandedEvents.has(event.id);
-                return (
-                  <Fragment key={event.id}>
-                    <TableRow
-                      aria-expanded={expanded}
-                      className={cn(
-                        "cursor-pointer",
-                        event.supersededAt && "opacity-60",
-                      )}
-                      onClick={() =>
-                        setExpandedEvents((current) => {
-                          const next = new Set(current);
-                          if (next.has(event.id)) next.delete(event.id);
-                          else next.add(event.id);
-                          return next;
-                        })
-                      }
-                    >
-                      <TableCell className="h-8 py-1">
-                        <span className="flex items-center gap-1">
-                          <ChevronDown
-                            className={cn(
-                              "size-3 transition-transform",
-                              expanded && "rotate-180",
-                            )}
-                          />
-                          <Icon className="size-3.5" />
-                        </span>
-                      </TableCell>
-                      <TableCell className="h-8 max-w-0 py-1 text-xs">
-                        <span className="block truncate">{event.summary}</span>
-                      </TableCell>
-                      <TableCell className="h-8 py-1">
-                        <Badge className="h-5 text-[10px]" variant="outline">
-                          {labels.eventType(event.type)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="h-8 py-1">
-                        <DateTime
-                          className="text-xs"
-                          kind="time"
-                          value={event.createdAt}
-                        />
-                      </TableCell>
-                    </TableRow>
-                    {expanded && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell
-                          className="bg-muted/10 px-4 py-3"
-                          colSpan={4}
-                        >
-                          <div className="w-full min-w-0 space-y-2 break-words">
-                            {event.detailMarkdown && !raw && (
-                              <MarkdownView
-                                showActions={false}
-                                value={event.detailMarkdown}
-                              />
-                            )}
-                            <Button
-                              onClick={() =>
-                                setExpandedRaw((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(event.id)) next.delete(event.id);
-                                  else next.add(event.id);
-                                  return next;
-                                })
-                              }
-                              size="xs"
-                              variant="outline"
-                            >
-                              <Code2 /> {raw ? t("rendered") : t("raw")}
-                            </Button>
-                            {raw && (
-                              <pre className="max-h-96 overflow-auto rounded bg-muted p-3 text-xs break-words whitespace-pre-wrap">
-                                {JSON.stringify(event.raw, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {!events.length && (
-                <TableRow>
-                  <TableCell
-                    className="h-20 text-center text-muted-foreground"
-                    colSpan={4}
-                  >
-                    {t("noActivity")}
-                  </TableCell>
-                </TableRow>
-              )}
+              <ActivityRows events={events} />
             </TableBody>
           </Table>
         </div>
@@ -1496,6 +1469,19 @@ export function RunDetailPage({ runId }: { runId: string }) {
             </CardContent>
           </Card>
         )}
+
+      {run.questionBatches.map((batch) => (
+        <QuestionBatch
+          batch={batch}
+          editable={
+            run.origin === "MANAGED" &&
+            !batch.supersededAt &&
+            Boolean(batch.checkpoint)
+          }
+          key={batch.id}
+          onAnswered={refresh}
+        />
+      ))}
 
       <Card>
         <CardHeader>
@@ -1588,8 +1574,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
             }
             uploading={busy === "upload"}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="ml-auto flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-4">
+            <label className="flex items-center gap-2">
               <Checkbox
                 checked={followWebSearch}
                 disabled={!followCatalog?.supportsWebSearch}
@@ -1597,8 +1583,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
               />
               {t("webSearch")}
             </label>
-          </div>
-          <div className="flex justify-end">
             <Button
               disabled={
                 !followPrompt.trim() ||

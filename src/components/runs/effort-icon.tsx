@@ -34,7 +34,7 @@ const ultraSpectrum = [
 const viewWidth = 20;
 const sideMargin = 1.5;
 const gap = 1;
-const maxBarWidth = 3.5;
+const maxBarWidth = 5;
 const baseline = 14;
 const minBarHeight = 2.5;
 const maxBarHeight = 12.5;
@@ -70,6 +70,12 @@ export function EffortIcon({
     (viewWidth - sideMargin * 2 - gap * span) / scale.length,
   );
   const start = (viewWidth - (scale.length * width + gap * span)) / 2;
+  /**
+   * A two-level ramp — OpenCode ranks only `low` and `high` — drawn against the
+   * floor a six-level ramp needs reads as a cliff rather than a scale, so the
+   * floor rises as the scale shortens.
+   */
+  const floor = Math.max(minBarHeight, maxBarHeight / (scale.length + 1));
   return (
     <svg
       aria-hidden="true"
@@ -79,7 +85,7 @@ export function EffortIcon({
     >
       {scale.map((level, index) => {
         const height = span
-          ? minBarHeight + ((maxBarHeight - minBarHeight) * index) / span
+          ? floor + ((maxBarHeight - floor) * index) / span
           : maxBarHeight;
         const lit = index < filled;
         return (

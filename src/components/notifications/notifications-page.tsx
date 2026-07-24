@@ -721,13 +721,18 @@ export function NotificationsPage() {
         </Alert>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("deliverySetup")}</CardTitle>
-            <CardDescription>{t("deliverySetupDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("deliverySetup")}</CardTitle>
+          <CardDescription>{t("deliverySetupDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/*
+           * The two channels are independent switches read side by side, so
+           * they share a row on a wide screen and stack only where one would
+           * have to wrap anyway.
+           */}
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
               <div>
                 <p className="font-medium">{t("browserAlerts")}</p>
@@ -789,100 +794,98 @@ export function NotificationsPage() {
                 {pushSubscriptionRegistered ? t("unsubscribe") : t("subscribe")}
               </Button>
             </div>
+          </div>
 
-            {isIos && !isStandalone && (
-              <Alert>
-                <AlertDescription>{t("iosInstallHelp")}</AlertDescription>
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
+          {isIos && !isStandalone && (
+            <Alert>
+              <AlertDescription>{t("iosInstallHelp")}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("preferences")}</CardTitle>
-            <CardDescription>{t("preferencesDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="px-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-4">
-                    {t("notificationType")}
-                  </TableHead>
-                  <TableHead className="w-24 text-center">
-                    {t("sidebarChannel")}
-                  </TableHead>
-                  <TableHead className="w-24 text-center">
-                    {t("browserChannel")}
-                  </TableHead>
-                  <TableHead className="w-24 text-center">
-                    {t("pushChannel")}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preferenceGroups.map(([category, entries]) => (
-                  <Fragment key={category}>
-                    <TableRow className="bg-muted/20 hover:bg-muted/20">
-                      <TableCell
-                        className="py-1.5 pl-4 text-xs font-medium text-muted-foreground"
-                        colSpan={4}
-                      >
-                        {t(`categories.${category}`)}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("preferences")}</CardTitle>
+          <CardDescription>{t("preferencesDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="px-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-4">{t("notificationType")}</TableHead>
+                <TableHead className="w-24 text-center">
+                  {t("sidebarChannel")}
+                </TableHead>
+                <TableHead className="w-24 text-center">
+                  {t("browserChannel")}
+                </TableHead>
+                <TableHead className="w-24 text-center">
+                  {t("pushChannel")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {preferenceGroups.map(([category, entries]) => (
+                <Fragment key={category}>
+                  <TableRow className="bg-muted/20 hover:bg-muted/20">
+                    <TableCell
+                      className="py-1.5 pl-4 text-xs font-medium text-muted-foreground"
+                      colSpan={4}
+                    >
+                      {t(`categories.${category}`)}
+                    </TableCell>
+                  </TableRow>
+                  {entries.map((preference) => (
+                    <TableRow key={preference.key}>
+                      <TableCell className="pl-4">
+                        <p className="font-medium">
+                          {t(`types.${preference.key}.title`)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t(`types.${preference.key}.description`)}
+                        </p>
                       </TableCell>
-                    </TableRow>
-                    {entries.map((preference) => (
-                      <TableRow key={preference.key}>
-                        <TableCell className="pl-4">
-                          <p className="font-medium">
-                            {t(`types.${preference.key}.title`)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {t(`types.${preference.key}.description`)}
-                          </p>
+                      {(
+                        [
+                          "sidebarEnabled",
+                          "browserEnabled",
+                          "webPushEnabled",
+                        ] as const
+                      ).map((channel) => (
+                        <TableCell className="w-24 text-center" key={channel}>
+                          <Checkbox
+                            aria-label={t("toggleChannel", {
+                              channel: t(
+                                channel === "sidebarEnabled"
+                                  ? "sidebarChannel"
+                                  : channel === "browserEnabled"
+                                    ? "browserChannel"
+                                    : "pushChannel",
+                              ),
+                              type: t(`types.${preference.key}.title`),
+                            })}
+                            checked={preference[channel]}
+                            className="mx-auto"
+                            disabled={savingPreference === preference.key}
+                            onCheckedChange={(checked) =>
+                              void updatePreference(
+                                preference,
+                                channel,
+                                checked === true,
+                              )
+                            }
+                          />
                         </TableCell>
-                        {(
-                          [
-                            "sidebarEnabled",
-                            "browserEnabled",
-                            "webPushEnabled",
-                          ] as const
-                        ).map((channel) => (
-                          <TableCell className="w-24 text-center" key={channel}>
-                            <Checkbox
-                              aria-label={t("toggleChannel", {
-                                channel: t(
-                                  channel === "sidebarEnabled"
-                                    ? "sidebarChannel"
-                                    : channel === "browserEnabled"
-                                      ? "browserChannel"
-                                      : "pushChannel",
-                                ),
-                                type: t(`types.${preference.key}.title`),
-                              })}
-                              checked={preference[channel]}
-                              className="mx-auto"
-                              disabled={savingPreference === preference.key}
-                              onCheckedChange={(checked) =>
-                                void updatePreference(
-                                  preference,
-                                  channel,
-                                  checked === true,
-                                )
-                              }
-                            />
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </Fragment>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+                      ))}
+                    </TableRow>
+                  ))}
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <Card className="gap-0 overflow-hidden py-0">
         <CardHeader className="border-b">
@@ -1185,9 +1188,16 @@ export function NotificationsPage() {
                                 />
                               </TableCell>
                             )}
+                            {/*
+                             * The message is the point of the row, so it wraps
+                             * onto as many lines as it needs rather than
+                             * stretching the table: `TableCell` defaults to
+                             * `whitespace-nowrap`, which kept long bodies on a
+                             * single runaway line.
+                             */}
                             <TableCell
                               className={cn(
-                                "min-w-80",
+                                "w-full min-w-80 align-top break-words whitespace-normal",
                                 !editMode && "border-l-4 pl-2",
                                 !editMode &&
                                   (color
@@ -1201,11 +1211,11 @@ export function NotificationsPage() {
                               >
                                 {notification.title}
                               </Link>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
+                              <p className="mt-0.5 text-xs break-words text-muted-foreground">
                                 {notification.body}
                               </p>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-top">
                               <div className="flex flex-wrap gap-1">
                                 {notification.sidebarRequested && (
                                   <Badge variant="outline">
@@ -1224,7 +1234,7 @@ export function NotificationsPage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">
+                            <TableCell className="align-top text-right text-xs text-muted-foreground">
                               <DateTime
                                 kind="time"
                                 value={notification.createdAt}

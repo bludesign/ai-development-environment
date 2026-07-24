@@ -1,0 +1,78 @@
+"One model's published prices, as cost per token in the upstream catalog's units."
+type ModelCostEntry {
+  model: String!
+  provider: String
+  mode: String
+  inputCostPerToken: Float
+  outputCostPerToken: Float
+  cacheReadCostPerToken: Float
+  cacheWriteCostPerToken: Float
+  maxInputTokens: Int
+  maxOutputTokens: Int
+  updatedAt: String!
+}
+
+"A page of catalog entries matching a search."
+type ModelCostEntryPage {
+  items: [ModelCostEntry!]!
+  totalCount: Int!
+}
+
+"A sortable column of the model price table."
+enum ModelCostSortKey {
+  MODEL
+  PROVIDER
+  INPUT_COST
+  OUTPUT_COST
+  CACHE_READ_COST
+  CACHE_WRITE_COST
+  CONTEXT_WINDOW
+}
+
+enum ModelCostSortDirection {
+  ASC
+  DESC
+}
+
+"Where model prices are fetched from, and the state of the last fetch."
+type ModelCostCatalog {
+  "The URL a refresh would fetch: the custom one when set, otherwise the default."
+  url: String!
+  defaultUrl: String!
+  "Null while the default is in use."
+  customUrl: String
+  fetchedAt: String
+  entryCount: Int!
+  error: String
+  "True when the catalog is missing or older than the daily refresh interval."
+  stale: Boolean!
+}
+
+extend type AgentRun {
+  """
+  Cost derived from the model price catalog rather than from what the provider
+  reported, so a run the provider priced at nothing still shows a number.
+  """
+  catalogCost: Float
+}
+
+extend type RunModelUsage {
+  catalogCost: Float
+}
+
+extend type Query {
+  modelCostCatalog: ModelCostCatalog!
+  modelCostEntries(
+    search: String
+    first: Int = 100
+    offset: Int = 0
+    sortKey: ModelCostSortKey = MODEL
+    direction: ModelCostSortDirection = ASC
+  ): ModelCostEntryPage!
+}
+
+extend type Mutation {
+  "Passing null or the default URL clears the override rather than storing it."
+  saveModelCostSettings(catalogUrl: String): ModelCostCatalog!
+  refreshModelCosts: ModelCostCatalog!
+}
