@@ -48,13 +48,18 @@ test("starts a selected worktree quick action and links to the run", async () =>
           id: "workflow-1",
           name: "Prepare review",
           description: "Runs the review preparation workflow",
+          quickActionIconKey: "rocket",
+          quickActionButtonVariant: "secondary",
         },
       ]}
       worktreeId="worktree-1"
     />,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Prepare review" }));
+  const button = screen.getByRole("button", { name: "Prepare review" });
+  expect(button.className).toContain("bg-secondary");
+  expect(button.querySelector("svg")).not.toBeNull();
+  fireEvent.click(button);
 
   await waitFor(() =>
     expect(controlPlaneRequest).toHaveBeenCalledWith(

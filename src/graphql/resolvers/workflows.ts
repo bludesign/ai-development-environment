@@ -259,7 +259,13 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       {
         input,
       }: {
-        input: { id: string; global: boolean; repositoryIds: string[] };
+        input: {
+          id: string;
+          global: boolean;
+          quickActionIconKey: string;
+          quickActionButtonVariant: string;
+          repositoryIds: string[];
+        };
       },
       context: GraphQLContext,
     ) => {

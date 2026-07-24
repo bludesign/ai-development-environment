@@ -2,6 +2,8 @@
 
 import {
   ArrowLeft,
+  ChevronDown,
+  CircleOff,
   CirclePause,
   CirclePlay,
   Download,
@@ -26,6 +28,13 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -34,6 +43,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -54,6 +70,10 @@ import {
 } from "@/lib/control-plane-client";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import {
+  BUILD_CONFIGURATION_ICON_KEYS,
+  ConfigurationIcon,
+} from "@/components/builds/configuration-icon";
 import { useWorkflowLabels } from "./workflow-labels";
 import type {
   WorkflowDefinition,
@@ -68,7 +88,7 @@ type WorkflowDetail = WorkflowSummary & {
 };
 
 const DETAIL_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
   activeVersion { id workflowId version name description schemaVersion definition contentHash publishedAt }
@@ -95,6 +115,7 @@ function downloadJson(value: unknown, filename: string) {
 
 export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const t = useTranslations("workflows");
+  const buildsT = useTranslations("builds");
   const labels = useWorkflowLabels();
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
@@ -105,6 +126,10 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);
   const [globalQuickAction, setGlobalQuickAction] = useState(false);
+  const [quickActionIconKey, setQuickActionIconKey] = useState("play");
+  const [quickActionButtonVariant, setQuickActionButtonVariant] = useState<
+    "default" | "outline" | "secondary" | "destructive"
+  >("default");
   const [quickActionRepositoryIds, setQuickActionRepositoryIds] = useState<
     string[]
   >([]);
@@ -135,6 +160,10 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       setRepositories(data.codebaseOverview?.repositories ?? []);
       if (data.workflow) {
         setGlobalQuickAction(data.workflow.globalQuickAction ?? false);
+        setQuickActionIconKey(data.workflow.quickActionIconKey ?? "play");
+        setQuickActionButtonVariant(
+          data.workflow.quickActionButtonVariant ?? "default",
+        );
         setQuickActionRepositoryIds(
           data.workflow.quickActionRepositories?.map(({ id }) => id) ?? [],
         );
@@ -210,6 +239,8 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           input: {
             id: workflow.id,
             global: globalQuickAction,
+            quickActionIconKey,
+            quickActionButtonVariant,
             repositoryIds: quickActionRepositoryIds,
           },
         },
@@ -384,6 +415,84 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           <CardDescription>{t("quickActionsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="workflow-quick-action-icon">
+                {t("quickActionIcon")}
+              </Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`${t("quickActionIcon")}: ${buildsT(`configurationIcons.${quickActionIconKey}`)}`}
+                    className="w-full justify-between sm:w-64"
+                    id="workflow-quick-action-icon"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {quickActionIconKey === "none" ? (
+                        <CircleOff className="size-4 shrink-0" />
+                      ) : (
+                        <ConfigurationIcon iconKey={quickActionIconKey} />
+                      )}
+                      <span className="truncate">
+                        {buildsT(
+                          `configurationIcons.${quickActionIconKey}` as never,
+                        )}
+                      </span>
+                    </span>
+                    <ChevronDown className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-64">
+                  <DropdownMenuRadioGroup
+                    onValueChange={setQuickActionIconKey}
+                    value={quickActionIconKey}
+                  >
+                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
+                        {value === "none" ? (
+                          <CircleOff className="size-4" />
+                        ) : (
+                          <ConfigurationIcon iconKey={value} />
+                        )}
+                        {buildsT(`configurationIcons.${value}` as never)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="workflow-quick-action-style">
+                {t("quickActionStyle")}
+              </Label>
+              <Select
+                onValueChange={(value) =>
+                  setQuickActionButtonVariant(
+                    value as typeof quickActionButtonVariant,
+                  )
+                }
+                value={quickActionButtonVariant}
+              >
+                <SelectTrigger
+                  className="w-full sm:w-64"
+                  id="workflow-quick-action-style"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["default", "outline", "secondary", "destructive"].map(
+                    (variant) => (
+                      <SelectItem key={variant} value={variant}>
+                        {t(`quickActionStyles.${variant}` as never)}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="flex items-start gap-3 rounded-lg border p-3">
             <Checkbox
               checked={globalQuickAction}

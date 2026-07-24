@@ -95,6 +95,8 @@ export type WorkflowSummary = {
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
   globalQuickAction: boolean;
+  quickActionIconKey: string;
+  quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   quickActionRepositories: Array<{
     id: string;
     name: string;

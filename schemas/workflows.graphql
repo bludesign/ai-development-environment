@@ -28,6 +28,8 @@ type Workflow {
   overlapPolicy: WorkflowOverlapPolicy!
   maxConcurrentRuns: Int!
   globalQuickAction: Boolean!
+  quickActionIconKey: String!
+  quickActionButtonVariant: String!
   quickActionRepositories: [CodebaseRepository!]!
   archivedAt: String
   versions: [WorkflowVersion!]!
@@ -270,6 +272,8 @@ input TriggerWorkflowInput {
 input SetWorkflowQuickActionInput {
   id: ID!
   global: Boolean!
+  quickActionIconKey: String!
+  quickActionButtonVariant: String!
   repositoryIds: [ID!]!
 }
 

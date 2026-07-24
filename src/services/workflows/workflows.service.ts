@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 
+import { BUILD_CONFIGURATION_ICON_KEYS } from "@ai-development-environment/agent-contract/builds";
+
 import type {
   Prisma,
   Workflow,
@@ -692,6 +694,8 @@ export class WorkflowsService {
   async setQuickAction(input: {
     id: string;
     global: boolean;
+    quickActionIconKey: string;
+    quickActionButtonVariant: string;
     repositoryIds: string[];
   }) {
     const prisma = await getPrismaClient();
@@ -709,10 +713,31 @@ export class WorkflowsService {
     if (repositoryCount !== repositoryIds.length) {
       throw new Error("One or more repositories were not found");
     }
+    const quickActionIconKey = input.quickActionIconKey.trim();
+    if (
+      quickActionIconKey !== "none" &&
+      !(BUILD_CONFIGURATION_ICON_KEYS as readonly string[]).includes(
+        quickActionIconKey,
+      )
+    ) {
+      throw new Error("Quick action icon is invalid");
+    }
+    const quickActionButtonVariant = input.quickActionButtonVariant.trim();
+    if (
+      !["default", "outline", "secondary", "destructive"].includes(
+        quickActionButtonVariant,
+      )
+    ) {
+      throw new Error("Quick action button style is invalid");
+    }
     await prisma.$transaction(async (transaction) => {
       await transaction.workflow.update({
         where: { id: input.id },
-        data: { globalQuickAction: input.global },
+        data: {
+          globalQuickAction: input.global,
+          quickActionIconKey,
+          quickActionButtonVariant,
+        },
       });
       await transaction.workflowQuickActionRepository.deleteMany({
         where: { workflowId: input.id },

@@ -276,6 +276,14 @@
     "manageWorkflows": "Workflows verwalten",
     "quickActions": "Schnellaktionen",
     "quickActionsDescription": "Diesen Workflow direkt in den Aktionszeilen von Arbeitsbäumen verfügbar machen.",
+    "quickActionIcon": "Schaltflächensymbol",
+    "quickActionStyle": "Schaltflächenstil",
+    "quickActionStyles": {
+      "default": "Standard",
+      "outline": "Kontur",
+      "secondary": "Sekundär",
+      "destructive": "Destruktiv"
+    },
     "globalQuickAction": "Globale Schnellaktion",
     "globalQuickActionHelp": "Diese Aktion für alle Repositorys und Arbeitsbäume anzeigen.",
     "repositoryQuickActions": "Repository-Verfügbarkeit",

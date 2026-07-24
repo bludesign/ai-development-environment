@@ -276,6 +276,14 @@
     "manageWorkflows": "Gérer les workflows",
     "quickActions": "Actions rapides",
     "quickActionsDescription": "Rendre ce workflow directement disponible dans les rangées d’actions des arbres de travail.",
+    "quickActionIcon": "Icône du bouton",
+    "quickActionStyle": "Style du bouton",
+    "quickActionStyles": {
+      "default": "Par défaut",
+      "outline": "Contour",
+      "secondary": "Secondaire",
+      "destructive": "Destructif"
+    },
     "globalQuickAction": "Action rapide globale",
     "globalQuickActionHelp": "Afficher cette action pour tous les dépôts et arbres de travail.",
     "repositoryQuickActions": "Disponibilité par dépôt",

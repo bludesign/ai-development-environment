@@ -149,12 +149,18 @@ describe("workflow quick actions", () => {
     await new WorkflowsService(new WorkflowEventsService()).setQuickAction({
       id: "workflow-1",
       global: true,
+      quickActionIconKey: "rocket",
+      quickActionButtonVariant: "secondary",
       repositoryIds: ["repository-1", "repository-2", "repository-1"],
     });
 
     expect(prisma.workflow.update).toHaveBeenCalledWith({
       where: { id: "workflow-1" },
-      data: { globalQuickAction: true },
+      data: {
+        globalQuickAction: true,
+        quickActionIconKey: "rocket",
+        quickActionButtonVariant: "secondary",
+      },
     });
     expect(
       prisma.workflowQuickActionRepository.createMany,

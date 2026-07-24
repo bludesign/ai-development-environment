@@ -70,7 +70,7 @@ import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
 `;

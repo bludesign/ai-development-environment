@@ -1,12 +1,12 @@
 "use client";
 
-import { CirclePlay } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { ConfigurationIcon } from "@/components/builds/configuration-icon";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
@@ -14,6 +14,8 @@ type QuickActionWorkflow = {
   id: string;
   name: string;
   description: string;
+  quickActionIconKey: string;
+  quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
 };
 
 export function WorkflowQuickActions({
@@ -77,9 +79,13 @@ export function WorkflowQuickActions({
             onClick={() => void trigger(workflow)}
             size="sm"
             title={workflow.description || workflow.name}
-            variant="outline"
+            variant={workflow.quickActionButtonVariant}
           >
-            {triggering === workflow.id ? <Spinner /> : <CirclePlay />}
+            {triggering === workflow.id ? (
+              <Spinner />
+            ) : (
+              <ConfigurationIcon iconKey={workflow.quickActionIconKey} />
+            )}
             {workflow.name}
           </Button>
         ))}

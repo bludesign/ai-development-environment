@@ -276,6 +276,14 @@
     "manageWorkflows": "Manage workflows",
     "quickActions": "Quick actions",
     "quickActionsDescription": "Make this workflow available directly from worktree action rows.",
+    "quickActionIcon": "Button icon",
+    "quickActionStyle": "Button style",
+    "quickActionStyles": {
+      "default": "Default",
+      "outline": "Outline",
+      "secondary": "Secondary",
+      "destructive": "Destructive"
+    },
     "globalQuickAction": "Global quick action",
     "globalQuickActionHelp": "Show this action for every repository and worktree.",
     "repositoryQuickActions": "Repository availability",

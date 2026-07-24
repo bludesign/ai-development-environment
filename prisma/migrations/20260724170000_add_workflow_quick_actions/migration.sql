@@ -1,4 +1,6 @@
 ALTER TABLE "Workflow" ADD COLUMN "globalQuickAction" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Workflow" ADD COLUMN "quickActionIconKey" TEXT NOT NULL DEFAULT 'play';
+ALTER TABLE "Workflow" ADD COLUMN "quickActionButtonVariant" TEXT NOT NULL DEFAULT 'default';
 
 CREATE TABLE "WorkflowQuickActionRepository" (
     "workflowId" TEXT NOT NULL,

@@ -78,6 +78,9 @@ export type WorktreeCodebaseGroup = {
     id: string;
     name: string;
     description: string;
+    quickActionIconKey: string;
+    quickActionButtonVariant:
+      "default" | "outline" | "secondary" | "destructive";
   }>;
 };
 

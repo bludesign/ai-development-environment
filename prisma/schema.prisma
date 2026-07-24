@@ -2016,6 +2016,8 @@ model Workflow {
   overlapPolicy       String            @default("QUEUE")
   maxConcurrentRuns   Int               @default(1)
   globalQuickAction   Boolean           @default(false)
+  quickActionIconKey  String            @default("play")
+  quickActionButtonVariant String       @default("default")
   archivedAt          DateTime?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt

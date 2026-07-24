@@ -439,7 +439,7 @@ export function WorktreesPage() {
               agent { ${AGENT_FIELDS} }
               codebases {
                 iosBuildConfigured
-                quickActions { id name description }
+                quickActions { id name description quickActionIconKey quickActionButtonVariant }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_FIELDS} }

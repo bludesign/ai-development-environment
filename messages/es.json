@@ -276,6 +276,14 @@
     "manageWorkflows": "Gestionar flujos",
     "quickActions": "Acciones rápidas",
     "quickActionsDescription": "Haz que este flujo esté disponible directamente en las filas de acciones de los árboles de trabajo.",
+    "quickActionIcon": "Icono del botón",
+    "quickActionStyle": "Estilo del botón",
+    "quickActionStyles": {
+      "default": "Predeterminado",
+      "outline": "Contorno",
+      "secondary": "Secundario",
+      "destructive": "Destructivo"
+    },
     "globalQuickAction": "Acción rápida global",
     "globalQuickActionHelp": "Muestra esta acción en todos los repositorios y árboles de trabajo.",
     "repositoryQuickActions": "Disponibilidad por repositorio",
