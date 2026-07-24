@@ -122,6 +122,7 @@ import {
 import { hasConfigDescriptor } from "./config-fields/descriptors";
 import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
 import {
+  MINIMAP_NODE_RADIUS,
   workflowFlowElements,
   WorkflowNodeActionsContext,
   workflowNodeTypes,
@@ -1268,6 +1269,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               >
                 <Background gap={20} size={1} />
                 <Controls
+                  className="overflow-hidden rounded-lg"
                   showFitView={!locked}
                   showInteractive={false}
                   showZoom={!locked}
@@ -1283,7 +1285,15 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   />
                 </Controls>
                 <WorkflowFitLock locked={locked} signature={fitSignature} />
-                {!locked && <MiniMap pannable zoomable />}
+                {!locked && (
+                  <MiniMap
+                    className="overflow-hidden rounded-xl border"
+                    maskColor="transparent"
+                    nodeBorderRadius={MINIMAP_NODE_RADIUS}
+                    pannable
+                    zoomable
+                  />
+                )}
               </ReactFlow>
             </WorkflowNodeActionsContext>
           </div>

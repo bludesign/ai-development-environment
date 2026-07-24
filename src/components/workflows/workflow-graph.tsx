@@ -52,6 +52,12 @@ type WorkflowNodeData = {
 
 const MAX_PROVIDES_CHIPS = 3;
 
+/**
+ * Corner radius of a step in the minimap. Measured in graph units rather than
+ * pixels, so it is sized against the ~208-unit-wide cards it stands in for.
+ */
+export const MINIMAP_NODE_RADIUS = 12;
+
 export type WorkflowFlowNode = Node<WorkflowNodeData, "workflow">;
 
 /**
@@ -427,6 +433,7 @@ export function WorkflowGraph({
       >
         <Background gap={20} size={1} />
         <Controls
+          className="overflow-hidden rounded-lg"
           showFitView={!locked}
           showInteractive={false}
           showZoom={!locked}
@@ -437,7 +444,18 @@ export function WorkflowGraph({
           />
         </Controls>
         <WorkflowFitLock locked={locked} signature={signature} />
-        {!compact && !locked && <MiniMap pannable zoomable />}
+        {!compact && !locked && (
+          <MiniMap
+            className="overflow-hidden rounded-xl border"
+            /* The mask dims everything outside the viewport, which reads as a
+               heavy border once the viewport covers most of the graph. The
+               card-weight border below takes its place as the frame. */
+            maskColor="transparent"
+            nodeBorderRadius={MINIMAP_NODE_RADIUS}
+            pannable
+            zoomable
+          />
+        )}
       </ReactFlow>
     </div>
   );

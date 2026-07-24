@@ -95,6 +95,7 @@ vi.mock("@xyflow/react", async () => {
 vi.mock("./workflow-graph", async () => {
   const React = await import("react");
   return {
+    MINIMAP_NODE_RADIUS: 12,
     WorkflowNodeActionsContext: React.createContext(null),
     workflowFlowElements: (
       definition: {
