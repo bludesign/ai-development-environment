@@ -332,9 +332,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     if (selectedNode)
       return displayProvidedPaths(selectedNode.id, availability.provides);
     if (selectedTrigger) {
-      const seeds =
-        catalog?.triggers.find((entry) => entry.kind === selectedTrigger.kind)
-          ?.seedPaths ?? [];
+      const seeds = [
+        ...(catalog?.triggers.find(
+          (entry) => entry.kind === selectedTrigger.kind,
+        )?.seedPaths ?? []),
+        // RESOURCE_MANUAL seeds depend on the resource kind chosen in config.
+        ...resourceManualSeedPaths(
+          selectedTrigger.kind,
+          selectedTrigger.config,
+        ),
+      ];
       return expandSessionPaths(seeds);
     }
     return [];
