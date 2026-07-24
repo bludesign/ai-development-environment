@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronsUpDown } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +61,14 @@ export function SearchableSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+
+  // Prevent react-remove-scroll (used by Sheet/Dialog overlays) from blocking
+  // wheel events on this portaled popover content.
+  const popoverRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      node.addEventListener("wheel", (e) => e.stopPropagation());
+    }
+  }, []);
   const selected = options.find((option) => option.value === value);
   const displayValue = selected?.label ?? (value || placeholder);
   const customValue = query.trim();
@@ -116,10 +124,11 @@ export function SearchableSelect({
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        ref={popoverRef}
         align="start"
         className="z-70 max-h-[min(24rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-hidden p-0"
       >
-        <Command label={searchPlaceholder}>
+        <Command className="min-h-0" label={searchPlaceholder}>
           <CommandInput
             aria-label={searchPlaceholder}
             autoFocus
@@ -127,7 +136,7 @@ export function SearchableSelect({
             placeholder={searchPlaceholder}
             value={query}
           />
-          <CommandList className="max-h-64 overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
+          <CommandList className="min-h-0 flex-1 max-h-64 overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:block [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
               {showCustomValue && (

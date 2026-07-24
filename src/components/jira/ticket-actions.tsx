@@ -49,6 +49,14 @@ export function JiraTicketActions({
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
+  // Prevent react-remove-scroll (used by Sheet/Dialog overlays) from blocking
+  // wheel events on this portaled popover content.
+  const popoverRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      node.addEventListener("wheel", (e) => e.stopPropagation());
+    }
+  }, []);
+
   const loadTransitions = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -171,7 +179,7 @@ export function JiraTicketActions({
                 <ChevronsUpDown className="opacity-50" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-72 space-y-2 p-2">
+            <PopoverContent ref={popoverRef} align="start" className="w-72 space-y-2 p-2">
               <Input
                 aria-label={t("searchAssignees")}
                 autoFocus
