@@ -1313,7 +1313,9 @@ function runLoggedCommand(options: {
   });
 }
 
-function minimalEnvironment(extra: Record<string, string>): NodeJS.ProcessEnv {
+export function minimalEnvironment(
+  extra: Record<string, string>,
+): NodeJS.ProcessEnv {
   const keys = [
     "PATH",
     "HOME",

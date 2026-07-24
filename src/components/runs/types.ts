@@ -41,7 +41,6 @@ export type AgentRunView = RunLinkView & {
   agentId: string | null;
   worktree: RunWorktreeRef | null;
   jiraIssueKey: string | null;
-  jiraSummary: string | null;
   repositoryName: string;
   branch: string | null;
   model: string;
@@ -184,7 +183,6 @@ export type RunDraftView = {
   agentId: string | null;
   worktree: RunWorktreeRef | null;
   jiraIssueKey: string | null;
-  jiraSummary: string | null;
   provider: string;
   model: string;
   effort: string | null;

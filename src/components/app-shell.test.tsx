@@ -134,6 +134,20 @@ describe("AppShell", () => {
     expect(main.previousElementSibling?.tagName).toBe("HEADER");
   });
 
+  test("owns consistent page gutters and removes page-level width caps", () => {
+    renderShell();
+
+    const pageContent = screen
+      .getByRole("main")
+      .querySelector<HTMLElement>('[data-slot="page-content"]');
+    expect(pageContent).not.toBeNull();
+    expect(pageContent?.className).toContain("p-4");
+    expect(pageContent?.className).toContain("sm:p-6");
+    expect(pageContent?.className).toContain("[&>*]:!mx-0");
+    expect(pageContent?.className).toContain("[&>*]:!w-full");
+    expect(pageContent?.className).toContain("[&>*]:!max-w-none");
+  });
+
   test("starts closed on mobile and opens the requested accessible sheet", async () => {
     setViewportWidth(375);
     renderShell();

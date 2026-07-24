@@ -45,7 +45,6 @@ export type RunConfigurationInput = {
   kind: string;
   worktreeId: string;
   jiraIssueKey?: string | null;
-  jiraSummary?: string | null;
   provider: string;
   model: string;
   effort?: string | null;
@@ -127,6 +126,10 @@ function optionalText(
   const result = value?.trim() || null;
   if (result && result.length > maximum) throw new Error("Value is too long");
   return result;
+}
+
+function optionalJiraIssueKey(value: string | null | undefined): string | null {
+  return optionalText(value, 100)?.toUpperCase() ?? null;
 }
 
 function parseDate(value: string | null | undefined): Date | undefined {
@@ -732,8 +735,7 @@ export class RunsService {
           kind,
           worktreeId: worktree.id,
           agentId: worktree.codebase.agentId,
-          jiraIssueKey: optionalText(input.jiraIssueKey, 100),
-          jiraSummary: optionalText(input.jiraSummary, 500),
+          jiraIssueKey: optionalJiraIssueKey(input.jiraIssueKey),
           provider,
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
@@ -744,8 +746,7 @@ export class RunsService {
           kind,
           worktreeId: worktree.id,
           agentId: worktree.codebase.agentId,
-          jiraIssueKey: optionalText(input.jiraIssueKey, 100),
-          jiraSummary: optionalText(input.jiraSummary, 500),
+          jiraIssueKey: optionalJiraIssueKey(input.jiraIssueKey),
           provider,
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
@@ -852,8 +853,7 @@ export class RunsService {
           provider,
           worktreeId: worktree.id,
           agentId: worktree.codebase.agentId,
-          jiraIssueKey: optionalText(input.jiraIssueKey, 100),
-          jiraSummary: optionalText(input.jiraSummary, 500),
+          jiraIssueKey: optionalJiraIssueKey(input.jiraIssueKey),
           repositoryName: worktree.codebase.repository.name,
           branch: worktree.branch,
           model,
@@ -920,7 +920,6 @@ export class RunsService {
       kind: "SESSION",
       worktreeId: plan.worktreeId,
       jiraIssueKey: plan.jiraIssueKey,
-      jiraSummary: plan.jiraSummary,
       provider: plan.provider,
       model: plan.model,
       effort: plan.effort,
@@ -994,7 +993,6 @@ export class RunsService {
         kind: source.kind,
         worktreeId: source.worktreeId,
         jiraIssueKey: input.jiraIssueKey ?? source.jiraIssueKey,
-        jiraSummary: input.jiraSummary ?? source.jiraSummary,
         parentRunId: source.id,
         followUpMode: mode,
         prompt,
@@ -1244,7 +1242,11 @@ export class RunsService {
         where: { id: batchId },
         include: { run: true, answerRevisions: true },
       });
-      if (!batch?.run.agentId || batch.run.origin !== "MANAGED") {
+      if (
+        !batch?.runId ||
+        !batch.run?.agentId ||
+        batch.run.origin !== "MANAGED"
+      ) {
         throw new Error("Question batch not found");
       }
       if (batch.status !== "PENDING")
@@ -1280,14 +1282,19 @@ export class RunsService {
         type: "ANSWER",
         payload: { batchId, nativeRequestId: batch.nativeRequestId, answers },
       });
-      return { batch, command };
+      return {
+        batch,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
-    agentEventBus.publish(runQuestionTopic(result.batch.runId), {
-      runQuestionChanged: { id: batchId, runId: result.batch.runId },
+    publishRun(result.sourceRunId);
+    agentEventBus.publish(runQuestionTopic(result.sourceRunId), {
+      runQuestionChanged: { id: batchId, runId: result.sourceRunId },
     });
-    publishCommand(result.command, result.batch.run.agentId!);
-    return this.get(result.batch.runId);
+    publishCommand(result.command, result.sourceAgentId);
+    return this.get(result.sourceRunId);
   }
 
   async prepareAnswerRevision(batchId: string) {
@@ -1298,7 +1305,8 @@ export class RunsService {
         include: { run: true, checkpoint: true },
       });
       if (
-        !batch?.run.agentId ||
+        !batch?.runId ||
+        !batch.run?.agentId ||
         !batch.run.worktreeId ||
         batch.run.origin !== "MANAGED" ||
         batch.status !== "ANSWERED" ||
@@ -1340,11 +1348,16 @@ export class RunsService {
         type: "PREPARE_ANSWER_REVISION",
         payload: { batchId, checkpoint: batch.checkpoint },
       });
-      return { batch, command };
+      return {
+        batch,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
-    publishCommand(result.command, result.batch.run.agentId!);
-    return this.get(result.batch.runId);
+    publishRun(result.sourceRunId);
+    publishCommand(result.command, result.sourceAgentId);
+    return this.get(result.sourceRunId);
   }
 
   async reviseAnswer(
@@ -1370,7 +1383,8 @@ export class RunsService {
         },
       });
       if (
-        !batch?.run.agentId ||
+        !batch?.runId ||
+        !batch.run?.agentId ||
         !batch.run.worktreeId ||
         batch.run.origin !== "MANAGED" ||
         batch.status !== "ANSWERED" ||
@@ -1434,7 +1448,6 @@ export class RunsService {
           worktreeId: batch.run.worktreeId,
           agentId: batch.run.agentId,
           jiraIssueKey: batch.run.jiraIssueKey,
-          jiraSummary: batch.run.jiraSummary,
           repositoryName: batch.run.repositoryName,
           branch: batch.run.branch,
           model: batch.run.model,
@@ -1488,11 +1501,17 @@ export class RunsService {
           checkpoint: batch.checkpoint,
         },
       });
-      return { batch, run, command };
+      return {
+        batch,
+        run,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
+    publishRun(result.sourceRunId);
     publishRun(result.run.id);
-    publishCommand(result.command, result.batch.run.agentId!);
+    publishCommand(result.command, result.sourceAgentId);
     return this.get(result.run.id);
   }
 
@@ -2102,7 +2121,8 @@ export class RunsService {
       include: { run: true },
     });
     if (
-      !batch ||
+      !batch?.runId ||
+      !batch.run ||
       batch.run.agentId !== agentId ||
       batch.run.origin !== "MANAGED"
     ) {
@@ -2155,7 +2175,8 @@ export class RunsService {
         where: { id: revisionId },
       });
       if (
-        !batch ||
+        !batch?.runId ||
+        !batch.run ||
         batch.run.agentId !== agentId ||
         !batch.attempt ||
         !replacement ||
@@ -2297,7 +2318,7 @@ export class RunsService {
                 effort: optionalText(record.effort, 100),
                 finalOutput: optionalText(record.finalOutput, 2_000_000),
                 branch: record.branch ?? existing.run.branch,
-                jiraIssueKey: optionalText(record.jiraIssueKey, 100),
+                jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
                 nativeArchivedAt: record.archived ? new Date() : null,
                 startedAt:
                   parseDate(record.createdAt) ?? existing.run.startedAt,
@@ -2339,7 +2360,7 @@ export class RunsService {
           provider,
           worktreeId: worktree.id,
           agentId,
-          jiraIssueKey: optionalText(record.jiraIssueKey, 100),
+          jiraIssueKey: optionalJiraIssueKey(record.jiraIssueKey),
           repositoryName: worktree.codebase.repository.name,
           branch: record.branch ?? worktree.branch,
           model: record.model || "unknown",

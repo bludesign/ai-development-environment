@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
+import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
@@ -8,6 +9,9 @@ import {
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
+  WORKTREE_GIT_OPERATION_JOB_KIND,
+  WORKTREE_GIT_OPERATIONS,
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
@@ -19,6 +23,7 @@ import {
   type CodebaseWorktreeReport,
   type WorktreeActivityReport,
   type WorktreeEditorVariant,
+  type WorktreeGitOperation,
   type WorktreeOperation,
   type WorktreeDiffScope,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -37,6 +42,7 @@ import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
 import type { SkillsService } from "@/services/skills";
+import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 
 const SETTINGS_ID = "default";
@@ -271,9 +277,14 @@ export class WorktreesService {
     private readonly jiraService: JiraService,
     private readonly gitHubService: GitHubService,
     private readonly skillsService?: SkillsService,
+    private readonly workflowEvents?: WorkflowEventsService,
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
+      (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_GIT_OPERATION_JOB_KIND,
       (job) => this.projectOperation(job),
     );
     this.agentControl.registerCompletionHandler(
@@ -986,6 +997,34 @@ export class WorktreesService {
     };
   }
 
+  /**
+   * The Jira ticket key a live worktree's branch resolves to, or null when the
+   * branch matches no ticket pattern. Mirrors the derivation `view` performs for
+   * the overview, but as a focused lookup so callers (e.g. workflow triggers)
+   * can seed the linked ticket without loading the full worktree payload.
+   */
+  async ticketKeyForWorktree(worktreeId: string): Promise<string | null> {
+    const prisma = await getPrismaClient();
+    const [worktree, settings] = await Promise.all([
+      prisma.worktree.findFirst({
+        where: { id: worktreeId, missingAt: null },
+        select: {
+          branch: true,
+          codebase: {
+            select: { repository: { select: { jiraBranchRegex: true } } },
+          },
+        },
+      }),
+      prisma.codebaseSettings.findUnique({ where: { id: SETTINGS_ID } }),
+    ]);
+    if (!worktree) return null;
+    const pattern =
+      worktree.codebase.repository.jiraBranchRegex ??
+      settings?.defaultJiraBranchRegex ??
+      "";
+    return ticketKey(worktree.branch, pattern);
+  }
+
   private async resolveBranchSelection(
     codebase: RunnableCodebase,
     selection: WorktreeBranchSelection,
@@ -1382,7 +1421,7 @@ export class WorktreesService {
               : change,
           )
         : [];
-      return {
+      const result = {
         ...normalized,
         changes,
         branchChanges: Array.isArray(normalized.branchChanges)
@@ -1390,6 +1429,51 @@ export class WorktreesService {
           : [],
         branchChangesTruncated: normalized.branchChangesTruncated === true,
       };
+      if (this.workflowEvents) {
+        const conflicts = changes.filter(
+          (change) =>
+            change &&
+            typeof change === "object" &&
+            !Array.isArray(change) &&
+            (change as Record<string, unknown>).conflicted === true,
+        );
+        const sessionData = {
+          repo: {
+            id: worktree.codebase.repository.id,
+            canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+            displayOrigin: worktree.codebase.repository.displayOrigin,
+            defaultBranch: worktree.codebase.defaultBranch,
+          },
+          codebase: {
+            id: worktree.codebase.id,
+            folder: worktree.codebase.folder,
+            agentId: worktree.codebase.agentId,
+          },
+          worktree: {
+            id: worktree.id,
+            path: worktree.folder,
+            branch: worktree.branch,
+            headSha: worktree.headSha,
+            conflicted: conflicts.length > 0,
+            conflicts,
+          },
+        };
+        await this.workflowEvents.record({
+          kind: "WORKTREE_CONFLICT",
+          subjectKey: worktree.id,
+          dedupeKey: `worktree-conflict:${worktree.id}:${requestId}`,
+          payload: {
+            ...sessionData,
+            sessionData,
+            cursorValue: conflicts.length
+              ? conflicts.map((change) =>
+                  String((change as Record<string, unknown>).path ?? ""),
+                )
+              : [],
+          },
+        });
+      }
+      return result;
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({
@@ -1531,6 +1615,82 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
+    });
+  }
+
+  async inspectGitState(id: string, requestId: string) {
+    if (!requestId.trim()) throw new Error("requestId is required");
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_GIT_INSPECT_JOB_KIND,
+    );
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_INSPECT_JOB_KIND,
+      payload: {
+        action: "STATE",
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      idempotencyKey: `worktree:git:state:${requestId}:${id}`,
+      timeoutSeconds: 30,
+      visibility: "SYSTEM",
+    });
+    try {
+      const completed = await this.waitForJob(job.id);
+      return parseCodebaseGitState(resultObject(completed).state);
+    } finally {
+      const prisma = await getPrismaClient();
+      await prisma.agentJob.deleteMany({
+        where: { id: job.id, visibility: "SYSTEM" },
+      });
+    }
+  }
+
+  async runGitOperation(input: {
+    worktreeId: string;
+    operation: WorktreeGitOperation;
+    branch?: string | null;
+    stashOid?: string | null;
+    stashChanges?: boolean | null;
+    requestId: string;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    if (!WORKTREE_GIT_OPERATIONS.includes(input.operation)) {
+      throw new Error("Unknown worktree Git operation");
+    }
+    const worktree = await this.requireRunnable(
+      input.worktreeId,
+      WORKTREE_GIT_OPERATION_JOB_KIND,
+    );
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_GIT_OPERATION_JOB_KIND,
+      payload: {
+        codebaseId: worktree.codebaseId,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+        baseBranch:
+          worktree.baseBranchOverride ??
+          worktree.codebase.defaultBranch ??
+          null,
+        defaultBranch: worktree.codebase.defaultBranch,
+        operation: input.operation,
+        ...(input.branch ? { branch: input.branch } : {}),
+        ...(input.stashOid ? { stashOid: input.stashOid } : {}),
+        ...(input.operation === "SWITCH_BRANCH"
+          ? { stashChanges: Boolean(input.stashChanges) }
+          : {}),
+      },
+      idempotencyKey: `worktree:git:${input.operation}:${input.requestId}:${input.worktreeId}`,
+      timeoutSeconds: input.operation === "PULL_BRANCH" ? 300 : 60,
     });
   }
 

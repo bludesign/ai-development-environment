@@ -1,0 +1,440 @@
+"use client";
+
+import {
+  ArrowLeft,
+  CirclePause,
+  CirclePlay,
+  Download,
+  Pencil,
+  RefreshCw,
+} from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+
+import { DateTime } from "@/components/common/date-time";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Link, useRouter } from "@/i18n/navigation";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
+
+import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import type {
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowSummary,
+  WorkflowVersion,
+} from "./types";
+
+type WorkflowDetail = WorkflowSummary & {
+  activeVersion: WorkflowVersion | null;
+  versions: WorkflowVersion[];
+};
+
+const DETAIL_FIELDS = `
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+  versionCount runCount createdAt updatedAt
+  activeVersion { id workflowId version name description schemaVersion definition contentHash publishedAt }
+  versions { id workflowId version name description schemaVersion definition contentHash publishedAt }
+`;
+
+const RUN_FIELDS = `
+  id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
+  blockedReason error queuedAt startedAt pausedAt finishedAt
+  workflow { id name }
+  version { id workflowId version name description schemaVersion definition contentHash publishedAt }
+`;
+
+function downloadJson(value: unknown, filename: string) {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
+  const t = useTranslations("workflows");
+  const router = useRouter();
+  const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
+  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await controlPlaneRequest<{
+        workflow: WorkflowDetail | null;
+        workflowRuns: { items: WorkflowRun[] };
+      }>(
+        `query WorkflowOverview($id: ID!) {
+        workflow(id: $id) { ${DETAIL_FIELDS} }
+        workflowRuns(workflowId: $id, first: 100) { items { ${RUN_FIELDS} } }
+      }`,
+        { id: workflowId },
+      );
+      setWorkflow(data.workflow);
+      setRuns(data.workflowRuns.items);
+      setError(data.workflow ? null : t("notFound"));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setLoading(false);
+    }
+  }, [t, workflowId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    const client = controlPlaneSubscriptions();
+    const subscription = client.subscribe<{
+      workflowsChanged: { id: string } | null;
+    }>(
+      {
+        query:
+          "subscription WorkflowOverviewChanged { workflowsChanged { id } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      window.clearTimeout(timer);
+      subscription();
+    };
+  }, [load]);
+
+  const toggleEnabled = async () => {
+    if (!workflow) return;
+    try {
+      await controlPlaneRequest(
+        `mutation ToggleWorkflow($id: ID!, $enabled: Boolean!) { setWorkflowEnabled(id: $id, enabled: $enabled) { id } }`,
+        { id: workflow.id, enabled: !workflow.enabled },
+      );
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  const trigger = async () => {
+    if (!workflow) return;
+    try {
+      const data = await controlPlaneRequest<{
+        triggerWorkflow: { id: string };
+      }>(
+        `mutation RunWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
+        { input: { workflowId: workflow.id, sessionData: {} } },
+      );
+      router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  const exportWorkflow = async (versionId?: string) => {
+    if (!workflow) return;
+    try {
+      const data = await controlPlaneRequest<{ exportWorkflow: unknown }>(
+        `query ExportWorkflow($id: ID!, $versionId: ID) { exportWorkflow(id: $id, versionId: $versionId) }`,
+        { id: workflow.id, versionId: versionId ?? null },
+      );
+      downloadJson(
+        data.exportWorkflow,
+        `${workflow.name.replaceAll(/[^a-z0-9]+/gi, "-").toLowerCase()}.workflow.json`,
+      );
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+
+  if (loading)
+    return (
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
+            <Skeleton className="h-32" key={item} />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  if (!workflow)
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  const shownDefinition: WorkflowDefinition =
+    workflow.activeVersion?.definition ?? workflow.draftDefinition;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                aria-label={t("back")}
+                size="icon"
+                variant="ghost"
+              >
+                <Link href="/workflows">
+                  <ArrowLeft />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("back")}</TooltipContent>
+          </Tooltip>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                {workflow.name}
+              </h1>
+              <Badge variant={workflow.enabled ? "secondary" : "outline"}>
+                {workflow.enabled ? t("enabled") : t("disabled")}
+              </Badge>
+              {workflow.activeVersion && (
+                <Badge variant="outline">
+                  v{workflow.activeVersion.version}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {workflow.description || t("noDescription")}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={() => void load()}
+                size="icon"
+                variant="outline"
+                aria-label={t("refresh")}
+              >
+                <RefreshCw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
+          <Button onClick={() => void exportWorkflow()} variant="outline">
+            <Download /> {t("export")}
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/workflows/${workflow.id}/edit`}>
+              <Pencil /> {t("edit")}
+            </Link>
+          </Button>
+          <Button onClick={() => void toggleEnabled()} variant="outline">
+            {workflow.enabled ? <CirclePause /> : <CirclePlay />}{" "}
+            {workflow.enabled ? t("pauseDefinition") : t("enable")}
+          </Button>
+          <Button disabled={!workflow.enabled} onClick={() => void trigger()}>
+            <CirclePlay /> {t("run")}
+          </Button>
+        </div>
+      </div>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("publishedVersion")}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {workflow.activeVersion
+              ? `v${workflow.activeVersion.version}`
+              : "—"}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("runs")}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {workflow.runCount}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("overlapPolicy")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline">{workflow.overlapPolicy}</Badge>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("maxConcurrentRuns")}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {workflow.maxConcurrentRuns}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("graph")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <WorkflowGraph definition={shownDefinition} />
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("recentRuns")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("run")}</TableHead>
+                    <TableHead>{t("status")}</TableHead>
+                    <TableHead>{t("trigger")}</TableHead>
+                    <TableHead>{t("started")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {runs.slice(0, 20).map((run) => (
+                    <TableRow key={run.id}>
+                      <TableCell>
+                        <Link
+                          className="font-medium hover:underline"
+                          href={`/workflows/runs/${run.id}`}
+                        >
+                          #{run.displayNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={workflowStatusVariant(run.status)}>
+                          {run.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{run.triggerKind}</TableCell>
+                      <TableCell>
+                        {run.startedAt ? (
+                          <DateTime kind="relative" value={run.startedAt} />
+                        ) : (
+                          t("queued")
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {!runs.length && (
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>{t("noRuns")}</EmptyTitle>
+                    <EmptyDescription>{t("recentRuns")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("versionHistory")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("version")}</TableHead>
+                    <TableHead>{t("hash")}</TableHead>
+                    <TableHead>{t("publishedAt")}</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {workflow.versions.map((version) => (
+                    <TableRow key={version.id}>
+                      <TableCell>v{version.version}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {version.contentHash.slice(0, 12)}
+                      </TableCell>
+                      <TableCell>
+                        <DateTime kind="relative" value={version.publishedAt} />
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              aria-label={t("exportVersion", {
+                                version: version.version,
+                              })}
+                              onClick={() => void exportWorkflow(version.id)}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <Download />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t("exportVersion", { version: version.version })}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {!workflow.versions.length && (
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>{t("unpublished")}</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

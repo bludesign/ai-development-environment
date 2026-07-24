@@ -835,7 +835,6 @@ export function RunDetailPage({ runId }: { runId: string }) {
             kind: run.kind,
             worktreeId: run.worktreeId,
             jiraIssueKey: run.jiraIssueKey,
-            jiraSummary: run.jiraSummary,
             provider: followProvider,
             model: followModel,
             effort: followEffort === "auto" ? null : followEffort,

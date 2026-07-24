@@ -324,7 +324,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
 
   if (loading && !overview) {
     return (
-      <p className="mx-auto flex max-w-6xl items-center gap-2 text-sm text-muted-foreground">
+      <p className="flex w-full items-center gap-2 text-sm text-muted-foreground">
         <Spinner /> {t("loading")}
       </p>
     );
@@ -332,7 +332,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
 
   if (!overview || !entry) {
     return (
-      <section className="mx-auto w-full max-w-6xl space-y-5">
+      <section className="w-full space-y-5">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -575,7 +575,7 @@ function LoadedWorktreeDetail({
     : null;
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+    <section className="flex w-full flex-col gap-5">
       <div>
         <Button asChild className="-ml-2" size="sm" variant="ghost">
           <Link href="/worktrees">

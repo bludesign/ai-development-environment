@@ -493,7 +493,6 @@ describe("run command persistence", () => {
       origin: "MANAGED",
       provider: "CODEX",
       jiraIssueKey: "AIDE-66",
-      jiraSummary: "Improve run questions",
       repositoryName: "aide",
       branch: "feature/questions",
       model: "gpt-5.6-sol",

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 
 import { BuildDetailPage } from "@/components/builds/build-detail-page";
+import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
 import { resolvePublicOrigin } from "@/lib/public-origin";
 
 export default async function BuildDetailRoute({
@@ -11,10 +12,13 @@ export default async function BuildDetailRoute({
   const { buildId } = await params;
   const publicOrigin = resolvePublicOrigin(await headers());
   return (
-    <BuildDetailPage
-      buildId={buildId}
-      key={buildId}
-      publicOrigin={publicOrigin}
-    />
+    <div className="space-y-6 [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none">
+      <BuildDetailPage buildId={buildId} publicOrigin={publicOrigin} />
+      <WorkflowResourcePanel
+        resourceId={buildId}
+        resourceKind="BUILD"
+        sessionData={{ build: { id: buildId } }}
+      />
+    </div>
   );
 }

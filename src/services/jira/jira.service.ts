@@ -7,6 +7,7 @@ import { AgileClient, Version3Client } from "jira.js";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import { CREDENTIALS, CredentialService } from "@/services/credentials";
+import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 import type {
   JiraApiCallView,
@@ -423,7 +424,62 @@ export class JiraService {
     { key: string; version3: Version3Client; agile: AgileClient } | undefined;
   private lastPrunedAt = 0;
 
-  constructor(private readonly credentials = new CredentialService()) {}
+  constructor(
+    private readonly credentials = new CredentialService(),
+    private readonly workflowEvents?: WorkflowEventsService,
+  ) {}
+
+  private async recordTicketWorkflowEvents(
+    ticket: JiraTicketDetail,
+  ): Promise<void> {
+    if (!this.workflowEvents) return;
+    const latestComment = ticket.comments.at(-1) ?? null;
+    const sessionData = {
+      ticket: {
+        key: ticket.key,
+        title: ticket.summary,
+        type: ticket.issueType,
+        status: ticket.status,
+        statusId: ticket.statusId,
+        statusCategory: ticket.statusCategory,
+        assignee: ticket.assignee,
+        assigneeAccountId: ticket.assigneeAccountId,
+        labels: ticket.labels,
+        sprintNames: ticket.sprintNames,
+        url: ticket.jiraUrl,
+      },
+      comment: latestComment
+        ? {
+            id: latestComment.id,
+            body: latestComment.content?.rawText ?? "",
+            author: latestComment.author,
+          }
+        : null,
+    };
+    const observedAt = ticket.cache.fetchedAt;
+    const currentAccountId = ticket.assigneeAccountId
+      ? await this.currentAccountId().catch(() => null)
+      : null;
+    const observations: Array<readonly [string, string]> = [
+      ["JIRA_STATUS", ticket.statusId],
+      ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
+      ["JIRA_MENTION", latestComment?.id ?? "none"],
+      ["JIRA_SPRINT_STARTED", JSON.stringify([...ticket.sprintNames].sort())],
+    ];
+    if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
+      observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
+    }
+    await Promise.allSettled(
+      observations.map(([kind, cursorValue]) =>
+        this.workflowEvents!.record({
+          kind,
+          subjectKey: ticket.key,
+          dedupeKey: `jira-trigger:${kind}:${ticket.key}:${observedAt}`,
+          payload: { ...sessionData, sessionData, cursorValue },
+        }),
+      ),
+    );
+  }
 
   async getSettings(): Promise<JiraSettingsView> {
     const prisma = await getPrismaClient();
@@ -850,6 +906,14 @@ export class JiraService {
       include: { project: true },
     });
     if (!source) throw new Error("Jira source not found");
+    const previous = await prisma.jiraCacheEntry.findFirst({
+      where: { sourceId, issues: { some: {} } },
+      orderBy: { fetchedAt: "desc" },
+      include: { issues: { select: { issueKey: true } } },
+    });
+    const previousKeys = new Set(
+      previous?.issues.map(({ issueKey }) => issueKey) ?? [],
+    );
     const loaded =
       source.kind === "BOARD"
         ? await this.loadBoardSource(sourceView(source), force)
@@ -867,11 +931,42 @@ export class JiraService {
       settings.ticketAssignmentFilter === "ALL"
         ? null
         : await this.currentAccountId();
-    return filterJiraTicketBoard(
+    const board = filterJiraTicketBoard(
       { source: sourceView(source), ...loaded },
       settings,
       currentAccountId,
     );
+    if (this.workflowEvents && previous) {
+      await Promise.allSettled(
+        board.tickets
+          .filter(({ key }) => !previousKeys.has(key))
+          .map((ticket) => {
+            const sessionData = {
+              ticket: {
+                key: ticket.key,
+                title: ticket.summary,
+                type: ticket.issueType,
+                status: ticket.status,
+                statusId: ticket.statusId,
+                statusCategory: ticket.statusCategory,
+                assignee: ticket.assignee,
+              },
+            };
+            return this.workflowEvents!.record({
+              kind: "JIRA_SOURCE_NEW_TICKET",
+              subjectKey: `${sourceId}:${ticket.key}`,
+              dedupeKey: `jira-source-new:${sourceId}:${ticket.key}:${board.cache.fetchedAt}`,
+              payload: {
+                ...sessionData,
+                sessionData,
+                source: { id: sourceId, name: source.name, kind: source.kind },
+                cursorValue: ticket.key,
+              },
+            });
+          }),
+      );
+    }
+    return board;
   }
 
   async ticket(issueKey: string, force = false): Promise<JiraTicketDetail> {
@@ -934,13 +1029,15 @@ export class JiraService {
       commentResults.map((result) => result.entryId),
     );
     const settings = await this.requireCredentials();
-    return this.normalizeTicketDetail(
+    const ticket = this.normalizeTicketDetail(
       detail.value,
       comments,
       settings.siteUrl,
       cacheMeta(detail),
       combineCacheMeta(commentResults),
     );
+    await this.recordTicketWorkflowEvents(ticket);
+    return ticket;
   }
 
   async assignableUsers(issueKey: string, query = ""): Promise<JiraPerson[]> {

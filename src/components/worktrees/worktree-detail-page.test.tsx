@@ -323,6 +323,9 @@ describe("WorktreeDetailPage", () => {
       await screen.findByRole("heading", { name: "feature/AIDE-43" }),
     ).toBeDefined();
     const summary = screen.getByTestId("worktree-summary");
+    const page = summary.closest("section");
+    expect(page?.className).toContain("w-full");
+    expect(page?.className).not.toContain("max-w-");
     expect(summary.className).toContain("rounded-lg");
     expect(summary.className).toContain("border-l-4");
     expect(summary.className).toContain("bg-blue-500/10");

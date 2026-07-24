@@ -20,6 +20,8 @@ type RunProcessOptions = {
   timeoutMs: number;
   signal: AbortSignal;
   onLog: (log: ProcessLog) => Promise<void>;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
 };
 
 export async function runProcess(
@@ -32,10 +34,15 @@ export async function runProcess(
     let settled = false;
     let logChain = Promise.resolve();
 
+    const detached = process.platform !== "win32";
     const child = spawn(options.command, options.args, {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      // A separate process group lets cancellation terminate scripts and all
+      // descendants instead of leaving a child holding stdout/stderr open.
+      detached,
     });
 
     const emit = (stream: ProcessLog["stream"], message: string) => {
@@ -76,10 +83,28 @@ export async function runProcess(
     attach(child.stdout, "STDOUT");
     attach(child.stderr, "STDERR");
 
+    const sendSignal = (signal: NodeJS.Signals) => {
+      if (detached && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !("code" in error) ||
+            error.code !== "ESRCH"
+          ) {
+            throw error;
+          }
+        }
+      }
+      child.kill(signal);
+    };
+
     const terminate = () => {
       if (child.exitCode !== null || child.killed) return;
-      child.kill("SIGTERM");
-      const killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      sendSignal("SIGTERM");
+      const killTimer = setTimeout(() => sendSignal("SIGKILL"), 5_000);
       killTimer.unref();
     };
 

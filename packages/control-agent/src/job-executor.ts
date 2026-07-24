@@ -73,6 +73,8 @@ export class JobExecutor {
               this.client.uploadBuildArtifact(input),
             claimSigningSecretTransfer: (transferId) =>
               this.client.claimSigningSecretTransfer(transferId),
+            claimWorkflowJobSecrets: () =>
+              this.client.claimWorkflowJobSecrets(claimed.id),
           },
         );
       const codebaseId =

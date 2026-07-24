@@ -33,6 +33,7 @@ import {
   TicketCheck,
   Terminal,
   TimerReset,
+  Waypoints,
   Wrench,
   X,
 } from "lucide-react";
@@ -127,7 +128,10 @@ function ShellContent({
       >
         <AppHeader leftSidebar={leftSidebar} rightSidebar={rightSidebar} />
         <main className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          <div className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+          <div
+            className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none"
+            data-slot="page-content"
+          >
             {children}
           </div>
         </main>
@@ -306,32 +310,35 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/builds")}
+                  isActive={
+                    pathname.startsWith("/agents") ||
+                    pathname.startsWith("/jobs")
+                  }
                 >
                   <Link
-                    href="/builds"
+                    href="/agents"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <Hammer />
-                    <span>{t("builds")}</span>
+                    <Cpu />
+                    <span>{t("agents")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/worktrees")}
+                  isActive={pathname.startsWith("/workflows")}
                 >
                   <Link
-                    href="/worktrees"
+                    href="/workflows"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <GitBranch />
-                    <span>{t("worktrees")}</span>
+                    <Waypoints />
+                    <span>{t("workflows")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -354,51 +361,32 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={
-                    pathname.startsWith("/agents") ||
-                    pathname.startsWith("/jobs")
-                  }
+                  isActive={pathname.startsWith("/worktrees")}
                 >
                   <Link
-                    href="/agents"
+                    href="/worktrees"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <Cpu />
-                    <span>{t("agents")}</span>
+                    <GitBranch />
+                    <span>{t("worktrees")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/usage")}
+                  isActive={pathname.startsWith("/builds")}
                 >
                   <Link
-                    href="/usage"
+                    href="/builds"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
                   >
-                    <ChartNoAxesCombined />
-                    <span>{t("usage")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/costs")}
-                >
-                  <Link
-                    href="/costs"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <CircleDollarSign />
-                    <span>{t("costs")}</span>
+                    <Hammer />
+                    <span>{t("builds")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -457,6 +445,54 @@ function NavigationSidebar() {
                   >
                     <FilePenLine />
                     <span>{t("drafts")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/usage")}
+                >
+                  <Link
+                    href="/usage"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ChartNoAxesCombined />
+                    <span>{t("usage")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/costs")}
+                >
+                  <Link
+                    href="/costs"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <CircleDollarSign />
+                    <span>{t("costs")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/skills")}
+                >
+                  <Link
+                    href="/skills"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Sparkles />
+                    <span>{t("skills")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -713,22 +749,6 @@ function NavigationSidebar() {
                   >
                     <Smartphone />
                     <span>{t("devices")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/skills")}
-                >
-                  <Link
-                    href="/skills"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Sparkles />
-                    <span>{t("skills")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

@@ -491,6 +491,23 @@ input MergeGitHubPullRequestInput {
   authorEmail: String
 }
 
+input CreateGitHubPullRequestInput {
+  owner: String!
+  name: String!
+  baseRefName: String!
+  headRefName: String!
+  title: String!
+  body: String
+  draft: Boolean = false
+}
+
+input SetGitHubPullRequestLabelsInput {
+  owner: String!
+  name: String!
+  number: Int!
+  labels: [String!]!
+}
+
 extend type Query {
   githubSettings: GitHubSettings!
   githubAppSettings: GitHubAppSettings!
@@ -555,6 +572,12 @@ extend type Mutation {
   mergeGitHubPullRequest(
     input: MergeGitHubPullRequestInput!
   ): GitHubPullRequestMergeResult!
+  createGitHubPullRequest(
+    input: CreateGitHubPullRequestInput!
+  ): GitHubPullRequestDetail!
+  setGitHubPullRequestLabels(
+    input: SetGitHubPullRequestLabelsInput!
+  ): GitHubPullRequestDetail!
   retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
   retryGitHubWorkflowJob(
     repositoryId: ID!

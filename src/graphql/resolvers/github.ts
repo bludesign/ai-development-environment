@@ -388,6 +388,24 @@ export const createGitHubResolvers = (
       );
       return result;
     },
+    createGitHubPullRequest: (
+      _root: unknown,
+      { input }: { input: Parameters<GitHubService["createPullRequest"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.createPullRequest(input);
+    },
+    setGitHubPullRequestLabels: (
+      _root: unknown,
+      {
+        input,
+      }: { input: Parameters<GitHubService["setPullRequestLabels"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.setPullRequestLabels(input);
+    },
     retryGitHubPipeline: (
       _root: unknown,
       {

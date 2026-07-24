@@ -11,6 +11,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -40,6 +41,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
+import { JIRA_SUMMARY_FIELDS } from "@/components/jira/ticket-graphql";
+import type { JiraTicketSummary } from "@/services/jira/types";
 
 import { RUN_DRAFT_FIELDS } from "./graphql-fields";
 import { AttachmentPicker } from "./attachment-picker";
@@ -62,6 +65,15 @@ type WorktreeOption = {
   capabilities: string[];
 };
 
+const JIRA_ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
+
+type TicketPreviewState = {
+  key: string;
+  ticket: JiraTicketSummary | null;
+  loading: boolean;
+  error: string | null;
+};
+
 export function RunStartPage({
   initialKind,
   draftId,
@@ -70,13 +82,19 @@ export function RunStartPage({
   draftId?: string | null;
 }) {
   const t = useTranslations("runs");
+  const jiraT = useTranslations("jiraTickets");
   const router = useRouter();
   const [kind, setKind] = useState(initialKind);
   const [worktrees, setWorktrees] = useState<WorktreeOption[]>([]);
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [worktreeId, setWorktreeId] = useState("");
   const [jiraIssueKey, setJiraIssueKey] = useState("");
-  const [jiraSummary, setJiraSummary] = useState("");
+  const [ticketPreview, setTicketPreview] = useState<TicketPreviewState>({
+    key: "",
+    ticket: null,
+    loading: false,
+    error: null,
+  });
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
@@ -145,7 +163,6 @@ export function RunStartPage({
         setKind(draft.kind);
         setWorktreeId(draft.worktreeId ?? "");
         setJiraIssueKey(draft.jiraIssueKey ?? "");
-        setJiraSummary(draft.jiraSummary ?? "");
         setPrompt(draft.prompt);
         setProvider(draft.provider);
         setModel(draft.model);
@@ -189,6 +206,44 @@ export function RunStartPage({
     };
   }, [worktreeId]);
 
+  const normalizedJiraIssueKey = jiraIssueKey.trim().toUpperCase();
+  const canLoadTicket = JIRA_ISSUE_KEY_PATTERN.test(normalizedJiraIssueKey);
+
+  useEffect(() => {
+    if (!canLoadTicket) return;
+    let cancelled = false;
+    const key = normalizedJiraIssueKey;
+    const timer = window.setTimeout(() => {
+      setTicketPreview({ key, ticket: null, loading: true, error: null });
+      void controlPlaneRequest<{ jiraTicket: JiraTicketSummary }>(
+        `query RunJiraTicket($issueKey: ID!) { jiraTicket(issueKey: $issueKey) { ${JIRA_SUMMARY_FIELDS} } }`,
+        { issueKey: key },
+      )
+        .then(({ jiraTicket }) => {
+          if (!cancelled)
+            setTicketPreview({
+              key,
+              ticket: jiraTicket,
+              loading: false,
+              error: null,
+            });
+        })
+        .catch((value) => {
+          if (!cancelled)
+            setTicketPreview({
+              key,
+              ticket: null,
+              loading: false,
+              error: value instanceof Error ? value.message : String(value),
+            });
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [canLoadTicket, normalizedJiraIssueKey]);
+
   const selectedWorktree = worktrees.find(({ id }) => id === worktreeId);
   const selectedProvider = catalog.find(({ key }) => key === provider);
   const providerUsable = Boolean(
@@ -224,10 +279,8 @@ export function RunStartPage({
     const worktree = worktrees.find((entry) => entry.id === id);
     if (worktree?.ticketKey) {
       setJiraIssueKey(worktree.ticketKey);
-      setJiraSummary(worktree.ticketTitle ?? "");
     } else {
       setJiraIssueKey("");
-      setJiraSummary("");
     }
   };
 
@@ -274,8 +327,7 @@ export function RunStartPage({
   const configuration = () => ({
     kind,
     worktreeId,
-    jiraIssueKey: jiraIssueKey.trim() || null,
-    jiraSummary: jiraSummary.trim() || null,
+    jiraIssueKey: normalizedJiraIssueKey || null,
     provider,
     model,
     effort: effort === "auto" ? null : effort,
@@ -419,24 +471,50 @@ export function RunStartPage({
               )}
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="jira-key">{t("jiraTicket")}</Label>
-              <Input
-                id="jira-key"
-                onChange={(event) => setJiraIssueKey(event.target.value)}
-                placeholder="AIDE-123"
-                value={jiraIssueKey}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="jira-summary">{t("jiraSummary")}</Label>
-              <Input
-                id="jira-summary"
-                onChange={(event) => setJiraSummary(event.target.value)}
-                value={jiraSummary}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="jira-key">{t("jiraTicket")}</Label>
+            <Input
+              id="jira-key"
+              onBlur={() => setJiraIssueKey(normalizedJiraIssueKey)}
+              onChange={(event) => setJiraIssueKey(event.target.value)}
+              placeholder="AIDE-123"
+              value={jiraIssueKey}
+            />
+            {canLoadTicket &&
+              ticketPreview.key === normalizedJiraIssueKey &&
+              (ticketPreview.loading ? (
+                <Card size="sm">
+                  <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner /> {jiraT("loadingTicket")}
+                  </CardContent>
+                </Card>
+              ) : ticketPreview.error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{ticketPreview.error}</AlertDescription>
+                </Alert>
+              ) : ticketPreview.ticket ? (
+                <Card className="py-0" size="sm">
+                  <CardHeader>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CardTitle>{ticketPreview.ticket.key}</CardTitle>
+                      <Badge>{ticketPreview.ticket.status}</Badge>
+                      {ticketPreview.ticket.issueType && (
+                        <Badge variant="outline">
+                          {ticketPreview.ticket.issueType}
+                        </Badge>
+                      )}
+                      {ticketPreview.ticket.priority && (
+                        <Badge variant="outline">
+                          {ticketPreview.ticket.priority}
+                        </Badge>
+                      )}
+                    </div>
+                    <CardDescription>
+                      {ticketPreview.ticket.summary}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              ) : null)}
           </div>
           <div className="space-y-2">
             <Label htmlFor="run-prompt">{t("prompt")}</Label>

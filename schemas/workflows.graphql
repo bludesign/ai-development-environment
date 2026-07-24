@@ -1,0 +1,332 @@
+enum WorkflowOverlapPolicy {
+  QUEUE
+  CONCURRENT
+  COALESCE_LATEST
+}
+
+enum WorkflowRunStatus {
+  QUEUED
+  RUNNING
+  PAUSING
+  PAUSED
+  WAITING
+  BLOCKED
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+type Workflow {
+  id: ID!
+  name: String!
+  description: String!
+  draftDefinition: JSON!
+  draftSchemaVersion: Int!
+  activeVersionId: ID
+  activeVersion: WorkflowVersion
+  enabled: Boolean!
+  overlapPolicy: WorkflowOverlapPolicy!
+  maxConcurrentRuns: Int!
+  archivedAt: String
+  versions: [WorkflowVersion!]!
+  versionCount: Int!
+  runCount: Int!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type WorkflowVersion {
+  id: ID!
+  workflowId: ID!
+  version: Int!
+  name: String!
+  description: String!
+  schemaVersion: Int!
+  definition: JSON!
+  contentHash: String!
+  triggers: [WorkflowTrigger!]!
+  publishedAt: String!
+  createdAt: String!
+}
+
+type WorkflowTrigger {
+  id: ID!
+  versionId: ID!
+  nodeId: ID!
+  kind: String!
+  config: JSON!
+  createdAt: String!
+}
+
+type WorkflowStepCatalogEntry {
+  kind: String!
+  category: String!
+  label: String!
+  description: String!
+  execution: String!
+  configSchema: JSON!
+  capabilityFlags: [String!]!
+  requiredPaths: [String!]!
+  providedPaths: [String!]!
+  mutatesExternal: Boolean!
+  mutatesWorktree: Boolean!
+}
+
+type WorkflowTriggerCatalogEntry {
+  kind: String!
+  category: String!
+  label: String!
+  configSchema: JSON!
+  capabilityFlags: [String!]!
+  seedPaths: [String!]!
+}
+
+type WorkflowCatalog {
+  schemaVersion: Int!
+  globalConcurrency: Int!
+  steps: [WorkflowStepCatalogEntry!]!
+  triggers: [WorkflowTriggerCatalogEntry!]!
+}
+
+type WorkflowDiagnostic {
+  severity: String!
+  code: String!
+  message: String!
+  nodeId: ID
+  triggerId: ID
+  path: String
+}
+
+type WorkflowValidation {
+  valid: Boolean!
+  diagnostics: [WorkflowDiagnostic!]!
+}
+
+type WorkflowRun {
+  id: ID!
+  displayNumber: Int!
+  workflowId: ID!
+  workflow: Workflow!
+  versionId: ID!
+  version: WorkflowVersion!
+  triggerId: ID
+  trigger: WorkflowTrigger
+  triggerEventId: ID
+  parentRunId: ID
+  parentRun: WorkflowRun
+  childRuns: [WorkflowRun!]!
+  triggerKind: String!
+  triggerSubjectKey: String!
+  triggerPayload: JSON!
+  status: WorkflowRunStatus!
+  phase: String!
+  generation: Int!
+  sessionData: JSON!
+  sessionRevision: Int!
+  blockedReason: String
+  error: String
+  queuedAt: String!
+  startedAt: String
+  pausedAt: String
+  finishedAt: String
+  createdAt: String!
+  updatedAt: String!
+  attempts: [WorkflowStepAttempt!]!
+  waits: [WorkflowWait!]!
+  events: [WorkflowRunEvent!]!
+  resourceLinks: [WorkflowRunResourceLink!]!
+  attemptCount: Int!
+  eventCount: Int!
+}
+
+type WorkflowStepAttempt {
+  id: ID!
+  runId: ID!
+  nodeId: ID!
+  kind: String!
+  generation: Int!
+  iterationKey: String!
+  attempt: Int!
+  status: String!
+  phase: String!
+  input: JSON
+  output: JSON
+  error: String
+  requiredPaths: [String!]!
+  providedPaths: [String!]!
+  resourceLockKey: String
+  idempotencyKey: String!
+  startedAt: String
+  finishedAt: String
+  supersededAt: String
+  replayedFromId: ID
+  createdAt: String!
+  updatedAt: String!
+  waits: [WorkflowWait!]!
+  resourceLinks: [WorkflowRunResourceLink!]!
+  questionBatches: [RunQuestionBatch!]!
+  checkpoints: [RunCheckpoint!]!
+}
+
+type WorkflowWait {
+  id: ID!
+  runId: ID!
+  attemptId: ID!
+  kind: String!
+  status: String!
+  predicate: JSON
+  externalKey: String
+  resumeAfter: String
+  timeoutAt: String
+  result: JSON
+  createdAt: String!
+  resolvedAt: String
+  updatedAt: String!
+}
+
+type WorkflowRunEvent {
+  id: ID!
+  runId: ID!
+  attemptId: ID
+  sequence: Int!
+  type: String!
+  message: String!
+  detail: JSON
+  createdAt: String!
+}
+
+type WorkflowRunResourceLink {
+  id: ID!
+  runId: ID!
+  attemptId: ID
+  kind: String!
+  resourceId: String!
+  label: String
+  url: String
+  metadata: JSON
+  createdAt: String!
+}
+
+type WorkflowPage {
+  items: [Workflow!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type WorkflowRunPage {
+  items: [WorkflowRun!]!
+  nextCursor: ID
+  totalCount: Int!
+}
+
+type WorkflowReplayExternalEffect {
+  kind: String!
+  resourceId: String!
+  label: String
+  url: String
+}
+
+type WorkflowReplayPreview {
+  runId: ID!
+  nodeId: ID!
+  affectedNodeIds: [ID!]!
+  affectedAttemptIds: [ID!]!
+  externalEffects: [WorkflowReplayExternalEffect!]!
+  checkpointId: ID
+  gitComparison: JSON
+  warning: String
+}
+
+type WorkflowJobSecret {
+  name: String!
+  value: String!
+}
+
+input CreateWorkflowInput {
+  name: String!
+  description: String
+  definition: JSON
+  overlapPolicy: WorkflowOverlapPolicy = QUEUE
+  maxConcurrentRuns: Int = 1
+}
+
+input SaveWorkflowDraftInput {
+  id: ID!
+  definition: JSON!
+  overlapPolicy: WorkflowOverlapPolicy
+  maxConcurrentRuns: Int
+}
+
+input TriggerWorkflowInput {
+  workflowId: ID!
+  sessionData: JSON
+  resourceKind: String
+  resourceId: ID
+  subjectKey: String
+}
+
+input ImportWorkflowInput {
+  payload: JSON!
+  name: String
+}
+
+extend type Query {
+  workflows(
+    search: String
+    archive: String = "ACTIVE"
+    enabled: Boolean
+    first: Int = 100
+    after: ID
+  ): WorkflowPage!
+  workflow(id: ID!): Workflow
+  workflowVersion(id: ID!): WorkflowVersion
+  workflowCatalog: WorkflowCatalog!
+  validateWorkflowDraft(id: ID!): WorkflowValidation!
+  workflowRuns(
+    workflowId: ID
+    status: String
+    search: String
+    first: Int = 100
+    after: ID
+  ): WorkflowRunPage!
+  workflowRun(id: ID!): WorkflowRun
+  workflowRunEvents(
+    runId: ID!
+    afterSequence: Int = -1
+    first: Int = 500
+  ): [WorkflowRunEvent!]!
+  workflowRunsForResource(kind: String!, resourceId: ID!): [WorkflowRun!]!
+  workflowsAcceptingResource(kind: String!): [Workflow!]!
+  exportWorkflow(id: ID!, versionId: ID): JSON!
+  prepareWorkflowReplay(runId: ID!, nodeId: ID!): WorkflowReplayPreview!
+  workflowJobSecrets(jobId: ID!): [WorkflowJobSecret!]!
+}
+
+extend type Mutation {
+  createWorkflow(input: CreateWorkflowInput!): Workflow!
+  saveWorkflowDraft(input: SaveWorkflowDraftInput!): Workflow!
+  importWorkflow(input: ImportWorkflowInput!): Workflow!
+  publishWorkflow(id: ID!): WorkflowVersion!
+  setWorkflowEnabled(id: ID!, enabled: Boolean!): Workflow!
+  archiveWorkflow(id: ID!, archived: Boolean!): Workflow!
+  deleteWorkflow(id: ID!): Boolean!
+  triggerWorkflow(input: TriggerWorkflowInput!): WorkflowRun!
+  pauseWorkflowRun(id: ID!): WorkflowRun!
+  resumeWorkflowRun(id: ID!): WorkflowRun!
+  cancelWorkflowRun(id: ID!): WorkflowRun!
+  repairWorkflowRunData(id: ID!, patch: JSON!): WorkflowRun!
+  answerWorkflowQuestion(batchId: ID!, answers: JSON!): WorkflowRun!
+  replayWorkflowRun(
+    runId: ID!
+    nodeId: ID!
+    restore: Boolean = false
+    stash: Boolean = false
+  ): WorkflowRun!
+}
+
+extend type Subscription {
+  workflowsChanged: Workflow
+  workflowRunChanged(runId: ID!): WorkflowRun!
+  workflowRunEventAdded(runId: ID!): WorkflowRunEvent!
+  workflowQuestionChanged(runId: ID!): RunQuestionBatch!
+}

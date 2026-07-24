@@ -204,6 +204,53 @@ describe("WorktreesService", () => {
     ).toBeNull();
   });
 
+  test("resolves the linked ticket key from a worktree branch", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({
+          branch: "feature/aide-42-workflow-support",
+          codebase: { repository: { jiraBranchRegex: "([a-z]+-\\d+)" } },
+        }),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+
+    await expect(service().ticketKeyForWorktree("worktree-1")).resolves.toBe(
+      "AIDE-42",
+    );
+  });
+
+  test("falls back to the default branch regex when the repo has none", async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValue({ defaultJiraBranchRegex: "([a-z]+-\\d+)" });
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({
+          branch: "bugfix/aide-7",
+          codebase: { repository: { jiraBranchRegex: null } },
+        }),
+      },
+      codebaseSettings: { findUnique },
+    });
+
+    await expect(service().ticketKeyForWorktree("worktree-1")).resolves.toBe(
+      "AIDE-7",
+    );
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: "default" } });
+  });
+
+  test("returns null when the worktree is missing or has no ticket", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktree: { findFirst: vi.fn().mockResolvedValue(null) },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+
+    await expect(
+      service().ticketKeyForWorktree("missing-worktree"),
+    ).resolves.toBeNull();
+  });
+
   test("upserts inventory and tombstones rows absent from a complete scan", async () => {
     const transaction = {
       codebase: { update: vi.fn() },

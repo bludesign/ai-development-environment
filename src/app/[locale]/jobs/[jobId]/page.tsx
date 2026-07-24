@@ -13,7 +13,7 @@ export default async function JobDetailPage({
   const { locale, jobId } = await params;
   const t = await getTranslations({ locale, namespace: "jobs" });
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+    <div className="flex w-full flex-col gap-4">
       <div>
         <Button asChild size="sm" variant="ghost">
           <Link href="/agents">

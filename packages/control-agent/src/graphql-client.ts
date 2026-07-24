@@ -333,6 +333,20 @@ export class AgentGraphQLClient {
     return data.claimSigningSecretTransfer;
   }
 
+  async claimWorkflowJobSecrets(
+    jobId: string,
+  ): Promise<Array<{ name: string; value: string }>> {
+    const data = await this.request<{
+      workflowJobSecrets: Array<{ name: string; value: string }>;
+    }>(
+      `query WorkflowJobSecrets($jobId: ID!) {
+        workflowJobSecrets(jobId: $jobId) { name value }
+      }`,
+      { jobId },
+    );
+    return data.workflowJobSecrets;
+  }
+
   appendLog(jobId: string, log: ProcessLog) {
     return this.request<{ appendAgentJobLogs: Array<{ id: string }> }>(
       `mutation AppendLog($jobId: ID!, $logs: [AgentJobLogInput!]!) {

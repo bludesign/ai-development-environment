@@ -24,6 +24,13 @@ import { NotificationsService } from "@/services/notifications";
 import { PollingService } from "@/services/polling";
 import { ModelCostsService } from "@/services/model-costs";
 import { RunsService } from "@/services/runs";
+import {
+  WorkflowEventsService,
+  WorkflowsService,
+  WorkflowStepExecutor,
+  WorkflowEventBridge,
+  registerWorkflowAdapters,
+} from "@/services/workflows";
 
 export type ServerServices = {
   prismaService: PrismaService;
@@ -49,11 +56,15 @@ export type ServerServices = {
   pollingService: PollingService;
   modelCostsService: ModelCostsService;
   runsService: RunsService;
+  workflowEventsService: WorkflowEventsService;
+  workflowsService: WorkflowsService;
+  workflowEventBridge: WorkflowEventBridge;
 };
 
 function createServerServices(): ServerServices {
   const prismaService = new PrismaService();
   const credentialService = new CredentialService();
+  const workflowEventsService = new WorkflowEventsService();
   const agentControlService = new AgentControlService();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
@@ -87,13 +98,15 @@ function createServerServices(): ServerServices {
     skillsService,
   );
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
-  const jiraService = new JiraService(credentialService);
+  const jiraService = new JiraService(credentialService, workflowEventsService);
   const iosDevicesService = new IosDevicesService(undefined, credentialService);
   const gitHubActionsNotificationsService =
     new GitHubActionsNotificationsService(
       credentialService,
       notificationsService,
       pollingService,
+      true,
+      workflowEventsService,
     );
   const gitHubService = new GitHubService(
     true,
@@ -107,7 +120,49 @@ function createServerServices(): ServerServices {
     jiraService,
     gitHubService,
     skillsService,
+    workflowEventsService,
   );
+  const toolsService = new ToolsService(
+    codebaseToolsService,
+    buildsService,
+    {
+      codebases: codebasesService,
+      telemetry: telemetryService,
+      pushNotifications: pushNotificationsService,
+      agents: agentControlService,
+    },
+    credentialService,
+  );
+  const workflowStepExecutor = new WorkflowStepExecutor();
+  const workflowsService = new WorkflowsService(
+    workflowEventsService,
+    workflowStepExecutor,
+    undefined,
+    credentialService,
+    agentControlService,
+    notificationsService,
+    runsService,
+    worktreesService,
+  );
+  registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
+    agentControl: agentControlService,
+    jira: jiraService,
+    github: gitHubService,
+    worktrees: worktreesService,
+    codebases: codebasesService,
+    builds: buildsService,
+    skills: skillsService,
+    runs: runsService,
+    notifications: notificationsService,
+    pushNotifications: pushNotificationsService,
+    tools: toolsService,
+  });
+  const workflowEventBridge = new WorkflowEventBridge(
+    workflowEventsService,
+    agentControlService,
+  );
+  workflowEventBridge.start();
+  workflowsService.startRuntime();
   return {
     prismaService,
     credentialService,
@@ -131,17 +186,10 @@ function createServerServices(): ServerServices {
     pollingService,
     modelCostsService,
     runsService,
-    toolsService: new ToolsService(
-      codebaseToolsService,
-      buildsService,
-      {
-        codebases: codebasesService,
-        telemetry: telemetryService,
-        pushNotifications: pushNotificationsService,
-        agents: agentControlService,
-      },
-      credentialService,
-    ),
+    toolsService,
+    workflowEventsService,
+    workflowsService,
+    workflowEventBridge,
   };
 }
 
