@@ -361,7 +361,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   // Off by default: laying a workflow out means panning and zooming around a
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
-  const [showSessionData, setShowSessionData] = useState(true);
+  const [showSessionData, setShowSessionData] = useState(false);
 
   const categories = useMemo(
     () =>

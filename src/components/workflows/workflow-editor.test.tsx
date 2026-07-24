@@ -221,7 +221,7 @@ describe("workflow editor session data toggle", () => {
     canvas.nodes = [];
   });
 
-  test("drops the session data chips from the cards and puts them back", async () => {
+  test("hides session data chips by default and toggles them on demand", async () => {
     const definition = emptyDefinition("Session data");
     definition.nodes.push({
       id: "session",
@@ -267,12 +267,12 @@ describe("workflow editor session data toggle", () => {
 
     const provided = () =>
       canvas.nodes.flatMap((node) => node.data.provides ?? []);
-    await waitFor(() => expect(provided()).toContain("session.custom.value"));
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide session data" }));
-    expect(provided()).toEqual([]);
+    await waitFor(() => expect(provided()).toEqual([]));
 
     fireEvent.click(screen.getByRole("button", { name: "Show session data" }));
     expect(provided()).toContain("session.custom.value");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide session data" }));
+    expect(provided()).toEqual([]);
   });
 });
