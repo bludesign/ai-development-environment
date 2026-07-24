@@ -27,7 +27,9 @@ describe("BuildDetailRoute", () => {
     const element = await BuildDetailRoute({
       params: Promise.resolve({ locale: "en", buildId: "build-1" }),
     });
-    const props = element.props as {
+    const children = (element.props as { children: Array<{ props: unknown }> })
+      .children;
+    const props = children[0]!.props as {
       buildId: string;
       publicOrigin: { origin: string; secure: boolean; source: string };
     };

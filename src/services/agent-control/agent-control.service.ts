@@ -113,6 +113,13 @@ import {
   signingProfileKeyPayload,
   signingScanPayload,
 } from "@ai-development-environment/agent-contract/signing-assets";
+import {
+  WORKFLOW_GIT_CHECKPOINT_JOB_KIND,
+  WORKFLOW_JOB_KINDS,
+  WORKFLOW_TERMINAL_JOB_KIND,
+  parseWorkflowGitCheckpointPayload,
+  parseWorkflowTerminalPayload,
+} from "@ai-development-environment/agent-contract/workflows";
 
 import { getPrismaClient } from "@/data/prisma-client";
 
@@ -153,6 +160,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
+  ...WORKFLOW_JOB_KINDS,
 ] as const;
 
 type CompletionHandler = (job: {
@@ -160,6 +168,7 @@ type CompletionHandler = (job: {
   agentId: string;
   codebaseId: string | null;
   worktreeId: string | null;
+  ccusageCollectionId?: string | null;
   buildDataCollectionId: string | null;
   kind: string;
   payloadJson: string;
@@ -289,6 +298,14 @@ export function validateJob(kind: string, payload: unknown): void {
     parseRunSessionReadPayload(payload);
     return;
   }
+  if (kind === WORKFLOW_TERMINAL_JOB_KIND) {
+    parseWorkflowTerminalPayload(payload);
+    return;
+  }
+  if (kind === WORKFLOW_GIT_CHECKPOINT_JOB_KIND) {
+    parseWorkflowGitCheckpointPayload(payload);
+    return;
+  }
   if (kind === SKILL_APPLY_JOB_KIND) {
     parseSkillApplyPayload(payload);
     return;
@@ -415,6 +432,7 @@ function publishJob(job: {
 
 export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
+  private readonly completionObservers = new Set<CompletionHandler>();
   private readonly connectionHandlers = new Set<ConnectionHandler>();
   private readonly signingSecretTransfers = new Map<
     string,
@@ -475,6 +493,10 @@ export class AgentControlService {
     this.completionHandlers.set(kind, handler);
   }
 
+  registerCompletionObserver(handler: CompletionHandler): void {
+    this.completionObservers.add(handler);
+  }
+
   registerConnectionHandler(handler: ConnectionHandler): void {
     this.connectionHandlers.add(handler);
   }
@@ -508,6 +530,9 @@ export class AgentControlService {
 
   private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
     await this.completionHandlers.get(job.kind)?.(job);
+    await Promise.allSettled(
+      [...this.completionObservers].map((observer) => observer(job)),
+    );
   }
 
   async authenticate(credential: string | null): Promise<string | null> {

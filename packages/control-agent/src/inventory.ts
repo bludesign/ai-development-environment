@@ -12,6 +12,7 @@ import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skil
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
 import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
+import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
@@ -29,6 +30,7 @@ export const AGENT_CAPABILITIES = [
   "runs.provider.claude",
   "runs.provider.opencode",
   RUN_SESSION_READ_JOB_KIND,
+  ...WORKFLOW_JOB_KINDS,
 ];
 
 export type AgentInventory = {

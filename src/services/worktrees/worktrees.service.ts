@@ -37,6 +37,7 @@ import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
 import type { SkillsService } from "@/services/skills";
+import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 
 const SETTINGS_ID = "default";
@@ -271,6 +272,7 @@ export class WorktreesService {
     private readonly jiraService: JiraService,
     private readonly gitHubService: GitHubService,
     private readonly skillsService?: SkillsService,
+    private readonly workflowEvents?: WorkflowEventsService,
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
@@ -1382,7 +1384,7 @@ export class WorktreesService {
               : change,
           )
         : [];
-      return {
+      const result = {
         ...normalized,
         changes,
         branchChanges: Array.isArray(normalized.branchChanges)
@@ -1390,6 +1392,51 @@ export class WorktreesService {
           : [],
         branchChangesTruncated: normalized.branchChangesTruncated === true,
       };
+      if (this.workflowEvents) {
+        const conflicts = changes.filter(
+          (change) =>
+            change &&
+            typeof change === "object" &&
+            !Array.isArray(change) &&
+            (change as Record<string, unknown>).conflicted === true,
+        );
+        const sessionData = {
+          repo: {
+            id: worktree.codebase.repository.id,
+            canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+            displayOrigin: worktree.codebase.repository.displayOrigin,
+            defaultBranch: worktree.codebase.defaultBranch,
+          },
+          codebase: {
+            id: worktree.codebase.id,
+            folder: worktree.codebase.folder,
+            agentId: worktree.codebase.agentId,
+          },
+          worktree: {
+            id: worktree.id,
+            path: worktree.folder,
+            branch: worktree.branch,
+            headSha: worktree.headSha,
+            conflicted: conflicts.length > 0,
+            conflicts,
+          },
+        };
+        await this.workflowEvents.record({
+          kind: "WORKTREE_CONFLICT",
+          subjectKey: worktree.id,
+          dedupeKey: `worktree-conflict:${worktree.id}:${requestId}`,
+          payload: {
+            ...sessionData,
+            sessionData,
+            cursorValue: conflicts.length
+              ? conflicts.map((change) =>
+                  String((change as Record<string, unknown>).path ?? ""),
+                )
+              : [],
+          },
+        });
+      }
+      return result;
     } finally {
       const prisma = await getPrismaClient();
       await prisma.agentJob.deleteMany({

@@ -17,51 +17,51 @@ datasource db {
 }
 
 model Agent {
-  id                       String                     @id
-  name                     String
-  hostname                 String
-  version                  String
-  osVersion                String
-  architecture             String
-  cpuModel                 String?
-  memoryTotalBytes         Float?
-  memoryFreeBytes          Float?
-  diskTotalBytes           Float?
-  diskFreeBytes            Float?
-  capabilitiesJson         String
-  secretHash               String                     @unique
-  baseRepoDirectory        String?
-  derivedDataLocationMode  String                     @default("DEFAULT")
-  derivedDataPath          String?
-  buildsDirectory          String?
-  defaultBuildsDirectory   String?
+  id                               String                     @id
+  name                             String
+  hostname                         String
+  version                          String
+  osVersion                        String
+  architecture                     String
+  cpuModel                         String?
+  memoryTotalBytes                 Float?
+  memoryFreeBytes                  Float?
+  diskTotalBytes                   Float?
+  diskFreeBytes                    Float?
+  capabilitiesJson                 String
+  secretHash                       String                     @unique
+  baseRepoDirectory                String?
+  derivedDataLocationMode          String                     @default("DEFAULT")
+  derivedDataPath                  String?
+  buildsDirectory                  String?
+  defaultBuildsDirectory           String?
   codebaseScanIntervalSeconds      Int?
   jobReconciliationIntervalSeconds Int?
   gitFetchIntervalSeconds          Int?
   heartbeatIntervalSeconds         Int?
-  ipAddress                String?
-  lastSeenAt               DateTime?
-  disconnectedAt           DateTime?
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  jobs                     AgentJob[]
-  ccusageCollections       CcusageCollectionAgent[]
-  auditEvents              AgentAuditEvent[]
-  codebases                Codebase[]
-  buildDataCollections     BuildDataCollectionAgent[]
-  buildDataDeletionHistory BuildDataDeletionHistory[]
-  skillToolObservations    SkillToolObservation[]
-  skillInstallations       SkillInstallation[]
-  skillDeployments         SkillDeployment[]
-  skillSyncItems           SkillSyncItem[]
-  builds                   Build[]
-  signingProfiles          SigningProfileAsset[]
-  signingCertificates      SigningCertificateAsset[]
-  signingOperationItems    SigningOperationItem[]
-  runs                     AgentRun[]
-  runDrafts                RunDraft[]
-  runCommands              RunCommand[]
-  runProviderSyncs         RunProviderSync[]
+  ipAddress                        String?
+  lastSeenAt                       DateTime?
+  disconnectedAt                   DateTime?
+  createdAt                        DateTime                   @default(now())
+  updatedAt                        DateTime                   @updatedAt
+  jobs                             AgentJob[]
+  ccusageCollections               CcusageCollectionAgent[]
+  auditEvents                      AgentAuditEvent[]
+  codebases                        Codebase[]
+  buildDataCollections             BuildDataCollectionAgent[]
+  buildDataDeletionHistory         BuildDataDeletionHistory[]
+  skillToolObservations            SkillToolObservation[]
+  skillInstallations               SkillInstallation[]
+  skillDeployments                 SkillDeployment[]
+  skillSyncItems                   SkillSyncItem[]
+  builds                           Build[]
+  signingProfiles                  SigningProfileAsset[]
+  signingCertificates              SigningCertificateAsset[]
+  signingOperationItems            SigningOperationItem[]
+  runs                             AgentRun[]
+  runDrafts                        RunDraft[]
+  runCommands                      RunCommand[]
+  runProviderSyncs                 RunProviderSync[]
 }
 
 model AgentEnrollmentToken {
@@ -297,63 +297,63 @@ model Worktree {
 }
 
 model AgentRun {
-  id                       String             @id
-  kind                     String
-  displayNumber            Int
-  status                   String             @default("IN_PROGRESS")
-  phase                    String             @default("QUEUED")
-  origin                   String             @default("MANAGED")
-  provider                 String
-  providerVersion          String?
-  worktreeId               String?
-  agentId                  String?
-  jiraIssueKey             String?
-  jiraSummary              String?
-  repositoryName           String
-  branch                   String?
-  model                    String
-  effort                   String?
-  webSearchEnabled         Boolean            @default(false)
-  initialPrompt            String
-  finalOutput              String?
-  error                    String?
-  estimatedCost            Float?
-  pricingSource            String?
-  pricingUpdatedAt         DateTime?
-  inputTokens              Int                @default(0)
-  outputTokens             Int                @default(0)
-  reasoningTokens          Int                @default(0)
-  cacheReadTokens          Int                @default(0)
-  cacheWriteTokens         Int                @default(0)
-  toolCallCount            Int                @default(0)
-  sourcePlanId             String?            @unique
-  sourcePlanNumber         Int?
-  playedAt                 DateTime?
-  playedSessionNumber      Int?
-  parentRunId              String?
-  parentRunNumber          Int?
-  followUpMode             String?
-  archivedAt               DateTime?
-  nativeArchivedAt         DateTime?
-  startedAt                DateTime?
-  finishedAt               DateTime?
-  createdAt                DateTime           @default(now())
-  updatedAt                DateTime           @updatedAt
-  worktree                 Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
-  agent                    Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  sourcePlan               AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
-  playedSession            AgentRun?          @relation("PlanSession")
-  parentRun                AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
-  followUps                AgentRun[]          @relation("RunFollowUps")
-  attempts                 RunAttempt[]
-  inputs                   RunInput[]
-  events                   RunEvent[]
-  toolCalls                RunToolCall[]
-  modelUsage               RunModelUsage[]
-  questionBatches          RunQuestionBatch[]
-  checkpoints              RunCheckpoint[]
-  commands                 RunCommand[]
-  lease                    WorktreeRunLease?
+  id                  String             @id
+  kind                String
+  displayNumber       Int
+  status              String             @default("IN_PROGRESS")
+  phase               String             @default("QUEUED")
+  origin              String             @default("MANAGED")
+  provider            String
+  providerVersion     String?
+  worktreeId          String?
+  agentId             String?
+  jiraIssueKey        String?
+  jiraSummary         String?
+  repositoryName      String
+  branch              String?
+  model               String
+  effort              String?
+  webSearchEnabled    Boolean            @default(false)
+  initialPrompt       String
+  finalOutput         String?
+  error               String?
+  estimatedCost       Float?
+  pricingSource       String?
+  pricingUpdatedAt    DateTime?
+  inputTokens         Int                @default(0)
+  outputTokens        Int                @default(0)
+  reasoningTokens     Int                @default(0)
+  cacheReadTokens     Int                @default(0)
+  cacheWriteTokens    Int                @default(0)
+  toolCallCount       Int                @default(0)
+  sourcePlanId        String?            @unique
+  sourcePlanNumber    Int?
+  playedAt            DateTime?
+  playedSessionNumber Int?
+  parentRunId         String?
+  parentRunNumber     Int?
+  followUpMode        String?
+  archivedAt          DateTime?
+  nativeArchivedAt    DateTime?
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  worktree            Worktree?          @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  agent               Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  sourcePlan          AgentRun?          @relation("PlanSession", fields: [sourcePlanId], references: [id], onDelete: SetNull)
+  playedSession       AgentRun?          @relation("PlanSession")
+  parentRun           AgentRun?          @relation("RunFollowUps", fields: [parentRunId], references: [id], onDelete: SetNull)
+  followUps           AgentRun[]         @relation("RunFollowUps")
+  attempts            RunAttempt[]
+  inputs              RunInput[]
+  events              RunEvent[]
+  toolCalls           RunToolCall[]
+  modelUsage          RunModelUsage[]
+  questionBatches     RunQuestionBatch[]
+  checkpoints         RunCheckpoint[]
+  commands            RunCommand[]
+  lease               WorktreeRunLease?
 
   @@unique([kind, displayNumber])
   @@index([kind, archivedAt, createdAt])
@@ -363,25 +363,25 @@ model AgentRun {
 }
 
 model RunAttempt {
-  id                  String             @id
-  runId               String
-  generation          Int
-  nativeId            String?
-  nativeKey           String?            @unique
-  status              String             @default("STARTING")
-  resumeStrategy      String?
-  rawMetadataJson     String?
-  startedAt           DateTime           @default(now())
-  finishedAt          DateTime?
-  supersededAt        DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  run                 AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
-  events              RunEvent[]
-  toolCalls           RunToolCall[]
-  modelUsage          RunModelUsage[]
-  questionBatches     RunQuestionBatch[]
-  checkpoints         RunCheckpoint[]
+  id              String             @id
+  runId           String
+  generation      Int
+  nativeId        String?
+  nativeKey       String?            @unique
+  status          String             @default("STARTING")
+  resumeStrategy  String?
+  rawMetadataJson String?
+  startedAt       DateTime           @default(now())
+  finishedAt      DateTime?
+  supersededAt    DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  run             AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  events          RunEvent[]
+  toolCalls       RunToolCall[]
+  modelUsage      RunModelUsage[]
+  questionBatches RunQuestionBatch[]
+  checkpoints     RunCheckpoint[]
 
   @@unique([runId, generation])
   @@index([runId, status])
@@ -462,20 +462,20 @@ model RunEvent {
 }
 
 model RunToolCall {
-  id             String      @id
-  runId          String
-  attemptId      String?
-  sequence       Int
-  name           String
-  status         String
-  inputJson      String?
-  outputJson     String?
-  error          String?
-  startedAt      DateTime    @default(now())
-  finishedAt     DateTime?
-  supersededAt   DateTime?
-  run         AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  attempt     RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  id           String      @id
+  runId        String
+  attemptId    String?
+  sequence     Int
+  name         String
+  status       String
+  inputJson    String?
+  outputJson   String?
+  error        String?
+  startedAt    DateTime    @default(now())
+  finishedAt   DateTime?
+  supersededAt DateTime?
+  run          AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt      RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
 
   @@unique([runId, sequence])
   @@index([runId, startedAt])
@@ -485,18 +485,18 @@ model RunModelUsage {
   id               String      @id
   runId            String
   attemptId        String?
-  model             String
-  inputTokens       Int         @default(0)
-  outputTokens      Int         @default(0)
-  reasoningTokens   Int         @default(0)
-  cacheReadTokens   Int         @default(0)
-  cacheWriteTokens  Int         @default(0)
-  estimatedCost     Float?
-  superseded        Boolean     @default(false)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  run               AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  attempt           RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  model            String
+  inputTokens      Int         @default(0)
+  outputTokens     Int         @default(0)
+  reasoningTokens  Int         @default(0)
+  cacheReadTokens  Int         @default(0)
+  cacheWriteTokens Int         @default(0)
+  estimatedCost    Float?
+  superseded       Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  run              AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt          RunAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
 
   @@unique([runId, attemptId, model])
   @@index([runId, model])
@@ -533,38 +533,42 @@ model ModelCostEntry {
 }
 
 model RunQuestionBatch {
-  id                  String              @id
-  runId               String
-  attemptId           String?
-  nativeRequestId     String?
-  eventSequence       Int?
-  status              String              @default("PENDING")
-  createdAt           DateTime            @default(now())
-  answeredAt          DateTime?
-  supersededAt        DateTime?
-  revisionPreparedAt  DateTime?
-  rollbackPatch       String?
-  pushedCommitWarning String?
-  run                 AgentRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
-  attempt             RunAttempt?         @relation(fields: [attemptId], references: [id], onDelete: SetNull)
-  questions           RunQuestion[]
-  answerRevisions     RunAnswerRevision[]
-  checkpoint          RunCheckpoint?
+  id                    String               @id
+  runId                 String?
+  workflowStepAttemptId String?
+  attemptId             String?
+  nativeRequestId       String?
+  eventSequence         Int?
+  status                String               @default("PENDING")
+  createdAt             DateTime             @default(now())
+  answeredAt            DateTime?
+  supersededAt          DateTime?
+  revisionPreparedAt    DateTime?
+  rollbackPatch         String?
+  pushedCommitWarning   String?
+  run                   AgentRun?            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workflowStepAttempt   WorkflowStepAttempt? @relation(fields: [workflowStepAttemptId], references: [id], onDelete: Cascade)
+  attempt               RunAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  questions             RunQuestion[]
+  answerRevisions       RunAnswerRevision[]
+  checkpoint            RunCheckpoint?
 
-  @@index([runId, status, createdAt])
   @@unique([runId, nativeRequestId])
+  @@unique([workflowStepAttemptId, nativeRequestId])
+  @@index([runId, status, createdAt])
+  @@index([workflowStepAttemptId, status, createdAt])
 }
 
 model RunQuestion {
-  id           String              @id
-  batchId      String
-  position     Int
-  header       String?
-  prompt       String
-  multiSelect  Boolean             @default(false)
-  allowCustom  Boolean             @default(true)
-  batch        RunQuestionBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  options      RunQuestionOption[]
+  id          String              @id
+  batchId     String
+  position    Int
+  header      String?
+  prompt      String
+  multiSelect Boolean             @default(false)
+  allowCustom Boolean             @default(true)
+  batch       RunQuestionBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  options     RunQuestionOption[]
 
   @@unique([batchId, position])
 }
@@ -594,27 +598,30 @@ model RunAnswerRevision {
 }
 
 model RunCheckpoint {
-  id              String            @id
-  runId           String
-  attemptId       String?
-  questionBatchId String?           @unique
-  kind            String
-  headSha         String?
-  branch          String?
-  upstreamSha     String?
-  indexTree       String?
-  worktreeTree    String?
-  refName         String?
-  manifestJson    String?
-  diffSummary     String?
-  diffPatch       String?
-  stashRef        String?
-  createdAt       DateTime          @default(now())
-  run             AgentRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
-  attempt         RunAttempt?       @relation(fields: [attemptId], references: [id], onDelete: SetNull)
-  questionBatch   RunQuestionBatch? @relation(fields: [questionBatchId], references: [id], onDelete: SetNull)
+  id                    String               @id
+  runId                 String?
+  workflowStepAttemptId String?
+  attemptId             String?
+  questionBatchId       String?              @unique
+  kind                  String
+  headSha               String?
+  branch                String?
+  upstreamSha           String?
+  indexTree             String?
+  worktreeTree          String?
+  refName               String?
+  manifestJson          String?
+  diffSummary           String?
+  diffPatch             String?
+  stashRef              String?
+  createdAt             DateTime             @default(now())
+  run                   AgentRun?            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workflowStepAttempt   WorkflowStepAttempt? @relation(fields: [workflowStepAttemptId], references: [id], onDelete: Cascade)
+  attempt               RunAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  questionBatch         RunQuestionBatch?    @relation(fields: [questionBatchId], references: [id], onDelete: SetNull)
 
   @@index([runId, createdAt])
+  @@index([workflowStepAttemptId, createdAt])
 }
 
 model RunCommand {
@@ -652,43 +659,43 @@ model WorktreeRunLease {
 }
 
 model RunProviderSync {
-  id               String    @id
-  agentId          String
-  provider         String
-  cursor           String?
-  status           String    @default("IDLE")
-  lastStartedAt    DateTime?
-  lastCompletedAt  DateTime?
-  lastError        String?
-  importedCount    Int       @default(0)
-  unmatchedCount   Int       @default(0)
-  catalogJson      String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  agent            Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  id              String    @id
+  agentId         String
+  provider        String
+  cursor          String?
+  status          String    @default("IDLE")
+  lastStartedAt   DateTime?
+  lastCompletedAt DateTime?
+  lastError       String?
+  importedCount   Int       @default(0)
+  unmatchedCount  Int       @default(0)
+  catalogJson     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@unique([agentId, provider])
   @@index([status, updatedAt])
 }
 
 model AppNotification {
-  id                   String    @id
-  dedupeKey            String    @unique
-  typeKey              String
-  title                String
-  body                 String
-  href                 String
-  resourceKind         String
-  resourceId           String
-  worktreeId           String?
-  highlightColor       String?
-  sidebarRequested     Boolean
-  browserRequested     Boolean
-  webPushRequested     Boolean
-  sidebarDismissedAt   DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  worktree             Worktree? @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  id                 String    @id
+  dedupeKey          String    @unique
+  typeKey            String
+  title              String
+  body               String
+  href               String
+  resourceKind       String
+  resourceId         String
+  worktreeId         String?
+  highlightColor     String?
+  sidebarRequested   Boolean
+  browserRequested   Boolean
+  webPushRequested   Boolean
+  sidebarDismissedAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  worktree           Worktree? @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([typeKey, createdAt])
@@ -697,12 +704,12 @@ model AppNotification {
 }
 
 model NotificationPreference {
-  typeKey           String   @id
-  sidebarEnabled    Boolean
-  browserEnabled    Boolean
-  webPushEnabled    Boolean
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  typeKey        String   @id
+  sidebarEnabled Boolean
+  browserEnabled Boolean
+  webPushEnabled Boolean
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model WebPushSettings {
@@ -1521,24 +1528,24 @@ model PushNotificationBatch {
 }
 
 model PushNotificationDelivery {
-  id                String                @id
+  id                String                   @id
   batchId           String
   registrationId    String?
   tokenHash         String?
   topic             String
   environment       String
-  status            String                @default("QUEUED")
+  status            String                   @default("QUEUED")
   apnsId            String?
   responseCode      Int?
   reason            String?
   responseTimestamp DateTime?
-  attempts          Int                   @default(0)
+  attempts          Int                      @default(0)
   durationMs        Int?
-  createdAt         DateTime              @default(now())
+  createdAt         DateTime                 @default(now())
   startedAt         DateTime?
   finishedAt        DateTime?
-  batch             PushNotificationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  registration      ApnsRegistration?     @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  batch             PushNotificationBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  registration      ApnsRegistration?        @relation(fields: [registrationId], references: [id], onDelete: SetNull)
   recipientSecret   ApnsPushRecipientSecret?
 
   @@index([batchId, status])
@@ -1805,11 +1812,11 @@ model GitHubSettings {
 }
 
 model GitHubAppSettings {
-  id                  String   @id
+  id                  String    @id
   appId               String
   installationId      String
-  apiBaseUrl          String   @default("https://api.github.com")
-  graphqlUrl          String   @default("https://api.github.com/graphql")
+  apiBaseUrl          String    @default("https://api.github.com")
+  graphqlUrl          String    @default("https://api.github.com/graphql")
   keyFingerprint      String
   appSlug             String
   accountLogin        String
@@ -1818,20 +1825,20 @@ model GitHubAppSettings {
   verifiedAt          DateTime
   webhookUrl          String?
   webhookConfiguredAt DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }
 
 model GitHubWebhookDelivery {
-  deliveryId          String    @id
-  event               String
-  action              String?
-  repositoryName      String?
-  workflowRunId       String?
-  outcome             String
-  error               String?
-  receivedAt          DateTime  @default(now())
-  processedAt         DateTime?
+  deliveryId     String    @id
+  event          String
+  action         String?
+  repositoryName String?
+  workflowRunId  String?
+  outcome        String
+  error          String?
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
 
   @@index([receivedAt])
   @@index([event, receivedAt])
@@ -1839,19 +1846,19 @@ model GitHubWebhookDelivery {
 }
 
 model GitHubWorkflowRunObservation {
-  id                       String             @id
-  codebaseRepositoryId     String
-  workflowRunId            String
-  runAttempt               Int
-  workflowId               String
-  status                   String
-  conclusion               String?
-  githubUpdatedAt          DateTime
-  source                   String
-  notifiedAt               DateTime?
-  firstObservedAt          DateTime           @default(now())
-  lastObservedAt           DateTime
-  codebaseRepository       CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
+  id                   String             @id
+  codebaseRepositoryId String
+  workflowRunId        String
+  runAttempt           Int
+  workflowId           String
+  status               String
+  conclusion           String?
+  githubUpdatedAt      DateTime
+  source               String
+  notifiedAt           DateTime?
+  firstObservedAt      DateTime           @default(now())
+  lastObservedAt       DateTime
+  codebaseRepository   CodebaseRepository @relation(fields: [codebaseRepositoryId], references: [id], onDelete: Cascade)
 
   @@unique([codebaseRepositoryId, workflowRunId, runAttempt])
   @@index([codebaseRepositoryId, lastObservedAt])
@@ -1902,20 +1909,20 @@ model Credential {
 }
 
 model GitHubAuditEvent {
-  id              String   @id
-  scopeId         String   @default("default")
-  actor           String
-  ipAddress       String?
-  operation       String
-  repositoryId    String?
-  checkSuiteId    String?
-  jobId           String?
-  githubRequestId String?
-  outcome         String
-  errorCode       String?
-  autoRetryRuleId String?
+  id                   String   @id
+  scopeId              String   @default("default")
+  actor                String
+  ipAddress            String?
+  operation            String
+  repositoryId         String?
+  checkSuiteId         String?
+  jobId                String?
+  githubRequestId      String?
+  outcome              String
+  errorCode            String?
+  autoRetryRuleId      String?
   autoRetryExecutionId String?
-  createdAt       DateTime @default(now())
+  createdAt            DateTime @default(now())
 
   @@index([operation, createdAt])
   @@index([repositoryId, createdAt])
@@ -1923,25 +1930,25 @@ model GitHubAuditEvent {
 }
 
 model GitHubAutoRetryRule {
-  id                       String                     @id
-  scope                    String
-  codebaseRepositoryId     String
-  repositoryGithubId       String?
-  worktreeId               String?
-  branch                   String?
-  pullRequestNumber        Int?
-  allWorkflows             Boolean                    @default(false)
-  mode                     String
-  retryLimit               Int?
-  failureStrategy          String                     @default("FAILED_JOBS")
-  status                   String                     @default("ACTIVE")
-  enabled                  Boolean                    @default(true)
-  lastError                String?
-  activatedAt              DateTime                   @default(now())
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  targets                  GitHubAutoRetryTarget[]
-  executions               GitHubAutoRetryExecution[]
+  id                   String                     @id
+  scope                String
+  codebaseRepositoryId String
+  repositoryGithubId   String?
+  worktreeId           String?
+  branch               String?
+  pullRequestNumber    Int?
+  allWorkflows         Boolean                    @default(false)
+  mode                 String
+  retryLimit           Int?
+  failureStrategy      String                     @default("FAILED_JOBS")
+  status               String                     @default("ACTIVE")
+  enabled              Boolean                    @default(true)
+  lastError            String?
+  activatedAt          DateTime                   @default(now())
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  targets              GitHubAutoRetryTarget[]
+  executions           GitHubAutoRetryExecution[]
 
   @@index([enabled, status, updatedAt])
   @@index([codebaseRepositoryId, scope])
@@ -1949,36 +1956,36 @@ model GitHubAutoRetryRule {
 }
 
 model GitHubAutoRetryTarget {
-  id            String                  @id
+  id            String              @id
   ruleId        String
   workflowId    String?
   workflowRunId String?
   jobName       String?
-  createdAt     DateTime                @default(now())
-  rule          GitHubAutoRetryRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  createdAt     DateTime            @default(now())
+  rule          GitHubAutoRetryRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
+  @@unique([ruleId, workflowId, workflowRunId, jobName])
   @@index([ruleId])
   @@index([workflowRunId])
-  @@unique([ruleId, workflowId, workflowRunId, jobName])
 }
 
 model GitHubAutoRetryExecution {
-  id                 String                  @id
+  id                 String              @id
   ruleId             String
   workflowRunId      String
   workflowId         String
   targetKey          String
-  status             String                  @default("WATCHING")
-  observedAttempt    Int                     @default(0)
-  automaticRetries   Int                     @default(0)
+  status             String              @default("WATCHING")
+  observedAttempt    Int                 @default(0)
+  automaticRetries   Int                 @default(0)
   pendingFromAttempt Int?
   lastStatus         String?
   lastError          String?
-  startedAt          DateTime                @default(now())
+  startedAt          DateTime            @default(now())
   finishedAt         DateTime?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  rule               GitHubAutoRetryRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  rule               GitHubAutoRetryRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@unique([ruleId, workflowRunId, targetKey])
   @@index([ruleId, status])
@@ -1997,4 +2004,254 @@ model GitHubRepository {
   updatedAt     DateTime @updatedAt
 
   @@index([nameWithOwner])
+}
+
+model Workflow {
+  id                  String            @id
+  name                String
+  description         String            @default("")
+  draftDefinitionJson String
+  draftSchemaVersion  Int               @default(1)
+  activeVersionId     String?           @unique
+  enabled             Boolean           @default(false)
+  overlapPolicy       String            @default("QUEUE")
+  maxConcurrentRuns   Int               @default(1)
+  archivedAt          DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  versions            WorkflowVersion[] @relation("WorkflowVersions")
+  activeVersion       WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs                WorkflowRun[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([enabled, activeVersionId])
+}
+
+model WorkflowVersion {
+  id             String            @id
+  workflowId     String
+  version        Int
+  name           String
+  description    String            @default("")
+  schemaVersion  Int               @default(1)
+  definitionJson String
+  contentHash    String
+  publishedAt    DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  workflow       Workflow          @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeFor      Workflow?         @relation("ActiveWorkflowVersion")
+  triggers       WorkflowTrigger[]
+  runs           WorkflowRun[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId, publishedAt])
+  @@index([contentHash])
+}
+
+model WorkflowTrigger {
+  id         String                 @id
+  versionId  String
+  nodeId     String
+  kind       String
+  configJson String
+  createdAt  DateTime               @default(now())
+  version    WorkflowVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  states     WorkflowTriggerState[]
+  runs       WorkflowRun[]
+
+  @@unique([versionId, nodeId])
+  @@index([kind, versionId])
+}
+
+model WorkflowTriggerState {
+  id              String          @id
+  triggerId       String
+  subjectKey      String
+  cursorJson      String?
+  lastMatched     Boolean         @default(false)
+  lastFiredAt     DateTime?
+  nextScheduledAt DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  trigger         WorkflowTrigger @relation(fields: [triggerId], references: [id], onDelete: Cascade)
+
+  @@unique([triggerId, subjectKey])
+  @@index([nextScheduledAt])
+}
+
+model WorkflowTriggerEvent {
+  id          String        @id
+  kind        String
+  subjectKey  String
+  dedupeKey   String        @unique
+  payloadJson String
+  status      String        @default("PENDING")
+  receivedAt  DateTime      @default(now())
+  processedAt DateTime?
+  error       String?
+  runs        WorkflowRun[]
+
+  @@index([status, receivedAt])
+  @@index([kind, subjectKey, receivedAt])
+}
+
+model WorkflowRun {
+  id                 String                    @id
+  displayNumber      Int                       @unique
+  workflowId         String
+  versionId          String
+  triggerId          String?
+  triggerEventId     String?
+  parentRunId        String?
+  idempotencyKey     String                    @unique
+  triggerKind        String
+  triggerSubjectKey  String
+  triggerPayloadJson String
+  status             String                    @default("QUEUED")
+  phase              String                    @default("QUEUED")
+  generation         Int                       @default(0)
+  sessionDataJson    String
+  sessionRevision    Int                       @default(0)
+  blockedReason      String?
+  error              String?
+  queuedAt           DateTime                  @default(now())
+  startedAt          DateTime?
+  pausedAt           DateTime?
+  finishedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  workflow           Workflow                  @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  version            WorkflowVersion           @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  trigger            WorkflowTrigger?          @relation(fields: [triggerId], references: [id], onDelete: SetNull)
+  triggerEvent       WorkflowTriggerEvent?     @relation(fields: [triggerEventId], references: [id], onDelete: SetNull)
+  parentRun          WorkflowRun?              @relation("WorkflowChildRuns", fields: [parentRunId], references: [id], onDelete: SetNull)
+  childRuns          WorkflowRun[]             @relation("WorkflowChildRuns")
+  attempts           WorkflowStepAttempt[]
+  waits              WorkflowWait[]
+  events             WorkflowRunEvent[]
+  resourceLinks      WorkflowRunResourceLink[]
+  leases             WorkflowResourceLease[]
+
+  @@index([workflowId, status, queuedAt])
+  @@index([versionId, createdAt])
+  @@index([triggerEventId])
+  @@index([parentRunId])
+}
+
+model WorkflowRunNumberSequence {
+  id        String   @id
+  nextValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model WorkflowStepAttempt {
+  id                String                    @id
+  runId             String
+  nodeId            String
+  kind              String
+  generation        Int                       @default(0)
+  iterationKey      String                    @default("")
+  attempt           Int                       @default(0)
+  status            String                    @default("PENDING")
+  phase             String                    @default("PENDING")
+  inputJson         String?
+  outputJson        String?
+  error             String?
+  requiredPathsJson String                    @default("[]")
+  providedPathsJson String                    @default("[]")
+  resourceLockKey   String?
+  idempotencyKey    String                    @unique
+  claimOwner        String?
+  claimExpiresAt    DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  supersededAt      DateTime?
+  replayedFromId    String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  run               WorkflowRun               @relation(fields: [runId], references: [id], onDelete: Cascade)
+  replayedFrom      WorkflowStepAttempt?      @relation("WorkflowAttemptReplays", fields: [replayedFromId], references: [id], onDelete: SetNull)
+  replays           WorkflowStepAttempt[]     @relation("WorkflowAttemptReplays")
+  waits             WorkflowWait[]
+  events            WorkflowRunEvent[]
+  resourceLinks     WorkflowRunResourceLink[]
+  leases            WorkflowResourceLease[]
+  questionBatches   RunQuestionBatch[]
+  checkpoints       RunCheckpoint[]
+
+  @@unique([runId, nodeId, generation, iterationKey, attempt])
+  @@index([runId, generation, status])
+  @@index([status, claimExpiresAt])
+  @@index([resourceLockKey, status])
+  @@index([replayedFromId])
+}
+
+model WorkflowWait {
+  id            String              @id
+  runId         String
+  attemptId     String
+  kind          String
+  status        String              @default("PENDING")
+  predicateJson String?
+  externalKey   String?
+  resumeAfter   DateTime?
+  timeoutAt     DateTime?
+  resultJson    String?
+  createdAt     DateTime            @default(now())
+  resolvedAt    DateTime?
+  updatedAt     DateTime            @updatedAt
+  run           WorkflowRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt       WorkflowStepAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([status, resumeAfter])
+  @@index([kind, externalKey, status])
+  @@index([runId, status])
+}
+
+model WorkflowRunEvent {
+  id         String               @id
+  runId      String
+  attemptId  String?
+  sequence   Int
+  type       String
+  message    String
+  detailJson String?
+  createdAt  DateTime             @default(now())
+  run        WorkflowRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt    WorkflowStepAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([runId, sequence])
+  @@index([runId, createdAt])
+  @@index([attemptId, createdAt])
+}
+
+model WorkflowRunResourceLink {
+  id           String               @id
+  runId        String
+  attemptId    String?
+  kind         String
+  resourceId   String
+  label        String?
+  url          String?
+  metadataJson String?
+  createdAt    DateTime             @default(now())
+  run          WorkflowRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt      WorkflowStepAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([attemptId, kind, resourceId])
+  @@index([kind, resourceId, createdAt])
+  @@index([runId, createdAt])
+}
+
+model WorkflowResourceLease {
+  key       String              @id
+  runId     String
+  attemptId String              @unique
+  expiresAt DateTime
+  createdAt DateTime            @default(now())
+  run       WorkflowRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempt   WorkflowStepAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([runId])
 }

@@ -33,6 +33,7 @@ import {
   TicketCheck,
   Terminal,
   TimerReset,
+  Waypoints,
   Wrench,
   X,
 } from "lucide-react";
@@ -316,6 +317,22 @@ function NavigationSidebar() {
                   >
                     <Hammer />
                     <span>{t("builds")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/workflows")}
+                >
+                  <Link
+                    href="/workflows"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Waypoints />
+                    <span>{t("workflows")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

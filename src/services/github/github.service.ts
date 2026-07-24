@@ -3820,6 +3820,173 @@ export class GitHubService {
     return pullRequest;
   }
 
+  async createPullRequest(input: {
+    owner: string;
+    name: string;
+    baseRefName: string;
+    headRefName: string;
+    title: string;
+    body?: string | null;
+    draft?: boolean | null;
+  }): Promise<GitHubPullRequestDetail> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const baseRefName = input.baseRefName.trim();
+    const headRefName = input.headRefName.trim();
+    const title = input.title.trim();
+    if (!baseRefName || !headRefName || !title) {
+      throw new Error("Base branch, head branch, and title are required");
+    }
+    const credentials = await this.requireAppCredentials();
+    const repository = await githubAppGraphql<{
+      repository: {
+        id: string;
+        base: { id: string } | null;
+        head: { id: string } | null;
+      } | null;
+    }>(
+      credentials,
+      `query WorkflowCreatePullRequestRepository(
+        $owner: String!
+        $name: String!
+        $base: String!
+        $head: String!
+      ) {
+        repository(owner: $owner, name: $name) {
+          id
+          base: ref(qualifiedName: $base) { id }
+          head: ref(qualifiedName: $head) { id }
+        }
+      }`,
+      {
+        owner,
+        name,
+        base: `refs/heads/${baseRefName}`,
+        head: `refs/heads/${headRefName}`,
+      },
+    );
+    if (!repository.data.repository)
+      throw new Error("GitHub repository was not found");
+    if (!repository.data.repository.base)
+      throw new Error("Pull request base branch was not found on GitHub");
+    if (!repository.data.repository.head) {
+      throw new Error("Push the workflow branch before opening a pull request");
+    }
+    const created = await githubAppGraphql<{
+      createPullRequest: {
+        pullRequest: { number: number } | null;
+      };
+    }>(
+      credentials,
+      `mutation WorkflowCreatePullRequest(
+        $repositoryId: ID!
+        $baseRefName: String!
+        $headRefName: String!
+        $title: String!
+        $body: String
+        $draft: Boolean
+      ) {
+        createPullRequest(input: {
+          repositoryId: $repositoryId
+          baseRefName: $baseRefName
+          headRefName: $headRefName
+          title: $title
+          body: $body
+          draft: $draft
+        }) { pullRequest { number } }
+      }`,
+      {
+        repositoryId: repository.data.repository.id,
+        baseRefName,
+        headRefName,
+        title,
+        body: input.body ?? "",
+        draft: Boolean(input.draft),
+      },
+    );
+    const number = created.data.createPullRequest.pullRequest?.number;
+    if (!number) throw new Error("GitHub did not return the new pull request");
+    const detail = await this.pullRequest(owner, name, number);
+    if (!detail) throw new Error("The new pull request could not be loaded");
+    return detail;
+  }
+
+  async setPullRequestLabels(input: {
+    owner: string;
+    name: string;
+    number: number;
+    labels: string[];
+  }): Promise<GitHubPullRequestDetail> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const labels = [
+      ...new Set(input.labels.map((label) => label.trim()).filter(Boolean)),
+    ];
+    const credentials = await this.requireAppCredentials();
+    const loaded = await githubAppGraphql<{
+      repository: {
+        pullRequest: {
+          id: string;
+          labels: { nodes: Array<{ id: string; name: string }> };
+        } | null;
+        labels: { nodes: Array<{ id: string; name: string }> };
+      } | null;
+    }>(
+      credentials,
+      `query WorkflowPullRequestLabels($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) { id labels(first: 100) { nodes { id name } } }
+          labels(first: 100) { nodes { id name } }
+        }
+      }`,
+      { owner, name, number: input.number },
+    );
+    const pullRequest = loaded.data.repository?.pullRequest;
+    if (!pullRequest) throw new Error("Pull request was not found");
+    const available = new Map(
+      (loaded.data.repository?.labels.nodes ?? []).map((label) => [
+        label.name,
+        label.id,
+      ]),
+    );
+    const missing = labels.filter((label) => !available.has(label));
+    if (missing.length)
+      throw new Error(`GitHub labels do not exist: ${missing.join(", ")}`);
+    const current = new Map(
+      pullRequest.labels.nodes.map((label) => [label.name, label.id]),
+    );
+    const add = labels
+      .filter((label) => !current.has(label))
+      .map((label) => available.get(label)!);
+    const remove = [...current]
+      .filter(([label]) => !labels.includes(label))
+      .map(([, id]) => id);
+    if (add.length) {
+      await githubAppGraphql(
+        credentials,
+        `mutation WorkflowAddPullRequestLabels($id: ID!, $labelIds: [ID!]!) {
+          addLabelsToLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId }
+        }`,
+        { id: pullRequest.id, labelIds: add },
+      );
+    }
+    if (remove.length) {
+      await githubAppGraphql(
+        credentials,
+        `mutation WorkflowRemovePullRequestLabels($id: ID!, $labelIds: [ID!]!) {
+          removeLabelsFromLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId }
+        }`,
+        { id: pullRequest.id, labelIds: remove },
+      );
+    }
+    const detail = await this.pullRequest(owner, name, input.number);
+    if (!detail)
+      throw new Error("The updated pull request could not be loaded");
+    return detail;
+  }
+
   async replyToReviewThread(
     threadId: string,
     body: string,

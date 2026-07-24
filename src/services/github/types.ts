@@ -64,7 +64,7 @@ export type GitHubAppSettingsView = {
 };
 
 export type GitHubAuditContext = {
-  actor: "control-plane" | "auto-retry";
+  actor: "control-plane" | "auto-retry" | "workflow";
   ipAddress: string | null;
   autoRetryRuleId?: string | null;
   autoRetryExecutionId?: string | null;

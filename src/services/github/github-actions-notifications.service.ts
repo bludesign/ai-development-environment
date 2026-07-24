@@ -10,6 +10,7 @@ import type {
   NotificationsService,
 } from "@/services/notifications";
 import type { PollingService } from "@/services/polling";
+import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 const OPERATION_ID = "server:github-actions-notifications";
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -90,6 +91,7 @@ export class GitHubActionsNotificationsService {
     private readonly notifications: NotificationsService,
     private readonly polling: PollingService,
     startPolling = true,
+    private readonly workflowEvents?: WorkflowEventsService,
   ) {
     this.polling.register({
       id: OPERATION_ID,
@@ -100,6 +102,156 @@ export class GitHubActionsNotificationsService {
       details: { mode: "DISABLED" },
     });
     if (startPolling) queueMicrotask(() => void this.tick());
+  }
+
+  private async recordWorkflowRunEvent(
+    target: RepositoryTarget,
+    run: WorkflowRun,
+  ): Promise<void> {
+    if (!this.workflowEvents || run.status !== "completed") return;
+    const sessionData = {
+      repo: { id: target.id, displayOrigin: target.name },
+      pipeline: {
+        runId: run.id,
+        workflowId: run.workflowId,
+        status: run.status,
+        conclusion: run.conclusion,
+        headBranch: run.headBranch,
+        url: run.url,
+      },
+    };
+    const extras = {
+      cursorValue: `${run.id}:${run.runAttempt}:${run.conclusion ?? "none"}`,
+    };
+    await this.workflowEvents.record({
+      kind: "GITHUB_ACTIONS_RESULT",
+      subjectKey: target.id,
+      dedupeKey: `github-actions-trigger:${target.id}:${run.id}:${run.runAttempt}`,
+      payload: { ...sessionData, ...extras, sessionData },
+    });
+    const secondary =
+      run.conclusion === "success"
+        ? "GITHUB_WORKFLOW_SUCCEEDED"
+        : run.conclusion && FAILURE_CONCLUSIONS.has(run.conclusion)
+          ? "GITHUB_CHECK_FAILED"
+          : null;
+    if (secondary) {
+      await this.workflowEvents.record({
+        kind: secondary,
+        subjectKey: target.id,
+        dedupeKey: `github-workflow-trigger:${secondary}:${target.id}:${run.id}:${run.runAttempt}`,
+        payload: { ...sessionData, ...extras, sessionData },
+      });
+    }
+  }
+
+  private async recordWebhookTrigger(
+    target: RepositoryTarget,
+    event: string,
+    action: string | null,
+    deliveryId: string,
+    payload: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (!this.workflowEvents) return false;
+    const repository = (payload.repository ?? {}) as Record<string, unknown>;
+    const pullRequest = (payload.pull_request ?? {}) as Record<string, unknown>;
+    const review = (payload.review ?? {}) as Record<string, unknown>;
+    const comment = (payload.comment ?? {}) as Record<string, unknown>;
+    const check = (payload.check_run ?? payload.check_suite ?? {}) as Record<
+      string,
+      unknown
+    >;
+    let kind: string | null = null;
+    if (
+      event === "pull_request" &&
+      new Set(["opened", "reopened", "ready_for_review"]).has(action ?? "")
+    ) {
+      kind = "GITHUB_PR_STATE";
+    } else if (event === "pull_request" && action === "closed") {
+      kind = "GITHUB_PR_CLOSED";
+    } else if (event === "pull_request" && action === "labeled") {
+      kind = "GITHUB_PR_LABEL";
+    } else if (
+      event === "pull_request_review" &&
+      action === "submitted" &&
+      text(review.state)?.toLowerCase() === "changes_requested"
+    ) {
+      kind = "GITHUB_REVIEW_CHANGES_REQUESTED";
+    } else if (
+      event === "pull_request_review_comment" &&
+      action === "created"
+    ) {
+      kind = "GITHUB_REVIEW_COMMENT";
+    } else if (
+      (event === "check_run" || event === "check_suite") &&
+      FAILURE_CONCLUSIONS.has(text(check.conclusion)?.toLowerCase() ?? "")
+    ) {
+      kind = "GITHUB_CHECK_FAILED";
+    } else if (
+      event === "push" &&
+      text(payload.ref) === `refs/heads/${text(repository.default_branch)}`
+    ) {
+      kind = "GITHUB_PUSH_DEFAULT";
+    } else if (event === "issue_comment" && action === "created") {
+      kind = "GITHUB_ISSUE_COMMAND";
+    }
+    if (!kind) return false;
+    const user = (comment.user ?? {}) as Record<string, unknown>;
+    const labels = Array.isArray(pullRequest.labels)
+      ? pullRequest.labels.flatMap((value) => {
+          const name =
+            value && typeof value === "object"
+              ? text((value as Record<string, unknown>).name)
+              : null;
+          return name ? [name] : [];
+        })
+      : [];
+    const sessionData = {
+      repo: {
+        id: target.id,
+        displayOrigin: text(repository.full_name) ?? target.name,
+        defaultBranch: text(repository.default_branch),
+      },
+      pr: {
+        number:
+          positiveInteger(pullRequest.number) ??
+          positiveInteger(
+            (payload.issue as Record<string, unknown> | undefined)?.number,
+          ),
+        url: text(pullRequest.html_url),
+        state: text(pullRequest.state)?.toUpperCase() ?? null,
+        merged: pullRequest.merged === true,
+        labels,
+        reviewDecision: text(review.state)?.toUpperCase() ?? null,
+      },
+      pipeline: {
+        checkSuiteId: positiveInteger(check.id)?.toString() ?? null,
+        status: text(check.status),
+        conclusion: text(check.conclusion),
+      },
+      comment: {
+        id: positiveInteger(comment.id)?.toString() ?? null,
+        body: text(comment.body) ?? "",
+        author: { login: text(user.login) },
+      },
+      push: {
+        ref: text(payload.ref),
+        before: text(payload.before),
+        after: text(payload.after),
+      },
+    };
+    await this.workflowEvents.record({
+      kind,
+      subjectKey: target.id,
+      dedupeKey: `github-webhook-trigger:${deliveryId}:${kind}`,
+      payload: {
+        ...sessionData,
+        sessionData,
+        cursorValue: `${deliveryId}:${kind}`,
+        webhook: { event, action, deliveryId },
+      },
+    });
+    return true;
   }
 
   private schedule(seconds: number): void {
@@ -441,6 +593,9 @@ export class GitHubActionsNotificationsService {
       notifications.forEach((notification) =>
         this.notifications.created(notification),
       );
+      await Promise.allSettled(
+        runs.map((run) => this.recordWorkflowRunEvent(target, run)),
+      );
       return notifications.length;
     } catch (error) {
       await prisma.gitHubActionsPollingState.update({
@@ -583,8 +738,42 @@ export class GitHubActionsNotificationsService {
         },
       });
       if (input.event !== "workflow_run" || action !== "completed") {
-        await finish("IGNORED");
-        return { outcome: "IGNORED", notificationCreated: false };
+        const app = await prisma.gitHubAppSettings.findUnique({
+          where: { id: "default" },
+        });
+        const installation = payload.installation as
+          Record<string, unknown> | undefined;
+        if (
+          !app ||
+          String(positiveInteger(installation?.id) ?? "") !== app.installationId
+        ) {
+          await finish("IGNORED", "Installation does not match configured App");
+          return { outcome: "IGNORED", notificationCreated: false };
+        }
+        const fullName = text(repository?.full_name);
+        const target = fullName
+          ? (await this.repositories()).find(
+              (candidate) =>
+                `${candidate.owner}/${candidate.repository}`.toLowerCase() ===
+                fullName.toLowerCase(),
+            )
+          : null;
+        if (!target) {
+          await finish("IGNORED", "Repository is not registered");
+          return { outcome: "IGNORED", notificationCreated: false };
+        }
+        const recorded = await this.recordWebhookTrigger(
+          target,
+          input.event ?? "unknown",
+          action,
+          deliveryId,
+          payload,
+        );
+        await finish(recorded ? "PROCESSED" : "IGNORED");
+        return {
+          outcome: recorded ? "PROCESSED" : "IGNORED",
+          notificationCreated: false,
+        };
       }
       const app = await prisma.gitHubAppSettings.findUnique({
         where: { id: "default" },
@@ -643,6 +832,7 @@ export class GitHubActionsNotificationsService {
         );
       });
       this.notifications.created(notification);
+      await this.recordWorkflowRunEvent(target, run);
       await finish("PROCESSED");
       this.polling.configure(OPERATION_ID, {
         enabled: false,

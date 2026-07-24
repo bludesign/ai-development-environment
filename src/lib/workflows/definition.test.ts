@@ -1,0 +1,220 @@
+import { describe, expect, test } from "vitest";
+
+import {
+  emptyWorkflowDefinition,
+  sanitizeWorkflowExportDefinition,
+  validateWorkflowDefinition,
+  type WorkflowDefinition,
+  type WorkflowNodeDefinition,
+} from "./definition";
+
+function node(
+  id: string,
+  kind: WorkflowNodeDefinition["kind"] = "JIRA_LOAD_TICKET",
+): WorkflowNodeDefinition {
+  return {
+    id,
+    kind,
+    name: id,
+    position: { x: 200, y: 100 },
+    config: {},
+    requiredPaths: [],
+    providedPaths: [],
+    retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+    failurePolicy: "FAIL",
+  };
+}
+
+function definition(nodes: WorkflowNodeDefinition[]): WorkflowDefinition {
+  const value = emptyWorkflowDefinition("Test");
+  return {
+    ...value,
+    nodes,
+    edges: nodes.length
+      ? [
+          {
+            id: "edge-start",
+            source: "manual",
+            target: nodes[0]!.id,
+            sourceHandle: "success",
+            targetHandle: "input",
+          },
+        ]
+      : [],
+  };
+}
+
+describe("workflow definition validation", () => {
+  test("accepts a connected versioned DAG", () => {
+    const result = validateWorkflowDefinition(definition([node("load")]));
+    expect(result.definition?.format).toBe("aide.workflow");
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("rejects schema versions the runtime does not understand", () => {
+    const value = { ...definition([node("load")]), schemaVersion: 2 };
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "SCHEMA_INVALID", severity: "ERROR" }),
+      ]),
+    );
+  });
+
+  test("rejects cycles and unreachable nodes", () => {
+    const value = definition([node("first"), node("second")]);
+    value.edges.push(
+      {
+        id: "first-second",
+        source: "first",
+        target: "second",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "second-first",
+        source: "second",
+        target: "first",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    );
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "DAG_CYCLE" })]),
+    );
+
+    const unreachable = definition([node("reachable"), node("orphan")]);
+    expect(validateWorkflowDefinition(unreachable).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "UNREACHABLE_STEP", nodeId: "orphan" }),
+      ]),
+    );
+  });
+
+  test("requires explicit joins and propagated session requirements", () => {
+    const value = definition([
+      node("left"),
+      node("right"),
+      node("merge", "JIRA_TRANSITION"),
+    ]);
+    value.edges.push(
+      {
+        id: "start-right",
+        source: "manual",
+        target: "right",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "left-merge",
+        source: "left",
+        target: "merge",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "right-merge",
+        source: "right",
+        target: "merge",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    );
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "EXPLICIT_JOIN_REQUIRED",
+          nodeId: "merge",
+        }),
+      ]),
+    );
+
+    const missing = definition([node("transition", "JIRA_TRANSITION")]);
+    expect(validateWorkflowDefinition(missing).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "REQUIREMENT_UNSATISFIED",
+          path: "ticket.key",
+        }),
+      ]),
+    );
+  });
+
+  test("rejects unordered writes, literal secrets, and unresolved imports", () => {
+    const value = definition([node("left"), node("right")]);
+    value.edges.push({
+      id: "start-right",
+      source: "manual",
+      target: "right",
+      sourceHandle: "success",
+      targetHandle: "input",
+    });
+    value.nodes[0]!.config = { apiToken: "plaintext" };
+    value.nodes[1]!.config = {
+      repository: { referenceStatus: "UNRESOLVED" },
+    };
+    const diagnostics = validateWorkflowDefinition(value).diagnostics;
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "PARALLEL_WRITE_CONFLICT" }),
+        expect.objectContaining({ code: "SECRET_LITERAL", nodeId: "left" }),
+        expect.objectContaining({
+          code: "UNRESOLVED_REFERENCE",
+          nodeId: "right",
+        }),
+      ]),
+    );
+  });
+
+  test("requires pinned sub-workflows and secured issue commands", () => {
+    const value = definition([node("child", "CONTROL_SUBWORKFLOW")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "GITHUB_ISSUE_COMMAND",
+      config: { commandPattern: "/fix" },
+    };
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "SUBWORKFLOW_VERSION_REQUIRED" }),
+        expect.objectContaining({ code: "ISSUE_COMMAND_ALLOWLIST_REQUIRED" }),
+        expect.objectContaining({ code: "ISSUE_COMMAND_PATTERN_ANCHORED" }),
+      ]),
+    );
+  });
+
+  test("validates interpolated session paths and propagates requirements", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.nodes[0]!.config = {
+      body: "Ticket {{ticket.key}}",
+      malformed: "{{ ticket key }}",
+    };
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SESSION_BINDING_INVALID",
+          nodeId: "notify",
+        }),
+        expect.objectContaining({
+          code: "REQUIREMENT_UNSATISFIED",
+          nodeId: "notify",
+          path: "ticket.key",
+        }),
+      ]),
+    );
+  });
+
+  test("strips secret literals and machine paths from exports", () => {
+    const value = definition([node("terminal", "TERMINAL_RUN")]);
+    value.nodes[0]!.config = {
+      apiToken: "secret-value",
+      credentialId: "credential-1",
+      cwd: "/Users/dev/worktree",
+      sessionPath: "ticket.key",
+    };
+    expect(sanitizeWorkflowExportDefinition(value).nodes[0]!.config).toEqual({
+      apiToken: null,
+      credentialId: "credential-1",
+      cwd: null,
+      sessionPath: "ticket.key",
+    });
+  });
+});

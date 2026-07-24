@@ -1,4 +1,5 @@
 import { WorktreeDetailPage } from "@/components/worktrees/worktree-detail-page";
+import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
 
 export default async function WorktreeDetailRoute({
   params,
@@ -6,5 +7,14 @@ export default async function WorktreeDetailRoute({
   params: Promise<{ locale: string; worktreeId: string }>;
 }) {
   const { worktreeId } = await params;
-  return <WorktreeDetailPage key={worktreeId} worktreeId={worktreeId} />;
+  return (
+    <div className="space-y-6">
+      <WorktreeDetailPage worktreeId={worktreeId} />
+      <WorkflowResourcePanel
+        resourceId={worktreeId}
+        resourceKind="WORKTREE"
+        sessionData={{ worktree: { id: worktreeId } }}
+      />
+    </div>
+  );
 }

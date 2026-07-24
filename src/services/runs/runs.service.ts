@@ -1244,7 +1244,11 @@ export class RunsService {
         where: { id: batchId },
         include: { run: true, answerRevisions: true },
       });
-      if (!batch?.run.agentId || batch.run.origin !== "MANAGED") {
+      if (
+        !batch?.runId ||
+        !batch.run?.agentId ||
+        batch.run.origin !== "MANAGED"
+      ) {
         throw new Error("Question batch not found");
       }
       if (batch.status !== "PENDING")
@@ -1280,14 +1284,19 @@ export class RunsService {
         type: "ANSWER",
         payload: { batchId, nativeRequestId: batch.nativeRequestId, answers },
       });
-      return { batch, command };
+      return {
+        batch,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
-    agentEventBus.publish(runQuestionTopic(result.batch.runId), {
-      runQuestionChanged: { id: batchId, runId: result.batch.runId },
+    publishRun(result.sourceRunId);
+    agentEventBus.publish(runQuestionTopic(result.sourceRunId), {
+      runQuestionChanged: { id: batchId, runId: result.sourceRunId },
     });
-    publishCommand(result.command, result.batch.run.agentId!);
-    return this.get(result.batch.runId);
+    publishCommand(result.command, result.sourceAgentId);
+    return this.get(result.sourceRunId);
   }
 
   async prepareAnswerRevision(batchId: string) {
@@ -1298,7 +1307,8 @@ export class RunsService {
         include: { run: true, checkpoint: true },
       });
       if (
-        !batch?.run.agentId ||
+        !batch?.runId ||
+        !batch.run?.agentId ||
         !batch.run.worktreeId ||
         batch.run.origin !== "MANAGED" ||
         batch.status !== "ANSWERED" ||
@@ -1340,11 +1350,16 @@ export class RunsService {
         type: "PREPARE_ANSWER_REVISION",
         payload: { batchId, checkpoint: batch.checkpoint },
       });
-      return { batch, command };
+      return {
+        batch,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
-    publishCommand(result.command, result.batch.run.agentId!);
-    return this.get(result.batch.runId);
+    publishRun(result.sourceRunId);
+    publishCommand(result.command, result.sourceAgentId);
+    return this.get(result.sourceRunId);
   }
 
   async reviseAnswer(
@@ -1370,7 +1385,8 @@ export class RunsService {
         },
       });
       if (
-        !batch?.run.agentId ||
+        !batch?.runId ||
+        !batch.run?.agentId ||
         !batch.run.worktreeId ||
         batch.run.origin !== "MANAGED" ||
         batch.status !== "ANSWERED" ||
@@ -1488,11 +1504,17 @@ export class RunsService {
           checkpoint: batch.checkpoint,
         },
       });
-      return { batch, run, command };
+      return {
+        batch,
+        run,
+        command,
+        sourceRunId: batch.runId,
+        sourceAgentId: batch.run.agentId,
+      };
     });
-    publishRun(result.batch.runId);
+    publishRun(result.sourceRunId);
     publishRun(result.run.id);
-    publishCommand(result.command, result.batch.run.agentId!);
+    publishCommand(result.command, result.sourceAgentId);
     return this.get(result.run.id);
   }
 
@@ -2102,7 +2124,8 @@ export class RunsService {
       include: { run: true },
     });
     if (
-      !batch ||
+      !batch?.runId ||
+      !batch.run ||
       batch.run.agentId !== agentId ||
       batch.run.origin !== "MANAGED"
     ) {
@@ -2155,7 +2178,8 @@ export class RunsService {
         where: { id: revisionId },
       });
       if (
-        !batch ||
+        !batch?.runId ||
+        !batch.run ||
         batch.run.agentId !== agentId ||
         !batch.attempt ||
         !replacement ||

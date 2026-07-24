@@ -44,8 +44,13 @@ import {
   SKILL_SCAN_JOB_KIND,
 } from "@ai-development-environment/agent-contract/skills";
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
+import {
+  WORKFLOW_GIT_CHECKPOINT_JOB_KIND,
+  WORKFLOW_TERMINAL_JOB_KIND,
+} from "@ai-development-environment/agent-contract/workflows";
 import { applySkills, readSkills, scanSkills } from "./skills.js";
 import { readRunSession } from "./runs.js";
+import { runWorkflowGitCheckpoint, runWorkflowTerminal } from "./workflows.js";
 import {
   inspectWorktree,
   inspectWorktreeDiff,
@@ -133,6 +138,9 @@ export type AgentJobHandlerContext = {
     p12Base64: string;
     passphrase: string;
   }>;
+  claimWorkflowJobSecrets?: () => Promise<
+    Array<{ name: string; value: string }>
+  >;
 };
 
 export type AgentJobHandler = (
@@ -168,6 +176,8 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [SKILL_READ_JOB_KIND]: readSkills,
   [SKILL_APPLY_JOB_KIND]: applySkills,
   [RUN_SESSION_READ_JOB_KIND]: readRunSession,
+  [WORKFLOW_TERMINAL_JOB_KIND]: runWorkflowTerminal,
+  [WORKFLOW_GIT_CHECKPOINT_JOB_KIND]: runWorkflowGitCheckpoint,
   [IOS_SOURCE_DISCOVER_JOB_KIND]: discoverBuildSources,
   [IOS_SOURCE_PARSE_JOB_KIND]: parseBuildSourceMetadata,
   [IOS_DESTINATIONS_JOB_KIND]: inspectBuildDestinations,
