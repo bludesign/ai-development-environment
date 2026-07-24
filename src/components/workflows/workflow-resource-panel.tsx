@@ -7,7 +7,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Item,
   ItemActions,
@@ -16,7 +23,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import { Link, useRouter } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -51,9 +58,9 @@ export function WorkflowResourcePanel({
   sessionData: Record<string, unknown>;
 }) {
   const t = useTranslations("workflows");
-  const router = useRouter();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [workflows, setWorkflows] = useState<AcceptedWorkflow[]>([]);
+  const [triggering, setTriggering] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -99,10 +106,9 @@ export function WorkflowResourcePanel({
   }, [load]);
 
   const trigger = async (workflowId: string) => {
+    setTriggering(workflowId);
     try {
-      const data = await controlPlaneRequest<{
-        triggerWorkflow: { id: string };
-      }>(
+      await controlPlaneRequest<{ triggerWorkflow: { id: string } }>(
         `mutation TriggerResourceWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
         {
           input: {
@@ -114,9 +120,12 @@ export function WorkflowResourcePanel({
           },
         },
       );
-      router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
+      // Stay on the resource page: the run shows up in this card's graph below.
+      await load();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setTriggering(null);
     }
   };
 
@@ -124,16 +133,14 @@ export function WorkflowResourcePanel({
   const current = runs[0];
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div>
-          <CardTitle>{t("resourceWorkflows")}</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("resourceWorkflowsDescription")}
-          </p>
-        </div>
-        <Button asChild size="sm" variant="outline">
-          <Link href="/workflows">{t("manageWorkflows")}</Link>
-        </Button>
+      <CardHeader>
+        <CardTitle>{t("resourceWorkflows")}</CardTitle>
+        <CardDescription>{t("resourceWorkflowsDescription")}</CardDescription>
+        <CardAction>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/workflows">{t("manageWorkflows")}</Link>
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
@@ -153,7 +160,7 @@ export function WorkflowResourcePanel({
                 </ItemContent>
                 <ItemActions>
                   <Button
-                    disabled={!workflow.enabled}
+                    disabled={!workflow.enabled || triggering !== null}
                     onClick={() => void trigger(workflow.id)}
                     size="sm"
                     variant="outline"
