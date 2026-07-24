@@ -125,6 +125,7 @@
     "idempotencyWarning": "Este paso cambia estado externo. Configura una estrategia de idempotencia y no reintentes a ciegas un resultado incierto.",
     "duplicateNode": "Duplicar paso",
     "deleteNode": "Eliminar nodo",
+    "deleteConnection": "Eliminar conexión",
     "configuration": "Configuración",
     "advancedJson": "Avanzado (JSON sin formato)",
     "advancedJsonHelp": "Edita como JSON los campos sin control de formulario.",

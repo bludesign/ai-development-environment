@@ -125,6 +125,7 @@
     "idempotencyWarning": "This step changes external state. Configure an idempotency strategy and do not retry an uncertain result blindly.",
     "duplicateNode": "Duplicate step",
     "deleteNode": "Delete node",
+    "deleteConnection": "Delete connection",
     "configuration": "Configuration",
     "advancedJson": "Advanced (raw JSON)",
     "advancedJsonHelp": "Edit fields without a form control as raw JSON.",

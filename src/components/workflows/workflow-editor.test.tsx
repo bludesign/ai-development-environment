@@ -28,14 +28,24 @@ vi.mock("@xyflow/react", async () => {
     MiniMap: () => null,
     ReactFlow: ({
       children,
+      onEdgeClick,
       onEdgesChange,
     }: {
       children: React.ReactNode;
+      onEdgeClick: (event: unknown, edge: { id: string }) => void;
       onEdgesChange: (changes: { id: string; type: "remove" }[]) => void;
     }) =>
       React.createElement(
         "div",
         null,
+        React.createElement(
+          "button",
+          {
+            onClick: () => onEdgeClick({}, { id: "trigger-to-session" }),
+            type: "button",
+          },
+          "Select test edge",
+        ),
         React.createElement(
           "button",
           {
@@ -86,7 +96,7 @@ describe("workflow editor edge deletion", () => {
     global.ResizeObserver = ResizeObserverMock;
   });
 
-  test("removes a deleted canvas edge from the saved draft definition", async () => {
+  test("offers a touch-friendly delete action that persists to the draft", async () => {
     const definition = emptyDefinition("Edge deletion");
     definition.nodes.push({
       id: "session",
@@ -151,8 +161,9 @@ describe("workflow editor edge deletion", () => {
     );
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Remove test edge" }),
+      await screen.findByRole("button", { name: "Select test edge" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
     await waitFor(() =>

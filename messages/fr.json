@@ -125,6 +125,7 @@
     "idempotencyWarning": "Cette étape modifie un état externe. Configurez l’idempotence et ne relancez jamais aveuglément un résultat incertain.",
     "duplicateNode": "Dupliquer l’étape",
     "deleteNode": "Supprimer le nœud",
+    "deleteConnection": "Supprimer la connexion",
     "configuration": "Configuration",
     "advancedJson": "Avancé (JSON brut)",
     "advancedJsonHelp": "Modifiez en JSON brut les champs sans contrôle de formulaire.",

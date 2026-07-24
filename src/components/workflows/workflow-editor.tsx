@@ -249,6 +249,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     Edge
   > | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteView, setPaletteView] = useState<"palette" | "outline">(
     "palette",
@@ -505,8 +506,26 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         ...current,
         edges: current.edges.filter(({ id }) => !removedIds.has(id)),
       }));
+      setSelectedEdgeId((current) =>
+        current && removedIds.has(current) ? null : current,
+      );
     },
     [onEdgesChange],
+  );
+
+  const removeEdges = useCallback(
+    (ids: string[]) => {
+      const removedIds = new Set(ids);
+      setEdges((current) => current.filter(({ id }) => !removedIds.has(id)));
+      setDefinition((current) => ({
+        ...current,
+        edges: current.edges.filter(({ id }) => !removedIds.has(id)),
+      }));
+      setSelectedEdgeId((current) =>
+        current && removedIds.has(current) ? null : current,
+      );
+    },
+    [setEdges],
   );
 
   const save = async (): Promise<boolean> => {
@@ -1009,7 +1028,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
         <div className="min-w-0 space-y-3">
           <div
-            className="h-[min(78vh,860px)] min-h-[520px] overflow-hidden rounded-xl border bg-muted/20"
+            className="relative h-[min(78vh,860px)] min-h-[520px] overflow-hidden rounded-xl border bg-muted/20"
             onDragOver={(event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = "copy";
@@ -1033,6 +1052,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             }}
             ref={wrapperRef}
           >
+            {selectedEdgeId && (
+              <Button
+                className="absolute top-3 right-3 z-10 shadow-md"
+                onClick={() => removeEdges([selectedEdgeId])}
+                size="sm"
+                variant="destructive"
+              >
+                <Trash2 /> {t("deleteConnection")}
+              </Button>
+            )}
             <ReactFlow
               colorMode="system"
               deleteKeyCode={["Backspace", "Delete"]}
@@ -1041,11 +1070,18 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               nodeTypes={workflowNodeTypes}
               nodes={nodes}
               onConnect={onConnect}
+              onEdgeClick={(_event, edge) => {
+                setSelectedId(null);
+                setSelectedEdgeId(edge.id);
+              }}
               onEdgesChange={handleEdgesChange}
               onInit={(value) =>
                 setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
               }
-              onNodeClick={(_event, node) => setSelectedId(node.id)}
+              onNodeClick={(_event, node) => {
+                setSelectedEdgeId(null);
+                setSelectedId(node.id);
+              }}
               onNodeDragStop={(_event, node) => {
                 setDefinition((current) => ({
                   ...current,
@@ -1065,6 +1101,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               onNodesDelete={(removed) =>
                 removeItems(removed.map(({ id }) => id))
               }
+              onPaneClick={() => setSelectedEdgeId(null)}
               proOptions={{ hideAttribution: true }}
             >
               <Background gap={20} size={1} />

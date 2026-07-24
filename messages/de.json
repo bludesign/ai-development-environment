@@ -125,6 +125,7 @@
     "idempotencyWarning": "Dieser Schritt ändert externen Zustand. Eine Idempotenzstrategie konfigurieren und ungewisse Ergebnisse nicht blind wiederholen.",
     "duplicateNode": "Schritt duplizieren",
     "deleteNode": "Knoten löschen",
+    "deleteConnection": "Verbindung löschen",
     "configuration": "Konfiguration",
     "advancedJson": "Erweitert (Roh-JSON)",
     "advancedJsonHelp": "Felder ohne Formularsteuerung als Roh-JSON bearbeiten.",
