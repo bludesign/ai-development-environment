@@ -194,6 +194,7 @@ export function ModelEffortPicker({
   onModelChange,
   onEffortChange,
   isProviderDisabled,
+  fullWidth,
 }: {
   catalog: ProviderCatalogEntry[];
   provider: string;
@@ -203,6 +204,12 @@ export function ModelEffortPicker({
   onModelChange: (value: string) => void;
   onEffortChange: (value: string) => void;
   isProviderDisabled?: (entry: ProviderCatalogEntry) => boolean;
+  /**
+   * Drop the preset rail and let the trigger pill fill its container. For
+   * full-width forms where a fixed-width pill with chips beside it would not
+   * match the surrounding fields.
+   */
+  fullWidth?: boolean;
 }) {
   const t = useTranslations("runs");
   const { rail, pinned, recent, isPinned, togglePin, remember } =
@@ -308,7 +315,13 @@ export function ModelEffortPicker({
   );
 
   return (
-    <div className="flex items-center gap-2 overflow-hidden" ref={railRef}>
+    <div
+      className={cn(
+        "flex items-center gap-2 overflow-hidden",
+        fullWidth && "w-full",
+      )}
+      ref={railRef}
+    >
       <Popover onOpenChange={setOpen} open={open}>
         <PopoverTrigger asChild>
           {/*
@@ -318,25 +331,41 @@ export function ModelEffortPicker({
            * back into the measurement. `max-w-full` still caps the pill to
            * the container on a narrow screen, where its label truncates and
            * the measurement correctly concludes that no chip fits.
+           *
+           * Full width drops the rail, so there is nothing to measure against:
+           * the pill simply fills the container and spreads its content, to sit
+           * flush with the other fields in a full-width form.
            */}
           <Button
-            className="h-8 min-w-0 max-w-full shrink-0 font-normal"
+            className={cn(
+              "h-8 min-w-0 font-normal",
+              fullWidth ? "w-full justify-between" : "max-w-full shrink-0",
+            )}
             type="button"
             variant="outline"
           >
-            {selectedProvider && selectedModel ? (
-              <>
-                <ProviderIcon provider={selectedProvider.key} />
-                <span className="max-w-48 truncate">
-                  <ModelLabel label={selectedModel.label} />
+            {/*
+             * The selection is one group so `justify-between` in full width
+             * separates only it from the chevron, rather than scattering the
+             * icon, label, and effort across the whole pill.
+             */}
+            <span className="flex min-w-0 items-center gap-2">
+              {selectedProvider && selectedModel ? (
+                <>
+                  <ProviderIcon provider={selectedProvider.key} />
+                  <span className="max-w-48 truncate">
+                    <ModelLabel label={selectedModel.label} />
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <EffortIcon effort={effort} efforts={selectedModel.efforts} />
+                  <span className="text-muted-foreground">{effort}</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  {t("chooseModel")}
                 </span>
-                <span className="text-muted-foreground">·</span>
-                <EffortIcon effort={effort} efforts={selectedModel.efforts} />
-                <span className="text-muted-foreground">{effort}</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">{t("chooseModel")}</span>
-            )}
+              )}
+            </span>
             <ChevronsUpDown className="text-muted-foreground" />
           </Button>
         </PopoverTrigger>
@@ -527,30 +556,31 @@ export function ModelEffortPicker({
           </div>
         </PopoverContent>
       </Popover>
-      {shown.map(({ preset, entry, model: presetModel }, index) => {
-        const fits = index < visible;
-        return (
-          <Button
-            aria-hidden={!fits}
-            className={cn("h-8 shrink-0 font-normal", !fits && "invisible")}
-            key={modelPresetKey(preset)}
-            onClick={() => apply(preset)}
-            tabIndex={fits ? undefined : -1}
-            type="button"
-            variant="ghost"
-          >
-            <ProviderIcon provider={entry.key} />
-            <span className="max-w-32 truncate">
-              <ModelLabel label={presetModel.label} />
-            </span>
-            <EffortIcon
-              className="text-muted-foreground"
-              effort={preset.effort}
-              efforts={presetModel.efforts}
-            />
-          </Button>
-        );
-      })}
+      {!fullWidth &&
+        shown.map(({ preset, entry, model: presetModel }, index) => {
+          const fits = index < visible;
+          return (
+            <Button
+              aria-hidden={!fits}
+              className={cn("h-8 shrink-0 font-normal", !fits && "invisible")}
+              key={modelPresetKey(preset)}
+              onClick={() => apply(preset)}
+              tabIndex={fits ? undefined : -1}
+              type="button"
+              variant="ghost"
+            >
+              <ProviderIcon provider={entry.key} />
+              <span className="max-w-32 truncate">
+                <ModelLabel label={presetModel.label} />
+              </span>
+              <EffortIcon
+                className="text-muted-foreground"
+                effort={preset.effort}
+                efforts={presetModel.efforts}
+              />
+            </Button>
+          );
+        })}
     </div>
   );
 }

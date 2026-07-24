@@ -619,6 +619,7 @@ function ModelField({
         <ModelEffortPicker
           catalog={catalog}
           effort={asString(literalValue(effortValue))}
+          fullWidth
           model={asString(literalValue(modelValue))}
           onEffortChange={(value) => patch({ [keys.effort]: value })}
           onModelChange={(value) => patch({ [keys.model]: value })}
