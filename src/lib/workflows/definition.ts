@@ -619,6 +619,22 @@ export type WorkflowTriggerCatalogEntry = {
   seedPaths: string[];
 };
 
+/**
+ * The session data `WorkflowEventBridge.observeRun` seeds for every run
+ * lifecycle trigger. All run-based kinds (RUN_STARTED, RUN_FAILED,
+ * RUN_COMPLETED, RUN_CANCELLED, …) share the same `sessionData` object, so
+ * they must advertise the same seed paths — otherwise a trigger like
+ * RUN_FAILED appears to provide less than RUN_STARTED even though the bridge
+ * hands both identical data.
+ */
+const RUN_SEED_PATHS = [
+  "run.*",
+  "worktree.*",
+  "codebase.*",
+  "repo.*",
+  "ticket.*",
+];
+
 const trigger = (
   kind: WorkflowTriggerKind,
   category: string,
@@ -744,49 +760,68 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
     ]),
     trigger("JIRA_MENTION", "Jira", "Jira comment mention", ["ticket.*"]),
     trigger("JIRA_SPRINT_STARTED", "Jira", "Sprint started", ["ticket.*"]),
-    trigger("RUN_STARTED", "Plans and sessions", "Run started", [
-      "run.*",
-      "worktree.*",
-      "ticket.*",
-    ]),
-    trigger("RUN_COMPLETED", "Plans and sessions", "Run completed", [
-      "run.*",
-      "worktree.*",
-    ]),
+    trigger("RUN_STARTED", "Plans and sessions", "Run started", RUN_SEED_PATHS),
+    trigger(
+      "RUN_COMPLETED",
+      "Plans and sessions",
+      "Run completed",
+      RUN_SEED_PATHS,
+    ),
     trigger(
       "RUN_QUESTION_NEEDED",
       "Plans and sessions",
       "Run needs an answer",
-      ["run.*"],
+      RUN_SEED_PATHS,
     ),
     trigger(
       "RUN_QUESTION_ANSWERED",
       "Plans and sessions",
       "Run question answered",
-      ["run.*"],
+      RUN_SEED_PATHS,
     ),
-    trigger("RUN_PAUSED", "Plans and sessions", "Run paused", ["run.*"]),
-    trigger("RUN_CONTINUED", "Plans and sessions", "Run continued", ["run.*"]),
-    trigger("RUN_FAILED", "Plans and sessions", "Run failed", ["run.*"]),
-    trigger("RUN_CANCELLED", "Plans and sessions", "Run cancelled", ["run.*"]),
-    trigger("RUN_PLAN_PLAYED", "Plans and sessions", "Plan played", ["run.*"]),
-    trigger("RUN_FOLLOW_UP", "Plans and sessions", "Run follow-up created", [
-      "run.*",
-    ]),
-    trigger("RUN_IMPORTED", "Plans and sessions", "Provider run imported", [
-      "run.*",
-    ]),
+    trigger("RUN_PAUSED", "Plans and sessions", "Run paused", RUN_SEED_PATHS),
+    trigger(
+      "RUN_CONTINUED",
+      "Plans and sessions",
+      "Run continued",
+      RUN_SEED_PATHS,
+    ),
+    trigger("RUN_FAILED", "Plans and sessions", "Run failed", RUN_SEED_PATHS),
+    trigger(
+      "RUN_CANCELLED",
+      "Plans and sessions",
+      "Run cancelled",
+      RUN_SEED_PATHS,
+    ),
+    trigger(
+      "RUN_PLAN_PLAYED",
+      "Plans and sessions",
+      "Plan played",
+      RUN_SEED_PATHS,
+    ),
+    trigger(
+      "RUN_FOLLOW_UP",
+      "Plans and sessions",
+      "Run follow-up created",
+      RUN_SEED_PATHS,
+    ),
+    trigger(
+      "RUN_IMPORTED",
+      "Plans and sessions",
+      "Provider run imported",
+      RUN_SEED_PATHS,
+    ),
     trigger(
       "RUN_USAGE_THRESHOLD",
       "Plans and sessions",
       "Run usage threshold",
-      ["run.*"],
+      RUN_SEED_PATHS,
     ),
     trigger(
       "RUN_EVENT_MATCH",
       "Plans and sessions",
       "Run event or tool matched",
-      ["run.*"],
+      RUN_SEED_PATHS,
     ),
   ];
 
