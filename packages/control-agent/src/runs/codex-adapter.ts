@@ -22,6 +22,7 @@ import {
   type ProviderImportWorktree,
   type ProviderQuestion,
   type ProviderStartInput,
+  type ProviderUsage,
   type StagedAttachment,
 } from "./provider.js";
 
@@ -57,6 +58,32 @@ export function supportedCodexVersion(version: string | null): boolean {
       version.startsWith(`${minor}.`),
     ),
   );
+}
+
+/**
+ * Codex app-server includes cached input in its total input count. The shared
+ * usage contract keeps cache reads separate, so subtract that subset before
+ * the catalog prices ordinary input and cache reads at their respective rates.
+ */
+export function codexTokenUsage(value: unknown, model: string): ProviderUsage {
+  const total = asRecord(value);
+  const inputTokens = Number(total.inputTokens ?? total.input_tokens ?? 0);
+  const cacheReadTokens = Number(
+    total.cachedInputTokens ?? total.cache_read_tokens ?? 0,
+  );
+  return {
+    model,
+    inputTokens: Math.max(0, inputTokens - cacheReadTokens),
+    outputTokens: Number(total.outputTokens ?? total.output_tokens ?? 0),
+    reasoningTokens: Number(
+      total.reasoningTokens ?? total.reasoning_tokens ?? 0,
+    ),
+    cacheReadTokens,
+    cacheWriteTokens: Number(
+      total.cacheWriteTokens ?? total.cache_write_tokens ?? 0,
+    ),
+    pricingSource: "codex-app-server",
+  };
 }
 
 class CodexAppServer {
@@ -493,23 +520,7 @@ export class CodexAdapter implements ProviderAdapter {
           const usageSignature = JSON.stringify(total);
           if (usageSignature !== lastUsageSignature) {
             lastUsageSignature = usageSignature;
-            await callbacks.onUsage({
-              model: input.run.model,
-              inputTokens: Number(total.inputTokens ?? total.input_tokens ?? 0),
-              outputTokens: Number(
-                total.outputTokens ?? total.output_tokens ?? 0,
-              ),
-              reasoningTokens: Number(
-                total.reasoningTokens ?? total.reasoning_tokens ?? 0,
-              ),
-              cacheReadTokens: Number(
-                total.cachedInputTokens ?? total.cache_read_tokens ?? 0,
-              ),
-              cacheWriteTokens: Number(
-                total.cacheWriteTokens ?? total.cache_write_tokens ?? 0,
-              ),
-              pricingSource: "codex-app-server",
-            });
+            await callbacks.onUsage(codexTokenUsage(total, input.run.model));
           }
         }
         // Streaming deltas arrive once per chunk; persisting each as its own

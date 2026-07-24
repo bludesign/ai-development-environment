@@ -166,14 +166,15 @@ export class ModelCostsService {
       create: { id: SETTINGS_ID },
       update: {},
     });
+    const url = settings.catalogUrl ?? DEFAULT_MODEL_COST_URL;
     return {
-      url: settings.catalogUrl ?? DEFAULT_MODEL_COST_URL,
+      url,
       defaultUrl: DEFAULT_MODEL_COST_URL,
       customUrl: settings.catalogUrl,
       fetchedAt: settings.fetchedAt?.toISOString() ?? null,
       entryCount: settings.entryCount,
       error: settings.error,
-      stale: this.isStale(settings.fetchedAt),
+      stale: this.isStale(settings.fetchedAt) || settings.sourceUrl !== url,
     };
   }
 
@@ -208,6 +209,9 @@ export class ModelCostsService {
       create: { id: SETTINGS_ID, catalogUrl: custom },
       update: { catalogUrl: custom },
     });
+    // The last check may have approved a different source. Make the next read
+    // compare the newly active URL with the source of the stored entries.
+    this.checkedAt = 0;
     return this.getCatalog();
   }
 
@@ -271,11 +275,13 @@ export class ModelCostsService {
    * fail on it — `refresh` records its own errors and returns the last state.
    */
   async ensureFresh(): Promise<void> {
+    // Readers arriving behind a refresh must join it before consulting the
+    // short check interval, otherwise they can query the pre-refresh table.
+    if (this.refreshing) await this.refreshing;
     if (Date.now() - this.checkedAt < CHECK_INTERVAL_MS) return;
-    this.checkedAt = Date.now();
     const catalog = await this.getCatalog();
-    if (!catalog.stale) return;
-    await this.refresh();
+    if (catalog.stale) await this.refresh();
+    this.checkedAt = Date.now();
   }
 
   async listEntries({

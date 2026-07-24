@@ -9,7 +9,7 @@ import {
   claudeModelUsages,
   questionsFromInput,
 } from "./claude-adapter.js";
-import { codexQuestions } from "./codex-adapter.js";
+import { codexQuestions, codexTokenUsage } from "./codex-adapter.js";
 import {
   opencodeEventText,
   opencodeQuestions,
@@ -39,6 +39,28 @@ describe("provider protocol fixtures", () => {
         ],
       }),
     ]);
+  });
+
+  test("separates cached input from Codex's inclusive input total", () => {
+    expect(
+      codexTokenUsage(
+        {
+          inputTokens: 12_774,
+          cachedInputTokens: 10_000,
+          outputTokens: 500,
+          reasoningTokens: 200,
+        },
+        "gpt-5.2-codex",
+      ),
+    ).toEqual({
+      model: "gpt-5.2-codex",
+      inputTokens: 2_774,
+      outputTokens: 500,
+      reasoningTokens: 200,
+      cacheReadTokens: 10_000,
+      cacheWriteTokens: 0,
+      pricingSource: "codex-app-server",
+    });
   });
 
   test("normalizes every question in a Claude AskUserQuestion batch", async () => {

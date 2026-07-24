@@ -52,12 +52,13 @@ export const createModelCostResolvers = (service: ModelCostsService) => ({
     },
   },
   Query: {
-    modelCostCatalog: (
+    modelCostCatalog: async (
       _root: unknown,
       _args: unknown,
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
+      await service.ensureFresh();
       return service.getCatalog();
     },
     modelCostEntries: (

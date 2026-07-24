@@ -225,6 +225,34 @@ describe("ModelCostsService", () => {
     ).toBeNull();
   });
 
+  test("refreshes immediately when the active catalog URL changes", async () => {
+    mockFetch(catalogPayload);
+    const service = new ModelCostsService();
+    expect((await service.refresh()).stale).toBe(false);
+    await service.listEntries({});
+
+    const catalog = await service.saveSettings(
+      "https://example.test/prices.json",
+    );
+    expect(catalog.url).toBe("https://example.test/prices.json");
+    expect(catalog.stale).toBe(true);
+
+    mockFetch({
+      "new-source-model": {
+        litellm_provider: "openai",
+        input_cost_per_token: 0.000001,
+        output_cost_per_token: 0.000002,
+      },
+    });
+    const page = await service.listEntries({});
+
+    expect(page.items.map(({ model }) => model)).toEqual(["new-source-model"]);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://example.test/prices.json",
+      expect.any(Object),
+    );
+  });
+
   test("rejects a URL that is not http or https", async () => {
     const service = new ModelCostsService();
     await expect(service.saveSettings("not a url")).rejects.toThrow(
@@ -248,6 +276,45 @@ describe("ModelCostsService", () => {
       "embed-only",
       "openrouter/moonshot/kimi-k2",
     ]);
+  });
+
+  test("makes concurrent readers await an in-flight catalog refresh", async () => {
+    let finishFetch!: (response: {
+      ok: boolean;
+      status: number;
+      json: () => Promise<unknown>;
+    }) => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          () =>
+            new Promise((finish) => {
+              finishFetch = finish;
+              resolve();
+            }),
+        ),
+      );
+    });
+    const service = new ModelCostsService();
+    const refresh = service.ensureFresh();
+    await fetchStarted;
+
+    let readerFinished = false;
+    const reader = service.listEntries({}).then((page) => {
+      readerFinished = true;
+      return page;
+    });
+    await Promise.resolve();
+    expect(readerFinished).toBe(false);
+
+    finishFetch({
+      ok: true,
+      status: 200,
+      json: async () => catalogPayload,
+    });
+    await expect(reader).resolves.toMatchObject({ totalCount: 3 });
+    await refresh;
   });
 
   test("records a failed fetch without discarding the prices it already had", async () => {
