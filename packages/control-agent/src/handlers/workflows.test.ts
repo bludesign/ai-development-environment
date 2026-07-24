@@ -50,9 +50,7 @@ describe("workflow terminal handler", () => {
     );
     const logs: string[] = [];
     const script = `
-      SCRIPT_MODE=$(stat -f '%Lp' "$0")
-      SESSION_MODE=$(stat -f '%Lp' "$AIDE_SESSION_PATH")
-      node -e 'const fs=require("node:fs"); const p=process.env.AIDE_SESSION_PATH; const d=JSON.parse(fs.readFileSync(p,"utf8")); d.contract={scriptMode:process.argv[1],sessionMode:process.argv[2],runId:process.env.AIDE_WORKFLOW_RUN_ID,stepId:process.env.AIDE_STEP_ID,branch:process.env.AIDE_BRANCH,parentLeaked:Boolean(process.env.AIDE_TEST_SHOULD_NOT_LEAK)}; fs.writeFileSync(p,JSON.stringify(d));' "$SCRIPT_MODE" "$SESSION_MODE"
+      node -e 'const fs=require("node:fs"); const p=process.env.AIDE_SESSION_PATH; const mode=(path)=>(fs.statSync(path).mode & 0o777).toString(8); const d=JSON.parse(fs.readFileSync(p,"utf8")); d.contract={scriptMode:mode(process.argv[1]),sessionMode:mode(p),runId:process.env.AIDE_WORKFLOW_RUN_ID,stepId:process.env.AIDE_STEP_ID,branch:process.env.AIDE_BRANCH,parentLeaked:Boolean(process.env.AIDE_TEST_SHOULD_NOT_LEAK)}; fs.writeFileSync(p,JSON.stringify(d));' "$0"
       printf '%s\n' "$WORKFLOW_SECRET"
     `;
     const result = await runWorkflowTerminal(

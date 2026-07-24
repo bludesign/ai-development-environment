@@ -44,7 +44,7 @@ export const runWorkflowTerminal: AgentJobHandler = async (
   if (!information.isDirectory())
     throw new Error("Workflow working directory is not a directory");
   const directory = await mkdtemp(join(tmpdir(), "aide-workflow-"));
-  const extension = payload.interpreter === "NODE" ? "mjs" : "zsh";
+  const extension = payload.interpreter === "NODE" ? "mjs" : "sh";
   const scriptPath = join(directory, `step.${extension}`);
   const sessionPath = join(directory, "session.json");
   try {
@@ -74,7 +74,10 @@ export const runWorkflowTerminal: AgentJobHandler = async (
     });
     const redact = createRedactor(env);
     const result = await runProcess({
-      command: payload.interpreter === "NODE" ? process.execPath : "/bin/zsh",
+      command:
+        payload.interpreter === "NODE"
+          ? process.execPath
+          : process.env.SHELL || "/bin/sh",
       args: [scriptPath],
       cwd,
       env,
