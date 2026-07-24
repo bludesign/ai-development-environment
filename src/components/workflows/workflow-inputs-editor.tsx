@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, List, PenLine, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 
@@ -34,6 +34,26 @@ const INPUT_TYPES: WorkflowInputType[] = [
   "JSON",
   "ID",
 ];
+
+/**
+ * Known resource kinds a typed input can accept. These mirror the literals the
+ * resource pages pass to the RESOURCE_MANUAL trigger (see
+ * `src/app/[locale]/*​/page.tsx` → workflow-resource-panel). The backend matches
+ * `acceptedResourceKind` case-insensitively, so the raw/manual mode below still
+ * allows any custom or future kind that isn't in this list.
+ */
+const RESOURCE_KINDS = [
+  "BUILD",
+  "CODEBASE",
+  "JIRA_TICKET",
+  "AGENT_RUN",
+  "PULL_REQUEST",
+  "WORKTREE",
+] as const;
+
+function isKnownResourceKind(value: string | undefined): boolean {
+  return Boolean(value) && RESOURCE_KINDS.includes(value as never);
+}
 
 function generateInputId(): string {
   return `input-${crypto.randomUUID()}`;
@@ -117,6 +137,69 @@ function DefaultValueEditor({
               : ""
         }
       />
+    </div>
+  );
+}
+
+function ResourceKindField({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (next: string | undefined) => void;
+}) {
+  const t = useTranslations("workflows");
+  const [manual, setManual] = useState(
+    () => Boolean(value) && !isKnownResourceKind(value),
+  );
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-[10px] text-muted-foreground">
+          {t("inputResourceKindLabel")}
+        </Label>
+        <Button
+          aria-label={t("resourceKindToggle")}
+          className="size-6"
+          onClick={() => setManual((current) => !current)}
+          size="icon"
+          title={manual ? t("resourceKindChoose") : t("resourceKindManual")}
+          type="button"
+          variant="ghost"
+        >
+          {manual ? (
+            <List className="size-3.5" />
+          ) : (
+            <PenLine className="size-3.5" />
+          )}
+        </Button>
+      </div>
+      {manual ? (
+        <Input
+          onChange={(event) =>
+            onChange(event.target.value === "" ? undefined : event.target.value)
+          }
+          placeholder="WORKTREE"
+          value={value ?? ""}
+        />
+      ) : (
+        <Select
+          onValueChange={(next) => onChange(next)}
+          value={isKnownResourceKind(value) ? value : ""}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={t("selectPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {RESOURCE_KINDS.map((kind) => (
+              <SelectItem key={kind} value={kind}>
+                {t(`inputResourceKind.${kind}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }
@@ -226,21 +309,10 @@ function InputRow({
             type={input.type}
             value={input.defaultValue}
           />
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("inputResourceKindLabel")}
-            </Label>
-            <Input
-              onChange={(event) =>
-                update(
-                  "acceptedResourceKind",
-                  event.target.value === "" ? undefined : event.target.value,
-                )
-              }
-              placeholder="WORKTREE"
-              value={input.acceptedResourceKind ?? ""}
-            />
-          </div>
+          <ResourceKindField
+            onChange={(value) => update("acceptedResourceKind", value)}
+            value={input.acceptedResourceKind}
+          />
         </CollapsibleContent>
       </Collapsible>
     </div>

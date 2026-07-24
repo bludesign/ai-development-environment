@@ -130,6 +130,17 @@
     "inputRequiredLabel": "Erforderlich",
     "inputDefaultLabel": "Standardwert",
     "inputResourceKindLabel": "Akzeptierte Ressourcenart",
+    "inputResourceKind": {
+      "BUILD": "Build",
+      "CODEBASE": "Codebasis",
+      "JIRA_TICKET": "Jira-Ticket",
+      "AGENT_RUN": "Agentenlauf",
+      "PULL_REQUEST": "Pull-Request",
+      "WORKTREE": "Worktree"
+    },
+    "resourceKindToggle": "Eingabe der Ressourcenart wechseln",
+    "resourceKindChoose": "Aus Liste auswählen",
+    "resourceKindManual": "Manuell eingeben",
     "inputMoreOptions": "Weitere Optionen",
     "inputType": {
       "STRING": "Zeichenkette",

@@ -130,6 +130,17 @@
     "inputRequiredLabel": "Required",
     "inputDefaultLabel": "Default value",
     "inputResourceKindLabel": "Accepted resource kind",
+    "inputResourceKind": {
+      "BUILD": "Build",
+      "CODEBASE": "Codebase",
+      "JIRA_TICKET": "Jira ticket",
+      "AGENT_RUN": "Agent run",
+      "PULL_REQUEST": "Pull request",
+      "WORKTREE": "Worktree"
+    },
+    "resourceKindToggle": "Switch resource kind entry",
+    "resourceKindChoose": "Choose from list",
+    "resourceKindManual": "Enter manually",
     "inputMoreOptions": "More options",
     "inputType": {
       "STRING": "Text",

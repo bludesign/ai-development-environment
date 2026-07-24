@@ -130,6 +130,17 @@
     "inputRequiredLabel": "Obligatorio",
     "inputDefaultLabel": "Valor predeterminado",
     "inputResourceKindLabel": "Tipo de recurso aceptado",
+    "inputResourceKind": {
+      "BUILD": "Compilación",
+      "CODEBASE": "Base de código",
+      "JIRA_TICKET": "Ticket de Jira",
+      "AGENT_RUN": "Ejecución de agente",
+      "PULL_REQUEST": "Pull request",
+      "WORKTREE": "Worktree"
+    },
+    "resourceKindToggle": "Cambiar la entrada del tipo de recurso",
+    "resourceKindChoose": "Elegir de la lista",
+    "resourceKindManual": "Introducir manualmente",
     "inputMoreOptions": "Más opciones",
     "inputType": {
       "STRING": "Texto",

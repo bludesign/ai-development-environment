@@ -63,6 +63,8 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["polling.duration", "{milliseconds} ms"],
   // Apple ships this product name untranslated in every locale.
   ["builds.exportMethod.APP_STORE_CONNECT", "App Store Connect"],
+  // "Worktree" is a git term kept untranslated across locales.
+  ["workflows.inputResourceKind.WORKTREE", "Worktree"],
 ]);
 
 function isTranslationData(value: unknown): value is TranslationData {
