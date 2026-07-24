@@ -143,6 +143,9 @@
     "sessionBindingLabel": "Sitzungspfad",
     "sessionPathPlaceholder": "z. B. ticket.key",
     "sessionBindingHelp": "Liest diesen Wert bei der Ausführung aus den Sitzungsdaten.",
+    "modelProvider": "Anbieter",
+    "modelModel": "Modell",
+    "modelEffort": "Aufwand",
     "overlap": {
       "QUEUE": "Jedes Ereignis einreihen",
       "CONCURRENT": "Parallel ausführen",

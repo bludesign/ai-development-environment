@@ -1,10 +1,12 @@
 "use client";
 
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Braces, ChevronDown, PenLine, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { SearchableSelect } from "@/components/common/searchable-select";
+import { ModelEffortPicker } from "@/components/runs/model-effort-picker";
+import { useProviderCatalog } from "@/components/runs/use-provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -27,7 +29,11 @@ import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 import { getConfigDescriptor } from "./descriptors";
 import type { ConfigFieldDescriptor, ConfigFieldScope } from "./types";
 import { useResourceOptions } from "./use-resource-options";
-import { ValueModeField, literalValue } from "./value-mode-field";
+import {
+  ValueModeField,
+  isSessionBinding,
+  literalValue,
+} from "./value-mode-field";
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -469,6 +475,164 @@ function JsonField({ field, value, onChange }: FieldProps) {
   );
 }
 
+type ModelKeys = NonNullable<ConfigFieldDescriptor["modelKeys"]>;
+
+const DEFAULT_MODEL_KEYS: ModelKeys = {
+  provider: "provider",
+  model: "model",
+  effort: "effort",
+};
+
+/**
+ * Combined provider/model/effort control for run steps. Two modes share the
+ * three sibling keys the descriptor names in `modelKeys`:
+ *
+ * - Model-selector mode renders the start-session ModelEffortPicker over the
+ *   live provider catalog and writes the three literal values.
+ * - Variable mode binds each of the three to a session path.
+ *
+ * The header toggle swaps modes; the current mode is inferred from whether any
+ * of the three values is a session binding. The catalog scopes to the sibling
+ * worktree field when that is a literal.
+ *
+ * The picker reports provider, model, and effort through three separate change
+ * callbacks fired in one synchronous burst. The parent commit reads a config
+ * snapshot that does not update between those calls, so a naive per-call spread
+ * would let the last write win and drop the other two. Accumulating into a ref
+ * that survives the burst — and only resyncs to the committed config on the
+ * next render — makes the final commit carry all three.
+ */
+function ModelField({
+  field,
+  config,
+  onChange,
+  sessionPaths,
+}: {
+  field: ConfigFieldDescriptor;
+  config: Record<string, unknown>;
+  onChange: (config: Record<string, unknown>) => void;
+  sessionPaths: readonly SessionFieldInfo[];
+}) {
+  const t = useTranslations("workflows");
+  const listId = useId();
+  const keys = field.modelKeys ?? DEFAULT_MODEL_KEYS;
+
+  const latest = useRef(config);
+  useEffect(() => {
+    latest.current = config;
+  }, [config]);
+
+  const patch = (changes: Record<string, unknown>) => {
+    const next = { ...latest.current };
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    latest.current = next;
+    onChange(next);
+  };
+
+  const providerValue = config[keys.provider];
+  const modelValue = config[keys.model];
+  const effortValue = config[keys.effort];
+  const sessionMode =
+    isSessionBinding(providerValue) ||
+    isSessionBinding(modelValue) ||
+    isSessionBinding(effortValue);
+
+  const worktreeScope = literalScope(config, keys.scopeFrom);
+  const catalog = useProviderCatalog(worktreeScope);
+
+  const toSession = () =>
+    patch({
+      [keys.provider]: { source: "SESSION", path: "" },
+      [keys.model]: { source: "SESSION", path: "" },
+      [keys.effort]: { source: "SESSION", path: "" },
+    });
+  const toSelector = () =>
+    patch({
+      [keys.provider]: undefined,
+      [keys.model]: undefined,
+      [keys.effort]: undefined,
+    });
+
+  const pathOf = (value: unknown) =>
+    isSessionBinding(value) ? value.path : "";
+  const sessionInputs = [
+    { key: keys.provider, label: t("modelProvider"), value: providerValue },
+    { key: keys.model, label: t("modelModel"), value: modelValue },
+    { key: keys.effort, label: t("modelEffort"), value: effortValue },
+  ];
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs">{field.label}</Label>
+        <Button
+          aria-label={t("valueModeToggle")}
+          className="size-6"
+          onClick={sessionMode ? toSelector : toSession}
+          size="icon"
+          title={sessionMode ? t("valueModeLiteral") : t("valueModeSession")}
+          type="button"
+          variant="ghost"
+        >
+          {sessionMode ? (
+            <PenLine className="size-3.5" />
+          ) : (
+            <Braces className="size-3.5" />
+          )}
+        </Button>
+      </div>
+      {sessionMode ? (
+        <>
+          <div className="space-y-1.5">
+            {sessionInputs.map(({ key, label, value }) => (
+              <div className="space-y-1" key={key}>
+                <Label className="text-[10px] text-muted-foreground">
+                  {label}
+                </Label>
+                <Input
+                  aria-label={label}
+                  list={sessionPaths.length ? listId : undefined}
+                  onChange={(event) =>
+                    patch({ [key]: { source: "SESSION", path: event.target.value } })
+                  }
+                  placeholder={t("sessionPathPlaceholder")}
+                  value={pathOf(value)}
+                />
+              </div>
+            ))}
+          </div>
+          {sessionPaths.length > 0 && (
+            <datalist id={listId}>
+              {sessionPaths.map(({ path, description }) => (
+                <option key={path} label={description} value={path} />
+              ))}
+            </datalist>
+          )}
+          <p className="text-[10px] text-muted-foreground">
+            {t("sessionBindingHelp")}
+          </p>
+        </>
+      ) : (
+        <ModelEffortPicker
+          catalog={catalog}
+          effort={asString(literalValue(effortValue))}
+          model={asString(literalValue(modelValue))}
+          onEffortChange={(value) => patch({ [keys.effort]: value })}
+          onModelChange={(value) => patch({ [keys.model]: value })}
+          onProviderChange={(value) => patch({ [keys.provider]: value })}
+          provider={asString(literalValue(providerValue))}
+        />
+      )}
+      {field.help && (
+        <p className="text-[10px] text-muted-foreground">{field.help}</p>
+      )}
+    </div>
+  );
+}
+
 function ConfigFieldRow(props: FieldProps) {
   switch (props.field.control) {
     case "enum":
@@ -601,7 +765,17 @@ export function ConfigFieldsEditor({
   const descriptor = getConfigDescriptor(kind, scope);
   if (!descriptor) return null;
 
-  const describedKeys = new Set(descriptor.fields.map((field) => field.key));
+  const describedKeys = new Set(
+    descriptor.fields.flatMap((field) =>
+      field.control === "model" && field.modelKeys
+        ? [
+            field.modelKeys.provider,
+            field.modelKeys.model,
+            field.modelKeys.effort,
+          ]
+        : [field.key],
+    ),
+  );
   const extraKeys = Object.keys(config).filter(
     (key) => !describedKeys.has(key),
   );
@@ -621,16 +795,26 @@ export function ConfigFieldsEditor({
       <p className="text-xs font-medium text-muted-foreground">
         {t("configuration")}
       </p>
-      {descriptor.fields.map((field) => (
-        <ConfigFieldRow
-          config={config}
-          field={field}
-          key={field.key}
-          onChange={(next) => update(field.key, next)}
-          sessionPaths={sessionPaths}
-          value={config[field.key]}
-        />
-      ))}
+      {descriptor.fields.map((field) =>
+        field.control === "model" ? (
+          <ModelField
+            config={config}
+            field={field}
+            key={field.key}
+            onChange={onChange}
+            sessionPaths={sessionPaths}
+          />
+        ) : (
+          <ConfigFieldRow
+            config={config}
+            field={field}
+            key={field.key}
+            onChange={(next) => update(field.key, next)}
+            sessionPaths={sessionPaths}
+            value={config[field.key]}
+          />
+        ),
+      )}
       <RawConfigEditor
         config={config}
         defaultOpen={false}

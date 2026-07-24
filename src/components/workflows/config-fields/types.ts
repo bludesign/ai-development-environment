@@ -17,6 +17,7 @@ export type ConfigControlType =
   | "resourceMulti" // multi-select resource list (scriptIds, registrationIds)
   | "stringList" // labels[], destinations[] — add/remove rows
   | "record" // Record<string,string> — fields, answers
+  | "model" // combined provider/model/effort picker (catalog or session data)
   | "json"; // per-field JSON fallback for a complex blob
 
 /**
@@ -75,6 +76,18 @@ export type ConfigFieldDescriptor = {
   multiline?: boolean;
   /** Value authoring modes. Undefined → literal only. */
   valueModes?: readonly ConfigValueMode[];
+  /**
+   * For the `model` control: the sibling config keys the combined picker reads
+   * and writes. The control spans all three, and the editor treats each as a
+   * described key (so none leaks into the raw-JSON escape hatch). The
+   * `scopeFrom` key, when a literal, scopes the provider catalog to a worktree.
+   */
+  modelKeys?: {
+    provider: string;
+    model: string;
+    effort: string;
+    scopeFrom?: string;
+  };
 };
 
 export type KindConfigDescriptor = {

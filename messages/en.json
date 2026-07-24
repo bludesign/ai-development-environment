@@ -143,6 +143,9 @@
     "sessionBindingLabel": "Session path",
     "sessionPathPlaceholder": "e.g. ticket.key",
     "sessionBindingHelp": "Reads this value from session data when the run executes.",
+    "modelProvider": "Provider",
+    "modelModel": "Model",
+    "modelEffort": "Effort",
     "overlap": {
       "QUEUE": "Queue every event",
       "CONCURRENT": "Run concurrently",

@@ -204,22 +204,32 @@ const githubCoordinateFields = (): ConfigFieldDescriptor[] => [
   text("name", "Repository name", { placeholder: "hello-world" }),
 ];
 
+/**
+ * Provider, model, and effort are one decision, so they are one control: the
+ * catalog-driven picker from the start-session page in literal mode, or session
+ * bindings for all three in variable mode. The catalog scopes to `worktreeId`
+ * when that sibling is a literal. `key` is the primary `model` slot; `modelKeys`
+ * names all three so none leaks into the raw-JSON escape hatch.
+ */
+const modelField = (): ConfigFieldDescriptor => ({
+  key: "model",
+  label: "Model",
+  control: "model",
+  required: true,
+  valueModes: ["literal", "session"],
+  modelKeys: {
+    provider: "provider",
+    model: "model",
+    effort: "effort",
+    scopeFrom: "worktreeId",
+  },
+});
+
 const runInputFields = (): ConfigFieldDescriptor[] => [
   resource("worktreeId", "Worktree", "worktree"),
   text("jiraIssueKey", "Jira issue key", { placeholder: "APP-123" }),
   text("jiraSummary", "Jira summary"),
-  enumField(
-    "provider",
-    "Provider",
-    listOptions([
-      { value: "CODEX", label: "Codex" },
-      { value: "CLAUDE", label: "Claude" },
-      { value: "OPENCODE", label: "opencode" },
-      { value: "COPILOT", label: "GitHub Copilot" },
-    ]),
-  ),
-  text("model", "Model", { required: true, placeholder: "gpt-5-codex" }),
-  text("effort", "Reasoning effort", { placeholder: "medium" }),
+  modelField(),
   bool("webSearchEnabled", "Enable web search"),
   multiline("prompt", "Prompt", { required: true }),
   stringList("attachmentIds", "Attachment IDs"),

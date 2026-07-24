@@ -143,6 +143,9 @@
     "sessionBindingLabel": "Ruta de sesión",
     "sessionPathPlaceholder": "p. ej. ticket.key",
     "sessionBindingHelp": "Lee este valor de los datos de sesión al ejecutar.",
+    "modelProvider": "Proveedor",
+    "modelModel": "Modelo",
+    "modelEffort": "Esfuerzo",
     "overlap": {
       "QUEUE": "Poner en cola cada evento",
       "CONCURRENT": "Ejecutar simultáneamente",

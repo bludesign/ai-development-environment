@@ -13,7 +13,7 @@ export type FieldValueMode = "literal" | "session";
 
 type SessionBinding = { source: "SESSION"; path: string };
 
-function isSessionBinding(value: unknown): value is SessionBinding {
+export function isSessionBinding(value: unknown): value is SessionBinding {
   return (
     Boolean(value) &&
     typeof value === "object" &&

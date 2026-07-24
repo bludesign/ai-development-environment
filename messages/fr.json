@@ -143,6 +143,9 @@
     "sessionBindingLabel": "Chemin de session",
     "sessionPathPlaceholder": "p. ex. ticket.key",
     "sessionBindingHelp": "Lit cette valeur dans les données de session à l’exécution.",
+    "modelProvider": "Fournisseur",
+    "modelModel": "Modèle",
+    "modelEffort": "Effort",
     "overlap": {
       "QUEUE": "Mettre chaque événement en file",
       "CONCURRENT": "Exécuter simultanément",
