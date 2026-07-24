@@ -70,7 +70,7 @@ export function WorkflowQuickActions({
   if (!workflows.length && !error) return null;
 
   return (
-    <div className="w-full space-y-2 border-t pt-3">
+    <div className="w-full space-y-2">
       <div className="flex flex-wrap gap-2">
         {workflows.map((workflow) => (
           <Button
