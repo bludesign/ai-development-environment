@@ -8,14 +8,23 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  useStoreApi,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Copy, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { createContext, useContext, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 
 import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
@@ -44,6 +53,20 @@ type WorkflowNodeData = {
 const MAX_PROVIDES_CHIPS = 3;
 
 export type WorkflowFlowNode = Node<WorkflowNodeData, "workflow">;
+
+/**
+ * What a card's right-click menu can do to the step behind it. The read-only
+ * graphs leave this unset, and their cards render without a menu.
+ */
+export type WorkflowNodeActions = {
+  onDelete: (id: string) => void;
+  /** Not offered on triggers, which the editor does not copy. */
+  onDuplicate: (id: string) => void;
+  onEdit: (id: string) => void;
+};
+
+export const WorkflowNodeActionsContext =
+  createContext<WorkflowNodeActions | null>(null);
 
 const terminal = new Set([
   "SUCCEEDED",
@@ -95,11 +118,14 @@ function sourceHandles(kind: string): Array<{ id: string; label: string }> {
   ];
 }
 
-function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
+function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
   const labels = useWorkflowLabels();
+  const t = useTranslations("workflows");
+  const actions = useContext(WorkflowNodeActionsContext);
+  const store = useStoreApi();
   const handles = sourceHandles(data.kind);
   const vertical = data.handleLayout === "TOP_BOTTOM";
-  return (
+  const card = (
     <div
       className={cn(
         "relative min-w-52 rounded-xl border bg-card p-3 text-card-foreground shadow-sm",
@@ -192,6 +218,37 @@ function WorkflowCard({ data, selected }: NodeProps<WorkflowFlowNode>) {
         />
       ))}
     </div>
+  );
+  if (!actions) return card;
+  return (
+    // Right-clicking a card selects it the way left-clicking does — the menu
+    // acts on this step, so it has to be the one wearing the ring. React Flow
+    // only selects on a left click, so the open does it through the same store
+    // call that click path uses.
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) store.getState().addSelectedNodes([id]);
+      }}
+    >
+      <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => actions.onEdit(id)}>
+          <Pencil /> {t("edit")}
+        </ContextMenuItem>
+        {!data.trigger && (
+          <ContextMenuItem onSelect={() => actions.onDuplicate(id)}>
+            <Copy /> {t("duplicateNode")}
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={() => actions.onDelete(id)}
+          variant="destructive"
+        >
+          <Trash2 /> {t("deleteNode")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

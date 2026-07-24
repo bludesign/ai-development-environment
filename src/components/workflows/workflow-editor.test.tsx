@@ -91,23 +91,27 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
-vi.mock("./workflow-graph", () => ({
-  workflowFlowElements: (
-    definition: {
-      nodes: { id: string }[];
-      triggers: { id: string }[];
-      edges: unknown[];
-    },
-    options: { provides?: Map<string, string[]> } = {},
-  ) => ({
-    nodes: [...definition.triggers, ...definition.nodes].map((entry) => ({
-      ...entry,
-      data: { provides: options.provides?.get(entry.id) ?? [] },
-    })),
-    edges: definition.edges,
-  }),
-  workflowNodeTypes: {},
-}));
+vi.mock("./workflow-graph", async () => {
+  const React = await import("react");
+  return {
+    WorkflowNodeActionsContext: React.createContext(null),
+    workflowFlowElements: (
+      definition: {
+        nodes: { id: string }[];
+        triggers: { id: string }[];
+        edges: unknown[];
+      },
+      options: { provides?: Map<string, string[]> } = {},
+    ) => ({
+      nodes: [...definition.triggers, ...definition.nodes].map((entry) => ({
+        ...entry,
+        data: { provides: options.provides?.get(entry.id) ?? [] },
+      })),
+      edges: definition.edges,
+    }),
+    workflowNodeTypes: {},
+  };
+});
 
 const request = vi.mocked(controlPlaneRequest);
 

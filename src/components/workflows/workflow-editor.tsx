@@ -119,8 +119,10 @@ import { hasConfigDescriptor } from "./config-fields/descriptors";
 import { WorkflowFitLock, WorkflowFitLockButton } from "./workflow-fit-lock";
 import {
   workflowFlowElements,
+  WorkflowNodeActionsContext,
   workflowNodeTypes,
   type WorkflowFlowNode,
+  type WorkflowNodeActions,
 } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import {
@@ -500,18 +502,38 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [commitDefinition, definition, selectedId],
   );
 
-  const duplicateSelected = useCallback(() => {
-    const source = definition.nodes.find(({ id }) => id === selectedId);
-    if (!source) return;
-    const copy = {
-      ...structuredClone(source),
-      id: clientId("node"),
-      name: `${source.name ?? source.kind} copy`,
-      position: { x: source.position.x + 36, y: source.position.y + 36 },
-    };
-    commitDefinition({ ...definition, nodes: [...definition.nodes, copy] });
-    setSelectedId(copy.id);
-  }, [commitDefinition, definition, selectedId]);
+  const duplicateItem = useCallback(
+    (id: string | null) => {
+      const source = definition.nodes.find((node) => node.id === id);
+      if (!source) return;
+      const copy = {
+        ...structuredClone(source),
+        id: clientId("node"),
+        name: `${source.name ?? source.kind} copy`,
+        position: { x: source.position.x + 36, y: source.position.y + 36 },
+      };
+      commitDefinition({ ...definition, nodes: [...definition.nodes, copy] });
+      setSelectedId(copy.id);
+    },
+    [commitDefinition, definition],
+  );
+
+  const duplicateSelected = useCallback(
+    () => duplicateItem(selectedId),
+    [duplicateItem, selectedId],
+  );
+
+  const nodeActions = useMemo<WorkflowNodeActions>(
+    () => ({
+      onDelete: (id) => removeItems([id]),
+      onDuplicate: (id) => duplicateItem(id),
+      onEdit: (id) => {
+        setSelectedEdgeId(null);
+        setSelectedId(id);
+      },
+    }),
+    [duplicateItem, removeItems],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -966,7 +988,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   />
                 </InputGroup>
                 {stepGroups.length || triggerGroups.length ? (
-                  <ScrollArea className="min-h-0 flex-1">
+                  <ScrollArea className="-mr-2 min-h-0 flex-1">
                     <div className="space-y-3 pr-2 pb-1">
                       {stepGroups.map(([category, entries]) => (
                         <section key={`step:${category}`}>
@@ -1070,7 +1092,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 )}
               </TabsContent>
               <TabsContent className="min-h-0" value="outline">
-                <ScrollArea className="h-full">
+                <ScrollArea className="-mr-2 h-full">
                   <ItemGroup className="gap-1 pr-2 pb-1">
                     {[...definition.triggers, ...definition.nodes].map(
                       (entry) => (
@@ -1143,79 +1165,81 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 <Trash2 /> {t("deleteConnection")}
               </Button>
             )}
-            <ReactFlow
-              colorMode="system"
-              deleteKeyCode={["Backspace", "Delete"]}
-              edges={edges}
-              fitView
-              nodeTypes={workflowNodeTypes}
-              nodes={canvasNodes}
-              onConnect={onConnect}
-              onEdgeClick={(_event, edge) => {
-                setSelectedId(null);
-                setSelectedEdgeId(edge.id);
-              }}
-              onEdgesChange={handleEdgesChange}
-              onInit={(value) =>
-                setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
-              }
-              onNodeClick={(event, node) => {
-                setSelectedEdgeId(null);
-                // A single click only picks the card up for dragging; opening
-                // the inspector takes a double click, so laying out a workflow
-                // does not keep throwing the panel over the canvas. Touch has
-                // no such distinction — a double tap is a poor target and the
-                // panel covers the canvas anyway — so a tap opens it there.
-                if (touchLike(event)) setSelectedId(node.id);
-              }}
-              onNodeDoubleClick={(_event, node) => {
-                setSelectedEdgeId(null);
-                setSelectedId(node.id);
-              }}
-              onNodeDragStop={(_event, node) => {
-                setDefinition((current) => ({
-                  ...current,
-                  nodes: current.nodes.map((entry) =>
-                    entry.id === node.id
-                      ? { ...entry, position: node.position }
-                      : entry,
-                  ),
-                  triggers: current.triggers.map((entry) =>
-                    entry.id === node.id
-                      ? { ...entry, position: node.position }
-                      : entry,
-                  ),
-                }));
-              }}
-              onNodesChange={onNodesChange}
-              onNodesDelete={(removed) =>
-                removeItems(removed.map(({ id }) => id))
-              }
-              onPaneClick={() => setSelectedEdgeId(null)}
-              panOnDrag={!locked}
-              preventScrolling={!locked}
-              proOptions={{ hideAttribution: true }}
-              /* Double click belongs to the step inspector here. React Flow's
+            <WorkflowNodeActionsContext value={nodeActions}>
+              <ReactFlow
+                colorMode="system"
+                deleteKeyCode={["Backspace", "Delete"]}
+                edges={edges}
+                fitView
+                nodeTypes={workflowNodeTypes}
+                nodes={canvasNodes}
+                onConnect={onConnect}
+                onEdgeClick={(_event, edge) => {
+                  setSelectedId(null);
+                  setSelectedEdgeId(edge.id);
+                }}
+                onEdgesChange={handleEdgesChange}
+                onInit={(value) =>
+                  setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
+                }
+                onNodeClick={(event, node) => {
+                  setSelectedEdgeId(null);
+                  // A single click only picks the card up for dragging; opening
+                  // the inspector takes a double click, so laying out a workflow
+                  // does not keep throwing the panel over the canvas. Touch has
+                  // no such distinction — a double tap is a poor target and the
+                  // panel covers the canvas anyway — so a tap opens it there.
+                  if (touchLike(event)) setSelectedId(node.id);
+                }}
+                onNodeDoubleClick={(_event, node) => {
+                  setSelectedEdgeId(null);
+                  setSelectedId(node.id);
+                }}
+                onNodeDragStop={(_event, node) => {
+                  setDefinition((current) => ({
+                    ...current,
+                    nodes: current.nodes.map((entry) =>
+                      entry.id === node.id
+                        ? { ...entry, position: node.position }
+                        : entry,
+                    ),
+                    triggers: current.triggers.map((entry) =>
+                      entry.id === node.id
+                        ? { ...entry, position: node.position }
+                        : entry,
+                    ),
+                  }));
+                }}
+                onNodesChange={onNodesChange}
+                onNodesDelete={(removed) =>
+                  removeItems(removed.map(({ id }) => id))
+                }
+                onPaneClick={() => setSelectedEdgeId(null)}
+                panOnDrag={!locked}
+                preventScrolling={!locked}
+                proOptions={{ hideAttribution: true }}
+                /* Double click belongs to the step inspector here. React Flow's
                  own double-click zoom sits on the pane and fires for clicks
                  that bubble up from a card, so it would zoom on every open. */
-              zoomOnDoubleClick={false}
-              zoomOnPinch={!locked}
-              zoomOnScroll={!locked}
-            >
-              <Background gap={20} size={1} />
-              <Controls showFitView={!locked} showZoom={!locked}>
-                <WorkflowFitLockButton
-                  locked={locked}
-                  onToggle={() => setLocked((current) => !current)}
-                />
-                <WorkflowSessionDataButton
-                  onToggle={() => setShowSessionData((current) => !current)}
-                  shown={showSessionData}
-                />
-              </Controls>
-              <WorkflowFitLock locked={locked} signature={fitSignature} />
-              {!locked && <MiniMap pannable zoomable />}
-            </ReactFlow>
+                zoomOnDoubleClick={false}
+                zoomOnPinch={!locked}
+                zoomOnScroll={!locked}
+              >
+                <Background gap={20} size={1} />
+                <Controls showFitView={!locked} showZoom={!locked}>
+                  <WorkflowFitLockButton
+                    locked={locked}
+                    onToggle={() => setLocked((current) => !current)}
+                  />
+                  <WorkflowSessionDataButton
+                    onToggle={() => setShowSessionData((current) => !current)}
+                    shown={showSessionData}
+                  />
+                </Controls>
+                <WorkflowFitLock locked={locked} signature={fitSignature} />
+                {!locked && <MiniMap pannable zoomable />}
+              </ReactFlow>
+            </WorkflowNodeActionsContext>
           </div>
           {diagnostics.length > 0 && (
             <Card>
