@@ -623,7 +623,7 @@ function ModelField({
 
   return (
     <Field>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-end justify-between gap-2">
         <FieldLabel className="text-xs">{field.label}</FieldLabel>
         <ValueModeToggle
           mode={sessionMode ? "session" : "literal"}

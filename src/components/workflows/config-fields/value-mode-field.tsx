@@ -71,7 +71,7 @@ export function ValueModeToggle({
         <TooltipTrigger asChild>
           <ToggleGroupItem
             aria-label={t("valueModeLiteral")}
-            className="size-7 px-0"
+            className="size-7 px-0 aria-checked:bg-accent aria-checked:text-accent-foreground"
             value="literal"
           >
             <PenLine className="size-3.5" />
@@ -83,7 +83,7 @@ export function ValueModeToggle({
         <TooltipTrigger asChild>
           <ToggleGroupItem
             aria-label={t("valueModeSession")}
-            className="size-7 px-0"
+            className="size-7 px-0 aria-checked:bg-accent aria-checked:text-accent-foreground"
             value="session"
           >
             <Braces className="size-3.5" />
@@ -133,7 +133,7 @@ export function ValueModeField({
 
   return (
     <Field>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-end justify-between gap-2">
         <FieldLabel className="text-xs" htmlFor={controlId}>
           {label}
         </FieldLabel>
