@@ -3,7 +3,11 @@ import { describe, expect, test, vi } from "vitest";
 import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
 import type { WorkflowsService } from "@/services/workflows";
 
-import { BuiltInToolRegistry } from "../builtin-tools";
+import {
+  BuiltInToolRegistry,
+  type BuiltInToolDefinition,
+  type BuiltInToolGroup,
+} from "../builtin-tools";
 import { createWorkflowToolGroup } from "./workflows";
 
 /**
@@ -46,6 +50,13 @@ function registry(double = service()) {
   };
 }
 
+function allTools(group: BuiltInToolGroup): BuiltInToolDefinition[] {
+  return [
+    ...group.tools,
+    ...group.children.flatMap((child) => allTools(child)),
+  ];
+}
+
 /** Calls a tool and returns its structured content. */
 async function call(
   instance: BuiltInToolRegistry,
@@ -57,16 +68,64 @@ async function call(
 }
 
 describe("workflow tool group", () => {
-  test("registers with globally unique tool names", () => {
+  test("groups tools by discovery, authoring, and runs", () => {
     const group = createWorkflowToolGroup(() => service().value);
-    const names = group.tools.map(({ name }) => name);
+    expect(group.tools).toEqual([]);
+    expect(group.children.map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: "builtin:workflows:discovery", name: "Discovery" },
+      { id: "builtin:workflows:authoring", name: "Authoring" },
+      { id: "builtin:workflows:runs", name: "Runs" },
+    ]);
+    expect(group.children[0]!.tools.map(({ name }) => name)).toEqual([
+      "list_workflow_step_kinds",
+      "list_workflow_trigger_kinds",
+      "describe_workflow_kind",
+      "list_workflow_session_paths",
+      "get_workflow_path_availability",
+    ]);
+    expect(group.children[1]!.tools.map(({ name }) => name)).toEqual([
+      "list_workflows",
+      "get_workflow",
+      "create_workflow",
+      "update_workflow_settings",
+      "set_workflow_enabled",
+      "archive_workflow",
+      "delete_workflow",
+      "add_workflow_step",
+      "update_workflow_step",
+      "add_workflow_trigger",
+      "update_workflow_trigger",
+      "remove_workflow_node",
+      "connect_workflow_nodes",
+      "disconnect_workflow_nodes",
+      "layout_workflow",
+      "set_workflow_definition",
+      "validate_workflow",
+      "publish_workflow",
+      "export_workflow",
+      "import_workflow",
+    ]);
+    expect(group.children[2]!.tools.map(({ name }) => name)).toEqual([
+      "trigger_workflow",
+      "list_workflow_runs",
+      "get_workflow_run",
+      "get_workflow_run_events",
+      "control_workflow_run",
+      "answer_workflow_question",
+      "prepare_workflow_replay",
+      "replay_workflow_run",
+    ]);
+
+    const names = allTools(group).map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);
     // The registry itself throws on a collision, so constructing it is the check.
     expect(() => new BuiltInToolRegistry([group])).not.toThrow();
   });
 
   test("every tool declares a title, description, and annotations", () => {
-    for (const tool of createWorkflowToolGroup(() => service().value).tools) {
+    for (const tool of allTools(
+      createWorkflowToolGroup(() => service().value),
+    )) {
       expect(tool.title, tool.name).toBeTruthy();
       expect(tool.description.length, tool.name).toBeGreaterThan(20);
       expect(tool.annotations, tool.name).toBeDefined();
@@ -75,7 +134,7 @@ describe("workflow tool group", () => {
 
   test("destructive tools are annotated as such", () => {
     const byName = new Map(
-      createWorkflowToolGroup(() => service().value).tools.map((tool) => [
+      allTools(createWorkflowToolGroup(() => service().value)).map((tool) => [
         tool.name,
         tool,
       ]),
@@ -91,6 +150,25 @@ describe("workflow tool group", () => {
     expect(byName.get("validate_workflow")?.annotations.readOnlyHint).toBe(
       true,
     );
+  });
+
+  test("routes catalog calls through the owning child group", async () => {
+    const { registry: instance } = registry();
+    await expect(
+      instance.call(
+        "builtin:workflows:discovery",
+        "list_workflow_step_kinds",
+        {},
+      ),
+    ).resolves.toMatchObject({
+      structuredContent: { steps: expect.any(Array) },
+    });
+    await expect(
+      instance.call("builtin:workflows", "list_workflow_step_kinds", {}),
+    ).rejects.toThrow("Unknown built-in tool");
+    await expect(
+      instance.call("builtin:workflows:runs", "list_workflow_step_kinds", {}),
+    ).rejects.toThrow("Unknown built-in tool");
   });
 });
 

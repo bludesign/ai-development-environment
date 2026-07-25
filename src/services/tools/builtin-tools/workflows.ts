@@ -278,12 +278,11 @@ function triggerEntry(kind: string) {
 // ---------------------------------------------------------------------------
 
 export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
-  return {
-    id: "builtin:workflows",
-    name: "Workflows",
+  const discoveryGroup: BuiltInToolGroup = {
+    id: "builtin:workflows:discovery",
+    name: "Discovery",
     children: [],
     tools: [
-      // -- Discovery ---------------------------------------------------------
       defineTool({
         name: "list_workflow_step_kinds",
         title: "List workflow step kinds",
@@ -522,7 +521,14 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
           };
         },
       }),
+    ],
+  };
 
+  const authoringGroup: BuiltInToolGroup = {
+    id: "builtin:workflows:authoring",
+    name: "Authoring",
+    children: [],
+    tools: [
       // -- Workflow CRUD -----------------------------------------------------
       defineTool({
         name: "list_workflows",
@@ -1072,8 +1078,14 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
           };
         },
       }),
+    ],
+  };
 
-      // -- Runs --------------------------------------------------------------
+  const runsGroup: BuiltInToolGroup = {
+    id: "builtin:workflows:runs",
+    name: "Runs",
+    children: [],
+    tools: [
       defineTool({
         name: "trigger_workflow",
         title: "Trigger workflow run",
@@ -1310,6 +1322,13 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
         },
       }),
     ],
+  };
+
+  return {
+    id: "builtin:workflows",
+    name: "Workflows",
+    tools: [],
+    children: [discoveryGroup, authoringGroup, runsGroup],
   };
 }
 
