@@ -66,6 +66,10 @@ import {
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { formatModelLabel } from "@/lib/enum-label";
+import {
+  hasPrioritizedTableStatus,
+  prioritizeActiveTableRows,
+} from "@/lib/active-table-order";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import {
   DEFAULT_RUN_FILTERS,
@@ -255,8 +259,9 @@ export function RunsPage({
   const groups = useMemo(() => {
     const result: Array<{ key: string; value: string; items: AgentRunView[] }> =
       [];
-    for (const item of items) {
-      const key = dayKey(item.createdAt) ?? item.createdAt;
+    for (const item of prioritizeActiveTableRows(items)) {
+      const dateKey = dayKey(item.createdAt) ?? item.createdAt;
+      const key = `${hasPrioritizedTableStatus(item.status) ? "priority" : "remaining"}:${dateKey}`;
       const group = result.at(-1);
       if (group?.key === key) group.items.push(item);
       else result.push({ key, value: item.createdAt, items: [item] });

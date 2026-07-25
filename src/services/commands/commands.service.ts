@@ -12,6 +12,7 @@ import {
   commandRunOutputTopic,
   type AgentControlService,
 } from "@/services/agent-control";
+import type { NotificationsService } from "@/services/notifications";
 
 const TARGETS = [
   "ANY_AGENT_HOME",
@@ -42,6 +43,7 @@ export type CommandDefinitionInput = {
   quickActionEnabled?: boolean | null;
   quickActionIconKey?: string | null;
   quickActionButtonVariant?: string | null;
+  notificationsEnabled?: boolean | null;
 };
 
 export type StartCommandRunInput = {
@@ -146,7 +148,10 @@ export class CommandsService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private reconciliation: Promise<void> | null = null;
 
-  constructor(private readonly agentControl: AgentControlService) {
+  constructor(
+    private readonly agentControl: AgentControlService,
+    private readonly notifications?: NotificationsService,
+  ) {
     this.agentControl.registerCompletionHandler(COMMAND_RUN_JOB_KIND, (job) =>
       this.handleAttemptCompletion(job),
     );
@@ -247,6 +252,7 @@ export class CommandsService {
         "Quick action style",
         40,
       ),
+      notificationsEnabled: input.notificationsEnabled ?? true,
     };
   }
 
@@ -512,6 +518,7 @@ export class CommandsService {
             snapshotTargetKind: definition.targetKind,
             snapshotRestartPolicy: definition.restartPolicy,
             snapshotRestartLimit: definition.restartLimit,
+            snapshotNotificationsEnabled: definition.notificationsEnabled,
             snapshotJson: JSON.stringify(definition),
             agentId: agent.id,
             worktreeId: worktree?.id ?? null,
@@ -650,8 +657,10 @@ export class CommandsService {
         finishedAt: new Date(),
         nextRestartAt: null,
       },
+      include: { worktree: { select: { highlightColor: true } } },
     });
     publishRun(updated);
+    await this.notifyFinishedRun(updated);
   }
 
   async terminateRun(id: string) {
@@ -700,6 +709,7 @@ export class CommandsService {
           snapshotTargetKind: original.snapshotTargetKind,
           snapshotRestartPolicy: original.snapshotRestartPolicy,
           snapshotRestartLimit: original.snapshotRestartLimit,
+          snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
           snapshotJson: original.snapshotJson,
           agentId: original.agentId,
           worktreeId: original.worktreeId,
@@ -827,6 +837,60 @@ export class CommandsService {
     if (successor) await this.dispatch(successor.id);
   }
 
+  private async notifyFinishedRun(run: {
+    id: string;
+    status: string;
+    snapshotName: string;
+    snapshotNotificationsEnabled: boolean;
+    agentName: string;
+    agentHostname: string;
+    worktreeId: string | null;
+    worktreePath: string | null;
+    worktreeBranch: string | null;
+    worktree: { highlightColor: string | null } | null;
+    error: string | null;
+  }): Promise<void> {
+    if (
+      !this.notifications ||
+      !run.snapshotNotificationsEnabled ||
+      (run.status !== "SUCCEEDED" && run.status !== "FAILED")
+    ) {
+      return;
+    }
+    const target =
+      run.worktreeBranch ??
+      run.worktreePath ??
+      `${run.agentName} · ${run.agentHostname}`;
+    const body = [target, run.status === "FAILED" ? run.error : null]
+      .filter((value): value is string => Boolean(value))
+      .join(" · ")
+      .slice(0, 1_000);
+    try {
+      const prisma = await getPrismaClient();
+      const notification = await prisma.$transaction((transaction) =>
+        this.notifications!.recordInTransaction(transaction, {
+          dedupeKey: `command-run:${run.id}:${run.status}`,
+          typeKey:
+            run.status === "SUCCEEDED"
+              ? "COMMAND_RUN_SUCCEEDED"
+              : "COMMAND_RUN_FAILED",
+          title: `${run.snapshotName} ${run.status.toLowerCase()}`,
+          body,
+          href: `/commands/runs/${run.id}`,
+          resourceKind: "COMMAND_RUN",
+          resourceId: run.id,
+          worktreeId: run.worktreeId,
+          highlightColor: run.worktree?.highlightColor ?? null,
+        }),
+      );
+      this.notifications.created(notification);
+    } catch (error) {
+      if (process.env.NODE_ENV !== "test") {
+        console.error("Command run notification failed:", error);
+      }
+    }
+  }
+
   private async handleAttemptCompletion(job: {
     id: string;
     status: string;
@@ -904,8 +968,10 @@ export class CommandsService {
         finishedAt: now,
         nextRestartAt: null,
       },
+      include: { worktree: { select: { highlightColor: true } } },
     });
     publishRun(updated);
+    await this.notifyFinishedRun(updated);
   }
 
   async reconcile(input: { agentId?: string } = {}): Promise<void> {

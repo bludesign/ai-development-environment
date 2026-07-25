@@ -688,6 +688,14 @@
         "title": "Échec du build iOS",
         "description": "Un build iOS se termine avec une erreur."
       },
+      "COMMAND_RUN_SUCCEEDED": {
+        "title": "Commande exécutée avec succès",
+        "description": "Une commande enregistrée se termine avec succès."
+      },
+      "COMMAND_RUN_FAILED": {
+        "title": "Échec de l’exécution de la commande",
+        "description": "Une commande enregistrée se termine par un échec."
+      },
       "GITHUB_ACTIONS_SUCCEEDED": {
         "title": "GitHub Actions réussi",
         "description": "Un workflow GitHub Actions se termine avec succès."
@@ -739,6 +747,7 @@
     },
     "categories": {
       "BUILDS": "Builds",
+      "COMMANDS": "Commandes",
       "GITHUB": "GitHub",
       "RUNS": "Plans et sessions",
       "WORKFLOWS": "Workflows"
@@ -3560,6 +3569,9 @@
     "onFailure": "On failure",
     "always": "Always",
     "unlimited": "Unlimited restarts",
+    "notifications": "Notifications",
+    "enableNotifications": "Notifier à la fin de cette commande",
+    "notificationsHelp": "Les canaux de diffusion se configurent sur la page Notifications. Désactivez cette option pour les commandes qui ne nécessitent pas d’alerte de fin.",
     "enableQuickAction": "Show this command as a quick action",
     "icon": "Icon",
     "style": "Button style",
@@ -3573,15 +3585,17 @@
     "runNumber": "Command run #{number}",
     "runError": "Command failed",
     "nextRestart": "Next restart",
+    "overview": "Vue d’ensemble",
     "timing": "Timing",
+    "duration": "Durée",
     "terminalOutput": "Terminal output",
     "followOutput": "Follow output",
     "fitTerminal": "Fit terminal",
     "attempts": "Attempts",
     "result": "Result",
     "snapshot": "Immutable command snapshot",
-    "copyCommand": "Copier la commande",
-    "commandCopied": "Commande copiée",
+    "copyCommand": "Copier",
+    "commandCopied": "Copié",
     "copyFailed": "Impossible de copier la commande. Sélectionnez-la et copiez-la manuellement.",
     "runCommand": "Exécuter {name}",
     "chooseAgentTarget": "Choisissez le dossier d’accueil précis de l’agent où cette commande sera exécutée.",

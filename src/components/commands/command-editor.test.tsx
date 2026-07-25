@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -54,8 +60,23 @@ describe("CommandEditor", () => {
     expect(releaseIcon.querySelector("svg")).not.toBeNull();
     fireEvent.click(releaseIcon);
 
-    expect(
-      screen.getByRole("button", { name: "Icon: Release" }),
-    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Icon: Release" })).toBeDefined();
+  });
+
+  test("enables completion notifications by default and saves an opt-out", async () => {
+    render(<CommandEditor />);
+
+    const notifications = screen.getByRole("checkbox", {
+      name: "Notify when this command finishes",
+    });
+    expect(notifications.getAttribute("data-state")).toBe("checked");
+
+    fireEvent.click(notifications);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[1]).toEqual({
+      input: expect.objectContaining({ notificationsEnabled: false }),
+    });
   });
 });

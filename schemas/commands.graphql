@@ -43,6 +43,7 @@ type CommandDefinition {
   quickActionEnabled: Boolean!
   quickActionIconKey: String!
   quickActionButtonVariant: String!
+  notificationsEnabled: Boolean!
   archivedAt: String
   createdAt: String!
   updatedAt: String!
@@ -88,6 +89,7 @@ type CommandRun {
   snapshotTargetKind: CommandTargetKind!
   snapshotRestartPolicy: CommandRestartPolicy!
   snapshotRestartLimit: Int
+  snapshotNotificationsEnabled: Boolean!
   snapshot: JSON!
   agentId: ID
   agent: Agent
@@ -138,6 +140,7 @@ input CommandDefinitionInput {
   quickActionEnabled: Boolean = false
   quickActionIconKey: String = "terminal"
   quickActionButtonVariant: String = "default"
+  notificationsEnabled: Boolean = true
 }
 
 input StartCommandRunInput {

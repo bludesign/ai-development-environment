@@ -99,6 +99,7 @@ describe("command target and output authorization", () => {
       quickActionEnabled: true,
       quickActionIconKey: "play",
       quickActionButtonVariant: "secondary",
+      notificationsEnabled: true,
       archivedAt: null,
       createdAt: new Date("2026-07-25T12:00:00.000Z"),
       updatedAt: new Date("2026-07-25T13:00:00.000Z"),
@@ -167,6 +168,7 @@ describe("command target and output authorization", () => {
       snapshotTargetKind: "REPOSITORY_WORKTREE",
       snapshotRestartPolicy: "ON_FAILURE",
       snapshotRestartLimit: 2,
+      snapshotNotificationsEnabled: false,
       snapshotJson: '{"name":"Original name"}',
       agentId: "agent-1",
       worktreeId: "worktree-1",
@@ -218,6 +220,7 @@ describe("command target and output authorization", () => {
         snapshotTargetKind: original.snapshotTargetKind,
         snapshotRestartPolicy: original.snapshotRestartPolicy,
         snapshotRestartLimit: original.snapshotRestartLimit,
+        snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
         snapshotJson: original.snapshotJson,
         agentId: original.agentId,
         worktreeId: original.worktreeId,
@@ -449,5 +452,137 @@ describe("command reconciliation", () => {
         }),
       }),
     );
+  });
+
+  test.each([
+    ["SUCCEEDED", 0, "COMMAND_RUN_SUCCEEDED", "Deploy succeeded"],
+    ["FAILED", 1, "COMMAND_RUN_FAILED", "Deploy failed"],
+  ])(
+    "records and publishes a %s command notification",
+    async (status, exitCode, typeKey, title) => {
+      let completeCommand: ((job: never) => Promise<void>) | undefined;
+      const notification = { id: "notification-1", typeKey, title };
+      const recordInTransaction = vi.fn().mockResolvedValue(notification);
+      const created = vi.fn();
+      const transaction = {};
+      const run = {
+        id: "run-1",
+        status,
+        snapshotName: "Deploy",
+        snapshotNotificationsEnabled: true,
+        agentName: "Builder",
+        agentHostname: "builder.local",
+        worktreeId: "worktree-1",
+        worktreePath: "/code/project",
+        worktreeBranch: "main",
+        worktree: { highlightColor: "blue" },
+        error: status === "FAILED" ? "Command failed" : null,
+      };
+      getPrismaClient.mockResolvedValue({
+        commandRunAttempt: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "attempt-1",
+            runId: "run-1",
+            completionProcessedAt: null,
+            createdAt: new Date(0),
+            run: {
+              id: "run-1",
+              stopRequested: false,
+              snapshotRestartPolicy: "NEVER",
+              snapshotRestartLimit: 3,
+              restartCount: 0,
+            },
+            agentJob: { startedAt: new Date(0), finishedAt: new Date(1) },
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        commandRun: {
+          update: vi.fn().mockResolvedValue(run),
+        },
+        $transaction: vi.fn((callback) => callback(transaction)),
+      });
+      new CommandsService(
+        {
+          registerCompletionHandler: vi.fn((_kind, handler) => {
+            completeCommand = handler as typeof completeCommand;
+          }),
+          registerConnectionHandler: vi.fn(),
+        } as never,
+        { recordInTransaction, created } as never,
+      );
+
+      await completeCommand!({
+        id: "job-1",
+        status,
+        resultJson: JSON.stringify({ exitCode }),
+        error: status === "FAILED" ? "Command failed" : null,
+      } as never);
+
+      expect(recordInTransaction).toHaveBeenCalledWith(
+        transaction,
+        expect.objectContaining({
+          dedupeKey: `command-run:run-1:${status}`,
+          typeKey,
+          title,
+          body: status === "FAILED" ? "main · Command failed" : "main",
+          href: "/commands/runs/run-1",
+          resourceKind: "COMMAND_RUN",
+          resourceId: "run-1",
+          worktreeId: "worktree-1",
+          highlightColor: "blue",
+        }),
+      );
+      expect(created).toHaveBeenCalledWith(notification);
+    },
+  );
+
+  test("honors a command's notification opt-out", async () => {
+    let completeCommand: ((job: never) => Promise<void>) | undefined;
+    const recordInTransaction = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      commandRunAttempt: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "attempt-1",
+          runId: "run-1",
+          completionProcessedAt: null,
+          createdAt: new Date(0),
+          run: {
+            id: "run-1",
+            stopRequested: false,
+            snapshotRestartPolicy: "NEVER",
+            snapshotRestartLimit: 3,
+            restartCount: 0,
+          },
+          agentJob: { startedAt: new Date(0), finishedAt: new Date(1) },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      commandRun: {
+        update: vi.fn().mockResolvedValue({
+          id: "run-1",
+          status: "SUCCEEDED",
+          snapshotName: "Quiet command",
+          snapshotNotificationsEnabled: false,
+        }),
+      },
+    });
+    new CommandsService(
+      {
+        registerCompletionHandler: vi.fn((_kind, handler) => {
+          completeCommand = handler as typeof completeCommand;
+        }),
+        registerConnectionHandler: vi.fn(),
+      } as never,
+      { recordInTransaction, created: vi.fn() } as never,
+    );
+
+    await completeCommand!({
+      id: "job-1",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({ exitCode: 0 }),
+      error: null,
+    } as never);
+
+    expect(recordInTransaction).not.toHaveBeenCalled();
   });
 });

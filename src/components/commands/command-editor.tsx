@@ -51,6 +51,7 @@ type Form = {
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
+  notificationsEnabled: boolean;
 };
 
 const initial: Form = {
@@ -66,6 +67,7 @@ const initial: Form = {
   quickActionEnabled: false,
   quickActionIconKey: "terminal",
   quickActionButtonVariant: "default",
+  notificationsEnabled: true,
 };
 
 export function CommandEditor({ commandId }: { commandId?: string }) {
@@ -119,6 +121,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             quickActionEnabled: value.quickActionEnabled,
             quickActionIconKey: value.quickActionIconKey,
             quickActionButtonVariant: value.quickActionButtonVariant,
+            notificationsEnabled: value.notificationsEnabled,
           });
         }
       })
@@ -148,6 +151,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
         quickActionEnabled: form.quickActionEnabled,
         quickActionIconKey: form.quickActionIconKey,
         quickActionButtonVariant: form.quickActionButtonVariant,
+        notificationsEnabled: form.notificationsEnabled,
       };
       const data = await controlPlaneRequest<{
         createCommandDefinition?: { id: string };
@@ -376,6 +380,25 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
       </div>
       <Card>
         <CardHeader>
+          <CardTitle>{t("notifications")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={form.notificationsEnabled}
+              onCheckedChange={(checked) =>
+                update("notificationsEnabled", checked === true)
+              }
+            />
+            {t("enableNotifications")}
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {t("notificationsHelp")}
+          </p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle>{t("quickAction")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -406,9 +429,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
                       {form.quickActionIconKey === "none" ? (
                         <CircleOff className="size-4 shrink-0" />
                       ) : (
-                        <ConfigurationIcon
-                          iconKey={form.quickActionIconKey}
-                        />
+                        <ConfigurationIcon iconKey={form.quickActionIconKey} />
                       )}
                       <span className="truncate">
                         {buildsT(

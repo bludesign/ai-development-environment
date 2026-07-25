@@ -54,6 +54,10 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import {
+  hasPrioritizedTableStatus,
+  prioritizeActiveTableRows,
+} from "@/lib/active-table-order";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
@@ -204,17 +208,20 @@ export function CommandsPage() {
 
   const filteredRuns = useMemo(
     () =>
-      runs.filter((run) =>
-        `${run.displayNumber} ${run.snapshotName} ${run.agentName} ${run.worktreePath ?? ""} ${run.status}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
+      prioritizeActiveTableRows(
+        runs.filter((run) =>
+          `${run.displayNumber} ${run.snapshotName} ${run.agentName} ${run.worktreePath ?? ""} ${run.status}`
+            .toLowerCase()
+            .includes(search.toLowerCase()),
+        ),
       ),
     [runs, search],
   );
   const groups = useMemo(() => {
     const result: Array<{ key: string; date: string; runs: CommandRun[] }> = [];
     for (const run of filteredRuns) {
-      const key = dayKey(run.createdAt) ?? run.createdAt;
+      const dateKey = dayKey(run.createdAt) ?? run.createdAt;
+      const key = `${hasPrioritizedTableStatus(run.status) ? "priority" : "remaining"}:${dateKey}`;
       const current = result.at(-1);
       if (current?.key === key) current.runs.push(run);
       else result.push({ key, date: run.createdAt, runs: [run] });

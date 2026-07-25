@@ -36,6 +36,7 @@ export type CommandDefinition = {
   quickActionEnabled: boolean;
   quickActionIconKey: string;
   quickActionButtonVariant: string;
+  notificationsEnabled: boolean;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -65,6 +66,7 @@ export type CommandRun = {
   snapshotTargetKind: string;
   snapshotRestartPolicy: string;
   snapshotRestartLimit: number | null;
+  snapshotNotificationsEnabled: boolean;
   snapshot: Record<string, unknown>;
   agentId: string | null;
   agent: CommandAgent | null;
@@ -95,6 +97,7 @@ export type CommandRun = {
 export const COMMAND_DEFINITION_FIELDS = `
   id name description script targetKind targetAgentId targetRepositoryId
   restartPolicy restartLimit quickActionEnabled quickActionIconKey quickActionButtonVariant
+  notificationsEnabled
   archivedAt createdAt updatedAt
   targetAgent { id name hostname connectionStatus capabilities }
   targetRepository { id name displayOrigin }
@@ -103,7 +106,7 @@ export const COMMAND_DEFINITION_FIELDS = `
 export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
   snapshotScript snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
-  snapshot
+  snapshotNotificationsEnabled snapshot
   agentId worktreeId agentName agentHostname worktreePath worktreeBranch
   restartCount stopRequested nextRestartAt predecessorRunId error exitCode signal
   queuedAt startedAt finishedAt archivedAt createdAt updatedAt

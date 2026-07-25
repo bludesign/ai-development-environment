@@ -688,6 +688,14 @@
         "title": "iOS-Build fehlgeschlagen",
         "description": "Ein iOS-Build wird mit einem Fehler beendet."
       },
+      "COMMAND_RUN_SUCCEEDED": {
+        "title": "Befehlsausführung erfolgreich",
+        "description": "Ein gespeicherter Befehl wird erfolgreich beendet."
+      },
+      "COMMAND_RUN_FAILED": {
+        "title": "Befehlsausführung fehlgeschlagen",
+        "description": "Ein gespeicherter Befehl wird mit einem Fehler beendet."
+      },
       "GITHUB_ACTIONS_SUCCEEDED": {
         "title": "GitHub Actions erfolgreich",
         "description": "Ein GitHub-Actions-Workflow wurde erfolgreich abgeschlossen."
@@ -739,6 +747,7 @@
     },
     "categories": {
       "BUILDS": "Build-Prozesse",
+      "COMMANDS": "Befehle",
       "GITHUB": "GitHub",
       "RUNS": "Pläne und Sitzungen",
       "WORKFLOWS": "Workflows"
@@ -3560,6 +3569,9 @@
     "onFailure": "Bei Fehler",
     "always": "Immer",
     "unlimited": "Unbegrenzte Neustarts",
+    "notifications": "Benachrichtigungen",
+    "enableNotifications": "Benachrichtigen, wenn dieser Befehl beendet ist",
+    "notificationsHelp": "Die Zustellungskanäle werden auf der Seite „Benachrichtigungen“ konfiguriert. Deaktivieren Sie diese Option für Befehle, die keine Abschlussmeldung benötigen.",
     "enableQuickAction": "Diesen Befehl als Schnellaktion anzeigen",
     "icon": "Symbol",
     "style": "Schaltflächenstil",
@@ -3573,7 +3585,9 @@
     "runNumber": "Befehlsausführung #{number}",
     "runError": "Befehl fehlgeschlagen",
     "nextRestart": "Nächster Neustart",
+    "overview": "Übersicht",
     "timing": "Zeitablauf",
+    "duration": "Dauer",
     "terminalOutput": "Terminalausgabe",
     "followOutput": "Ausgabe folgen",
     "fitTerminal": "Terminal anpassen",

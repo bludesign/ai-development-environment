@@ -34,6 +34,49 @@ const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const push = vi.fn();
 const timestamp = "2026-07-25T12:00:00.000Z";
 
+function commandRun({
+  id = "run-1",
+  displayNumber = 42,
+  status = "SUCCEEDED",
+  createdAt = timestamp,
+} = {}) {
+  return {
+    id,
+    displayNumber,
+    commandId: "command-1",
+    command: { id: "command-1", name: "Development server" },
+    origin: "MANUAL",
+    status,
+    snapshotName: "Development server",
+    agentId: "agent-1",
+    agentName: "Studio",
+    agentHostname: "studio.local",
+    worktreeId: "worktree-1",
+    worktree: {
+      id: "worktree-1",
+      folder: "/code/project",
+      branch: "feature/AIDE-75",
+      highlightColor: "violet",
+    },
+    worktreePath: "/code/project",
+    worktreeBranch: "feature/AIDE-75",
+    restartCount: 0,
+    stopRequested: false,
+    nextRestartAt: null,
+    predecessorRunId: null,
+    error: null,
+    exitCode: 0,
+    signal: null,
+    attempts: [],
+    queuedAt: createdAt,
+    startedAt: createdAt,
+    finishedAt: status === "RUNNING" ? null : createdAt,
+    archivedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
 beforeEach(() => {
   push.mockReset();
   subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
@@ -49,45 +92,7 @@ beforeEach(() => {
       },
     ],
     worktreeOverview: { agents: [] },
-    commandRuns: {
-      nodes: [
-        {
-          id: "run-1",
-          displayNumber: 42,
-          commandId: "command-1",
-          command: { id: "command-1", name: "Development server" },
-          origin: "MANUAL",
-          status: "SUCCEEDED",
-          snapshotName: "Development server",
-          agentId: "agent-1",
-          agentName: "Studio",
-          agentHostname: "studio.local",
-          worktreeId: "worktree-1",
-          worktree: {
-            id: "worktree-1",
-            folder: "/code/project",
-            branch: "feature/AIDE-75",
-            highlightColor: "violet",
-          },
-          worktreePath: "/code/project",
-          worktreeBranch: "feature/AIDE-75",
-          restartCount: 0,
-          stopRequested: false,
-          nextRestartAt: null,
-          predecessorRunId: null,
-          error: null,
-          exitCode: 0,
-          signal: null,
-          attempts: [],
-          queuedAt: timestamp,
-          startedAt: timestamp,
-          finishedAt: timestamp,
-          archivedAt: null,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        },
-      ],
-    },
+    commandRuns: { nodes: [commandRun()] },
   } as never);
 });
 
@@ -147,5 +152,29 @@ describe("CommandsPage", () => {
     const rowCheckbox = screen.getAllByRole("checkbox")[2];
     expect(dayCheckbox.getAttribute("aria-checked")).toBe("true");
     expect(rowCheckbox.getAttribute("aria-checked")).toBe("true");
+  });
+
+  test("shows running commands before newer completed commands", async () => {
+    request.mockResolvedValueOnce({
+      commandDefinitions: [],
+      agents: [],
+      worktreeOverview: { agents: [] },
+      commandRuns: {
+        nodes: [
+          commandRun({ id: "complete", displayNumber: 43 }),
+          commandRun({
+            id: "running",
+            displayNumber: 41,
+            status: "RUNNING",
+            createdAt: "2026-07-24T12:00:00.000Z",
+          }),
+        ],
+      },
+    } as never);
+
+    render(<CommandsPage />);
+
+    const runLinks = await screen.findAllByRole("link", { name: /^#\d+$/ });
+    expect(runLinks.map((link) => link.textContent)).toEqual(["#41", "#43"]);
   });
 });

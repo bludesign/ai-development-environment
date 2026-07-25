@@ -688,6 +688,14 @@
         "title": "iOS build failed",
         "description": "An iOS build finishes with a failure."
       },
+      "COMMAND_RUN_SUCCEEDED": {
+        "title": "Command run succeeded",
+        "description": "A saved command finishes successfully."
+      },
+      "COMMAND_RUN_FAILED": {
+        "title": "Command run failed",
+        "description": "A saved command finishes with a failure."
+      },
       "GITHUB_ACTIONS_SUCCEEDED": {
         "title": "GitHub Actions succeeded",
         "description": "A GitHub Actions workflow finishes successfully."
@@ -739,6 +747,7 @@
     },
     "categories": {
       "BUILDS": "Builds",
+      "COMMANDS": "Commands",
       "GITHUB": "GitHub",
       "RUNS": "Plans and Sessions",
       "WORKFLOWS": "Workflows"
@@ -3560,6 +3569,9 @@
     "onFailure": "On failure",
     "always": "Always",
     "unlimited": "Unlimited restarts",
+    "notifications": "Notifications",
+    "enableNotifications": "Notify when this command finishes",
+    "notificationsHelp": "Delivery channels are configured on the Notifications page. Turn this off for commands that do not need completion alerts.",
     "enableQuickAction": "Show this command as a quick action",
     "icon": "Icon",
     "style": "Button style",
@@ -3573,15 +3585,17 @@
     "runNumber": "Command run #{number}",
     "runError": "Command failed",
     "nextRestart": "Next restart",
+    "overview": "Overview",
     "timing": "Timing",
+    "duration": "Duration",
     "terminalOutput": "Terminal output",
     "followOutput": "Follow output",
     "fitTerminal": "Fit terminal",
     "attempts": "Attempts",
     "result": "Result",
     "snapshot": "Immutable command snapshot",
-    "copyCommand": "Copy command",
-    "commandCopied": "Command copied",
+    "copyCommand": "Copy",
+    "commandCopied": "Copied",
     "copyFailed": "Could not copy the command. Select and copy it manually.",
     "runCommand": "Run {name}",
     "chooseAgentTarget": "Choose the concrete agent home where this command will run.",

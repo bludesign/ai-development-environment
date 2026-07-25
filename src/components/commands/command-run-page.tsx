@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
+import { DetailItem, DetailList } from "@/components/common/detail-list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,11 +34,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
+import { useNow } from "@/hooks/use-now";
 import { copyText } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 
 import {
   COMMAND_RUN_FIELDS,
@@ -60,6 +67,38 @@ type OutputChunk = {
 };
 const OUTPUT_FIELDS =
   "id attemptId attemptNumber sequence stream dataBase64 byteLength createdAt";
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  if (minutes > 0) return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
+  return `${seconds}s`;
+}
+
+function LiveRunDuration({ startedAt }: { startedAt: string }) {
+  const start = Date.parse(startedAt);
+  const now = useNow(Number.isFinite(start) ? start : null);
+  if (!Number.isFinite(start) || now === null) return <>—</>;
+  return <>{formatDuration(now - start)}</>;
+}
+
+function RunDuration({
+  startedAt,
+  finishedAt,
+}: {
+  startedAt: string | null;
+  finishedAt: string | null;
+}) {
+  if (!startedAt) return <>—</>;
+  if (!finishedAt) return <LiveRunDuration startedAt={startedAt} />;
+  const start = Date.parse(startedAt);
+  const finish = Date.parse(finishedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(finish)) return <>—</>;
+  return <>{formatDuration(finish - start)}</>;
+}
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
@@ -269,10 +308,19 @@ export function CommandRunPage({ runId }: { runId: string }) {
         <AlertDescription>{error}</AlertDescription>
       </Alert>
     );
+  const highlighted = run.worktree?.highlightColor;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-3",
+          highlighted && "rounded-lg border-l-4 p-4",
+          highlighted && worktreeHighlightBackgroundClasses[highlighted],
+          highlighted && worktreeHighlightAccentClasses[highlighted],
+        )}
+        data-testid="command-run-summary"
+      >
         <Button asChild size="icon" variant="ghost">
           <Link href="/commands">
             <ArrowLeft />
@@ -334,80 +382,83 @@ export function CommandRunPage({ runId }: { runId: string }) {
           <AlertDescription>{run.error}</AlertDescription>
         </Alert>
       )}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t("agent")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {run.agentId ? (
-              <Button asChild className="px-0" variant="link">
-                <Link href={`/agents/${run.agentId}`}>
-                  {run.agentName}
-                  <ExternalLink />
-                </Link>
-              </Button>
-            ) : (
-              <p>{run.agentName}</p>
-            )}
-            <p className="text-xs text-muted-foreground">{run.agentHostname}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t("worktree")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {run.worktreeId ? (
-              <Button asChild className="h-auto px-0 text-left" variant="link">
-                <Link href={`/worktrees/${run.worktreeId}`}>
-                  {run.worktreeBranch || run.worktreePath}
-                  <ExternalLink />
-                </Link>
-              </Button>
-            ) : run.snapshotTargetKind.includes("WORKTREE") ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("overview")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DetailList className="sm:grid-cols-6">
+            <DetailItem className="sm:col-span-3" label={t("agent")}>
+              {run.agentId ? (
+                <Button
+                  asChild
+                  className="h-auto w-full min-w-0 items-start justify-start px-0 text-left whitespace-normal"
+                  variant="link"
+                >
+                  <Link href={`/agents/${run.agentId}`}>
+                    <span className="min-w-0 break-words">{run.agentName}</span>
+                    <ExternalLink />
+                  </Link>
+                </Button>
+              ) : (
+                <p className="break-words">{run.agentName}</p>
+              )}
+              <p className="break-words text-xs text-muted-foreground">
+                {run.agentHostname}
+              </p>
+            </DetailItem>
+            <DetailItem className="sm:col-span-3" label={t("worktree")}>
+              {run.worktreeId ? (
+                <Button
+                  asChild
+                  className="h-auto w-full min-w-0 items-start justify-start px-0 text-left whitespace-normal"
+                  variant="link"
+                >
+                  <Link href={`/worktrees/${run.worktreeId}`}>
+                    <span className="min-w-0 break-words">
+                      {run.worktreeBranch || run.worktreePath}
+                    </span>
+                    <ExternalLink />
+                  </Link>
+                </Button>
+              ) : run.snapshotTargetKind.includes("WORKTREE") ? (
+                <p className="break-words">
+                  {run.worktreeBranch ||
+                    run.worktreePath ||
+                    t("targetUnavailable")}
+                </p>
+              ) : (
+                <p>{t("agentHome")}</p>
+              )}
+            </DetailItem>
+            <DetailItem className="sm:col-span-2" label={t("restart")}>
               <p>
-                {run.worktreeBranch ||
-                  run.worktreePath ||
-                  t("targetUnavailable")}
+                {t(commandRestartKey(run.snapshotRestartPolicy))}
+                {run.snapshotRestartPolicy !== "NEVER" && (
+                  <>
+                    {" · "}
+                    {run.restartCount}/{run.snapshotRestartLimit ?? "∞"}
+                  </>
+                )}
               </p>
-            ) : (
-              <p>{t("agentHome")}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t("restart")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>
-              {t(commandRestartKey(run.snapshotRestartPolicy))} ·{" "}
-              {run.restartCount}/{run.snapshotRestartLimit ?? "∞"}
-            </p>
-            {run.nextRestartAt && (
-              <p className="text-xs text-muted-foreground">
-                {t("nextRestart")} <DateTime value={run.nextRestartAt} />
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t("timing")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm">
-              <DateTime value={run.startedAt ?? run.queuedAt} />
-            </p>
-            {run.finishedAt && (
-              <p className="text-xs text-muted-foreground">
-                {t("finished")} <DateTime value={run.finishedAt} />
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              {run.nextRestartAt && (
+                <p className="text-xs text-muted-foreground">
+                  {t("nextRestart")} <DateTime value={run.nextRestartAt} />
+                </p>
+              )}
+            </DetailItem>
+            <DetailItem className="sm:col-span-2" label={t("started")}>
+              <DateTime value={run.startedAt} />
+            </DetailItem>
+            <DetailItem className="sm:col-span-2" label={t("duration")}>
+              <RunDuration
+                finishedAt={run.finishedAt}
+                startedAt={run.startedAt}
+              />
+            </DetailItem>
+          </DetailList>
+        </CardContent>
+      </Card>
       <Card className="overflow-hidden p-0">
         <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b px-4 py-3">
           <CardTitle className="text-sm">{t("terminalOutput")}</CardTitle>
@@ -483,15 +534,13 @@ export function CommandRunPage({ runId }: { runId: string }) {
           <CardTitle className="text-sm">{t("snapshot")}</CardTitle>
           <CardAction>
             <Button
-              aria-label={
-                snapshotCopied ? t("commandCopied") : t("copyCommand")
-              }
               onClick={() => void copySnapshot(run.snapshotScript)}
-              size="icon-sm"
+              size="sm"
               type="button"
-              variant="ghost"
+              variant="outline"
             >
               {snapshotCopied ? <Check /> : <Copy />}
+              {snapshotCopied ? t("commandCopied") : t("copyCommand")}
             </Button>
           </CardAction>
         </CardHeader>

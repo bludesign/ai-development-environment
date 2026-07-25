@@ -68,7 +68,11 @@ function createServerServices(): ServerServices {
   const credentialService = new CredentialService();
   const workflowEventsService = new WorkflowEventsService();
   const agentControlService = new AgentControlService();
-  const commandsService = new CommandsService(agentControlService);
+  const notificationsService = new NotificationsService(credentialService);
+  const commandsService = new CommandsService(
+    agentControlService,
+    notificationsService,
+  );
   commandsService.startRuntime();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
@@ -85,7 +89,6 @@ function createServerServices(): ServerServices {
     credentialService,
     pollingService,
   );
-  const notificationsService = new NotificationsService(credentialService);
   const runsService = new RunsService(
     notificationsService,
     agentControlService,

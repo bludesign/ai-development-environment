@@ -2061,6 +2061,7 @@ model CommandDefinition {
   quickActionEnabled       Boolean            @default(false)
   quickActionIconKey       String             @default("terminal")
   quickActionButtonVariant String             @default("default")
+  notificationsEnabled     Boolean            @default(true)
   archivedAt               DateTime?
   createdAt                DateTime           @default(now())
   updatedAt                DateTime           @updatedAt
@@ -2086,6 +2087,7 @@ model CommandRun {
   snapshotTargetKind String
   snapshotRestartPolicy String           @default("NEVER")
   snapshotRestartLimit Int?
+  snapshotNotificationsEnabled Boolean   @default(true)
   snapshotJson       String              @default("{}")
   agentId            String?
   worktreeId         String?

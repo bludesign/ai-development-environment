@@ -83,6 +83,10 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import {
+  hasPrioritizedTableStatus,
+  prioritizeActiveTableRows,
+} from "@/lib/active-table-order";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 
@@ -177,20 +181,21 @@ export function WorkflowsPage() {
   );
   const filteredRuns = useMemo(
     () =>
-      runs.filter((run) =>
-        `${run.displayNumber} ${run.workflow.name} ${run.status} ${run.triggerKind}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
+      prioritizeActiveTableRows(
+        runs.filter((run) =>
+          `${run.displayNumber} ${run.workflow.name} ${run.status} ${run.triggerKind}`
+            .toLowerCase()
+            .includes(search.toLowerCase()),
+        ),
       ),
     [runs, search],
   );
-  /* Runs arrive newest first, so a day boundary is simply the point where the
-     key changes — no sorting or bucketing pass needed. */
   const runGroups = useMemo(() => {
     const result: Array<{ key: string; value: string; items: WorkflowRun[] }> =
       [];
     for (const run of filteredRuns) {
-      const key = dayKey(run.createdAt) ?? run.createdAt;
+      const dateKey = dayKey(run.createdAt) ?? run.createdAt;
+      const key = `${hasPrioritizedTableStatus(run.status) ? "priority" : "remaining"}:${dateKey}`;
       const group = result.at(-1);
       if (group?.key === key) group.items.push(run);
       else result.push({ key, value: run.createdAt, items: [run] });

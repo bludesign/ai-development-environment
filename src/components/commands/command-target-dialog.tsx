@@ -44,7 +44,7 @@ export function CommandTargetDialog({
       );
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {t("runCommand", { name: command?.name ?? "" })}
@@ -64,7 +64,7 @@ export function CommandTargetDialog({
                   ?.capabilities.includes("command.run") === true;
             return (
               <Button
-                className="h-auto justify-start gap-3 py-3 text-left"
+                className="h-auto w-full min-w-0 items-start justify-start gap-3 py-3 text-left whitespace-normal"
                 disabled={!upgraded}
                 key={option.id}
                 onClick={() =>
@@ -75,13 +75,13 @@ export function CommandTargetDialog({
                 variant="outline"
               >
                 {home ? <Laptop /> : <HardDrive />}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  <span className="block font-medium">
                     {home
                       ? `${agent?.name} · ${agent?.hostname}`
                       : worktree?.branch || worktree?.folder}
                   </span>
-                  <span className="block truncate text-xs text-muted-foreground">
+                  <span className="block text-xs text-muted-foreground">
                     {home
                       ? agent?.connectionStatus
                       : `${worktree?.repositoryName} · ${worktree?.agentName} · ${worktree?.folder}`}

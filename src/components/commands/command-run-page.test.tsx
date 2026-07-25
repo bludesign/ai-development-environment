@@ -82,9 +82,11 @@ const run = {
   snapshotRestartLimit: 3,
   snapshot: { id: "command-1", name: "Color output" },
   agentId: "agent-1",
+  agent: null,
   agentName: "Studio",
   agentHostname: "studio.local",
   worktreeId: null,
+  worktree: null,
   worktreePath: null,
   worktreeBranch: null,
   restartCount: 0,
@@ -283,6 +285,95 @@ describe("CommandRunPage", () => {
     expect(editLink.getAttribute("href")).toBe("/commands/command-1/edit");
   });
 
+  test("does not show a restart count when restarts are disabled", async () => {
+    render(<CommandRunPage runId="run-1" />);
+
+    expect(await screen.findByText("Never")).toBeDefined();
+    expect(screen.queryByText(/0\/3/)).toBeNull();
+  });
+
+  test("shows one overview card with the start date and duration", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: {
+            ...run,
+            agentName: "An-agent-name-that-is-long-enough-to-need-wrapping",
+            agentHostname:
+              "an-agent-hostname-that-is-long-enough-to-need-wrapping.local",
+            worktreeId: "worktree-1",
+            worktreeBranch:
+              "feature/a-very-long-worktree-branch-that-needs-to-wrap",
+            startedAt: "2026-07-25T12:00:00.000Z",
+            finishedAt: "2026-07-25T12:01:05.000Z",
+          },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+
+    const overviewTitle = await screen.findByText("Overview");
+    const overviewCard = overviewTitle.closest('[data-slot="card"]');
+    expect(overviewCard).not.toBeNull();
+    const detailList = overviewCard?.querySelector("dl");
+    expect(detailList?.className).toContain("sm:grid-cols-6");
+    expect(detailList?.querySelectorAll(".sm\\:col-span-3")).toHaveLength(2);
+    expect(detailList?.querySelectorAll(".sm\\:col-span-2")).toHaveLength(3);
+    const agentLink = overviewCard?.querySelector('a[href="/agents/agent-1"]');
+    expect(agentLink?.className).toContain("whitespace-normal");
+    expect(agentLink?.querySelector("span")?.className).toContain(
+      "break-words",
+    );
+    const worktreeLink = overviewCard?.querySelector(
+      'a[href="/worktrees/worktree-1"]',
+    );
+    expect(worktreeLink?.className).toContain("whitespace-normal");
+    expect(worktreeLink?.querySelector("span")?.className).toContain(
+      "break-words",
+    );
+    expect(
+      overviewCard?.querySelector('time[dateTime="2026-07-25T12:00:00.000Z"]'),
+    ).not.toBeNull();
+    expect(overviewCard?.textContent).toContain("1m 5s");
+    expect(overviewCard?.textContent).not.toContain("Finished");
+  });
+
+  test("highlights the header with the worktree color", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: {
+            ...run,
+            worktreeId: "worktree-1",
+            worktree: {
+              id: "worktree-1",
+              folder: "/workspaces/example",
+              branch: "feature/highlight",
+              highlightColor: "blue",
+            },
+          },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+
+    const summary = await screen.findByTestId("command-run-summary");
+    expect(summary.className).toContain("rounded-lg");
+    expect(summary.className).toContain("border-l-4");
+    expect(summary.className).toContain("bg-blue-500/10");
+    expect(summary.className).toContain("border-l-blue-500");
+  });
+
   test("uses the standard cancel icon without decorating terminal output", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("CommandRunDetail")) {
@@ -315,10 +406,8 @@ describe("CommandRunPage", () => {
     expect(attemptsCard?.className).toContain("py-0");
     expect(attemptsCard?.querySelector("table")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("printf color"));
-    expect(
-      screen.getByRole("button", { name: "Command copied" }),
-    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Copied" })).toBeDefined();
   });
 });
