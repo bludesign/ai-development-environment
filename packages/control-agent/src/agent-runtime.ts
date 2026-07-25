@@ -73,6 +73,12 @@ export async function runAgent(
           executor.cancel(job.id);
           return;
         }
+        if (job.status === "CANCELLING") {
+          if (!executor.cancel(job.id)) {
+            await client.completeJob(job.id, "CANCELLED");
+          }
+          return;
+        }
         if (
           job.status !== "RUNNING" ||
           (!recoverInterrupted && !interruptedJobs.has(job.id))

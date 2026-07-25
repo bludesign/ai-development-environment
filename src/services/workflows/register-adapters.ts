@@ -21,6 +21,7 @@ import { getPrismaClient } from "@/data/prisma-client";
 import type { AgentControlService } from "@/services/agent-control";
 import type { BuildsService } from "@/services/builds";
 import type { CodebasesService } from "@/services/codebases";
+import type { CommandsService } from "@/services/commands";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
@@ -52,6 +53,7 @@ export type WorkflowAdapterServices = {
   notifications: NotificationsService;
   pushNotifications: PushNotificationsService;
   tools: ToolsService;
+  commands: CommandsService;
 };
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -369,6 +371,30 @@ function registerWaitPollers(
         run.status === "COMPLETED"
           ? null
           : run.error || `Run ${run.status.toLowerCase()}`,
+    };
+  });
+  workflows.registerWaitPoller("COMMAND_RUN", async (runId) => {
+    const run = await services.commands.getRun(runId);
+    if (!run) return { pending: false, error: "Command run disappeared" };
+    if (
+      new Set(["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"]).has(run.status)
+    ) {
+      return { pending: true, pollAfterSeconds: 1 };
+    }
+    return {
+      pending: false,
+      result: {
+        id: run.id,
+        displayNumber: run.displayNumber,
+        status: run.status,
+        exitCode: run.exitCode,
+        signal: run.signal,
+        error: run.error,
+      },
+      error:
+        run.status === "SUCCEEDED"
+          ? null
+          : run.error || `Command run ${run.status.toLowerCase()}`,
     };
   });
   workflows.registerWaitPoller("BUILD", async (buildId) => {
@@ -1541,6 +1567,94 @@ function registerMiscellaneousAdapters(
   executor: WorkflowStepExecutor,
   services: WorkflowAdapterServices,
 ): void {
+  executor.register("SAVED_COMMAND", async (context) => {
+    const commandId = text(context.node.config.commandId, "Saved command", 500);
+    const definition = await services.commands.getDefinition(commandId);
+    if (!definition || definition.archivedAt)
+      throw new Error("Saved command is unavailable");
+    const completionMode =
+      context.node.config.completionMode === "FIRE_AND_FORGET"
+        ? "FIRE_AND_FORGET"
+        : "WAIT_FOR_EXIT";
+    if (
+      completionMode === "WAIT_FOR_EXIT" &&
+      definition.restartPolicy === "ALWAYS"
+    ) {
+      throw new Error("Always-restart commands require fire and forget");
+    }
+    const targetMode = String(context.node.config.targetMode ?? "CONTEXT");
+    let agentId: string | null = null;
+    let worktreeId: string | null = null;
+    const home = new Set(["ANY_AGENT_HOME", "SPECIFIC_AGENT_HOME"]).has(
+      definition.targetKind,
+    );
+    if (targetMode === "FIXED_AGENT") {
+      agentId = text(context.node.config.agentId, "Fixed agent", 500);
+    } else if (targetMode === "FIXED_WORKTREE") {
+      worktreeId = text(context.node.config.worktreeId, "Fixed worktree", 500);
+    } else if (home) {
+      const configured =
+        getSessionValue(context.sessionData, "agent.id") ??
+        getSessionValue(context.sessionData, "codebase.agentId");
+      if (typeof configured === "string") agentId = configured;
+      if (!agentId) {
+        const contextWorktreeId = getSessionValue(
+          context.sessionData,
+          "worktree.id",
+        );
+        if (typeof contextWorktreeId === "string") {
+          const prisma = await getPrismaClient();
+          const worktree = await prisma.worktree.findUnique({
+            where: { id: contextWorktreeId },
+            select: { codebase: { select: { agentId: true } } },
+          });
+          agentId = worktree?.codebase.agentId ?? null;
+        }
+      }
+    } else {
+      const configured = getSessionValue(context.sessionData, "worktree.id");
+      if (typeof configured === "string") worktreeId = configured;
+    }
+    const run = await services.commands.startRun({
+      commandId,
+      agentId,
+      worktreeId,
+      origin: "WORKFLOW",
+      idempotencyKey: context.attempt.idempotencyKey,
+    });
+    if (!run) throw new Error("Command run could not be created");
+    return {
+      output: {
+        id: run.id,
+        displayNumber: run.displayNumber,
+        status: run.status,
+      },
+      sessionPatch: {
+        steps: {
+          [context.node.id]: {
+            commandRunId: run.id,
+            displayNumber: run.displayNumber,
+          },
+        },
+      },
+      links: [
+        {
+          kind: "COMMAND_RUN",
+          resourceId: run.id,
+          label: `Command #${run.displayNumber}`,
+          url: `/commands/runs/${run.id}`,
+        },
+      ],
+      wait:
+        completionMode === "WAIT_FOR_EXIT"
+          ? {
+              kind: "COMMAND_RUN",
+              externalKey: run.id,
+              resumeAfter: new Date(Date.now() + 1_000),
+            }
+          : undefined,
+    };
+  });
   executor.register("SKILL_APPLY", async (context) => {
     const run = await services.skills.prepareSync(
       context.node.config.groupId ? "GROUP" : "ALL",

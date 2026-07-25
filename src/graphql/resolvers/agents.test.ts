@@ -83,6 +83,27 @@ describe("agent read ownership", () => {
     ).resolves.toEqual({ id: "agent-1" });
   });
 
+  test("requires saved commands to use the command run API", () => {
+    const service = { createJob: vi.fn() } as unknown as AgentControlService;
+    const mutation = createAgentResolvers(service).Mutation.createAgentJob;
+
+    expect(() =>
+      mutation(
+        {},
+        {
+          input: {
+            agentId: "agent-1",
+            kind: "command.run",
+            payload: {},
+            idempotencyKey: "manual-command",
+          },
+        },
+        context(null),
+      ),
+    ).toThrow("launched through startCommandRun");
+    expect(service.createJob).not.toHaveBeenCalled();
+  });
+
   test("only the control plane can request an immediate codebase reconcile", async () => {
     const service = {
       requestCodebaseReconcile: vi.fn().mockResolvedValue(1),

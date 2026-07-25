@@ -50,6 +50,8 @@ import { createModelCostResolvers } from "./resolvers/model-costs";
 import type { ModelCostsService } from "@/services/model-costs";
 import { createWorkflowResolvers } from "./resolvers/workflows";
 import type { WorkflowsService } from "@/services/workflows";
+import { createCommandResolvers } from "./resolvers/commands";
+import type { CommandsService } from "@/services/commands";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -79,6 +81,7 @@ export const createSchema = (
   modelCostsService: ModelCostsService,
   runsService: RunsService,
   workflowsService: WorkflowsService,
+  commandsService: CommandsService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -103,6 +106,7 @@ export const createSchema = (
     createModelCostResolvers(modelCostsService),
     createRunResolvers(runsService),
     createWorkflowResolvers(workflowsService),
+    createCommandResolvers(commandsService),
   ]);
 
   return buildSubgraphSchema({

@@ -4,7 +4,6 @@ import { samplePayloadForCapability } from "./capability-payloads";
 
 describe("samplePayloadForCapability", () => {
   test.each([
-    ["cloudflared.runTunnel", { tunnelName: "" }],
     ["ccusage.report", {}],
     ["codebase.browse", { path: null }],
     ["codebase.inspect", { folder: "" }],

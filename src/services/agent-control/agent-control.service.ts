@@ -9,8 +9,11 @@ import {
   MAX_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
   MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
-  TUNNEL_NAME_REGEX,
 } from "@ai-development-environment/agent-contract";
+import {
+  COMMAND_RUN_JOB_KIND,
+  parseCommandRunPayload,
+} from "@ai-development-environment/agent-contract/commands";
 import {
   IOS_BUILD_JOB_KIND,
   IOS_BUILD_DELETE_JOB_KIND,
@@ -137,7 +140,7 @@ import {
   ccusageCollectionChangedTopic,
 } from "./event-bus";
 
-const ACTIVE_JOB_STATUSES = ["QUEUED", "RUNNING"];
+const ACTIVE_JOB_STATUSES = ["QUEUED", "RUNNING", "CANCELLING"];
 const FINAL_JOB_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -156,7 +159,7 @@ export function agentOnlineWindowMs(agent: {
   );
 }
 export const SUPPORTED_AGENT_JOBS = [
-  "cloudflared.runTunnel",
+  COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
   ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
@@ -225,6 +228,10 @@ function cadence(
 
 export function validateJob(kind: string, payload: unknown): void {
   const value = parsePayload(payload);
+  if (kind === COMMAND_RUN_JOB_KIND) {
+    parseCommandRunPayload(value);
+    return;
+  }
   if (kind === BUILD_DATA_SCAN_JOB_KIND) {
     buildDataScanPayload(value);
     return;
@@ -401,21 +408,7 @@ export function validateJob(kind: string, payload: unknown): void {
     }
     return;
   }
-  if (kind !== "cloudflared.runTunnel") {
-    throw new Error(`Unsupported agent job kind: ${kind}`);
-  }
-  if (
-    typeof value.tunnelName !== "string" ||
-    !TUNNEL_NAME_REGEX.test(value.tunnelName)
-  ) {
-    throw new Error(
-      "cloudflared.runTunnel requires a tunnelName containing only letters, numbers, underscores, or hyphens",
-    );
-  }
-  const unexpected = Object.keys(value).filter((key) => key !== "tunnelName");
-  if (unexpected.length > 0) {
-    throw new Error(`Unexpected cloudflared payload field: ${unexpected[0]}`);
-  }
+  throw new Error(`Unsupported agent job kind: ${kind}`);
 }
 
 function publishAgent(agent: unknown): void {
@@ -911,10 +904,10 @@ export class AgentControlService {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
       throw new Error("idempotencyKey is required");
-    const timeoutSeconds = Math.max(
-      10,
-      Math.min(input.timeoutSeconds ?? 86_400, 7 * 86_400),
-    );
+    const timeoutSeconds =
+      input.kind === COMMAND_RUN_JOB_KIND
+        ? 0
+        : Math.max(10, Math.min(input.timeoutSeconds ?? 86_400, 7 * 86_400));
     const prisma = await getPrismaClient();
     const existing = await prisma.agentJob.findUnique({
       where: {
@@ -1102,9 +1095,12 @@ export class AgentControlService {
     const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
     if (!job) throw new Error("Job not found");
     if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
+    const commandCancellation = job.kind === COMMAND_RUN_JOB_KIND;
     const updated = await prisma.agentJob.update({
       where: { id: jobId },
-      data: { status: "CANCELLED", finishedAt: new Date() },
+      data: commandCancellation
+        ? { status: "CANCELLING" }
+        : { status: "CANCELLED", finishedAt: new Date() },
     });
     publishJob(updated);
     agentEventBus.publish(agentEventsTopic(job.agentId), {

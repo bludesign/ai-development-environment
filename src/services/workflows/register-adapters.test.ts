@@ -192,3 +192,88 @@ describe("workflow run adapters", () => {
     );
   });
 });
+
+describe("saved command workflow adapter", () => {
+  function commandExecutor(restartPolicy = "NEVER") {
+    const executor = new WorkflowStepExecutor();
+    const startRun = vi.fn().mockResolvedValue({
+      id: "command-run-1",
+      displayNumber: 7,
+      status: "RUNNING",
+    });
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        commands: {
+          getDefinition: vi.fn().mockResolvedValue({
+            id: "command-1",
+            archivedAt: null,
+            targetKind: "ANY_WORKTREE",
+            restartPolicy,
+          }),
+          startRun,
+        },
+      } as unknown as WorkflowAdapterServices,
+    );
+    return { executor, startRun };
+  }
+
+  function commandContext(completionMode: string) {
+    const input = context("actual-worktree");
+    input.attempt = {
+      ...input.attempt,
+      idempotencyKey: "workflow-command-attempt",
+    };
+    input.node = {
+      ...input.node,
+      id: "saved-command",
+      kind: "SAVED_COMMAND",
+      config: {
+        commandId: "command-1",
+        completionMode,
+        targetMode: "CONTEXT",
+      },
+    };
+    return input;
+  }
+
+  test("uses workflow context, waits, and links the command resource", async () => {
+    const { executor, startRun } = commandExecutor();
+    const result = await executor.execute(commandContext("WAIT_FOR_EXIT"));
+
+    expect(startRun).toHaveBeenCalledWith({
+      commandId: "command-1",
+      agentId: null,
+      worktreeId: "actual-worktree",
+      origin: "WORKFLOW",
+      idempotencyKey: "workflow-command-attempt",
+    });
+    expect(result.wait).toEqual(
+      expect.objectContaining({
+        kind: "COMMAND_RUN",
+        externalKey: "command-run-1",
+      }),
+    );
+    expect(result.links).toEqual([
+      expect.objectContaining({
+        kind: "COMMAND_RUN",
+        resourceId: "command-run-1",
+        url: "/commands/runs/command-run-1",
+      }),
+    ]);
+  });
+
+  test("fire and forget succeeds after dispatch without a wait", async () => {
+    const { executor } = commandExecutor("ALWAYS");
+    const result = await executor.execute(commandContext("FIRE_AND_FORGET"));
+    expect(result.wait).toBeUndefined();
+  });
+
+  test("rejects always-restart commands when waiting for exit", async () => {
+    const { executor } = commandExecutor("ALWAYS");
+    await expect(
+      executor.execute(commandContext("WAIT_FOR_EXIT")),
+    ).rejects.toThrow("require fire and forget");
+  });
+});

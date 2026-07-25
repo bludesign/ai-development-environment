@@ -12,6 +12,7 @@ import {
   MIN_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   MIN_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract";
+import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 import {
   MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
@@ -40,6 +41,9 @@ import {
 import { AgentDirectoryBrowser } from "@/components/agents/agent-directory-browser";
 import { JobMonitor } from "@/components/agents/job-monitor";
 import { StatusBadge } from "@/components/agents/status-badge";
+import { ResourceUsage } from "@/components/agents/resource-usage";
+import { CommandQuickActions } from "@/components/commands/command-quick-actions";
+import { CommandResourcePanel } from "@/components/commands/command-resource-panel";
 import type {
   Agent,
   AgentCadenceSettings,
@@ -130,6 +134,7 @@ function upsertJob(jobs: AgentJob[], changed: AgentJob): AgentJob[] {
 
 export function AgentDetail({ agentId }: { agentId: string }) {
   const t = useTranslations("agentDetail");
+  const commandsT = useTranslations("commands");
   const common = useTranslations("common");
   const locale = useLocale();
   const router = useRouter();
@@ -339,10 +344,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const canBrowseDirectories =
     agent.connectionStatus === "ONLINE" &&
     agent.capabilities.includes(CODEBASE_BROWSE_JOB_KIND);
-  const visibleCapabilities = agent.capabilities.filter((capability) =>
-    capability
-      .toLocaleLowerCase()
-      .includes(capabilityQuery.toLocaleLowerCase()),
+  const visibleCapabilities = agent.capabilities.filter(
+    (capability) =>
+      capability !== COMMAND_RUN_JOB_KIND &&
+      capability
+        .toLocaleLowerCase()
+        .includes(capabilityQuery.toLocaleLowerCase()),
   );
 
   return (
@@ -442,6 +449,26 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           </div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{commandsT("commandQuickActions")}</CardTitle>
+          <CardDescription>
+            {commandsT("agentQuickActionsDescription")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CommandQuickActions
+            agentCapabilities={agent.capabilities}
+            agentId={agent.id}
+          />
+        </CardContent>
+      </Card>
+
+      <CommandResourcePanel
+        agentCapabilities={agent.capabilities}
+        agentId={agent.id}
+      />
 
       {cadenceSettings && (
         <AgentCadenceSettingsCard
@@ -1030,78 +1057,6 @@ function Info({
       >
         {value}
       </dd>
-    </div>
-  );
-}
-
-function formatBytes(value: number, locale: string): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  const unitIndex = Math.min(
-    Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
-    value / 1024 ** unitIndex,
-  )} ${units[unitIndex]}`;
-}
-
-function ResourceUsage({
-  label,
-  total,
-  free,
-  locale,
-  unavailable,
-  usedLabel,
-  freeLabel,
-}: {
-  label: string;
-  total?: number | null;
-  free?: number | null;
-  locale: string;
-  unavailable: string;
-  usedLabel: string;
-  freeLabel: string;
-}) {
-  if (total == null || free == null || total <= 0) {
-    return (
-      <div className="rounded-lg border p-4">
-        <p className="font-medium">{label}</p>
-        <p className="mt-2 text-sm text-muted-foreground">{unavailable}</p>
-      </div>
-    );
-  }
-  const safeFree = Math.max(0, Math.min(free, total));
-  const used = total - safeFree;
-  const percentage = (used / total) * 100;
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">
-          {Math.round(percentage)}%
-        </p>
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          aria-label={`${label}: ${Math.round(percentage)}%`}
-          aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={Math.round(percentage)}
-          className="h-full rounded-full bg-primary transition-[width]"
-          role="progressbar"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <dt className="text-muted-foreground">{usedLabel}</dt>
-          <dd>{formatBytes(used, locale)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{freeLabel}</dt>
-          <dd>{formatBytes(safeFree, locale)}</dd>
-        </div>
-      </dl>
     </div>
   );
 }

@@ -12,8 +12,12 @@ import {
   CODEBASE_INSPECT_JOB_KIND,
   CODEBASE_REFRESH_JOB_KIND,
 } from "@ai-development-environment/agent-contract/codebases";
+import {
+  COMMAND_RUN_JOB_KIND,
+  type CommandOutputChunk,
+} from "@ai-development-environment/agent-contract/commands";
 
-import { runCloudflared } from "./cloudflared.js";
+import { runCommand } from "./commands.js";
 import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
@@ -145,6 +149,10 @@ export type AgentJobHandlerContext = {
   claimWorkflowJobSecrets?: () => Promise<
     Array<{ name: string; value: string }>
   >;
+  appendCommandOutput?: (
+    attemptId: string,
+    chunks: CommandOutputChunk[],
+  ) => Promise<unknown>;
 };
 
 export type AgentJobHandler = (
@@ -156,7 +164,7 @@ export type AgentJobHandler = (
 ) => Promise<ProcessResult>;
 
 export const handlers: Readonly<Record<string, AgentJobHandler>> = {
-  "cloudflared.runTunnel": runCloudflared,
+  [COMMAND_RUN_JOB_KIND]: runCommand,
   [CCUSAGE_REPORT_JOB_KIND]: runCcusage,
   [BUILD_DATA_SCAN_JOB_KIND]: scanBuildData,
   [BUILD_DATA_SIZE_JOB_KIND]: sizeBuildData,

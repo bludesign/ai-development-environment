@@ -17,7 +17,7 @@ const inventory: AgentInventory = {
   memoryFreeBytes: 12 * 1024 ** 3,
   diskTotalBytes: 512 * 1024 ** 3,
   diskFreeBytes: 256 * 1024 ** 3,
-  capabilities: ["cloudflared.runTunnel"],
+  capabilities: ["command.run"],
 };
 
 const enrolledConfig: AgentConfig = {

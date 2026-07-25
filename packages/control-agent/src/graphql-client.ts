@@ -14,6 +14,7 @@ import type {
   CodebaseWorktreeReport,
   WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
+import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
 
 export type AgentJob = {
   id: string;
@@ -21,7 +22,13 @@ export type AgentJob = {
   kind: string;
   payload: unknown;
   status:
-    "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+    | "QUEUED"
+    | "RUNNING"
+    | "CANCELLING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED"
+    | "TIMED_OUT";
   timeoutSeconds: number;
 };
 
@@ -280,6 +287,7 @@ export class AgentGraphQLClient {
       (job) =>
         job.status === "QUEUED" ||
         job.status === "RUNNING" ||
+        job.status === "CANCELLING" ||
         job.status === "CANCELLED",
     );
   }
@@ -353,6 +361,19 @@ export class AgentGraphQLClient {
         appendAgentJobLogs(jobId: $jobId, logs: $logs) { id }
       }`,
       { jobId, logs: [log] },
+    );
+  }
+
+  appendCommandOutput(
+    jobId: string,
+    attemptId: string,
+    chunks: CommandOutputChunk[],
+  ) {
+    return this.request<{ appendCommandRunOutput: Array<{ id: string }> }>(
+      `mutation AppendCommandRunOutput($jobId: ID!, $attemptId: ID!, $chunks: [CommandRunOutputInput!]!) {
+        appendCommandRunOutput(jobId: $jobId, attemptId: $attemptId, chunks: $chunks) { id }
+      }`,
+      { jobId, attemptId, chunks },
     );
   }
 

@@ -21,6 +21,8 @@ import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
+import { CommandQuickActions } from "@/components/commands/command-quick-actions";
+import { CommandResourcePanel } from "@/components/commands/command-resource-panel";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -716,8 +718,17 @@ function LoadedWorktreeDetail({
             worktreeId={worktree.id}
             workflows={entry.group.quickActions ?? []}
           />
+          <CommandQuickActions
+            agentCapabilities={entry.agentGroup.agent.capabilities}
+            worktreeId={worktree.id}
+          />
         </CardContent>
       </Card>
+
+      <CommandResourcePanel
+        agentCapabilities={entry.agentGroup.agent.capabilities}
+        worktreeId={worktree.id}
+      />
 
       <WorktreePipelinesCard
         branch={worktree.branch}

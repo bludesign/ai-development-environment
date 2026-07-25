@@ -32,6 +32,8 @@ import {
 import { formatDateValue } from "@/lib/date-format";
 
 import { StatusBadge } from "./status-badge";
+import { ResourceUsage } from "./resource-usage";
+import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { AGENT_FIELDS } from "./graphql-fields";
 import type { Agent } from "./types";
 
@@ -48,6 +50,7 @@ export function AgentsList({
   localServerOrigins?: string[];
 }) {
   const t = useTranslations("agents");
+  const detailT = useTranslations("agentDetail");
   const locale = useLocale();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -333,49 +336,65 @@ export function AgentsList({
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 lg:grid-cols-2">
           {agents.map((agent) => (
-            <Link
+            <Card
+              className="h-full transition-colors hover:bg-muted/20"
               key={agent.id}
-              href={`/agents/${agent.id}`}
-              className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <Card className="h-full transition-colors hover:bg-muted/50">
-                <CardContent>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="truncate font-medium">{agent.name}</h2>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {agent.hostname}
-                      </p>
-                    </div>
-                    <StatusBadge status={agent.connectionStatus} />
+              <CardContent className="space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link
+                      className="truncate font-medium hover:underline"
+                      href={`/agents/${agent.id}`}
+                    >
+                      <h2>{agent.name}</h2>
+                    </Link>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {agent.hostname}
+                    </p>
                   </div>
-                  <dl className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                    <div>
-                      <dt>{t("version")}</dt>
-                      <dd className="text-foreground">{agent.version}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("platform")}</dt>
-                      <dd className="text-foreground">
-                        {agent.cpuModel ?? agent.architecture}
-                      </dd>
-                    </div>
-                    <div className="col-span-2">
-                      <dt>{t("lastSeen")}</dt>
-                      <dd className="text-foreground">
-                        {agent.lastSeenAt
-                          ? formatDateValue(agent.lastSeenAt, "short", {
-                              locale,
-                            })
-                          : t("never")}
-                      </dd>
-                    </div>
-                  </dl>
-                </CardContent>
-              </Card>
-            </Link>
+                  <StatusBadge status={agent.connectionStatus} />
+                </div>
+                <dl className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <div>
+                    <dt>{t("version")}</dt>
+                    <dd className="text-foreground">{agent.version}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("platform")}</dt>
+                    <dd className="text-foreground">
+                      {agent.cpuModel ?? agent.architecture}
+                    </dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt>{t("lastSeen")}</dt>
+                    <dd className="text-foreground">
+                      {agent.lastSeenAt
+                        ? formatDateValue(agent.lastSeenAt, "short", {
+                            locale,
+                          })
+                        : t("never")}
+                    </dd>
+                  </div>
+                </dl>
+                <ResourceUsage
+                  compact
+                  free={agent.diskFreeBytes}
+                  label={detailT("disk")}
+                  locale={locale}
+                  total={agent.diskTotalBytes}
+                  unavailable={detailT("unavailable")}
+                  usedLabel={detailT("used")}
+                  freeLabel={detailT("free")}
+                />
+                <CommandQuickActions
+                  agentCapabilities={agent.capabilities}
+                  agentId={agent.id}
+                />
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}

@@ -62,6 +62,8 @@ model Agent {
   runDrafts                        RunDraft[]
   runCommands                      RunCommand[]
   runProviderSyncs                 RunProviderSync[]
+  targetedCommandDefinitions       CommandDefinition[]          @relation("CommandDefinitionTargetAgent")
+  commandRuns                      CommandRun[]
 }
 
 model AgentEnrollmentToken {
@@ -177,6 +179,7 @@ model AgentJob {
   deployments           BuildDeployment[]
   exports               BuildExport[]
   signingOperationItems SigningOperationItem[]
+  commandRunAttempt     CommandRunAttempt?
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, status, createdAt])
@@ -203,6 +206,7 @@ model CodebaseRepository {
   githubWorkflowRuns     GitHubWorkflowRunObservation[]
   githubPollingState     GitHubActionsPollingState?
   quickActionWorkflows   WorkflowQuickActionRepository[]
+  commandDefinitions     CommandDefinition[]
 
   @@index([name])
 }
@@ -293,6 +297,7 @@ model Worktree {
   runs                     AgentRun[]
   runDrafts                RunDraft[]
   runLease                 WorktreeRunLease?
+  commandRuns              CommandRun[]
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
@@ -2041,6 +2046,120 @@ model WorkflowQuickActionRepository {
 
   @@id([workflowId, repositoryId])
   @@index([repositoryId, workflowId])
+}
+
+model CommandDefinition {
+  id                       String             @id
+  name                     String
+  description              String             @default("")
+  script                   String
+  targetKind               String
+  targetAgentId            String?
+  targetRepositoryId       String?
+  restartPolicy            String             @default("NEVER")
+  restartLimit             Int?               @default(3)
+  quickActionEnabled       Boolean            @default(false)
+  quickActionIconKey       String             @default("terminal")
+  quickActionButtonVariant String             @default("default")
+  archivedAt               DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  targetAgent              Agent?             @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
+  targetRepository         CodebaseRepository? @relation(fields: [targetRepositoryId], references: [id], onDelete: SetNull)
+  runs                     CommandRun[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([targetKind, targetAgentId])
+  @@index([targetKind, targetRepositoryId])
+}
+
+model CommandRun {
+  id                 String              @id
+  displayNumber      Int                 @unique
+  commandId          String
+  idempotencyKey     String              @unique
+  origin             String              @default("MANUAL")
+  status             String              @default("QUEUED")
+  snapshotName       String
+  snapshotDescription String             @default("")
+  snapshotScript     String
+  snapshotTargetKind String
+  snapshotRestartPolicy String           @default("NEVER")
+  snapshotRestartLimit Int?
+  snapshotJson       String              @default("{}")
+  agentId            String?
+  worktreeId         String?
+  agentName          String
+  agentHostname      String
+  worktreePath       String?
+  worktreeBranch     String?
+  restartCount       Int                 @default(0)
+  stopRequested      Boolean             @default(false)
+  nextRestartAt      DateTime?
+  predecessorRunId   String?             @unique
+  error              String?
+  exitCode           Int?
+  signal             String?
+  queuedAt           DateTime            @default(now())
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  archivedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  command            CommandDefinition   @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  agent              Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  worktree           Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  predecessor        CommandRun?         @relation("CommandRunReruns", fields: [predecessorRunId], references: [id], onDelete: SetNull)
+  successor          CommandRun?         @relation("CommandRunReruns")
+  attempts           CommandRunAttempt[]
+
+  @@index([commandId, createdAt])
+  @@index([agentId, status, createdAt])
+  @@index([worktreeId, status, createdAt])
+  @@index([archivedAt, createdAt])
+  @@index([status, nextRestartAt])
+}
+
+model CommandRunAttempt {
+  id                    String                  @id
+  runId                 String
+  attempt               Int
+  agentJobId            String?                 @unique
+  status                String                  @default("QUEUED")
+  exitCode              Int?
+  signal                String?
+  error                 String?
+  startedAt             DateTime?
+  finishedAt            DateTime?
+  completionProcessedAt DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  run                   CommandRun              @relation(fields: [runId], references: [id], onDelete: Cascade)
+  agentJob              AgentJob?               @relation(fields: [agentJobId], references: [id], onDelete: SetNull)
+  outputChunks          CommandRunOutputChunk[]
+
+  @@unique([runId, attempt])
+  @@index([runId, status])
+}
+
+model CommandRunOutputChunk {
+  id         String            @id
+  attemptId  String
+  sequence   Int
+  stream     String
+  dataBase64 String
+  byteLength Int
+  createdAt  DateTime          @default(now())
+  attempt    CommandRunAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, sequence])
+  @@index([attemptId, createdAt])
+}
+
+model CommandRunNumberSequence {
+  id        String   @id
+  nextValue Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 model WorkflowVersion {

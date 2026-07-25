@@ -8,7 +8,7 @@ Control agent for the [AI Development Environment](https://github.com/bludesign/
 npm install -g @ai-development-environment/control-agent
 ```
 
-Requires Node.js 24 (`>=24.16.0 <25`). Running Cloudflared jobs additionally requires [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on the `PATH` (for example `brew install cloudflared`) — `control-agent doctor` checks for it.
+Requires Node.js 24 (`>=24.16.0 <25`). Saved commands use the agent user's login shell and require no additional runtime.
 
 ## Usage
 

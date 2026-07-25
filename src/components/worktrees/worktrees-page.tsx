@@ -46,6 +46,7 @@ import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
+import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -1381,6 +1382,16 @@ function WorktreeCard(props: WorktreeItemProps) {
           }}
           worktreeId={worktree.id}
           workflows={props.group.quickActions ?? []}
+        />
+        <CommandQuickActions
+          agentCapabilities={
+            props.overview.agents.find((agentGroup) =>
+              agentGroup.codebases.some(
+                (group) => group.codebase.id === props.group.codebase.id,
+              ),
+            )?.agent.capabilities ?? []
+          }
+          worktreeId={worktree.id}
         />
       </CardFooter>
     </Card>

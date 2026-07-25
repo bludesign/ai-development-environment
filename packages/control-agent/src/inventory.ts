@@ -13,10 +13,11 @@ import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-con
 import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
 import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
+import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 
 export const AGENT_VERSION = "0.1.0";
 export const AGENT_CAPABILITIES = [
-  "cloudflared.runTunnel",
+  COMMAND_RUN_JOB_KIND,
   CCUSAGE_REPORT_JOB_KIND,
   ...BUILD_DATA_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,

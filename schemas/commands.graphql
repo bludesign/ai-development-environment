@@ -1,0 +1,204 @@
+enum CommandTargetKind {
+  ANY_AGENT_HOME
+  SPECIFIC_AGENT_HOME
+  ANY_WORKTREE
+  REPOSITORY_WORKTREE
+}
+
+enum CommandRestartPolicy {
+  NEVER
+  ON_FAILURE
+  ALWAYS
+}
+
+enum CommandRunStatus {
+  QUEUED
+  RUNNING
+  RESTARTING
+  CANCELLING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum CommandRunOrigin {
+  MANUAL
+  QUICK_ACTION
+  WORKFLOW
+  RERUN
+}
+
+type CommandDefinition {
+  id: ID!
+  name: String!
+  description: String!
+  script: String!
+  targetKind: CommandTargetKind!
+  targetAgentId: ID
+  targetAgent: Agent
+  targetRepositoryId: ID
+  targetRepository: CodebaseRepository
+  restartPolicy: CommandRestartPolicy!
+  restartLimit: Int
+  quickActionEnabled: Boolean!
+  quickActionIconKey: String!
+  quickActionButtonVariant: String!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type CommandRunAttempt {
+  id: ID!
+  runId: ID!
+  attempt: Int!
+  agentJobId: ID
+  agentJob: AgentJob
+  status: AgentJobStatus!
+  exitCode: Int
+  signal: String
+  error: String
+  startedAt: String
+  finishedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type CommandRunOutputChunk {
+  id: ID!
+  attemptId: ID!
+  attemptNumber: Int!
+  sequence: Int!
+  stream: AgentLogStream!
+  dataBase64: String!
+  byteLength: Int!
+  createdAt: String!
+}
+
+type CommandRun {
+  id: ID!
+  displayNumber: Int!
+  commandId: ID!
+  command: CommandDefinition!
+  origin: CommandRunOrigin!
+  status: CommandRunStatus!
+  snapshotName: String!
+  snapshotDescription: String!
+  snapshotScript: String!
+  snapshotTargetKind: CommandTargetKind!
+  snapshotRestartPolicy: CommandRestartPolicy!
+  snapshotRestartLimit: Int
+  snapshot: JSON!
+  agentId: ID
+  agent: Agent
+  worktreeId: ID
+  worktree: Worktree
+  agentName: String!
+  agentHostname: String!
+  worktreePath: String
+  worktreeBranch: String
+  restartCount: Int!
+  stopRequested: Boolean!
+  nextRestartAt: String
+  predecessorRunId: ID
+  predecessor: CommandRun
+  successor: CommandRun
+  error: String
+  exitCode: Int
+  signal: String
+  attempts: [CommandRunAttempt!]!
+  queuedAt: String!
+  startedAt: String
+  finishedAt: String
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type CommandRunPageInfo {
+  hasNextPage: Boolean!
+  endCursor: ID
+}
+
+type CommandRunPage {
+  nodes: [CommandRun!]!
+  totalCount: Int!
+  pageInfo: CommandRunPageInfo!
+}
+
+input CommandDefinitionInput {
+  name: String!
+  description: String = ""
+  script: String!
+  targetKind: CommandTargetKind!
+  targetAgentId: ID
+  targetRepositoryId: ID
+  restartPolicy: CommandRestartPolicy = NEVER
+  restartLimit: Int = 3
+  quickActionEnabled: Boolean = false
+  quickActionIconKey: String = "terminal"
+  quickActionButtonVariant: String = "default"
+}
+
+input StartCommandRunInput {
+  commandId: ID!
+  agentId: ID
+  worktreeId: ID
+  origin: CommandRunOrigin = MANUAL
+  idempotencyKey: String
+}
+
+input CommandRunOutputInput {
+  sequence: Int!
+  stream: AgentLogStream!
+  dataBase64: String!
+  byteLength: Int!
+  createdAt: String!
+}
+
+extend type Query {
+  commandDefinitions(includeArchived: Boolean = false): [CommandDefinition!]!
+  commandDefinition(id: ID!): CommandDefinition
+  commandRuns(
+    includeArchived: Boolean = false
+    search: String
+    agentId: ID
+    worktreeId: ID
+    first: Int = 50
+    after: ID
+  ): CommandRunPage!
+  commandRun(id: ID!): CommandRun
+  commandRunOutput(
+    runId: ID!
+    afterAttempt: Int = 0
+    afterSequence: Int = -1
+    first: Int = 1000
+  ): [CommandRunOutputChunk!]!
+  eligibleCommandsForAgent(agentId: ID!): [CommandDefinition!]!
+  eligibleCommandsForWorktree(worktreeId: ID!): [CommandDefinition!]!
+}
+
+extend type Mutation {
+  createCommandDefinition(input: CommandDefinitionInput!): CommandDefinition!
+  updateCommandDefinition(
+    id: ID!
+    input: CommandDefinitionInput!
+  ): CommandDefinition!
+  archiveCommandDefinition(id: ID!, archived: Boolean!): CommandDefinition!
+  startCommandRun(input: StartCommandRunInput!): CommandRun!
+  terminateCommandRun(id: ID!): CommandRun!
+  rerunCommandRun(id: ID!): CommandRun!
+  archiveCommandRuns(ids: [ID!]!, archived: Boolean!): Boolean!
+  deleteCommandRuns(ids: [ID!]!): Int!
+  appendCommandRunOutput(
+    jobId: ID!
+    attemptId: ID!
+    chunks: [CommandRunOutputInput!]!
+  ): [CommandRunOutputChunk!]!
+}
+
+extend type Subscription {
+  commandsChanged: CommandDefinition
+  commandRunChanged(runId: ID!): CommandRun!
+  commandRunOutputAdded(runId: ID!): CommandRunOutputChunk!
+}

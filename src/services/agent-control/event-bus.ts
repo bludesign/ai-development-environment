@@ -96,6 +96,11 @@ export const SIGNING_ASSETS_CHANGED_TOPIC = "signing-assets.changed";
 export const PUSH_NOTIFICATIONS_CHANGED_TOPIC = "push-notifications.changed";
 export const APP_NOTIFICATIONS_CHANGED_TOPIC = "app-notifications.changed";
 export const RUNS_CHANGED_TOPIC = "runs.changed";
+export const COMMANDS_CHANGED_TOPIC = "commands.changed";
+export const commandRunChangedTopic = (runId: string) =>
+  `command-run.${runId}.changed`;
+export const commandRunOutputTopic = (runId: string) =>
+  `command-run.${runId}.output`;
 export const runChangedTopic = (runId: string) => `run.${runId}.changed`;
 export const runEventTopic = (runId: string) => `run.${runId}.event`;
 export const runQuestionTopic = (runId: string) => `run.${runId}.question`;

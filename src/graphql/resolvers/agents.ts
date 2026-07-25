@@ -1,4 +1,5 @@
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
+import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
 
 import type { AgentControlService } from "@/services/agent-control";
 import { effectiveBuildsDirectory } from "@/services/builds/build-directory";
@@ -234,6 +235,11 @@ export const createAgentResolvers = (
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
+      if (input.kind === COMMAND_RUN_JOB_KIND) {
+        throw new Error(
+          "Saved commands must be launched through startCommandRun",
+        );
+      }
       return agentControlService.createJob(input as never);
     },
     claimAgentJob: (

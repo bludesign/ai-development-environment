@@ -31,8 +31,6 @@ export function samplePayloadForCapability(
   capability: string,
 ): Record<string, unknown> {
   switch (capability) {
-    case "cloudflared.runTunnel":
-      return { tunnelName: "" };
     case CCUSAGE_REPORT_JOB_KIND:
       return {};
     case CODEBASE_BROWSE_JOB_KIND:

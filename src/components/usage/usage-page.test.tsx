@@ -114,7 +114,7 @@ function collection(status: "COLLECTING" | "COMPLETED" = "COMPLETED") {
           error: null,
         },
         {
-          agent: agent("old", "ONLINE", ["cloudflared.runTunnel"]),
+          agent: agent("old", "ONLINE", ["command.run"]),
           status: "UNSUPPORTED",
           jobId: null,
           error: null,

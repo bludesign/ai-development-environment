@@ -8,6 +8,7 @@ enum AgentConnectionStatus {
 enum AgentJobStatus {
   QUEUED
   RUNNING
+  CANCELLING
   SUCCEEDED
   FAILED
   CANCELLED

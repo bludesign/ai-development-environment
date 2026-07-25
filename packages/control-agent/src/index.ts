@@ -1,6 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import {
   defaultWebSocketServer,
   loadConfig,
@@ -12,8 +9,6 @@ import { runDevelopmentAgent } from "./dev-runtime.js";
 import { AgentGraphQLClient } from "./graphql-client.js";
 import { collectInventory } from "./inventory.js";
 import { redactedRequestHeaders, requestHeaders } from "./request-headers.js";
-
-const execFileAsync = promisify(execFile);
 
 function flags(args: string[]): {
   values: Record<string, string>;
@@ -121,22 +116,6 @@ async function doctor(): Promise<void> {
   } catch (error) {
     checks.push({
       check: "control plane",
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    });
-  }
-  try {
-    const { stdout, stderr } = await execFileAsync("cloudflared", [
-      "--version",
-    ]);
-    checks.push({
-      check: "cloudflared",
-      ok: true,
-      detail: (stdout || stderr).trim(),
-    });
-  } catch (error) {
-    checks.push({
-      check: "cloudflared",
       ok: false,
       detail: error instanceof Error ? error.message : String(error),
     });
