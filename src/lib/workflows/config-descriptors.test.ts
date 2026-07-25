@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getConfigDescriptor } from "./descriptors";
+import { getConfigDescriptor } from "./config-descriptors";
 
 describe("workflow config descriptors", () => {
   test("uses resource selectors for worktrees and Jira issue keys", () => {

@@ -1,7 +1,4 @@
-import type {
-  WorkflowStepKind,
-  WorkflowTriggerKind,
-} from "@/lib/workflows/definition";
+import type { WorkflowStepKind, WorkflowTriggerKind } from "./kinds";
 
 /**
  * The interactive control used to edit a single config field. Every kind's
@@ -79,6 +76,8 @@ export type ConfigFieldDescriptor = {
   help?: string;
   /** Render multi-line text for the `text` control. */
   multiline?: boolean;
+  /** Value type for entries in a `record` control. Defaults to strings. */
+  recordValueType?: "string" | "json";
   /** Value authoring modes. Undefined → literal only. */
   valueModes?: readonly ConfigValueMode[];
   /**

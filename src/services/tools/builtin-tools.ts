@@ -8,11 +8,13 @@ import type {
 } from "@/services/codebases";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
+import type { WorkflowsService } from "@/services/workflows";
 
 import { createAgentToolGroup } from "./builtin-tools/agents";
 import { createBuildToolGroup } from "./builtin-tools/builds";
 import { createCodebaseToolGroup } from "./builtin-tools/codebases";
 import { createDebuggingToolGroup } from "./builtin-tools/debugging";
+import { createWorkflowToolGroup } from "./builtin-tools/workflows";
 import type { ToolCatalogGroup } from "./types";
 
 export type ToolAnnotations = {
@@ -67,6 +69,13 @@ export type BuiltInToolServices = {
   telemetry?: TelemetryService;
   pushNotifications?: PushNotificationsService;
   agents?: AgentControlService;
+  /**
+   * Supplied as a thunk rather than an instance: `WorkflowsService` is
+   * constructed after `ToolsService` and takes it as a dependency, so the two
+   * cannot both be resolved at construction time. Called only when a workflow
+   * tool is invoked.
+   */
+  workflows?: () => WorkflowsService;
 };
 
 export function defineTool<I extends z.ZodType, O extends z.ZodType>(input: {
@@ -209,5 +218,7 @@ export function createBuiltInToolRegistry(
     );
   }
   if (services.agents) groups.push(createAgentToolGroup(services.agents));
+  if (services.workflows)
+    groups.push(createWorkflowToolGroup(services.workflows));
   return new BuiltInToolRegistry(groups);
 }

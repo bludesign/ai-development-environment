@@ -81,12 +81,21 @@ type WorkflowStepCatalogEntry {
   kind: String!
   category: String!
   label: String!
+  "One or two sentences: what the step does."
   description: String!
+  """
+  The long form: preconditions, credentials, side effects, failure modes, and
+  what the step contributes to session data.
+  """
+  details: String!
   execution: String!
+  "JSON Schema for this kind's `config` object, derived from its field descriptors."
   configSchema: JSON!
   capabilityFlags: [String!]!
   requiredPaths: [String!]!
   providedPaths: [String!]!
+  "Outgoing handle ids an edge may leave this step from."
+  sourceHandles: [String!]!
   mutatesExternal: Boolean!
   mutatesWorktree: Boolean!
 }
@@ -95,9 +104,16 @@ type WorkflowTriggerCatalogEntry {
   kind: String!
   category: String!
   label: String!
+  "One or two sentences: when this trigger fires."
+  description: String!
+  "The long form: what has to be configured, how matching works, what it seeds."
+  details: String!
+  "JSON Schema for this kind's `config` object, derived from its field descriptors."
   configSchema: JSON!
   capabilityFlags: [String!]!
   seedPaths: [String!]!
+  "Outgoing handle ids. Empty for choice triggers, whose handles come from config."
+  sourceHandles: [String!]!
 }
 
 type WorkflowCatalog {

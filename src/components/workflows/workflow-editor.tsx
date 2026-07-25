@@ -43,6 +43,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -119,7 +120,7 @@ import {
   ConfigFieldsEditor,
   RawConfigEditor,
 } from "./config-fields/config-fields-editor";
-import { hasConfigDescriptor } from "./config-fields/descriptors";
+import { hasConfigDescriptor } from "@/lib/workflows/config-descriptors";
 import {
   WorkflowFitLock,
   WorkflowFitLockButton,
@@ -157,8 +158,8 @@ const CATALOG_QUERY = `
   query WorkflowEditorCatalog($id: ID!) {
     workflowCatalog {
       schemaVersion globalConcurrency
-      steps { kind category label description execution configSchema capabilityFlags requiredPaths providedPaths mutatesExternal mutatesWorktree }
-      triggers { kind category label configSchema capabilityFlags seedPaths }
+      steps { kind category label description details execution configSchema capabilityFlags requiredPaths providedPaths sourceHandles mutatesExternal mutatesWorktree }
+      triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
     }
     workflow(id: $id) {
       id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
@@ -188,6 +189,38 @@ function groupByCategory<T extends { category: string }>(entries: T[]) {
     groups.set(entry.category, [...(groups.get(entry.category) ?? []), entry]);
   }
   return groups;
+}
+
+/**
+ * One row in the step/trigger palette. The card shows the catalog's short
+ * description; the long `details` — preconditions, side effects, what the kind
+ * writes to session data — hangs off a hover, so the list stays scannable while
+ * the full story is one pointer away.
+ */
+function PaletteItem({
+  children,
+  details,
+}: {
+  children: ReactNode;
+  details: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Item
+          asChild
+          className="gap-1.5 px-1.5 py-1"
+          size="xs"
+          variant="outline"
+        >
+          {children}
+        </Item>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-80 text-xs leading-relaxed" side="right">
+        {details}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function defaultNode(
@@ -440,6 +473,18 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const selectedTrigger =
     definition.triggers.find(({ id }) => id === selectedId) ?? null;
   const selected = selectedNode ?? selectedTrigger;
+
+  // The catalog prose for whatever is selected, so the inspector explains the
+  // kind rather than restating its name.
+  const selectedEntry = useMemo(() => {
+    if (selectedNode)
+      return catalog?.steps.find(({ kind }) => kind === selectedNode.kind);
+    if (selectedTrigger)
+      return catalog?.triggers.find(
+        ({ kind }) => kind === selectedTrigger.kind,
+      );
+    return undefined;
+  }, [catalog, selectedNode, selectedTrigger]);
 
   // Whole-definition path list, used as the value-picker fallback for triggers
   // and unreachable steps where per-step availability isn't meaningful.
@@ -856,10 +901,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     commitDefinition(next);
   };
 
+  // Searching the description as well as the label is what makes the palette
+  // answer "what do I use to merge a PR" rather than only matching on titles.
   const filteredSteps = useMemo(
     () =>
       catalog?.steps.filter((entry) =>
-        `${entry.label} ${entry.kind} ${entry.category}`
+        `${entry.label} ${entry.kind} ${entry.category} ${entry.description}`
           .toLowerCase()
           .includes(search.toLowerCase()),
       ) ?? [],
@@ -868,7 +915,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const filteredTriggers = useMemo(
     () =>
       catalog?.triggers.filter((entry) =>
-        `${entry.label} ${entry.kind} ${entry.category}`
+        `${entry.label} ${entry.kind} ${entry.category} ${entry.description}`
           .toLowerCase()
           .includes(search.toLowerCase()),
       ) ?? [],
@@ -1049,12 +1096,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                           </div>
                           <ItemGroup className="gap-1">
                             {entries.map((entry) => (
-                              <Item
-                                asChild
-                                className="gap-1.5 px-1.5 py-1"
+                              <PaletteItem
+                                details={entry.details}
                                 key={entry.kind}
-                                size="xs"
-                                variant="outline"
                               >
                                 <button
                                   className="cursor-grab text-left"
@@ -1076,23 +1120,29 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                     <ItemTitle className="text-xs">
                                       {entry.label}
                                     </ItemTitle>
-                                    <ItemDescription className="text-[10px]">
-                                      {entry.execution}
+                                    <ItemDescription className="line-clamp-2 text-[10px] leading-snug">
+                                      {entry.description}
                                     </ItemDescription>
                                   </ItemContent>
-                                  {(entry.mutatesExternal ||
-                                    entry.mutatesWorktree) && (
-                                    <ItemActions>
+                                  <ItemActions className="flex-col items-end gap-0.5">
+                                    <Badge
+                                      className="text-[9px]"
+                                      variant="outline"
+                                    >
+                                      {entry.execution}
+                                    </Badge>
+                                    {(entry.mutatesExternal ||
+                                      entry.mutatesWorktree) && (
                                       <Badge
                                         className="text-[9px]"
                                         variant="outline"
                                       >
                                         {t("mutates")}
                                       </Badge>
-                                    </ItemActions>
-                                  )}
+                                    )}
+                                  </ItemActions>
                                 </button>
-                              </Item>
+                              </PaletteItem>
                             ))}
                           </ItemGroup>
                         </section>
@@ -1104,12 +1154,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                           </div>
                           <ItemGroup className="gap-1">
                             {entries.map((entry) => (
-                              <Item
-                                asChild
-                                className="gap-1.5 px-1.5 py-1"
+                              <PaletteItem
+                                details={entry.details}
                                 key={entry.kind}
-                                size="xs"
-                                variant="outline"
                               >
                                 <button
                                   className="text-left"
@@ -1123,12 +1170,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                     <ItemTitle className="text-xs">
                                       {entry.label}
                                     </ItemTitle>
-                                    <ItemDescription className="text-[10px]">
-                                      {labels.kind(entry.kind)}
+                                    <ItemDescription className="line-clamp-2 text-[10px] leading-snug">
+                                      {entry.description}
                                     </ItemDescription>
                                   </ItemContent>
                                 </button>
-                              </Item>
+                              </PaletteItem>
                             ))}
                           </ItemGroup>
                         </section>
@@ -1478,10 +1525,15 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   {selected.name ?? labels.kind(selected.kind)}
                 </SheetTitle>
                 <SheetDescription>
-                  {labels.kind(selected.kind)}
+                  {selectedEntry?.description ?? labels.kind(selected.kind)}
                 </SheetDescription>
               </SheetHeader>
               <FieldGroup className="gap-4 px-4">
+                {selectedEntry && (
+                  <p className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                    {selectedEntry.details}
+                  </p>
+                )}
                 <Field>
                   <FieldLabel htmlFor="node-name">{t("name")}</FieldLabel>
                   <Input

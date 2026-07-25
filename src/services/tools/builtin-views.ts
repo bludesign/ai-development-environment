@@ -130,3 +130,144 @@ export function agentJobLogView(value: Record<string, unknown>) {
 export function jsonSafe<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
+
+/**
+ * Workflow rows arrive as Prisma records: `Date` columns and JSON blobs kept as
+ * `*Json` strings. These project them the way the GraphQL resolvers in
+ * `src/graphql/resolvers/workflows.ts` do, so an MCP caller sees the same shape
+ * the UI does — parsed JSON, ISO timestamps — rather than raw storage.
+ */
+export function workflowView(value: Record<string, unknown>) {
+  const counts = value._count as
+    { versions?: number; runs?: number } | undefined;
+  const versions = value.versions as unknown[] | undefined;
+  return {
+    id: String(value.id),
+    name: String(value.name),
+    description: String(value.description ?? ""),
+    enabled: value.enabled === true,
+    overlapPolicy: String(value.overlapPolicy),
+    maxConcurrentRuns: Number(value.maxConcurrentRuns),
+    activeVersionId:
+      typeof value.activeVersionId === "string" ? value.activeVersionId : null,
+    draftSchemaVersion: Number(value.draftSchemaVersion),
+    globalQuickAction: value.globalQuickAction === true,
+    archivedAt: iso(value.archivedAt),
+    versionCount: counts?.versions ?? versions?.length ?? 0,
+    runCount: counts?.runs ?? 0,
+    createdAt: iso(value.createdAt),
+    updatedAt: iso(value.updatedAt),
+  };
+}
+
+export function workflowVersionView(value: Record<string, unknown>) {
+  return {
+    id: String(value.id),
+    workflowId: String(value.workflowId),
+    version: Number(value.version),
+    name: String(value.name),
+    description: String(value.description ?? ""),
+    schemaVersion: Number(value.schemaVersion),
+    contentHash: String(value.contentHash),
+    definition: parsedJson(value.definitionJson),
+    publishedAt: iso(value.publishedAt),
+  };
+}
+
+export function workflowRunView(value: Record<string, unknown>) {
+  const counts = value._count as
+    { attempts?: number; events?: number } | undefined;
+  return {
+    id: String(value.id),
+    displayNumber: Number(value.displayNumber),
+    workflowId: String(value.workflowId),
+    versionId: String(value.versionId),
+    parentRunId:
+      typeof value.parentRunId === "string" ? value.parentRunId : null,
+    triggerKind: String(value.triggerKind),
+    triggerSubjectKey: String(value.triggerSubjectKey ?? ""),
+    triggerPayload: parsedJson(value.triggerPayloadJson),
+    status: String(value.status),
+    phase: String(value.phase),
+    generation: Number(value.generation),
+    sessionData: parsedJson(value.sessionDataJson),
+    blockedReason:
+      typeof value.blockedReason === "string" ? value.blockedReason : null,
+    error: typeof value.error === "string" ? value.error : null,
+    attemptCount:
+      counts?.attempts ??
+      (value.attempts as unknown[] | undefined)?.length ??
+      0,
+    eventCount:
+      counts?.events ?? (value.events as unknown[] | undefined)?.length ?? 0,
+    queuedAt: iso(value.queuedAt),
+    startedAt: iso(value.startedAt),
+    pausedAt: iso(value.pausedAt),
+    finishedAt: iso(value.finishedAt),
+    updatedAt: iso(value.updatedAt),
+  };
+}
+
+export function workflowAttemptView(value: Record<string, unknown>) {
+  return {
+    id: String(value.id),
+    nodeId: String(value.nodeId),
+    kind: String(value.kind),
+    generation: Number(value.generation),
+    iterationKey: String(value.iterationKey ?? ""),
+    attempt: Number(value.attempt),
+    status: String(value.status),
+    phase: String(value.phase),
+    input: parsedJson(value.inputJson),
+    output: parsedJson(value.outputJson),
+    error: typeof value.error === "string" ? value.error : null,
+    startedAt: iso(value.startedAt),
+    finishedAt: iso(value.finishedAt),
+  };
+}
+
+export function workflowRunEventView(value: Record<string, unknown>) {
+  return {
+    id: String(value.id),
+    runId: String(value.runId),
+    attemptId: typeof value.attemptId === "string" ? value.attemptId : null,
+    sequence: Number(value.sequence),
+    type: String(value.type),
+    message: String(value.message ?? ""),
+    detail: parsedJson(value.detailJson),
+    createdAt: iso(value.createdAt),
+  };
+}
+
+/**
+ * A pending question batch flattened to what an answer needs: the batch id to
+ * respond to, and each question's id, prompt, and selectable options.
+ */
+export function workflowQuestionBatchView(value: Record<string, unknown>) {
+  const questions = Array.isArray(value.questions) ? value.questions : [];
+  return {
+    batchId: String(value.id),
+    runId: typeof value.runId === "string" ? value.runId : null,
+    status: String(value.status),
+    createdAt: iso(value.createdAt),
+    questions: questions.map((entry) => {
+      const question = entry as Record<string, unknown>;
+      const options = Array.isArray(question.options) ? question.options : [];
+      return {
+        id: String(question.id),
+        header: typeof question.header === "string" ? question.header : null,
+        prompt: String(question.prompt ?? ""),
+        multiSelect: question.multiSelect === true,
+        allowCustom: question.allowCustom === true,
+        options: options.map((option) => {
+          const row = option as Record<string, unknown>;
+          return {
+            label: String(row.label ?? ""),
+            description:
+              typeof row.description === "string" ? row.description : null,
+          };
+        }),
+      };
+    }),
+  };
+}

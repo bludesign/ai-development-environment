@@ -72,8 +72,11 @@ import {
   type ConditionOperatorKey,
   type ConditionRow,
 } from "./condition";
-import { getConfigDescriptor } from "./descriptors";
-import type { ConfigFieldDescriptor, ConfigFieldScope } from "./types";
+import type {
+  ConfigFieldDescriptor,
+  ConfigFieldScope,
+} from "@/lib/workflows/config-descriptor-types";
+import { getConfigDescriptor } from "@/lib/workflows/config-descriptors";
 import { useResourceOptions } from "./use-resource-options";
 import {
   ValueModeToggle,

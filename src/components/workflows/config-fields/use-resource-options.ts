@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SearchableSelectOption } from "@/components/common/searchable-select";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import type { ResourceKind } from "./types";
+import type { ResourceKind } from "@/lib/workflows/config-descriptor-types";
 
 /** Resources whose list query needs a scoping argument to return anything. */
 const REQUIRES_SCOPE: Partial<Record<ResourceKind, true>> = {
