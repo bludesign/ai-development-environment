@@ -3,8 +3,6 @@
 import {
   Archive,
   ArrowLeft,
-  ArrowDownToLine,
-  ArrowUpToLine,
   Check,
   Copy,
   Download,
@@ -16,9 +14,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import {
+  decodeTerminalBase64,
+  TerminalOutputCard,
+} from "@/components/common/terminal-output-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,7 +67,7 @@ import { ExportArchiveDialog } from "./export-archive-dialog";
 import { IosInstallButton } from "./ios-install-button";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
-import type { BuildLogEvent, BuildRecord, BuildReport } from "./types";
+import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
 
 const BUILD_DETAIL_FIELDS = `
   id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
@@ -85,7 +87,8 @@ const BUILD_DETAIL_FIELDS = `
   exports { id status settings commandSummary outputRelativePath error createdAt startedAt finishedAt }
 `;
 
-const LOG_FIELDS = `id scope scopeId sequence phase level stream message createdAt`;
+const LOG_FIELDS = `id scope scopeId sequence phase stream dataBase64 byteLength createdAt`;
+const EMPTY_LOG_CHUNKS: BuildLogChunk[] = [];
 
 /** Acronyms that title casing would otherwise mangle, such as IPA into "Ipa". */
 const PRESERVED_ACRONYMS = new Set(["IPA"]);
@@ -173,6 +176,20 @@ function advancedSettingHasValue(key: string, value: unknown) {
   return true;
 }
 
+function mergeBuildLogChunks(
+  current: BuildLogChunk[],
+  incoming: BuildLogChunk[],
+): BuildLogChunk[] {
+  const chunks = new Map(current.map((chunk) => [chunk.id, chunk]));
+  for (const chunk of incoming) chunks.set(chunk.id, chunk);
+  return [...chunks.values()].sort(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.sequence - right.sequence ||
+      left.id.localeCompare(right.id),
+  );
+}
+
 export function BuildDetailPage({
   buildId,
   publicOrigin,
@@ -183,7 +200,14 @@ export function BuildDetailPage({
   const t = useTranslations("builds");
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
-  const [logs, setLogs] = useState<BuildLogEvent[]>([]);
+  const [logState, setLogState] = useState<{
+    buildId: string;
+    chunks: BuildLogChunk[];
+  }>({ buildId, chunks: [] });
+  const logChunks =
+    logState.buildId === buildId ? logState.chunks : EMPTY_LOG_CHUNKS;
+  const logChunksRef = useRef<BuildLogChunk[]>([]);
+  const logsHydratedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,22 +218,14 @@ export function BuildDetailPage({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
   const [logsOpen, setLogsOpen] = useState(true);
-  const logRef = useRef<HTMLPreElement>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await controlPlaneRequest<{
-        build: BuildRecord | null;
-        buildLogs: BuildLogEvent[];
-      }>(
-        `query BuildDetail($id: ID!) {
-          build(id: $id) { ${BUILD_DETAIL_FIELDS} }
-          buildLogs(buildId: $id, first: 5000) { ${LOG_FIELDS} }
-        }`,
+      const data = await controlPlaneRequest<{ build: BuildRecord | null }>(
+        `query BuildDetail($id: ID!) { build(id: $id) { ${BUILD_DETAIL_FIELDS} } }`,
         { id: buildId },
       );
       setBuild(data.build);
-      setLogs(data.buildLogs);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -217,6 +233,42 @@ export function BuildDetailPage({
       setLoading(false);
     }
   }, [buildId]);
+
+  const mergeLogChunks = useCallback(
+    (incoming: BuildLogChunk[]) => {
+      setLogState((current) => {
+        const merged = mergeBuildLogChunks(
+          current.buildId === buildId ? current.chunks : [],
+          incoming,
+        );
+        logChunksRef.current = merged;
+        return { buildId, chunks: merged };
+      });
+    },
+    [buildId],
+  );
+
+  const catchUpLogChunks = useCallback(async () => {
+    if (!logsHydratedRef.current) return;
+    let after = logChunksRef.current.at(-1)?.id ?? null;
+    const incoming: BuildLogChunk[] = [];
+    while (true) {
+      const data = await controlPlaneRequest<{
+        buildLogChunks: BuildLogChunk[];
+      }>(
+        `query BuildLogChunks($buildId: ID!, $after: ID) {
+          buildLogChunks(buildId: $buildId, after: $after, first: 1000) { ${LOG_FIELDS} }
+        }`,
+        { buildId, after },
+      );
+      incoming.push(...data.buildLogChunks);
+      if (data.buildLogChunks.length < 1_000) break;
+      const last = data.buildLogChunks.at(-1);
+      if (!last) break;
+      after = last.id;
+    }
+    if (incoming.length) mergeLogChunks(incoming);
+  }, [buildId, mergeLogChunks]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -237,34 +289,73 @@ export function BuildDetailPage({
         complete: () => undefined,
       },
     );
-    const unsubscribeLogs = controlPlaneSubscriptions().subscribe<{
-      buildLogAdded: BuildLogEvent;
+    return unsubscribeBuild;
+  }, [buildId, load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let hydrating = true;
+    let buffered: BuildLogChunk[] = [];
+    logChunksRef.current = [];
+    logsHydratedRef.current = false;
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      buildLogChunkAdded: BuildLogChunk;
     }>(
       {
-        query: `subscription BuildLogAdded($buildId: ID!) {
-          buildLogAdded(buildId: $buildId) { ${LOG_FIELDS} }
+        query: `subscription BuildLogChunkAdded($buildId: ID!) {
+          buildLogChunkAdded(buildId: $buildId) { ${LOG_FIELDS} }
         }`,
         variables: { buildId },
       },
       {
         next: (value) => {
-          const log = value.data?.buildLogAdded;
-          if (!log) return;
-          setLogs((current) =>
-            current.some((entry) => entry.id === log.id)
-              ? current
-              : [...current, log],
-          );
+          const chunk = value.data?.buildLogChunkAdded;
+          if (!chunk) return;
+          if (hydrating) buffered.push(chunk);
+          else mergeLogChunks([chunk]);
         },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    void (async () => {
+      const historical: BuildLogChunk[] = [];
+      let after: string | null = null;
+      while (!cancelled) {
+        const data: { buildLogChunks: BuildLogChunk[] } =
+          await controlPlaneRequest<{
+            buildLogChunks: BuildLogChunk[];
+          }>(
+            `query BuildLogChunks($buildId: ID!, $after: ID) {
+              buildLogChunks(buildId: $buildId, after: $after, first: 1000) { ${LOG_FIELDS} }
+            }`,
+            { buildId, after },
+          );
+        historical.push(...data.buildLogChunks);
+        if (data.buildLogChunks.length < 1_000) break;
+        const last: BuildLogChunk | undefined = data.buildLogChunks.at(-1);
+        if (!last) break;
+        after = last.id;
+      }
+      if (cancelled) return;
+      hydrating = false;
+      logsHydratedRef.current = true;
+      mergeLogChunks([...historical, ...buffered]);
+      buffered = [];
+    })().catch((value) => {
+      if (!cancelled) {
+        hydrating = false;
+        logsHydratedRef.current = true;
+        mergeLogChunks(buffered);
+        buffered = [];
+        setError(value instanceof Error ? value.message : String(value));
+      }
+    });
     return () => {
-      unsubscribeBuild();
-      unsubscribeLogs();
+      cancelled = true;
+      unsubscribe();
     };
-  }, [buildId, load]);
+  }, [buildId, mergeLogChunks]);
 
   const activeOperation =
     build !== null &&
@@ -277,14 +368,14 @@ export function BuildDetailPage({
       ));
   useEffect(() => {
     if (!activeOperation) return;
-    const timer = window.setInterval(() => void load(), 2_000);
+    const timer = window.setInterval(() => {
+      void load();
+      void catchUpLogChunks().catch((value) =>
+        setError(value instanceof Error ? value.message : String(value)),
+      );
+    }, 2_000);
     return () => window.clearInterval(timer);
-  }, [activeOperation, load]);
-
-  useEffect(() => {
-    if (!activeOperation || !logRef.current) return;
-    logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [activeOperation, logs]);
+  }, [activeOperation, catchUpLogChunks, load]);
 
   useEffect(() => {
     if (!commandCopied) return;
@@ -391,14 +482,28 @@ export function BuildDetailPage({
     }
   };
 
-  const scrollLogs = (position: "top" | "bottom") => {
-    const element = logRef.current;
-    if (!element) return;
-    element.scrollTo({
-      behavior: "smooth",
-      top: position === "top" ? 0 : element.scrollHeight,
-    });
-  };
+  const terminalEntries = useMemo(
+    () =>
+      logChunks.map((chunk) => {
+        const phase = humanizeConstant(chunk.phase);
+        let divider = phase;
+        if (chunk.scope === "DEPLOYMENT") {
+          const destination = build?.deployments.find(
+            (deployment) => deployment.id === chunk.scopeId,
+          )?.destination.name;
+          divider = `${destination ?? humanizeConstant(chunk.scope)} · ${phase}`;
+        } else if (chunk.scope === "EXPORT") {
+          divider = `${t("archiveExport")} · ${phase}`;
+        }
+        return {
+          id: chunk.id,
+          data: decodeTerminalBase64(chunk.dataBase64),
+          divider,
+          dividerKey: `${chunk.scope}:${chunk.scopeId}:${chunk.phase}`,
+        };
+      }),
+    [build?.deployments, logChunks, t],
+  );
 
   if (loading) {
     return (
@@ -569,74 +674,23 @@ export function BuildDetailPage({
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0 space-y-5">
-          <Card className="gap-0 py-0">
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <Button
-                  aria-expanded={logsOpen}
-                  className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
-                  onClick={() => setLogsOpen((current) => !current)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <span className="truncate font-medium">{t("logs")}</span>
-                </Button>
-                <div className="ml-auto flex items-center gap-1">
-                  {logsOpen && (
-                    <>
-                      <Button
-                        aria-label={t("scrollLogsToTop")}
-                        onClick={() => scrollLogs("top")}
-                        size="icon-xs"
-                        type="button"
-                        variant="outline"
-                      >
-                        <ArrowUpToLine />
-                      </Button>
-                      <Button
-                        aria-label={t("scrollLogsToBottom")}
-                        onClick={() => scrollLogs("bottom")}
-                        size="icon-xs"
-                        type="button"
-                        variant="outline"
-                      >
-                        <ArrowDownToLine />
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    aria-expanded={logsOpen}
-                    aria-label={t(logsOpen ? "collapseLogs" : "expandLogs")}
-                    onClick={() => setLogsOpen((current) => !current)}
-                    size="icon-sm"
-                    title={t(logsOpen ? "collapseLogs" : "expandLogs")}
-                    type="button"
-                    variant="ghost"
-                  >
-                    {logsOpen ? (
-                      <ChevronDown className="size-5" />
-                    ) : (
-                      <ChevronRight className="size-5" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            {logsOpen && (
-              <CardContent className="py-4">
-                <pre
-                  className="max-h-[calc(100svh-8rem)] w-full min-w-0 max-w-full overflow-auto rounded-lg bg-neutral-950 p-3 text-xs whitespace-pre-wrap text-neutral-100 [overflow-wrap:anywhere] sm:max-h-[48rem]"
-                  ref={logRef}
-                >
-                  {logs.length
-                    ? logs
-                        .map((log) => `[${log.phase}] ${log.message}`)
-                        .join("\n")
-                    : t("noLogs")}
-                </pre>
-              </CardContent>
-            )}
-          </Card>
+          <TerminalOutputCard
+            ariaLabel={t("logs")}
+            collapseLabel={t("collapseLogs")}
+            emptyText={t("noLogs")}
+            entries={terminalEntries}
+            expandLabel={t("expandLogs")}
+            fitLabel={t("fitTerminal")}
+            followLabel={t("followOutput")}
+            key={buildId}
+            nextMatchLabel={t("nextTerminalMatch")}
+            onOpenChange={setLogsOpen}
+            open={logsOpen}
+            previousMatchLabel={t("previousTerminalMatch")}
+            searchLabel={t("searchTerminal")}
+            sourceKey={buildId}
+            title={t("logs")}
+          />
           <Card>
             <CardHeader>
               <CardTitle>{t("commandSummary")}</CardTitle>

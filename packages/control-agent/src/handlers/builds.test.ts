@@ -20,6 +20,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   type BuildJobPayload,
+  type BuildLogChunk,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 
@@ -719,7 +720,7 @@ esac
     const xcrun = join(bin, "xcrun");
     await writeFile(
       xcrun,
-      "#!/bin/sh\ncase \" $* \" in *\" -showBuildSettings \"*) printf '[]' ;; *) printf 'xcodebuild complete\\n' ;; esac\n",
+      "#!/bin/sh\ncase \" $* \" in *\" -showBuildSettings \"*) printf '[]' ;; *) printf '\\033[31mprogress 10%%\\rprogress 100%%\\033[0m\\n' ;; esac\n",
     );
     await chmod(xcrun, 0o755);
     const originalPath = process.env.PATH;
@@ -727,13 +728,20 @@ esac
     process.env.PATH = `${bin}:${originalPath ?? ""}`;
     process.env.TEST_API_TOKEN = "integration-secret";
     const artifactDirectory = join(builds, "build-ordered");
-    const events: Array<{ message: string }> = [];
+    const events: BuildLogChunk[] = [];
     const hookSource = (value: string, includeSecret = false) =>
       `import { appendFile } from "node:fs/promises";
 export default async function hook(build) {
   await appendFile("hook-order.txt", ${JSON.stringify(`${value}\n`)});
   await appendFile("hook-contexts.jsonl", JSON.stringify(build) + "\\n");
-  ${includeSecret ? 'console.log("integration-secret");' : ""}
+  ${
+    includeSecret
+      ? `process.stdout.write(Buffer.from([0xf0, 0x9f]));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  process.stdout.write(Buffer.from([0x99, 0x82]));
+  console.log("integration-secret");`
+      : ""
+  }
 }`;
     try {
       const result = (await runIosBuild(
@@ -773,7 +781,7 @@ export default async function hook(build) {
         {
           reportWorktreeActivity: async () => undefined,
           reportBuildProgress: async () => undefined,
-          appendBuildLogs: async (_buildId, batch) => {
+          appendBuildLogChunks: async (_buildId, batch) => {
             events.push(...batch);
           },
         },
@@ -822,8 +830,21 @@ export default async function hook(build) {
       expect(await readFile(rawLog, "utf8")).not.toContain(
         "integration-secret",
       );
-      expect(events.some(({ message }) => message.includes("[REDACTED]"))).toBe(
-        true,
+      expect(
+        events.some(({ dataBase64 }) =>
+          Buffer.from(dataBase64, "base64")
+            .toString("utf8")
+            .includes("[REDACTED]"),
+        ),
+      ).toBe(true);
+      const terminalOutput = events
+        .map(({ dataBase64 }) =>
+          Buffer.from(dataBase64, "base64").toString("utf8"),
+        )
+        .join("");
+      expect(terminalOutput).toContain("🙂");
+      expect(terminalOutput).toContain(
+        "\u001b[31mprogress 10%\rprogress 100%\u001b[0m\n",
       );
     } finally {
       process.env.PATH = originalPath;

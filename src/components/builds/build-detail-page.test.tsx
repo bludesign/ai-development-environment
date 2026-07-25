@@ -17,9 +17,50 @@ import { formatDateValue } from "@/lib/date-format";
 
 import { BuildDetailPage } from "./build-detail-page";
 
+const terminalWrite = vi.hoisted(() => vi.fn());
+const terminalReset = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
+}));
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class {
+    buffer = { active: { viewportY: 0, baseY: 0 } };
+    loadAddon() {}
+    open() {}
+    write(value: string | Uint8Array, callback?: () => void) {
+      terminalWrite(value);
+      callback?.();
+    }
+    onScroll() {
+      return { dispose: vi.fn() };
+    }
+    scrollToBottom() {}
+    reset() {
+      terminalReset();
+    }
+    dispose() {}
+  },
+}));
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit() {}
+  },
+}));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext() {
+      return false;
+    }
+    findPrevious() {
+      return false;
+    }
+    clearDecorations() {}
+    onDidChangeResults() {
+      return { dispose: vi.fn() };
+    }
+  },
 }));
 
 const request = vi.mocked(controlPlaneRequest);
@@ -143,7 +184,29 @@ const build = {
   updatedAt: now,
 };
 
+function buildLogChunk(index: number, output = `output-${index}\r\n`) {
+  const data = Buffer.from(output);
+  return {
+    id: `log-${String(index).padStart(5, "0")}`,
+    scope: "BUILD",
+    scopeId: "build-1",
+    sequence: index,
+    phase: "XCODEBUILD",
+    stream: "STDOUT",
+    dataBase64: data.toString("base64"),
+    byteLength: data.byteLength,
+    createdAt: new Date(Date.parse(now) + index).toISOString(),
+  };
+}
+
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   Element.prototype.hasPointerCapture = vi.fn(() => false);
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
@@ -153,6 +216,8 @@ beforeEach(() => {
     value: vi.fn(),
   });
   writeText.mockReset();
+  terminalWrite.mockReset();
+  terminalReset.mockReset();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText },
@@ -160,8 +225,9 @@ beforeEach(() => {
   nextLog = null;
   subscriptions.mockReturnValue({
     subscribe: vi.fn((operation, sink) => {
-      if (String(operation.query).includes("subscription BuildLogAdded")) {
-        nextLog = (log) => sink.next({ data: { buildLogAdded: log } } as never);
+      if (String(operation.query).includes("subscription BuildLogChunkAdded")) {
+        nextLog = (log) =>
+          sink.next({ data: { buildLogChunkAdded: log } } as never);
       }
       return vi.fn();
     }),
@@ -169,18 +235,22 @@ beforeEach(() => {
   request.mockImplementation(async (query) => {
     const operation = String(query);
     if (operation.includes("query BuildDetail")) {
+      return { build } as never;
+    }
+    if (operation.includes("query BuildLogChunks")) {
       return {
-        build,
-        buildLogs: [
+        buildLogChunks: [
           {
             id: "log-1",
             scope: "BUILD",
             scopeId: "build-1",
             sequence: 0,
             phase: "XCODEBUILD",
-            level: "INFO",
             stream: "STDOUT",
-            message: "Compile Swift sources",
+            dataBase64: Buffer.from("Compile Swift sources\r\n").toString(
+              "base64",
+            ),
+            byteLength: 23,
             createdAt: now,
           },
         ],
@@ -276,6 +346,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("BuildDetailPage", () => {
@@ -294,11 +365,16 @@ describe("BuildDetailPage", () => {
     );
     expect(screen.getByText("Runnable App")).toBeDefined();
     expect(screen.getByText("Raw Log")).toBeDefined();
-    const logViewport = screen.getByText(/Compile Swift sources/);
-    expect(logViewport.className).toContain("max-h-[calc(100svh-8rem)]");
-    expect(logViewport.className).toContain("sm:max-h-[48rem]");
-    expect(logViewport.className).toContain("max-w-full");
-    expect(logViewport.className).toContain("[overflow-wrap:anywhere]");
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.some(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "Compile Swift sources\r\n",
+        ),
+      ).toBe(true),
+    );
+    const logViewport = screen.getByRole("log", { name: "Logs" });
     const detailGrid =
       logViewport.closest('[data-slot="card"]')?.parentElement?.parentElement;
     expect(detailGrid?.className).toContain("min-w-0");
@@ -306,20 +382,14 @@ describe("BuildDetailPage", () => {
     const collapseLogs = screen.getByRole("button", {
       name: "Collapse logs",
     });
+    expect(screen.getByRole("button", { name: "Fit terminal" })).toBeDefined();
     expect(
-      screen
-        .getByRole("button", { name: "Scroll logs to top" })
-        .getAttribute("data-size"),
-    ).toBe("icon-xs");
-    expect(
-      screen
-        .getByRole("button", { name: "Scroll logs to bottom" })
-        .getAttribute("data-size"),
-    ).toBe("icon-xs");
+      screen.getByRole("searchbox", { name: "Search terminal" }),
+    ).toBeDefined();
     expect(collapseLogs.getAttribute("data-size")).toBe("icon-sm");
     expect(collapseLogs.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(collapseLogs);
-    expect(screen.queryByText(/Compile Swift sources/)).toBeNull();
+    expect(screen.queryByRole("log", { name: "Logs" })).toBeNull();
     expect(
       screen
         .getByRole("button", { name: "Expand logs" })
@@ -385,8 +455,147 @@ describe("BuildDetailPage", () => {
     );
   });
 
+  test("loads build output beyond the former 5000-event limit", async () => {
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query BuildDetail")) return { build } as never;
+      if (operation.includes("query BuildLogChunks")) {
+        const after = (variables as { after?: string | null }).after;
+        const start = after ? Number(after.slice(4)) + 1 : 0;
+        const count = Math.min(1_000, 5_001 - start);
+        return {
+          buildLogChunks: Array.from({ length: count }, (_, offset) =>
+            buildLogChunk(start + offset),
+          ),
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    await waitFor(
+      () =>
+        expect(
+          terminalWrite.mock.calls.some(
+            ([value]) =>
+              value instanceof Uint8Array &&
+              Buffer.from(value).toString("utf8") === "output-5000\r\n",
+          ),
+        ).toBe(true),
+      { timeout: 5_000 },
+    );
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query BuildLogChunks"),
+      ),
+    ).toHaveLength(6);
+  });
+
+  test("buffers and deduplicates subscription output during history loading", async () => {
+    const chunk = buildLogChunk(7, "buffered output\r\n");
+    let resolveHistory: (value: {
+      buildLogChunks: (typeof chunk)[];
+    }) => void = () => undefined;
+    const history = new Promise<{ buildLogChunks: (typeof chunk)[] }>(
+      (resolve) => {
+        resolveHistory = resolve;
+      },
+    );
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query BuildDetail")) return { build } as never;
+      if (operation.includes("query BuildLogChunks")) return history as never;
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+    expect(await screen.findByText("Development")).toBeDefined();
+    await waitFor(() => expect(nextLog).not.toBeNull());
+    act(() => nextLog?.(chunk));
+    await act(async () => resolveHistory({ buildLogChunks: [chunk] }));
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "buffered output\r\n",
+        ),
+      ).toHaveLength(1),
+    );
+  });
+
+  test("orders split chunks with identical timestamps by sequence", async () => {
+    const createdAt = "2026-07-25T12:00:00.000Z";
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query BuildDetail")) return { build } as never;
+      if (operation.includes("query BuildLogChunks")) {
+        return {
+          buildLogChunks: [
+            {
+              ...buildLogChunk(1, "second"),
+              id: "a-random-id",
+              createdAt,
+            },
+            {
+              ...buildLogChunk(0, "first"),
+              id: "z-random-id",
+              createdAt,
+            },
+          ],
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls
+          .filter(([value]) => value instanceof Uint8Array)
+          .map(([value]) => Buffer.from(value).toString("utf8")),
+      ).toEqual(["first", "second"]),
+    );
+  });
+
+  test("appends late log chunks without resetting visible output", async () => {
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+    expect(await screen.findByText("Development")).toBeDefined();
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(1),
+    );
+    await waitFor(() => expect(nextLog).not.toBeNull());
+
+    act(() =>
+      nextLog?.({
+        ...buildLogChunk(-1, "late output\r\n"),
+        id: "late-log",
+        createdAt: new Date(Date.parse(now) - 1).toISOString(),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(2),
+    );
+    expect(terminalReset).not.toHaveBeenCalled();
+  });
+
   test("filters compact test results grouped by suite and file", async () => {
     request.mockImplementation(async (query) => {
+      if (String(query).includes("query BuildLogChunks")) {
+        return { buildLogChunks: [] } as never;
+      }
       if (!String(query).includes("query BuildDetail")) {
         throw new Error(`Unexpected request: ${query}`);
       }
@@ -478,7 +687,6 @@ describe("BuildDetailPage", () => {
             },
           ],
         },
-        buildLogs: [],
       } as never;
     });
 
@@ -553,6 +761,9 @@ describe("BuildDetailPage", () => {
   test("polls while a build or deployment is still active", async () => {
     const interval = vi.spyOn(window, "setInterval");
     request.mockImplementation(async (query) => {
+      if (String(query).includes("query BuildLogChunks")) {
+        return { buildLogChunks: [] } as never;
+      }
       if (String(query).includes("query BuildDetail")) {
         return {
           build: {
@@ -572,7 +783,6 @@ describe("BuildDetailPage", () => {
               },
             ],
           },
-          buildLogs: [],
         } as never;
       }
       throw new Error(`Unexpected request: ${query}`);
@@ -590,27 +800,38 @@ describe("BuildDetailPage", () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 
     expect(await screen.findByText("Development")).toBeDefined();
-    expect(screen.getByText(/Compile Swift sources/)).toBeDefined();
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.some(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "Compile Swift sources\r\n",
+        ),
+      ).toBe(true),
+    );
     act(() => {
+      const output = Buffer.from("Link App\r\n");
       nextLog?.({
         id: "log-2",
         scope: "BUILD",
         scopeId: "build-1",
         sequence: 1,
         phase: "XCODEBUILD",
-        level: "INFO",
         stream: "STDOUT",
-        message: "Link App",
+        dataBase64: output.toString("base64"),
+        byteLength: output.byteLength,
         createdAt: now,
       });
     });
-    expect(screen.getByText(/Link App/)).toBeDefined();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Scroll logs to bottom" }),
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.some(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "Link App\r\n",
+        ),
+      ).toBe(true),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Scroll logs to top" }));
-    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledTimes(2);
 
     fireEvent.click(
       screen.getByRole("button", { name: "Copy command summary" }),

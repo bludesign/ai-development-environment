@@ -282,15 +282,15 @@ type BuildPage {
   nextCursor: ID
 }
 
-type BuildLogEvent {
+type BuildLogChunk {
   id: ID!
   scope: String!
   scopeId: ID!
   sequence: Int!
   phase: String!
-  level: String!
-  stream: String!
-  message: String!
+  stream: AgentLogStream!
+  dataBase64: String!
+  byteLength: Int!
   createdAt: String!
 }
 
@@ -386,14 +386,14 @@ input BuildProgressInput {
   error: String
 }
 
-input BuildLogEventInput {
+input BuildLogChunkInput {
   scope: String!
   scopeId: ID!
   sequence: Int!
   phase: String!
-  level: String!
-  stream: String!
-  message: String!
+  stream: AgentLogStream!
+  dataBase64: String!
+  byteLength: Int!
   createdAt: String!
 }
 
@@ -468,7 +468,7 @@ extend type Query {
     worktreeId: ID
   ): BuildPage!
   build(id: ID!): Build
-  buildLogs(buildId: ID!, after: ID, first: Int = 1000): [BuildLogEvent!]!
+  buildLogChunks(buildId: ID!, after: ID, first: Int = 1000): [BuildLogChunk!]!
   worktreeCoverageReports(worktreeId: ID!): [BuildReport!]!
 }
 
@@ -503,14 +503,14 @@ extend type Mutation {
   generateBuildCoverageReport(buildId: ID!, requestId: ID!): BuildReport!
   startWorktreeCoverage(input: StartBuildInput!): Build!
   reportBuildProgress(input: BuildProgressInput!): Build!
-  appendBuildLogEvents(
+  appendBuildLogChunks(
     buildId: ID!
-    events: [BuildLogEventInput!]!
-  ): [BuildLogEvent!]!
+    chunks: [BuildLogChunkInput!]!
+  ): [BuildLogChunk!]!
 }
 
 extend type Subscription {
   buildsChanged: BuildChange!
   buildChanged(id: ID!): BuildChange!
-  buildLogAdded(buildId: ID!): BuildLogEvent!
+  buildLogChunkAdded(buildId: ID!): BuildLogChunk!
 }

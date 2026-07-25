@@ -6,8 +6,8 @@ import { JobExecutor } from "./job-executor.js";
 const job: AgentJob = {
   id: "job-1",
   agentId: "agent-1",
-  kind: "cloudflared.runTunnel",
-  payload: { tunnelName: "example" },
+  kind: "ccusage.report",
+  payload: {},
   status: "QUEUED",
   timeoutSeconds: 60,
 };

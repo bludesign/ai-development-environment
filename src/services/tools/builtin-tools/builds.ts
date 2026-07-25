@@ -56,7 +56,7 @@ export function createBuildToolGroup(builds: BuildsService): BuiltInToolGroup {
           if (!build) throw new Error("Build not found");
           return {
             build,
-            logs: await builds.logs(buildId, afterLogId, logLimit),
+            logs: await builds.logChunks(buildId, afterLogId, logLimit),
           };
         },
       }),

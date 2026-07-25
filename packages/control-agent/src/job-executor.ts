@@ -25,8 +25,10 @@ export class JobExecutor {
     this.running.set(job.id, { controller, task });
   }
 
-  cancel(jobId: string): void {
-    this.running.get(jobId)?.controller.abort();
+  cancel(jobId: string): boolean {
+    const running = this.running.get(jobId);
+    running?.controller.abort();
+    return Boolean(running);
   }
 
   async cancelAll(): Promise<void> {
@@ -67,14 +69,16 @@ export class JobExecutor {
               this.client.reportWorktreeActivity(input),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
-            appendBuildLogs: (buildId, events) =>
-              this.client.appendBuildLogs(buildId, events),
+            appendBuildLogChunks: (buildId, chunks) =>
+              this.client.appendBuildLogChunks(buildId, chunks),
             uploadBuildArtifact: (input) =>
               this.client.uploadBuildArtifact(input),
             claimSigningSecretTransfer: (transferId) =>
               this.client.claimSigningSecretTransfer(transferId),
             claimWorkflowJobSecrets: () =>
               this.client.claimWorkflowJobSecrets(claimed.id),
+            appendCommandOutput: (attemptId, chunks) =>
+              this.client.appendCommandOutput(claimed.id, attemptId, chunks),
           },
         );
       const codebaseId =

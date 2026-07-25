@@ -148,3 +148,4 @@
     overscroll-behavior: none;
   }
 }
+@import "@xterm/xterm/css/xterm.css";

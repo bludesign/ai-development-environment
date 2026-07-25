@@ -11,6 +11,17 @@ export const IOS_TEST_RESULTS_JOB_KIND = "ios.test-results.parse";
 export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
 export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
 
+export type BuildLogChunk = {
+  scope: string;
+  scopeId: string;
+  sequence: number;
+  phase: string;
+  stream: "STDOUT" | "STDERR" | "SYSTEM";
+  dataBase64: string;
+  byteLength: number;
+  createdAt: string;
+};
+
 export const IOS_BUILD_JOB_KINDS = [
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,

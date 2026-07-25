@@ -24,6 +24,7 @@ import { NotificationsService } from "@/services/notifications";
 import { PollingService } from "@/services/polling";
 import { ModelCostsService } from "@/services/model-costs";
 import { RunsService } from "@/services/runs";
+import { CommandsService } from "@/services/commands";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -56,6 +57,7 @@ export type ServerServices = {
   pollingService: PollingService;
   modelCostsService: ModelCostsService;
   runsService: RunsService;
+  commandsService: CommandsService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -66,6 +68,12 @@ function createServerServices(): ServerServices {
   const credentialService = new CredentialService();
   const workflowEventsService = new WorkflowEventsService();
   const agentControlService = new AgentControlService();
+  const notificationsService = new NotificationsService(credentialService);
+  const commandsService = new CommandsService(
+    agentControlService,
+    notificationsService,
+  );
+  commandsService.startRuntime();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
   const telemetryService = new TelemetryService();
@@ -81,7 +89,6 @@ function createServerServices(): ServerServices {
     credentialService,
     pollingService,
   );
-  const notificationsService = new NotificationsService(credentialService);
   const runsService = new RunsService(
     notificationsService,
     agentControlService,
@@ -146,6 +153,7 @@ function createServerServices(): ServerServices {
     notificationsService,
     runsService,
     worktreesService,
+    commandsService,
   );
   registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
     agentControl: agentControlService,
@@ -156,6 +164,7 @@ function createServerServices(): ServerServices {
     builds: buildsService,
     skills: skillsService,
     runs: runsService,
+    commands: commandsService,
     notifications: notificationsService,
     pushNotifications: pushNotificationsService,
     tools: toolsService,
@@ -189,6 +198,7 @@ function createServerServices(): ServerServices {
     pollingService,
     modelCostsService,
     runsService,
+    commandsService,
     toolsService,
     workflowEventsService,
     workflowsService,

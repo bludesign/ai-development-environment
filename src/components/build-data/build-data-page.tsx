@@ -704,7 +704,11 @@ export function BuildDataPage() {
                         </TableCell>
                         <TableCell>{item.agentName}</TableCell>
                         <TableCell>
-                          <DateTime kind="relative" value={item.deletedAt} />
+                          <DateTime
+                            kind="time"
+                            relativeToday
+                            value={item.deletedAt}
+                          />
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary">

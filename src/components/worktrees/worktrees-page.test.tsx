@@ -560,6 +560,32 @@ describe("WorktreesPage", () => {
     ).toContain("bg-fuchsia-500");
   });
 
+  test("links to the worktree codebase and repository from its menu", async () => {
+    render(<WorktreesPage />);
+    await screen.findByText("feature/AIDE-24");
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+
+    const codebaseLink = await screen.findByRole("menuitem", {
+      name: "View codebase",
+    });
+    const repositoryLink = screen.getByRole("menuitem", {
+      name: "View repository",
+    });
+    expect(codebaseLink.getAttribute("href")).toBe("/codebases/codebase-1");
+    expect(repositoryLink.getAttribute("href")).toBe(
+      "/codebases/repositories/repository-1",
+    );
+
+    const menuItems = screen.getAllByRole("menuitem");
+    expect(
+      menuItems.slice(0, 3).map((item) => item.textContent?.trim()),
+    ).toEqual(["Change branch", "View codebase", "View repository"]);
+  });
+
   test("keeps the change branch popover open with an agent-relative path", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");

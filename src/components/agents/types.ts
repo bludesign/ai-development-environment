@@ -30,7 +30,13 @@ export type AgentJob = {
   kind: string;
   payload: Record<string, unknown>;
   status:
-    "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+    | "QUEUED"
+    | "RUNNING"
+    | "CANCELLING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED"
+    | "TIMED_OUT";
   error: string | null;
   result: unknown;
   timeoutSeconds: number;

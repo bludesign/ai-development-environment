@@ -41,7 +41,7 @@ import {
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
   agentJobChangedTopic,
-  buildLogTopic,
+  buildLogChunkTopic,
   buildTopic,
 } from "@/services/agent-control";
 import type { TelemetryService } from "@/services/telemetry";
@@ -2067,28 +2067,36 @@ export class BuildsService {
     }
   }
 
-  async logs(buildId: string, after: string | null = null, first = 1_000) {
+  async logChunks(buildId: string, after: string | null = null, first = 1_000) {
     const prisma = await getPrismaClient();
     const cursor = after
-      ? await prisma.buildLogEvent.findFirst({
+      ? await prisma.buildLogChunk.findFirst({
           where: { id: after, buildId },
-          select: { id: true, createdAt: true },
+          select: { id: true, createdAt: true, sequence: true },
         })
       : null;
     if (after && !cursor) throw new Error("Build log cursor not found");
-    return prisma.buildLogEvent.findMany({
+    return prisma.buildLogChunk.findMany({
       where: {
         buildId,
         ...(cursor
           ? {
               OR: [
                 { createdAt: { gt: cursor.createdAt } },
-                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+                {
+                  createdAt: cursor.createdAt,
+                  sequence: { gt: cursor.sequence },
+                },
+                {
+                  createdAt: cursor.createdAt,
+                  sequence: cursor.sequence,
+                  id: { gt: cursor.id },
+                },
               ],
             }
           : {}),
       },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "asc" }, { sequence: "asc" }, { id: "asc" }],
       take: Math.max(1, Math.min(first, 5_000)),
     });
   }
@@ -2146,56 +2154,77 @@ export class BuildsService {
     return updated;
   }
 
-  async appendLogs(
+  async appendLogChunks(
     agentId: string,
     buildId: string,
-    events: Array<{
+    chunks: Array<{
       scope: string;
       scopeId: string;
       sequence: number;
       phase: string;
-      level: string;
       stream: string;
-      message: string;
+      dataBase64: string;
+      byteLength: number;
       createdAt: string;
     }>,
   ) {
+    if (!chunks.length || chunks.length > 200) {
+      throw new Error("Build log batches must contain 1 to 200 chunks");
+    }
     const prisma = await getPrismaClient();
     const build = await prisma.build.findUnique({ where: { id: buildId } });
     if (!build || build.agentId !== agentId)
       throw new Error("Build not found for agent");
-    const normalized = events.slice(0, 200).map((event) => ({
-      id: randomUUID(),
-      buildId,
-      scope: cleanName(event.scope, "Log scope", 40),
-      scopeId: cleanName(event.scopeId, "Log scope ID", 200),
-      sequence: event.sequence,
-      phase: cleanName(event.phase, "Log phase", 80),
-      level: cleanName(event.level, "Log level", 20),
-      stream: cleanName(event.stream, "Log stream", 20),
-      message: sanitizePersistedLog(event.message).slice(0, 64_000),
-      createdAt: new Date(event.createdAt),
-    }));
-    for (const event of normalized) {
-      if (!Number.isInteger(event.sequence) || event.sequence < 0) {
+    const normalized = chunks.map((chunk) => {
+      if (!Number.isInteger(chunk.sequence) || chunk.sequence < 0) {
         throw new Error("Log sequence must be a non-negative integer");
       }
-      if (Number.isNaN(event.createdAt.valueOf()))
+      if (!["STDOUT", "STDERR", "SYSTEM"].includes(chunk.stream)) {
+        throw new Error("Log stream is invalid");
+      }
+      const bytes = Buffer.from(chunk.dataBase64, "base64");
+      if (bytes.length !== chunk.byteLength || bytes.length > 256 * 1024) {
+        throw new Error("Log byte length is invalid");
+      }
+      const sanitized = Buffer.from(
+        sanitizePersistedLog(bytes.toString("utf8")),
+        "utf8",
+      );
+      const createdAt = new Date(chunk.createdAt);
+      if (Number.isNaN(createdAt.valueOf()))
         throw new Error("Log date is invalid");
-      await prisma.buildLogEvent.upsert({
+      return {
+        id: randomUUID(),
+        buildId,
+        scope: cleanName(chunk.scope, "Log scope", 40),
+        scopeId: cleanName(chunk.scopeId, "Log scope ID", 200),
+        sequence: chunk.sequence,
+        phase: cleanName(chunk.phase, "Log phase", 80),
+        stream: chunk.stream,
+        dataBase64: sanitized.toString("base64"),
+        byteLength: sanitized.byteLength,
+        createdAt,
+      };
+    });
+    const persisted = [];
+    for (const chunk of normalized) {
+      const stored = await prisma.buildLogChunk.upsert({
         where: {
           scope_scopeId_sequence: {
-            scope: event.scope,
-            scopeId: event.scopeId,
-            sequence: event.sequence,
+            scope: chunk.scope,
+            scopeId: chunk.scopeId,
+            sequence: chunk.sequence,
           },
         },
-        create: event,
+        create: chunk,
         update: {},
       });
-      agentEventBus.publish(buildLogTopic(buildId), { buildLogAdded: event });
+      persisted.push(stored);
+      agentEventBus.publish(buildLogChunkTopic(buildId), {
+        buildLogChunkAdded: stored,
+      });
     }
-    return normalized;
+    return persisted;
   }
 
   async runBuild(input: {

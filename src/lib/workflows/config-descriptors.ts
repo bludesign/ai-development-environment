@@ -795,6 +795,23 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     ],
   },
   // -- Extensibility ---------------------------------------------------------
+  SAVED_COMMAND: {
+    fields: [
+      text("commandId", "Saved command ID", { required: true }),
+      enumField(
+        "completionMode",
+        "Completion",
+        staticOptions(["WAIT_FOR_EXIT", "FIRE_AND_FORGET"]),
+      ),
+      enumField(
+        "targetMode",
+        "Target",
+        staticOptions(["CONTEXT", "FIXED_AGENT", "FIXED_WORKTREE"]),
+      ),
+      text("agentId", "Fixed agent ID"),
+      text("worktreeId", "Fixed worktree ID"),
+    ],
+  },
   TERMINAL_RUN: {
     fields: [
       multiline("script", "Script", { required: true }),

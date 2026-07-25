@@ -14,6 +14,8 @@ import type {
   CodebaseWorktreeReport,
   WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
+import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
+import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
 
 export type AgentJob = {
   id: string;
@@ -21,7 +23,13 @@ export type AgentJob = {
   kind: string;
   payload: unknown;
   status:
-    "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+    | "QUEUED"
+    | "RUNNING"
+    | "CANCELLING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED"
+    | "TIMED_OUT";
   timeoutSeconds: number;
 };
 
@@ -280,6 +288,7 @@ export class AgentGraphQLClient {
       (job) =>
         job.status === "QUEUED" ||
         job.status === "RUNNING" ||
+        job.status === "CANCELLING" ||
         job.status === "CANCELLED",
     );
   }
@@ -356,6 +365,19 @@ export class AgentGraphQLClient {
     );
   }
 
+  appendCommandOutput(
+    jobId: string,
+    attemptId: string,
+    chunks: CommandOutputChunk[],
+  ) {
+    return this.request<{ appendCommandRunOutput: Array<{ id: string }> }>(
+      `mutation AppendCommandRunOutput($jobId: ID!, $attemptId: ID!, $chunks: [CommandRunOutputInput!]!) {
+        appendCommandRunOutput(jobId: $jobId, attemptId: $attemptId, chunks: $chunks) { id }
+      }`,
+      { jobId, attemptId, chunks },
+    );
+  }
+
   reportBuildProgress(input: {
     buildId: string;
     status: "PREPARING" | "RUNNING";
@@ -371,24 +393,12 @@ export class AgentGraphQLClient {
     );
   }
 
-  appendBuildLogs(
-    buildId: string,
-    events: Array<{
-      scope: string;
-      scopeId: string;
-      sequence: number;
-      phase: string;
-      level: string;
-      stream: string;
-      message: string;
-      createdAt: string;
-    }>,
-  ) {
-    return this.request<{ appendBuildLogEvents: Array<{ id: string }> }>(
-      `mutation AppendBuildLogs($buildId: ID!, $events: [BuildLogEventInput!]!) {
-        appendBuildLogEvents(buildId: $buildId, events: $events) { id }
+  appendBuildLogChunks(buildId: string, chunks: BuildLogChunk[]) {
+    return this.request<{ appendBuildLogChunks: Array<{ id: string }> }>(
+      `mutation AppendBuildLogChunks($buildId: ID!, $chunks: [BuildLogChunkInput!]!) {
+        appendBuildLogChunks(buildId: $buildId, chunks: $chunks) { id }
       }`,
-      { buildId, events },
+      { buildId, chunks },
     );
   }
 

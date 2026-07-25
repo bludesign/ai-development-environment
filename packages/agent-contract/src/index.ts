@@ -1,6 +1,3 @@
-export const TUNNEL_NAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9_-]{0,127}";
-export const TUNNEL_NAME_REGEX = new RegExp(`^${TUNNEL_NAME_PATTERN}$`);
-
 export const CCUSAGE_REPORT_JOB_KIND = "ccusage.report";
 
 export const DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS = 15;

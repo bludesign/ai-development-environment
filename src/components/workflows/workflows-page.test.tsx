@@ -52,6 +52,8 @@ function workflowRun(
   id: string,
   displayNumber: number,
   archivedAt: string | null,
+  status = "SUCCEEDED",
+  createdAt = timestamp,
 ) {
   return {
     id,
@@ -60,17 +62,19 @@ function workflowRun(
     workflow: { id: "workflow-1", name: "Example workflow" },
     triggerKind: "MANUAL",
     triggerSubjectKey: "manual",
-    status: "SUCCEEDED",
+    status,
     phase: "FINISHED",
     generation: 1,
     blockedReason: null,
     error: null,
-    queuedAt: timestamp,
-    startedAt: timestamp,
-    pausedAt: null,
-    finishedAt: timestamp,
+    queuedAt: createdAt,
+    startedAt: createdAt,
+    pausedAt: status === "PAUSED" ? createdAt : null,
+    finishedAt: ["SUCCEEDED", "FAILED", "CANCELLED"].includes(status)
+      ? createdAt
+      : null,
     archivedAt,
-    createdAt: timestamp,
+    createdAt,
   };
 }
 
@@ -135,6 +139,35 @@ describe("WorkflowsPage", () => {
         expect.stringContaining("query WorkflowManagement"),
         { archive: "ARCHIVED" },
       ),
+    );
+  });
+
+  test("shows waiting and paused runs before newer completed runs", async () => {
+    request.mockImplementationOnce(
+      async () =>
+        ({
+          workflows: { items: [] },
+          workflowRuns: {
+            items: [
+              workflowRun("complete", 303, null),
+              workflowRun("paused", 202, null, "PAUSED", timestamp),
+              workflowRun("waiting", 101, null, "WAITING", timestamp),
+            ],
+          },
+        }) as never,
+    );
+
+    renderPage();
+
+    const runLinks = await screen.findAllByRole("link", { name: /^#\d+$/ });
+    expect(runLinks.map((link) => link.textContent)).toEqual([
+      "#202",
+      "#101",
+      "#303",
+    ]);
+    expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
+    expect(screen.getAllByRole("cell", { name: /July 25, 2026/ })).toHaveLength(
+      1,
     );
   });
 });

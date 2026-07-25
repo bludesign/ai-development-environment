@@ -39,7 +39,7 @@ Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket ru
 ~/.config/control-agent-dev/config.json
 ```
 
-Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it. `cloudflared` must still be installed before running Cloudflared jobs.
+Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it.
 
 The common overrides are:
 
@@ -146,7 +146,7 @@ ai-development-environment
 
 The `ai-development-environment` command applies pending database migrations, then starts the server on `http://127.0.0.1:3090` with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`, storing its SQLite database at `~/.ai-development-environment/production.db`. It accepts the same server and credential-storage variables as the Homebrew service, but defaults to database credential storage on every platform.
 
-Unlike Homebrew, npm does not install `cloudflared`; install it separately (for example `brew install cloudflared`) before running Cloudflared jobs — `control-agent doctor` checks for it.
+Saved commands run through the enrolled agent user's login shell and stream their terminal output back to the control plane.
 
 npm versions track the repository's `vX.Y.Z` release tags; the `publish-npm` job in `.github/workflows/release.yml` publishes both packages via npm trusted publishing on every release.
 
@@ -178,4 +178,4 @@ control-agent status
 control-agent doctor
 ```
 
-The credential and stable agent ID are stored at `~/.config/control-agent/config.json`. The first allow-listed job is `cloudflared.runTunnel`; there is no arbitrary shell execution surface.
+The credential and stable agent ID are stored at `~/.config/control-agent/config.json`. Saved commands are the explicit shell execution surface and run with the permissions of the agent service account.

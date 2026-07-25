@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Code2,
   ExternalLink,
+  FolderGit2,
   GitBranch,
   GitMerge,
   GitPullRequest,
@@ -46,6 +47,7 @@ import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
+import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -1382,6 +1384,16 @@ function WorktreeCard(props: WorktreeItemProps) {
           worktreeId={worktree.id}
           workflows={props.group.quickActions ?? []}
         />
+        <CommandQuickActions
+          agentCapabilities={
+            props.overview.agents.find((agentGroup) =>
+              agentGroup.codebases.some(
+                (group) => group.codebase.id === props.group.codebase.id,
+              ),
+            )?.agent.capabilities ?? []
+          }
+          worktreeId={worktree.id}
+        />
       </CardFooter>
     </Card>
   );
@@ -2184,6 +2196,18 @@ export function WorktreeMenus(
               }}
             >
               <GitBranch /> {t("changeBranch")}
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/codebases/${props.group.codebase.id}`}>
+                <Code2 /> {t("viewCodebase")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link
+                href={`/codebases/repositories/${props.group.repository.id}`}
+              >
+                <FolderGit2 /> {t("viewRepository")}
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">

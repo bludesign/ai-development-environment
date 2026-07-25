@@ -305,15 +305,17 @@ export function workflowResourceDestination(
                   ? pullRequestHref(id)
                   : kind === "AGENT_JOB"
                     ? `/jobs/${segment(id)}`
-                    : kind === "WORKFLOW_RUN"
-                      ? `/workflows/runs/${segment(id)}`
-                      : kind === "SKILL_RUN"
-                        ? `/skills/sync/${segment(id)}`
-                        : kind === "AGENT"
-                          ? `/agents/${segment(id)}`
-                          : kind === "CODEBASE_REPOSITORY"
-                            ? `/codebases/repositories/${segment(id)}`
-                            : null;
+                    : kind === "COMMAND_RUN"
+                      ? `/commands/runs/${segment(id)}`
+                      : kind === "WORKFLOW_RUN"
+                        ? `/workflows/runs/${segment(id)}`
+                        : kind === "SKILL_RUN"
+                          ? `/skills/sync/${segment(id)}`
+                          : kind === "AGENT"
+                            ? `/agents/${segment(id)}`
+                            : kind === "CODEBASE_REPOSITORY"
+                              ? `/codebases/repositories/${segment(id)}`
+                              : null;
   if (derived) return { href: derived, external: false };
 
   const provider = externalUrl(link.url);
@@ -323,6 +325,7 @@ export function workflowResourceDestination(
 function navigationPriority(link: WorkflowResourceLinkLike): number {
   const kind = link.kind.trim().toUpperCase();
   if (kind === "AGENT_JOB") return 30;
+  if (kind === "COMMAND_RUN") return 30;
   if (kind === "GITHUB_WORKFLOW_RUN") return 20;
   return 10;
 }

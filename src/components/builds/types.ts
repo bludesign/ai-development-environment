@@ -153,14 +153,14 @@ export type BuildRecord = {
   updatedAt: string;
 };
 
-export type BuildLogEvent = {
+export type BuildLogChunk = {
   id: string;
   scope: string;
   scopeId: string;
   sequence: number;
   phase: string;
-  level: string;
   stream: string;
-  message: string;
+  dataBase64: string;
+  byteLength: number;
   createdAt: string;
 };

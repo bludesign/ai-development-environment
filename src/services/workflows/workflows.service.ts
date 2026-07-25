@@ -55,6 +55,7 @@ import {
 import type { CredentialService } from "@/services/credentials";
 import type { NotificationsService } from "@/services/notifications";
 import type { RunsService } from "@/services/runs";
+import type { CommandsService } from "@/services/commands";
 import {
   CREDENTIAL_KINDS,
   type CredentialDescriptor,
@@ -297,6 +298,7 @@ export class WorkflowsService {
         id: string,
       ): Promise<Record<string, unknown>>;
     },
+    private readonly commandsService?: CommandsService,
   ) {
     if (this.agentControl) {
       this.executor.register("TERMINAL_RUN", (context) =>
@@ -348,6 +350,25 @@ export class WorkflowsService {
         }
         await this.runsService!.lifecycle(resourceId, action);
       }),
+    );
+  }
+
+  private async cancelWaitingCommandRuns(workflowRunId: string): Promise<void> {
+    if (!this.commandsService) return;
+    const prisma = await getPrismaClient();
+    const links = await prisma.workflowRunResourceLink.findMany({
+      where: {
+        runId: workflowRunId,
+        kind: "COMMAND_RUN",
+        attempt: { status: "WAITING" },
+      },
+      select: { resourceId: true },
+      distinct: ["resourceId"],
+    });
+    await Promise.allSettled(
+      links.map(({ resourceId }) =>
+        this.commandsService!.terminateRun(resourceId),
+      ),
     );
   }
 
@@ -2309,6 +2330,7 @@ export class WorkflowsService {
     } else {
       if (TERMINAL_RUN_STATUSES.has(run.status)) return this.run(runId);
       await this.controlLinkedAgentRuns(runId, "CANCEL");
+      await this.cancelWaitingCommandRuns(runId);
       for (const [attemptId, controller] of this.activeExecutions) {
         const attempt = await prisma.workflowStepAttempt.findUnique({
           where: { id: attemptId },

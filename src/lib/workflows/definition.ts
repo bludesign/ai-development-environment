@@ -989,6 +989,21 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "SAVED_COMMAND",
+    "Extensibility",
+    "Run saved command",
+    "AGENT",
+    [],
+    ["steps.<stepId>.*"],
+    {
+      description:
+        "Starts a saved command on an eligible agent home or worktree target.",
+      details:
+        "Uses the saved command snapshot, target rules, output log, and restart policy. Wait for exit fails the workflow when the command ultimately fails or is cancelled; fire and forget succeeds after durable dispatch and remains independent if the workflow is later cancelled. Always-restart commands can only use fire and forget.",
+      mutatesWorktree: true,
+    },
+  ),
+  step(
     "TERMINAL_RUN",
     "Extensibility",
     "Run terminal script",

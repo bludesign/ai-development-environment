@@ -140,6 +140,7 @@ describe("AgentGraphQLClient", () => {
     vi.spyOn(client, "request").mockResolvedValue({
       agentJobs: [
         { id: "queued", status: "QUEUED" },
+        { id: "cancelling", status: "CANCELLING" },
         { id: "cancelled", status: "CANCELLED" },
         { id: "done", status: "SUCCEEDED" },
       ],
@@ -147,6 +148,7 @@ describe("AgentGraphQLClient", () => {
 
     await expect(client.pendingJobs("agent-1")).resolves.toEqual([
       { id: "queued", status: "QUEUED" },
+      { id: "cancelling", status: "CANCELLING" },
       { id: "cancelled", status: "CANCELLED" },
     ]);
   });

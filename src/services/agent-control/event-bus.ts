@@ -96,6 +96,12 @@ export const SIGNING_ASSETS_CHANGED_TOPIC = "signing-assets.changed";
 export const PUSH_NOTIFICATIONS_CHANGED_TOPIC = "push-notifications.changed";
 export const APP_NOTIFICATIONS_CHANGED_TOPIC = "app-notifications.changed";
 export const RUNS_CHANGED_TOPIC = "runs.changed";
+export const COMMANDS_CHANGED_TOPIC = "commands.changed";
+export const COMMAND_RUNS_CHANGED_TOPIC = "command-runs.changed";
+export const commandRunChangedTopic = (runId: string) =>
+  `command-run.${runId}.changed`;
+export const commandRunOutputTopic = (runId: string) =>
+  `command-run.${runId}.output`;
 export const runChangedTopic = (runId: string) => `run.${runId}.changed`;
 export const runEventTopic = (runId: string) => `run.${runId}.event`;
 export const runQuestionTopic = (runId: string) => `run.${runId}.question`;
@@ -103,7 +109,8 @@ export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;
-export const buildLogTopic = (buildId: string) => `build.${buildId}.log`;
+export const buildLogChunkTopic = (buildId: string) =>
+  `build.${buildId}.log-chunk`;
 export const skillSyncRunTopic = (runId: string) =>
   `skills.sync.${runId}.changed`;
 export const worktreeInspectionTopic = (worktreeId: string) =>

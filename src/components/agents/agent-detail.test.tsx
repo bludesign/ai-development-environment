@@ -153,7 +153,7 @@ describe("AgentDetail", () => {
         memoryFreeBytes: 12 * 1024 ** 3,
         diskTotalBytes: 512 * 1024 ** 3,
         diskFreeBytes: 256 * 1024 ** 3,
-        capabilities: ["cloudflared.runTunnel", "ccusage.report"],
+        capabilities: ["command.run", "ccusage.report"],
         baseRepoDirectory: null,
         connectionStatus: "ONLINE",
         ipAddress: "192.168.1.20",
@@ -196,7 +196,7 @@ describe("AgentDetail", () => {
       { target: { value: "ccusage" } },
     );
     expect(screen.getByText("ccusage.report")).toBeDefined();
-    expect(screen.queryByText("cloudflared.runTunnel")).toBeNull();
+    expect(screen.queryByText("command.run")).toBeNull();
   });
 
   test("explains and saves each agent cadence", async () => {
@@ -289,10 +289,10 @@ describe("AgentDetail", () => {
   test("shows an empty sample payload before invoking a capability", async () => {
     const createdAt = new Date(0).toISOString();
     const job: AgentJob = {
-      id: "job-dev-tunnel",
+      id: "job-report",
       agentId: "agent-1",
-      kind: "cloudflared.runTunnel",
-      payload: { tunnelName: "dev-tunnel" },
+      kind: "ccusage.report",
+      payload: {},
       status: "QUEUED",
       error: null,
       result: null,
@@ -315,7 +315,7 @@ describe("AgentDetail", () => {
             version: "1.0.0",
             osVersion: "macOS",
             architecture: "arm64",
-            capabilities: ["cloudflared.runTunnel"],
+            capabilities: ["ccusage.report"],
             baseRepoDirectory: null,
             connectionStatus: "ONLINE",
             ipAddress: null,
@@ -338,7 +338,7 @@ describe("AgentDetail", () => {
     render(<AgentDetail agentId="agent-1" />);
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Expand cloudflared.runTunnel",
+        name: "Expand ccusage.report",
       }),
     );
     expect(
@@ -347,10 +347,10 @@ describe("AgentDetail", () => {
           name: "Payload (JSON object)",
         }) as HTMLTextAreaElement
       ).value,
-    ).toBe('{\n  "tunnelName": ""\n}');
+    ).toBe("{}");
     fireEvent.change(
       screen.getByRole("textbox", { name: "Payload (JSON object)" }),
-      { target: { value: '{"tunnelName":"dev-tunnel"}' } },
+      { target: { value: "{}" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Invoke capability" }));
 
@@ -359,10 +359,8 @@ describe("AgentDetail", () => {
         expect.stringContaining("mutation InvokeAgentCapability"),
         expect.objectContaining({
           input: expect.objectContaining({
-            payload: { tunnelName: "dev-tunnel" },
-            idempotencyKey: expect.stringMatching(
-              /^manual:cloudflared\.runTunnel:/,
-            ),
+            payload: {},
+            idempotencyKey: expect.stringMatching(/^manual:ccusage\.report:/),
           }),
         }),
       ),
@@ -375,7 +373,7 @@ describe("AgentDetail", () => {
       {
         id: "job-1",
         agentId: "agent-1",
-        kind: "cloudflared.first",
+        kind: "custom.first",
         payload: {},
         status: "SUCCEEDED",
         error: null,
@@ -389,7 +387,7 @@ describe("AgentDetail", () => {
       {
         id: "job-2",
         agentId: "agent-1",
-        kind: "cloudflared.second",
+        kind: "custom.second",
         payload: {},
         status: "SUCCEEDED",
         error: null,
@@ -414,7 +412,7 @@ describe("AgentDetail", () => {
             version: "1.0.0",
             osVersion: "macOS",
             architecture: "arm64",
-            capabilities: ["cloudflared.runTunnel"],
+            capabilities: ["ccusage.report"],
             baseRepoDirectory: null,
             connectionStatus: "ONLINE",
             ipAddress: null,
@@ -434,7 +432,7 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="agent-1" />);
     const secondJob = await screen.findByRole("button", {
-      name: /cloudflared\.second/i,
+      name: /custom\.second/i,
     });
     expect(
       secondJob.closest("table")?.closest('[data-slot="card"]'),
