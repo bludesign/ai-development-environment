@@ -292,7 +292,7 @@
     "quickActionEligibility": "La acción aparece cuando el flujo está publicado, activado y tiene un disparador de recurso de árbol de trabajo.",
     "saveQuickActions": "Guardar acciones rápidas",
     "quickActionStarted": "Se inició {name}.",
-    "viewRun": "Ver ejecución",
+    "quickActionView": "Ver",
     "runNamed": "Ejecutar {name}",
     "fullRun": "Ejecución completa",
     "currentPage": "Página actual",

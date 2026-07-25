@@ -292,7 +292,7 @@
     "quickActionEligibility": "L’action apparaît lorsque le workflow est publié, activé et possède un déclencheur de ressource Arbre de travail.",
     "saveQuickActions": "Enregistrer les actions rapides",
     "quickActionStarted": "{name} a démarré.",
-    "viewRun": "Voir l’exécution",
+    "quickActionView": "Voir",
     "runNamed": "Exécuter {name}",
     "fullRun": "Exécution complète",
     "currentPage": "Page actuelle",

@@ -29,15 +29,11 @@ export function WorkflowQuickActions({
 }) {
   const t = useTranslations("workflows");
   const [triggering, setTriggering] = useState<string | null>(null);
-  const [startedRun, setStartedRun] = useState<{
-    id: string;
-    workflowName: string;
-  } | null>(null);
+  const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const trigger = async (workflow: QuickActionWorkflow) => {
     setTriggering(workflow.id);
-    setStartedRun(null);
     setError(null);
     try {
       const data = await controlPlaneRequest<{
@@ -56,10 +52,10 @@ export function WorkflowQuickActions({
           },
         },
       );
-      setStartedRun({
-        id: data.triggerWorkflow.id,
-        workflowName: workflow.name,
-      });
+      setStartedRuns((current) => ({
+        ...current,
+        [workflow.id]: data.triggerWorkflow.id,
+      }));
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -72,35 +68,45 @@ export function WorkflowQuickActions({
   return (
     <div className="w-full space-y-2">
       <div className="flex flex-wrap gap-2">
-        {workflows.map((workflow) => (
-          <Button
-            disabled={triggering !== null}
-            key={workflow.id}
-            onClick={() => void trigger(workflow)}
-            size="sm"
-            title={workflow.description || workflow.name}
-            variant={workflow.quickActionButtonVariant}
-          >
-            {triggering === workflow.id ? (
-              <Spinner />
-            ) : (
-              <ConfigurationIcon iconKey={workflow.quickActionIconKey} />
-            )}
-            {workflow.name}
-          </Button>
-        ))}
+        {workflows.map((workflow) => {
+          const startedRunId = startedRuns[workflow.id];
+          return (
+            <div className="flex items-center" key={workflow.id}>
+              {startedRunId && (
+                <Button
+                  asChild
+                  className="rounded-r-none border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300"
+                  size="sm"
+                  variant="outline"
+                >
+                  <Link
+                    href={`/workflows/runs/${startedRunId}`}
+                    title={t("quickActionStarted", { name: workflow.name })}
+                  >
+                    <Spinner />
+                    {t("quickActionView")}
+                  </Link>
+                </Button>
+              )}
+              <Button
+                className={startedRunId ? "-ml-px rounded-l-none" : undefined}
+                disabled={triggering !== null}
+                onClick={() => void trigger(workflow)}
+                size="sm"
+                title={workflow.description || workflow.name}
+                variant={workflow.quickActionButtonVariant}
+              >
+                {triggering === workflow.id ? (
+                  <Spinner />
+                ) : (
+                  <ConfigurationIcon iconKey={workflow.quickActionIconKey} />
+                )}
+                {workflow.name}
+              </Button>
+            </div>
+          );
+        })}
       </div>
-      {startedRun && (
-        <p className="text-xs text-muted-foreground">
-          {t("quickActionStarted", { name: startedRun.workflowName })}{" "}
-          <Link
-            className="font-medium text-primary hover:underline"
-            href={`/workflows/runs/${startedRun.id}`}
-          >
-            {t("viewRun")}
-          </Link>
-        </p>
-      )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>

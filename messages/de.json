@@ -292,7 +292,7 @@
     "quickActionEligibility": "Die Aktion erscheint, wenn der Workflow veröffentlicht und aktiviert ist und einen Arbeitsbaum-Ressourcentrigger besitzt.",
     "saveQuickActions": "Schnellaktionen speichern",
     "quickActionStarted": "{name} wurde gestartet.",
-    "viewRun": "Lauf anzeigen",
+    "quickActionView": "Anzeigen",
     "runNamed": "{name} ausführen",
     "fullRun": "Vollständiger Lauf",
     "currentPage": "Aktuelle Seite",

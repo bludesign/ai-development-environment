@@ -75,9 +75,9 @@ test("starts a selected worktree quick action and links to the run", async () =>
       },
     ),
   );
-  expect(
-    (await screen.findByRole("link", { name: "View run" })).getAttribute(
-      "href",
-    ),
-  ).toBe("/workflows/runs/run-1");
+  const viewLink = await screen.findByRole("link", { name: /View/ });
+  expect(viewLink.getAttribute("href")).toBe("/workflows/runs/run-1");
+  expect(viewLink.querySelector('[data-slot="spinner"]')).not.toBeNull();
+  expect(viewLink.className).toContain("rounded-r-none");
+  expect(button.className).toContain("rounded-l-none");
 });

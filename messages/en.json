@@ -292,7 +292,7 @@
     "quickActionEligibility": "The action appears when this workflow is published, enabled, and has a Worktree resource trigger.",
     "saveQuickActions": "Save quick actions",
     "quickActionStarted": "Started {name}.",
-    "viewRun": "View run",
+    "quickActionView": "View",
     "runNamed": "Run {name}",
     "fullRun": "Full run",
     "currentPage": "Current page",
