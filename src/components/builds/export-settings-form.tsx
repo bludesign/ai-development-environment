@@ -6,9 +6,9 @@ import {
   profileCoversBundle,
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
-import { Plus, ScanSearch, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  controlPlaneRequest,
+  controlPlaneSubscriptions,
+} from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
 
 export type ExportSettingsValue = {
@@ -56,6 +59,44 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettingsValue = {
   distributionBundleIdentifier: null,
 };
 
+type SigningInventory = {
+  agentCount: number;
+  certificates: Array<{
+    sha1: string;
+    name: string;
+    teamId: string | null;
+    hasPrivateKey: boolean;
+    installedAgents: Array<{ id: string }>;
+  }>;
+  profiles: Array<{
+    uuid: string;
+    name: string;
+    profileType: string;
+    bundleId: string;
+    teamId: string | null;
+    platforms: string[];
+    expiresAt: string | null;
+    expired: boolean;
+    certificateSha1s: string[];
+    installedAgents: Array<{ id: string }>;
+  }>;
+};
+
+type RefreshJob = {
+  id: string;
+  agentId: string;
+  status:
+    "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+  error: string | null;
+};
+
+const TERMINAL_REFRESH_STATUSES = new Set<RefreshJob["status"]>([
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "TIMED_OUT",
+]);
+
 function profileSupportsPlatform(
   profilePlatforms: string[],
   requirementPlatform: string | null,
@@ -82,6 +123,7 @@ export function ExportSettingsForm({
   disabled?: boolean;
 }) {
   const t = useTranslations("builds");
+  const tp = useTranslations("provisioningProfiles");
   const locale = useLocale();
   const [requirements, setRequirements] = useState<BuildSigningRequirement[]>(
     () =>
@@ -104,78 +146,166 @@ export function ExportSettingsForm({
     () => new Set(Object.keys(value.provisioningProfiles)),
   );
   const manualBundleInputId = useId();
-  const [inventory, setInventory] = useState<{
-    agentCount: number;
-    certificates: Array<{
-      sha1: string;
-      name: string;
-      teamId: string | null;
-      hasPrivateKey: boolean;
-      installedAgents: Array<{ id: string }>;
-    }>;
-    profiles: Array<{
-      uuid: string;
-      name: string;
-      profileType: string;
-      bundleId: string;
-      teamId: string | null;
-      platforms: string[];
-      expiresAt: string | null;
-      expired: boolean;
-      certificateSha1s: string[];
-      installedAgents: Array<{ id: string }>;
-    }>;
-  } | null>(null);
-  useEffect(() => {
-    let disposed = false;
-    void controlPlaneRequest<{
-      signingAgents: Array<{ supported: boolean }>;
-      signingCertificates: Array<{
-        sha1: string;
-        name: string;
-        teamId: string | null;
-        hasPrivateKey: boolean;
-        installedAgents: Array<{ id: string }>;
-      }>;
-      signingProfiles: Array<{
-        uuid: string;
-        name: string;
-        profileType: string;
-        bundleId: string;
-        teamId: string | null;
-        platforms: string[];
-        expiresAt: string | null;
-        expired: boolean;
-        certificateSha1s: string[];
-        installedAgents: Array<{ id: string }>;
-      }>;
-    }>(`query ExportSigningInventory {
-      signingAgents { supported }
-      signingCertificates { sha1 name teamId hasPrivateKey installedAgents { id } }
-      signingProfiles {
-        uuid name profileType bundleId teamId platforms expiresAt expired
-        certificateSha1s installedAgents { id }
-      }
-    }`)
-      .then((data) => {
-        if (!disposed) {
-          setInventory({
-            agentCount: data.signingAgents.filter((agent) => agent.supported)
-              .length,
-            certificates: data.signingCertificates,
-            profiles: data.signingProfiles,
-          });
+  const [inventory, setInventory] = useState<SigningInventory | null>(null);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [refreshJobs, setRefreshJobs] = useState<RefreshJob[]>([]);
+  const [startingRefresh, setStartingRefresh] = useState(false);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      const data = await controlPlaneRequest<{
+        signingAgents: Array<{ supported: boolean }>;
+        signingCertificates: SigningInventory["certificates"];
+        signingProfiles: SigningInventory["profiles"];
+      }>(`query ExportSigningInventory {
+        signingAgents { supported }
+        signingCertificates { sha1 name teamId hasPrivateKey installedAgents { id } }
+        signingProfiles {
+          uuid name profileType bundleId teamId platforms expiresAt expired
+          certificateSha1s installedAgents { id }
         }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setInventory({ agentCount: 0, certificates: [], profiles: [] });
-        }
+      }`);
+      setInventory({
+        agentCount: data.signingAgents.filter((agent) => agent.supported)
+          .length,
+        certificates: data.signingCertificates,
+        profiles: data.signingProfiles,
       });
-    return () => {
-      disposed = true;
-    };
+      setInventoryError(null);
+    } catch (error) {
+      setInventory(
+        (current) =>
+          current ?? { agentCount: 0, certificates: [], profiles: [] },
+      );
+      setInventoryError(error instanceof Error ? error.message : String(error));
+    }
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadInventory(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadInventory]);
+
+  const applyRefreshJob = useCallback((job: RefreshJob) => {
+    setRefreshJobs((current) => {
+      const index = current.findIndex((item) => item.id === job.id);
+      if (index < 0) return [...current, job];
+      const previous = current[index]!;
+      if (previous.status === job.status && previous.error === job.error) {
+        return current;
+      }
+      const next = [...current];
+      next[index] = job;
+      return next;
+    });
+  }, []);
+
+  const refreshJobIds = refreshJobs
+    .map((job) => job.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    if (!refreshJobIds) return;
+    const ids = refreshJobIds.split(",");
+    const unsubscribers = ids.map((id) =>
+      controlPlaneSubscriptions().subscribe<{ agentJobChanged: RefreshJob }>(
+        {
+          query: `subscription ExportSigningInventoryJobChanged($id: ID!) {
+            agentJobChanged(jobId: $id) { id agentId status error }
+          }`,
+          variables: { id },
+        },
+        {
+          next: (value) => {
+            if (value.data?.agentJobChanged) {
+              applyRefreshJob(value.data.agentJobChanged);
+            }
+          },
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
+    );
+    const reconcile = async () => {
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const data = await controlPlaneRequest<{
+              agentJob: RefreshJob | null;
+            }>(
+              `query ExportSigningInventoryJob($id: ID!) {
+                agentJob(id: $id) { id agentId status error }
+              }`,
+              { id },
+            );
+            if (data.agentJob) applyRefreshJob(data.agentJob);
+          } catch {
+            // The subscription remains the primary progress channel.
+          }
+        }),
+      );
+    };
+    void reconcile();
+    const timer = window.setInterval(() => void reconcile(), 2_000);
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      window.clearInterval(timer);
+    };
+  }, [applyRefreshJob, refreshJobIds]);
+
+  useEffect(() => {
+    if (
+      !refreshJobs.length ||
+      !refreshJobs.every((job) => TERMINAL_REFRESH_STATUSES.has(job.status))
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void loadInventory().then(() => {
+        const failures = refreshJobs.filter(
+          (job) => job.status !== "SUCCEEDED",
+        );
+        if (failures.length) {
+          setInventoryError(
+            failures
+              .map((job) => job.error || `${job.agentId}: ${job.status}`)
+              .join("; "),
+          );
+        }
+        setRefreshJobs([]);
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadInventory, refreshJobs]);
+
+  const refreshInventory = async () => {
+    setStartingRefresh(true);
+    setInventoryError(null);
+    setRefreshJobs([]);
+    try {
+      const data = await controlPlaneRequest<{
+        refreshSigningAssets: RefreshJob[];
+      }>(`mutation RefreshExportSigningInventory {
+        refreshSigningAssets { id agentId status error }
+      }`);
+      setRefreshJobs(data.refreshSigningAssets);
+      if (!data.refreshSigningAssets.length) {
+        setInventoryError(tp("noRefreshAgents"));
+      }
+    } catch (error) {
+      setInventoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setStartingRefresh(false);
+    }
+  };
+
+  const refreshingInventory =
+    startingRefresh ||
+    refreshJobs.some((job) => !TERMINAL_REFRESH_STATUSES.has(job.status));
+  const completedRefreshJobs = refreshJobs.filter((job) =>
+    TERMINAL_REFRESH_STATUSES.has(job.status),
+  ).length;
   const teams = useMemo(
     () => [
       ...new Set(
@@ -519,23 +649,50 @@ export function ExportSettingsForm({
                 {t("parseProvisioningProfilesHelp")}
               </p>
             </div>
-            {onParseSigningRequirements && (
+            <div className="flex flex-wrap gap-2">
               <Button
-                disabled={disabled || parsingRequirements || !inventory}
-                onClick={() => void parseRequirements()}
+                disabled={disabled || refreshingInventory || !inventory}
+                onClick={() => void refreshInventory()}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {parsingRequirements ? <Spinner /> : <ScanSearch />}
-                {t(
-                  requirementsParsed
-                    ? "reparseProvisioningProfiles"
-                    : "parseProvisioningProfiles",
-                )}
+                <RefreshCw
+                  className={refreshingInventory ? "animate-spin" : undefined}
+                />
+                {tp("refresh")}
               </Button>
-            )}
+              {onParseSigningRequirements && (
+                <Button
+                  disabled={disabled || parsingRequirements || !inventory}
+                  onClick={() => void parseRequirements()}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {parsingRequirements ? <Spinner /> : <ScanSearch />}
+                  {t(
+                    requirementsParsed
+                      ? "reparseProvisioningProfiles"
+                      : "parseProvisioningProfiles",
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
+          {refreshJobs.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {tp("refreshProgress", {
+                complete: completedRefreshJobs,
+                total: refreshJobs.length,
+              })}
+            </p>
+          )}
+          {inventoryError && (
+            <Alert variant="destructive">
+              <AlertDescription>{inventoryError}</AlertDescription>
+            </Alert>
+          )}
           <div className="grid gap-2 rounded-lg border border-dashed p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
             <div className="space-y-2">
               <Label htmlFor={manualBundleInputId}>

@@ -423,6 +423,20 @@ describe("WorktreeDetailPage", () => {
     expect(
       screen.getByRole("button", { name: "Customize worktree" }),
     ).toBeDefined();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Customize worktree" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: "View codebase" })
+      ).getAttribute("href"),
+    ).toBe("/codebases/codebase-1");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "View repository" })
+        .getAttribute("href"),
+    ).toBe("/codebases/repositories/repository-1");
   });
 
   test("keeps saved metadata read-only when the agent is offline", async () => {

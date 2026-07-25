@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Code2,
   ExternalLink,
+  FolderGit2,
   GitBranch,
   GitMerge,
   GitPullRequest,
@@ -2195,6 +2196,18 @@ export function WorktreeMenus(
               }}
             >
               <GitBranch /> {t("changeBranch")}
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/codebases/${props.group.codebase.id}`}>
+                <Code2 /> {t("viewCodebase")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link
+                href={`/codebases/repositories/${props.group.repository.id}`}
+              >
+                <FolderGit2 /> {t("viewRepository")}
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">

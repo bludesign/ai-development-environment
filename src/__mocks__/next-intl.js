@@ -1204,6 +1204,8 @@ const mockTranslations = {
     localAndOrigin: "Local and origin",
     remoteDefault: "Remote default",
     changeBranch: "Change branch",
+    viewCodebase: "View codebase",
+    viewRepository: "View repository",
     moveToAgent: "Move to agent",
     moveWorktree: "Move worktree",
     moveDescription: "Push {branch} and check it out on another agent.",

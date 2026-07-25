@@ -2208,6 +2208,8 @@
     "localAndOrigin": "Locale et origin",
     "remoteDefault": "Branche distante par défaut",
     "changeBranch": "Changer de branche",
+    "viewCodebase": "Voir la base de code",
+    "viewRepository": "Voir le dépôt",
     "moveToAgent": "Déplacer vers un agent",
     "moveWorktree": "Déplacer l’arbre de travail",
     "moveDescription": "Pousser {branch} et l’extraire sur un autre agent.",
