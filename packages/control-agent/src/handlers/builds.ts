@@ -15,6 +15,7 @@ import {
 import { createReadStream, createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
+import { StringDecoder } from "node:string_decoder";
 import {
   basename,
   dirname,
@@ -44,6 +45,7 @@ import {
   type BuildExportPayload,
   type BuildExportSettings,
   type BuildJobPayload,
+  type BuildLogChunk,
   type BuildReportKind,
   type BuildSigningRequirement,
   type BuildSourceSnapshot,
@@ -71,17 +73,6 @@ const SKIP_DIRECTORIES = new Set([
   "build",
   "node_modules",
 ]);
-
-type BuildLogEvent = {
-  scope: string;
-  scopeId: string;
-  sequence: number;
-  phase: string;
-  level: string;
-  stream: string;
-  message: string;
-  createdAt: string;
-};
 
 type CommandResult = ProcessResult & {
   output: string;
@@ -1089,10 +1080,13 @@ export function createRedactor(env: NodeJS.ProcessEnv) {
 }
 
 class BuildLogger {
+  private static readonly MAX_CHUNK_BYTES = 128 * 1024;
+  private static readonly MAX_BATCH_BYTES = 128 * 1024;
   private readonly stream;
   private readonly redact;
   private sequence = 0;
-  private pending: BuildLogEvent[] = [];
+  private pending: BuildLogChunk[] = [];
+  private pendingBytes = 0;
   private flushChain = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closePromise: Promise<void> | null = null;
@@ -1116,6 +1110,19 @@ class BuildLogger {
     scopeId = this.buildId,
     extraStream?: ReturnType<typeof createWriteStream>,
   ): void {
+    this.write(phase, stream, `${message}\r\n`, scope, scopeId, extraStream);
+  }
+
+  write(
+    phase: string,
+    stream: "STDOUT" | "STDERR" | "SYSTEM",
+    output: string,
+    scope = "BUILD",
+    scopeId = this.buildId,
+    extraStream?: ReturnType<typeof createWriteStream>,
+  ): void {
+    const ending = output.match(/(?:\r\n|\r|\n)$/)?.[0] ?? "";
+    const message = ending ? output.slice(0, -ending.length) : output;
     const startsPrivateKey = /-----BEGIN [^-]*PRIVATE KEY-----/i.test(message);
     const endsPrivateKey = /-----END [^-]*PRIVATE KEY-----/i.test(message);
     if (startsPrivateKey) this.redactingPrivateKey = true;
@@ -1124,27 +1131,32 @@ class BuildLogger {
       : this.redact(message);
     if (endsPrivateKey) this.redactingPrivateKey = false;
     const createdAt = new Date().toISOString();
-    const line = `[${createdAt}] [${phase}] [${stream}] ${sanitized}\n`;
+    const terminalOutput = `${sanitized}${ending}`;
+    const line = `[${createdAt}] [${phase}] [${stream}] ${sanitized}${ending || "\n"}`;
     this.stream.write(line);
     extraStream?.write(line);
-    this.pending.push({
-      scope,
-      scopeId,
-      sequence: this.sequence++,
-      phase,
-      level:
-        stream === "STDERR" || /\berror\b/i.test(sanitized)
-          ? "ERROR"
-          : /\bwarning\b/i.test(sanitized)
-            ? "WARNING"
-            : "INFO",
-      stream,
-      message: sanitized,
-      createdAt,
-    });
-    if (this.pending.length >= 100) this.flush();
-    else if (!this.timer) {
-      this.timer = setTimeout(() => this.flush(), 250);
+    for (const data of splitUtf8(terminalOutput, BuildLogger.MAX_CHUNK_BYTES)) {
+      const bytes = Buffer.from(data, "utf8");
+      this.pending.push({
+        scope,
+        scopeId,
+        sequence: this.sequence++,
+        phase,
+        stream,
+        dataBase64: bytes.toString("base64"),
+        byteLength: bytes.byteLength,
+        createdAt,
+      });
+      this.pendingBytes += bytes.byteLength;
+      if (
+        this.pending.length >= 200 ||
+        this.pendingBytes >= BuildLogger.MAX_BATCH_BYTES
+      ) {
+        this.flush();
+      }
+    }
+    if (this.pending.length && !this.timer) {
+      this.timer = setTimeout(() => this.flush(), 25);
       this.timer.unref();
     }
   }
@@ -1152,13 +1164,14 @@ class BuildLogger {
   flush(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    const events = this.pending.splice(0);
-    if (!events.length || !this.context?.appendBuildLogs) return;
+    const chunks = this.pending.splice(0);
+    this.pendingBytes = 0;
+    if (!chunks.length || !this.context?.appendBuildLogChunks) return;
     this.flushChain = this.flushChain.then(async () => {
       try {
-        await this.context!.appendBuildLogs!(this.buildId, events);
+        await this.context!.appendBuildLogChunks!(this.buildId, chunks);
       } catch (error) {
-        console.error("Could not append build logs:", cleanError(error));
+        console.error("Could not append build log chunks:", cleanError(error));
       }
     });
   }
@@ -1171,6 +1184,25 @@ class BuildLogger {
     })();
     return this.closePromise;
   }
+}
+
+function splitUtf8(value: string, maximumBytes: number): string[] {
+  if (!value) return [];
+  const parts: string[] = [];
+  let part = "";
+  let byteLength = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (part && byteLength + characterBytes > maximumBytes) {
+      parts.push(part);
+      part = "";
+      byteLength = 0;
+    }
+    part += character;
+    byteLength += characterBytes;
+  }
+  if (part) parts.push(part);
+  return parts;
 }
 
 function terminateProcess(
@@ -1223,7 +1255,13 @@ function runLoggedCommand(options: {
     }
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: options.env,
+      env: {
+        ...options.env,
+        TERM: "xterm-256color",
+        COLORTERM: "truecolor",
+        FORCE_COLOR: "1",
+        CLICOLOR_FORCE: "1",
+      },
       shell: false,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1240,35 +1278,39 @@ function runLoggedCommand(options: {
       stream: NodeJS.ReadableStream,
       kind: "STDOUT" | "STDERR",
     ) => {
+      const decoder = new StringDecoder("utf8");
       let remainder = "";
-      stream.setEncoding("utf8");
-      stream.on("data", (chunk: string) => {
-        const parts = `${remainder}${chunk}`.split(/\r?\n/);
-        remainder = parts.pop() ?? "";
-        for (const line of parts) {
-          output = `${output}${line}\n`.slice(-64_000);
-          options.logger.emit(
+      const drain = (final = false) => {
+        while (remainder) {
+          const delimiter = remainder.search(/[\r\n]/);
+          if (delimiter < 0 && !final) return;
+          let end = delimiter < 0 ? remainder.length : delimiter + 1;
+          if (
+            remainder[delimiter] === "\r" &&
+            remainder[delimiter + 1] === "\n"
+          ) {
+            end += 1;
+          }
+          const record = remainder.slice(0, end);
+          remainder = remainder.slice(end);
+          output = `${output}${record}`.slice(-64_000);
+          options.logger.write(
             options.phase,
             kind,
-            line,
+            record,
             options.scope,
             options.scopeId,
             extraStream,
           );
         }
+      };
+      stream.on("data", (chunk: Buffer) => {
+        remainder += decoder.write(chunk);
+        drain();
       });
       stream.on("end", () => {
-        if (remainder) {
-          output = `${output}${remainder}`.slice(-64_000);
-          options.logger.emit(
-            options.phase,
-            kind,
-            remainder,
-            options.scope,
-            options.scopeId,
-            extraStream,
-          );
-        }
+        remainder += decoder.end();
+        drain(true);
       });
     };
     attach(child.stdout, "STDOUT");

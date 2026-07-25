@@ -76,7 +76,7 @@ describe("build resolver authorization", () => {
   test("accepts progress and sanitized log reports only from authenticated agents", async () => {
     const service = {
       reportProgress: vi.fn().mockResolvedValue({ id: "build-1" }),
-      appendLogs: vi.fn().mockResolvedValue([{ sequence: 0 }]),
+      appendLogChunks: vi.fn().mockResolvedValue([{ sequence: 0 }]),
     } as unknown as BuildsService;
     const mutation = createBuildResolvers(service).Mutation;
 
@@ -88,17 +88,17 @@ describe("build resolver authorization", () => {
       ),
     ).toThrow("Agent authentication is required");
     await expect(
-      mutation.appendBuildLogEvents(
+      mutation.appendBuildLogChunks(
         {},
         {
           buildId: "build-1",
-          events: [{ sequence: 0, message: "sanitized" }] as never,
+          chunks: [{ sequence: 0, dataBase64: "eA==" }] as never,
         },
         context("agent-1"),
       ),
     ).resolves.toEqual([{ sequence: 0 }]);
-    expect(service.appendLogs).toHaveBeenCalledWith("agent-1", "build-1", [
-      { sequence: 0, message: "sanitized" },
+    expect(service.appendLogChunks).toHaveBeenCalledWith("agent-1", "build-1", [
+      { sequence: 0, dataBase64: "eA==" },
     ]);
   });
 });

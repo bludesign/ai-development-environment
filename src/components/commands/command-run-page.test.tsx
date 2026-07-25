@@ -17,6 +17,11 @@ import { CommandRunPage } from "./command-run-page";
 
 const terminalWrite = vi.hoisted(() => vi.fn());
 const terminalOptions = vi.hoisted(() => vi.fn());
+const terminalOnScroll = vi.hoisted(() => vi.fn());
+const terminalScrollToBottom = vi.hoisted(() => vi.fn());
+const terminalBuffers = vi.hoisted(
+  () => [] as Array<{ active: { viewportY: number; baseY: number } }>,
+);
 const push = vi.hoisted(() => vi.fn());
 const writeText = vi.hoisted(() => vi.fn());
 
@@ -44,6 +49,7 @@ vi.mock("@xterm/xterm", () => ({
     buffer = { active: { viewportY: 0, baseY: 0 } };
     constructor(options: unknown) {
       terminalOptions(options);
+      terminalBuffers.push(this.buffer);
     }
     loadAddon() {}
     open() {}
@@ -51,10 +57,14 @@ vi.mock("@xterm/xterm", () => ({
       terminalWrite(value);
       callback?.();
     }
-    onScroll() {
+    onScroll(callback: () => void) {
+      terminalOnScroll(callback);
       return { dispose: vi.fn() };
     }
-    scrollToBottom() {}
+    scrollToBottom() {
+      terminalScrollToBottom();
+    }
+    reset() {}
     dispose() {}
   },
 }));
@@ -117,6 +127,9 @@ beforeEach(() => {
   );
   terminalWrite.mockReset();
   terminalOptions.mockReset();
+  terminalOnScroll.mockReset();
+  terminalScrollToBottom.mockReset();
+  terminalBuffers.splice(0);
   push.mockReset();
   writeText.mockReset();
   Object.defineProperty(navigator, "clipboard", {
@@ -243,6 +256,23 @@ describe("CommandRunPage", () => {
     expect(terminalOptions).toHaveBeenCalledWith(
       expect.objectContaining({ convertEol: true }),
     );
+  });
+
+  test("offers follow output after the terminal is scrolled away from the bottom", async () => {
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText("Color output")).toBeDefined();
+    await waitFor(() => expect(terminalOnScroll).toHaveBeenCalled());
+
+    const buffer = terminalBuffers.at(-1);
+    expect(buffer).toBeDefined();
+    buffer!.active.baseY = 10;
+    buffer!.active.viewportY = 5;
+    terminalOnScroll.mock.calls.at(-1)?.[0]();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Follow output" }),
+    );
+    expect(terminalScrollToBottom).toHaveBeenCalled();
   });
 
   test("replays persisted output when the terminal lifecycle is replaced", async () => {

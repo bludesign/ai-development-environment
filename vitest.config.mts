@@ -54,6 +54,11 @@ export default defineConfig({
     // assertions vacuously equal.
     env: { TZ: "America/New_York" },
     environment: "jsdom",
-    exclude: [...configDefaults.exclude, "packages/control-agent/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "packages/control-agent/**",
+      ".next/**",
+      ".npm-staging/**",
+    ],
   },
 });

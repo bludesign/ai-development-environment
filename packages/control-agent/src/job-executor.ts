@@ -69,8 +69,8 @@ export class JobExecutor {
               this.client.reportWorktreeActivity(input),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
-            appendBuildLogs: (buildId, events) =>
-              this.client.appendBuildLogs(buildId, events),
+            appendBuildLogChunks: (buildId, chunks) =>
+              this.client.appendBuildLogChunks(buildId, chunks),
             uploadBuildArtifact: (input) =>
               this.client.uploadBuildArtifact(input),
             claimSigningSecretTransfer: (transferId) =>

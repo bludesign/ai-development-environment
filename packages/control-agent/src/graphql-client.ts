@@ -15,6 +15,7 @@ import type {
   WorktreeActivityReport,
 } from "@ai-development-environment/agent-contract/worktrees";
 import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
+import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
 
 export type AgentJob = {
   id: string;
@@ -392,24 +393,12 @@ export class AgentGraphQLClient {
     );
   }
 
-  appendBuildLogs(
-    buildId: string,
-    events: Array<{
-      scope: string;
-      scopeId: string;
-      sequence: number;
-      phase: string;
-      level: string;
-      stream: string;
-      message: string;
-      createdAt: string;
-    }>,
-  ) {
-    return this.request<{ appendBuildLogEvents: Array<{ id: string }> }>(
-      `mutation AppendBuildLogs($buildId: ID!, $events: [BuildLogEventInput!]!) {
-        appendBuildLogEvents(buildId: $buildId, events: $events) { id }
+  appendBuildLogChunks(buildId: string, chunks: BuildLogChunk[]) {
+    return this.request<{ appendBuildLogChunks: Array<{ id: string }> }>(
+      `mutation AppendBuildLogChunks($buildId: ID!, $chunks: [BuildLogChunkInput!]!) {
+        appendBuildLogChunks(buildId: $buildId, chunks: $chunks) { id }
       }`,
-      { buildId, events },
+      { buildId, chunks },
     );
   }
 

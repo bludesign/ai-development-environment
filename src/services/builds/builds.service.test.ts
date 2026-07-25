@@ -14,6 +14,7 @@ import {
 import {
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
+  buildLogChunkTopic,
   buildTopic,
   type AgentControlService,
 } from "@/services/agent-control";
@@ -1011,13 +1012,13 @@ describe("BuildsService", () => {
     const createdAt = new Date("2026-07-18T12:00:00Z");
     const findMany = vi.fn().mockResolvedValue([]);
     getPrismaClient.mockResolvedValue({
-      buildLogEvent: {
+      buildLogChunk: {
         findFirst: vi.fn().mockResolvedValue({ id: "log-4", createdAt }),
         findMany,
       },
     });
 
-    await new BuildsService(control()).logs("build-1", "log-4", 25);
+    await new BuildsService(control()).logChunks("build-1", "log-4", 25);
 
     expect(findMany).toHaveBeenCalledWith({
       where: {
@@ -1118,7 +1119,8 @@ describe("BuildsService", () => {
   });
 
   test("redacts common credentials again before central log persistence", async () => {
-    const upsert = vi.fn().mockResolvedValue({});
+    const upsert = vi.fn(async ({ create }) => create);
+    const publish = vi.spyOn(agentEventBus, "publish");
     getPrismaClient.mockResolvedValue({
       build: {
         findUnique: vi.fn().mockResolvedValue({
@@ -1126,26 +1128,76 @@ describe("BuildsService", () => {
           agentId: "agent-1",
         }),
       },
-      buildLogEvent: { upsert },
+      buildLogChunk: { upsert },
     });
     const service = new BuildsService(control());
 
-    await service.appendLogs("agent-1", "build-1", [
+    const raw = Buffer.from(
+      "Bearer abc.def API_TOKEN=secret https://user:password@example.com",
+    );
+    await service.appendLogChunks("agent-1", "build-1", [
       {
         scope: "BUILD",
         scopeId: "build-1",
         sequence: 0,
         phase: "XCODEBUILD",
-        level: "INFO",
         stream: "STDOUT",
-        message:
-          "Bearer abc.def API_TOKEN=secret https://user:password@example.com",
+        dataBase64: raw.toString("base64"),
+        byteLength: raw.byteLength,
         createdAt: new Date().toISOString(),
       },
     ]);
 
-    const persisted = upsert.mock.calls[0]![0].create.message as string;
+    const persisted = Buffer.from(
+      upsert.mock.calls[0]![0].create.dataBase64 as string,
+      "base64",
+    ).toString("utf8");
     expect(persisted).toContain("[REDACTED]");
     expect(persisted).not.toMatch(/abc\.def|API_TOKEN=secret|user:password/);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          scope_scopeId_sequence: {
+            scope: "BUILD",
+            scopeId: "build-1",
+            sequence: 0,
+          },
+        },
+        update: {},
+      }),
+    );
+    expect(publish).toHaveBeenCalledWith(buildLogChunkTopic("build-1"), {
+      buildLogChunkAdded: expect.objectContaining({ sequence: 0 }),
+    });
+  });
+
+  test("validates build log chunk batches and encoded byte lengths", async () => {
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          agentId: "agent-1",
+        }),
+      },
+      buildLogChunk: { upsert: vi.fn() },
+    });
+    const service = new BuildsService(control());
+    await expect(
+      service.appendLogChunks("agent-1", "build-1", []),
+    ).rejects.toThrow("1 to 200 chunks");
+    await expect(
+      service.appendLogChunks("agent-1", "build-1", [
+        {
+          scope: "BUILD",
+          scopeId: "build-1",
+          sequence: 0,
+          phase: "RUNNING",
+          stream: "STDOUT",
+          dataBase64: Buffer.from("output").toString("base64"),
+          byteLength: 999,
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+    ).rejects.toThrow("Log byte length is invalid");
   });
 });

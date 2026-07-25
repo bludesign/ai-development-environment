@@ -7,14 +7,17 @@ import {
   Copy,
   ExternalLink,
   FilePenLine,
-  RefreshCw,
   RotateCcw,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { DetailItem, DetailList } from "@/components/common/detail-list";
+import {
+  decodeTerminalBase64,
+  TerminalOutputCard,
+} from "@/components/common/terminal-output-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,6 +70,7 @@ type OutputChunk = {
 };
 const OUTPUT_FIELDS =
   "id attemptId attemptNumber sequence stream dataBase64 byteLength createdAt";
+const EMPTY_OUTPUT: OutputChunk[] = [];
 
 function formatDuration(milliseconds: number): string {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
@@ -100,28 +104,31 @@ function RunDuration({
   return <>{formatDuration(finish - start)}</>;
 }
 
-function decodeBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1)
-    bytes[index] = binary.charCodeAt(index);
-  return bytes;
+function mergeOutputChunks(
+  current: OutputChunk[],
+  incoming: OutputChunk[],
+): OutputChunk[] {
+  const chunks = new Map(current.map((chunk) => [chunk.id, chunk]));
+  for (const chunk of incoming) chunks.set(chunk.id, chunk);
+  return [...chunks.values()].sort(
+    (left, right) =>
+      left.attemptNumber - right.attemptNumber ||
+      left.sequence - right.sequence ||
+      left.id.localeCompare(right.id),
+  );
 }
 
 export function CommandRunPage({ runId }: { runId: string }) {
   const t = useTranslations("commands");
   const router = useRouter();
-  const [terminalElement, setTerminalElement] = useState<HTMLDivElement | null>(
-    null,
-  );
-  const terminalRef = useRef<import("@xterm/xterm").Terminal | null>(null);
-  const fitRef = useRef<import("@xterm/addon-fit").FitAddon | null>(null);
-  const followRef = useRef(true);
-  const writtenRef = useRef(new Set<string>());
-  const lastAttemptRef = useRef(0);
   const [run, setRun] = useState<CommandRun | null>(null);
+  const [outputState, setOutputState] = useState<{
+    runId: string;
+    chunks: OutputChunk[];
+  }>({ runId, chunks: [] });
+  const output =
+    outputState.runId === runId ? outputState.chunks : EMPTY_OUTPUT;
   const [error, setError] = useState<string | null>(null);
-  const [follow, setFollow] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [snapshotCopied, setSnapshotCopied] = useState(false);
 
@@ -138,101 +145,11 @@ export function CommandRunPage({ runId }: { runId: string }) {
     }
   }, [runId, t]);
 
-  const writeChunk = useCallback(
-    (chunk: OutputChunk) => {
-      const terminal = terminalRef.current;
-      if (!terminal || writtenRef.current.has(chunk.id)) return;
-      writtenRef.current.add(chunk.id);
-      if (chunk.attemptNumber !== lastAttemptRef.current) {
-        lastAttemptRef.current = chunk.attemptNumber;
-        terminal.write(
-          `\r\n\x1b[90m── ${t("attemptDivider", { number: chunk.attemptNumber })} ──\x1b[0m\r\n`,
-        );
-      }
-      terminal.write(decodeBase64(chunk.dataBase64), () => {
-        if (followRef.current) terminal.scrollToBottom();
-      });
-    },
-    [t],
-  );
-
   useEffect(() => {
-    if (!terminalElement) return;
     let cancelled = false;
-    let observer: ResizeObserver | null = null;
-    let scrollDisposable: { dispose(): void } | null = null;
-    writtenRef.current.clear();
-    lastAttemptRef.current = 0;
-    void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
-      ([{ Terminal }, { FitAddon }]) => {
-        if (cancelled) return;
-        const terminal = new Terminal({
-          convertEol: true,
-          cursorBlink: false,
-          disableStdin: true,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-          fontSize: 13,
-          scrollback: 100_000,
-          theme: {
-            background: "#09090b",
-            foreground: "#fafafa",
-            cursor: "#a1a1aa",
-            selectionBackground: "#3f3f46",
-          },
-        });
-        const fit = new FitAddon();
-        terminal.loadAddon(fit);
-        terminal.open(terminalElement);
-        fit.fit();
-        terminalRef.current = terminal;
-        fitRef.current = fit;
-        scrollDisposable = terminal.onScroll(() => {
-          const atBottom =
-            terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
-          followRef.current = atBottom;
-          setFollow(atBottom);
-        });
-        observer = new ResizeObserver(() => fit.fit());
-        observer.observe(terminalElement);
-        void (async () => {
-          let afterAttempt = 0;
-          let afterSequence = -1;
-          while (!cancelled) {
-            const { commandRunOutput } = await controlPlaneRequest<{
-              commandRunOutput: OutputChunk[];
-            }>(
-              `query CommandOutput($runId: ID!, $afterAttempt: Int!, $afterSequence: Int!) {
-                commandRunOutput(runId: $runId, afterAttempt: $afterAttempt, afterSequence: $afterSequence, first: 1000) { ${OUTPUT_FIELDS} }
-              }`,
-              { runId, afterAttempt, afterSequence },
-            );
-            commandRunOutput.forEach(writeChunk);
-            if (commandRunOutput.length < 1_000) return;
-            const last = commandRunOutput.at(-1);
-            if (!last) return;
-            afterAttempt = last.attemptNumber;
-            afterSequence = last.sequence;
-          }
-        })().catch((value) =>
-          setError(value instanceof Error ? value.message : String(value)),
-        );
-      },
-    );
-    return () => {
-      cancelled = true;
-      observer?.disconnect();
-      scrollDisposable?.dispose();
-      terminalRef.current?.dispose();
-      terminalRef.current = null;
-      fitRef.current = null;
-    };
-  }, [runId, terminalElement, writeChunk]);
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => void loadRun(), 0);
-    const client = controlPlaneSubscriptions();
-    const disposeOutput = client.subscribe<{
+    let hydrating = true;
+    let buffered: OutputChunk[] = [];
+    const dispose = controlPlaneSubscriptions().subscribe<{
       commandRunOutputAdded: OutputChunk;
     }>(
       {
@@ -241,13 +158,72 @@ export function CommandRunPage({ runId }: { runId: string }) {
       },
       {
         next: (result) => {
-          if (result.data?.commandRunOutputAdded)
-            writeChunk(result.data.commandRunOutputAdded);
+          const chunk = result.data?.commandRunOutputAdded;
+          if (!chunk) return;
+          if (hydrating) buffered.push(chunk);
+          else
+            setOutputState((current) => ({
+              runId,
+              chunks: mergeOutputChunks(
+                current.runId === runId ? current.chunks : [],
+                [chunk],
+              ),
+            }));
         },
         error: () => undefined,
         complete: () => undefined,
       },
     );
+    void (async () => {
+      const historical: OutputChunk[] = [];
+      let afterAttempt = 0;
+      let afterSequence = -1;
+      while (!cancelled) {
+        const { commandRunOutput } = await controlPlaneRequest<{
+          commandRunOutput: OutputChunk[];
+        }>(
+          `query CommandOutput($runId: ID!, $afterAttempt: Int!, $afterSequence: Int!) {
+            commandRunOutput(runId: $runId, afterAttempt: $afterAttempt, afterSequence: $afterSequence, first: 1000) { ${OUTPUT_FIELDS} }
+          }`,
+          { runId, afterAttempt, afterSequence },
+        );
+        historical.push(...commandRunOutput);
+        if (commandRunOutput.length < 1_000) break;
+        const last = commandRunOutput.at(-1);
+        if (!last) break;
+        afterAttempt = last.attemptNumber;
+        afterSequence = last.sequence;
+      }
+      if (cancelled) return;
+      hydrating = false;
+      setOutputState({
+        runId,
+        chunks: mergeOutputChunks(historical, buffered),
+      });
+      buffered = [];
+    })().catch((value) => {
+      if (!cancelled) {
+        hydrating = false;
+        setOutputState((current) => ({
+          runId,
+          chunks: mergeOutputChunks(
+            current.runId === runId ? current.chunks : [],
+            buffered,
+          ),
+        }));
+        buffered = [];
+        setError(value instanceof Error ? value.message : String(value));
+      }
+    });
+    return () => {
+      cancelled = true;
+      dispose();
+    };
+  }, [runId]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void loadRun(), 0);
+    const client = controlPlaneSubscriptions();
     const disposeRun = client.subscribe(
       {
         query:
@@ -262,10 +238,9 @@ export function CommandRunPage({ runId }: { runId: string }) {
     );
     return () => {
       window.clearTimeout(initialLoad);
-      disposeOutput();
       disposeRun();
     };
-  }, [loadRun, runId, writeChunk]);
+  }, [loadRun, runId]);
 
   const mutate = async (kind: "terminate" | "rerun") => {
     setMutating(true);
@@ -300,6 +275,17 @@ export function CommandRunPage({ runId }: { runId: string }) {
       setError(t("copyFailed"));
     }
   };
+
+  const terminalEntries = useMemo(
+    () =>
+      output.map((chunk) => ({
+        id: chunk.id,
+        data: decodeTerminalBase64(chunk.dataBase64),
+        divider: t("attemptDivider", { number: chunk.attemptNumber }),
+        dividerKey: String(chunk.attemptNumber),
+      })),
+    [output, t],
+  );
 
   if (!run && !error) return <Card className="h-96 animate-pulse" />;
   if (!run)
@@ -459,37 +445,15 @@ export function CommandRunPage({ runId }: { runId: string }) {
           </DetailList>
         </CardContent>
       </Card>
-      <Card className="overflow-hidden p-0">
-        <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b px-4 py-3">
-          <CardTitle className="text-sm">{t("terminalOutput")}</CardTitle>
-          <div className="flex items-center gap-2">
-            {!follow && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  followRef.current = true;
-                  setFollow(true);
-                  terminalRef.current?.scrollToBottom();
-                }}
-              >
-                {t("followOutput")}
-              </Button>
-            )}
-            <Button
-              aria-label={t("fitTerminal")}
-              size="icon"
-              variant="outline"
-              onClick={() => fitRef.current?.fit()}
-            >
-              <RefreshCw />
-            </Button>
-          </div>
-        </CardHeader>
-        <div
-          className="h-[min(60vh,42rem)] bg-[#09090b] p-2"
-          ref={setTerminalElement}
-        />
-      </Card>
+      <TerminalOutputCard
+        ariaLabel={t("terminalOutput")}
+        emptyText={t("noOutput")}
+        entries={terminalEntries}
+        fitLabel={t("fitTerminal")}
+        followLabel={t("followOutput")}
+        sourceKey={runId}
+        title={t("terminalOutput")}
+      />
       <Card className="gap-0 py-0">
         <CardHeader>
           <CardTitle className="text-sm">{t("attempts")}</CardTitle>

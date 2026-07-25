@@ -1082,7 +1082,7 @@ model Build {
   job               AgentJob?              @relation(fields: [jobId], references: [id], onDelete: SetNull)
   artifacts         BuildArtifact[]
   scriptExecutions  BuildScriptExecution[]
-  logs              BuildLogEvent[]
+  logChunks         BuildLogChunk[]
   deployments       BuildDeployment[]
   exports           BuildExport[]
   reports           BuildReport[]
@@ -1156,21 +1156,21 @@ model BuildScriptExecution {
   @@index([buildId, phase])
 }
 
-model BuildLogEvent {
+model BuildLogChunk {
   id        String   @id
   buildId   String
   scope     String
   scopeId   String
   sequence  Int
   phase     String
-  level     String
   stream    String
-  message   String
+  dataBase64 String
+  byteLength Int
   createdAt DateTime @default(now())
   build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
 
   @@unique([scope, scopeId, sequence])
-  @@index([buildId, createdAt])
+  @@index([buildId, createdAt, id])
 }
 
 model TelemetryEntry {

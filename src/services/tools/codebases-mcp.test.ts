@@ -124,7 +124,9 @@ describe("codebases MCP server", () => {
     const builds = {
       builds: vi.fn().mockResolvedValue({ items: [build], nextCursor: null }),
       getBuild: vi.fn().mockResolvedValue(build),
-      logs: vi.fn().mockResolvedValue([{ sequence: 0, message: "sanitized" }]),
+      logChunks: vi
+        .fn()
+        .mockResolvedValue([{ sequence: 0, dataBase64: "c2FuaXRpemVk" }]),
       projectForWorktree: vi.fn().mockResolvedValue({ id: "project-1" }),
       destinations: vi.fn().mockResolvedValue([
         {
@@ -199,10 +201,10 @@ describe("codebases MCP server", () => {
     ).resolves.toMatchObject({
       structuredContent: {
         build,
-        logs: [{ sequence: 0, message: "sanitized" }],
+        logs: [{ sequence: 0, dataBase64: "c2FuaXRpemVk" }],
       },
     });
-    expect(builds.logs).toHaveBeenCalledWith("build-1", "log-4", 10);
+    expect(builds.logChunks).toHaveBeenCalledWith("build-1", "log-4", 10);
 
     await expect(
       client.callTool({

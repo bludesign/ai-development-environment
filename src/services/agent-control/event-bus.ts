@@ -108,7 +108,8 @@ export const POLLING_CHANGED_TOPIC = "polling.changed";
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;
-export const buildLogTopic = (buildId: string) => `build.${buildId}.log`;
+export const buildLogChunkTopic = (buildId: string) =>
+  `build.${buildId}.log-chunk`;
 export const skillSyncRunTopic = (runId: string) =>
   `skills.sync.${runId}.changed`;
 export const worktreeInspectionTopic = (worktreeId: string) =>

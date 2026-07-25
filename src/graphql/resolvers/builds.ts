@@ -3,7 +3,7 @@ import { buildOutOfDate } from "@/services/builds/build-freshness";
 import {
   BUILDS_CHANGED_TOPIC,
   agentEventBus,
-  buildLogTopic,
+  buildLogChunkTopic,
   buildTopic,
 } from "@/services/agent-control";
 import type {
@@ -166,7 +166,7 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : null,
     outOfDate: buildOutOfDate,
   },
-  BuildLogEvent: {
+  BuildLogChunk: {
     createdAt: (value: { createdAt: Date | string }) =>
       value.createdAt instanceof Date
         ? value.createdAt.toISOString()
@@ -205,13 +205,13 @@ export const createBuildResolvers = (service: BuildsService) => ({
       requireControlPlane(context);
       return service.getBuild(id);
     },
-    buildLogs: (
+    buildLogChunks: (
       _root: unknown,
       args: { buildId: string; after?: string | null; first?: number },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.logs(args.buildId, args.after, args.first);
+      return service.logChunks(args.buildId, args.after, args.first);
     },
     worktreeCoverageReports: (
       _root: unknown,
@@ -408,11 +408,11 @@ export const createBuildResolvers = (service: BuildsService) => ({
       { input }: { input: never },
       context: GraphQLContext,
     ) => service.reportProgress(requireAgent(context), input),
-    appendBuildLogEvents: (
+    appendBuildLogChunks: (
       _root: unknown,
-      { buildId, events }: { buildId: string; events: never[] },
+      { buildId, chunks }: { buildId: string; chunks: never[] },
       context: GraphQLContext,
-    ) => service.appendLogs(requireAgent(context), buildId, events),
+    ) => service.appendLogChunks(requireAgent(context), buildId, chunks),
   },
   Subscription: {
     buildsChanged: {
@@ -431,14 +431,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
         return agentEventBus.iterate(buildTopic(id));
       },
     },
-    buildLogAdded: {
+    buildLogChunkAdded: {
       subscribe: (
         _root: unknown,
         { buildId }: { buildId: string },
         context: GraphQLContext,
       ) => {
         requireControlPlane(context);
-        return agentEventBus.iterate(buildLogTopic(buildId));
+        return agentEventBus.iterate(buildLogChunkTopic(buildId));
       },
     },
   },

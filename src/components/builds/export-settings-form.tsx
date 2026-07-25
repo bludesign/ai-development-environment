@@ -651,7 +651,12 @@ export function ExportSettingsForm({
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
-                disabled={disabled || refreshingInventory || !inventory}
+                disabled={
+                  disabled ||
+                  parsingRequirements ||
+                  refreshingInventory ||
+                  !inventory
+                }
                 onClick={() => void refreshInventory()}
                 size="sm"
                 type="button"
@@ -664,7 +669,12 @@ export function ExportSettingsForm({
               </Button>
               {onParseSigningRequirements && (
                 <Button
-                  disabled={disabled || parsingRequirements || !inventory}
+                  disabled={
+                    disabled ||
+                    parsingRequirements ||
+                    refreshingInventory ||
+                    !inventory
+                  }
                   onClick={() => void parseRequirements()}
                   size="sm"
                   type="button"
