@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ type QuickActionWorkflow = {
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
 };
 
+const STARTED_RUN_VISIBLE_MS = 5000;
+
 export function WorkflowQuickActions({
   worktreeId,
   sessionData,
@@ -31,6 +33,15 @@ export function WorkflowQuickActions({
   const [triggering, setTriggering] = useState<string | null>(null);
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const timers = hideTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   const trigger = async (workflow: QuickActionWorkflow) => {
     setTriggering(workflow.id);
@@ -56,6 +67,18 @@ export function WorkflowQuickActions({
         ...current,
         [workflow.id]: data.triggerWorkflow.id,
       }));
+      clearTimeout(hideTimers.current.get(workflow.id));
+      hideTimers.current.set(
+        workflow.id,
+        setTimeout(() => {
+          hideTimers.current.delete(workflow.id);
+          setStartedRuns((current) => {
+            const next = { ...current };
+            delete next[workflow.id];
+            return next;
+          });
+        }, STARTED_RUN_VISIBLE_MS),
+      );
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
