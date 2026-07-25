@@ -5,6 +5,7 @@ import {
   emptyWorkflowDefinition,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
+  workflowTriggerChoices,
   type WorkflowDefinition,
   type WorkflowNodeDefinition,
 } from "./definition";
@@ -329,6 +330,79 @@ describe("workflow definition validation", () => {
         }),
       ]),
     );
+  });
+
+  test("choice triggers route out of a handle named after each option", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: { choices: [{ key: "draft", label: "Draft" }] },
+    };
+    value.edges[0] = { ...value.edges[0]!, sourceHandle: "draft" };
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+    expect(workflowTriggerChoices(value.triggers[0].config)).toEqual([
+      { key: "draft", label: "Draft", description: "" },
+    ]);
+  });
+
+  test("choice triggers need options, and edges that still name one", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: {},
+    };
+    // The default `success` handle belongs to no option, so the step it feeds
+    // could never run.
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TRIGGER_CHOICES_REQUIRED" }),
+        expect.objectContaining({ code: "TRIGGER_CHOICE_HANDLE_UNKNOWN" }),
+      ]),
+    );
+  });
+
+  test("a repeated choice key is reported rather than silently collapsed", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: {
+        choices: [
+          { key: "draft", label: "Draft" },
+          { key: "draft", label: "Draft again" },
+        ],
+      },
+    };
+    value.edges[0] = { ...value.edges[0]!, sourceHandle: "draft" };
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TRIGGER_CHOICES_REQUIRED" }),
+      ]),
+    );
+  });
+
+  test("resource choice triggers seed their resource kind like plain ones", () => {
+    const value = definition([node("notify", "NOTIFICATION_SEND")]);
+    value.nodes[0]!.config = { body: "PR {{pr.number}}" };
+    value.triggers[0] = {
+      ...value.triggers[0]!,
+      kind: "RESOURCE_MANUAL_CHOICE",
+      config: {
+        resourceKind: "PULL_REQUEST",
+        choices: [{ key: "review", label: "Review" }],
+      },
+    };
+    value.edges[0] = { ...value.edges[0]!, sourceHandle: "review" };
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+    expect(
+      computeWorkflowPathAvailability(value).availableBefore.get("notify") ??
+        [],
+    ).toContain("pr.*");
   });
 
   test("strips secret literals and machine paths from exports", () => {

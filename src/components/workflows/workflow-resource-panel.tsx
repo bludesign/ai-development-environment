@@ -2,7 +2,7 @@
 
 import { CirclePlay, ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +28,15 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { currentPageWorkflowNodeIds } from "@/lib/workflows/resource-navigation";
 
+import {
+  WorkflowChoiceMenu,
+  type WorkflowTriggerChoice,
+} from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
+import { WorkflowQuestionActions } from "./workflow-question-actions";
 import type { WorkflowRun } from "./types";
 
 type AcceptedWorkflow = {
@@ -37,15 +44,25 @@ type AcceptedWorkflow = {
   name: string;
   description: string;
   enabled: boolean;
+  triggerChoices: WorkflowTriggerChoice[];
+  hasPlainTrigger: boolean;
 };
 
 const LINKED_RUN_FIELDS = `
   id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt
   workflow { id name }
+  trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
-  attempts { id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt resourceLinks { id kind resourceId label url metadata createdAt } }
-  resourceLinks { id kind resourceId label url metadata createdAt }
+  attempts {
+    id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt
+    resourceLinks { id attemptId kind resourceId label url metadata createdAt }
+    questionBatches {
+      id status
+      questions { id header prompt multiSelect options { id label description } }
+    }
+  }
+  resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
 export function WorkflowResourcePanel({
@@ -58,6 +75,7 @@ export function WorkflowResourcePanel({
   sessionData: Record<string, unknown>;
 }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [workflows, setWorkflows] = useState<AcceptedWorkflow[]>([]);
   const [triggering, setTriggering] = useState<string | null>(null);
@@ -71,7 +89,11 @@ export function WorkflowResourcePanel({
       }>(
         `query ResourceWorkflows($kind: String!, $resourceId: ID!) {
         workflowRunsForResource(kind: $kind, resourceId: $resourceId) { ${LINKED_RUN_FIELDS} }
-        workflowsAcceptingResource(kind: $kind) { id name description enabled }
+        workflowsAcceptingResource(kind: $kind) {
+          id name description enabled
+          hasPlainTrigger(resourceKind: $kind)
+          triggerChoices(resourceKind: $kind) { key label description }
+        }
       }`,
         { kind: resourceKind, resourceId },
       );
@@ -105,7 +127,7 @@ export function WorkflowResourcePanel({
     };
   }, [load]);
 
-  const trigger = async (workflowId: string) => {
+  const trigger = async (workflowId: string, choice: string | null) => {
     setTriggering(workflowId);
     try {
       await controlPlaneRequest<{ triggerWorkflow: { id: string } }>(
@@ -117,6 +139,7 @@ export function WorkflowResourcePanel({
             resourceKind,
             resourceId,
             subjectKey: `${resourceKind}:${resourceId}`,
+            choice,
           },
         },
       );
@@ -129,8 +152,15 @@ export function WorkflowResourcePanel({
     }
   };
 
-  if (!runs.length && !workflows.length && !error) return null;
   const current = runs[0];
+  const currentPageNodeIds = useMemo(
+    () =>
+      current
+        ? currentPageWorkflowNodeIds(current, resourceKind, resourceId)
+        : new Set<string>(),
+    [current, resourceId, resourceKind],
+  );
+  if (!runs.length && !workflows.length && !error) return null;
   return (
     <Card>
       <CardHeader>
@@ -159,14 +189,20 @@ export function WorkflowResourcePanel({
                   )}
                 </ItemContent>
                 <ItemActions>
-                  <Button
-                    disabled={!workflow.enabled || triggering !== null}
-                    onClick={() => void trigger(workflow.id)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <CirclePlay /> {t("run")}
-                  </Button>
+                  <WorkflowChoiceMenu
+                    button={
+                      <Button
+                        disabled={!workflow.enabled || triggering !== null}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <CirclePlay /> {t("run")}
+                      </Button>
+                    }
+                    choices={workflow.triggerChoices}
+                    hasPlainTrigger={workflow.hasPlainTrigger}
+                    onRun={(choice) => void trigger(workflow.id, choice)}
+                  />
                 </ItemActions>
               </Item>
             ))}
@@ -183,7 +219,7 @@ export function WorkflowResourcePanel({
                   {current.workflow.name} #{current.displayNumber}
                 </Link>
                 <Badge variant={workflowStatusVariant(current.status)}>
-                  {current.status}
+                  {labels.status(current.status)}
                 </Badge>
               </div>
               <Button asChild size="sm" variant="ghost">
@@ -192,9 +228,11 @@ export function WorkflowResourcePanel({
                 </Link>
               </Button>
             </div>
+            <WorkflowQuestionActions onAnswered={load} run={current} />
             <WorkflowGraph
               attempts={current.attempts}
               compact
+              currentPageNodeIds={currentPageNodeIds}
               definition={current.version.definition}
               generation={current.generation}
             />
@@ -203,7 +241,7 @@ export function WorkflowResourcePanel({
                 {runs.slice(1, 6).map((run) => (
                   <Button asChild key={run.id} size="sm" variant="ghost">
                     <Link href={`/workflows/runs/${run.id}`}>
-                      #{run.displayNumber} · {run.status}
+                      #{run.displayNumber} · {labels.status(run.status)}
                     </Link>
                   </Button>
                 ))}

@@ -44,6 +44,7 @@ import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
+import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -438,6 +439,11 @@ export function WorktreesPage() {
               agent { ${AGENT_FIELDS} }
               codebases {
                 iosBuildConfigured
+                quickActions {
+            id name description quickActionIconKey quickActionButtonVariant
+            hasPlainTrigger(resourceKind: "WORKTREE")
+            triggerChoices(resourceKind: "WORKTREE") { key label description }
+          }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_FIELDS} }
@@ -480,12 +486,24 @@ export function WorktreesPage() {
         complete: () => undefined,
       },
     );
+    const unsubscribeWorkflows = subscriptions.subscribe(
+      {
+        query:
+          "subscription WorktreeQuickActionsChanged { workflowsChanged { id } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
       latestLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
+      unsubscribeWorkflows();
     };
   }, [load]);
 
@@ -1316,13 +1334,38 @@ function WorktreeCard(props: WorktreeItemProps) {
         )}
         {expanded && detail && <WorktreeDetailPanel detail={detail} inline />}
       </CardContent>
-      <CardFooter className="flex-wrap gap-2" data-worktree-navigation-ignore>
+      <CardFooter
+        className="flex-col items-stretch gap-2"
+        data-worktree-navigation-ignore
+      >
         <ActionRow
           {...liveProps}
           onCompleted={async () => {
             await props.onReload();
             if (expanded) await refreshInspection();
           }}
+        />
+        <WorkflowQuickActions
+          sessionData={{
+            worktree: {
+              id: worktree.id,
+              path: worktree.folder,
+              branch: worktree.branch,
+              baseBranch: worktree.baseBranch,
+              headSha: worktree.headSha,
+            },
+            codebase: {
+              id: props.group.codebase.id,
+              folder: props.group.codebase.folder,
+            },
+            repo: {
+              id: props.group.repository.id,
+              name: props.group.repository.name,
+              displayOrigin: props.group.repository.displayOrigin,
+            },
+          }}
+          worktreeId={worktree.id}
+          workflows={props.group.quickActions ?? []}
         />
       </CardFooter>
     </Card>

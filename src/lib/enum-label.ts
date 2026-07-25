@@ -24,6 +24,42 @@ export function formatProviderLabel(provider: string): string {
 }
 
 /**
+ * Words inside a domain identifier that carry their own casing. Plain title
+ * casing reads `GITHUB_LOAD_PR` as `Github Load Pr`, which looks like a typo
+ * next to the product names the rest of the UI writes out properly.
+ */
+const WORD_LABELS: Record<string, string> = {
+  AI: "AI",
+  API: "API",
+  CI: "CI",
+  GIT: "Git",
+  GITHUB: "GitHub",
+  ID: "ID",
+  IOS: "iOS",
+  JIRA: "Jira",
+  JSON: "JSON",
+  MCP: "MCP",
+  PR: "PR",
+  SHA: "SHA",
+  URL: "URL",
+};
+
+/**
+ * Title cases a SCREAMING_SNAKE_CASE identifier the way `formatEnumLabel`
+ * does, but keeps brand names and acronyms intact: `GITHUB_LOAD_PR` becomes
+ * `GitHub Load PR`. Use it for the step, trigger, and event identifiers that
+ * name an integration; `formatEnumLabel` still covers plain state enums.
+ */
+export function formatKindLabel(value: string): string {
+  if (!/^[A-Z0-9_]+$/.test(value)) return value;
+  return value
+    .split("_")
+    .filter((word) => word.length > 0)
+    .map((word) => WORD_LABELS[word] ?? word[0] + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
  * OpenCode reports models namespaced by their catalog provider, e.g.
  * `opencode-go/grok-code`. The namespace costs horizontal room in list views
  * without telling the reader anything the provider badge does not, so drop it.

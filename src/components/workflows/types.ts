@@ -1,5 +1,12 @@
 export type WorkflowPosition = { x: number; y: number };
 
+/**
+ * Which edges of a step card its connectors sit on: `SIDES` runs the graph
+ * left to right, `TOP_BOTTOM` runs it downwards. Whole-workflow, so every step
+ * agrees and edges never cut across a card.
+ */
+export type WorkflowHandleLayout = "SIDES" | "TOP_BOTTOM";
+
 export type WorkflowTriggerDefinition = {
   id: string;
   kind: string;
@@ -40,7 +47,10 @@ export type WorkflowDefinition = {
   triggers: WorkflowTriggerDefinition[];
   nodes: WorkflowNodeDefinition[];
   edges: WorkflowEdgeDefinition[];
-  editor: { viewport?: { x: number; y: number; zoom: number } };
+  editor: {
+    viewport?: { x: number; y: number; zoom: number };
+    handleLayout?: WorkflowHandleLayout;
+  };
 };
 
 export type WorkflowCatalogEntry = {
@@ -84,6 +94,18 @@ export type WorkflowSummary = {
   enabled: boolean;
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
+  globalQuickAction: boolean;
+  quickActionIconKey: string;
+  quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
+  quickActionRepositories: Array<{
+    id: string;
+    name: string;
+    displayOrigin: string;
+  }>;
+  /** Options the published MANUAL_CHOICE trigger offers, if it has one. */
+  triggerChoices: Array<{ key: string; label: string; description: string }>;
+  /** Whether the published definition also accepts a no-choice manual run. */
+  hasPlainTrigger: boolean;
   archivedAt: string | null;
   versionCount: number;
   runCount: number;
@@ -125,6 +147,8 @@ export type WorkflowAttempt = {
 
 export type WorkflowResourceLink = {
   id: string;
+  runId?: string;
+  attemptId?: string | null;
   kind: string;
   resourceId: string;
   label: string | null;
@@ -140,6 +164,7 @@ export type WorkflowRun = {
   workflow: { id: string; name: string };
   versionId: string;
   version: WorkflowVersion;
+  trigger?: { nodeId: string } | null;
   triggerKind: string;
   triggerSubjectKey: string;
   status: string;

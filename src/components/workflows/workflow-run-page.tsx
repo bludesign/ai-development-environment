@@ -66,24 +66,28 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { workflowRunNodeDestinations } from "@/lib/workflows/resource-navigation";
+import { workflowResourceDestination } from "@/lib/workflows/resources";
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun } from "./types";
 
 const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
   workflow { id name }
+  trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
   attempts {
     id nodeId kind generation iterationKey attempt status phase input output error requiredPaths providedPaths
     resourceLockKey idempotencyKey startedAt finishedAt supersededAt replayedFromId createdAt updatedAt
-    resourceLinks { id kind resourceId label url metadata createdAt }
+    resourceLinks { id attemptId kind resourceId label url metadata createdAt }
     questionBatches {
       id nativeRequestId eventSequence status createdAt answeredAt supersededAt revisionPreparedAt rollbackPatch pushedCommitWarning
       questions { id position header prompt multiSelect allowCustom options { id position label description } }
@@ -94,7 +98,7 @@ const RUN_DETAIL_FIELDS = `
   }
   waits { id attemptId kind status predicate externalKey resumeAfter timeoutAt result createdAt resolvedAt updatedAt }
   events { id attemptId sequence type message detail createdAt }
-  resourceLinks { id kind resourceId label url metadata createdAt }
+  resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
 type ReplayPreview = {
@@ -147,6 +151,8 @@ function jsonText(value: unknown) {
 
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
+  const router = useRouter();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +164,10 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
   );
   const [replayNodeId, setReplayNodeId] = useState<string>("");
   const [preview, setPreview] = useState<ReplayPreview | null>(null);
+  const nodeDestinations = useMemo(
+    () => (run ? workflowRunNodeDestinations(run) : new Map()),
+    [run],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -374,7 +384,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                 {run.workflow.name} #{run.displayNumber}
               </h1>
               <Badge variant={workflowStatusVariant(run.status)}>
-                {run.status}
+                {labels.status(run.status)}
               </Badge>
               <Badge variant="outline">v{run.version.version}</Badge>
               <Badge variant="outline">
@@ -382,7 +392,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {run.triggerKind} · {run.triggerSubjectKey}
+              {labels.kind(run.triggerKind)} · {run.triggerSubjectKey}
             </p>
           </div>
         </div>
@@ -444,9 +454,23 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           <WorkflowGraph
             attempts={run.attempts}
             definition={run.version.definition}
+            destinations={nodeDestinations}
             generation={run.generation}
-            onNodeClick={(nodeId) => {
-              if (canReplay) setReplayNodeId(nodeId);
+            onNodeClick={(nodeId, { destination, locked, trigger }) => {
+              if (locked) {
+                if (!destination) return;
+                if (destination.external) {
+                  window.open(
+                    destination.href,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                } else {
+                  router.push(destination.href);
+                }
+                return;
+              }
+              if (canReplay && !trigger) setReplayNodeId(nodeId);
             }}
           />
         </CardContent>
@@ -478,7 +502,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         return (
           <Card key={String(batch.id)}>
             <CardHeader>
-              <CardTitle>{t("questionFrom", { step: attempt.kind })}</CardTitle>
+              <CardTitle>
+                {t("questionFrom", { step: labels.kind(attempt.kind) })}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {questions.map((question) => (
@@ -627,7 +653,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                 <SelectContent>
                   {run.version.definition.nodes.map((node) => (
                     <SelectItem key={node.id} value={node.id}>
-                      {node.name ?? node.kind}
+                      {node.name ?? labels.kind(node.kind)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -730,7 +756,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                     <div className="z-10 mt-1 size-6 rounded-full border bg-background" />
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{event.type}</Badge>
+                        <Badge variant="outline">
+                          {labels.eventType(event.type)}
+                        </Badge>
                         <DateTime kind="relative" value={event.createdAt} />
                       </div>
                       <p className="mt-1 text-sm">{event.message}</p>
@@ -779,7 +807,9 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                         key={attempt.id}
                       >
                         <TableCell>
-                          <p className="font-medium">{attempt.kind}</p>
+                          <p className="font-medium">
+                            {labels.kind(attempt.kind)}
+                          </p>
                           <p className="font-mono text-[10px] text-muted-foreground">
                             {attempt.nodeId}
                           </p>
@@ -788,7 +818,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
                           <Badge
                             variant={workflowStatusVariant(attempt.status)}
                           >
-                            {attempt.status}
+                            {labels.status(attempt.status)}
                           </Badge>
                         </TableCell>
                         <TableCell>{attempt.generation}</TableCell>
@@ -837,25 +867,38 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
           <Card>
             <CardContent className="pt-6">
               <ItemGroup className="gap-2">
-                {run.resourceLinks.map((link) => (
-                  <Item key={link.id} variant="outline">
-                    <ItemContent>
-                      <ItemTitle>{link.label ?? link.kind}</ItemTitle>
-                      <ItemDescription>
-                        {link.kind} · {link.resourceId}
-                      </ItemDescription>
-                    </ItemContent>
-                    {link.url && (
-                      <ItemActions>
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={link.url}>
-                            <ExternalLink /> {t("open")}
-                          </Link>
-                        </Button>
-                      </ItemActions>
-                    )}
-                  </Item>
-                ))}
+                {run.resourceLinks.map((link) => {
+                  const destination = workflowResourceDestination(link);
+                  return (
+                    <Item key={link.id} variant="outline">
+                      <ItemContent>
+                        <ItemTitle>{link.label ?? link.kind}</ItemTitle>
+                        <ItemDescription>
+                          {link.kind} · {link.resourceId}
+                        </ItemDescription>
+                      </ItemContent>
+                      {destination && (
+                        <ItemActions>
+                          <Button asChild size="sm" variant="outline">
+                            <Link
+                              href={destination.href}
+                              rel={
+                                destination.external
+                                  ? "noopener noreferrer"
+                                  : undefined
+                              }
+                              target={
+                                destination.external ? "_blank" : undefined
+                              }
+                            >
+                              <ExternalLink /> {t("open")}
+                            </Link>
+                          </Button>
+                        </ItemActions>
+                      )}
+                    </Item>
+                  );
+                })}
               </ItemGroup>
               {!run.resourceLinks.length && (
                 <Empty className="py-12">

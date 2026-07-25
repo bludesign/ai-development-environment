@@ -17,6 +17,9 @@ export type ConfigControlType =
   | "resourceMulti" // multi-select resource list (scriptIds, registrationIds)
   | "stringList" // labels[], destinations[] — add/remove rows
   | "record" // Record<string,string> — fields, answers
+  | "condition" // if / wait-until condition built as comparison rows
+  | "choiceOptions" // HUMAN_CHOICE buttons — label + description rows
+  | "triggerChoices" // choice-trigger options — key + label + description rows
   | "model" // combined provider/model/effort picker (catalog or session data)
   | "json"; // per-field JSON fallback for a complex blob
 

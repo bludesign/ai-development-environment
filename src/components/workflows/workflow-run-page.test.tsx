@@ -21,6 +21,8 @@ import {
 } from "./workflow-run-page";
 import type { WorkflowRun } from "./types";
 
+const routerPush = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
@@ -39,10 +41,52 @@ vi.mock("@/i18n/navigation", () => ({
       {children}
     </a>
   ),
+  useRouter: () => ({ push: routerPush }),
 }));
 
 vi.mock("./workflow-graph", () => ({
-  WorkflowGraph: () => <div>Workflow graph</div>,
+  WorkflowGraph: ({
+    onNodeClick,
+  }: {
+    onNodeClick?: (nodeId: string, details: Record<string, unknown>) => void;
+  }) => (
+    <div>
+      Workflow graph
+      <button
+        onClick={() =>
+          onNodeClick?.("linked", {
+            destination: { href: "/sessions/session-1", external: false },
+            locked: true,
+            trigger: false,
+          })
+        }
+      >
+        Locked linked step
+      </button>
+      <button
+        onClick={() =>
+          onNodeClick?.("action", {
+            destination: null,
+            locked: false,
+            trigger: false,
+          })
+        }
+      >
+        Unlocked action step
+      </button>
+      <button
+        onClick={() =>
+          onNodeClick?.("trigger", {
+            destination: null,
+            locked: false,
+            trigger: true,
+          })
+        }
+      >
+        Unlocked trigger
+      </button>
+    </div>
+  ),
   workflowStatusVariant: () => "outline",
 }));
 
@@ -210,5 +254,30 @@ describe("workflow question answers", () => {
         },
       ),
     );
+  });
+
+  test("navigates locked links and only selects unlocked action nodes for replay", async () => {
+    request.mockResolvedValue({
+      workflowRun: { ...pendingRun, status: "SUCCEEDED" },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Locked linked step" }),
+    );
+    expect(routerPush).toHaveBeenCalledWith("/sessions/session-1");
+
+    const prepare = screen.getByRole("button", { name: "Prepare replay" });
+    fireEvent.click(screen.getByRole("button", { name: "Unlocked trigger" }));
+    expect(prepare.getAttribute("disabled")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Unlocked action step" }),
+    );
+    expect(prepare.getAttribute("disabled")).toBeNull();
   });
 });

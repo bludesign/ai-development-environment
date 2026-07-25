@@ -20,6 +20,7 @@ import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
 import type { BuildRecord, BuildReport } from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
+import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +100,11 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
       agent { ${AGENT_FIELDS} }
       codebases {
         iosBuildConfigured
+        quickActions {
+            id name description quickActionIconKey quickActionButtonVariant
+            hasPlainTrigger(resourceKind: "WORKTREE")
+            triggerChoices(resourceKind: "WORKTREE") { key label description }
+          }
         repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
         codebase { ${CODEBASE_FIELDS} }
         worktrees { ${WORKTREE_FIELDS} }
@@ -279,12 +285,26 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeWorkflows = subscriptions.subscribe<{
+      workflowsChanged: { id: string } | null;
+    }>(
+      {
+        query:
+          "subscription WorktreeDetailQuickActionsChanged { workflowsChanged { id } }",
+      },
+      {
+        next: () => void load(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
       latestLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
+      unsubscribeWorkflows();
     };
   }, [load, worktreeId]);
 
@@ -659,8 +679,30 @@ function LoadedWorktreeDetail({
         <CardHeader>
           <CardTitle>{t("actions")}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <ActionRow {...managementProps} onCompleted={reloadEverything} />
+          <WorkflowQuickActions
+            sessionData={{
+              worktree: {
+                id: worktree.id,
+                path: worktree.folder,
+                branch: worktree.branch,
+                baseBranch: worktree.baseBranch,
+                headSha: worktree.headSha,
+              },
+              codebase: {
+                id: entry.group.codebase.id,
+                folder: entry.group.codebase.folder,
+              },
+              repo: {
+                id: entry.group.repository.id,
+                name: entry.group.repository.name,
+                displayOrigin: entry.group.repository.displayOrigin,
+              },
+            }}
+            worktreeId={worktree.id}
+            workflows={entry.group.quickActions ?? []}
+          />
         </CardContent>
       </Card>
 

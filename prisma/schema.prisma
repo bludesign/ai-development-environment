@@ -202,6 +202,7 @@ model CodebaseRepository {
   buildScripts           CodebaseRepositoryBuildScript[]
   githubWorkflowRuns     GitHubWorkflowRunObservation[]
   githubPollingState     GitHubActionsPollingState?
+  quickActionWorkflows   WorkflowQuickActionRepository[]
 
   @@index([name])
 }
@@ -2014,15 +2015,30 @@ model Workflow {
   enabled             Boolean           @default(false)
   overlapPolicy       String            @default("QUEUE")
   maxConcurrentRuns   Int               @default(1)
+  globalQuickAction   Boolean           @default(false)
+  quickActionIconKey  String            @default("play")
+  quickActionButtonVariant String       @default("default")
   archivedAt          DateTime?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   versions            WorkflowVersion[] @relation("WorkflowVersions")
   activeVersion       WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
   runs                WorkflowRun[]
+  quickActionRepositories WorkflowQuickActionRepository[]
 
   @@index([archivedAt, updatedAt])
   @@index([enabled, activeVersionId])
+}
+
+model WorkflowQuickActionRepository {
+  workflowId   String
+  repositoryId String
+  createdAt    DateTime           @default(now())
+  workflow     Workflow           @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  repository   CodebaseRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([workflowId, repositoryId])
+  @@index([repositoryId, workflowId])
 }
 
 model WorkflowVersion {

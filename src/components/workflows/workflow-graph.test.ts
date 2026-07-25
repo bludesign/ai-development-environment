@@ -86,4 +86,69 @@ describe("workflow run graph projection", () => {
       result.nodes.find(({ id }) => id === "blocked")?.data.diagnostics,
     ).toHaveLength(1);
   });
+
+  test("gives a choice trigger one output per option, and steps the usual pair", () => {
+    const definition = emptyDefinition("Choice graph");
+    definition.triggers[0] = {
+      ...definition.triggers[0]!,
+      kind: "MANUAL_CHOICE",
+      config: {
+        choices: [
+          { key: "draft", label: "Draft" },
+          { key: "ready", label: "Ready for review" },
+        ],
+      },
+    };
+    definition.nodes.push({
+      id: "notify",
+      kind: "NOTIFICATION_SEND",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+    const { nodes } = workflowFlowElements(definition);
+
+    expect(nodes.find(({ id }) => id === "manual")?.data.handles).toEqual([
+      { id: "draft", label: "Draft" },
+      { id: "ready", label: "Ready for review" },
+    ]);
+    expect(
+      nodes.find(({ id }) => id === "notify")?.data.handles.map(({ id }) => id),
+    ).toEqual(["success", "failure"]);
+  });
+
+  test("projects current-page and navigation state onto triggers and steps", () => {
+    const definition = emptyDefinition("Linked graph");
+    definition.nodes.push({
+      id: "ticket",
+      kind: "JIRA_LOAD_TICKET",
+      position: { x: 200, y: 100 },
+      config: {},
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+    const result = workflowFlowElements(definition, {
+      currentPageNodeIds: new Set(["manual", "ticket"]),
+      destinations: new Map([
+        ["ticket", { href: "/jira/tickets/AIDE-1", external: false }],
+      ]),
+      navigationEnabled: true,
+    });
+
+    expect(
+      result.nodes.find(({ id }) => id === "manual")?.data.currentPage,
+    ).toBe(true);
+    expect(result.nodes.find(({ id }) => id === "ticket")?.data).toEqual(
+      expect.objectContaining({
+        currentPage: true,
+        destination: { href: "/jira/tickets/AIDE-1", external: false },
+        navigationEnabled: true,
+      }),
+    );
+  });
 });

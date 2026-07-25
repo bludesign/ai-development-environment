@@ -191,6 +191,39 @@ const json = (
   ...options,
 });
 
+const condition = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "condition",
+  ...options,
+});
+
+const choiceOptions = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "choiceOptions",
+  ...options,
+});
+
+const triggerChoices = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "triggerChoices",
+  ...options,
+});
+
 // ---------------------------------------------------------------------------
 // Shared option sets and reused field groups.
 // ---------------------------------------------------------------------------
@@ -656,18 +689,32 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       multiline("prompt", "Prompt"),
       bool("multiSelect", "Allow multiple selections"),
       bool("allowCustom", "Allow a custom answer"),
-      json("options", "Options", {
-        placeholder: '[{ "label": "Yes" }, { "label": "No" }]',
-      }),
+      choiceOptions("options", "Buttons"),
       num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Control flow ----------------------------------------------------------
   CONTROL_IF: {
-    fields: [json("condition", "Condition", { required: true })],
+    fields: [condition("condition", "Condition", { required: true })],
   },
   CONTROL_JOIN: {
-    fields: [enumField("mode", "Join mode", staticOptions(["ALL", "ANY"]))],
+    fields: [
+      enumField(
+        "mode",
+        "Join mode",
+        listOptions([
+          { value: "ALL", label: "All — wait for every branch" },
+          { value: "ANY", label: "Any — continue on the first branch" },
+        ]),
+        {
+          help:
+            "All (default) waits until every incoming branch has finished before continuing. " +
+            "Any continues as soon as the first incoming branch arrives, and the remaining " +
+            "branches keep running on their own. Either way, branches that were skipped do not " +
+            "block the join, and the join itself is skipped when no branch reaches it.",
+        },
+      ),
+    ],
   },
   CONTROL_DELAY: {
     fields: [num("seconds", "Delay (seconds)", { required: true })],
@@ -717,7 +764,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       multiline("script", "Script", { required: true }),
       enumField("interpreter", "Interpreter", staticOptions(["SHELL", "NODE"])),
       record("environment", "Environment variables"),
-      stringList("credentials", "Credential environment"),
+      json("credentials", "Credential environment", {
+        help: "JSON array of { name, credential: { id, kind, ownerId } } entries.",
+      }),
       num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
@@ -757,7 +806,9 @@ const THRESHOLD_TRIGGERS: WorkflowTriggerKind[] = [
 
 const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "MANUAL",
+  "MANUAL_CHOICE",
   "RESOURCE_MANUAL",
+  "RESOURCE_MANUAL_CHOICE",
   "SCHEDULE",
   "WORKFLOW_FINISHED",
   "GITHUB_PR_STATE",
@@ -808,7 +859,7 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
   ALL_TRIGGER_KINDS.map((kind) => {
-    if (kind === "RESOURCE_MANUAL") {
+    if (kind === "RESOURCE_MANUAL" || kind === "RESOURCE_MANUAL_CHOICE") {
       return [
         kind,
         triggerWithFilters([
@@ -818,6 +869,17 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             staticOptions(WORKFLOW_RESOURCE_KINDS),
             { required: true },
           ),
+          ...(kind === "RESOURCE_MANUAL_CHOICE"
+            ? [triggerChoices("choices", "Choices", { required: true })]
+            : []),
+        ]),
+      ];
+    }
+    if (kind === "MANUAL_CHOICE") {
+      return [
+        kind,
+        triggerWithFilters([
+          triggerChoices("choices", "Choices", { required: true }),
         ]),
       ];
     }

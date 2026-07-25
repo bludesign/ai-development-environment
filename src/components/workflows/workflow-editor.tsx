@@ -3,12 +3,15 @@
 import {
   addEdge,
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useStore,
+  useStoreApi,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -19,7 +22,11 @@ import {
   ArrowLeft,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   GripVertical,
+  MousePointer2,
+  MousePointer2Off,
   Plus,
   Search,
   Save,
@@ -29,7 +36,14 @@ import {
   Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -107,15 +121,25 @@ import {
 } from "./config-fields/config-fields-editor";
 import { hasConfigDescriptor } from "./config-fields/descriptors";
 import {
+  WorkflowFitLock,
+  WorkflowFitLockButton,
+  workflowFitLockPaneClass,
+} from "./workflow-fit-lock";
+import {
+  MINIMAP_NODE_RADIUS,
   workflowFlowElements,
+  WorkflowNodeActionsContext,
   workflowNodeTypes,
   type WorkflowFlowNode,
+  type WorkflowNodeActions,
 } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import {
   emptyDefinition,
   type WorkflowCatalogEntry,
   type WorkflowDefinition,
   type WorkflowDiagnostic,
+  type WorkflowHandleLayout,
   type WorkflowNodeDefinition,
   type WorkflowSummary,
   type WorkflowTriggerCatalogEntry,
@@ -232,8 +256,80 @@ function providesByNodeMap(
   );
 }
 
+/**
+ * Whether a click came from a finger or a pen rather than a mouse. Clicks are
+ * PointerEvents in every browser React Flow supports; anything else — an older
+ * engine, a synthesized event — reads as a mouse, which only costs one extra
+ * click on a device that had the precision for it anyway.
+ */
+function touchLike(event: ReactMouseEvent): boolean {
+  const pointerType = (event.nativeEvent as Partial<PointerEvent>).pointerType;
+  return pointerType !== undefined && pointerType !== "mouse";
+}
+
+/**
+ * Replaces React Flow's own interactivity toggle, which draws a padlock all but
+ * identical to the fit lock sitting right above it. A pointer says the same
+ * thing about whether steps can be grabbed, without the second lock.
+ */
+function WorkflowInteractivityButton() {
+  const t = useTranslations("workflows");
+  const store = useStoreApi();
+  const interactive = useStore(
+    (state) =>
+      state.nodesDraggable ||
+      state.nodesConnectable ||
+      state.elementsSelectable,
+  );
+  const label = interactive ? t("lockSteps") : t("unlockSteps");
+  const icon = "fill-none!";
+  return (
+    <ControlButton
+      aria-label={label}
+      onClick={() =>
+        store.setState({
+          elementsSelectable: !interactive,
+          nodesConnectable: !interactive,
+          nodesDraggable: !interactive,
+        })
+      }
+      title={label}
+    >
+      {interactive ? (
+        <MousePointer2Off className={icon} />
+      ) : (
+        <MousePointer2 className={icon} />
+      )}
+    </ControlButton>
+  );
+}
+
+/**
+ * Toggles the session-data chips the editor adds under each step card, so the
+ * canvas can be read the way it renders everywhere else. Styled as one more
+ * button in React Flow's control stack, and named for the action it performs.
+ */
+function WorkflowSessionDataButton({
+  onToggle,
+  shown,
+}: {
+  onToggle: () => void;
+  shown: boolean;
+}) {
+  const t = useTranslations("workflows");
+  const label = shown ? t("hideSessionData") : t("showSessionData");
+  // React Flow fills any svg in a control button; Lucide draws in strokes.
+  const icon = "fill-none!";
+  return (
+    <ControlButton aria-label={label} onClick={onToggle} title={label}>
+      {shown ? <EyeOff className={icon} /> : <Eye className={icon} />}
+    </ControlButton>
+  );
+}
+
 function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -262,6 +358,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [diagnostics, setDiagnostics] = useState<WorkflowDiagnostic[]>([]);
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
+  // Off by default: laying a workflow out means panning and zooming around a
+  // canvas bigger than the pane, which a fit lock would fight.
+  const [locked, setLocked] = useState(false);
+  const [showSessionData, setShowSessionData] = useState(false);
 
   const categories = useMemo(
     () =>
@@ -448,18 +548,44 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [commitDefinition, definition, selectedId],
   );
 
-  const duplicateSelected = useCallback(() => {
-    const source = definition.nodes.find(({ id }) => id === selectedId);
-    if (!source) return;
-    const copy = {
-      ...structuredClone(source),
-      id: clientId("node"),
-      name: `${source.name ?? source.kind} copy`,
-      position: { x: source.position.x + 36, y: source.position.y + 36 },
-    };
-    commitDefinition({ ...definition, nodes: [...definition.nodes, copy] });
-    setSelectedId(copy.id);
-  }, [commitDefinition, definition, selectedId]);
+  const duplicateItem = useCallback(
+    (id: string | null) => {
+      const source = definition.nodes.find((node) => node.id === id);
+      if (!source) return;
+      const copy = {
+        ...structuredClone(source),
+        id: clientId("node"),
+        name: `${source.name ?? source.kind} copy`,
+        position: { x: source.position.x + 36, y: source.position.y + 36 },
+      };
+      commitDefinition({ ...definition, nodes: [...definition.nodes, copy] });
+      setSelectedId(copy.id);
+    },
+    [commitDefinition, definition],
+  );
+
+  const duplicateSelected = useCallback(
+    () => duplicateItem(selectedId),
+    [duplicateItem, selectedId],
+  );
+
+  const duplicateCanvasSelection = useCallback(() => {
+    const canvasSelection =
+      instance?.getNodes().find(({ selected }) => selected)?.id ?? null;
+    duplicateItem(canvasSelection ?? selectedId);
+  }, [duplicateItem, instance, selectedId]);
+
+  const nodeActions = useMemo<WorkflowNodeActions>(
+    () => ({
+      onDelete: (id) => removeItems([id]),
+      onDuplicate: (id) => duplicateItem(id),
+      onEdit: (id) => {
+        setSelectedEdgeId(null);
+        setSelectedId(id);
+      },
+    }),
+    [duplicateItem, removeItems],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -467,12 +593,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         const target = event.target as HTMLElement | null;
         if (target?.matches("input, textarea, [contenteditable=true]")) return;
         event.preventDefault();
-        duplicateSelected();
+        duplicateCanvasSelection();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [duplicateSelected]);
+  }, [duplicateCanvasSelection]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -748,6 +874,31 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       ) ?? [],
     [catalog, search],
   );
+  // Adding or removing a step re-fits a locked canvas; moving one does not.
+  // Hiding the session-data chips resizes every card, so it re-fits too.
+  const fitSignature = useMemo(
+    () =>
+      `${definition.triggers.map(({ id }) => id).join()}|${definition.nodes
+        .map(({ id }) => id)
+        .join()}|${definition.edges.map(({ id }) => id).join()}|${
+        definition.editor.handleLayout ?? "SIDES"
+      }|${showSessionData}`,
+    [definition, showSessionData],
+  );
+  // The chips are an editing aid layered onto the same card the run and detail
+  // views render, so they are dropped on the way to the canvas rather than left
+  // out of the graph — the definition and its rebuilds stay untouched.
+  const canvasNodes = useMemo(
+    () =>
+      showSessionData
+        ? nodes
+        : nodes.map((node) =>
+            node.data.provides.length
+              ? { ...node, data: { ...node.data, provides: [] } }
+              : node,
+          ),
+    [nodes, showSessionData],
+  );
   const stepGroups = useMemo(
     () => [...groupByCategory(filteredSteps)],
     [filteredSteps],
@@ -889,7 +1040,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   />
                 </InputGroup>
                 {stepGroups.length || triggerGroups.length ? (
-                  <ScrollArea className="min-h-0 flex-1">
+                  <ScrollArea className="-mr-2 min-h-0 flex-1">
                     <div className="space-y-3 pr-2 pb-1">
                       {stepGroups.map(([category, entries]) => (
                         <section key={`step:${category}`}>
@@ -973,7 +1124,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                       {entry.label}
                                     </ItemTitle>
                                     <ItemDescription className="text-[10px]">
-                                      {entry.kind}
+                                      {labels.kind(entry.kind)}
                                     </ItemDescription>
                                   </ItemContent>
                                 </button>
@@ -993,7 +1144,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 )}
               </TabsContent>
               <TabsContent className="min-h-0" value="outline">
-                <ScrollArea className="h-full">
+                <ScrollArea className="-mr-2 h-full">
                   <ItemGroup className="gap-1 pr-2 pb-1">
                     {[...definition.triggers, ...definition.nodes].map(
                       (entry) => (
@@ -1012,8 +1163,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                             type="button"
                           >
                             <ItemContent>
-                              <ItemTitle>{entry.name ?? entry.kind}</ItemTitle>
-                              <ItemDescription>{entry.kind}</ItemDescription>
+                              <ItemTitle>
+                                {entry.name ?? labels.kind(entry.kind)}
+                              </ItemTitle>
+                              <ItemDescription>
+                                {labels.kind(entry.kind)}
+                              </ItemDescription>
                             </ItemContent>
                           </button>
                         </Item>
@@ -1062,52 +1217,96 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                 <Trash2 /> {t("deleteConnection")}
               </Button>
             )}
-            <ReactFlow
-              colorMode="system"
-              deleteKeyCode={["Backspace", "Delete"]}
-              edges={edges}
-              fitView
-              nodeTypes={workflowNodeTypes}
-              nodes={nodes}
-              onConnect={onConnect}
-              onEdgeClick={(_event, edge) => {
-                setSelectedId(null);
-                setSelectedEdgeId(edge.id);
-              }}
-              onEdgesChange={handleEdgesChange}
-              onInit={(value) =>
-                setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
-              }
-              onNodeClick={(_event, node) => {
-                setSelectedEdgeId(null);
-                setSelectedId(node.id);
-              }}
-              onNodeDragStop={(_event, node) => {
-                setDefinition((current) => ({
-                  ...current,
-                  nodes: current.nodes.map((entry) =>
-                    entry.id === node.id
-                      ? { ...entry, position: node.position }
-                      : entry,
-                  ),
-                  triggers: current.triggers.map((entry) =>
-                    entry.id === node.id
-                      ? { ...entry, position: node.position }
-                      : entry,
-                  ),
-                }));
-              }}
-              onNodesChange={onNodesChange}
-              onNodesDelete={(removed) =>
-                removeItems(removed.map(({ id }) => id))
-              }
-              onPaneClick={() => setSelectedEdgeId(null)}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background gap={20} size={1} />
-              <Controls />
-              <MiniMap pannable zoomable />
-            </ReactFlow>
+            <WorkflowNodeActionsContext value={nodeActions}>
+              <ReactFlow
+                className={locked ? workflowFitLockPaneClass : undefined}
+                colorMode="system"
+                deleteKeyCode={["Backspace", "Delete"]}
+                edges={edges}
+                fitView
+                nodeTypes={workflowNodeTypes}
+                nodes={canvasNodes}
+                onConnect={onConnect}
+                onEdgeClick={(_event, edge) => {
+                  setSelectedId(null);
+                  setSelectedEdgeId(edge.id);
+                }}
+                onEdgesChange={handleEdgesChange}
+                onInit={(value) =>
+                  setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
+                }
+                onNodeClick={(event, node) => {
+                  setSelectedEdgeId(null);
+                  // A single click only picks the card up for dragging; opening
+                  // the inspector takes a double click, so laying out a workflow
+                  // does not keep throwing the panel over the canvas. Touch has
+                  // no such distinction — a double tap is a poor target and the
+                  // panel covers the canvas anyway — so a tap opens it there.
+                  if (touchLike(event)) setSelectedId(node.id);
+                }}
+                onNodeDoubleClick={(_event, node) => {
+                  setSelectedEdgeId(null);
+                  setSelectedId(node.id);
+                }}
+                onNodeDragStop={(_event, node) => {
+                  setDefinition((current) => ({
+                    ...current,
+                    nodes: current.nodes.map((entry) =>
+                      entry.id === node.id
+                        ? { ...entry, position: node.position }
+                        : entry,
+                    ),
+                    triggers: current.triggers.map((entry) =>
+                      entry.id === node.id
+                        ? { ...entry, position: node.position }
+                        : entry,
+                    ),
+                  }));
+                }}
+                onNodesChange={onNodesChange}
+                onNodesDelete={(removed) =>
+                  removeItems(removed.map(({ id }) => id))
+                }
+                onPaneClick={() => setSelectedEdgeId(null)}
+                panOnDrag={!locked}
+                preventScrolling={!locked}
+                proOptions={{ hideAttribution: true }}
+                /* Double click belongs to the step inspector here. React Flow's
+                 own double-click zoom sits on the pane and fires for clicks
+                 that bubble up from a card, so it would zoom on every open. */
+                zoomOnDoubleClick={false}
+                zoomOnPinch={!locked}
+                zoomOnScroll={!locked}
+              >
+                <Background gap={20} size={1} />
+                <Controls
+                  className="overflow-hidden rounded-lg"
+                  showFitView={!locked}
+                  showInteractive={false}
+                  showZoom={!locked}
+                >
+                  <WorkflowFitLockButton
+                    locked={locked}
+                    onToggle={() => setLocked((current) => !current)}
+                  />
+                  <WorkflowInteractivityButton />
+                  <WorkflowSessionDataButton
+                    onToggle={() => setShowSessionData((current) => !current)}
+                    shown={showSessionData}
+                  />
+                </Controls>
+                <WorkflowFitLock locked={locked} signature={fitSignature} />
+                {!locked && (
+                  <MiniMap
+                    className="overflow-hidden rounded-xl border"
+                    maskColor="transparent"
+                    nodeBorderRadius={MINIMAP_NODE_RADIUS}
+                    pannable
+                    zoomable
+                  />
+                )}
+              </ReactFlow>
+            </WorkflowNodeActionsContext>
           </div>
           {diagnostics.length > 0 && (
             <Card>
@@ -1143,7 +1342,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                                 : "outline"
                             }
                           >
-                            {diagnostic.code}
+                            {labels.diagnosticCode(diagnostic.code)}
                           </Badge>
                         </ItemActions>
                       </button>
@@ -1211,6 +1410,35 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               </Select>
             </Field>
             <Field>
+              <FieldLabel htmlFor="workflow-handle-layout">
+                {t("connectorLayout")}
+              </FieldLabel>
+              <Select
+                onValueChange={(value) =>
+                  commitDefinition({
+                    ...definition,
+                    editor: {
+                      ...definition.editor,
+                      handleLayout: value as WorkflowHandleLayout,
+                    },
+                  })
+                }
+                value={definition.editor.handleLayout ?? "SIDES"}
+              >
+                <SelectTrigger className="w-full" id="workflow-handle-layout">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SIDES">
+                    {t("connectorLayouts.SIDES")}
+                  </SelectItem>
+                  <SelectItem value="TOP_BOTTOM">
+                    {t("connectorLayouts.TOP_BOTTOM")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
               <FieldLabel htmlFor="workflow-concurrency">
                 {t("maxConcurrentRuns")}
               </FieldLabel>
@@ -1246,8 +1474,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>{selected.name ?? selected.kind}</SheetTitle>
-                <SheetDescription>{selected.kind}</SheetDescription>
+                <SheetTitle>
+                  {selected.name ?? labels.kind(selected.kind)}
+                </SheetTitle>
+                <SheetDescription>
+                  {labels.kind(selected.kind)}
+                </SheetDescription>
               </SheetHeader>
               <FieldGroup className="gap-4 px-4">
                 <Field>

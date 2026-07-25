@@ -9,7 +9,13 @@ import { WorkflowsService } from "./workflows.service";
 
 const prisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
-  workflow: { findUnique: vi.fn() },
+  workflow: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  codebaseRepository: { count: vi.fn() },
+  worktree: { findUnique: vi.fn() },
+  workflowQuickActionRepository: {
+    deleteMany: vi.fn(),
+    createMany: vi.fn(),
+  },
   workflowVersion: { findMany: vi.fn() },
   workflowRun: {
     findUnique: vi.fn(),
@@ -69,6 +75,103 @@ function subworkflowDefinition(
     ],
   };
 }
+
+describe("workflow quick actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+  });
+
+  test("returns enabled worktree actions inherited from the repository", async () => {
+    const accepted = emptyWorkflowDefinition("Accepted");
+    accepted.triggers = [
+      {
+        id: "worktree",
+        kind: "RESOURCE_MANUAL",
+        position: { x: 0, y: 0 },
+        config: { resourceKind: "WORKTREE" },
+      },
+    ];
+    const ignored = emptyWorkflowDefinition("Ignored");
+    prisma.worktree.findUnique.mockResolvedValue({
+      codebase: { repositoryId: "repository-1" },
+    });
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow-accepted",
+        activeVersion: { definitionJson: JSON.stringify(accepted) },
+      },
+      {
+        id: "workflow-ignored",
+        activeVersion: { definitionJson: JSON.stringify(ignored) },
+      },
+    ]);
+
+    const result = await new WorkflowsService(
+      new WorkflowEventsService(),
+    ).quickActions("worktree-1");
+
+    expect(result.map(({ id }) => id)).toEqual(["workflow-accepted"]);
+    expect(prisma.workflow.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { globalQuickAction: true },
+            {
+              quickActionRepositories: {
+                some: { repositoryId: "repository-1" },
+              },
+            },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  test("replaces global and repository assignments atomically", async () => {
+    prisma.workflow.findUnique.mockResolvedValue({ id: "workflow-1" });
+    prisma.codebaseRepository.count.mockResolvedValue(2);
+    prisma.workflow.update.mockResolvedValue({ id: "workflow-1" });
+    prisma.workflowQuickActionRepository.deleteMany.mockResolvedValue({
+      count: 0,
+    });
+    prisma.workflowQuickActionRepository.createMany.mockResolvedValue({
+      count: 2,
+    });
+
+    await new WorkflowsService(new WorkflowEventsService()).setQuickAction({
+      id: "workflow-1",
+      global: true,
+      quickActionIconKey: "rocket",
+      quickActionButtonVariant: "secondary",
+      repositoryIds: ["repository-1", "repository-2", "repository-1"],
+    });
+
+    expect(prisma.workflow.update).toHaveBeenCalledWith({
+      where: { id: "workflow-1" },
+      data: {
+        globalQuickAction: true,
+        quickActionIconKey: "rocket",
+        quickActionButtonVariant: "secondary",
+      },
+    });
+    expect(
+      prisma.workflowQuickActionRepository.createMany,
+    ).toHaveBeenCalledWith({
+      data: [
+        { workflowId: "workflow-1", repositoryId: "repository-1" },
+        { workflowId: "workflow-1", repositoryId: "repository-2" },
+      ],
+    });
+  });
+});
 
 describe("workflow sub-workflow validation", () => {
   beforeEach(() => {
@@ -336,7 +439,42 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
-  test("loads attempt resource links for resource-panel runs", async () => {
+  test("links event-triggered runs to the resource that caused the event", async () => {
+    const version = { id: "version-1", name: "Run workflow" };
+    prisma.workflowRun.findUnique.mockResolvedValue(null);
+    prisma.workflowRunNumberSequence.upsert.mockResolvedValue({ nextValue: 3 });
+    prisma.workflowRun.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).createRunForTrigger(
+      {
+        id: "workflow-1",
+        overlapPolicy: "CONCURRENT",
+        activeVersion: version,
+      },
+      version,
+      null,
+      null,
+      "RUN_COMPLETED",
+      "agent-run-1",
+      {
+        sessionData: { run: { id: "agent-run-1", kind: "PLAN" } },
+      },
+      "idempotency-2",
+    );
+
+    expect(prisma.workflowRunResourceLink.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "AGENT_RUN",
+        resourceId: "agent-run-1",
+        metadataJson: JSON.stringify({ runKind: "PLAN" }),
+      }),
+    });
+  });
+
+  test("loads attempt resource links and question batches for resource-panel runs", async () => {
     prisma.workflowRunResourceLink.findMany.mockResolvedValue([
       { runId: "run-1" },
     ]);
@@ -351,10 +489,158 @@ describe("workflow runtime lifecycle guards", () => {
           attempts: expect.objectContaining({
             include: {
               resourceLinks: { orderBy: { createdAt: "asc" } },
+              questionBatches: {
+                orderBy: { createdAt: "asc" },
+                include: {
+                  questions: {
+                    orderBy: { position: "asc" },
+                    include: { options: { orderBy: { position: "asc" } } },
+                  },
+                },
+              },
             },
           }),
         }),
       }),
     );
+  });
+});
+
+describe("workflow choice triggers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+  });
+
+  const choiceDefinition = () => {
+    const definition = emptyWorkflowDefinition("Choice workflow");
+    definition.triggers = [
+      {
+        id: "choose",
+        kind: "MANUAL_CHOICE",
+        position: { x: 0, y: 0 },
+        config: {
+          choices: [
+            { key: "draft", label: "Draft" },
+            { key: "ready", label: "Ready" },
+          ],
+        },
+      },
+    ];
+    return definition;
+  };
+
+  const publishedWorkflow = (definition: WorkflowDefinition) => ({
+    id: "workflow-1",
+    enabled: true,
+    archivedAt: null,
+    overlapPolicy: "CONCURRENT",
+    activeVersion: {
+      id: "version-1",
+      name: definition.name,
+      definitionJson: JSON.stringify(definition),
+      triggers: definition.triggers.map((trigger) => ({
+        id: `db-${trigger.id}`,
+        nodeId: trigger.id,
+        kind: trigger.kind,
+        configJson: JSON.stringify(trigger.config),
+      })),
+    },
+  });
+
+  test("records the picked option on the run it starts", async () => {
+    const definition = choiceDefinition();
+    prisma.workflow.findUnique.mockResolvedValue(publishedWorkflow(definition));
+    // First lookup is the idempotency check inside the transaction; the second
+    // is `run()` reading the created run back out.
+    prisma.workflowRun.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "run-1" });
+    prisma.workflowRunNumberSequence.upsert.mockResolvedValue({ nextValue: 1 });
+    prisma.workflowRun.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.trigger({ workflowId: "workflow-1", choice: "ready" });
+
+    const { data } = prisma.workflowRun.create.mock.calls[0]![0] as {
+      data: Record<string, string>;
+    };
+    expect(data.triggerKind).toBe("MANUAL_CHOICE");
+    expect(data.triggerId).toBe("db-choose");
+    expect(JSON.parse(data.triggerPayloadJson!).choice).toBe("ready");
+    expect(JSON.parse(data.sessionDataJson!).workflow.trigger.choice).toBe(
+      "ready",
+    );
+  });
+
+  test("rejects an option the trigger does not offer", async () => {
+    prisma.workflow.findUnique.mockResolvedValue(
+      publishedWorkflow(choiceDefinition()),
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      service.trigger({ workflowId: "workflow-1", choice: "shipped" }),
+    ).rejects.toThrow(/Unknown choice/);
+  });
+
+  test("refuses a plain run when the workflow only offers choices", async () => {
+    prisma.workflow.findUnique.mockResolvedValue(
+      publishedWorkflow(choiceDefinition()),
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(service.trigger({ workflowId: "workflow-1" })).rejects.toThrow(
+      /needs a choice: draft, ready/,
+    );
+  });
+
+  test("activates only the edge leaving the option that was picked", () => {
+    const definition = choiceDefinition();
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      selectedTrigger: (
+        run: unknown,
+        definition: WorkflowDefinition,
+      ) => { id: string | null; choice: string | null };
+      edgeState: (
+        edge: unknown,
+        selected: { id: string | null; choice: string | null },
+        attempts: Map<string, unknown>,
+        nodeById: Map<string, unknown>,
+      ) => string;
+    };
+    const selected = service.selectedTrigger(
+      {
+        triggerKind: "MANUAL_CHOICE",
+        trigger: { nodeId: "choose" },
+        triggerPayloadJson: JSON.stringify({ choice: "ready" }),
+      },
+      definition,
+    );
+
+    const edgeFrom = (sourceHandle: string) => ({
+      id: `edge-${sourceHandle}`,
+      source: "choose",
+      target: "step",
+      sourceHandle,
+      targetHandle: "input",
+    });
+    const state = (sourceHandle: string) =>
+      service.edgeState(edgeFrom(sourceHandle), selected, new Map(), new Map());
+
+    expect(selected.choice).toBe("ready");
+    expect(state("ready")).toBe("ACTIVE");
+    expect(state("draft")).toBe("INACTIVE");
   });
 });

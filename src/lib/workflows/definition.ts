@@ -80,7 +80,9 @@ export type WorkflowStepKind = (typeof WORKFLOW_STEP_KINDS)[number];
 
 export const WORKFLOW_TRIGGER_KINDS = [
   "MANUAL",
+  "MANUAL_CHOICE",
   "RESOURCE_MANUAL",
+  "RESOURCE_MANUAL_CHOICE",
   "SCHEDULE",
   "WORKFLOW_FINISHED",
   "GITHUB_PR_STATE",
@@ -132,11 +134,84 @@ export const WORKFLOW_TRIGGER_KINDS = [
 export type WorkflowTriggerKind = (typeof WORKFLOW_TRIGGER_KINDS)[number];
 
 /**
- * Resource kinds a RESOURCE_MANUAL trigger can be launched from. Each kind maps
+ * The manual trigger kinds come in pairs: a plain one, and a `*_CHOICE` one for
+ * when the person starting the run picks an option first. A choice trigger
+ * offers the options in its `choices` config, drops a menu under the run
+ * button, and routes the run out of the handle named after the option that was
+ * picked — so one workflow can fan out into several entry paths without a step
+ * in front of them.
+ */
+const CHOICE_TRIGGER_KINDS = new Set<string>([
+  "MANUAL_CHOICE",
+  "RESOURCE_MANUAL_CHOICE",
+]);
+
+const RESOURCE_TRIGGER_KINDS = new Set<string>([
+  "RESOURCE_MANUAL",
+  "RESOURCE_MANUAL_CHOICE",
+]);
+
+/** Whether a trigger kind routes its run out of a per-option handle. */
+export function isChoiceTriggerKind(kind: string): boolean {
+  return CHOICE_TRIGGER_KINDS.has(kind);
+}
+
+/** Whether a trigger kind is launched from a resource page rather than the workflow. */
+export function isResourceTriggerKind(kind: string): boolean {
+  return RESOURCE_TRIGGER_KINDS.has(kind);
+}
+
+/**
+ * One option a choice trigger offers. `key` is the stable identity: it names the
+ * trigger's output handle and is what `triggerWorkflow` is called with, so
+ * renaming a `label` leaves existing edges connected.
+ */
+export type WorkflowTriggerChoice = {
+  key: string;
+  label: string;
+  description: string;
+};
+
+/** Handle-id shape for a choice key — kept in step with `workflowEdgeSchema`. */
+const CHOICE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+export function isWorkflowChoiceKey(value: unknown): value is string {
+  return typeof value === "string" && CHOICE_KEY_PATTERN.test(value);
+}
+
+/**
+ * The options a choice trigger's config declares. Entries missing a usable key
+ * are dropped, so callers see only choices that can actually be routed; the
+ * validator reports the malformed ones separately.
+ */
+export function workflowTriggerChoices(
+  config: unknown,
+): WorkflowTriggerChoice[] {
+  const value = (config as { choices?: unknown } | null)?.choices;
+  if (!Array.isArray(value)) return [];
+  const choices: WorkflowTriggerChoice[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const row = entry as Record<string, unknown>;
+    if (!isWorkflowChoiceKey(row.key) || seen.has(row.key)) continue;
+    seen.add(row.key);
+    choices.push({
+      key: row.key,
+      label:
+        typeof row.label === "string" && row.label.trim() ? row.label : row.key,
+      description: typeof row.description === "string" ? row.description : "",
+    });
+  }
+  return choices;
+}
+
+/**
+ * Resource kinds a resource trigger can be launched from. Each kind maps
  * to the session-data paths the resource page seeds when it starts the run (see
  * `RESOURCE_KIND_SEED_PATHS` and `src/app/[locale]/*​/page.tsx` →
  * workflow-resource-panel). A trigger targets exactly one kind; to accept
- * several resource types, add one RESOURCE_MANUAL trigger per kind.
+ * several resource types, add one resource trigger per kind.
  */
 export const WORKFLOW_RESOURCE_KINDS = [
   "BUILD",
@@ -170,7 +245,7 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   WORKTREE: ["worktree.*", "ticket.*"],
 };
 
-/** The resource kind a RESOURCE_MANUAL trigger config targets, if valid. */
+/** The resource kind a resource trigger config targets, if valid. */
 export function workflowResourceKind(
   config: unknown,
 ): WorkflowResourceKind | null {
@@ -182,15 +257,15 @@ export function workflowResourceKind(
 }
 
 /**
- * Seed paths a trigger contributes on top of `workflow.*`. RESOURCE_MANUAL
- * derives them from its configured resource kind; every other kind uses the
- * static catalog seeds.
+ * Seed paths a trigger contributes on top of `workflow.*`. The resource
+ * triggers derive them from their configured resource kind; every other kind
+ * uses the static catalog seeds.
  */
 export function resourceManualSeedPaths(
   kind: string,
   config: unknown,
 ): string[] {
-  if (kind !== "RESOURCE_MANUAL") return [];
+  if (!isResourceTriggerKind(kind)) return [];
   const resourceKind = workflowResourceKind(config);
   return resourceKind ? RESOURCE_KIND_SEED_PATHS[resourceKind] : [];
 }
@@ -735,9 +810,15 @@ const trigger = (
 export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
   [
     trigger("MANUAL", "Manual", "Manual run"),
+    trigger("MANUAL_CHOICE", "Manual", "Manual run with a choice"),
     // Seed paths are derived per-trigger from the configured resource kind
     // (see `resourceManualSeedPaths`), not declared statically here.
     trigger("RESOURCE_MANUAL", "Manual", "Run from a resource"),
+    trigger(
+      "RESOURCE_MANUAL_CHOICE",
+      "Manual",
+      "Run from a resource with a choice",
+    ),
     trigger("SCHEDULE", "Schedule", "On a schedule"),
     trigger("WORKFLOW_FINISHED", "Workflows", "Another workflow finished", [
       "workflow.*",
@@ -964,8 +1045,13 @@ export const workflowDefinitionSchema = z.object({
       viewport: z
         .object({ x: z.number(), y: z.number(), zoom: z.number().positive() })
         .optional(),
+      // Which edges of a step card its connectors sit on. Presentation only —
+      // handle ids are unchanged, so existing edges survive a switch — but it
+      // travels with the definition so a published run draws the way its
+      // author laid it out.
+      handleLayout: z.enum(["SIDES", "TOP_BOTTOM"]).default("SIDES"),
     })
-    .default({}),
+    .default({ handleLayout: "SIDES" }),
 });
 
 export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;
@@ -1504,7 +1590,7 @@ export function validateWorkflowDefinition(value: unknown): {
         triggerId: triggerDefinition.id,
       });
     if (
-      triggerDefinition.kind === "RESOURCE_MANUAL" &&
+      isResourceTriggerKind(triggerDefinition.kind) &&
       !workflowResourceKind(triggerDefinition.config)
     )
       diagnostics.push({
@@ -1514,6 +1600,34 @@ export function validateWorkflowDefinition(value: unknown): {
           "Resource triggers must target a single resource kind; add one trigger per kind",
         triggerId: triggerDefinition.id,
       });
+    if (isChoiceTriggerKind(triggerDefinition.kind)) {
+      const choices = workflowTriggerChoices(triggerDefinition.config);
+      const declared = Array.isArray(triggerDefinition.config.choices)
+        ? triggerDefinition.config.choices.length
+        : 0;
+      // A key that fails `isWorkflowChoiceKey`, or repeats an earlier one, is
+      // dropped by `workflowTriggerChoices` — so a shortfall here is the signal
+      // that an option exists in config but can never be picked or routed.
+      if (!choices.length || choices.length !== declared)
+        diagnostics.push({
+          severity: "ERROR",
+          code: "TRIGGER_CHOICES_REQUIRED",
+          message:
+            "Choice triggers need at least one option, each with a unique key",
+          triggerId: triggerDefinition.id,
+        });
+      const keys = new Set(choices.map(({ key }) => key));
+      for (const edge of definition.edges) {
+        if (edge.source !== triggerDefinition.id) continue;
+        if (keys.has(edge.sourceHandle)) continue;
+        diagnostics.push({
+          severity: "ERROR",
+          code: "TRIGGER_CHOICE_HANDLE_UNKNOWN",
+          message: `Connection ${edge.id} leaves an option that no longer exists`,
+          triggerId: triggerDefinition.id,
+        });
+      }
+    }
     if (triggerDefinition.kind === "GITHUB_ISSUE_COMMAND") {
       const allowed = triggerDefinition.config.allowedLogins;
       const pattern = triggerDefinition.config.commandPattern;

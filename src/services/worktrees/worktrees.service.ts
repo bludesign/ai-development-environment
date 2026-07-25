@@ -31,6 +31,10 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  isResourceTriggerKind,
+  workflowResourceKind,
+} from "@/lib/workflows/definition";
+import {
   agentOnlineWindowMs,
   AgentControlService,
   agentEventBus,
@@ -428,6 +432,41 @@ export class WorktreesService {
     const views = worktrees.map((worktree) =>
       this.view(worktree, defaultRegex),
     );
+    const repositoryIds = [
+      ...new Set(views.map((item) => item.codebase.repository.id)),
+    ];
+    const quickActionWorkflows = await prisma.workflow.findMany({
+      where: {
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+        OR: [
+          { globalQuickAction: true },
+          {
+            quickActionRepositories: {
+              some: { repositoryId: { in: repositoryIds } },
+            },
+          },
+        ],
+      },
+      include: {
+        activeVersion: { include: { triggers: true } },
+        quickActionRepositories: { select: { repositoryId: true } },
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    const eligibleQuickActions = quickActionWorkflows.filter((workflow) =>
+      workflow.activeVersion?.triggers.some((trigger) => {
+        if (!isResourceTriggerKind(trigger.kind)) return false;
+        try {
+          return (
+            workflowResourceKind(JSON.parse(trigger.configJson)) === "WORKTREE"
+          );
+        } catch {
+          return false;
+        }
+      }),
+    );
 
     const origins = [
       ...new Set(views.map((item) => item.codebase.repository.canonicalOrigin)),
@@ -493,6 +532,7 @@ export class WorktreesService {
       repository: View["codebase"]["repository"];
       worktrees: View[];
       iosBuildConfigured: boolean;
+      quickActions: typeof eligibleQuickActions;
     };
     type AgentGroup = {
       agent: View["codebase"]["agent"];
@@ -517,6 +557,14 @@ export class WorktreesService {
             worktree.codebase.repository.projects?.some(
               (project) => project.configurations.length > 0,
             ) ?? false,
+          quickActions: eligibleQuickActions.filter(
+            (workflow) =>
+              workflow.globalQuickAction ||
+              workflow.quickActionRepositories.some(
+                ({ repositoryId }) =>
+                  repositoryId === worktree.codebase.repository.id,
+              ),
+          ),
         };
         agentGroup.codebaseMap.set(worktree.codebase.id, codebaseGroup);
         agentGroup.codebases.push(codebaseGroup);

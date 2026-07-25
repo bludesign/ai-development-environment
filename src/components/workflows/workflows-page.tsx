@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +18,13 @@ import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,12 +62,19 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
+import { cn } from "@/lib/utils";
 
+import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { workflowStatusVariant } from "./workflow-graph";
+import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
 
 const WORKFLOW_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
+  quickActionRepositories { id name displayOrigin }
+  hasPlainTrigger
+  triggerChoices { key label description }
   versionCount runCount createdAt updatedAt
 `;
 
@@ -73,9 +87,12 @@ const RUN_FIELDS = `
 
 export function WorkflowsPage() {
   const t = useTranslations("workflows");
+  const labels = useWorkflowLabels();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<"workflows" | "runs">("workflows");
+  // Runs first: the page is checked far more often to see what automation did
+  // overnight than to edit a definition.
+  const [tab, setTab] = useState<"runs" | "workflows">("runs");
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [search, setSearch] = useState("");
@@ -142,6 +159,7 @@ export function WorkflowsPage() {
   const mutateWorkflow = async (
     workflow: WorkflowSummary,
     operation: "enabled" | "archive" | "run",
+    choice: string | null = null,
   ) => {
     try {
       if (operation === "enabled") {
@@ -159,7 +177,7 @@ export function WorkflowsPage() {
           triggerWorkflow: { id: string };
         }>(
           `mutation TriggerWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
-          { input: { workflowId: workflow.id, sessionData: {} } },
+          { input: { workflowId: workflow.id, sessionData: {}, choice } },
         );
         router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
       }
@@ -224,12 +242,12 @@ export function WorkflowsPage() {
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          onValueChange={(value) => setTab(value as "workflows" | "runs")}
+          onValueChange={(value) => setTab(value as "runs" | "workflows")}
           value={tab}
         >
           <TabsList>
-            <TabsTrigger value="workflows">{t("workflowsTab")}</TabsTrigger>
             <TabsTrigger value="runs">{t("allRuns")}</TabsTrigger>
+            <TabsTrigger value="workflows">{t("workflowsTab")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
@@ -261,75 +279,95 @@ export function WorkflowsPage() {
       </div>
 
       {loading ? (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {[0, 1, 2].map((item) => (
-            <Card key={item}>
-              <CardHeader>
-                <Skeleton className="h-5 w-2/5" />
-                <Skeleton className="h-4 w-4/5" />
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Skeleton className="h-5 w-16" />
-                  <Skeleton className="h-5 w-20" />
-                </div>
-                <Skeleton className="h-8 w-full" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        tab === "runs" ? (
+          <Card className="gap-0 overflow-hidden p-4">
+            <div className="space-y-3">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <Skeleton className="h-8 w-full" key={item} />
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {[0, 1, 2].map((item) => (
+              <Card key={item}>
+                <CardHeader>
+                  <Skeleton className="h-5 w-2/5" />
+                  <Skeleton className="h-4 w-4/5" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Skeleton className="h-5 w-16" />
+                    <Skeleton className="h-5 w-20" />
+                  </div>
+                  <Skeleton className="h-8 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
       ) : tab === "workflows" ? (
         filteredWorkflows.length ? (
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
             {filteredWorkflows.map((workflow) => (
               <Card key={workflow.id}>
-                <CardHeader className="flex-row items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle className="truncate">
-                      <Link
-                        className="hover:underline"
-                        href={`/workflows/${workflow.id}`}
-                      >
-                        {workflow.name}
-                      </Link>
-                    </CardTitle>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {workflow.description || t("noDescription")}
-                    </p>
-                  </div>
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            aria-label={t("actions")}
-                            size="icon"
-                            variant="ghost"
-                          >
-                            <MoreHorizontal />
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("actions")}</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem asChild>
-                        <Link href={`/workflows/${workflow.id}/edit`}>
-                          {t("edit")}
-                        </Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void mutateWorkflow(workflow, "enabled")}
-                      >
-                        {workflow.enabled ? t("pauseDefinition") : t("enable")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void mutateWorkflow(workflow, "archive")}
-                      >
-                        <Archive /> {t("archive")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                {/* `CardAction` parks the menu in the header's own top-right
+                    cell. Overriding the header to `flex-row` did not: the
+                    header is a grid, so `flex-direction` never applied and the
+                    menu dropped to a second row under the description. */}
+                <CardHeader>
+                  <CardTitle className="truncate">
+                    <Link
+                      className="hover:underline"
+                      href={`/workflows/${workflow.id}`}
+                    >
+                      {workflow.name}
+                    </Link>
+                  </CardTitle>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {workflow.description || t("noDescription")}
+                  </p>
+                  <CardAction>
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              aria-label={t("actions")}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("actions")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem asChild>
+                          <Link href={`/workflows/${workflow.id}/edit`}>
+                            {t("edit")}
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            void mutateWorkflow(workflow, "enabled")
+                          }
+                        >
+                          {workflow.enabled
+                            ? t("pauseDefinition")
+                            : t("enable")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            void mutateWorkflow(workflow, "archive")
+                          }
+                        >
+                          <Archive /> {t("archive")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </CardAction>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
@@ -339,7 +377,15 @@ export function WorkflowsPage() {
                     <Badge variant="outline">
                       {t("versionCount", { count: workflow.versionCount })}
                     </Badge>
-                    <Badge variant="outline">{workflow.overlapPolicy}</Badge>
+                    <Badge variant="outline">
+                      {labels.overlapPolicy(workflow.overlapPolicy)}
+                    </Badge>
+                    {(workflow.globalQuickAction ||
+                      (workflow.quickActionRepositories?.length ?? 0) > 0) && (
+                      <Badge variant="outline">
+                        <Zap /> {t("quickActions")}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{t("runCount", { count: workflow.runCount })}</span>
@@ -351,13 +397,18 @@ export function WorkflowsPage() {
                         <GitFork /> {t("edit")}
                       </Link>
                     </Button>
-                    <Button
-                      className="flex-1"
-                      disabled={!workflow.enabled}
-                      onClick={() => void mutateWorkflow(workflow, "run")}
-                    >
-                      <CirclePlay /> {t("run")}
-                    </Button>
+                    <WorkflowChoiceMenu
+                      button={
+                        <Button className="flex-1" disabled={!workflow.enabled}>
+                          <CirclePlay /> {t("run")}
+                        </Button>
+                      }
+                      choices={workflow.triggerChoices}
+                      hasPlainTrigger={workflow.hasPlainTrigger}
+                      onRun={(choice) =>
+                        void mutateWorkflow(workflow, "run", choice)
+                      }
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -370,25 +421,42 @@ export function WorkflowsPage() {
             </EmptyHeader>
           </Empty>
         )
-      ) : (
-        <div className="overflow-x-auto rounded-xl border">
-          <Table>
+      ) : filteredRuns.length ? (
+        <Card className="gap-0 overflow-hidden py-0">
+          {/* A fixed layout divides the width between the columns instead of
+              handing every spare pixel to the gaps, and the floor is the sum
+              of what the columns actually need — below it the container
+              scrolls rather than squeezing the run number into two lines. */}
+          <Table className="table-fixed min-w-[48rem]">
             <TableHeader>
               <TableRow>
-                <TableHead>{t("run")}</TableHead>
-                <TableHead>{t("workflow")}</TableHead>
-                <TableHead>{t("status")}</TableHead>
-                <TableHead>{t("trigger")}</TableHead>
-                <TableHead>{t("generation")}</TableHead>
-                <TableHead>{t("started")}</TableHead>
+                <TableHead className="w-[8%]">{t("run")}</TableHead>
+                <TableHead className="w-[26%]">{t("workflow")}</TableHead>
+                <TableHead className="w-[14%]">{t("status")}</TableHead>
+                <TableHead className="w-[22%]">{t("trigger")}</TableHead>
+                <TableHead className="w-[12%]">{t("generation")}</TableHead>
+                <TableHead className="w-[18%]">{t("started")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredRuns.map((run) => (
-                <TableRow key={run.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  key={run.id}
+                  /* Anything interactive inside the row — the workflow link,
+                     a text selection drag — opts the row out, so only a click
+                     on the row itself opens the run. */
+                  onClick={(event) => {
+                    if (!isRowActivation(event)) return;
+                    router.push(`/workflows/runs/${run.id}`);
+                  }}
+                >
                   <TableCell>
                     <Link
-                      className="font-medium hover:underline"
+                      className={cn(
+                        rowLinkClass,
+                        "inline-block font-mono font-medium",
+                      )}
                       href={`/workflows/runs/${run.id}`}
                     >
                       #{run.displayNumber}
@@ -396,18 +464,24 @@ export function WorkflowsPage() {
                   </TableCell>
                   <TableCell>
                     <Link
-                      className="hover:underline"
+                      className={cn(rowLinkClass, "block min-w-0 truncate")}
                       href={`/workflows/${run.workflow.id}`}
+                      title={run.workflow.name}
                     >
                       {run.workflow.name}
                     </Link>
                   </TableCell>
                   <TableCell>
                     <Badge variant={workflowStatusVariant(run.status)}>
-                      {run.status}
+                      {labels.status(run.status)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{run.triggerKind}</TableCell>
+                  <TableCell
+                    className="truncate"
+                    title={labels.kind(run.triggerKind)}
+                  >
+                    {labels.kind(run.triggerKind)}
+                  </TableCell>
                   <TableCell>{run.generation}</TableCell>
                   <TableCell>
                     {run.startedAt ? (
@@ -420,15 +494,14 @@ export function WorkflowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!filteredRuns.length && (
-            <Empty className="py-16">
-              <EmptyHeader>
-                <EmptyTitle>{t("noRuns")}</EmptyTitle>
-                <EmptyDescription>{t("descriptionLong")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-        </div>
+        </Card>
+      ) : (
+        <Empty className="border py-16">
+          <EmptyHeader>
+            <EmptyTitle>{t("noRuns")}</EmptyTitle>
+            <EmptyDescription>{t("descriptionLong")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
     </div>
   );

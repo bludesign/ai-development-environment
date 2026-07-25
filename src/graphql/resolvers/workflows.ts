@@ -1,3 +1,8 @@
+import {
+  parseWorkflowDefinition,
+  workflowResourceKind,
+  workflowTriggerChoices,
+} from "@/lib/workflows/definition";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   CreateWorkflowInput,
@@ -31,6 +36,44 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     }) => value._count?.versions ?? value.versions?.length ?? 0,
     runCount: (value: { _count?: { runs?: number } }) =>
       value._count?.runs ?? 0,
+    quickActionRepositories: (value: {
+      quickActionRepositories?: Array<{ repository: unknown }>;
+    }) =>
+      value.quickActionRepositories?.map(({ repository }) => repository) ?? [],
+    // Read off the published definition every caller already loads with the
+    // workflow, so listing a page of run buttons costs no extra queries.
+    triggerChoices: (
+      value: { activeVersion?: { definitionJson: string } | null },
+      { resourceKind }: { resourceKind?: string | null },
+    ) => {
+      if (!value.activeVersion) return [];
+      const wanted = resourceKind?.trim().toUpperCase() ?? null;
+      const definition = parseWorkflowDefinition(
+        JSON.parse(value.activeVersion.definitionJson),
+      );
+      const trigger = definition.triggers.find(
+        (candidate) =>
+          candidate.kind ===
+            (wanted ? "RESOURCE_MANUAL_CHOICE" : "MANUAL_CHOICE") &&
+          (!wanted || workflowResourceKind(candidate.config) === wanted),
+      );
+      return trigger ? workflowTriggerChoices(trigger.config) : [];
+    },
+    hasPlainTrigger: (
+      value: { activeVersion?: { definitionJson: string } | null },
+      { resourceKind }: { resourceKind?: string | null },
+    ) => {
+      if (!value.activeVersion) return false;
+      const wanted = resourceKind?.trim().toUpperCase() ?? null;
+      const definition = parseWorkflowDefinition(
+        JSON.parse(value.activeVersion.definitionJson),
+      );
+      return definition.triggers.some(
+        (candidate) =>
+          candidate.kind === (wanted ? "RESOURCE_MANUAL" : "MANUAL") &&
+          (!wanted || workflowResourceKind(candidate.config) === wanted),
+      );
+    },
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
@@ -179,6 +222,14 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       requireControlPlane(context);
       return service.acceptingResource(kind);
     },
+    workflowQuickActions: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.quickActions(worktreeId);
+    },
     exportWorkflow: (
       _root: unknown,
       { id, versionId }: { id: string; versionId?: string | null },
@@ -241,6 +292,24 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.setEnabled(args.id, args.enabled);
+    },
+    setWorkflowQuickAction: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          id: string;
+          global: boolean;
+          quickActionIconKey: string;
+          quickActionButtonVariant: string;
+          repositoryIds: string[];
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.setQuickAction(input);
     },
     archiveWorkflow: (
       _root: unknown,
