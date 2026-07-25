@@ -28,7 +28,8 @@
     "ws": "8.21.1"
   },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/control-agent.js --banner:js=\"#!/usr/bin/env node\"",
+    "build": "node esbuild.config.mjs",
+    "smoke": "node dist/control-agent.js --help",
     "prepublishOnly": "npm run build",
     "dev": "node --watch --watch-preserve-output --import tsx src/index.ts dev",
     "format": "prettier --write --ignore-path ../../.gitignore --ignore-path ../../.prettierignore .",
@@ -38,8 +39,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json",
     "test": "vitest",
     "test:run": "vitest run",
-    "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build",
-    "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build",
+    "full-check": "npm run format && npm run lint:fix && npm run type-check && npm run test:run && npm run build && npm run smoke",
+    "full-check:ci": "npm run format:check && npm run lint && npm run type-check && npm run test:run && npm run build && npm run smoke",
     "full-check:dev": "npm run full-check && npm run dev",
     "upgrade": "ncu -u --cooldown 48h && npm install",
     "upgrade:check": "ncu --cooldown 48h"
