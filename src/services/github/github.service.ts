@@ -413,17 +413,29 @@ const worktreeHighlightKey = (canonicalOrigin: string, branch: string) =>
 const canonicalOriginOf = (nameWithOwner: string) =>
   `github.com/${nameWithOwner.toLowerCase()}`;
 
-/**
- * A fork's branch lives in the head repository, so that is the repository whose
- * worktrees can match a pull request's branch; same-repository pull requests
- * fall back to the base repository.
- */
+/** A pull request branch can only match a worktree when GitHub identifies the
+ * repository that owns the head ref. */
 const headRepositoryName = (pullRequest: {
   headRepository: { nameWithOwner: string } | null;
-  repository: { nameWithOwner: string };
-}) =>
-  pullRequest.headRepository?.nameWithOwner ??
-  pullRequest.repository.nameWithOwner;
+}) => pullRequest.headRepository?.nameWithOwner ?? null;
+
+function pullRequestWorktreeHighlight(
+  pullRequest: {
+    headRefName: string;
+    headRepository: { nameWithOwner: string } | null;
+  },
+  highlights?: Map<string, WorktreeHighlight>,
+) {
+  const nameWithOwner = headRepositoryName(pullRequest);
+  return nameWithOwner
+    ? highlights?.get(
+        worktreeHighlightKey(
+          canonicalOriginOf(nameWithOwner),
+          pullRequest.headRefName,
+        ),
+      )
+    : undefined;
+}
 
 function repositoryView(repository: {
   id: string;
@@ -797,12 +809,7 @@ function reviewThreadPullRequest(
   pullRequest: RawReviewThreadPullRequest,
   highlights?: Map<string, WorktreeHighlight>,
 ): GitHubReviewThreadPullRequest {
-  const highlight = highlights?.get(
-    worktreeHighlightKey(
-      canonicalOriginOf(headRepositoryName(pullRequest)),
-      pullRequest.headRefName,
-    ),
-  );
+  const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
   return {
     id: pullRequest.id,
     number: pullRequest.number,
@@ -3385,12 +3392,7 @@ export class GitHubService {
           token,
           appConfigured,
         );
-        const highlight = highlights.get(
-          worktreeHighlightKey(
-            canonicalOriginOf(headRepositoryName(pullRequest)),
-            pullRequest.headRefName,
-          ),
-        );
+        const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
         return {
           ...summary,
           worktreeId: highlight?.id ?? null,
@@ -3673,7 +3675,7 @@ export class GitHubService {
         };
       }),
     );
-    const reviewThreads = await this.completeReviewThreads(
+    const normalizedReviewThreads = await this.completeReviewThreads(
       pullRequest.id,
       pullRequest.reviewThreadsFull,
       token,
@@ -3706,6 +3708,14 @@ export class GitHubService {
           select: { id: true, highlightColor: true },
         })
       : null;
+    const reviewThreads = normalizedReviewThreads.map((thread) => ({
+      ...thread,
+      pullRequest: {
+        ...thread.pullRequest,
+        worktreeId: worktree?.id ?? null,
+        worktreeHighlightColor: worktree?.highlightColor ?? null,
+      },
+    }));
     return {
       ...summary,
       codebaseRepositoryId: codebaseRepository?.id ?? null,

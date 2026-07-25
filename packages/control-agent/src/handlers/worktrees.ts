@@ -121,6 +121,38 @@ async function rebaseInProgress(
   return false;
 }
 
+async function rebaseBranch(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  for (const name of ["rebase-merge/head-name", "rebase-apply/head-name"]) {
+    const pathResult = await git(
+      folder,
+      ["rev-parse", "--git-path", name],
+      timeoutMs,
+      signal,
+    );
+    if (pathResult.exitCode !== 0) continue;
+    const candidate = pathResult.stdout.trim();
+    if (!candidate) continue;
+    try {
+      const headName = (
+        await readFile(
+          isAbsolute(candidate) ? candidate : join(folder, candidate),
+          "utf8",
+        )
+      ).trim();
+      if (headName.startsWith("refs/heads/")) {
+        return headName.slice("refs/heads/".length);
+      }
+    } catch {
+      // Check the other rebase backend.
+    }
+  }
+  return null;
+}
+
 function closeWorktreeWatch(entry: ActiveWorktreeWatch): void {
   if (entry.timer) clearTimeout(entry.timer);
   entry.timer = null;
@@ -169,8 +201,13 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
         worktreeCodeStateHash(entry.folder, entry.timeoutMs, signal),
         rebaseInProgress(entry.folder, entry.timeoutMs, signal),
       ]);
-    const branch =
+    const symbolicBranch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+    const branch =
+      symbolicBranch ??
+      (rebasing
+        ? await rebaseBranch(entry.folder, entry.timeoutMs, signal)
+        : null);
     const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
     const headIdentity = headSha ? `${branch ?? ""}\0${headSha}` : null;
     const changes =
@@ -481,8 +518,11 @@ export async function inspectWorktreeItem(
         ),
         rebaseInProgress(folder, timeoutMs, signal),
       ]);
-    const branch =
+    const symbolicBranch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+    const branch =
+      symbolicBranch ??
+      (rebasing ? await rebaseBranch(folder, timeoutMs, signal) : null);
     const upstreamResult = branch
       ? await git(
           folder,

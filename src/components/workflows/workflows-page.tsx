@@ -341,9 +341,10 @@ export function WorkflowsPage() {
           {tab === "runs" && (
             <>
               <Select
-                onValueChange={(value) =>
-                  setRunArchiveFilter(value ?? "ACTIVE")
-                }
+                onValueChange={(value) => {
+                  setRunArchiveFilter(value ?? "ACTIVE");
+                  setSelected(new Set());
+                }}
                 value={runArchiveFilter}
               >
                 <SelectTrigger aria-label={t("archiveFilter")}>

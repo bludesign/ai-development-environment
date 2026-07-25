@@ -673,6 +673,18 @@ describe("worktree inventory and inspection", () => {
       expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
       baseBranch: "main",
     };
+    const reportWorktreeActivity = vi.fn(async () => ({}));
+    await watchWorktree(
+      { ...operation, action: "START", watchId: "conflicted-rebase-watch" },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+      { reportWorktreeActivity },
+    );
+    await vi.waitFor(() => expect(reportWorktreeActivity).toHaveBeenCalled(), {
+      timeout: 3_000,
+    });
+    reportWorktreeActivity.mockClear();
 
     await expect(
       operateWorktree(
@@ -682,6 +694,17 @@ describe("worktree inventory and inspection", () => {
         async () => undefined,
       ),
     ).rejects.toThrow();
+    await vi.waitFor(
+      () =>
+        expect(reportWorktreeActivity).toHaveBeenCalledWith(
+          expect.objectContaining({
+            branch: "feature/conflict",
+            rebaseInProgress: true,
+            hasConflicts: true,
+          }),
+        ),
+      { timeout: 3_000 },
+    );
 
     const paused = await discoverWorktrees(
       folder,
@@ -692,7 +715,11 @@ describe("worktree inventory and inspection", () => {
     );
     expect(
       paused.worktrees.find((worktree) => worktree.folder === linkedRealPath),
-    ).toMatchObject({ rebaseInProgress: true, hasConflicts: true });
+    ).toMatchObject({
+      branch: "feature/conflict",
+      rebaseInProgress: true,
+      hasConflicts: true,
+    });
 
     await operateWorktree(
       { ...operation, operation: "CANCEL_REBASE" },

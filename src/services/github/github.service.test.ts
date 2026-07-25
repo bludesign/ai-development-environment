@@ -460,6 +460,7 @@ function rawReviewThread(
     pullRequestId?: string;
     pullRequestNumber?: number;
     headRefName?: string;
+    headRepository?: { nameWithOwner: string } | null;
   } = {},
 ) {
   const pullRequestId = options.pullRequestId ?? "review-pull-request-1";
@@ -484,7 +485,10 @@ function rawReviewThread(
       title: `Review pull request ${pullRequestNumber}`,
       url: `https://github.com/acme/widgets/pull/${pullRequestNumber}`,
       headRefName: options.headRefName ?? "feature/app-42",
-      headRepository: { nameWithOwner: "acme/widgets" },
+      headRepository:
+        options.headRepository === undefined
+          ? { nameWithOwner: "acme/widgets" }
+          : options.headRepository,
       repository: { nameWithOwner: "acme/widgets" },
     },
     comments: {
@@ -2027,7 +2031,7 @@ describe("GitHub service", () => {
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
                 reviewThreadsFull: {
-                  nodes: [],
+                  nodes: [rawReviewThread("detail-thread", { headRepository })],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
                 baseRefName: "main",
@@ -2061,6 +2065,14 @@ describe("GitHub service", () => {
     ).resolves.toMatchObject({
       worktreeId: "fork-worktree",
       worktreeHighlightColor: "violet",
+      reviewThreads: [
+        {
+          pullRequest: {
+            worktreeId: "fork-worktree",
+            worktreeHighlightColor: "violet",
+          },
+        },
+      ],
     });
     expect(state.codebaseRepositoryOrigins).toEqual([
       "github.com/acme/widgets",
@@ -2074,6 +2086,14 @@ describe("GitHub service", () => {
     ).resolves.toMatchObject({
       worktreeId: null,
       worktreeHighlightColor: null,
+      reviewThreads: [
+        {
+          pullRequest: {
+            worktreeId: null,
+            worktreeHighlightColor: null,
+          },
+        },
+      ],
     });
     expect(state.codebaseRepositoryOrigins).toEqual([
       "github.com/acme/widgets",
@@ -2735,6 +2755,61 @@ describe("GitHub service", () => {
     });
   });
 
+  test("does not match pull request rows when GitHub omits the head repository", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [
+                  {
+                    ...rawPullRequest("pull-request-1", "APP-42 Add API"),
+                    headRepository: null,
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "base-worktree",
+        branch: "feature/app-42",
+        highlightColor: "violet",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().pullRequests("MINE", null, {
+      first: 1,
+    });
+
+    expect(page.items[0]).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
+  });
+
   test("leaves pull request rows untinted when no worktree tracks the branch", async () => {
     vi.stubGlobal(
       "fetch",
@@ -2849,6 +2924,76 @@ describe("GitHub service", () => {
     expect(page.threads[0].pullRequest).toMatchObject({
       worktreeId: "worktree-1",
       worktreeHighlightColor: "emerald",
+    });
+  });
+
+  test("does not match review threads when GitHub omits the head repository", async () => {
+    const thread = rawReviewThread("thread-1", {
+      author: "octocat",
+      headRepository: null,
+    });
+    const reviewPullRequest = {
+      id: "review-pull-request-1",
+      number: 21,
+      title: "Review pull request 21",
+      url: "https://github.com/acme/widgets/pull/21",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      headRefName: "feature/app-42",
+      headRepository: null,
+      repository: { nameWithOwner: "acme/widgets" },
+      reviewThreads: {
+        nodes: [thread],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [reviewPullRequest],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "base-worktree",
+        branch: "feature/app-42",
+        highlightColor: "emerald",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().reviewThreads();
+
+    expect(page.pullRequests[0]).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
+    expect(page.threads[0].pullRequest).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
     });
   });
 });
