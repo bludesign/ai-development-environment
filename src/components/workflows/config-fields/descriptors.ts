@@ -687,7 +687,23 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [condition("condition", "Condition", { required: true })],
   },
   CONTROL_JOIN: {
-    fields: [enumField("mode", "Join mode", staticOptions(["ALL", "ANY"]))],
+    fields: [
+      enumField(
+        "mode",
+        "Join mode",
+        listOptions([
+          { value: "ALL", label: "All — wait for every branch" },
+          { value: "ANY", label: "Any — continue on the first branch" },
+        ]),
+        {
+          help:
+            "All (default) waits until every incoming branch has finished before continuing. " +
+            "Any continues as soon as the first incoming branch arrives, and the remaining " +
+            "branches keep running on their own. Either way, branches that were skipped do not " +
+            "block the join, and the join itself is skipped when no branch reaches it.",
+        },
+      ),
+    ],
   },
   CONTROL_DELAY: {
     fields: [num("seconds", "Delay (seconds)", { required: true })],
