@@ -344,9 +344,15 @@ describe("CommandRunPage", () => {
     buffer!.active.viewportY = 5;
     terminalOnScroll.mock.calls.at(-1)?.[0]();
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Follow output" }),
+    const followButton = await screen.findByRole("button", {
+      name: "Follow output",
+    });
+    expect(screen.getByRole("log").parentElement?.contains(followButton)).toBe(
+      true,
     );
+    expect(followButton.className).toContain("absolute");
+    expect(followButton.className).toContain("bg-neutral-800/70");
+    fireEvent.click(followButton);
     expect(terminalScrollToBottom).toHaveBeenCalled();
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowDown,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -281,19 +282,6 @@ export function TerminalOutputCard({
               </Button>
             </div>
           )}
-          {open && !follow && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                followRef.current = true;
-                setFollow(true);
-                terminalRef.current?.scrollToBottom();
-              }}
-            >
-              {followLabel}
-            </Button>
-          )}
           {open && (
             <Button
               aria-label={fitLabel}
@@ -337,6 +325,23 @@ export function TerminalOutputCard({
             <p className="pointer-events-none absolute inset-0 p-4 font-mono text-xs text-neutral-400">
               {emptyText}
             </p>
+          )}
+          {!follow && (
+            <Button
+              aria-label={followLabel}
+              className="absolute right-4 bottom-4 z-10 border-white/15 bg-neutral-800/70 text-white shadow-lg backdrop-blur-sm hover:bg-neutral-700/90 hover:text-white"
+              onClick={() => {
+                followRef.current = true;
+                setFollow(true);
+                terminalRef.current?.scrollToBottom();
+              }}
+              size="icon"
+              title={followLabel}
+              type="button"
+              variant="outline"
+            >
+              <ArrowDown />
+            </Button>
           )}
         </div>
       )}
