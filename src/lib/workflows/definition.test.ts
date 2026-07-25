@@ -274,6 +274,18 @@ describe("workflow definition validation", () => {
     expect(availableBefore.get("notify") ?? []).toContain("ticket.*");
   });
 
+  test("optional config keys do not become publish requirements", () => {
+    // `runId` is optional on RUN_PAUSE, the way `jiraIssueKey` is on the run
+    // steps: the adapter falls back to session data and treats an empty value as
+    // absent, so binding one must not demand the path be guaranteed.
+    const value = definition([node("pause", "RUN_PAUSE")]);
+    value.nodes[0]!.config = {
+      runId: { source: "SESSION", path: "run.id" },
+    };
+
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+  });
+
   test("non-provider steps still hard-require their session bindings", () => {
     // JIRA_TRANSITION does not provide ticket.*, so a ticket.key binding stays
     // a publish requirement — the unwrap relaxation is scoped to self-provides.

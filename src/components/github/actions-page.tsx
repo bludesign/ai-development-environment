@@ -25,6 +25,11 @@ import {
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowRunActionsMenu } from "@/components/github/workflow-run-actions-menu";
+import { WorkflowJob as WorkflowJobMenu } from "@/components/github/workflow-job";
+import {
+  githubJobWorkflowResource,
+  githubPipelineWorkflowResource,
+} from "@/components/github/workflow-resource-context";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -56,6 +61,11 @@ import {
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightBackgroundClasses,
+  worktreeHighlightInsetAccentClasses,
+} from "@/lib/worktree-highlight";
 import { isRowActivation } from "@/lib/row-activation";
 import type {
   GitHubActionsRepositoryErrorView,
@@ -70,7 +80,7 @@ import type {
 const ALL_REPOSITORIES = "all";
 const ALL_PIPELINES = "all";
 const RUN_FIELDS =
-  "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt";
+  "id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId worktreeHighlightColor startedAt createdAt updatedAt";
 const REPOSITORY_FIELDS = "id nameWithOwner url";
 const JOB_FIELDS =
   "id name status url canRetry retryUnavailableReason steps { number name status }";
@@ -892,15 +902,26 @@ function ActionsTable({
                       updatedAt: historicalAttempt.updatedAt,
                     }
                   : run;
+                const highlight = run.worktreeHighlightColor;
                 return (
                   <Fragment key={key}>
                     <TableRow
-                      className="cursor-pointer"
+                      className={cn(
+                        "cursor-pointer",
+                        highlight &&
+                          worktreeHighlightBackgroundClasses[highlight],
+                      )}
                       onClick={(event) => {
                         if (isRowActivation(event)) onToggleRun(run);
                       }}
                     >
-                      <TableCell className="pr-0">
+                      <TableCell
+                        className={cn(
+                          "pr-0",
+                          highlight &&
+                            worktreeHighlightInsetAccentClasses[highlight],
+                        )}
+                      >
                         <Button
                           aria-expanded={expanded}
                           aria-label={t(expanded ? "hideJobs" : "showJobs", {
@@ -1028,6 +1049,10 @@ function ActionsTable({
                             onRetried={() => onRunRetried(run)}
                             run={run}
                             jobs={jobState?.jobs ?? []}
+                            workflowResource={githubPipelineWorkflowResource({
+                              ...run,
+                              workflowRunId: run.id,
+                            })}
                           />
                         </div>
                       </TableCell>
@@ -1102,13 +1127,22 @@ function WorkflowJobsPanel({
       ) : state?.jobs ? (
         <div className="divide-y">
           {state.jobs.map((job) => (
-            <WorkflowJob
+            <WorkflowJobMenu
               checkSuiteId={run.checkSuiteId}
               job={job}
               key={job.id}
               onError={onError}
               onRetried={() => onRetried(job.id)}
               repositoryId={run.repositoryGithubId}
+              workflowResource={githubJobWorkflowResource(
+                githubPipelineWorkflowResource({
+                  ...run,
+                  workflowRunId: run.id,
+                }),
+                job,
+                run.codebaseRepositoryId,
+                run.repositoryGithubId,
+              )}
             />
           ))}
         </div>
@@ -1117,7 +1151,7 @@ function WorkflowJobsPanel({
   );
 }
 
-function WorkflowJob({
+export function LegacyWorkflowJob({
   job,
   repositoryId,
   checkSuiteId,

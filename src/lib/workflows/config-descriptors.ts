@@ -20,6 +20,7 @@ import {
   type WorkflowStepKind,
   type WorkflowTriggerKind,
 } from "./kinds";
+import { workflowValueSessionPaths } from "./session";
 
 /**
  * The config every step and trigger kind accepts, described declaratively.
@@ -81,6 +82,19 @@ function resourceOptions(
   };
 }
 
+/**
+ * A scalar string the author may pin, bind to a session path, or write with
+ * `{{path}}` tokens the runtime substitutes.
+ */
+const SCALAR_MODES = ["literal", "session", "interpolation"] as const;
+
+/**
+ * A composite value — a list, a record, a condition tree, a raw JSON blob. There
+ * is no single scalar to bind, but `resolveWorkflowValue` walks the whole config
+ * before a step runs, so every string *inside* one of these still interpolates.
+ */
+const NESTED_MODES = ["literal", "interpolation"] as const;
+
 const text = (
   key: string,
   label: string,
@@ -89,7 +103,7 @@ const text = (
   key,
   label,
   control: "text",
-  valueModes: ["literal", "session", "interpolation"],
+  valueModes: SCALAR_MODES,
   ...options,
 });
 
@@ -147,7 +161,9 @@ const resource = (
     label,
     control: "resource",
     options: resourceOptions(kind, scopeFrom),
-    valueModes: ["literal", "session"],
+    // The picker accepts a typed-in value, so an id assembled from session data
+    // is as valid here as one chosen from the list.
+    valueModes: SCALAR_MODES,
     ...rest,
   };
 };
@@ -164,6 +180,7 @@ const resourceMulti = (
     label,
     control: "resourceMulti",
     options: resourceOptions(kind, scopeFrom),
+    valueModes: NESTED_MODES,
     ...rest,
   };
 };
@@ -176,6 +193,7 @@ const stringList = (
   key,
   label,
   control: "stringList",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -187,6 +205,7 @@ const record = (
   key,
   label,
   control: "record",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -198,6 +217,7 @@ const json = (
   key,
   label,
   control: "json",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -209,6 +229,7 @@ const condition = (
   key,
   label,
   control: "condition",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -220,6 +241,7 @@ const choiceOptions = (
   key,
   label,
   control: "choiceOptions",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -917,7 +939,10 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
           text("commandPattern", "Command pattern (regex)", {
             placeholder: "^/deploy\\b$",
             required: true,
-            valueModes: undefined,
+            // The matcher compiles this itself, so it has to stay a string: a
+            // session binding would arrive as an object. Interpolation keeps it
+            // a string, so tokens are still allowed.
+            valueModes: ["literal", "interpolation"],
           }),
         ]),
       ];
@@ -947,6 +972,67 @@ export function hasConfigDescriptor(
   scope: ConfigFieldScope,
 ): boolean {
   return Boolean(getConfigDescriptor(kind, scope));
+}
+
+/**
+ * The config keys a kind describes, with the subset it marks required. The
+ * `model` control spans three sibling keys, of which only its primary `key`
+ * counts as required — the same split `configSchemaForKind` publishes.
+ */
+function configKeys(
+  kind: string,
+  scope: ConfigFieldScope,
+): { described: Set<string>; required: Set<string> } | null {
+  const descriptor = getConfigDescriptor(kind, scope);
+  if (!descriptor) return null;
+  const described = new Set<string>();
+  const required = new Set<string>();
+  for (const field of descriptor.fields) {
+    const keys =
+      field.control === "model" && field.modelKeys
+        ? [
+            field.modelKeys.provider,
+            field.modelKeys.model,
+            field.modelKeys.effort,
+          ]
+        : [field.key];
+    for (const key of keys) described.add(key);
+    if (field.required) required.add(field.key);
+  }
+  return { described, required };
+}
+
+/**
+ * The session paths a config binds that have to exist before the step can run.
+ *
+ * Only bindings on keys the descriptor marks required gate execution. An
+ * optional key is exactly that at run time: `resolveWorkflowValue` yields
+ * undefined, `{{tokens}}` interpolate to nothing, and the adapters read the
+ * result through `optionalText` with their own session fallbacks. Gating on one
+ * blocked whole runs over data the step never needed — "Run AI session" merely
+ * offers a Jira issue key, so a worktree with no ticket must still start it.
+ * Steps that genuinely cannot work without a value declare it in the catalog's
+ * `requiredPaths`, which stay strict. So do kinds with no descriptor and keys it
+ * does not describe (the editor's raw-JSON escape hatch), where there is nothing
+ * to say the value is optional.
+ */
+export function requiredConfigSessionPaths(
+  kind: string,
+  scope: ConfigFieldScope,
+  config: unknown,
+): Set<string> {
+  const keys = configKeys(kind, scope);
+  if (!keys || !config || typeof config !== "object" || Array.isArray(config)) {
+    return workflowValueSessionPaths(config);
+  }
+  const paths = new Set<string>();
+  for (const [key, value] of Object.entries(
+    config as Record<string, unknown>,
+  )) {
+    if (keys.described.has(key) && !keys.required.has(key)) continue;
+    workflowValueSessionPaths(value, paths);
+  }
+  return paths;
 }
 
 export { STEP_CONFIG_DESCRIPTORS, TRIGGER_CONFIG_DESCRIPTORS };

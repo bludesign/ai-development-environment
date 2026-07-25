@@ -7,6 +7,7 @@ import {
 
 import type { CodebasesService } from "@/services/codebases";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
+import { getPrismaClient } from "@/data/prisma-client";
 
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
@@ -29,9 +30,28 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       Array.isArray(value) ? value : (value.repositories ?? []),
   },
   CodebaseRepository: {
-    quickActionWorkflows: (value: {
-      quickActionWorkflows?: Array<{ workflow: unknown }>;
-    }) => value.quickActionWorkflows?.map(({ workflow }) => workflow) ?? [],
+    quickActionWorkflows: async (value: { id: string }) => {
+      const prisma = await getPrismaClient();
+      return prisma.workflow.findMany({
+        where: {
+          archivedAt: null,
+          quickActionKind: { not: "NONE" },
+          OR: [
+            { quickActionRepositories: { none: {} } },
+            {
+              quickActionRepositories: {
+                some: { repositoryId: value.id },
+              },
+            },
+          ],
+        },
+        include: {
+          activeVersion: true,
+          quickActionRepositories: { include: { repository: true } },
+        },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+      });
+    },
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -173,7 +193,6 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
           jiraBranchRegex?: string | null;
           keepBaseBranchUpToDate: boolean;
           skillGroupIds?: string[] | null;
-          quickActionWorkflowIds?: string[] | null;
         };
       },
       context: GraphQLContext,
@@ -186,7 +205,6 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.jiraBranchRegex,
         input.keepBaseBranchUpToDate,
         input.skillGroupIds,
-        input.quickActionWorkflowIds,
       );
     },
     updateCodebaseSettings: (

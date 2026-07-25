@@ -16,6 +16,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 import type {
   GitHubPullRequestActor,
   GitHubReviewComment,
@@ -137,9 +142,16 @@ export function ReviewThreadCard({
   const canChangeState = thread.isResolved
     ? thread.viewerCanUnresolve
     : thread.viewerCanResolve;
+  const highlighted = thread.pullRequest.worktreeHighlightColor;
 
   return (
-    <Card>
+    <Card
+      className={cn(
+        highlighted && "border-l-4",
+        highlighted && worktreeHighlightBackgroundClasses[highlighted],
+        highlighted && worktreeHighlightAccentClasses[highlighted],
+      )}
+    >
       <CardContent className="space-y-5">
         <GitHubMarkdownBlock
           body={thread.rootComment.body}

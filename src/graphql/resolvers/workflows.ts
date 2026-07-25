@@ -11,6 +11,7 @@ import type {
   TriggerWorkflowInput,
   WorkflowsService,
 } from "@/services/workflows";
+import type { WorkflowQuickActionKind } from "@/lib/workflows/kinds";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId)
@@ -94,6 +95,8 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       JSON.parse(value.triggerPayloadJson),
     sessionData: (value: { sessionDataJson: string }) =>
       JSON.parse(value.sessionDataJson),
+    worktree: (value: { sessionDataJson: string }) =>
+      service.runWorktree(value.sessionDataJson),
     attemptCount: (value: {
       _count?: { attempts?: number };
       attempts?: unknown[];
@@ -104,6 +107,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     startedAt: (value: { startedAt?: Date | null }) => iso(value.startedAt),
     pausedAt: (value: { pausedAt?: Date | null }) => iso(value.pausedAt),
     finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
+    archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -224,11 +228,15 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     },
     workflowQuickActions: (
       _root: unknown,
-      { worktreeId }: { worktreeId: string },
+      input: {
+        kind: WorkflowQuickActionKind;
+        resourceKind: string;
+        repositoryId?: string | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.quickActions(worktreeId);
+      return service.quickActions(input);
     },
     exportWorkflow: (
       _root: unknown,
@@ -300,7 +308,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       }: {
         input: {
           id: string;
-          global: boolean;
+          kind: WorkflowQuickActionKind;
           quickActionIconKey: string;
           quickActionButtonVariant: string;
           repositoryIds: string[];
@@ -326,6 +334,22 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.delete(id);
+    },
+    archiveWorkflowRuns: (
+      _root: unknown,
+      { ids, archived }: { ids: string[]; archived: boolean },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.archiveRuns(ids, archived);
+    },
+    deleteWorkflowRuns: (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteRuns(ids);
     },
     triggerWorkflow: (
       _root: unknown,

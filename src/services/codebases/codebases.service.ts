@@ -451,7 +451,6 @@ export class CodebasesService {
     jiraBranchRegexValue?: string | null,
     keepBaseBranchUpToDate = true,
     skillGroupIds?: string[] | null,
-    quickActionWorkflowIds?: string[] | null,
   ) {
     const name = nameValue.trim();
     const description = descriptionValue.trim();
@@ -474,22 +473,6 @@ export class CodebasesService {
         ? null
         : await this.skillsService?.validateGroupIds(skillGroupIds);
     const prisma = await getPrismaClient();
-    const validatedQuickActionWorkflowIds =
-      quickActionWorkflowIds === undefined || quickActionWorkflowIds === null
-        ? null
-        : [
-            ...new Set(
-              quickActionWorkflowIds.map((workflowId) => workflowId.trim()),
-            ),
-          ].filter(Boolean);
-    if (validatedQuickActionWorkflowIds) {
-      const workflowCount = await prisma.workflow.count({
-        where: { id: { in: validatedQuickActionWorkflowIds } },
-      });
-      if (workflowCount !== validatedQuickActionWorkflowIds.length) {
-        throw new Error("One or more quick action workflows were not found");
-      }
-    }
     const repository = await prisma.codebaseRepository.update({
       where: { id },
       data: {
@@ -501,21 +484,6 @@ export class CodebasesService {
     });
     if (validatedSkillGroupIds) {
       await this.skillsService?.setRepositoryGroups(id, validatedSkillGroupIds);
-    }
-    if (validatedQuickActionWorkflowIds) {
-      await prisma.$transaction(async (transaction) => {
-        await transaction.workflowQuickActionRepository.deleteMany({
-          where: { repositoryId: id },
-        });
-        if (validatedQuickActionWorkflowIds.length) {
-          await transaction.workflowQuickActionRepository.createMany({
-            data: validatedQuickActionWorkflowIds.map((workflowId) => ({
-              workflowId,
-              repositoryId: id,
-            })),
-          });
-        }
-      });
     }
     this.publish(null, id);
     return repository;

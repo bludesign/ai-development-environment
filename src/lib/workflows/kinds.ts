@@ -148,11 +148,23 @@ export const WORKFLOW_RESOURCE_KINDS = [
   "CODEBASE",
   "JIRA_TICKET",
   "AGENT_RUN",
+  "GITHUB_PIPELINE",
+  "GITHUB_JOB",
   "PULL_REQUEST",
   "WORKTREE",
 ] as const;
 
 export type WorkflowResourceKind = (typeof WORKFLOW_RESOURCE_KINDS)[number];
+
+export const WORKFLOW_QUICK_ACTION_KINDS = [
+  "STANDARD",
+  "MERGE_CONFLICT",
+  "GITHUB_ACTIONS",
+  "NONE",
+] as const;
+
+export type WorkflowQuickActionKind =
+  (typeof WORKFLOW_QUICK_ACTION_KINDS)[number];
 
 /**
  * The manual trigger kinds come in pairs: a plain one, and a `*_CHOICE` one for

@@ -71,6 +71,11 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 import { workflowRunNodeDestinations } from "@/lib/workflows/resource-navigation";
 import { workflowResourceDestination } from "@/lib/workflows/resources";
 
@@ -82,6 +87,7 @@ const RUN_DETAIL_FIELDS = `
   id displayNumber workflowId versionId triggerKind triggerSubjectKey status phase generation
   sessionData sessionRevision blockedReason error queuedAt startedAt pausedAt finishedAt createdAt updatedAt
   workflow { id name }
+  worktree { id folder branch highlightColor }
   trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
   attempts {
@@ -358,10 +364,18 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
     "SUCCEEDED",
     "CANCELLED",
   ].includes(run.status);
+  const highlighted = run.worktree?.highlightColor;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-3",
+          highlighted && "rounded-lg border-l-4 p-4",
+          highlighted && worktreeHighlightBackgroundClasses[highlighted],
+          highlighted && worktreeHighlightAccentClasses[highlighted],
+        )}
+      >
         <div className="flex items-start gap-2">
           <Tooltip>
             <TooltipTrigger asChild>

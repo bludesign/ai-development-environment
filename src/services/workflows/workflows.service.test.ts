@@ -100,9 +100,6 @@ describe("workflow quick actions", () => {
       },
     ];
     const ignored = emptyWorkflowDefinition("Ignored");
-    prisma.worktree.findUnique.mockResolvedValue({
-      codebase: { repositoryId: "repository-1" },
-    });
     prisma.workflow.findMany.mockResolvedValue([
       {
         id: "workflow-accepted",
@@ -116,14 +113,22 @@ describe("workflow quick actions", () => {
 
     const result = await new WorkflowsService(
       new WorkflowEventsService(),
-    ).quickActions("worktree-1");
+    ).quickActions({
+      kind: "STANDARD",
+      resourceKind: "WORKTREE",
+      repositoryId: "repository-1",
+    });
 
     expect(result.map(({ id }) => id)).toEqual(["workflow-accepted"]);
     expect(prisma.workflow.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          enabled: true,
+          archivedAt: null,
+          activeVersionId: { not: null },
+          quickActionKind: "STANDARD",
           OR: expect.arrayContaining([
-            { globalQuickAction: true },
+            { quickActionRepositories: { none: {} } },
             {
               quickActionRepositories: {
                 some: { repositoryId: "repository-1" },
@@ -148,7 +153,7 @@ describe("workflow quick actions", () => {
 
     await new WorkflowsService(new WorkflowEventsService()).setQuickAction({
       id: "workflow-1",
-      global: true,
+      kind: "GITHUB_ACTIONS",
       quickActionIconKey: "rocket",
       quickActionButtonVariant: "secondary",
       repositoryIds: ["repository-1", "repository-2", "repository-1"],
@@ -157,7 +162,7 @@ describe("workflow quick actions", () => {
     expect(prisma.workflow.update).toHaveBeenCalledWith({
       where: { id: "workflow-1" },
       data: {
-        globalQuickAction: true,
+        quickActionKind: "GITHUB_ACTIONS",
         quickActionIconKey: "rocket",
         quickActionButtonVariant: "secondary",
       },
@@ -170,6 +175,135 @@ describe("workflow quick actions", () => {
         { workflowId: "workflow-1", repositoryId: "repository-2" },
       ],
     });
+  });
+});
+
+describe("workflow resource session hydration", () => {
+  test("adds authoritative worktree context without replacing caller data", async () => {
+    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+      worktree: { id: "worktree-1", path: "/tmp/feature" },
+      repo: { id: "repository-derived", name: "widgets" },
+      pr: { number: 12, jiraKey: "APP-12" },
+      ticket: { key: "APP-12" },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree,
+      },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    const result = await service.hydrateResourceSessionData(
+      "GITHUB_JOB",
+      "repository-1:job:44",
+      {
+        worktree: { id: "worktree-1", headSha: "caller-sha" },
+        repo: { id: "repository-explicit" },
+        pipeline: { id: "run-1" },
+        job: { id: "44" },
+        pr: { number: 99, jiraKey: "APP-99" },
+      },
+    );
+
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
+    expect(result).toMatchObject({
+      worktree: {
+        id: "worktree-1",
+        path: "/tmp/feature",
+        headSha: "caller-sha",
+      },
+      repo: { id: "repository-explicit", name: "widgets" },
+      pipeline: { id: "run-1" },
+      job: { id: "44" },
+      pr: { number: 99, jiraKey: "APP-99" },
+      ticket: { key: "APP-12" },
+    });
+  });
+
+  test("falls back to legacy ticket hydration for worktree resources", async () => {
+    const ticketKeyForWorktree = vi.fn().mockResolvedValue("APP-42");
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { ticketKeyForWorktree },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("WORKTREE", "worktree-1", {
+        worktree: { id: "worktree-1" },
+      }),
+    ).resolves.toMatchObject({ ticket: { key: "APP-42" } });
+  });
+
+  test("uses the first run PR only when a linked worktree has none", async () => {
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree: vi.fn().mockResolvedValue({
+          worktree: { id: "worktree-1" },
+          repo: { id: "repository-1" },
+        }),
+      },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData(
+        "GITHUB_PIPELINE",
+        "repository-1:run:1",
+        {
+          worktree: { id: "worktree-1" },
+          pipeline: {
+            pullRequests: [
+              {
+                number: 12,
+                url: "https://github.com/acme/widgets/pull/12",
+              },
+              {
+                number: 13,
+                url: "https://github.com/acme/widgets/pull/13",
+              },
+            ],
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ pr: { number: 12 } });
   });
 });
 
@@ -506,6 +640,79 @@ describe("workflow runtime lifecycle guards", () => {
   });
 });
 
+describe("workflow trigger interpolation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function matches(
+    kind: string,
+    config: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ) {
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as Record<string, (...args: unknown[]) => Promise<boolean>>;
+    return service.triggerMatches!(
+      { id: "trigger-1", kind, configJson: JSON.stringify(config) },
+      "PULL_REQUEST:1",
+      payload,
+    );
+  }
+
+  const pullRequest = {
+    pr: { author: "octocat", base: "main" },
+    repo: { owner: "octocat" },
+    worktree: { baseBranch: "main" },
+  };
+
+  test("resolves filter values against the event payload", async () => {
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        { filters: { "pr.author": "{{repo.owner}}" } },
+        pullRequest,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        { filters: { "pr.base": "{{worktree.baseBranch}}-next" } },
+        pullRequest,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  test("resolves a session binding in a filter", async () => {
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        {
+          filters: {
+            "pr.base": { source: "SESSION", path: "worktree.baseBranch" },
+          },
+        },
+        pullRequest,
+      ),
+    ).resolves.toBe(true);
+  });
+
+  test("interpolates the issue command pattern before compiling it", async () => {
+    const payload = {
+      ...pullRequest,
+      comment: { author: { login: "octocat" }, body: "/deploy main" },
+    };
+    await expect(
+      matches(
+        "GITHUB_ISSUE_COMMAND",
+        {
+          allowedLogins: ["octocat"],
+          commandPattern: "^/deploy {{worktree.baseBranch}}$",
+        },
+        payload,
+      ),
+    ).resolves.toBe(true);
+  });
+});
+
 describe("workflow choice triggers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -642,5 +849,40 @@ describe("workflow choice triggers", () => {
     expect(selected.choice).toBe("ready");
     expect(state("ready")).toBe("ACTIVE");
     expect(state("draft")).toBe("INACTIVE");
+  });
+});
+
+describe("workflow run worktree tint", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("resolves the linked worktree from session data", async () => {
+    prisma.worktree.findUnique.mockResolvedValue({
+      id: "worktree-1",
+      folder: "/tmp/feature",
+      branch: "feature",
+      highlightColor: "violet",
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const worktree = await service.runWorktree(
+      JSON.stringify({ worktree: { id: "worktree-1" } }),
+    );
+
+    expect(prisma.worktree.findUnique).toHaveBeenCalledWith({
+      where: { id: "worktree-1" },
+      select: { id: true, folder: true, branch: true, highlightColor: true },
+    });
+    expect(worktree).toMatchObject({ highlightColor: "violet" });
+  });
+
+  test("skips the lookup when the run has no worktree", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    expect(
+      await service.runWorktree(JSON.stringify({ codebase: { id: "code-1" } })),
+    ).toBeNull();
+    expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
   });
 });

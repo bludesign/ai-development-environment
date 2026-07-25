@@ -52,6 +52,62 @@ export const worktreeHighlightBackgroundClasses: Record<string, string> = {
   pink: "bg-pink-500/10 hover:bg-pink-500/20",
 };
 
+/**
+ * The accent stripe for a cell in a `border-collapse` table, painted as an
+ * inset shadow rather than the left border `worktreeHighlightAccentClasses`
+ * uses. Collapsed borders miter at the corners, so a 4px left border wins the
+ * bottom-left corner against the 1px row divider and notches a matching gap
+ * out of it; a shadow paints inside the cell and leaves the divider whole.
+ */
+export const worktreeHighlightInsetAccentClasses: Record<string, string> = {
+  gray: "shadow-[inset_4px_0_0_var(--color-slate-500)]",
+  stone: "shadow-[inset_4px_0_0_var(--color-stone-500)]",
+  red: "shadow-[inset_4px_0_0_var(--color-red-500)]",
+  rose: "shadow-[inset_4px_0_0_var(--color-rose-500)]",
+  orange: "shadow-[inset_4px_0_0_var(--color-orange-500)]",
+  amber: "shadow-[inset_4px_0_0_var(--color-amber-500)]",
+  yellow: "shadow-[inset_4px_0_0_var(--color-yellow-500)]",
+  lime: "shadow-[inset_4px_0_0_var(--color-lime-500)]",
+  green: "shadow-[inset_4px_0_0_var(--color-green-500)]",
+  emerald: "shadow-[inset_4px_0_0_var(--color-emerald-500)]",
+  teal: "shadow-[inset_4px_0_0_var(--color-teal-500)]",
+  cyan: "shadow-[inset_4px_0_0_var(--color-cyan-500)]",
+  sky: "shadow-[inset_4px_0_0_var(--color-sky-500)]",
+  blue: "shadow-[inset_4px_0_0_var(--color-blue-500)]",
+  indigo: "shadow-[inset_4px_0_0_var(--color-indigo-500)]",
+  violet: "shadow-[inset_4px_0_0_var(--color-violet-500)]",
+  purple: "shadow-[inset_4px_0_0_var(--color-purple-500)]",
+  fuchsia: "shadow-[inset_4px_0_0_var(--color-fuchsia-500)]",
+  pink: "shadow-[inset_4px_0_0_var(--color-pink-500)]",
+};
+
+/**
+ * The transient wash used while a highlighted row animates in — the same hue as
+ * `worktreeHighlightBackgroundClasses` at a heavier weight so the arrival reads
+ * as that worktree's color instead of the generic primary flash.
+ */
+export const worktreeHighlightArrivalClasses: Record<string, string> = {
+  gray: "bg-slate-500/30 ring-slate-500/50 hover:bg-slate-500/30",
+  stone: "bg-stone-500/30 ring-stone-500/50 hover:bg-stone-500/30",
+  red: "bg-red-500/30 ring-red-500/50 hover:bg-red-500/30",
+  rose: "bg-rose-500/30 ring-rose-500/50 hover:bg-rose-500/30",
+  orange: "bg-orange-500/30 ring-orange-500/50 hover:bg-orange-500/30",
+  amber: "bg-amber-500/30 ring-amber-500/50 hover:bg-amber-500/30",
+  yellow: "bg-yellow-500/30 ring-yellow-500/50 hover:bg-yellow-500/30",
+  lime: "bg-lime-500/30 ring-lime-500/50 hover:bg-lime-500/30",
+  green: "bg-green-500/30 ring-green-500/50 hover:bg-green-500/30",
+  emerald: "bg-emerald-500/30 ring-emerald-500/50 hover:bg-emerald-500/30",
+  teal: "bg-teal-500/30 ring-teal-500/50 hover:bg-teal-500/30",
+  cyan: "bg-cyan-500/30 ring-cyan-500/50 hover:bg-cyan-500/30",
+  sky: "bg-sky-500/30 ring-sky-500/50 hover:bg-sky-500/30",
+  blue: "bg-blue-500/30 ring-blue-500/50 hover:bg-blue-500/30",
+  indigo: "bg-indigo-500/30 ring-indigo-500/50 hover:bg-indigo-500/30",
+  violet: "bg-violet-500/30 ring-violet-500/50 hover:bg-violet-500/30",
+  purple: "bg-purple-500/30 ring-purple-500/50 hover:bg-purple-500/30",
+  fuchsia: "bg-fuchsia-500/30 ring-fuchsia-500/50 hover:bg-fuchsia-500/30",
+  pink: "bg-pink-500/30 ring-pink-500/50 hover:bg-pink-500/30",
+};
+
 export const worktreeHighlightAccentClasses: Record<string, string> = {
   gray: "border-l-slate-500",
   stone: "border-l-stone-500",

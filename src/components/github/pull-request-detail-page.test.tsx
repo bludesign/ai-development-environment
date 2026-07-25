@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -133,6 +134,7 @@ const detail = {
   updatedAt: "2026-07-15T00:00:00.000Z",
   mergedAt: null,
   worktreeId: "worktree-1",
+  worktreeHighlightColor: null as string | null,
 };
 
 beforeEach(() => {
@@ -163,6 +165,38 @@ afterEach(() => {
 });
 
 describe("PullRequestDetailPage", () => {
+  test("tints the header with the linked worktree colour", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestDetail")) {
+        return {
+          githubPullRequest: { ...detail, worktreeHighlightColor: "violet" },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(
+      <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
+    );
+
+    const heading = await screen.findByRole("heading", {
+      name: "APP-42 Add the API",
+    });
+    const header = heading.closest("div.rounded-lg");
+    expect(header?.className).toContain("bg-violet-500/10");
+    expect(header?.className).toContain("border-l-violet-500");
+  });
+
+  test("leaves the header untinted when the worktree has no highlight", async () => {
+    render(
+      <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
+    );
+
+    const heading = await screen.findByRole("heading", {
+      name: "APP-42 Add the API",
+    });
+    expect(heading.closest("div.rounded-lg")).toBeNull();
+  });
+
   test("shows description, metadata, pipelines, and retries a check suite", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -222,12 +256,11 @@ describe("PullRequestDetailPage", () => {
       stepsPanel?.parentElement?.parentElement?.parentElement;
     expect(jobsContainer?.className).toContain("px-4");
     expect(jobsContainer?.className).not.toContain("pl-4");
-    const jobViewButton = screen.getByRole("link", {
-      name: "View test on GitHub",
+    const jobActionsButton = screen.getByRole("button", {
+      name: "Actions for test",
     });
-    expect(jobViewButton.getAttribute("data-variant")).toBe("outline");
-    expect(jobViewButton.getAttribute("data-size")).toBe("sm");
-    expect(jobViewButton.textContent).toContain("View");
+    expect(jobActionsButton.getAttribute("data-variant")).toBe("outline");
+    expect(jobActionsButton.getAttribute("data-size")).toBe("icon-sm");
     expect(screen.getByText("Changes requested")).toBeDefined();
     const jiraBadge = screen.getByRole("button", { name: "APP-42" });
     for (const className of ["rounded-4xl", "px-2", "py-0.5", "text-xs"]) {
@@ -272,7 +305,13 @@ describe("PullRequestDetailPage", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry test" }));
+    fireEvent.pointerDown(jobActionsButton, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubWorkflowJob"),

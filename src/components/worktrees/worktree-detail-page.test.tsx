@@ -157,6 +157,8 @@ function overview(
                 baseBehind: 0,
                 hasStagedChanges: true,
                 hasUnstagedChanges: true,
+                rebaseInProgress: false,
+                hasConflicts: false,
                 pushStatus: "DIRTY",
                 highlightColor: "blue",
                 availability: "AVAILABLE",
@@ -435,6 +437,61 @@ describe("WorktreeDetailPage", () => {
     expect(
       request.mock.calls.some(([query]) => query.includes("InspectWorktree")),
     ).toBe(false);
+  });
+
+  test("shows a paused conflict and cancels its rebase inline", async () => {
+    let cancelled = false;
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        const state = overview();
+        const group = state.agents[0]!.codebases[0]!;
+        group.worktrees[0] = {
+          ...group.worktrees[0]!,
+          rebaseInProgress: !cancelled,
+          hasConflicts: !cancelled,
+        };
+        group.mergeConflictQuickActions = [
+          {
+            id: "workflow-conflicts",
+            name: "Resolve conflicts",
+            description: "Resolve the rebase conflicts",
+            quickActionIconKey: "git-merge",
+            quickActionButtonVariant: "secondary",
+            triggerChoices: [],
+            hasPlainTrigger: true,
+          },
+        ];
+        return { worktreeOverview: state } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      if (query.includes("CancelWorktreeRebase")) {
+        cancelled = true;
+        return { runWorktreeOperation: { id: "job-cancel-rebase" } } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+
+    expect(await screen.findByText("Rebase paused")).toBeDefined();
+    expect(screen.getByText("Resolve conflicts")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel rebase" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("CancelWorktreeRebase"),
+        {
+          input: {
+            worktreeId: "worktree-1",
+            operation: "CANCEL_REBASE",
+            requestId: expect.any(String),
+          },
+        },
+      ),
+    );
+    await waitFor(() => expect(screen.queryByText("Rebase paused")).toBeNull());
   });
 
   test("shows a not-found state for a missing worktree", async () => {

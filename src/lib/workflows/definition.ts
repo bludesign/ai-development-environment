@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { requiredConfigSessionPaths } from "./config-descriptors";
 import { configSchemaForKind } from "./config-schema";
 import {
   isChoiceTriggerKind,
@@ -13,10 +14,7 @@ import {
   type WorkflowStepKind,
   type WorkflowTriggerKind,
 } from "./kinds";
-import {
-  invalidWorkflowValueBindings,
-  workflowValueSessionPaths,
-} from "./session";
+import { invalidWorkflowValueBindings } from "./session";
 
 export const WORKFLOW_FORMAT = "aide.workflow" as const;
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
@@ -81,20 +79,27 @@ export function workflowTriggerChoices(
  * These mirror the `sessionData` the resource pages pass to `triggerWorkflow`,
  * and are what a RESOURCE_MANUAL trigger contributes to path availability.
  *
- * WORKTREE also seeds `ticket.*`: a worktree may have a Jira ticket derived
- * from its branch, which `WorkflowsService.trigger` hydrates into the run's
- * session data when present (see `hydrateResourceSessionData`). The link is
- * optional, so — like `worktree.*` guaranteeing only `worktree.id` at runtime —
- * the seed is an optimistic contract; a step bound to `ticket.key` on a
- * worktree with no matching ticket resolves to `undefined` at run time.
+ * WORKTREE also seeds repository, pull-request, and ticket data resolved from
+ * its codebase and branch. These links are optional, so the seed is an
+ * optimistic contract: a step bound to a missing linked resource resolves to
+ * `undefined` at run time.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   BUILD: ["build.*"],
   CODEBASE: ["codebase.*"],
   JIRA_TICKET: ["ticket.*"],
   AGENT_RUN: ["run.*"],
+  GITHUB_PIPELINE: ["pipeline.*", "repo.*", "pr.*", "worktree.*", "ticket.*"],
+  GITHUB_JOB: [
+    "job.*",
+    "pipeline.*",
+    "repo.*",
+    "pr.*",
+    "worktree.*",
+    "ticket.*",
+  ],
   PULL_REQUEST: ["pr.*", "repo.*"],
-  WORKTREE: ["worktree.*", "ticket.*"],
+  WORKTREE: ["worktree.*", "repo.*", "pr.*", "ticket.*"],
 };
 
 /** The resource kind a resource trigger config targets, if valid. */
@@ -1875,17 +1880,18 @@ export function computeWorkflowPathAvailability(
         nodeId,
         existing ? intersection([existing, available]) : new Set(available),
       );
-      // Config session bindings normally become hard requirements, but a step
-      // that *provides* a namespace may optionally read from it: a loader like
-      // JIRA_LOAD_TICKET binds `issueKey` to `{{ticket.key}}` to establish
+      // Config session bindings become hard requirements only where the
+      // descriptor marks the key required (`requiredConfigSessionPaths`), and
+      // even then not when the step *provides* the namespace it reads: a loader
+      // like JIRA_LOAD_TICKET binds `issueKey` to `{{ticket.key}}` to establish
       // `ticket.*`. Such self-referential bindings are the "unwrap" point — the
       // step resolves the optional value at run time and fails if it is absent
       // (see `jiraKey` in register-adapters) — so they must not block publish.
       // Explicit `requiredPaths` (catalog + node) stay strict.
       const selfProvided = new Set(provides.get(nodeId) ?? []);
-      const configRequired = [...workflowValueSessionPaths(node.config)].filter(
-        (path) => !hasPath(selfProvided, path),
-      );
+      const configRequired = [
+        ...requiredConfigSessionPaths(node.kind, "step", node.config),
+      ].filter((path) => !hasPath(selfProvided, path));
       const required = new Set([
         ...expandedPaths(node, lookup.stepPaths(node.kind).requiredPaths),
         ...node.requiredPaths,

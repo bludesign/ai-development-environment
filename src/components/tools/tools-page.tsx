@@ -11,6 +11,7 @@ import {
   Search,
   Server,
   Trash2,
+  TriangleAlert,
   Wrench,
   X,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -30,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -75,6 +78,9 @@ import type {
 
 const SERVER_FIELDS =
   "id name url transport toolNamePrefix createdAt updatedAt headers { id name valueConfigured }";
+
+/** Suggested key for the client's own MCP config file; purely a local alias. */
+const BUILT_IN_SERVER_NAME = "ai-development-environment";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -256,17 +262,7 @@ export function ToolsPage() {
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          aria-label={t("search")}
-          className="pl-9"
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("searchPlaceholder")}
-          type="search"
-          value={query}
-        />
-      </div>
+      <ConnectClientsCard />
 
       {error && (
         <Alert variant="destructive">
@@ -354,22 +350,36 @@ export function ToolsPage() {
         )}
       </Card>
 
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="font-semibold">{t("catalogTitle")}</h2>
-          <p className="text-xs text-muted-foreground">
-            {t("catalogDescription")}
-          </p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">{t("catalogTitle")}</h2>
+            <p className="text-xs text-muted-foreground">
+              {t("catalogDescription")}
+            </p>
+          </div>
+          <Button
+            disabled={catalogLoading}
+            onClick={() => void loadCatalog()}
+            type="button"
+            variant="outline"
+          >
+            {catalogLoading ? <Spinner /> : <RotateCw />}
+            {t("refresh")}
+          </Button>
         </div>
-        <Button
-          disabled={catalogLoading}
-          onClick={() => void loadCatalog()}
-          type="button"
-          variant="outline"
-        >
-          {catalogLoading ? <Spinner /> : <RotateCw />}
-          {t("refresh")}
-        </Button>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label={t("search")}
+            className="pl-9"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("searchPlaceholder")}
+            type="search"
+            value={query}
+          />
+        </div>
       </div>
 
       {catalogLoading && groups.length === 0 ? (
@@ -393,6 +403,104 @@ export function ToolsPage() {
         saving={saving}
       />
     </section>
+  );
+}
+
+const subscribeToNothing = () => () => {};
+const readOrigin = () => window.location.origin;
+
+/**
+ * Shows external MCP clients how to reach this app's own built-in tool server,
+ * which is mounted at /api/mcp on the same origin.
+ */
+function ConnectClientsCard() {
+  const t = useTranslations("tools");
+  // The server cannot know the browsing origin — the port comes from however
+  // the process was started — so the client fills it in on hydration.
+  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, () => "");
+  const [copied, setCopied] = useState<"URL" | "CONFIG" | null>(null);
+  const [copyFailed, setCopyFailed] = useState(false);
+
+  const url = `${origin}/api/mcp`;
+  const config = JSON.stringify(
+    {
+      mcpServers: {
+        [BUILT_IN_SERVER_NAME]: { type: "http", url },
+      },
+    },
+    null,
+    2,
+  );
+
+  const copy = async (value: string, target: "URL" | "CONFIG") => {
+    try {
+      await copyText(value);
+      setCopyFailed(false);
+      setCopied(target);
+    } catch {
+      setCopied(null);
+      setCopyFailed(true);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("connectTitle")}</CardTitle>
+        <CardDescription>{t("connectDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium">{t("serverUrl")}</h3>
+          <div className="flex items-start gap-2 rounded-lg bg-muted p-3">
+            <code className="min-w-0 flex-1 break-all text-xs">{url}</code>
+            <Button
+              aria-label={copied === "URL" ? t("connectCopied") : t("copyUrl")}
+              onClick={() => void copy(url, "URL")}
+              size="icon-sm"
+              title={copied === "URL" ? t("connectCopied") : t("copyUrl")}
+              type="button"
+              variant="ghost"
+            >
+              {copied === "URL" ? <Check /> : <Copy />}
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium">{t("clientConfig")}</h3>
+          <p className="text-xs text-muted-foreground">
+            {t("clientConfigHelp")}
+          </p>
+          <div className="flex items-start gap-2 rounded-lg bg-muted p-3">
+            <pre className="min-w-0 flex-1 overflow-x-auto text-xs">
+              <code>{config}</code>
+            </pre>
+            <Button
+              aria-label={
+                copied === "CONFIG" ? t("connectCopied") : t("copyConfig")
+              }
+              onClick={() => void copy(config, "CONFIG")}
+              size="icon-sm"
+              title={copied === "CONFIG" ? t("connectCopied") : t("copyConfig")}
+              type="button"
+              variant="ghost"
+            >
+              {copied === "CONFIG" ? <Check /> : <Copy />}
+            </Button>
+          </div>
+        </div>
+
+        {copyFailed && (
+          <p className="text-xs text-destructive">{t("connectCopyFailed")}</p>
+        )}
+
+        <Alert>
+          <TriangleAlert />
+          <AlertDescription>{t("connectWarning")}</AlertDescription>
+        </Alert>
+      </CardContent>
+    </Card>
   );
 }
 

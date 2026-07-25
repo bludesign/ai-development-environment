@@ -16,6 +16,32 @@ export function pullRequestResourceId(
   return `${normalizedOwner}/${normalizedRepository}#${number}`;
 }
 
+export function githubPipelineResourceId(
+  codebaseRepositoryId: string,
+  workflowRunId: string | null | undefined,
+  pipelineId: string,
+): string {
+  const repositoryId = codebaseRepositoryId.trim();
+  const runId = workflowRunId?.trim();
+  const fallbackId = pipelineId.trim();
+  if (!repositoryId || (!runId && !fallbackId)) {
+    throw new Error("GitHub pipeline repository and provider ID are required");
+  }
+  return `${repositoryId}:${runId ? "run" : "check"}:${runId || fallbackId}`;
+}
+
+export function githubJobResourceId(
+  codebaseRepositoryId: string,
+  jobId: string,
+): string {
+  const repositoryId = codebaseRepositoryId.trim();
+  const normalizedJobId = jobId.trim();
+  if (!repositoryId || !normalizedJobId) {
+    throw new Error("GitHub job repository and job ID are required");
+  }
+  return `${repositoryId}:job:${normalizedJobId}`;
+}
+
 export type WorkflowResourceLinkLike = {
   kind: string;
   resourceId: string;
@@ -130,8 +156,17 @@ export function workflowTriggerResourceLink(
   const session = record(payload.sessionData);
   if (isResourceTriggerKind(kind)) {
     const resourceKind = payload.resourceKind;
+    const normalizedResourceKind =
+      typeof resourceKind === "string" ? resourceKind.toUpperCase() : null;
+    const providerUrl =
+      normalizedResourceKind === "GITHUB_JOB"
+        ? nested(session, "job", "url")
+        : normalizedResourceKind === "GITHUB_PIPELINE"
+          ? nested(session, "pipeline", "url")
+          : null;
     return typeof resourceKind === "string"
       ? resourceLink(resourceKind.toUpperCase(), payload.resourceId, {
+          url: typeof providerUrl === "string" ? providerUrl : null,
           metadata:
             resourceKind.toUpperCase() === "AGENT_RUN"
               ? { runKind: nested(session, "run", "kind") }

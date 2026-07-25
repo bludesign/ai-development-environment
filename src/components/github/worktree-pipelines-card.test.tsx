@@ -15,6 +15,7 @@ import { WorktreePipelinesCard } from "./worktree-pipelines-card";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
 }));
 
 Object.defineProperties(HTMLElement.prototype, {
@@ -46,6 +47,7 @@ const run: GitHubActionsWorkflowRunView = {
   pullRequests: [],
   jiraKey: "APP-1",
   worktreeId: "worktree-1",
+  worktreeHighlightColor: null,
   startedAt: "2026-07-21T12:00:00.000Z",
   createdAt: "2026-07-21T12:00:00.000Z",
   updatedAt: "2026-07-21T12:01:00.000Z",
@@ -109,12 +111,12 @@ describe("WorktreePipelinesCard", () => {
     });
     fireEvent.click(showSteps);
     expect(screen.getByText("Checkout")).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: "View build-and-test on GitHub" }),
-    ).toBeDefined();
-    expect(
-      screen.getByRole("button", { name: "Retry build-and-test" }),
-    ).toBeDefined();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Actions for build-and-test" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Retry" })).toBeDefined();
   });
 
   test("cancels an active workflow run from the pipeline menu", async () => {

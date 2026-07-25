@@ -96,4 +96,64 @@ describe("workflow additive migration", () => {
       { name: "WorkflowStepAttempt" },
     ]);
   });
+
+  test("preserves legacy quick-action availability while adding rebase state", () => {
+    database = new Database(":memory:");
+    database.exec(`
+      CREATE TABLE "Workflow" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "globalQuickAction" BOOLEAN NOT NULL DEFAULT false
+      );
+      CREATE TABLE "WorkflowQuickActionRepository" (
+        "workflowId" TEXT NOT NULL,
+        "repositoryId" TEXT NOT NULL,
+        PRIMARY KEY ("workflowId", "repositoryId")
+      );
+      CREATE TABLE "Worktree" (
+        "id" TEXT NOT NULL PRIMARY KEY
+      );
+      INSERT INTO "Workflow" ("id", "globalQuickAction") VALUES
+        ('global', true),
+        ('scoped', false),
+        ('mixed', true),
+        ('disabled', false);
+      INSERT INTO "WorkflowQuickActionRepository" ("workflowId", "repositoryId") VALUES
+        ('scoped', 'repo-1'),
+        ('mixed', 'repo-2');
+      INSERT INTO "Worktree" ("id") VALUES ('worktree-1');
+    `);
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "prisma/migrations/20260725120000_expand_workflow_quick_actions/migration.sql",
+      ),
+      "utf8",
+    );
+    database.exec(migration);
+
+    expect(
+      database
+        .prepare(`SELECT "id", "quickActionKind" FROM "Workflow" ORDER BY "id"`)
+        .all(),
+    ).toEqual([
+      { id: "disabled", quickActionKind: "NONE" },
+      { id: "global", quickActionKind: "STANDARD" },
+      { id: "mixed", quickActionKind: "STANDARD" },
+      { id: "scoped", quickActionKind: "STANDARD" },
+    ]);
+    expect(
+      database
+        .prepare(
+          `SELECT "workflowId", "repositoryId" FROM "WorkflowQuickActionRepository" ORDER BY "workflowId"`,
+        )
+        .all(),
+    ).toEqual([{ workflowId: "scoped", repositoryId: "repo-1" }]);
+    expect(
+      database
+        .prepare(
+          `SELECT "rebaseInProgress", "hasConflicts" FROM "Worktree" WHERE "id" = 'worktree-1'`,
+        )
+        .get(),
+    ).toEqual({ rebaseInProgress: 0, hasConflicts: 0 });
+  });
 });

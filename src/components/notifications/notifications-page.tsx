@@ -11,10 +11,10 @@ import {
 import {
   BellRing,
   CheckCircle2,
-  ListFilter,
+  FilePenLine,
+  RefreshCw,
   Send,
   Trash2,
-  X,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -24,7 +24,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -32,7 +31,15 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DateTime } from "@/components/common/date-time";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -41,16 +48,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Link } from "@/i18n/navigation";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Link, useRouter } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import {
-  worktreeHighlightAccentClasses,
   worktreeHighlightBackgroundClasses,
+  worktreeHighlightInsetAccentClasses,
 } from "@/lib/worktree-highlight";
 
 import {
@@ -68,6 +81,17 @@ const PREFERENCE_FIELDS = `
 `;
 
 type TimeRange = { key: string; start: string; end: string };
+
+/**
+ * The table runs edge to edge inside its card, so its outer columns reproduce
+ * the padding the card gives its other children (`--card-spacing`, 16px) —
+ * the 8px cell default left the whole table visibly outdented from the rest of
+ * the page. The 4px worktree accent sits inside that padding as an inset
+ * shadow — see `worktreeHighlightInsetAccentClasses` for why it cannot be the
+ * left border it is everywhere else.
+ */
+const firstColumn = "pl-4";
+const lastColumn = "pr-4";
 
 function localDayKey(value: string): string {
   return dayKey(value) ?? value;
@@ -148,6 +172,10 @@ function endpointHost(endpoint: string): string {
 export function NotificationsPage() {
   const t = useTranslations("notifications");
   const locale = useLocale();
+  const router = useRouter();
+  // History first: the page is opened to see what happened far more often than
+  // to change how a channel is wired up.
+  const [tab, setTab] = useState<"history" | "settings">("history");
   const [notifications, setNotifications] = useState<AppNotificationView[]>([]);
   const [preferences, setPreferences] = useState<NotificationPreferenceView[]>(
     [],
@@ -709,10 +737,10 @@ export function NotificationsPage() {
     selectAll || selected.size > 0 || selectionRanges.length > 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1700px] flex-col gap-6">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
       </div>
 
       {error && (
@@ -721,417 +749,153 @@ export function NotificationsPage() {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("deliverySetup")}</CardTitle>
-          <CardDescription>{t("deliverySetupDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/*
-           * The two channels are independent switches read side by side, so
-           * they share a row on a wide screen and stack only where one would
-           * have to wrap anyway.
-           */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-              <div>
-                <p className="font-medium">{t("browserAlerts")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {permission === "unsupported"
-                    ? t("browserUnsupported")
-                    : t(`permissions.${permission}`)}
-                </p>
-              </div>
-              {permission === "granted" ? (
-                <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                  <CheckCircle2 /> {t("enabled")}
-                </Badge>
-              ) : (
-                <Button
-                  disabled={
-                    permission === "denied" || permission === "unsupported"
-                  }
-                  onClick={() => void enableBrowserAlerts()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <BellRing /> {t("enable")}
-                </Button>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-              <div>
-                <p className="font-medium">{t("webPush")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {!pushSupported
-                    ? t("pushUnsupported")
-                    : pushSubscriptionRegistered
-                      ? t("pushSubscribed")
-                      : t("pushNotSubscribed")}
-                </p>
-                {webPushState && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {t("subscriptionCount", {
-                      count: webPushState.subscriptionCount,
-                    })}
-                  </p>
-                )}
-              </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          onValueChange={(value) => setTab(value as "history" | "settings")}
+          value={tab}
+        >
+          <TabsList>
+            <TabsTrigger value="history">{t("history")}</TabsTrigger>
+            <TabsTrigger value="settings">{t("settingsTab")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Selection and deletion only reach history, so their controls
+              follow the tab rather than sitting inert over the settings
+              cards. */}
+          {tab === "history" && (
+            <>
+              <Badge variant="outline">
+                {t("historyCount", { count: totalCount })}
+              </Badge>
               <Button
-                disabled={!pushSupported || pushBusy}
-                onClick={() =>
-                  void (pushSubscriptionRegistered
-                    ? unsubscribePush()
-                    : subscribePush())
-                }
-                size="sm"
+                onClick={() => {
+                  setEditMode((current) => !current);
+                  resetSelection();
+                }}
                 type="button"
-                variant={pushSubscriptionRegistered ? "outline" : "default"}
+                variant="outline"
               >
-                {pushBusy ? <Spinner /> : <Send />}
-                {pushSubscriptionRegistered ? t("unsubscribe") : t("subscribe")}
+                <FilePenLine /> {editMode ? t("done") : t("edit")}
               </Button>
-            </div>
-          </div>
-
-          {isIos && !isStandalone && (
-            <Alert>
-              <AlertDescription>{t("iosInstallHelp")}</AlertDescription>
-            </Alert>
+              <ConfirmationDialog
+                actionLabel={t("deleteAll")}
+                cancelLabel={t("cancel")}
+                description={t("deleteAllDescription")}
+                onConfirm={deleteAll}
+                title={t("deleteAllTitle")}
+                trigger={
+                  <Button
+                    disabled={!totalCount}
+                    type="button"
+                    variant="outline"
+                  >
+                    <Trash2 /> {t("deleteAll")}
+                  </Button>
+                }
+              />
+            </>
           )}
-        </CardContent>
-      </Card>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={t("refresh")}
+                onClick={() => void refresh()}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <RefreshCw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("preferences")}</CardTitle>
-          <CardDescription>{t("preferencesDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">{t("notificationType")}</TableHead>
-                <TableHead className="w-24 text-center">
-                  {t("sidebarChannel")}
-                </TableHead>
-                <TableHead className="w-24 text-center">
-                  {t("browserChannel")}
-                </TableHead>
-                <TableHead className="w-24 text-center">
-                  {t("pushChannel")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {preferenceGroups.map(([category, entries]) => (
-                <Fragment key={category}>
-                  <TableRow className="bg-muted/20 hover:bg-muted/20">
-                    <TableCell
-                      className="py-1.5 pl-4 text-xs font-medium text-muted-foreground"
-                      colSpan={4}
-                    >
-                      {t(`categories.${category}`)}
-                    </TableCell>
-                  </TableRow>
-                  {entries.map((preference) => (
-                    <TableRow key={preference.key}>
-                      <TableCell className="pl-4">
-                        <p className="font-medium">
-                          {t(`types.${preference.key}.title`)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {t(`types.${preference.key}.description`)}
-                        </p>
-                      </TableCell>
-                      {(
-                        [
-                          "sidebarEnabled",
-                          "browserEnabled",
-                          "webPushEnabled",
-                        ] as const
-                      ).map((channel) => (
-                        <TableCell className="w-24 text-center" key={channel}>
-                          <Checkbox
-                            aria-label={t("toggleChannel", {
-                              channel: t(
-                                channel === "sidebarEnabled"
-                                  ? "sidebarChannel"
-                                  : channel === "browserEnabled"
-                                    ? "browserChannel"
-                                    : "pushChannel",
-                              ),
-                              type: t(`types.${preference.key}.title`),
-                            })}
-                            checked={preference[channel]}
-                            className="mx-auto"
-                            disabled={savingPreference === preference.key}
-                            onCheckedChange={(checked) =>
-                              void updatePreference(
-                                preference,
-                                channel,
-                                checked === true,
-                              )
-                            }
-                          />
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </Fragment>
+      {tab === "history" && editMode && hasSelection && (
+        <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/30 p-3">
+          <span className="mr-auto text-sm text-muted-foreground">
+            {selectAll
+              ? t("allSelected")
+              : t("selectedCount", {
+                  count: notifications.filter(isSelected).length,
+                })}
+          </span>
+          <Button
+            onClick={() => void deleteSelected()}
+            size="sm"
+            type="button"
+            variant="destructive"
+          >
+            <Trash2 /> {t("deleteSelected")}
+          </Button>
+        </div>
+      )}
+
+      {tab === "history" ? (
+        loading ? (
+          <Card className="gap-0 overflow-hidden p-4">
+            <div className="space-y-3">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <Skeleton className="h-8 w-full" key={item} />
               ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card className="gap-0 overflow-hidden py-0">
-        <CardHeader className="border-b">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>{t("subscribedBrowsers")}</CardTitle>
-              <CardDescription>
-                {t("subscribedBrowsersDescription")}
-              </CardDescription>
             </div>
-            <Badge variant="outline">
-              {t("subscriptionCount", {
-                count: webPushSubscriptions.length,
-              })}
-            </Badge>
-          </div>
-        </CardHeader>
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="pl-4">{t("browser")}</TableHead>
-              <TableHead>{t("pushService")}</TableHead>
-              <TableHead>{t("locale")}</TableHead>
-              <TableHead>{t("lastSeen")}</TableHead>
-              <TableHead className="pr-4 text-right">{t("actions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {webPushSubscriptions.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  className="py-10 text-center text-muted-foreground"
-                  colSpan={5}
-                >
-                  {t("noSubscribedBrowsers")}
-                </TableCell>
-              </TableRow>
-            ) : (
-              webPushSubscriptions.map((subscription) => {
-                const isCurrent =
-                  pushSubscription?.endpoint === subscription.endpoint;
-                const testing = subscriptionBusy === `test:${subscription.id}`;
-                const deleting =
-                  subscriptionBusy === `delete:${subscription.id}`;
-                const tested = testedSubscription === subscription.id;
-                return (
-                  <TableRow key={subscription.id}>
-                    <TableCell className="max-w-sm pl-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          {browserName(
-                            subscription.userAgent,
-                            t("unknownBrowser"),
-                          )}
-                        </span>
-                        {isCurrent && (
-                          <Badge variant="secondary">{t("current")}</Badge>
-                        )}
-                      </div>
-                      {subscription.userAgent && (
-                        <p
-                          className="max-w-sm truncate text-xs text-muted-foreground"
-                          title={subscription.userAgent}
-                        >
-                          {subscription.userAgent}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span title={subscription.endpoint}>
-                        {endpointHost(subscription.endpoint)}
-                      </span>
-                    </TableCell>
-                    <TableCell>{subscription.locale ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <DateTime value={subscription.lastSeenAt} />
-                    </TableCell>
-                    <TableCell className="pr-4">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          disabled={subscriptionBusy !== null}
-                          onClick={() => void testSubscription(subscription.id)}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          {testing ? (
-                            <Spinner />
-                          ) : tested ? (
-                            <CheckCircle2 />
-                          ) : (
-                            <Send />
-                          )}
-                          {tested ? t("testSent") : t("test")}
-                        </Button>
-                        <ConfirmationDialog
-                          actionLabel={t("remove")}
-                          cancelLabel={t("cancel")}
-                          description={t("removeBrowserDescription")}
-                          onConfirm={() => deleteSubscription(subscription)}
-                          title={t("removeBrowserTitle")}
-                          trigger={
-                            <Button
-                              aria-label={t("removeBrowser", {
-                                browser: browserName(
-                                  subscription.userAgent,
-                                  t("unknownBrowser"),
-                                ),
-                              })}
-                              disabled={subscriptionBusy !== null}
-                              size="icon-sm"
-                              title={t("remove")}
-                              type="button"
-                              variant="ghost"
-                            >
-                              {deleting ? <Spinner /> : <Trash2 />}
-                            </Button>
-                          }
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <Card className="gap-0 overflow-hidden py-0">
-        <CardHeader>
-          <CardTitle>{t("history")}</CardTitle>
-          <CardDescription>
-            {t("historyCount", { count: totalCount })}
-          </CardDescription>
-          <CardAction className="flex items-center gap-2">
-            <Button
-              onClick={() => {
-                setEditMode((current) => !current);
-                resetSelection();
-              }}
-              size="sm"
-              type="button"
-              variant={editMode ? "default" : "outline"}
+          </Card>
+        ) : notifications.length ? (
+          <Card className="gap-0 overflow-hidden py-0">
+            {/* The message is the row, so a fixed layout hands it the bulk of
+                the width and leaves the channel badges and timestamp only what
+                they need — an auto layout instead sized the channel column to
+                its widest row of badges and squeezed the message. Below the
+                floor the container scrolls rather than shrinking further. */}
+            <Table
+              className={cn(
+                "table-fixed",
+                editMode ? "min-w-[45rem]" : "min-w-[42rem]",
+              )}
             >
-              {editMode ? <X /> : <ListFilter />}
-              {editMode ? t("done") : t("edit")}
-            </Button>
-            <ConfirmationDialog
-              actionLabel={t("deleteAll")}
-              cancelLabel={t("cancel")}
-              description={t("deleteAllDescription")}
-              onConfirm={deleteAll}
-              title={t("deleteAllTitle")}
-              trigger={
-                <Button
-                  disabled={!totalCount}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <Trash2 /> {t("deleteAll")}
-                </Button>
-              }
-            />
-          </CardAction>
-        </CardHeader>
-
-        {editMode && (
-          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/30 p-3">
-            <span className="text-xs text-muted-foreground">
-              {selectAll
-                ? t("allSelected")
-                : t("selectedCount", {
-                    count: notifications.filter(isSelected).length,
-                  })}
-            </span>
-            <Button
-              disabled={!hasSelection}
-              onClick={() => void deleteSelected()}
-              size="sm"
-              type="button"
-              variant="destructive"
-            >
-              <Trash2 /> {t("deleteSelected")}
-            </Button>
-          </div>
-        )}
-
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {editMode && (
-                  <TableHead className="w-10 pl-3">
-                    <Checkbox
-                      aria-label={t("selectAll")}
-                      checked={
-                        selectAll && (excluded.size || excludedRanges.length)
-                          ? "indeterminate"
-                          : selectAll
-                      }
-                      onCheckedChange={(checked) => {
-                        const value = checked === true;
-                        setSelectAll(value);
-                        setSelected(new Set());
-                        setExcluded(new Set());
-                        setSelectionRanges([]);
-                        setExcludedRanges([]);
-                      }}
-                    />
+              <TableHeader>
+                <TableRow>
+                  {editMode && (
+                    <TableHead className={cn("w-10", firstColumn)}>
+                      <Checkbox
+                        aria-label={t("selectAll")}
+                        checked={
+                          selectAll && (excluded.size || excludedRanges.length)
+                            ? "indeterminate"
+                            : selectAll
+                        }
+                        onCheckedChange={(checked) => {
+                          setSelectAll(checked === true);
+                          setSelected(new Set());
+                          setExcluded(new Set());
+                          setSelectionRanges([]);
+                          setExcludedRanges([]);
+                        }}
+                      />
+                    </TableHead>
+                  )}
+                  <TableHead
+                    className={cn("w-[70%]", !editMode && firstColumn)}
+                  >
+                    {t("notification")}
                   </TableHead>
-                )}
-                <TableHead>{t("notification")}</TableHead>
-                <TableHead>{t("channels")}</TableHead>
-                <TableHead className="text-right">{t("received")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell
-                    className="py-12 text-center"
-                    colSpan={editMode ? 4 : 3}
-                  >
-                    <Spinner />
-                  </TableCell>
+                  <TableHead className="w-[18%]">{t("channels")}</TableHead>
+                  <TableHead className={cn("w-[12%] text-right", lastColumn)}>
+                    {t("received")}
+                  </TableHead>
                 </TableRow>
-              ) : notifications.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    className="py-12 text-center text-muted-foreground"
-                    colSpan={editMode ? 4 : 3}
-                  >
-                    {t("historyEmpty")}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                groupedNotifications.map((group) => {
+              </TableHeader>
+              <TableBody>
+                {groupedNotifications.map((group) => {
                   const groupChecked = group.items.every(isSelected);
                   const groupSome = group.items.some(isSelected);
                   return (
                     <Fragment key={group.key}>
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
                         {editMode && (
-                          <TableCell className="pl-3">
+                          <TableCell className={cn("py-1.5", firstColumn)}>
                             <Checkbox
                               aria-label={t("selectDay", { day: group.label })}
                               checked={
@@ -1148,7 +912,10 @@ export function NotificationsPage() {
                           </TableCell>
                         )}
                         <TableCell
-                          className="py-1.5 text-xs text-muted-foreground"
+                          className={cn(
+                            "py-1.5 text-xs font-normal text-muted-foreground",
+                            !editMode && firstColumn,
+                          )}
                           colSpan={3}
                         >
                           {group.label}
@@ -1159,19 +926,33 @@ export function NotificationsPage() {
                         return (
                           <TableRow
                             className={cn(
-                              "transition-colors",
+                              "cursor-pointer transition-colors",
                               color &&
                                 worktreeHighlightBackgroundClasses[color],
                             )}
                             key={notification.id}
+                            /* Anything interactive inside the row — the title
+                               link, the checkbox, a text selection drag — opts
+                               the row out, so only a click on the row itself
+                               opens the notification. In edit mode the row is a
+                               selection target instead, so it toggles rather
+                               than navigating away mid-selection. */
+                            onClick={(event) => {
+                              if (!isRowActivation(event)) return;
+                              if (editMode) {
+                                toggleNotification(
+                                  notification,
+                                  !isSelected(notification),
+                                );
+                              } else router.push(notification.href);
+                            }}
                           >
                             {editMode && (
                               <TableCell
                                 className={cn(
-                                  "border-l-4 pl-2",
-                                  color
-                                    ? worktreeHighlightAccentClasses[color]
-                                    : "border-l-transparent",
+                                  firstColumn,
+                                  color &&
+                                    worktreeHighlightInsetAccentClasses[color],
                                 )}
                               >
                                 <Checkbox
@@ -1197,16 +978,18 @@ export function NotificationsPage() {
                              */}
                             <TableCell
                               className={cn(
-                                "w-full min-w-80 align-top break-words whitespace-normal",
-                                !editMode && "border-l-4 pl-2",
+                                "align-top break-words whitespace-normal",
+                                !editMode && firstColumn,
                                 !editMode &&
-                                  (color
-                                    ? worktreeHighlightAccentClasses[color]
-                                    : "border-l-transparent"),
+                                  color &&
+                                  worktreeHighlightInsetAccentClasses[color],
                               )}
                             >
                               <Link
-                                className="font-medium hover:underline"
+                                className={cn(
+                                  rowLinkClass,
+                                  "inline-block font-medium",
+                                )}
                                 href={notification.href}
                               >
                                 {notification.title}
@@ -1234,7 +1017,12 @@ export function NotificationsPage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="align-top text-right text-xs text-muted-foreground">
+                            <TableCell
+                              className={cn(
+                                "align-top text-right text-xs text-muted-foreground",
+                                lastColumn,
+                              )}
+                            >
                               <DateTime
                                 kind="time"
                                 value={notification.createdAt}
@@ -1245,18 +1033,338 @@ export function NotificationsPage() {
                       })}
                     </Fragment>
                   );
-                })
+                })}
+              </TableBody>
+            </Table>
+            {/* The sentinel exists to trip the observer that pages in the next
+                batch, so it only takes up room while there is one — otherwise
+                a fully loaded history ends in a strip of empty card. */}
+            {nextCursor && (
+              <div
+                className="flex min-h-10 items-center justify-center border-t p-2"
+                ref={sentinel}
+              >
+                {loadingMore && <Spinner />}
+              </div>
+            )}
+          </Card>
+        ) : (
+          <Empty className="border py-16">
+            <EmptyHeader>
+              <EmptyTitle>{t("historyEmpty")}</EmptyTitle>
+              <EmptyDescription>{t("description")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        )
+      ) : (
+        <div className="space-y-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("deliverySetup")}</CardTitle>
+              <CardDescription>{t("deliverySetupDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/*
+               * The two channels are independent switches read side by side, so
+               * they share a row on a wide screen and stack only where one would
+               * have to wrap anyway.
+               */}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium">{t("browserAlerts")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {permission === "unsupported"
+                        ? t("browserUnsupported")
+                        : t(`permissions.${permission}`)}
+                    </p>
+                  </div>
+                  {permission === "granted" ? (
+                    <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 /> {t("enabled")}
+                    </Badge>
+                  ) : (
+                    <Button
+                      disabled={
+                        permission === "denied" || permission === "unsupported"
+                      }
+                      onClick={() => void enableBrowserAlerts()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <BellRing /> {t("enable")}
+                    </Button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium">{t("webPush")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {!pushSupported
+                        ? t("pushUnsupported")
+                        : pushSubscriptionRegistered
+                          ? t("pushSubscribed")
+                          : t("pushNotSubscribed")}
+                    </p>
+                    {webPushState && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {t("subscriptionCount", {
+                          count: webPushState.subscriptionCount,
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    disabled={!pushSupported || pushBusy}
+                    onClick={() =>
+                      void (pushSubscriptionRegistered
+                        ? unsubscribePush()
+                        : subscribePush())
+                    }
+                    size="sm"
+                    type="button"
+                    variant={pushSubscriptionRegistered ? "outline" : "default"}
+                  >
+                    {pushBusy ? <Spinner /> : <Send />}
+                    {pushSubscriptionRegistered
+                      ? t("unsubscribe")
+                      : t("subscribe")}
+                  </Button>
+                </div>
+              </div>
+
+              {isIos && !isStandalone && (
+                <Alert>
+                  <AlertDescription>{t("iosInstallHelp")}</AlertDescription>
+                </Alert>
               )}
-            </TableBody>
-          </Table>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("preferences")}</CardTitle>
+              <CardDescription>{t("preferencesDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="px-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-4">
+                      {t("notificationType")}
+                    </TableHead>
+                    <TableHead className="w-24 text-center">
+                      {t("sidebarChannel")}
+                    </TableHead>
+                    <TableHead className="w-24 text-center">
+                      {t("browserChannel")}
+                    </TableHead>
+                    <TableHead className="w-24 text-center">
+                      {t("pushChannel")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {preferenceGroups.map(([category, entries]) => (
+                    <Fragment key={category}>
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableCell
+                          className="py-1.5 pl-4 text-xs font-medium text-muted-foreground"
+                          colSpan={4}
+                        >
+                          {t(`categories.${category}`)}
+                        </TableCell>
+                      </TableRow>
+                      {entries.map((preference) => (
+                        <TableRow key={preference.key}>
+                          <TableCell className="pl-4">
+                            <p className="font-medium">
+                              {t(`types.${preference.key}.title`)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {t(`types.${preference.key}.description`)}
+                            </p>
+                          </TableCell>
+                          {(
+                            [
+                              "sidebarEnabled",
+                              "browserEnabled",
+                              "webPushEnabled",
+                            ] as const
+                          ).map((channel) => (
+                            <TableCell
+                              className="w-24 text-center"
+                              key={channel}
+                            >
+                              <Checkbox
+                                aria-label={t("toggleChannel", {
+                                  channel: t(
+                                    channel === "sidebarEnabled"
+                                      ? "sidebarChannel"
+                                      : channel === "browserEnabled"
+                                        ? "browserChannel"
+                                        : "pushChannel",
+                                  ),
+                                  type: t(`types.${preference.key}.title`),
+                                })}
+                                checked={preference[channel]}
+                                className="mx-auto"
+                                disabled={savingPreference === preference.key}
+                                onCheckedChange={(checked) =>
+                                  void updatePreference(
+                                    preference,
+                                    channel,
+                                    checked === true,
+                                  )
+                                }
+                              />
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{t("subscribedBrowsers")}</CardTitle>
+                  <CardDescription>
+                    {t("subscribedBrowsersDescription")}
+                  </CardDescription>
+                </div>
+                <Badge variant="outline">
+                  {t("subscriptionCount", {
+                    count: webPushSubscriptions.length,
+                  })}
+                </Badge>
+              </div>
+            </CardHeader>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-4">{t("browser")}</TableHead>
+                  <TableHead>{t("pushService")}</TableHead>
+                  <TableHead>{t("locale")}</TableHead>
+                  <TableHead>{t("lastSeen")}</TableHead>
+                  <TableHead className="pr-4 text-right">
+                    {t("actions")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {webPushSubscriptions.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      className="py-10 text-center text-muted-foreground"
+                      colSpan={5}
+                    >
+                      {t("noSubscribedBrowsers")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  webPushSubscriptions.map((subscription) => {
+                    const isCurrent =
+                      pushSubscription?.endpoint === subscription.endpoint;
+                    const testing =
+                      subscriptionBusy === `test:${subscription.id}`;
+                    const deleting =
+                      subscriptionBusy === `delete:${subscription.id}`;
+                    const tested = testedSubscription === subscription.id;
+                    return (
+                      <TableRow key={subscription.id}>
+                        <TableCell className="max-w-sm pl-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">
+                              {browserName(
+                                subscription.userAgent,
+                                t("unknownBrowser"),
+                              )}
+                            </span>
+                            {isCurrent && (
+                              <Badge variant="secondary">{t("current")}</Badge>
+                            )}
+                          </div>
+                          {subscription.userAgent && (
+                            <p
+                              className="max-w-sm truncate text-xs text-muted-foreground"
+                              title={subscription.userAgent}
+                            >
+                              {subscription.userAgent}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span title={subscription.endpoint}>
+                            {endpointHost(subscription.endpoint)}
+                          </span>
+                        </TableCell>
+                        <TableCell>{subscription.locale ?? "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <DateTime value={subscription.lastSeenAt} />
+                        </TableCell>
+                        <TableCell className="pr-4">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              disabled={subscriptionBusy !== null}
+                              onClick={() =>
+                                void testSubscription(subscription.id)
+                              }
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              {testing ? (
+                                <Spinner />
+                              ) : tested ? (
+                                <CheckCircle2 />
+                              ) : (
+                                <Send />
+                              )}
+                              {tested ? t("testSent") : t("test")}
+                            </Button>
+                            <ConfirmationDialog
+                              actionLabel={t("remove")}
+                              cancelLabel={t("cancel")}
+                              description={t("removeBrowserDescription")}
+                              onConfirm={() => deleteSubscription(subscription)}
+                              title={t("removeBrowserTitle")}
+                              trigger={
+                                <Button
+                                  aria-label={t("removeBrowser", {
+                                    browser: browserName(
+                                      subscription.userAgent,
+                                      t("unknownBrowser"),
+                                    ),
+                                  })}
+                                  disabled={subscriptionBusy !== null}
+                                  size="icon-sm"
+                                  title={t("remove")}
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {deleting ? <Spinner /> : <Trash2 />}
+                                </Button>
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </Card>
         </div>
-        <div
-          ref={sentinel}
-          className="flex min-h-10 items-center justify-center p-2"
-        >
-          {loadingMore && <Spinner />}
-        </div>
-      </Card>
-    </section>
+      )}
+    </div>
   );
 }

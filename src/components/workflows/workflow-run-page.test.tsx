@@ -161,6 +161,8 @@ const pendingRun = {
   startedAt: "2026-07-24T12:00:01.000Z",
   pausedAt: null,
   finishedAt: null,
+  archivedAt: null,
+  createdAt: "2026-07-24T12:00:00.000Z",
   attempts: [
     {
       id: "attempt-1",
@@ -254,6 +256,41 @@ describe("workflow question answers", () => {
         },
       ),
     );
+  });
+
+  test("tints the header with the linked worktree colour", async () => {
+    request.mockResolvedValue({
+      workflowRun: {
+        ...pendingRun,
+        worktree: {
+          id: "worktree-1",
+          folder: "/tmp/feature",
+          branch: "feature",
+          highlightColor: "violet",
+        },
+      },
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: "Release #7" });
+    const header = heading.closest("div.rounded-lg");
+    expect(header?.className).toContain("bg-violet-500/10");
+    expect(header?.className).toContain("border-l-violet-500");
+  });
+
+  test("leaves the header untinted when no worktree is linked", async () => {
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: "Release #7" });
+    expect(heading.closest("div.rounded-lg")).toBeNull();
   });
 
   test("navigates locked links and only selects unlocked action nodes for replay", async () => {

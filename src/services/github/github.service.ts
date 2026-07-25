@@ -268,6 +268,8 @@ type RawReviewThreadPullRequest = {
   number: number;
   title: string;
   url: string;
+  headRefName: string;
+  headRepository: { nameWithOwner: string } | null;
   repository: { nameWithOwner: string };
 };
 
@@ -393,6 +395,8 @@ const REVIEW_THREAD_FIELDS = `
     number
     title
     url
+    headRefName
+    headRepository { nameWithOwner }
     repository { nameWithOwner }
   }
   comments(first: 100) {
@@ -400,6 +404,38 @@ const REVIEW_THREAD_FIELDS = `
     pageInfo { hasNextPage endCursor }
   }
 `;
+
+type WorktreeHighlight = { id: string; highlightColor: string | null };
+
+const worktreeHighlightKey = (canonicalOrigin: string, branch: string) =>
+  `${canonicalOrigin}\u0000${branch}`;
+
+const canonicalOriginOf = (nameWithOwner: string) =>
+  `github.com/${nameWithOwner.toLowerCase()}`;
+
+/** A pull request branch can only match a worktree when GitHub identifies the
+ * repository that owns the head ref. */
+const headRepositoryName = (pullRequest: {
+  headRepository: { nameWithOwner: string } | null;
+}) => pullRequest.headRepository?.nameWithOwner ?? null;
+
+function pullRequestWorktreeHighlight(
+  pullRequest: {
+    headRefName: string;
+    headRepository: { nameWithOwner: string } | null;
+  },
+  highlights?: Map<string, WorktreeHighlight>,
+) {
+  const nameWithOwner = headRepositoryName(pullRequest);
+  return nameWithOwner
+    ? highlights?.get(
+        worktreeHighlightKey(
+          canonicalOriginOf(nameWithOwner),
+          pullRequest.headRefName,
+        ),
+      )
+    : undefined;
+}
 
 function repositoryView(repository: {
   id: string;
@@ -771,13 +807,17 @@ function reviewDecision(value: string | null): GitHubReviewDecision {
 
 function reviewThreadPullRequest(
   pullRequest: RawReviewThreadPullRequest,
+  highlights?: Map<string, WorktreeHighlight>,
 ): GitHubReviewThreadPullRequest {
+  const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
   return {
     id: pullRequest.id,
     number: pullRequest.number,
     title: pullRequest.title,
     url: pullRequest.url,
     repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
+    worktreeId: highlight?.id ?? null,
+    worktreeHighlightColor: highlight?.highlightColor ?? null,
   };
 }
 
@@ -798,6 +838,7 @@ function normalizeReviewComment(
 
 function normalizeReviewThread(
   thread: RawReviewThread,
+  highlights?: Map<string, WorktreeHighlight>,
 ): GitHubReviewThread | null {
   const comments = connectionNodes(thread.comments);
   const root = comments.find((comment) => !comment.replyTo) ?? comments[0];
@@ -816,7 +857,7 @@ function normalizeReviewThread(
     viewerCanResolve: thread.viewerCanResolve,
     viewerCanUnresolve: thread.viewerCanUnresolve,
     resolvedBy: thread.resolvedBy,
-    pullRequest: reviewThreadPullRequest(thread.pullRequest),
+    pullRequest: reviewThreadPullRequest(thread.pullRequest, highlights),
     rootComment: normalizeReviewComment(root),
     replies: comments
       .filter((comment) => comment.id !== root.id)
@@ -1822,16 +1863,20 @@ export class GitHubService {
           select: {
             id: true,
             branch: true,
+            highlightColor: true,
             codebase: { select: { repositoryId: true } },
           },
         })
       : [];
-    const worktreeByRepositoryAndBranch = new Map<string, string>();
+    const worktreeByRepositoryAndBranch = new Map<string, WorktreeHighlight>();
     for (const worktree of worktrees) {
       if (!worktree.branch) continue;
       const key = `${worktree.codebase.repositoryId}\u0000${worktree.branch}`;
       if (!worktreeByRepositoryAndBranch.has(key)) {
-        worktreeByRepositoryAndBranch.set(key, worktree.id);
+        worktreeByRepositoryAndBranch.set(key, {
+          id: worktree.id,
+          highlightColor: worktree.highlightColor,
+        });
       }
     }
     const managedByName = new Map(
@@ -1866,6 +1911,11 @@ export class GitHubService {
           defaultGitHubRegex;
         const branchRegex = target.jiraBranchRegex ?? defaultBranchRegex;
         const pullRequestNumbers = pullRequestNumbersByRun[index] ?? [];
+        const worktreeHighlight = run.head_branch
+          ? (worktreeByRepositoryAndBranch.get(
+              `${target.id}\u0000${run.head_branch}`,
+            ) ?? null)
+          : null;
         return {
           id: String(run.id),
           workflowId: String(run.workflow_id ?? run.name ?? run.id),
@@ -1892,11 +1942,8 @@ export class GitHubService {
           jiraKey:
             parseJiraKey(run.display_title, titleRegex) ??
             parseJiraKey(run.head_branch ?? "", branchRegex),
-          worktreeId: run.head_branch
-            ? (worktreeByRepositoryAndBranch.get(
-                `${target.id}\u0000${run.head_branch}`,
-              ) ?? null)
-            : null,
+          worktreeId: worktreeHighlight?.id ?? null,
+          worktreeHighlightColor: worktreeHighlight?.highlightColor ?? null,
           startedAt: run.run_started_at ?? run.created_at,
           createdAt: run.created_at,
           updatedAt: run.updated_at,
@@ -2119,6 +2166,7 @@ export class GitHubService {
         id: true,
         branch: true,
         headSha: true,
+        highlightColor: true,
         codebase: {
           select: {
             repository: {
@@ -2201,6 +2249,7 @@ export class GitHubService {
         })),
         jiraKey: null,
         worktreeId: worktree.id,
+        worktreeHighlightColor: worktree.highlightColor,
         startedAt: run.run_started_at ?? run.created_at,
         createdAt: run.created_at,
         updatedAt: run.updated_at,
@@ -2320,6 +2369,7 @@ export class GitHubService {
         })),
         jiraKey: null,
         worktreeId: null,
+        worktreeHighlightColor: null,
         startedAt: run.run_started_at ?? run.created_at,
         createdAt: run.created_at,
         updatedAt: run.updated_at,
@@ -2393,6 +2443,7 @@ export class GitHubService {
       })),
       jiraKey: null,
       worktreeId: null,
+      worktreeHighlightColor: null,
       startedAt: run.run_started_at ?? run.created_at,
       createdAt: run.created_at,
       updatedAt: run.updated_at,
@@ -2669,6 +2720,7 @@ export class GitHubService {
     pullRequestId: string,
     initial: RawConnection<RawReviewThread>,
     token: string,
+    highlights?: Map<string, WorktreeHighlight>,
   ): Promise<GitHubReviewThread[]> {
     const threads = connectionNodes(initial);
     let cursor = initial.pageInfo.hasNextPage
@@ -2702,7 +2754,10 @@ export class GitHubService {
     }
     const normalized = await Promise.all(
       threads.map(async (thread) =>
-        normalizeReviewThread(await this.completeReviewThread(thread, token)),
+        normalizeReviewThread(
+          await this.completeReviewThread(thread, token),
+          highlights,
+        ),
       ),
     );
     return normalized
@@ -2736,6 +2791,8 @@ export class GitHubService {
                   title
                   url
                   updatedAt
+                  headRefName
+                  headRepository { nameWithOwner }
                   repository { nameWithOwner }
                   reviewThreads(first: 50) {
                     nodes { ${REVIEW_THREAD_FIELDS} }
@@ -3028,8 +3085,71 @@ export class GitHubService {
       unresolvedReviewThreadCount,
       state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
       headRefName: pullRequest.headRefName,
+      // Callers that show the pull request alongside its worktree overlay the
+      // tint from `worktreeHighlights`; on its own a pull request carries no
+      // link to one.
+      worktreeId: null,
+      worktreeHighlightColor: null,
       createdAt: pullRequest.createdAt,
     };
+  }
+
+  /**
+   * The worktree tint a GitHub surface paints is keyed by the branch's own
+   * repository plus branch name, because that pair is all a pull request,
+   * review thread, and Actions run carry in common. Resolving the colour live
+   * rather than snapshotting it keeps recolouring a worktree from stranding the
+   * rows pointing at it on the old tint.
+   */
+  private async worktreeHighlights(
+    branches: Array<{ nameWithOwner: string | null; branch: string | null }>,
+  ): Promise<Map<string, WorktreeHighlight>> {
+    const origins = new Set<string>();
+    const names = new Set<string>();
+    for (const { nameWithOwner, branch } of branches) {
+      if (!nameWithOwner || !branch) continue;
+      origins.add(canonicalOriginOf(nameWithOwner));
+      names.add(branch);
+    }
+    const highlights = new Map<string, WorktreeHighlight>();
+    if (!origins.size) return highlights;
+    const prisma = await getPrismaClient();
+    const repositories = await prisma.codebaseRepository.findMany({
+      where: { canonicalOrigin: { in: [...origins] } },
+      select: { id: true, canonicalOrigin: true },
+    });
+    if (!repositories.length) return highlights;
+    const worktrees = await prisma.worktree.findMany({
+      where: {
+        missingAt: null,
+        branch: { in: [...names] },
+        codebase: { repositoryId: { in: repositories.map(({ id }) => id) } },
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        branch: true,
+        highlightColor: true,
+        codebase: { select: { repositoryId: true } },
+      },
+    });
+    const originByRepositoryId = new Map(
+      repositories.map(({ id, canonicalOrigin }) => [id, canonicalOrigin]),
+    );
+    for (const worktree of worktrees) {
+      const origin = originByRepositoryId.get(worktree.codebase.repositoryId);
+      if (!origin || !worktree.branch) continue;
+      const key = worktreeHighlightKey(origin, worktree.branch);
+      // Descending `updatedAt` means the first worktree seen for a branch is
+      // the freshest, matching which one the detail lookup's `findFirst` picks.
+      if (!highlights.has(key)) {
+        highlights.set(key, {
+          id: worktree.id,
+          highlightColor: worktree.highlightColor,
+        });
+      }
+    }
+    return highlights;
   }
 
   async pullRequests(
@@ -3258,15 +3378,27 @@ export class GitHubService {
     const truncated = streams.some((stream) => stream.cursor.limitReached);
     const endCursor = hasNextPage ? encodePullRequestCursor(cursor) : null;
 
+    const highlights = await this.worktreeHighlights(
+      rawItems.map((pullRequest) => ({
+        nameWithOwner: headRepositoryName(pullRequest),
+        branch: pullRequest.headRefName,
+      })),
+    );
     const items = await Promise.all(
-      rawItems.map((pullRequest) =>
-        this.normalizePullRequest(
+      rawItems.map(async (pullRequest) => {
+        const summary = await this.normalizePullRequest(
           pullRequest,
           regexByGitHubId.get(pullRequest.repository.id) ?? defaultJiraKeyRegex,
           token,
           appConfigured,
-        ),
-      ),
+        );
+        const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
+        return {
+          ...summary,
+          worktreeId: highlight?.id ?? null,
+          worktreeHighlightColor: highlight?.highlightColor ?? null,
+        };
+      }),
     );
     if (!options.includePipelineJobs) {
       return { items, truncated, hasNextPage, endCursor };
@@ -3338,6 +3470,12 @@ export class GitHubService {
     const pullRequests = [...unique.values()].sort(
       (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
     );
+    const highlights = await this.worktreeHighlights(
+      pullRequests.map((pullRequest) => ({
+        nameWithOwner: headRepositoryName(pullRequest),
+        branch: pullRequest.headRefName,
+      })),
+    );
     const threads = (
       await Promise.all(
         pullRequests.map((pullRequest) =>
@@ -3345,6 +3483,7 @@ export class GitHubService {
             pullRequest.id,
             pullRequest.reviewThreads,
             token,
+            highlights,
           ),
         ),
       )
@@ -3356,7 +3495,9 @@ export class GitHubService {
     );
     return {
       viewerLogin: viewer.login,
-      pullRequests: pullRequests.map(reviewThreadPullRequest),
+      pullRequests: pullRequests.map((pullRequest) =>
+        reviewThreadPullRequest(pullRequest, highlights),
+      ),
       threads,
       truncated: searches.some((search) => search.truncated),
     };
@@ -3534,7 +3675,7 @@ export class GitHubService {
         };
       }),
     );
-    const reviewThreads = await this.completeReviewThreads(
+    const normalizedReviewThreads = await this.completeReviewThreads(
       pullRequest.id,
       pullRequest.reviewThreadsFull,
       token,
@@ -3564,9 +3705,17 @@ export class GitHubService {
             codebase: { repositoryId: matchingRepository.id },
           },
           orderBy: { updatedAt: "desc" },
-          select: { id: true },
+          select: { id: true, highlightColor: true },
         })
       : null;
+    const reviewThreads = normalizedReviewThreads.map((thread) => ({
+      ...thread,
+      pullRequest: {
+        ...thread.pullRequest,
+        worktreeId: worktree?.id ?? null,
+        worktreeHighlightColor: worktree?.highlightColor ?? null,
+      },
+    }));
     return {
       ...summary,
       codebaseRepositoryId: codebaseRepository?.id ?? null,
@@ -3588,6 +3737,7 @@ export class GitHubService {
       updatedAt: pullRequest.updatedAt,
       mergedAt: pullRequest.mergedAt,
       worktreeId: worktree?.id ?? null,
+      worktreeHighlightColor: worktree?.highlightColor ?? null,
     };
   }
 

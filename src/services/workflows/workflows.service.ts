@@ -38,12 +38,16 @@ import {
   mergeSessionData,
   resolveWorkflowValue,
   setSessionValue,
-  workflowValueSessionPaths,
   workflowSessionData,
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
+import {
+  WORKFLOW_QUICK_ACTION_KINDS,
+  type WorkflowQuickActionKind,
+} from "@/lib/workflows/kinds";
 import {
   agentEventBus,
   type AgentControlService,
@@ -226,6 +230,12 @@ function publishRunChanged(runId: string): void {
   });
 }
 
+/**
+ * What must be in session data before the step may run. Config bindings count
+ * only where the descriptor marks the key required — an optional one resolves to
+ * nothing and the adapter carries on, so blocking on it would strand a run over
+ * a value the step never needed (see `requiredConfigSessionPaths`).
+ */
 function nodeRequiredPaths(node: WorkflowNodeDefinition): string[] {
   const catalog = WORKFLOW_STEP_BY_KIND.get(node.kind)!;
   return [
@@ -233,7 +243,7 @@ function nodeRequiredPaths(node: WorkflowNodeDefinition): string[] {
       path.replaceAll("<stepId>", node.id),
     ),
     ...node.requiredPaths,
-    ...workflowValueSessionPaths(node.config),
+    ...requiredConfigSessionPaths(node.kind, "step", node.config),
   ];
 }
 
@@ -283,6 +293,9 @@ export class WorkflowsService {
     private readonly runsService?: RunsService,
     private readonly worktrees?: {
       ticketKeyForWorktree(id: string): Promise<string | null>;
+      workflowSessionDataForWorktree?(
+        id: string,
+      ): Promise<Record<string, unknown>>;
     },
   ) {
     if (this.agentControl) {
@@ -338,6 +351,25 @@ export class WorkflowsService {
     );
   }
 
+  /**
+   * A run reaches its worktree through session data rather than a column, so
+   * the tint has to be resolved from `worktree.id` on demand. Reading the
+   * worktree live rather than snapshotting the colour into session data keeps
+   * recolouring a worktree from stranding its runs on the old tint.
+   */
+  async runWorktree(sessionDataJson: string) {
+    const worktreeId = getSessionValue(
+      json<SessionData>(sessionDataJson),
+      "worktree.id",
+    );
+    if (typeof worktreeId !== "string" || !worktreeId) return null;
+    const prisma = await getPrismaClient();
+    return prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      select: { id: true, folder: true, branch: true, highlightColor: true },
+    });
+  }
+
   private async notifyRun(
     runId: string,
     typeKey:
@@ -351,6 +383,11 @@ export class WorkflowsService {
   ): Promise<void> {
     if (!this.notifications) return;
     const prisma = await getPrismaClient();
+    const run = await prisma.workflowRun.findUnique({
+      where: { id: runId },
+      select: { sessionDataJson: true },
+    });
+    const worktree = run ? await this.runWorktree(run.sessionDataJson) : null;
     const notification = await prisma.$transaction((transaction) =>
       this.notifications!.recordInTransaction(transaction, {
         dedupeKey: `workflow:${runId}:${dedupeSuffix}`,
@@ -360,6 +397,8 @@ export class WorkflowsService {
         href: `/workflows/runs/${runId}`,
         resourceKind: "WORKFLOW_RUN",
         resourceId: runId,
+        worktreeId: worktree?.id ?? null,
+        highlightColor: worktree?.highlightColor ?? null,
       }),
     );
     this.notifications.created(notification);
@@ -699,7 +738,7 @@ export class WorkflowsService {
 
   async setQuickAction(input: {
     id: string;
-    global: boolean;
+    kind: WorkflowQuickActionKind;
     quickActionIconKey: string;
     quickActionButtonVariant: string;
     repositoryIds: string[];
@@ -720,6 +759,9 @@ export class WorkflowsService {
       throw new Error("One or more repositories were not found");
     }
     const quickActionIconKey = input.quickActionIconKey.trim();
+    if (!WORKFLOW_QUICK_ACTION_KINDS.includes(input.kind)) {
+      throw new Error("Quick action kind is invalid");
+    }
     if (
       quickActionIconKey !== "none" &&
       !(BUILD_CONFIGURATION_ICON_KEYS as readonly string[]).includes(
@@ -740,7 +782,7 @@ export class WorkflowsService {
       await transaction.workflow.update({
         where: { id: input.id },
         data: {
-          globalQuickAction: input.global,
+          quickActionKind: input.kind,
           quickActionIconKey,
           quickActionButtonVariant,
         },
@@ -855,6 +897,7 @@ export class WorkflowsService {
       workflowId?: string | null;
       status?: string | null;
       search?: string | null;
+      archive?: string | null;
       first?: number | null;
       after?: string | null;
     } = {},
@@ -862,8 +905,16 @@ export class WorkflowsService {
     const prisma = await getPrismaClient();
     const first = Math.min(Math.max(input.first ?? 100, 1), 200);
     const searchNumber = Number(input.search);
+    const archive = input.archive?.toUpperCase() ?? "ACTIVE";
+    const archiveWhere =
+      archive === "ALL"
+        ? {}
+        : archive === "ARCHIVED"
+          ? { archivedAt: { not: null } }
+          : { archivedAt: null };
     const items = await prisma.workflowRun.findMany({
       where: {
+        ...archiveWhere,
         ...(input.workflowId ? { workflowId: input.workflowId } : {}),
         ...(input.status ? { status: input.status.toUpperCase() } : {}),
         ...(Number.isInteger(searchNumber) && searchNumber > 0
@@ -886,9 +937,50 @@ export class WorkflowsService {
       items: items.slice(0, first),
       nextCursor: items.length > first ? items[first - 1]!.id : null,
       totalCount: await prisma.workflowRun.count({
-        where: input.workflowId ? { workflowId: input.workflowId } : {},
+        where: {
+          ...archiveWhere,
+          ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+        },
       }),
     };
+  }
+
+  async archiveRuns(ids: string[], archived: boolean) {
+    const prisma = await getPrismaClient();
+    const unique = [...new Set(ids)];
+    const result = await prisma.workflowRun.updateMany({
+      where: { id: { in: unique } },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+    for (const id of unique) publishRunChanged(id);
+    return result.count;
+  }
+
+  /**
+   * Child runs point at their parent with `onDelete: SetNull`, and every other
+   * row hanging off a run cascades, so a plain `deleteMany` is enough. The one
+   * thing worth guarding is a run that has not finished: the scheduler would
+   * keep holding a lease on a row that no longer exists.
+   */
+  async deleteRuns(ids: string[]) {
+    const prisma = await getPrismaClient();
+    const unique = [...new Set(ids)];
+    const unfinished = await prisma.workflowRun.count({
+      where: {
+        id: { in: unique },
+        status: { notIn: ["SUCCEEDED", "FAILED", "CANCELLED"] },
+      },
+    });
+    if (unfinished) {
+      throw new Error(
+        "Cancel runs that have not finished before deleting them",
+      );
+    }
+    const result = await prisma.workflowRun.deleteMany({
+      where: { id: { in: unique } },
+    });
+    for (const id of unique) publishRunChanged(id);
+    return result.count;
   }
 
   async run(id: string) {
@@ -1582,23 +1674,28 @@ export class WorkflowsService {
     });
   }
 
-  async quickActions(worktreeId: string) {
+  async quickActions(input: {
+    kind: WorkflowQuickActionKind;
+    resourceKind: string;
+    repositoryId?: string | null;
+  }) {
     const prisma = await getPrismaClient();
-    const worktree = await prisma.worktree.findUnique({
-      where: { id: worktreeId },
-      select: { codebase: { select: { repositoryId: true } } },
-    });
-    if (!worktree) throw new Error("Worktree not found");
+    if (!WORKFLOW_QUICK_ACTION_KINDS.includes(input.kind)) {
+      throw new Error("Quick action kind is invalid");
+    }
+    const normalizedResourceKind = input.resourceKind.trim().toUpperCase();
+    const repositoryId = input.repositoryId?.trim() || null;
     const workflows = await prisma.workflow.findMany({
       where: {
         enabled: true,
         archivedAt: null,
         activeVersionId: { not: null },
+        quickActionKind: input.kind,
         OR: [
-          { globalQuickAction: true },
+          { quickActionRepositories: { none: {} } },
           {
             quickActionRepositories: {
-              some: { repositoryId: worktree.codebase.repositoryId },
+              some: { repositoryId: repositoryId ?? "" },
             },
           },
         ],
@@ -1614,7 +1711,7 @@ export class WorkflowsService {
       return definition.triggers.some(
         (trigger) =>
           isResourceTriggerKind(trigger.kind) &&
-          workflowResourceKind(trigger.config) === "WORKTREE",
+          workflowResourceKind(trigger.config) === normalizedResourceKind,
       );
     });
   }
@@ -1635,16 +1732,54 @@ export class WorkflowsService {
     resourceId: string | null | undefined,
     sessionData: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (
-      resourceKind?.toUpperCase() !== "WORKTREE" ||
-      !resourceId ||
-      !this.worktrees
-    ) {
-      return sessionData;
+    if (!this.worktrees) return sessionData;
+    const normalized = resourceKind?.toUpperCase() ?? null;
+    const sessionWorktreeId = getSessionValue(sessionData, "worktree.id");
+    const worktreeId =
+      normalized === "WORKTREE"
+        ? resourceId
+        : normalized === "GITHUB_PIPELINE" || normalized === "GITHUB_JOB"
+          ? typeof sessionWorktreeId === "string"
+            ? sessionWorktreeId
+            : null
+          : null;
+    let derived: Record<string, unknown> = {};
+    if (worktreeId) {
+      if (this.worktrees.workflowSessionDataForWorktree) {
+        derived =
+          await this.worktrees.workflowSessionDataForWorktree(worktreeId);
+      } else {
+        const key = await this.worktrees.ticketKeyForWorktree(worktreeId);
+        if (key) derived = { ticket: { key } };
+      }
     }
-    const ticketKey = await this.worktrees.ticketKeyForWorktree(resourceId);
-    if (!ticketKey) return sessionData;
-    return mergeSessionData({ ticket: { key: ticketKey } }, sessionData);
+    const associatedPullRequests = getSessionValue(
+      sessionData,
+      "pipeline.pullRequests",
+    );
+    if (
+      !getSessionValue(derived, "pr") &&
+      !getSessionValue(sessionData, "pr") &&
+      Array.isArray(associatedPullRequests) &&
+      associatedPullRequests[0] &&
+      typeof associatedPullRequests[0] === "object" &&
+      !Array.isArray(associatedPullRequests[0])
+    ) {
+      derived = mergeSessionData(derived, {
+        pr: associatedPullRequests[0] as Record<string, unknown>,
+      });
+    }
+    const jiraKey =
+      getSessionValue(sessionData, "pr.jiraKey") ??
+      getSessionValue(sessionData, "pipeline.jiraKey");
+    if (
+      typeof getSessionValue(derived, "ticket.key") !== "string" &&
+      typeof jiraKey === "string" &&
+      jiraKey.trim()
+    ) {
+      derived = mergeSessionData(derived, { ticket: { key: jiraKey } });
+    }
+    return mergeSessionData(derived, sessionData);
   }
 
   async trigger(input: TriggerWorkflowInput) {
@@ -1919,10 +2054,14 @@ export class WorkflowsService {
     subjectKey: string,
     payload: Record<string, unknown>,
   ): Promise<boolean> {
-    const config = parseObject(
-      json(trigger.configJson),
-      "Trigger configuration",
-    );
+    // Resolved against the event payload the same way a step's config is
+    // resolved against session data, so a filter, a threshold, or a command
+    // pattern can carry `{{path}}` tokens and session bindings rather than only
+    // constants.
+    const config = resolveWorkflowValue(
+      parseObject(json(trigger.configJson), "Trigger configuration"),
+      payload,
+    ) as Record<string, unknown>;
     let cursorChanged: boolean | null = null;
     if (
       payload.cursorValue !== undefined &&

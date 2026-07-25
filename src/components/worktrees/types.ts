@@ -45,6 +45,8 @@ export type Worktree = {
   baseBehind: number | null;
   hasStagedChanges: boolean;
   hasUnstagedChanges: boolean;
+  rebaseInProgress: boolean;
+  hasConflicts: boolean;
   pushStatus:
     "READY" | "DIRTY" | "DETACHED" | "BEHIND" | "DIVERGED" | "UNKNOWN";
   highlightColor: string | null;
@@ -63,6 +65,20 @@ export type Worktree = {
   updatedAt: string;
 };
 
+export type WorktreeQuickAction = {
+  id: string;
+  name: string;
+  description: string;
+  quickActionIconKey: string;
+  quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
+  hasPlainTrigger?: boolean;
+  triggerChoices?: Array<{
+    key: string;
+    label: string;
+    description: string;
+  }>;
+};
+
 export type WorktreeCodebaseGroup = {
   codebase: Codebase & {
     defaultBranch: string | null;
@@ -74,20 +90,8 @@ export type WorktreeCodebaseGroup = {
   repository: CodebaseRepository;
   worktrees: Worktree[];
   iosBuildConfigured?: boolean;
-  quickActions?: Array<{
-    id: string;
-    name: string;
-    description: string;
-    quickActionIconKey: string;
-    quickActionButtonVariant:
-      "default" | "outline" | "secondary" | "destructive";
-    hasPlainTrigger?: boolean;
-    triggerChoices?: Array<{
-      key: string;
-      label: string;
-      description: string;
-    }>;
-  }>;
+  quickActions?: WorktreeQuickAction[];
+  mergeConflictQuickActions?: WorktreeQuickAction[];
 };
 
 export type WorktreeAgentGroup = {

@@ -3,7 +3,7 @@ export const PULL_REQUEST_FIELDS =
 
 export const WORKTREE_FIELDS = `
   id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
-  baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges highlightColor availability statusError
+  baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges rebaseInProgress hasConflicts highlightColor availability statusError
   pushStatus
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }

@@ -87,6 +87,15 @@ describe("configSchemaForKind", () => {
     expect(prompt.description).toContain("interpolation");
   });
 
+  test("interpolation-only fields keep their native shape but say so", () => {
+    // No `anyOf`: a list is still a list, and only the strings inside it carry
+    // tokens — but a caller reading the schema needs to be told that.
+    const environment = properties("TERMINAL_RUN", "step").environment!;
+    expect(environment.type).toBe("object");
+    expect(environment.anyOf).toBeUndefined();
+    expect(environment.description).toContain("{{worktree.baseBranch}}");
+  });
+
   test("literal-only fields stay narrow", () => {
     // Booleans have no `valueModes`, so they must not gain the binding `anyOf`.
     expect(properties("JIRA_LOAD_TICKET", "step").force).toMatchObject({

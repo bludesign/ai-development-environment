@@ -695,7 +695,7 @@ describe("CodebasesService", () => {
     });
   });
 
-  test("replaces repository-wide quick action workflows", async () => {
+  test("does not mutate workflow scopes from repository settings", async () => {
     const repository = {
       id: "repository-1",
       name: "Codex",
@@ -729,20 +729,14 @@ describe("CodebasesService", () => {
       null,
       true,
       undefined,
-      ["workflow-1", "workflow-2", "workflow-1"],
     );
 
     expect(
       prisma.workflowQuickActionRepository.deleteMany,
-    ).toHaveBeenCalledWith({ where: { repositoryId: "repository-1" } });
+    ).not.toHaveBeenCalled();
     expect(
       prisma.workflowQuickActionRepository.createMany,
-    ).toHaveBeenCalledWith({
-      data: [
-        { workflowId: "workflow-1", repositoryId: "repository-1" },
-        { workflowId: "workflow-2", repositoryId: "repository-1" },
-      ],
-    });
+    ).not.toHaveBeenCalled();
   });
 
   test("validates and persists the agent refresh interval", async () => {

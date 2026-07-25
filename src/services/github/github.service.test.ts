@@ -41,7 +41,11 @@ const state = vi.hoisted(() => ({
     id: string;
     canonicalOrigin: string;
   } | null,
-  linkedWorktree: null as { id: string; branch: string } | null,
+  linkedWorktree: null as {
+    id: string;
+    branch: string;
+    highlightColor?: string | null;
+  } | null,
   worktreeDetail: null as {
     id: string;
     branch: string | null;
@@ -71,6 +75,7 @@ const state = vi.hoisted(() => ({
   worktrees: [] as Array<{
     id: string;
     branch: string | null;
+    highlightColor?: string | null;
     updatedAt: Date;
     codebase: { repositoryId: string };
   }>,
@@ -254,7 +259,10 @@ vi.mock("@/data/prisma-client", () => ({
           : [],
       findFirst: async ({ where }: { where: { branch: string } }) =>
         state.linkedWorktree?.branch === where.branch
-          ? { id: state.linkedWorktree.id }
+          ? {
+              id: state.linkedWorktree.id,
+              highlightColor: state.linkedWorktree.highlightColor ?? null,
+            }
           : null,
       findUnique: async ({ where }: { where: { id: string } }) =>
         state.worktreeDetail?.id === where.id ? state.worktreeDetail : null,
@@ -451,6 +459,8 @@ function rawReviewThread(
     hasMoreComments?: boolean;
     pullRequestId?: string;
     pullRequestNumber?: number;
+    headRefName?: string;
+    headRepository?: { nameWithOwner: string } | null;
   } = {},
 ) {
   const pullRequestId = options.pullRequestId ?? "review-pull-request-1";
@@ -474,6 +484,11 @@ function rawReviewThread(
       number: pullRequestNumber,
       title: `Review pull request ${pullRequestNumber}`,
       url: `https://github.com/acme/widgets/pull/${pullRequestNumber}`,
+      headRefName: options.headRefName ?? "feature/app-42",
+      headRepository:
+        options.headRepository === undefined
+          ? { nameWithOwner: "acme/widgets" }
+          : options.headRepository,
       repository: { nameWithOwner: "acme/widgets" },
     },
     comments: {
@@ -2016,7 +2031,7 @@ describe("GitHub service", () => {
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
                 reviewThreadsFull: {
-                  nodes: [],
+                  nodes: [rawReviewThread("detail-thread", { headRepository })],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
                 baseRefName: "main",
@@ -2041,12 +2056,24 @@ describe("GitHub service", () => {
     state.linkedWorktree = {
       id: "fork-worktree",
       branch: "feature/app-42",
+      highlightColor: "violet",
     };
     const service = new GitHubService();
 
     await expect(
       service.pullRequest("acme", "widgets", 17),
-    ).resolves.toMatchObject({ worktreeId: "fork-worktree" });
+    ).resolves.toMatchObject({
+      worktreeId: "fork-worktree",
+      worktreeHighlightColor: "violet",
+      reviewThreads: [
+        {
+          pullRequest: {
+            worktreeId: "fork-worktree",
+            worktreeHighlightColor: "violet",
+          },
+        },
+      ],
+    });
     expect(state.codebaseRepositoryOrigins).toEqual([
       "github.com/acme/widgets",
       "github.com/forkowner/mixedrepo",
@@ -2056,7 +2083,18 @@ describe("GitHub service", () => {
     headRepository = null;
     await expect(
       service.pullRequest("acme", "widgets", 17),
-    ).resolves.toMatchObject({ worktreeId: null });
+    ).resolves.toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+      reviewThreads: [
+        {
+          pullRequest: {
+            worktreeId: null,
+            worktreeHighlightColor: null,
+          },
+        },
+      ],
+    });
     expect(state.codebaseRepositoryOrigins).toEqual([
       "github.com/acme/widgets",
     ]);
@@ -2662,5 +2700,300 @@ describe("GitHub service", () => {
         outcome: "FAILURE",
       }),
     );
+  });
+
+  test("tints pull request rows with the worktree on their head branch", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "worktree-1",
+        branch: "feature/app-42",
+        highlightColor: "violet",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().pullRequests("MINE", null, {
+      first: 1,
+    });
+
+    expect(page.items[0]).toMatchObject({
+      worktreeId: "worktree-1",
+      worktreeHighlightColor: "violet",
+    });
+  });
+
+  test("does not match pull request rows when GitHub omits the head repository", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [
+                  {
+                    ...rawPullRequest("pull-request-1", "APP-42 Add API"),
+                    headRepository: null,
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "base-worktree",
+        branch: "feature/app-42",
+        highlightColor: "violet",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().pullRequests("MINE", null, {
+      first: 1,
+    });
+
+    expect(page.items[0]).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
+  });
+
+  test("leaves pull request rows untinted when no worktree tracks the branch", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "worktree-other",
+        branch: "feature/unrelated",
+        highlightColor: "violet",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().pullRequests("MINE", null, {
+      first: 1,
+    });
+
+    expect(page.items[0]).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
+  });
+
+  test("tints review threads with the worktree on their pull request's branch", async () => {
+    const thread = rawReviewThread("thread-1", { author: "octocat" });
+    const reviewPullRequest = {
+      id: "review-pull-request-1",
+      number: 21,
+      title: "Review pull request 21",
+      url: "https://github.com/acme/widgets/pull/21",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      headRefName: "feature/app-42",
+      headRepository: { nameWithOwner: "acme/widgets" },
+      repository: { nameWithOwner: "acme/widgets" },
+      reviewThreads: {
+        nodes: [thread],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [reviewPullRequest],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "worktree-1",
+        branch: "feature/app-42",
+        highlightColor: "emerald",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().reviewThreads();
+
+    expect(page.pullRequests[0]).toMatchObject({
+      worktreeId: "worktree-1",
+      worktreeHighlightColor: "emerald",
+    });
+    expect(page.threads[0].pullRequest).toMatchObject({
+      worktreeId: "worktree-1",
+      worktreeHighlightColor: "emerald",
+    });
+  });
+
+  test("does not match review threads when GitHub omits the head repository", async () => {
+    const thread = rawReviewThread("thread-1", {
+      author: "octocat",
+      headRepository: null,
+    });
+    const reviewPullRequest = {
+      id: "review-pull-request-1",
+      number: 21,
+      title: "Review pull request 21",
+      url: "https://github.com/acme/widgets/pull/21",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      headRefName: "feature/app-42",
+      headRepository: null,
+      repository: { nameWithOwner: "acme/widgets" },
+      reviewThreads: {
+        nodes: [thread],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.includes("query GitHubViewer")) {
+          return response({
+            data: {
+              viewer: {
+                login: "octocat",
+                name: "Octo Cat",
+                avatarUrl: "https://avatars.example/octocat",
+                url: "https://github.com/octocat",
+              },
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
+          return response({
+            data: {
+              search: {
+                nodes: [reviewPullRequest],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      }),
+    );
+    state.worktrees = [
+      {
+        id: "base-worktree",
+        branch: "feature/app-42",
+        highlightColor: "emerald",
+        updatedAt: new Date("2026-07-16T00:00:00.000Z"),
+        codebase: { repositoryId: "codebase-repository-1" },
+      },
+    ];
+
+    const page = await new GitHubService().reviewThreads();
+
+    expect(page.pullRequests[0]).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
+    expect(page.threads[0].pullRequest).toMatchObject({
+      worktreeId: null,
+      worktreeHighlightColor: null,
+    });
   });
 });

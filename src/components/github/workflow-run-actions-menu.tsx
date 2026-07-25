@@ -31,6 +31,12 @@ import type {
   GitHubWorkflowJobView,
 } from "@/services/github/types";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
+import {
+  WorkflowResourceDialog,
+  WorkflowResourceMenuItems,
+  type WorkflowMenuResource,
+} from "@/components/workflows/workflow-resource-actions";
+import type { AutoRetryRunOption } from "@/components/github/auto-retry-dialog";
 
 const CANCELLABLE_RUN_STATES = new Set<GitHubPipelineState>([
   "ACTION_REQUIRED",
@@ -80,6 +86,8 @@ export function WorkflowRunActionsMenu({
   onRetried,
   onError,
   viewAllHref,
+  workflowResource,
+  autoRetryContext,
 }: {
   run: WorkflowRunMenuRun;
   jobs?: GitHubWorkflowJobView[];
@@ -89,6 +97,14 @@ export function WorkflowRunActionsMenu({
   onRetried: () => void;
   onError: (error: string | null) => void;
   viewAllHref?: string | null;
+  workflowResource?: WorkflowMenuResource | null;
+  autoRetryContext?: {
+    allowFuture?: boolean;
+    branch?: string | null;
+    worktreeId?: string | null;
+    pullRequestNumber?: number | null;
+    currentRuns?: AutoRetryRunOption[];
+  };
 }) {
   const t = useTranslations("actionsPage");
   const td = useTranslations("pullRequestDetail");
@@ -96,6 +112,7 @@ export function WorkflowRunActionsMenu({
   const [retrying, setRetrying] = useState(false);
   const [cancelling, setCancelling] = useState<"cancel" | "force" | null>(null);
   const [confirmingForceCancel, setConfirmingForceCancel] = useState(false);
+  const [linkedOpen, setLinkedOpen] = useState(false);
 
   const retry = async () => {
     if (!run.canRetry || !run.checkSuiteId) return;
@@ -246,22 +263,35 @@ export function WorkflowRunActionsMenu({
           </DropdownMenuItem>
           {includeAutoRetry && run.codebaseRepositoryId ? (
             <AutoRetryDialog
+              allowFuture={autoRetryContext?.allowFuture}
+              branch={autoRetryContext?.branch}
               codebaseRepositoryId={run.codebaseRepositoryId}
-              currentRuns={[
-                {
-                  id: run.id,
-                  workflowId: run.workflowId,
-                  name: run.name,
-                  jobs,
-                },
-              ]}
+              currentRuns={
+                autoRetryContext?.currentRuns ?? [
+                  {
+                    id: run.id,
+                    workflowId: run.workflowId,
+                    name: run.name,
+                    jobs,
+                  },
+                ]
+              }
+              pullRequestNumber={autoRetryContext?.pullRequestNumber}
               repositoryGithubId={run.repositoryGithubId}
+              worktreeId={autoRetryContext?.worktreeId}
               trigger={
                 <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
                   <RotateCcw />
                   {t("autoRetry")}
                 </DropdownMenuItem>
               }
+            />
+          ) : null}
+          {workflowResource ? (
+            <WorkflowResourceMenuItems
+              onError={onError}
+              onOpenLinked={() => setLinkedOpen(true)}
+              resource={workflowResource}
             />
           ) : null}
         </DropdownMenuContent>
@@ -275,6 +305,13 @@ export function WorkflowRunActionsMenu({
         open={confirmingForceCancel}
         title={t("forceCancelTitle")}
       />
+      {workflowResource ? (
+        <WorkflowResourceDialog
+          onOpenChange={setLinkedOpen}
+          open={linkedOpen}
+          resource={workflowResource}
+        />
+      ) : null}
     </>
   );
 }

@@ -16,6 +16,13 @@ enum WorkflowRunStatus {
   CANCELLED
 }
 
+enum WorkflowQuickActionKind {
+  STANDARD
+  MERGE_CONFLICT
+  GITHUB_ACTIONS
+  NONE
+}
+
 type Workflow {
   id: ID!
   name: String!
@@ -27,7 +34,7 @@ type Workflow {
   enabled: Boolean!
   overlapPolicy: WorkflowOverlapPolicy!
   maxConcurrentRuns: Int!
-  globalQuickAction: Boolean!
+  quickActionKind: WorkflowQuickActionKind!
   quickActionIconKey: String!
   quickActionButtonVariant: String!
   quickActionRepositories: [CodebaseRepository!]!
@@ -137,6 +144,13 @@ type WorkflowValidation {
   diagnostics: [WorkflowDiagnostic!]!
 }
 
+type WorkflowRunWorktreeRef {
+  id: ID!
+  folder: String!
+  branch: String
+  highlightColor: String
+}
+
 type WorkflowRun {
   id: ID!
   displayNumber: Int!
@@ -158,12 +172,14 @@ type WorkflowRun {
   generation: Int!
   sessionData: JSON!
   sessionRevision: Int!
+  worktree: WorkflowRunWorktreeRef
   blockedReason: String
   error: String
   queuedAt: String!
   startedAt: String
   pausedAt: String
   finishedAt: String
+  archivedAt: String
   createdAt: String!
   updatedAt: String!
   attempts: [WorkflowStepAttempt!]!
@@ -304,7 +320,7 @@ input TriggerWorkflowInput {
 
 input SetWorkflowQuickActionInput {
   id: ID!
-  global: Boolean!
+  kind: WorkflowQuickActionKind!
   quickActionIconKey: String!
   quickActionButtonVariant: String!
   repositoryIds: [ID!]!
@@ -331,6 +347,7 @@ extend type Query {
     workflowId: ID
     status: String
     search: String
+    archive: String = "ACTIVE"
     first: Int = 100
     after: ID
   ): WorkflowRunPage!
@@ -342,7 +359,11 @@ extend type Query {
   ): [WorkflowRunEvent!]!
   workflowRunsForResource(kind: String!, resourceId: ID!): [WorkflowRun!]!
   workflowsAcceptingResource(kind: String!): [Workflow!]!
-  workflowQuickActions(worktreeId: ID!): [Workflow!]!
+  workflowQuickActions(
+    kind: WorkflowQuickActionKind!
+    resourceKind: String!
+    repositoryId: ID
+  ): [Workflow!]!
   exportWorkflow(id: ID!, versionId: ID): JSON!
   prepareWorkflowReplay(runId: ID!, nodeId: ID!): WorkflowReplayPreview!
   workflowJobSecrets(jobId: ID!): [WorkflowJobSecret!]!
@@ -357,6 +378,8 @@ extend type Mutation {
   setWorkflowQuickAction(input: SetWorkflowQuickActionInput!): Workflow!
   archiveWorkflow(id: ID!, archived: Boolean!): Workflow!
   deleteWorkflow(id: ID!): Boolean!
+  archiveWorkflowRuns(ids: [ID!]!, archived: Boolean!): Int!
+  deleteWorkflowRuns(ids: [ID!]!): Int!
   triggerWorkflow(input: TriggerWorkflowInput!): WorkflowRun!
   pauseWorkflowRun(id: ID!): WorkflowRun!
   resumeWorkflowRun(id: ID!): WorkflowRun!

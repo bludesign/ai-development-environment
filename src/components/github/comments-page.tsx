@@ -53,6 +53,11 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightBackgroundClasses,
+  worktreeHighlightInsetAccentClasses,
+} from "@/lib/worktree-highlight";
 import type {
   GitHubReviewComment,
   GitHubReviewThread,
@@ -67,7 +72,7 @@ const THREAD_FIELDS = `
   id isResolved isOutdated subjectType path line startLine originalLine originalStartLine
   viewerCanReply viewerCanResolve viewerCanUnresolve
   resolvedBy { login avatarUrl url }
-  pullRequest { id number title url repositoryNameWithOwner }
+  pullRequest { id number title url repositoryNameWithOwner worktreeId worktreeHighlightColor }
   rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt }
   replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt }
 `;
@@ -457,52 +462,66 @@ function ReviewThreadTable({ threads }: { threads: GitHubReviewThread[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {threads.map((thread) => (
-              <TableRow key={thread.id}>
-                <TableCell className="min-w-40">
-                  <ReviewAuthor actor={thread.rootComment.author} compact />
-                </TableCell>
-                <TableCell className="min-w-64 whitespace-normal">
-                  <div className="flex flex-col">
-                    <Link
-                      className="font-semibold text-primary hover:underline"
-                      href={pullRequestDetailHref(thread.pullRequest)}
-                    >
-                      {thread.pullRequest.repositoryNameWithOwner} #
-                      {thread.pullRequest.number}
-                    </Link>
-                    <Link
-                      className="text-sm hover:underline"
-                      href={pullRequestDetailHref(thread.pullRequest)}
-                    >
-                      {thread.pullRequest.title}
-                    </Link>
-                  </div>
-                </TableCell>
-                <TableCell className="min-w-80 whitespace-pre-wrap">
-                  {thread.rootComment.bodyText}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-muted-foreground">
-                  <DateTime
-                    kind="relative"
-                    value={thread.rootComment.createdAt}
-                  />
-                </TableCell>
-                <TableCell>{thread.replies.length}</TableCell>
-                <TableCell className="text-right">
-                  <Button asChild size="icon-sm" variant="ghost">
-                    <a
-                      aria-label={t("openInGitHub")}
-                      href={thread.rootComment.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <ExternalLink />
-                    </a>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {threads.map((thread) => {
+              const highlight = thread.pullRequest.worktreeHighlightColor;
+              return (
+                <TableRow
+                  key={thread.id}
+                  className={cn(
+                    highlight && worktreeHighlightBackgroundClasses[highlight],
+                  )}
+                >
+                  <TableCell
+                    className={cn(
+                      "min-w-40",
+                      highlight &&
+                        worktreeHighlightInsetAccentClasses[highlight],
+                    )}
+                  >
+                    <ReviewAuthor actor={thread.rootComment.author} compact />
+                  </TableCell>
+                  <TableCell className="min-w-64 whitespace-normal">
+                    <div className="flex flex-col">
+                      <Link
+                        className="font-semibold text-primary hover:underline"
+                        href={pullRequestDetailHref(thread.pullRequest)}
+                      >
+                        {thread.pullRequest.repositoryNameWithOwner} #
+                        {thread.pullRequest.number}
+                      </Link>
+                      <Link
+                        className="text-sm hover:underline"
+                        href={pullRequestDetailHref(thread.pullRequest)}
+                      >
+                        {thread.pullRequest.title}
+                      </Link>
+                    </div>
+                  </TableCell>
+                  <TableCell className="min-w-80 whitespace-pre-wrap">
+                    {thread.rootComment.bodyText}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    <DateTime
+                      kind="relative"
+                      value={thread.rootComment.createdAt}
+                    />
+                  </TableCell>
+                  <TableCell>{thread.replies.length}</TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild size="icon-sm" variant="ghost">
+                      <a
+                        aria-label={t("openInGitHub")}
+                        href={thread.rootComment.url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <ExternalLink />
+                      </a>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}

@@ -99,7 +99,7 @@ export type WorkflowSummary = {
   enabled: boolean;
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
-  globalQuickAction: boolean;
+  quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   quickActionRepositories: Array<{
@@ -177,12 +177,20 @@ export type WorkflowRun = {
   generation: number;
   sessionData: Record<string, unknown>;
   sessionRevision: number;
+  worktree?: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    highlightColor: string | null;
+  } | null;
   blockedReason: string | null;
   error: string | null;
   queuedAt: string;
   startedAt: string | null;
   pausedAt: string | null;
   finishedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
   attempts: WorkflowAttempt[];
   events: Array<{
     id: string;

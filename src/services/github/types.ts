@@ -199,6 +199,7 @@ export type GitHubActionsWorkflowRunView = {
   pullRequests: GitHubActionsPullRequestView[];
   jiraKey: string | null;
   worktreeId: string | null;
+  worktreeHighlightColor: string | null;
   startedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -296,6 +297,8 @@ export type GitHubPullRequestView = {
   unresolvedReviewThreadCount: number;
   state: GitHubPullRequestState;
   headRefName: string;
+  worktreeId: string | null;
+  worktreeHighlightColor: string | null;
   createdAt: string;
 };
 
@@ -322,6 +325,8 @@ export type GitHubReviewThreadPullRequest = {
   title: string;
   url: string;
   repositoryNameWithOwner: string;
+  worktreeId: string | null;
+  worktreeHighlightColor: string | null;
 };
 
 export type GitHubReviewThread = {
@@ -377,6 +382,7 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
   updatedAt: string;
   mergedAt: string | null;
   worktreeId: string | null;
+  worktreeHighlightColor: string | null;
 };
 
 export type GitHubPullRequestMergeOptions = {

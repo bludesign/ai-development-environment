@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Ruta de sesión",
     "sessionPathPlaceholder": "p. ej. ticket.key",
     "sessionBindingHelp": "Lee este valor de los datos de sesión al ejecutar.",
+    "interpolationHelp": "Usa {token} para insertar datos de sesión al ejecutar; por ejemplo, {example}.",
     "modelProvider": "Proveedor",
     "modelModel": "Modelo",
     "modelEffort": "Esfuerzo",
@@ -309,7 +310,7 @@
     "resourceWorkflowsDescription": "Ejecuta un flujo compatible o sigue este recurso durante una ejecución activa.",
     "manageWorkflows": "Gestionar flujos",
     "quickActions": "Acciones rápidas",
-    "quickActionsDescription": "Haz que este flujo esté disponible directamente en las filas de acciones de los árboles de trabajo.",
+    "quickActionsDescription": "Elige dónde aparece este flujo como acción rápida.",
     "quickActionIcon": "Icono del botón",
     "quickActionStyle": "Estilo del botón",
     "quickActionStyles": {
@@ -318,12 +319,23 @@
       "secondary": "Secundario",
       "destructive": "Destructivo"
     },
-    "globalQuickAction": "Acción rápida global",
-    "globalQuickActionHelp": "Muestra esta acción en todos los repositorios y árboles de trabajo.",
+    "quickActionKind": "Tipo de acción",
+    "quickActionKinds": {
+      "STANDARD": "Estándar",
+      "MERGE_CONFLICT": "Conflicto de fusión",
+      "GITHUB_ACTIONS": "Acciones de GitHub",
+      "NONE": "Ninguna"
+    },
+    "quickActionKindHelp": {
+      "STANDARD": "Mostrar con las acciones estándar del worktree.",
+      "MERGE_CONFLICT": "Mostrar cuando un rebase se detiene por conflictos.",
+      "GITHUB_ACTIONS": "Mostrar en los menús de pipelines y trabajos de GitHub.",
+      "NONE": "No mostrar como acción rápida."
+    },
     "repositoryQuickActions": "Disponibilidad por repositorio",
-    "repositoryQuickActionsHelp": "Elige los repositorios cuyos agentes y árboles de trabajo heredarán esta acción.",
+    "repositoryQuickActionsHelp": "Sin selección se permiten todos los repositorios; una selección crea una lista permitida.",
     "noQuickActionRepositories": "Añade una base de código antes de asignar acciones rápidas por repositorio.",
-    "quickActionEligibility": "La acción aparece cuando el flujo está publicado, activado y tiene un disparador de recurso de árbol de trabajo.",
+    "quickActionEligibility": "La acción aparece cuando el flujo está publicado, activado y tiene un disparador de recurso que coincide con el tipo de acción seleccionado.",
     "saveQuickActions": "Guardar acciones rápidas",
     "quickActionStarted": "Se inició {name}.",
     "quickActionView": "Ver",
@@ -337,7 +349,22 @@
     "triggerChoiceDescription": "Descripción (opcional)",
     "triggerChoicesHelp": "Cada opción se convierte en un elemento del menú bajo el botón de ejecución y en una salida propia del activador.",
     "triggerChoicesEmpty": "Aún no hay opciones. Añade las que se ofrecerán al iniciar este flujo de trabajo.",
-    "triggerChoicesAdvanced": "Estas opciones no son entradas simples de clave, texto y descripción. Edítalas como JSON."
+    "triggerChoicesAdvanced": "Estas opciones no son entradas simples de clave, texto y descripción. Edítalas como JSON.",
+    "active": "Activo",
+    "all": "Todos",
+    "archived": "Archivado",
+    "archiveFilter": "Filtro de archivo",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "deleteRunDescription": "Se eliminarán la ejecución y todo su historial de pasos. Esta acción no se puede deshacer.",
+    "deleteRunTitle": "Eliminar ejecución del flujo de trabajo",
+    "done": "Hecho",
+    "editRuns": "Editar",
+    "restore": "Restaurar",
+    "selectAll": "Seleccionar todo",
+    "selectDay": "Seleccionar todo del {day}",
+    "selectRun": "Seleccionar ejecución #{id}",
+    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}"
   },
   "runs": {
     "actions": "Acciones",
@@ -566,7 +593,9 @@
     "webSearchDescription": "Activa la herramienta nativa de búsqueda web del proveedor cuando sea compatible.",
     "worktree": "Árbol de trabajo",
     "reportedCost": "Informado por el proveedor",
-    "catalogCost": "Catálogo de costes de modelos"
+    "catalogCost": "Catálogo de costes de modelos",
+    "selectAll": "Seleccionar todo",
+    "selectDay": "Seleccionar todo del {day}"
   },
   "notifications": {
     "title": "Notificaciones",
@@ -612,6 +641,8 @@
     "pushChannel": "Push web",
     "toggleChannel": "Cambiar {channel} para {type}",
     "history": "Historial",
+    "settingsTab": "Configuración",
+    "refresh": "Actualizar",
     "historyCount": "{count, plural, one {# notificación} other {# notificaciones}}",
     "historyEmpty": "Todavía no hay notificaciones.",
     "notification": "Notificación",
@@ -683,12 +714,33 @@
       "RUN_RECOVERY_PAUSED": {
         "title": "Plan o sesión en pausa tras la recuperación",
         "description": "Un plan o una sesión gestionada se pausa tras reiniciarse su agente."
+      },
+      "WORKFLOW_MESSAGE": {
+        "title": "Mensaje de flujo de trabajo",
+        "description": "Un flujo de trabajo envía una notificación genérica."
+      },
+      "WORKFLOW_NEEDS_ATTENTION": {
+        "title": "El flujo de trabajo necesita atención",
+        "description": "Un flujo de trabajo espera datos o una decisión."
+      },
+      "WORKFLOW_COMPLETED": {
+        "title": "Flujo de trabajo completado",
+        "description": "Una ejecución de flujo de trabajo se completa correctamente."
+      },
+      "WORKFLOW_FAILED": {
+        "title": "Flujo de trabajo fallido",
+        "description": "Una ejecución de flujo de trabajo falla."
+      },
+      "WORKFLOW_RECOVERY_PAUSED": {
+        "title": "Flujo de trabajo en pausa tras la recuperación",
+        "description": "Un flujo de trabajo se pausa mientras recupera trabajo duradero."
       }
     },
     "categories": {
       "BUILDS": "Compilaciones",
       "GITHUB": "GitHub",
-      "RUNS": "Planes y sesiones"
+      "RUNS": "Planes y sesiones",
+      "WORKFLOWS": "Flujos de trabajo"
     }
   },
   "credentialEncryption": {
@@ -1781,6 +1833,7 @@
     "jobCount": "{count} trabajos",
     "noJobs": "No se informaron trabajos para esta ejecución.",
     "viewJob": "Ver {job} en GitHub",
+    "jobActions": "Acciones para {job}",
     "retryJob": "Reintentar {job}",
     "showJobSteps": "Mostrar los pasos de {job}",
     "hideJobSteps": "Ocultar los pasos de {job}",
@@ -1999,11 +2052,17 @@
     "skillGroupsHelp": "Elige los grupos que se sincronizan en todos los checkouts y worktrees de este repositorio.",
     "noSkillGroups": "No hay grupos disponibles.",
     "quickActions": "Acciones rápidas",
-    "repositoryQuickActionsDescription": "Elige los flujos disponibles debajo de la fila de acciones de cada árbol de trabajo de este repositorio.",
-    "alreadyGlobal": "Ya es global",
+    "repositoryQuickActionsDescription": "Flujos heredados por este repositorio. Abre un flujo para cambiar su tipo o alcance.",
+    "quickActionKinds": {
+      "STANDARD": "Estándar",
+      "MERGE_CONFLICT": "Conflicto de fusión",
+      "GITHUB_ACTIONS": "Acciones de GitHub"
+    },
+    "allRepositories": "Todos los repositorios",
+    "limitedRepositories": "{count, plural, one {Limitado a # repositorio} other {Limitado a # repositorios}}",
     "workflowPaused": "Pausado",
     "noWorkflows": "No hay flujos disponibles.",
-    "quickActionEligibility": "Solo aparecen flujos publicados y activados con un disparador de recurso de árbol de trabajo.",
+    "quickActionEligibility": "Los flujos configurados siguen visibles cuando están pausados; las acciones solo aparecen si están publicados, activados y vinculados al recurso actual.",
     "saveQuickActions": "Guardar acciones rápidas",
     "keepBaseBranchUpToDate": "Mantener actualizada la rama base",
     "keepBaseBranchUpToDateHelp": "Después de una obtención correcta, la rama base avanza mediante fast-forward cuando no hay cambios preparados. Esta configuración del repositorio se aplica a todos los agentes.",
@@ -2242,6 +2301,11 @@
     "openInsiders": "Abrir en VS Code Insiders",
     "forcePush": "Forzar push",
     "sync": "Sincronizar",
+    "rebase": "Rebasar",
+    "rebasePaused": "Rebase en pausa",
+    "rebaseConflicts": "Resuelve los conflictos con un flujo o cancela para restaurar el estado anterior al rebase.",
+    "rebaseIncomplete": "Hay un rebase en curso. Cancélalo para restaurar el estado anterior de la rama.",
+    "cancelRebase": "Cancelar rebase",
     "push": "Push",
     "publish": "Publicar",
     "reset": "Restablecer",
@@ -2336,6 +2400,16 @@
   "tools": {
     "title": "Herramientas",
     "description": "Explora, configura y ejecuta herramientas MCP internas y externas.",
+    "connectTitle": "Conectar clientes externos",
+    "connectDescription": "Otros clientes MCP pueden llamar a todas las herramientas integradas de este servidor mediante Streamable HTTP.",
+    "serverUrl": "URL del servidor",
+    "copyUrl": "Copiar la URL del servidor",
+    "clientConfig": "Configuración del cliente",
+    "clientConfigHelp": "Añadir esto a la configuración MCP de Claude Code, Cursor o cualquier otro cliente Streamable HTTP.",
+    "copyConfig": "Copiar la configuración",
+    "connectCopied": "Copiado",
+    "connectCopyFailed": "No se pudo copiar al portapapeles.",
+    "connectWarning": "Este endpoint no está autenticado. Cualquier cosa que alcance este puerto puede ejecutar todas las herramientas integradas.",
     "addServer": "Añadir servidor MCP",
     "search": "Buscar herramientas",
     "searchPlaceholder": "Busca nombres, descripciones o servidores…",

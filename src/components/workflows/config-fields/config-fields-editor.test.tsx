@@ -90,6 +90,20 @@ describe("interactive step configuration", () => {
     ]);
   });
 
+  test("tells the author which fields accept session variables", () => {
+    render(<Harness config={{}} kind="NOTIFICATION_SEND" />);
+
+    // One hint per interpolating field — title, body, and link here.
+    expect(
+      screen.getAllByText(/\{\{worktree\.baseBranch\}\}/).length,
+    ).toBeGreaterThanOrEqual(3);
+
+    cleanup();
+    // The thread id interpolates; the checkbox beside it has nothing to.
+    render(<Harness config={{}} kind="GITHUB_SET_REVIEW_THREAD_RESOLVED" />);
+    expect(screen.getAllByText(/\{\{worktree\.baseBranch\}\}/).length).toBe(1);
+  });
+
   test("preserves structured terminal credential entries while editing", () => {
     const credentials = [
       {

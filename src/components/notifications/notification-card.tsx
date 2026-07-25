@@ -20,6 +20,7 @@ import { formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
+  worktreeHighlightArrivalClasses,
   worktreeHighlightBackgroundClasses,
 } from "@/lib/worktree-highlight";
 
@@ -82,6 +83,7 @@ export function NotificationCard({
             color && worktreeHighlightAccentClasses[color],
             arriving &&
               "motion-safe:animate-in motion-safe:slide-in-from-top-2 bg-primary/20 ring-1 ring-primary/30",
+            arriving && color && worktreeHighlightArrivalClasses[color],
           )}
         >
           <Link

@@ -68,6 +68,7 @@ import {
   useWorktreeActivitySubscription,
   type WorktreeActivity,
 } from "./worktree-inspection";
+import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import {
   findWorktreeOverviewEntry,
   worktreeDetailHref,
@@ -101,6 +102,11 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
       codebases {
         iosBuildConfigured
         quickActions {
+            id name description quickActionIconKey quickActionButtonVariant
+            hasPlainTrigger(resourceKind: "WORKTREE")
+            triggerChoices(resourceKind: "WORKTREE") { key label description }
+          }
+        mergeConflictQuickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
             triggerChoices(resourceKind: "WORKTREE") { key label description }
@@ -674,6 +680,13 @@ function LoadedWorktreeDetail({
           <AlertDescription>{inspectionUnavailable}</AlertDescription>
         </Alert>
       )}
+
+      <WorktreeRebaseConflictItem
+        group={entry.group}
+        onCompleted={reloadEverything}
+        onError={setOperationError}
+        worktree={worktree}
+      />
 
       <Card>
         <CardHeader>

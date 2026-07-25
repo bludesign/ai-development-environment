@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Session path",
     "sessionPathPlaceholder": "e.g. ticket.key",
     "sessionBindingHelp": "Reads this value from session data when the run executes.",
+    "interpolationHelp": "Use {token} to insert session data when the run executes — for example {example}.",
     "modelProvider": "Provider",
     "modelModel": "Model",
     "modelEffort": "Effort",
@@ -309,7 +310,7 @@
     "resourceWorkflowsDescription": "Run an accepting workflow or follow this resource through an active run.",
     "manageWorkflows": "Manage workflows",
     "quickActions": "Quick actions",
-    "quickActionsDescription": "Make this workflow available directly from worktree action rows.",
+    "quickActionsDescription": "Choose where this workflow appears as a quick action.",
     "quickActionIcon": "Button icon",
     "quickActionStyle": "Button style",
     "quickActionStyles": {
@@ -318,12 +319,23 @@
       "secondary": "Secondary",
       "destructive": "Destructive"
     },
-    "globalQuickAction": "Global quick action",
-    "globalQuickActionHelp": "Show this action for every repository and worktree.",
+    "quickActionKind": "Action type",
+    "quickActionKinds": {
+      "STANDARD": "Standard",
+      "MERGE_CONFLICT": "Merge conflict",
+      "GITHUB_ACTIONS": "GitHub Actions",
+      "NONE": "None"
+    },
+    "quickActionKindHelp": {
+      "STANDARD": "Show this action with the standard worktree actions.",
+      "MERGE_CONFLICT": "Show this action while a worktree rebase is stopped on conflicts.",
+      "GITHUB_ACTIONS": "Show this action in matching GitHub pipeline and job menus.",
+      "NONE": "Do not show this workflow as a quick action."
+    },
     "repositoryQuickActions": "Repository availability",
-    "repositoryQuickActionsHelp": "Choose the repositories whose agents and worktrees inherit this action.",
+    "repositoryQuickActionsHelp": "Leave every repository unchecked to allow all repositories, or select repositories to create an allowlist.",
     "noQuickActionRepositories": "Add a codebase before assigning repository quick actions.",
-    "quickActionEligibility": "The action appears when this workflow is published, enabled, and has a Worktree resource trigger.",
+    "quickActionEligibility": "The action appears when this workflow is published, enabled, and has a resource trigger matching the selected action type.",
     "saveQuickActions": "Save quick actions",
     "quickActionStarted": "Started {name}.",
     "quickActionView": "View",
@@ -337,7 +349,22 @@
     "triggerChoiceDescription": "Description (optional)",
     "triggerChoicesHelp": "Each choice becomes a menu item under the run button and its own output on the trigger.",
     "triggerChoicesEmpty": "No choices yet. Add the options offered when this workflow is started.",
-    "triggerChoicesAdvanced": "These choices are not plain key, label and description entries. Edit them as JSON."
+    "triggerChoicesAdvanced": "These choices are not plain key, label and description entries. Edit them as JSON.",
+    "active": "Active",
+    "all": "All",
+    "archived": "Archived",
+    "archiveFilter": "Archive filter",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteRunDescription": "The run and its full step history will be removed. This cannot be undone.",
+    "deleteRunTitle": "Delete workflow run",
+    "done": "Done",
+    "editRuns": "Edit",
+    "restore": "Restore",
+    "selectAll": "Select all",
+    "selectDay": "Select everything from {day}",
+    "selectRun": "Select run #{id}",
+    "selectedRuns": "{count, plural, one {# run selected} other {# runs selected}}"
   },
   "runs": {
     "actions": "Actions",
@@ -566,7 +593,9 @@
     "webSearchDescription": "Enable the provider's native web-search tool when supported.",
     "worktree": "Worktree",
     "reportedCost": "Reported by provider",
-    "catalogCost": "Model cost catalog"
+    "catalogCost": "Model cost catalog",
+    "selectAll": "Select all",
+    "selectDay": "Select everything from {day}"
   },
   "notifications": {
     "title": "Notifications",
@@ -612,6 +641,8 @@
     "pushChannel": "Web Push",
     "toggleChannel": "Toggle {channel} for {type}",
     "history": "History",
+    "settingsTab": "Settings",
+    "refresh": "Refresh",
     "historyCount": "{count, plural, one {# notification} other {# notifications}}",
     "historyEmpty": "No notifications yet.",
     "notification": "Notification",
@@ -683,12 +714,33 @@
       "RUN_RECOVERY_PAUSED": {
         "title": "Plan or session paused after recovery",
         "description": "A managed plan or session is paused after its agent restarts."
+      },
+      "WORKFLOW_MESSAGE": {
+        "title": "Workflow message",
+        "description": "A workflow sends a generic notification."
+      },
+      "WORKFLOW_NEEDS_ATTENTION": {
+        "title": "Workflow needs attention",
+        "description": "A workflow is waiting for data or a decision."
+      },
+      "WORKFLOW_COMPLETED": {
+        "title": "Workflow completed",
+        "description": "A workflow run completes successfully."
+      },
+      "WORKFLOW_FAILED": {
+        "title": "Workflow failed",
+        "description": "A workflow run fails."
+      },
+      "WORKFLOW_RECOVERY_PAUSED": {
+        "title": "Workflow paused after recovery",
+        "description": "A workflow pauses while recovering durable work."
       }
     },
     "categories": {
       "BUILDS": "Builds",
       "GITHUB": "GitHub",
-      "RUNS": "Plans and Sessions"
+      "RUNS": "Plans and Sessions",
+      "WORKFLOWS": "Workflows"
     }
   },
   "credentialEncryption": {
@@ -1781,6 +1833,7 @@
     "jobCount": "{count} jobs",
     "noJobs": "No jobs were reported for this run.",
     "viewJob": "View {job} on GitHub",
+    "jobActions": "Actions for {job}",
     "retryJob": "Retry {job}",
     "showJobSteps": "Show steps for {job}",
     "hideJobSteps": "Hide steps for {job}",
@@ -1999,11 +2052,17 @@
     "skillGroupsHelp": "Choose the project skill groups synchronized into every checkout and worktree for this repository.",
     "noSkillGroups": "No skill groups are available.",
     "quickActions": "Quick actions",
-    "repositoryQuickActionsDescription": "Choose workflows available below the action row on every worktree for this repository.",
-    "alreadyGlobal": "Global",
+    "repositoryQuickActionsDescription": "Workflows inherited by this repository. Open a workflow to change its action type or repository scope.",
+    "quickActionKinds": {
+      "STANDARD": "Standard",
+      "MERGE_CONFLICT": "Merge conflict",
+      "GITHUB_ACTIONS": "GitHub Actions"
+    },
+    "allRepositories": "All repositories",
+    "limitedRepositories": "{count, plural, one {Limited to # repository} other {Limited to # repositories}}",
     "workflowPaused": "Paused",
     "noWorkflows": "No workflows are available.",
-    "quickActionEligibility": "Only published, enabled workflows with a Worktree resource trigger appear on worktrees.",
+    "quickActionEligibility": "Configured workflows remain listed when paused; actions appear only when published, enabled, and matched to the current resource.",
     "saveQuickActions": "Save quick actions",
     "keepBaseBranchUpToDate": "Keep base branch up to date",
     "keepBaseBranchUpToDateHelp": "After a successful fetch, fast-forward the base branch when there are no staged changes. This repository setting applies to every agent.",
@@ -2242,6 +2301,11 @@
     "openInsiders": "Open in VS Code Insiders",
     "forcePush": "Force push",
     "sync": "Sync",
+    "rebase": "Rebase",
+    "rebasePaused": "Rebase paused",
+    "rebaseConflicts": "Resolve the merge conflicts with a workflow, or cancel to restore the branch to its pre-rebase state.",
+    "rebaseIncomplete": "A rebase is still in progress. Cancel it to restore the branch to its pre-rebase state.",
+    "cancelRebase": "Cancel rebase",
     "push": "Push",
     "publish": "Publish",
     "reset": "Reset",
@@ -2336,6 +2400,16 @@
   "tools": {
     "title": "Tools",
     "description": "Browse, configure, and run built-in and external MCP tools.",
+    "connectTitle": "Connect external clients",
+    "connectDescription": "Other MCP clients can call every built-in tool on this server over Streamable HTTP.",
+    "serverUrl": "Server URL",
+    "copyUrl": "Copy server URL",
+    "clientConfig": "Client configuration",
+    "clientConfigHelp": "Add this to the MCP config for Claude Code, Cursor, or any other Streamable HTTP client.",
+    "copyConfig": "Copy configuration",
+    "connectCopied": "Copied",
+    "connectCopyFailed": "Could not copy to the clipboard.",
+    "connectWarning": "This endpoint is unauthenticated. Anything that can reach this port can run every built-in tool.",
     "addServer": "Add MCP server",
     "search": "Search tools",
     "searchPlaceholder": "Search tool names, descriptions, or servers…",

@@ -317,4 +317,54 @@ describe("ToolsPage", () => {
     );
     expect(screen.queryByDisplayValue("Bearer secret")).toBeNull();
   });
+
+  test("shows the built-in MCP endpoint and copies its client configuration", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(Response.json({ groups: [] })),
+    );
+
+    render(<ToolsPage />);
+
+    const url = `${window.location.origin}/api/mcp`;
+    expect(await screen.findByText(url)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy server URL" }));
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith(url));
+    expect(screen.getAllByRole("button", { name: "Copied" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy configuration" }));
+    await waitFor(() =>
+      expect(copyTextMock).toHaveBeenCalledWith(
+        JSON.stringify(
+          {
+            mcpServers: {
+              "ai-development-environment": { type: "http", url },
+            },
+          },
+          null,
+          2,
+        ),
+      ),
+    );
+  });
+
+  test("reports a failed clipboard write on the connect card", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    copyTextMock.mockRejectedValue(new Error("denied"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(Response.json({ groups: [] })),
+    );
+
+    render(<ToolsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Copy server URL" }),
+    );
+
+    expect(
+      await screen.findByText("Could not copy to the clipboard."),
+    ).toBeDefined();
+  });
 });

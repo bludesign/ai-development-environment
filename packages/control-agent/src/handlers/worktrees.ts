@@ -1,7 +1,7 @@
 import { createWriteStream, watch, type FSWatcher } from "node:fs";
 import { mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
 
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
@@ -71,13 +71,18 @@ const activeWorktreeWatches = new Map<string, ActiveWorktreeWatch>();
 function statusChangeState(value: string): {
   hasStagedChanges: boolean;
   hasUnstagedChanges: boolean;
+  hasConflicts: boolean;
 } {
   const entries = value.split("\0").filter(Boolean);
   let hasStagedChanges = false;
   let hasUnstagedChanges = false;
+  let hasConflicts = false;
   for (let index = 0; index < entries.length; index += 1) {
     const code = entries[index]!.slice(0, 2);
     const untracked = code === "??";
+    if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(code)) {
+      hasConflicts = true;
+    }
     if (!untracked && code[0] !== " " && code[0] !== "?" && code[0] !== "!") {
       hasStagedChanges = true;
     }
@@ -88,7 +93,64 @@ function statusChangeState(value: string): {
       index += 1;
     }
   }
-  return { hasStagedChanges, hasUnstagedChanges };
+  return { hasStagedChanges, hasUnstagedChanges, hasConflicts };
+}
+
+async function rebaseInProgress(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  for (const name of ["rebase-merge", "rebase-apply"]) {
+    const pathResult = await git(
+      folder,
+      ["rev-parse", "--git-path", name],
+      timeoutMs,
+      signal,
+    );
+    if (pathResult.exitCode !== 0) continue;
+    const candidate = pathResult.stdout.trim();
+    if (!candidate) continue;
+    try {
+      await stat(isAbsolute(candidate) ? candidate : join(folder, candidate));
+      return true;
+    } catch {
+      // Check the other rebase backend.
+    }
+  }
+  return false;
+}
+
+async function rebaseBranch(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  for (const name of ["rebase-merge/head-name", "rebase-apply/head-name"]) {
+    const pathResult = await git(
+      folder,
+      ["rev-parse", "--git-path", name],
+      timeoutMs,
+      signal,
+    );
+    if (pathResult.exitCode !== 0) continue;
+    const candidate = pathResult.stdout.trim();
+    if (!candidate) continue;
+    try {
+      const headName = (
+        await readFile(
+          isAbsolute(candidate) ? candidate : join(folder, candidate),
+          "utf8",
+        )
+      ).trim();
+      if (headName.startsWith("refs/heads/")) {
+        return headName.slice("refs/heads/".length);
+      }
+    } catch {
+      // Check the other rebase backend.
+    }
+  }
+  return null;
 }
 
 function closeWorktreeWatch(entry: ActiveWorktreeWatch): void {
@@ -115,8 +177,8 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   entry.pending = false;
   try {
     const signal = new AbortController().signal;
-    const [status, branchResult, headResult, codeStateHash] = await Promise.all(
-      [
+    const [status, branchResult, headResult, codeStateHash, rebasing] =
+      await Promise.all([
         git(
           entry.folder,
           [
@@ -137,21 +199,31 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
         ),
         git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
         worktreeCodeStateHash(entry.folder, entry.timeoutMs, signal),
-      ],
-    );
-    const branch =
+        rebaseInProgress(entry.folder, entry.timeoutMs, signal),
+      ]);
+    const symbolicBranch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+    const branch =
+      symbolicBranch ??
+      (rebasing
+        ? await rebaseBranch(entry.folder, entry.timeoutMs, signal)
+        : null);
     const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
     const headIdentity = headSha ? `${branch ?? ""}\0${headSha}` : null;
     const changes =
       status.exitCode === 0
         ? statusChangeState(status.stdout)
-        : { hasStagedChanges: false, hasUnstagedChanges: false };
+        : {
+            hasStagedChanges: false,
+            hasUnstagedChanges: false,
+            hasConflicts: false,
+          };
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
       codeStateHash,
       ...changes,
+      rebaseInProgress: rebasing,
       pushStatus: await worktreePushStatus(
         entry.folder,
         branch,
@@ -422,25 +494,35 @@ export async function inspectWorktreeItem(
   const checkedAt = new Date().toISOString();
   try {
     const folder = await realpath(folderValue);
-    const [gitDir, branchResult, headResult, statusResult] = await Promise.all([
-      gitDirectory(folder, timeoutMs, signal),
-      git(folder, ["symbolic-ref", "--short", "-q", "HEAD"], timeoutMs, signal),
-      git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
-      git(
-        folder,
-        [
-          "--no-optional-locks",
-          "status",
-          "--porcelain=v1",
-          "-z",
-          "--untracked-files=all",
-        ],
-        timeoutMs,
-        signal,
-      ),
-    ]);
-    const branch =
+    const [gitDir, branchResult, headResult, statusResult, rebasing] =
+      await Promise.all([
+        gitDirectory(folder, timeoutMs, signal),
+        git(
+          folder,
+          ["symbolic-ref", "--short", "-q", "HEAD"],
+          timeoutMs,
+          signal,
+        ),
+        git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
+        git(
+          folder,
+          [
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+          ],
+          timeoutMs,
+          signal,
+        ),
+        rebaseInProgress(folder, timeoutMs, signal),
+      ]);
+    const symbolicBranch =
       branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+    const branch =
+      symbolicBranch ??
+      (rebasing ? await rebaseBranch(folder, timeoutMs, signal) : null);
     const upstreamResult = branch
       ? await git(
           folder,
@@ -466,7 +548,11 @@ export async function inspectWorktreeItem(
     const changes =
       statusResult.exitCode === 0
         ? statusChangeState(statusResult.stdout)
-        : { hasStagedChanges: false, hasUnstagedChanges: false };
+        : {
+            hasStagedChanges: false,
+            hasUnstagedChanges: false,
+            hasConflicts: false,
+          };
     return {
       gitDirectory: gitDir,
       folder,
@@ -482,6 +568,7 @@ export async function inspectWorktreeItem(
       baseAhead: baseCounts.ahead,
       baseBehind: baseCounts.behind,
       ...changes,
+      rebaseInProgress: rebasing,
       pushStatus: await worktreePushStatus(
         folder,
         branch,
@@ -510,6 +597,8 @@ export async function inspectWorktreeItem(
       baseBehind: null,
       hasStagedChanges: false,
       hasUnstagedChanges: false,
+      rebaseInProgress: false,
+      hasConflicts: false,
       pushStatus: "UNKNOWN",
       availability: "ERROR",
       error: cleanError(error),
@@ -2359,10 +2448,65 @@ export const operateWorktree: AgentJobHandler = async (
         signal,
       );
       if (rebase.exitCode !== 0) {
-        await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        const status = await git(
+          folder,
+          ["status", "--porcelain=v1", "-z"],
+          timeoutMs,
+          signal,
+        );
+        const conflicts =
+          status.exitCode === 0 &&
+          statusChangeState(status.stdout).hasConflicts;
+        if (!(
+          conflicts && (await rebaseInProgress(folder, timeoutMs, signal))
+        )) {
+          await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        }
         throw new Error(cleanError(rebase.stderr || "Rebase failed"));
       }
       await runGit(["push", "--force-with-lease"], "Sync push failed");
+      break;
+    }
+    case "REBASE": {
+      if (!branch) throw new Error("Rebase requires a branch");
+      if (!input.baseBranch) throw new Error("Rebase requires a base branch");
+      const statusResult = await runGit(
+        ["status", "--porcelain"],
+        "Could not inspect worktree changes",
+      );
+      if (statusResult.stdout.trim())
+        throw new Error("Stash or commit changes before rebasing");
+      await runGit(["fetch", "origin"], "Could not fetch origin");
+      const rebase = await git(
+        folder,
+        ["rebase", `refs/remotes/origin/${input.baseBranch}`],
+        timeoutMs,
+        signal,
+      );
+      if (rebase.exitCode !== 0) {
+        const status = await git(
+          folder,
+          ["status", "--porcelain=v1", "-z"],
+          timeoutMs,
+          signal,
+        );
+        const conflicts =
+          status.exitCode === 0 &&
+          statusChangeState(status.stdout).hasConflicts;
+        if (!(
+          conflicts && (await rebaseInProgress(folder, timeoutMs, signal))
+        )) {
+          await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        }
+        throw new Error(cleanError(rebase.stderr || "Rebase failed"));
+      }
+      break;
+    }
+    case "CANCEL_REBASE": {
+      if (!(await rebaseInProgress(folder, timeoutMs, signal))) {
+        throw new Error("No rebase is in progress");
+      }
+      await runGit(["rebase", "--abort"], "Could not cancel rebase");
       break;
     }
     case "PUSH":
