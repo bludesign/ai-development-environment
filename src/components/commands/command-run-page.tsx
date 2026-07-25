@@ -456,7 +456,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
       />
       <Card className="gap-0 py-0">
         <CardHeader>
-          <CardTitle className="text-sm">{t("attempts")}</CardTitle>
+          <CardTitle>{t("attempts")}</CardTitle>
         </CardHeader>
         <Table>
           <TableHeader>
@@ -495,7 +495,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">{t("snapshot")}</CardTitle>
+          <CardTitle>{t("snapshot")}</CardTitle>
           <CardAction>
             <Button
               onClick={() => void copySnapshot(run.snapshotScript)}

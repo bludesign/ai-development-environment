@@ -4,7 +4,12 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export type TerminalOutputEntry = {
@@ -80,7 +85,10 @@ export function TerminalOutputCard({
       const dividerKey = entry.dividerKey ?? entry.divider;
       if (entry.divider && dividerKey !== dividerRef.current) {
         dividerRef.current = dividerKey ?? null;
-        terminal.write(`\r\n\x1b[90m── ${entry.divider} ──\x1b[0m\r\n`);
+        // The blank line separates a divider from the block above it, so the
+        // first divider skips it and stays flush with the top of the terminal.
+        const lead = renderedRef.current.length ? "\r\n" : "";
+        terminal.write(`${lead}\x1b[90m── ${entry.divider} ──\x1b[0m\r\n`);
       }
       terminal.write(entry.data, () => {
         if (followRef.current) terminal.scrollToBottom();
@@ -150,24 +158,27 @@ export function TerminalOutputCard({
   }, [open, sourceKey, terminalElement, writeEntries]);
 
   return (
-    <Card className={cn("overflow-hidden p-0", className)}>
-      <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b px-4 py-3">
-        {onOpenChange ? (
-          <Button
-            aria-expanded={open}
-            className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left"
-            onClick={() => onOpenChange(!open)}
-            type="button"
-            variant="ghost"
-          >
-            <span className="truncate font-medium">{title}</span>
-          </Button>
-        ) : (
-          <CardTitle className="text-sm">{title}</CardTitle>
-        )}
-        <div className="flex items-center gap-2">
+    <Card className={cn("gap-0 py-0", className)}>
+      <CardHeader>
+        <CardTitle className="min-w-0">
+          {onOpenChange ? (
+            <Button
+              aria-expanded={open}
+              className="-mx-2 -my-1 h-auto w-full min-w-0 justify-start px-2 py-1 font-heading text-base leading-snug font-medium aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
+              onClick={() => onOpenChange(!open)}
+              type="button"
+              variant="ghost"
+            >
+              <span className="truncate">{title}</span>
+            </Button>
+          ) : (
+            title
+          )}
+        </CardTitle>
+        <CardAction className="flex items-center gap-2">
           {open && !follow && (
             <Button
+              size="sm"
               variant="outline"
               onClick={() => {
                 followRef.current = true;
@@ -181,7 +192,7 @@ export function TerminalOutputCard({
           {open && (
             <Button
               aria-label={fitLabel}
-              size="icon"
+              size="icon-sm"
               title={fitLabel}
               variant="outline"
               onClick={() => fitRef.current?.fit()}
@@ -193,6 +204,7 @@ export function TerminalOutputCard({
             <Button
               aria-expanded={open}
               aria-label={open ? collapseLabel : expandLabel}
+              className="aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:bg-transparent dark:aria-expanded:hover:bg-muted/50"
               onClick={() => onOpenChange(!open)}
               size="icon-sm"
               title={open ? collapseLabel : expandLabel}
@@ -206,13 +218,13 @@ export function TerminalOutputCard({
               )}
             </Button>
           )}
-        </div>
+        </CardAction>
       </CardHeader>
       {open && (
         <div className="relative bg-[#09090b]">
           <div
             aria-label={ariaLabel}
-            className="h-[min(60vh,42rem)] p-2"
+            className="h-[min(60vh,42rem)] px-2 pb-2"
             ref={setTerminalElement}
             role="log"
           />
