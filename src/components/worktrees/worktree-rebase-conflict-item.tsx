@@ -11,6 +11,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
@@ -35,6 +36,8 @@ export function WorktreeRebaseConflictItem({
   const t = useTranslations("worktrees");
   const [cancelling, setCancelling] = useState(false);
   if (!worktree.rebaseInProgress) return null;
+
+  const quickActions = group.mergeConflictQuickActions ?? [];
 
   const cancel = async () => {
     setCancelling(true);
@@ -65,7 +68,7 @@ export function WorktreeRebaseConflictItem({
 
   return (
     <Item
-      className="border-destructive/40 bg-destructive/5"
+      className="border-destructive/40 bg-[color-mix(in_oklab,var(--destructive)_8%,var(--card))]"
       size="sm"
       variant="outline"
     >
@@ -77,7 +80,20 @@ export function WorktreeRebaseConflictItem({
         <ItemDescription>
           {t(worktree.hasConflicts ? "rebaseConflicts" : "rebaseIncomplete")}
         </ItemDescription>
-        {worktree.hasConflicts ? (
+      </ItemContent>
+      <ItemActions>
+        <Button
+          disabled={cancelling}
+          onClick={() => void cancel()}
+          size="sm"
+          variant="outline"
+        >
+          {cancelling ? <Spinner /> : <X />}
+          {t("cancelRebase")}
+        </Button>
+      </ItemActions>
+      {worktree.hasConflicts && quickActions.length ? (
+        <ItemFooter className="-mx-3 -mb-2.5 basis-[calc(100%+(var(--spacing)*6))] rounded-b-lg border-t border-destructive/30 bg-[color-mix(in_oklab,var(--destructive)_16%,var(--card))] px-3 py-2.5">
           <WorkflowQuickActions
             sessionData={{
               worktree: {
@@ -100,21 +116,10 @@ export function WorktreeRebaseConflictItem({
               },
             }}
             worktreeId={worktree.id}
-            workflows={group.mergeConflictQuickActions ?? []}
+            workflows={quickActions}
           />
-        ) : null}
-      </ItemContent>
-      <ItemActions>
-        <Button
-          disabled={cancelling}
-          onClick={() => void cancel()}
-          size="sm"
-          variant="outline"
-        >
-          {cancelling ? <Spinner /> : <X />}
-          {t("cancelRebase")}
-        </Button>
-      </ItemActions>
+        </ItemFooter>
+      ) : null}
     </Item>
   );
 }

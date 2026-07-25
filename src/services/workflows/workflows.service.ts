@@ -38,11 +38,11 @@ import {
   mergeSessionData,
   resolveWorkflowValue,
   setSessionValue,
-  workflowValueSessionPaths,
   workflowSessionData,
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
   WORKFLOW_QUICK_ACTION_KINDS,
@@ -230,6 +230,12 @@ function publishRunChanged(runId: string): void {
   });
 }
 
+/**
+ * What must be in session data before the step may run. Config bindings count
+ * only where the descriptor marks the key required — an optional one resolves to
+ * nothing and the adapter carries on, so blocking on it would strand a run over
+ * a value the step never needed (see `requiredConfigSessionPaths`).
+ */
 function nodeRequiredPaths(node: WorkflowNodeDefinition): string[] {
   const catalog = WORKFLOW_STEP_BY_KIND.get(node.kind)!;
   return [
@@ -237,7 +243,7 @@ function nodeRequiredPaths(node: WorkflowNodeDefinition): string[] {
       path.replaceAll("<stepId>", node.id),
     ),
     ...node.requiredPaths,
-    ...workflowValueSessionPaths(node.config),
+    ...requiredConfigSessionPaths(node.kind, "step", node.config),
   ];
 }
 

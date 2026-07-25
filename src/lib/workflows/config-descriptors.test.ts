@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { getConfigDescriptor } from "./config-descriptors";
+import {
+  getConfigDescriptor,
+  requiredConfigSessionPaths,
+} from "./config-descriptors";
 
 describe("workflow config descriptors", () => {
   test("uses resource selectors for worktrees and Jira issue keys", () => {
@@ -83,6 +86,40 @@ describe("workflow config descriptors", () => {
         ?.fields.find(({ key }) => key === "commandPattern")
         ?.valueModes?.includes("session"),
     ).toBe(false);
+  });
+
+  test("only required config keys make their bindings prerequisites", () => {
+    const paths = requiredConfigSessionPaths("RUN_CREATE_SESSION", "step", {
+      worktreeId: { source: "SESSION", path: "worktree.id" },
+      // Optional: a worktree may carry no Jira ticket, and the run starts
+      // without one, so this must not hold the step back.
+      jiraIssueKey: { source: "SESSION", path: "ticket.key" },
+      model: { source: "SESSION", path: "run.model" },
+      prompt: "Rebase onto {{worktree.baseBranch}}",
+    });
+
+    expect([...paths]).toEqual(
+      expect.arrayContaining(["run.model", "worktree.baseBranch"]),
+    );
+    expect(paths.has("ticket.key")).toBe(false);
+    // `worktreeId` is optional too — RUN_CREATE_SESSION requires `worktree.id`
+    // through the catalog instead, which stays strict.
+    expect(paths.has("worktree.id")).toBe(false);
+  });
+
+  test("keeps undescribed config keys strict", () => {
+    // The raw-JSON escape hatch says nothing about optionality, and a kind with
+    // no descriptor at all even less, so both keep every binding required.
+    expect([
+      ...requiredConfigSessionPaths("RUN_CREATE_SESSION", "step", {
+        someAdapterKey: { source: "SESSION", path: "ticket.key" },
+      }),
+    ]).toEqual(["ticket.key"]);
+    expect([
+      ...requiredConfigSessionPaths("NOT_A_KIND", "step", {
+        anything: "{{ticket.key}}",
+      }),
+    ]).toEqual(["ticket.key"]);
   });
 
   test("edits terminal credential entries as structured JSON", () => {

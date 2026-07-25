@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { requiredConfigSessionPaths } from "./config-descriptors";
 import { configSchemaForKind } from "./config-schema";
 import {
   isChoiceTriggerKind,
@@ -13,10 +14,7 @@ import {
   type WorkflowStepKind,
   type WorkflowTriggerKind,
 } from "./kinds";
-import {
-  invalidWorkflowValueBindings,
-  workflowValueSessionPaths,
-} from "./session";
+import { invalidWorkflowValueBindings } from "./session";
 
 export const WORKFLOW_FORMAT = "aide.workflow" as const;
 export const WORKFLOW_SCHEMA_VERSION = 1 as const;
@@ -1882,17 +1880,18 @@ export function computeWorkflowPathAvailability(
         nodeId,
         existing ? intersection([existing, available]) : new Set(available),
       );
-      // Config session bindings normally become hard requirements, but a step
-      // that *provides* a namespace may optionally read from it: a loader like
-      // JIRA_LOAD_TICKET binds `issueKey` to `{{ticket.key}}` to establish
+      // Config session bindings become hard requirements only where the
+      // descriptor marks the key required (`requiredConfigSessionPaths`), and
+      // even then not when the step *provides* the namespace it reads: a loader
+      // like JIRA_LOAD_TICKET binds `issueKey` to `{{ticket.key}}` to establish
       // `ticket.*`. Such self-referential bindings are the "unwrap" point — the
       // step resolves the optional value at run time and fails if it is absent
       // (see `jiraKey` in register-adapters) — so they must not block publish.
       // Explicit `requiredPaths` (catalog + node) stay strict.
       const selfProvided = new Set(provides.get(nodeId) ?? []);
-      const configRequired = [...workflowValueSessionPaths(node.config)].filter(
-        (path) => !hasPath(selfProvided, path),
-      );
+      const configRequired = [
+        ...requiredConfigSessionPaths(node.kind, "step", node.config),
+      ].filter((path) => !hasPath(selfProvided, path));
       const required = new Set([
         ...expandedPaths(node, lookup.stepPaths(node.kind).requiredPaths),
         ...node.requiredPaths,

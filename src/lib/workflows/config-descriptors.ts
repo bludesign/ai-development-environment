@@ -20,6 +20,7 @@ import {
   type WorkflowStepKind,
   type WorkflowTriggerKind,
 } from "./kinds";
+import { workflowValueSessionPaths } from "./session";
 
 /**
  * The config every step and trigger kind accepts, described declaratively.
@@ -971,6 +972,67 @@ export function hasConfigDescriptor(
   scope: ConfigFieldScope,
 ): boolean {
   return Boolean(getConfigDescriptor(kind, scope));
+}
+
+/**
+ * The config keys a kind describes, with the subset it marks required. The
+ * `model` control spans three sibling keys, of which only its primary `key`
+ * counts as required — the same split `configSchemaForKind` publishes.
+ */
+function configKeys(
+  kind: string,
+  scope: ConfigFieldScope,
+): { described: Set<string>; required: Set<string> } | null {
+  const descriptor = getConfigDescriptor(kind, scope);
+  if (!descriptor) return null;
+  const described = new Set<string>();
+  const required = new Set<string>();
+  for (const field of descriptor.fields) {
+    const keys =
+      field.control === "model" && field.modelKeys
+        ? [
+            field.modelKeys.provider,
+            field.modelKeys.model,
+            field.modelKeys.effort,
+          ]
+        : [field.key];
+    for (const key of keys) described.add(key);
+    if (field.required) required.add(field.key);
+  }
+  return { described, required };
+}
+
+/**
+ * The session paths a config binds that have to exist before the step can run.
+ *
+ * Only bindings on keys the descriptor marks required gate execution. An
+ * optional key is exactly that at run time: `resolveWorkflowValue` yields
+ * undefined, `{{tokens}}` interpolate to nothing, and the adapters read the
+ * result through `optionalText` with their own session fallbacks. Gating on one
+ * blocked whole runs over data the step never needed — "Run AI session" merely
+ * offers a Jira issue key, so a worktree with no ticket must still start it.
+ * Steps that genuinely cannot work without a value declare it in the catalog's
+ * `requiredPaths`, which stay strict. So do kinds with no descriptor and keys it
+ * does not describe (the editor's raw-JSON escape hatch), where there is nothing
+ * to say the value is optional.
+ */
+export function requiredConfigSessionPaths(
+  kind: string,
+  scope: ConfigFieldScope,
+  config: unknown,
+): Set<string> {
+  const keys = configKeys(kind, scope);
+  if (!keys || !config || typeof config !== "object" || Array.isArray(config)) {
+    return workflowValueSessionPaths(config);
+  }
+  const paths = new Set<string>();
+  for (const [key, value] of Object.entries(
+    config as Record<string, unknown>,
+  )) {
+    if (keys.described.has(key) && !keys.required.has(key)) continue;
+    workflowValueSessionPaths(value, paths);
+  }
+  return paths;
 }
 
 export { STEP_CONFIG_DESCRIPTORS, TRIGGER_CONFIG_DESCRIPTORS };
