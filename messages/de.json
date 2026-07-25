@@ -256,7 +256,9 @@
       "ISSUE_COMMAND_ALLOWLIST_REQUIRED": "Befehls-Allowlist erforderlich",
       "ISSUE_COMMAND_PATTERN_ANCHORED": "Befehlsmuster muss verankert sein",
       "REQUIREMENT_UNSATISFIED": "Anforderung nicht erfüllt",
-      "PARALLEL_WRITE_CONFLICT": "Paralleler Schreibkonflikt"
+      "PARALLEL_WRITE_CONFLICT": "Paralleler Schreibkonflikt",
+      "TRIGGER_CHOICES_REQUIRED": "Auswahlmöglichkeiten erforderlich",
+      "TRIGGER_CHOICE_HANDLE_UNKNOWN": "Unbekannte Auslöser-Auswahl"
     },
     "notFound": "Workflow nicht gefunden.",
     "publishedVersion": "Veröffentlichte Version",
@@ -327,7 +329,15 @@
     "quickActionView": "Anzeigen",
     "runNamed": "{name} ausführen",
     "fullRun": "Vollständiger Lauf",
-    "openLinkedResource": "Verknüpfte Details öffnen"
+    "openLinkedResource": "Verknüpfte Details öffnen",
+    "addTriggerChoice": "Auswahl hinzufügen",
+    "triggerChoiceLabel": "Bezeichnung der Auswahl",
+    "triggerChoiceKey": "Ausgangsschlüssel",
+    "triggerChoiceKeyDuplicate": "Eine andere Auswahl verwendet diesen Schlüssel bereits.",
+    "triggerChoiceDescription": "Beschreibung (optional)",
+    "triggerChoicesHelp": "Jede Auswahl wird zu einem Menüeintrag unter der Ausführen-Schaltfläche und zu einem eigenen Ausgang am Auslöser.",
+    "triggerChoicesEmpty": "Noch keine Auswahlmöglichkeiten. Füge die Optionen hinzu, die beim Start dieses Workflows angeboten werden.",
+    "triggerChoicesAdvanced": "Diese Auswahlmöglichkeiten sind keine einfachen Einträge aus Schlüssel, Bezeichnung und Beschreibung. Bearbeite sie als JSON."
   },
   "runs": {
     "actions": "Aktionen",

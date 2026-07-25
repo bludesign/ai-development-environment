@@ -256,7 +256,9 @@
       "ISSUE_COMMAND_ALLOWLIST_REQUIRED": "Liste de commandes autorisées requise",
       "ISSUE_COMMAND_PATTERN_ANCHORED": "Le motif de commande doit être ancré",
       "REQUIREMENT_UNSATISFIED": "Exigence non satisfaite",
-      "PARALLEL_WRITE_CONFLICT": "Conflit d'écriture parallèle"
+      "PARALLEL_WRITE_CONFLICT": "Conflit d'écriture parallèle",
+      "TRIGGER_CHOICES_REQUIRED": "Choix du déclencheur requis",
+      "TRIGGER_CHOICE_HANDLE_UNKNOWN": "Choix de déclencheur inconnu"
     },
     "notFound": "Workflow introuvable.",
     "publishedVersion": "Version publiée",
@@ -327,7 +329,15 @@
     "quickActionView": "Voir",
     "runNamed": "Exécuter {name}",
     "fullRun": "Exécution complète",
-    "openLinkedResource": "Ouvrir les détails associés"
+    "openLinkedResource": "Ouvrir les détails associés",
+    "addTriggerChoice": "Ajouter un choix",
+    "triggerChoiceLabel": "Libellé du choix",
+    "triggerChoiceKey": "Clé de sortie",
+    "triggerChoiceKeyDuplicate": "Un autre choix utilise déjà cette clé.",
+    "triggerChoiceDescription": "Description (facultatif)",
+    "triggerChoicesHelp": "Chaque choix devient une entrée de menu sous le bouton d'exécution et une sortie propre sur le déclencheur.",
+    "triggerChoicesEmpty": "Aucun choix pour l'instant. Ajoutez les options proposées au démarrage de ce workflow.",
+    "triggerChoicesAdvanced": "Ces choix ne sont pas de simples entrées clé, libellé et description. Modifiez-les en JSON."
   },
   "runs": {
     "actions": "Opérations",

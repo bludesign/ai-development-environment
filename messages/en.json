@@ -256,7 +256,9 @@
       "ISSUE_COMMAND_ALLOWLIST_REQUIRED": "Command allowlist required",
       "ISSUE_COMMAND_PATTERN_ANCHORED": "Command pattern must be anchored",
       "REQUIREMENT_UNSATISFIED": "Unsatisfied requirement",
-      "PARALLEL_WRITE_CONFLICT": "Parallel write conflict"
+      "PARALLEL_WRITE_CONFLICT": "Parallel write conflict",
+      "TRIGGER_CHOICES_REQUIRED": "Trigger choices required",
+      "TRIGGER_CHOICE_HANDLE_UNKNOWN": "Unknown trigger choice"
     },
     "notFound": "Workflow not found.",
     "publishedVersion": "Published version",
@@ -327,7 +329,15 @@
     "quickActionView": "View",
     "runNamed": "Run {name}",
     "fullRun": "Full run",
-    "openLinkedResource": "Open linked details"
+    "openLinkedResource": "Open linked details",
+    "addTriggerChoice": "Add choice",
+    "triggerChoiceLabel": "Choice label",
+    "triggerChoiceKey": "Output key",
+    "triggerChoiceKeyDuplicate": "Another choice already uses this key.",
+    "triggerChoiceDescription": "Description (optional)",
+    "triggerChoicesHelp": "Each choice becomes a menu item under the run button and its own output on the trigger.",
+    "triggerChoicesEmpty": "No choices yet. Add the options offered when this workflow is started.",
+    "triggerChoicesAdvanced": "These choices are not plain key, label and description entries. Edit them as JSON."
   },
   "runs": {
     "actions": "Actions",

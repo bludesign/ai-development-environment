@@ -256,7 +256,9 @@
       "ISSUE_COMMAND_ALLOWLIST_REQUIRED": "Se requiere una lista de comandos permitidos",
       "ISSUE_COMMAND_PATTERN_ANCHORED": "El patrón de comando debe estar anclado",
       "REQUIREMENT_UNSATISFIED": "Requisito no satisfecho",
-      "PARALLEL_WRITE_CONFLICT": "Conflicto de escritura paralela"
+      "PARALLEL_WRITE_CONFLICT": "Conflicto de escritura paralela",
+      "TRIGGER_CHOICES_REQUIRED": "Se requieren opciones del activador",
+      "TRIGGER_CHOICE_HANDLE_UNKNOWN": "Opción de activador desconocida"
     },
     "notFound": "Flujo no encontrado.",
     "publishedVersion": "Versión publicada",
@@ -327,7 +329,15 @@
     "quickActionView": "Ver",
     "runNamed": "Ejecutar {name}",
     "fullRun": "Ejecución completa",
-    "openLinkedResource": "Abrir detalles vinculados"
+    "openLinkedResource": "Abrir detalles vinculados",
+    "addTriggerChoice": "Añadir opción",
+    "triggerChoiceLabel": "Texto de la opción",
+    "triggerChoiceKey": "Clave de salida",
+    "triggerChoiceKeyDuplicate": "Otra opción ya usa esta clave.",
+    "triggerChoiceDescription": "Descripción (opcional)",
+    "triggerChoicesHelp": "Cada opción se convierte en un elemento del menú bajo el botón de ejecución y en una salida propia del activador.",
+    "triggerChoicesEmpty": "Aún no hay opciones. Añade las que se ofrecerán al iniciar este flujo de trabajo.",
+    "triggerChoicesAdvanced": "Estas opciones no son entradas simples de clave, texto y descripción. Edítalas como JSON."
   },
   "runs": {
     "actions": "Acciones",
