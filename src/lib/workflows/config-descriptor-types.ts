@@ -1,7 +1,4 @@
-import type {
-  WorkflowStepKind,
-  WorkflowTriggerKind,
-} from "@/lib/workflows/definition";
+import type { WorkflowStepKind, WorkflowTriggerKind } from "./kinds";
 
 /**
  * The interactive control used to edit a single config field. Every kind's

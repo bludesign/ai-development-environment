@@ -5,12 +5,6 @@ import {
   WORKTREE_OPERATIONS,
 } from "@ai-development-environment/agent-contract/worktrees";
 
-import {
-  WORKFLOW_RESOURCE_KINDS,
-  type WorkflowStepKind,
-  type WorkflowTriggerKind,
-} from "@/lib/workflows/definition";
-
 import type {
   ConfigFieldDescriptor,
   ConfigFieldScope,
@@ -20,7 +14,23 @@ import type {
   ResourceKind,
   StepConfigDescriptors,
   TriggerConfigDescriptors,
-} from "./types";
+} from "./config-descriptor-types";
+import {
+  WORKFLOW_RESOURCE_KINDS,
+  type WorkflowStepKind,
+  type WorkflowTriggerKind,
+} from "./kinds";
+
+/**
+ * The config every step and trigger kind accepts, described declaratively.
+ *
+ * This is the single source of truth for three consumers: the editor's config
+ * form (`components/workflows/config-fields/config-fields-editor.tsx`), the
+ * JSON Schema published in the workflow catalog (`config-schema.ts`), and
+ * through that catalog the MCP tools that let an agent author workflows. A key
+ * missing here is invisible to the schema and falls back to the editor's
+ * raw-JSON escape hatch, so new adapter config belongs in this file too.
+ */
 
 // ---------------------------------------------------------------------------
 // Field builders — keep the descriptor maps below terse and readable.
@@ -742,6 +752,10 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       ),
     ],
   },
+  // Try/catch is expressed entirely in the graph — the step takes no config and
+  // routes failures out of its `catch` handle — but it still needs an entry so
+  // the catalog can publish an (empty) schema rather than an opaque object.
+  CONTROL_TRY: { fields: [] },
   CONTROL_SET_VARIABLE: {
     fields: [
       text("path", "Output path", {

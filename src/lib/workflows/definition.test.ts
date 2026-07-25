@@ -1,11 +1,16 @@
 import { describe, expect, test } from "vitest";
 
+import { hasConfigDescriptor } from "./config-descriptors";
 import {
   computeWorkflowPathAvailability,
   emptyWorkflowDefinition,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
   workflowTriggerChoices,
+  WORKFLOW_STEP_CATALOG,
+  WORKFLOW_STEP_KINDS,
+  WORKFLOW_TRIGGER_CATALOG,
+  WORKFLOW_TRIGGER_KINDS,
   type WorkflowDefinition,
   type WorkflowNodeDefinition,
 } from "./definition";
@@ -419,5 +424,66 @@ describe("workflow definition validation", () => {
       cwd: null,
       sessionPath: "ticket.key",
     });
+  });
+});
+
+/**
+ * The catalog is what the editor palette and the MCP tools read to decide which
+ * step or trigger fits a job, so an entry that only restates its own label — the
+ * old `description: label` default — is worse than useless. These assertions
+ * keep the three lists (kinds, catalog, config descriptors) from drifting apart.
+ */
+describe("workflow catalog", () => {
+  const entries = [
+    ...WORKFLOW_STEP_CATALOG.map((entry) => ({ ...entry, scope: "step" })),
+    ...WORKFLOW_TRIGGER_CATALOG.map((entry) => ({
+      ...entry,
+      scope: "trigger",
+    })),
+  ];
+
+  test("covers every kind exactly once", () => {
+    expect(WORKFLOW_STEP_CATALOG.map(({ kind }) => kind)).toEqual([
+      ...WORKFLOW_STEP_KINDS,
+    ]);
+    expect(WORKFLOW_TRIGGER_CATALOG.map(({ kind }) => kind)).toEqual([
+      ...WORKFLOW_TRIGGER_KINDS,
+    ]);
+  });
+
+  test("every entry describes itself beyond its label", () => {
+    for (const entry of entries) {
+      expect(entry.description.length, entry.kind).toBeGreaterThan(20);
+      expect(entry.description, entry.kind).not.toBe(entry.label);
+      expect(entry.details.length, entry.kind).toBeGreaterThan(
+        entry.description.length,
+      );
+    }
+  });
+
+  test("every kind has a config descriptor backing its schema", () => {
+    for (const entry of entries) {
+      expect(
+        hasConfigDescriptor(entry.kind, entry.scope as "step" | "trigger"),
+        entry.kind,
+      ).toBe(true);
+      expect(entry.configSchema.properties, entry.kind).toBeDefined();
+    }
+  });
+
+  test("control-flow steps advertise their branch handles", () => {
+    const handles = (kind: string) =>
+      WORKFLOW_STEP_CATALOG.find((entry) => entry.kind === kind)?.sourceHandles;
+    expect(handles("CONTROL_IF")).toEqual(["true", "false"]);
+    expect(handles("CONTROL_FOR_EACH")).toEqual(["body", "empty"]);
+    expect(handles("CONTROL_TRY")).toEqual(["success", "catch"]);
+    expect(handles("JIRA_LOAD_TICKET")).toEqual(["success", "failure"]);
+  });
+
+  test("choice triggers leave their handles to config", () => {
+    const choice = WORKFLOW_TRIGGER_CATALOG.find(
+      ({ kind }) => kind === "MANUAL_CHOICE",
+    );
+    expect(choice?.sourceHandles).toEqual([]);
   });
 });

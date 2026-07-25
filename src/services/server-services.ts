@@ -130,6 +130,9 @@ function createServerServices(): ServerServices {
       telemetry: telemetryService,
       pushNotifications: pushNotificationsService,
       agents: agentControlService,
+      // A thunk, not the instance: `workflowsService` is constructed below and
+      // takes `toolsService` itself. Resolved when a workflow tool is called.
+      workflows: () => workflowsService,
     },
     credentialService,
   );

@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   isChoiceTriggerKind,
+  workflowStaticSourceHandles,
   workflowTriggerChoices,
 } from "@/lib/workflows/definition";
 import type { WorkflowResourceDestination } from "@/lib/workflows/resources";
@@ -138,28 +139,7 @@ export function workflowSourceHandles(
       label,
     }));
   }
-  if (kind === "CONTROL_IF") {
-    return [
-      { id: "true", label: "true" },
-      { id: "false", label: "false" },
-    ];
-  }
-  if (kind === "CONTROL_FOR_EACH") {
-    return [
-      { id: "body", label: "body" },
-      { id: "empty", label: "empty" },
-    ];
-  }
-  if (kind === "CONTROL_TRY") {
-    return [
-      { id: "success", label: "success" },
-      { id: "catch", label: "catch" },
-    ];
-  }
-  return [
-    { id: "success", label: "success" },
-    { id: "failure", label: "failure" },
-  ];
+  return workflowStaticSourceHandles(kind).map((id) => ({ id, label: id }));
 }
 
 function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {

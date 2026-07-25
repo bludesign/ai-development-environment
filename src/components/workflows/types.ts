@@ -58,11 +58,13 @@ export type WorkflowCatalogEntry = {
   category: string;
   label: string;
   description: string;
+  details: string;
   execution: string;
   configSchema: Record<string, unknown>;
   capabilityFlags: string[];
   requiredPaths: string[];
   providedPaths: string[];
+  sourceHandles: string[];
   mutatesExternal: boolean;
   mutatesWorktree: boolean;
 };
@@ -71,9 +73,12 @@ export type WorkflowTriggerCatalogEntry = {
   kind: string;
   category: string;
   label: string;
+  description: string;
+  details: string;
   configSchema: Record<string, unknown>;
   capabilityFlags: string[];
   seedPaths: string[];
+  sourceHandles: string[];
 };
 
 export type WorkflowDiagnostic = {
