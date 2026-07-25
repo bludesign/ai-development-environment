@@ -89,4 +89,35 @@ describe("interactive step configuration", () => {
       { label: "Hold" },
     ]);
   });
+
+  test("preserves structured terminal credential entries while editing", () => {
+    const credentials = [
+      {
+        name: "WORKFLOW_SECRET",
+        credential: { id: "credential-1", kind: "TOKEN", ownerId: null },
+      },
+    ];
+    render(<Harness config={{ credentials }} kind="TERMINAL_RUN" />);
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Credential environment" }),
+      {
+        target: {
+          value: JSON.stringify([
+            {
+              ...credentials[0],
+              name: "UPDATED_SECRET",
+            },
+          ]),
+        },
+      },
+    );
+
+    expect(config().credentials).toEqual([
+      {
+        name: "UPDATED_SECRET",
+        credential: { id: "credential-1", kind: "TOKEN", ownerId: null },
+      },
+    ]);
+  });
 });

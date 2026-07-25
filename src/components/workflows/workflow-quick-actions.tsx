@@ -22,6 +22,7 @@ type QuickActionWorkflow = {
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   triggerChoices?: WorkflowTriggerChoice[];
+  hasPlainTrigger?: boolean;
 };
 
 const STARTED_RUN_VISIBLE_MS = 5000;
@@ -143,6 +144,7 @@ export function WorkflowQuickActions({
                   </Button>
                 }
                 choices={workflow.triggerChoices ?? []}
+                hasPlainTrigger={workflow.hasPlainTrigger ?? false}
                 onRun={(choice) => void trigger(workflow, choice)}
               />
             </div>

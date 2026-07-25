@@ -147,6 +147,46 @@ test("asks which choice to run before starting a choice workflow", async () => {
   );
 });
 
+test("keeps the plain trigger available beside choice triggers", async () => {
+  vi.mocked(controlPlaneRequest).mockResolvedValue({
+    triggerWorkflow: { id: "run-plain" },
+  } as never);
+  render(
+    <WorkflowQuickActions
+      sessionData={{ worktree: { id: "worktree-1" } }}
+      workflows={[
+        {
+          id: "workflow-1",
+          name: "Prepare review",
+          description: "Runs the review preparation workflow",
+          quickActionIconKey: "rocket",
+          quickActionButtonVariant: "secondary",
+          hasPlainTrigger: true,
+          triggerChoices: [
+            { key: "draft", label: "Draft PR", description: "" },
+          ],
+        },
+      ]}
+      worktreeId="worktree-1"
+    />,
+  );
+
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Prepare review" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Full run" }));
+
+  await waitFor(() =>
+    expect(controlPlaneRequest).toHaveBeenCalledWith(
+      expect.stringContaining("RunWorktreeQuickAction"),
+      expect.objectContaining({
+        input: expect.objectContaining({ choice: null }),
+      }),
+    ),
+  );
+});
+
 test("hides the view button five seconds after the run starts", async () => {
   // A frozen clock, deliberately: `shouldAdvanceTime` would tick the hide timer
   // along with real time, so the 4999ms assertion below raced the machine and

@@ -764,7 +764,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       multiline("script", "Script", { required: true }),
       enumField("interpreter", "Interpreter", staticOptions(["SHELL", "NODE"])),
       record("environment", "Environment variables"),
-      stringList("credentials", "Credential environment"),
+      json("credentials", "Credential environment", {
+        help: "JSON array of { name, credential: { id, kind, ownerId } } entries.",
+      }),
       num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },

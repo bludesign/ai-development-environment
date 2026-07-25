@@ -59,6 +59,21 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       );
       return trigger ? workflowTriggerChoices(trigger.config) : [];
     },
+    hasPlainTrigger: (
+      value: { activeVersion?: { definitionJson: string } | null },
+      { resourceKind }: { resourceKind?: string | null },
+    ) => {
+      if (!value.activeVersion) return false;
+      const wanted = resourceKind?.trim().toUpperCase() ?? null;
+      const definition = parseWorkflowDefinition(
+        JSON.parse(value.activeVersion.definitionJson),
+      );
+      return definition.triggers.some(
+        (candidate) =>
+          candidate.kind === (wanted ? "RESOURCE_MANUAL" : "MANUAL") &&
+          (!wanted || workflowResourceKind(candidate.config) === wanted),
+      );
+    },
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),

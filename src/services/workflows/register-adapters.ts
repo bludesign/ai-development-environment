@@ -184,6 +184,20 @@ function pullRequestLink(
   );
 }
 
+function contextualPullRequestLink(
+  context: WorkflowExecutionContext,
+): WorkflowResourceLinkInput | null {
+  const repository = contextualGitHubCoordinates(context);
+  const number = contextualPullRequestNumber(context);
+  return repository && number
+    ? detailLink(
+        "PULL_REQUEST",
+        pullRequestResourceId(repository.owner, repository.name, number),
+        "Pull request",
+      )
+    : null;
+}
+
 function githubWorkflowRunLink(
   context: WorkflowExecutionContext,
 ): WorkflowResourceLinkInput | null {
@@ -201,9 +215,10 @@ function githubWorkflowRunLink(
 function contextualAgentRunLink(
   context: WorkflowExecutionContext,
 ): WorkflowResourceLinkInput | null {
-  const id = agentRunId(context);
   const kind = getSessionValue(context.sessionData, "run.kind");
   if (kind !== "PLAN" && kind !== "SESSION") return null;
+  const id = contextualAgentRunId(context);
+  if (!id) return null;
   return detailLink(
     "AGENT_RUN",
     id,
@@ -213,14 +228,19 @@ function contextualAgentRunLink(
   );
 }
 
-function githubCoordinates(context: WorkflowExecutionContext): {
+function contextualGitHubCoordinates(context: WorkflowExecutionContext): {
   owner: string;
   name: string;
-} {
+} | null {
   const owner = context.node.config.owner;
   const name = context.node.config.name;
-  if (typeof owner === "string" && typeof name === "string") {
-    return { owner, name };
+  if (
+    typeof owner === "string" &&
+    owner.trim() &&
+    typeof name === "string" &&
+    name.trim()
+  ) {
+    return { owner: owner.trim(), name: name.trim() };
   }
   const origin =
     context.sessionData.repo &&
@@ -234,10 +254,20 @@ function githubCoordinates(context: WorkflowExecutionContext): {
           /(?:https?:\/\/)?github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/i,
         )
       : null;
-  if (!match?.[1] || !match[2]) {
-    throw new Error("GitHub owner and repository are required");
-  }
-  return { owner: match[1], name: match[2] };
+  const matchedOwner = match?.[1]?.trim();
+  const matchedName = match?.[2]?.trim();
+  return matchedOwner && matchedName
+    ? { owner: matchedOwner, name: matchedName }
+    : null;
+}
+
+function githubCoordinates(context: WorkflowExecutionContext): {
+  owner: string;
+  name: string;
+} {
+  const repository = contextualGitHubCoordinates(context);
+  if (!repository) throw new Error("GitHub owner and repository are required");
+  return repository;
 }
 
 function normalizeTicket(ticketValue: unknown): Record<string, unknown> {
@@ -618,15 +648,22 @@ function registerJiraAdapters(
   });
 }
 
-function pullRequestNumber(context: WorkflowExecutionContext): number {
+function contextualPullRequestNumber(
+  context: WorkflowExecutionContext,
+): number | null {
   const value =
     context.node.config.number ??
     getSessionValue(context.sessionData, "pr.number");
   const result = typeof value === "string" ? Number(value) : value;
-  if (typeof result !== "number" || !Number.isInteger(result) || result < 1) {
-    throw new Error("Pull request number is required");
-  }
-  return result;
+  return typeof result === "number" && Number.isInteger(result) && result >= 1
+    ? result
+    : null;
+}
+
+function pullRequestNumber(context: WorkflowExecutionContext): number {
+  const number = contextualPullRequestNumber(context);
+  if (!number) throw new Error("Pull request number is required");
+  return number;
 }
 
 function registerGitHubAdapters(
@@ -718,15 +755,17 @@ function registerGitHubAdapters(
       text(context.node.config.threadId, "Review thread ID", 500),
       text(context.node.config.body, "Review reply", 100_000),
     );
-    return { output: result, links: [pullRequestLink(context)] };
+    const link = contextualPullRequestLink(context);
+    return { output: result, links: link ? [link] : undefined };
   });
-  executor.register("GITHUB_SET_REVIEW_THREAD_RESOLVED", async (context) => ({
-    output: await services.github.setReviewThreadResolved(
+  executor.register("GITHUB_SET_REVIEW_THREAD_RESOLVED", async (context) => {
+    const output = await services.github.setReviewThreadResolved(
       text(context.node.config.threadId, "Review thread ID", 500),
       context.node.config.resolved !== false,
-    ),
-    links: [pullRequestLink(context)],
-  }));
+    );
+    const link = contextualPullRequestLink(context);
+    return { output, links: link ? [link] : undefined };
+  });
   executor.register("GITHUB_CREATE_PR", async (context) => {
     const repository = githubCoordinates(context);
     const pullRequest = await services.github.createPullRequest({
@@ -1298,6 +1337,16 @@ function registerBuildAdapters(
       links: [buildLink(id)],
     };
   });
+}
+
+function contextualAgentRunId(
+  context: WorkflowExecutionContext,
+): string | null {
+  try {
+    return agentRunId(context);
+  } catch {
+    return null;
+  }
 }
 
 function agentRunId(context: WorkflowExecutionContext): string {

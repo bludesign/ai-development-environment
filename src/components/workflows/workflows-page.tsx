@@ -73,6 +73,7 @@ import type { WorkflowRun, WorkflowSummary } from "./types";
 const WORKFLOW_FIELDS = `
   id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
+  hasPlainTrigger
   triggerChoices { key label description }
   versionCount runCount createdAt updatedAt
 `;
@@ -403,6 +404,7 @@ export function WorkflowsPage() {
                         </Button>
                       }
                       choices={workflow.triggerChoices}
+                      hasPlainTrigger={workflow.hasPlainTrigger}
                       onRun={(choice) =>
                         void mutateWorkflow(workflow, "run", choice)
                       }

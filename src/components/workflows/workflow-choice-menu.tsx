@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { cloneElement, type ReactElement } from "react";
 
 import {
@@ -24,18 +25,26 @@ export type WorkflowTriggerChoice = {
 export function WorkflowChoiceMenu({
   button,
   choices,
+  hasPlainTrigger = false,
   onRun,
 }: {
   button: ReactElement<{ onClick?: () => void }>;
   choices: readonly WorkflowTriggerChoice[];
+  hasPlainTrigger?: boolean;
   onRun: (choice: string | null) => void;
 }) {
+  const t = useTranslations("workflows");
   if (!choices.length)
     return cloneElement(button, { onClick: () => onRun(null) });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-w-64">
+        {hasPlainTrigger && (
+          <DropdownMenuItem onSelect={() => onRun(null)}>
+            {t("fullRun")}
+          </DropdownMenuItem>
+        )}
         {choices.map((choice) => (
           <DropdownMenuItem key={choice.key} onSelect={() => onRun(choice.key)}>
             <div className="min-w-0">

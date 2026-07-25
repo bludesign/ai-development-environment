@@ -569,6 +569,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     [duplicateItem, selectedId],
   );
 
+  const duplicateCanvasSelection = useCallback(() => {
+    const canvasSelection =
+      instance?.getNodes().find(({ selected }) => selected)?.id ?? null;
+    duplicateItem(canvasSelection ?? selectedId);
+  }, [duplicateItem, instance, selectedId]);
+
   const nodeActions = useMemo<WorkflowNodeActions>(
     () => ({
       onDelete: (id) => removeItems([id]),
@@ -587,12 +593,12 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         const target = event.target as HTMLElement | null;
         if (target?.matches("input, textarea, [contenteditable=true]")) return;
         event.preventDefault();
-        duplicateSelected();
+        duplicateCanvasSelection();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [duplicateSelected]);
+  }, [duplicateCanvasSelection]);
 
   const onConnect = useCallback(
     (connection: Connection) => {

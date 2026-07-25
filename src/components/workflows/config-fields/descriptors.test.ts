@@ -42,4 +42,16 @@ describe("workflow config descriptors", () => {
       });
     }
   });
+
+  test("edits terminal credential entries as structured JSON", () => {
+    const credentialField = getConfigDescriptor(
+      "TERMINAL_RUN",
+      "step",
+    )?.fields.find(({ key }) => key === "credentials");
+
+    expect(credentialField).toMatchObject({
+      control: "json",
+      key: "credentials",
+    });
+  });
 });

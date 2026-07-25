@@ -104,6 +104,8 @@ export type WorkflowSummary = {
   }>;
   /** Options the published MANUAL_CHOICE trigger offers, if it has one. */
   triggerChoices: Array<{ key: string; label: string; description: string }>;
+  /** Whether the published definition also accepts a no-choice manual run. */
+  hasPlainTrigger: boolean;
   archivedAt: string | null;
   versionCount: number;
   runCount: number;

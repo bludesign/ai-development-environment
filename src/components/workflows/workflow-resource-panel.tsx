@@ -45,6 +45,7 @@ type AcceptedWorkflow = {
   description: string;
   enabled: boolean;
   triggerChoices: WorkflowTriggerChoice[];
+  hasPlainTrigger: boolean;
 };
 
 const LINKED_RUN_FIELDS = `
@@ -90,6 +91,7 @@ export function WorkflowResourcePanel({
         workflowRunsForResource(kind: $kind, resourceId: $resourceId) { ${LINKED_RUN_FIELDS} }
         workflowsAcceptingResource(kind: $kind) {
           id name description enabled
+          hasPlainTrigger(resourceKind: $kind)
           triggerChoices(resourceKind: $kind) { key label description }
         }
       }`,
@@ -198,6 +200,7 @@ export function WorkflowResourcePanel({
                       </Button>
                     }
                     choices={workflow.triggerChoices}
+                    hasPlainTrigger={workflow.hasPlainTrigger}
                     onRun={(choice) => void trigger(workflow.id, choice)}
                   />
                 </ItemActions>

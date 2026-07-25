@@ -37,6 +37,8 @@ type Workflow {
   resource kind to read the resource trigger instead of the plain manual one.
   """
   triggerChoices(resourceKind: String): [WorkflowTriggerChoice!]!
+  "Whether the published workflow also has a matching no-choice manual trigger."
+  hasPlainTrigger(resourceKind: String): Boolean!
   archivedAt: String
   versions: [WorkflowVersion!]!
   versionCount: Int!

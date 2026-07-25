@@ -90,6 +90,7 @@ type WorkflowDetail = WorkflowSummary & {
 
 const DETAIL_FIELDS = `
   id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
+  hasPlainTrigger
   triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
@@ -366,6 +367,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
               </Button>
             }
             choices={workflow.triggerChoices}
+            hasPlainTrigger={workflow.hasPlainTrigger}
             onRun={(choice) => void trigger(choice)}
           />
         </div>

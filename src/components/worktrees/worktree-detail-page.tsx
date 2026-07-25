@@ -102,6 +102,7 @@ const OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!) {
         iosBuildConfigured
         quickActions {
             id name description quickActionIconKey quickActionButtonVariant
+            hasPlainTrigger(resourceKind: "WORKTREE")
             triggerChoices(resourceKind: "WORKTREE") { key label description }
           }
         repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
