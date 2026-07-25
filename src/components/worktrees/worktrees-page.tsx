@@ -11,6 +11,7 @@ import {
   Code2,
   ExternalLink,
   GitBranch,
+  GitMerge,
   GitPullRequest,
   Grid2X2,
   List,
@@ -313,6 +314,7 @@ type Operation =
   | "OPEN_EDITOR"
   | "FORCE_PUSH"
   | "SYNC"
+  | "REBASE"
   | "PUSH"
   | "RESET"
   | "STASH_ALL"
@@ -2779,6 +2781,16 @@ export function ActionRow(
           !worktree.upstream ||
           !worktree.baseBranch ||
           worktree.baseBehind === 0
+        }
+      />
+      <OperationButton
+        confirm
+        icon={<GitMerge />}
+        label={t("rebase")}
+        operation="REBASE"
+        props={props}
+        disabled={
+          unavailable || !worktree.baseBranch || worktree.baseBehind === 0
         }
       />
       <OperationButton

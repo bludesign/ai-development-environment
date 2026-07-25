@@ -2365,6 +2365,28 @@ export const operateWorktree: AgentJobHandler = async (
       await runGit(["push", "--force-with-lease"], "Sync push failed");
       break;
     }
+    case "REBASE": {
+      if (!branch) throw new Error("Rebase requires a branch");
+      if (!input.baseBranch) throw new Error("Rebase requires a base branch");
+      const statusResult = await runGit(
+        ["status", "--porcelain"],
+        "Could not inspect worktree changes",
+      );
+      if (statusResult.stdout.trim())
+        throw new Error("Stash or commit changes before rebasing");
+      await runGit(["fetch", "origin"], "Could not fetch origin");
+      const rebase = await git(
+        folder,
+        ["rebase", `refs/remotes/origin/${input.baseBranch}`],
+        timeoutMs,
+        signal,
+      );
+      if (rebase.exitCode !== 0) {
+        await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+        throw new Error(cleanError(rebase.stderr || "Rebase failed"));
+      }
+      break;
+    }
     case "PUSH":
       if (!branch) throw new Error("Push requires a branch");
       await runGit(

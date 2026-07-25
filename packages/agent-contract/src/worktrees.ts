@@ -58,6 +58,7 @@ export const WORKTREE_OPERATIONS = [
   "OPEN_EDITOR",
   "FORCE_PUSH",
   "SYNC",
+  "REBASE",
   "PUSH",
   "RESET",
   "STASH_ALL",

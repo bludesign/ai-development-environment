@@ -588,6 +588,81 @@ describe("worktree inventory and inspection", () => {
     ).rejects.toThrow("Stash or commit changes before syncing");
   });
 
+  test("rebases onto the base branch without pushing", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    // The handler runs Git with the developer's own global config, so the
+    // rebase it performs would otherwise block on commit signing.
+    await git(folder, "config", "commit.gpgsign", "false");
+    await git(folder, "push", "-u", "origin", "main");
+    const linked = `${folder}-rebase`;
+    temporaryDirectories.push(linked);
+    await git(folder, "worktree", "add", "-b", "feature/rebase", linked);
+    await writeFile(join(linked, "feature.txt"), "feature\n");
+    await git(linked, "add", "feature.txt");
+    await git(linked, "commit", "-m", "Add feature");
+    await writeFile(join(folder, "base.txt"), "base\n");
+    await git(folder, "add", "base.txt");
+    await git(folder, "commit", "-m", "Advance base");
+    await git(folder, "push", "origin", "main");
+    const baseHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    const gitDirectory = await realpath(
+      (
+        await git(linked, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+
+    await operateWorktree(
+      {
+        codebaseId: "codebase-1",
+        folder: linked,
+        gitDirectory,
+        expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+        baseBranch: "main",
+        operation: "REBASE",
+      },
+      10_000,
+      new AbortController().signal,
+      async () => undefined,
+    );
+
+    expect((await git(linked, "rev-parse", "HEAD~1")).stdout.trim()).toBe(
+      baseHead,
+    );
+    expect(
+      (await git(remote, "branch", "--list", "feature/rebase")).stdout.trim(),
+    ).toBe("");
+  }, 15_000);
+
+  test("blocks rebase when the worktree is dirty", async () => {
+    const folder = await repository();
+    await git(folder, "checkout", "-b", "feature/dirty-rebase");
+    await writeFile(join(folder, "README.md"), "dirty\n");
+    const gitDirectory = await realpath(
+      (
+        await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+
+    await expect(
+      operateWorktree(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          gitDirectory,
+          expectedOrigin: "github.com/openai/codex",
+          baseBranch: "main",
+          operation: "REBASE",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      ),
+    ).rejects.toThrow("Stash or commit changes before rebasing");
+  });
+
   test("pushes a clean branch, checks it out on another clone, and deletes the linked worktree", async () => {
     const source = await repository();
     const remote = await localRemote();

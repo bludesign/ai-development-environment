@@ -2242,6 +2242,7 @@
     "openInsiders": "In VS Code Insiders öffnen",
     "forcePush": "Push erzwingen",
     "sync": "Synchronisieren",
+    "rebase": "Rebasen",
     "push": "Pushen",
     "publish": "Veröffentlichen",
     "reset": "Zurücksetzen",
