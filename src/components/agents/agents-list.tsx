@@ -339,14 +339,14 @@ export function AgentsList({
         <div className="grid gap-3 lg:grid-cols-2">
           {agents.map((agent) => (
             <Card
-              className="h-full transition-colors hover:bg-muted/20"
+              className="relative h-full transition-colors hover:bg-muted/20 focus-within:ring-2 focus-within:ring-ring/50"
               key={agent.id}
             >
               <CardContent className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <Link
-                      className="truncate font-medium hover:underline"
+                      className="truncate font-medium outline-none after:absolute after:inset-0 after:rounded-[inherit]"
                       href={`/agents/${agent.id}`}
                     >
                       <h2>{agent.name}</h2>
@@ -389,10 +389,12 @@ export function AgentsList({
                   usedLabel={detailT("used")}
                   freeLabel={detailT("free")}
                 />
-                <CommandQuickActions
-                  agentCapabilities={agent.capabilities}
-                  agentId={agent.id}
-                />
+                <div className="relative z-10 empty:hidden">
+                  <CommandQuickActions
+                    agentCapabilities={agent.capabilities}
+                    agentId={agent.id}
+                  />
+                </div>
               </CardContent>
             </Card>
           ))}

@@ -16,7 +16,9 @@ import {
 import { CommandRunPage } from "./command-run-page";
 
 const terminalWrite = vi.hoisted(() => vi.fn());
+const terminalOptions = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+const writeText = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -40,6 +42,9 @@ vi.mock("@/i18n/navigation", () => ({
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
     buffer = { active: { viewportY: 0, baseY: 0 } };
+    constructor(options: unknown) {
+      terminalOptions(options);
+    }
     loadAddon() {}
     open() {}
     write(value: string | Uint8Array, callback?: () => void) {
@@ -109,7 +114,13 @@ beforeEach(() => {
     },
   );
   terminalWrite.mockReset();
+  terminalOptions.mockReset();
   push.mockReset();
+  writeText.mockReset();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
   subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
   request.mockImplementation(async (query) => {
     if (query.includes("CommandRunDetail")) return { commandRun: run } as never;
@@ -176,6 +187,32 @@ describe("CommandRunPage", () => {
         .map((value) => Buffer.from(value)),
     );
     expect(bytes.toString("utf8")).toBe("\u001b[31m🙂\u001b[0m");
+    expect(terminalOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ convertEol: true }),
+    );
+  });
+
+  test("replays persisted output when the terminal lifecycle is replaced", async () => {
+    const { rerender } = render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText("Color output")).toBeDefined();
+
+    await waitFor(() => {
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(2);
+    });
+
+    rerender(<CommandRunPage runId="run-2" />);
+
+    await waitFor(() => {
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(4);
+    });
   });
 
   test("navigates to the successor returned by rerun", async () => {
@@ -184,5 +221,53 @@ describe("CommandRunPage", () => {
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith("/commands/runs/run-2"),
     );
+  });
+
+  test("links to the command editor from the page actions", async () => {
+    render(<CommandRunPage runId="run-1" />);
+
+    const editLink = await screen.findByRole("link", {
+      name: "Edit command",
+    });
+    expect(editLink.getAttribute("href")).toBe("/commands/command-1/edit");
+  });
+
+  test("uses the standard cancel icon without decorating terminal output", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: { ...run, status: "RUNNING", finishedAt: null },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+
+    const terminateButton = await screen.findByRole("button", {
+      name: "Terminate",
+    });
+    expect(terminateButton.querySelector(".lucide-circle-stop")).not.toBeNull();
+    const terminalTitle = screen.getByText("Terminal output");
+    expect(terminalTitle.querySelector("svg")).toBeNull();
+  });
+
+  test("uses a standard table card for attempts and copies the command snapshot", async () => {
+    render(<CommandRunPage runId="run-1" />);
+
+    const attemptsTitle = await screen.findByText("Attempts");
+    const attemptsCard = attemptsTitle.closest('[data-slot="card"]');
+    expect(attemptsCard?.className).toContain("gap-0");
+    expect(attemptsCard?.className).toContain("py-0");
+    expect(attemptsCard?.querySelector("table")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("printf color"));
+    expect(
+      screen.getByRole("button", { name: "Command copied" }),
+    ).toBeDefined();
   });
 });

@@ -2,11 +2,13 @@
 
 import {
   ArrowLeft,
+  Check,
+  CircleStop,
+  Copy,
   ExternalLink,
+  FilePenLine,
   RefreshCw,
   RotateCcw,
-  Square,
-  TerminalSquare,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,7 +17,13 @@ import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -25,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
+import { copyText } from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -73,6 +82,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
   const [mutating, setMutating] = useState(false);
+  const [snapshotCopied, setSnapshotCopied] = useState(false);
 
   const loadRun = useCallback(async () => {
     try {
@@ -109,11 +119,13 @@ export function CommandRunPage({ runId }: { runId: string }) {
     let cancelled = false;
     let observer: ResizeObserver | null = null;
     let scrollDisposable: { dispose(): void } | null = null;
+    writtenRef.current.clear();
+    lastAttemptRef.current = 0;
     void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
       ([{ Terminal }, { FitAddon }]) => {
         if (cancelled || !terminalElement.current) return;
         const terminal = new Terminal({
-          convertEol: false,
+          convertEol: true,
           cursorBlink: false,
           disableStdin: true,
           fontFamily:
@@ -238,6 +250,15 @@ export function CommandRunPage({ runId }: { runId: string }) {
     }
   };
 
+  const copySnapshot = async (snapshotScript: string) => {
+    try {
+      await copyText(snapshotScript);
+      setSnapshotCopied(true);
+    } catch {
+      setError(t("copyFailed"));
+    }
+  };
+
   if (!run && !error) return <Card className="h-96 animate-pulse" />;
   if (!run)
     return (
@@ -274,6 +295,12 @@ export function CommandRunPage({ runId }: { runId: string }) {
             {t(commandOriginKey(run.origin))}
           </p>
         </div>
+        <Button asChild variant="outline">
+          <Link href={`/commands/${run.commandId}/edit`}>
+            <FilePenLine />
+            {t("editCommand")}
+          </Link>
+        </Button>
         <Button
           disabled={mutating}
           variant="outline"
@@ -288,7 +315,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
             variant="destructive"
             onClick={() => void mutate("terminate")}
           >
-            <Square />
+            <CircleStop />
             {t("terminate")}
           </Button>
         )}
@@ -379,16 +406,12 @@ export function CommandRunPage({ runId }: { runId: string }) {
         </Card>
       </div>
       <Card className="overflow-hidden p-0">
-        <CardHeader className="flex-row items-center border-b px-4 py-3">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <TerminalSquare />
-            {t("terminalOutput")}
-          </CardTitle>
-          <div className="ml-auto flex items-center gap-2">
+        <CardHeader className="flex grid-cols-none flex-row items-center justify-between gap-3 border-b px-4 py-3">
+          <CardTitle className="text-sm">{t("terminalOutput")}</CardTitle>
+          <div className="flex items-center gap-2">
             {!follow && (
               <Button
-                size="sm"
-                variant="secondary"
+                variant="outline"
                 onClick={() => {
                   followRef.current = true;
                   setFollow(true);
@@ -400,8 +423,8 @@ export function CommandRunPage({ runId }: { runId: string }) {
             )}
             <Button
               aria-label={t("fitTerminal")}
-              size="icon-sm"
-              variant="ghost"
+              size="icon"
+              variant="outline"
               onClick={() => fitRef.current?.fit()}
             >
               <RefreshCw />
@@ -413,8 +436,8 @@ export function CommandRunPage({ runId }: { runId: string }) {
           ref={terminalElement}
         />
       </Card>
-      <Card className="overflow-hidden p-0">
-        <CardHeader className="border-b px-4 py-3">
+      <Card className="gap-0 py-0">
+        <CardHeader>
           <CardTitle className="text-sm">{t("attempts")}</CardTitle>
         </CardHeader>
         <Table>
@@ -455,6 +478,19 @@ export function CommandRunPage({ runId }: { runId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">{t("snapshot")}</CardTitle>
+          <CardAction>
+            <Button
+              aria-label={
+                snapshotCopied ? t("commandCopied") : t("copyCommand")
+              }
+              onClick={() => void copySnapshot(run.snapshotScript)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              {snapshotCopied ? <Check /> : <Copy />}
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent>
           <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted p-4 text-xs">

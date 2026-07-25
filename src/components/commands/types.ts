@@ -10,6 +10,7 @@ export type CommandWorktree = {
   id: string;
   folder: string;
   branch: string | null;
+  highlightColor: string | null;
   repositoryId?: string;
   repositoryName?: string;
   agentId?: string;
@@ -108,7 +109,7 @@ export const COMMAND_RUN_FIELDS = `
   queuedAt startedAt finishedAt archivedAt createdAt updatedAt
   command { id name }
   agent { id name hostname connectionStatus capabilities }
-  worktree { id folder branch }
+  worktree { id folder branch highlightColor }
   attempts { id attempt status exitCode signal error startedAt finishedAt }
 `;
 

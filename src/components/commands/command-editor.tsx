@@ -1,13 +1,24 @@
 "use client";
 
-import { Archive, ArrowLeft, Save, TerminalSquare } from "lucide-react";
+import { Archive, ArrowLeft, ChevronDown, CircleOff, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  BUILD_CONFIGURATION_ICON_KEYS,
+  ConfigurationIcon,
+} from "@/components/builds/configuration-icon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -59,6 +70,7 @@ const initial: Form = {
 
 export function CommandEditor({ commandId }: { commandId?: string }) {
   const t = useTranslations("commands");
+  const buildsT = useTranslations("builds");
   const router = useRouter();
   const [form, setForm] = useState(initial);
   const [agents, setAgents] = useState<CommandAgent[]>([]);
@@ -201,10 +213,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
       )}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TerminalSquare />
-            {t("command")}
-          </CardTitle>
+          <CardTitle>{t("command")}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-5">
           <div className="grid gap-2">
@@ -381,13 +390,55 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label>{t("icon")}</Label>
-              <Input
-                value={form.quickActionIconKey}
-                onChange={(event) =>
-                  update("quickActionIconKey", event.target.value)
-                }
-              />
+              <Label htmlFor="command-quick-action-icon">{t("icon")}</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={`${t("icon")}: ${buildsT(
+                      `configurationIcons.${form.quickActionIconKey}` as never,
+                    )}`}
+                    className="w-full justify-between"
+                    id="command-quick-action-icon"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {form.quickActionIconKey === "none" ? (
+                        <CircleOff className="size-4 shrink-0" />
+                      ) : (
+                        <ConfigurationIcon
+                          iconKey={form.quickActionIconKey}
+                        />
+                      )}
+                      <span className="truncate">
+                        {buildsT(
+                          `configurationIcons.${form.quickActionIconKey}` as never,
+                        )}
+                      </span>
+                    </span>
+                    <ChevronDown className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-56">
+                  <DropdownMenuRadioGroup
+                    onValueChange={(value) =>
+                      update("quickActionIconKey", value)
+                    }
+                    value={form.quickActionIconKey}
+                  >
+                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
+                      <DropdownMenuRadioItem key={value} value={value}>
+                        {value === "none" ? (
+                          <CircleOff className="size-4" />
+                        ) : (
+                          <ConfigurationIcon iconKey={value} />
+                        )}
+                        {buildsT(`configurationIcons.${value}` as never)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="grid gap-2">
               <Label>{t("style")}</Label>

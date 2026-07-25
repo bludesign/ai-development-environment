@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -26,14 +26,16 @@ vi.mock("@/i18n/navigation", () => ({
       {children}
     </a>
   ),
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push, refresh: vi.fn() }),
 }));
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
+const push = vi.fn();
 const timestamp = "2026-07-25T12:00:00.000Z";
 
 beforeEach(() => {
+  push.mockReset();
   subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
   request.mockResolvedValue({
     commandDefinitions: [],
@@ -61,6 +63,12 @@ beforeEach(() => {
           agentName: "Studio",
           agentHostname: "studio.local",
           worktreeId: "worktree-1",
+          worktree: {
+            id: "worktree-1",
+            folder: "/code/project",
+            branch: "feature/AIDE-75",
+            highlightColor: "violet",
+          },
           worktreePath: "/code/project",
           worktreeBranch: "feature/AIDE-75",
           restartCount: 0,
@@ -100,5 +108,44 @@ describe("CommandsPage", () => {
         .getByRole("link", { name: "feature/AIDE-75" })
         .getAttribute("href"),
     ).toBe("/worktrees/worktree-1");
+  });
+
+  test("opens a run from the row and uses session-style link highlights", async () => {
+    render(<CommandsPage />);
+
+    const command = await screen.findByRole("link", {
+      name: "Development server",
+    });
+    const agent = screen.getByRole("link", { name: "Studio" });
+    expect(command.className).toContain("hover:bg-muted");
+    expect(agent.className).toContain("hover:bg-muted");
+
+    fireEvent.click(screen.getByText("Succeeded"));
+    expect(push).toHaveBeenCalledWith("/commands/runs/run-1");
+  });
+
+  test("tints worktree command rows with their configured highlight color", async () => {
+    render(<CommandsPage />);
+
+    const row = (await screen.findByText("Succeeded")).closest("tr");
+    expect(row?.className).toContain("bg-violet-500/10");
+    expect(row?.className).toContain("hover:bg-violet-500/20");
+    expect(request.mock.calls[0]?.[0]).toContain(
+      "worktree { id folder branch highlightColor }",
+    );
+  });
+
+  test("selects completed runs from the current day in edit mode", async () => {
+    render(<CommandsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const dayCheckbox = screen.getByRole("checkbox", {
+      name: /Select completed runs from/,
+    });
+    fireEvent.click(dayCheckbox);
+
+    const rowCheckbox = screen.getAllByRole("checkbox")[2];
+    expect(dayCheckbox.getAttribute("aria-checked")).toBe("true");
+    expect(rowCheckbox.getAttribute("aria-checked")).toBe("true");
   });
 });

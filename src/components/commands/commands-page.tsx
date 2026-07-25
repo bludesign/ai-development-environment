@@ -54,6 +54,9 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
+import { cn } from "@/lib/utils";
+import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { CommandTargetDialog } from "./command-target-dialog";
 import {
@@ -126,7 +129,7 @@ export function CommandsPage() {
         agents { id name hostname connectionStatus capabilities }
         worktreeOverview {
           agents { agent { id name hostname connectionStatus capabilities }
-            codebases { repository { id name } worktrees { id folder branch } }
+            codebases { repository { id name } worktrees { id folder branch highlightColor } }
           }
         }
       }`,
@@ -389,8 +392,25 @@ export function CommandsPage() {
               {groups.map((group) => (
                 <Fragment key={group.key}>
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    {editMode && (
+                      <TableCell className="py-2">
+                        <SelectAllCheckbox
+                          ids={group.runs
+                            .filter((run) => !activeCommandRun(run.status))
+                            .map((run) => run.id)}
+                          label={t("selectDay", {
+                            day: formatDateValue(group.date, "long", {
+                              locale,
+                              showTime: false,
+                            }),
+                          })}
+                          onChange={setSelected}
+                          selected={selected}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell
-                      colSpan={editMode ? 8 : 7}
+                      colSpan={7}
                       className="py-2 text-xs font-medium text-muted-foreground"
                     >
                       {formatDateValue(group.date, "long", {
@@ -400,7 +420,29 @@ export function CommandsPage() {
                     </TableCell>
                   </TableRow>
                   {group.runs.map((run) => (
-                    <TableRow key={run.id}>
+                    <TableRow
+                      className={cn(
+                        "cursor-pointer",
+                        worktreeHighlightBackgroundClasses[
+                          run.worktree?.highlightColor ?? ""
+                        ],
+                      )}
+                      key={run.id}
+                      onClick={(event) => {
+                        if (!isRowActivation(event)) return;
+                        if (editMode) {
+                          if (activeCommandRun(run.status)) return;
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            if (next.has(run.id)) next.delete(run.id);
+                            else next.add(run.id);
+                            return next;
+                          });
+                        } else {
+                          router.push(`/commands/runs/${run.id}`);
+                        }
+                      }}
+                    >
                       {editMode && (
                         <TableCell>
                           <Checkbox
@@ -419,7 +461,10 @@ export function CommandsPage() {
                       )}
                       <TableCell>
                         <Link
-                          className="font-mono text-xs hover:underline"
+                          className={cn(
+                            rowLinkClass,
+                            "inline-block font-mono text-xs",
+                          )}
                           href={`/commands/runs/${run.id}`}
                         >
                           #{run.displayNumber}
@@ -427,7 +472,10 @@ export function CommandsPage() {
                       </TableCell>
                       <TableCell>
                         <Link
-                          className="font-medium hover:underline"
+                          className={cn(
+                            rowLinkClass,
+                            "inline-block font-medium",
+                          )}
                           href={`/commands/runs/${run.id}`}
                         >
                           {run.snapshotName}
@@ -441,7 +489,7 @@ export function CommandsPage() {
                       <TableCell>
                         {run.agentId ? (
                           <Link
-                            className="hover:underline"
+                            className={cn(rowLinkClass, "inline-block")}
                             href={`/agents/${run.agentId}`}
                           >
                             {run.agentName}
@@ -453,7 +501,10 @@ export function CommandsPage() {
                       <TableCell>
                         {run.worktreeId ? (
                           <Link
-                            className="max-w-48 truncate hover:underline"
+                            className={cn(
+                              rowLinkClass,
+                              "inline-block max-w-48 truncate",
+                            )}
                             href={`/worktrees/${run.worktreeId}`}
                           >
                             {run.worktreeBranch || run.worktreePath}
