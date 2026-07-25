@@ -59,6 +59,7 @@ export const WORKTREE_OPERATIONS = [
   "FORCE_PUSH",
   "SYNC",
   "REBASE",
+  "CANCEL_REBASE",
   "PUSH",
   "RESET",
   "STASH_ALL",
@@ -96,6 +97,8 @@ export type WorktreeActivityReport = {
   baseBehind?: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  rebaseInProgress?: boolean;
+  hasConflicts?: boolean;
   pushStatus?: WorktreePushStatus;
   observedAt: string;
 };
@@ -116,6 +119,8 @@ export type WorktreeInventoryItem = {
   baseBehind: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  rebaseInProgress?: boolean;
+  hasConflicts?: boolean;
   pushStatus?: WorktreePushStatus;
   availability: "AVAILABLE" | "MISSING" | "ERROR";
   error: string | null;
@@ -391,6 +396,11 @@ export function parseWorktreeInventoryItem(
       item.hasUnstagedChanges,
       `${name}.hasUnstagedChanges`,
     ),
+    rebaseInProgress: optionalBoolean(
+      item.rebaseInProgress,
+      `${name}.rebaseInProgress`,
+    ),
+    hasConflicts: optionalBoolean(item.hasConflicts, `${name}.hasConflicts`),
     pushStatus:
       optionalPushStatus(item.pushStatus, `${name}.pushStatus`) ?? "UNKNOWN",
     availability: availability as WorktreeInventoryItem["availability"],
@@ -1144,6 +1154,8 @@ export function parseWorktreeActivityReport(
     "baseBehind",
     "hasStagedChanges",
     "hasUnstagedChanges",
+    "rebaseInProgress",
+    "hasConflicts",
     "pushStatus",
     "observedAt",
   ]);
@@ -1203,6 +1215,14 @@ export function parseWorktreeActivityReport(
     hasUnstagedChanges: optionalBoolean(
       report.hasUnstagedChanges,
       "worktree activity report.hasUnstagedChanges",
+    ),
+    rebaseInProgress: optionalBoolean(
+      report.rebaseInProgress,
+      "worktree activity report.rebaseInProgress",
+    ),
+    hasConflicts: optionalBoolean(
+      report.hasConflicts,
+      "worktree activity report.hasConflicts",
     ),
     pushStatus: optionalPushStatus(
       report.pushStatus,

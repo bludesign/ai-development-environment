@@ -151,7 +151,7 @@ export function workflowView(value: Record<string, unknown>) {
     activeVersionId:
       typeof value.activeVersionId === "string" ? value.activeVersionId : null,
     draftSchemaVersion: Number(value.draftSchemaVersion),
-    globalQuickAction: value.globalQuickAction === true,
+    quickActionKind: String(value.quickActionKind ?? "NONE"),
     archivedAt: iso(value.archivedAt),
     versionCount: counts?.versions ?? versions?.length ?? 0,
     runCount: counts?.runs ?? 0,

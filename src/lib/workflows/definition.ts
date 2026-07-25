@@ -81,20 +81,27 @@ export function workflowTriggerChoices(
  * These mirror the `sessionData` the resource pages pass to `triggerWorkflow`,
  * and are what a RESOURCE_MANUAL trigger contributes to path availability.
  *
- * WORKTREE also seeds `ticket.*`: a worktree may have a Jira ticket derived
- * from its branch, which `WorkflowsService.trigger` hydrates into the run's
- * session data when present (see `hydrateResourceSessionData`). The link is
- * optional, so — like `worktree.*` guaranteeing only `worktree.id` at runtime —
- * the seed is an optimistic contract; a step bound to `ticket.key` on a
- * worktree with no matching ticket resolves to `undefined` at run time.
+ * WORKTREE also seeds repository, pull-request, and ticket data resolved from
+ * its codebase and branch. These links are optional, so the seed is an
+ * optimistic contract: a step bound to a missing linked resource resolves to
+ * `undefined` at run time.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   BUILD: ["build.*"],
   CODEBASE: ["codebase.*"],
   JIRA_TICKET: ["ticket.*"],
   AGENT_RUN: ["run.*"],
+  GITHUB_PIPELINE: ["pipeline.*", "repo.*", "pr.*", "worktree.*", "ticket.*"],
+  GITHUB_JOB: [
+    "job.*",
+    "pipeline.*",
+    "repo.*",
+    "pr.*",
+    "worktree.*",
+    "ticket.*",
+  ],
   PULL_REQUEST: ["pr.*", "repo.*"],
-  WORKTREE: ["worktree.*", "ticket.*"],
+  WORKTREE: ["worktree.*", "repo.*", "pr.*", "ticket.*"],
 };
 
 /** The resource kind a resource trigger config targets, if valid. */

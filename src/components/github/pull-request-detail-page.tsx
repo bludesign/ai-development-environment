@@ -20,6 +20,10 @@ import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
 import {
+  githubJobWorkflowResource,
+  githubPipelineWorkflowResource,
+} from "@/components/github/workflow-resource-context";
+import {
   actionsForBranchHref,
   WorkflowRunActionsMenu,
 } from "@/components/github/workflow-run-actions-menu";
@@ -497,6 +501,38 @@ export function PullRequestDetailPage({
                         historicalAttempt?.url ?? pipeline.url;
                       const displayedJobs =
                         historicalAttempt?.jobs ?? pipeline.jobs;
+                      const workflowResource = githubPipelineWorkflowResource(
+                        {
+                          ...pipeline,
+                          codebaseRepositoryId:
+                            pullRequest.codebaseRepositoryId,
+                          repositoryGithubId: pullRequest.repositoryGithubId,
+                          repositoryNameWithOwner:
+                            pullRequest.repositoryNameWithOwner,
+                          repositoryUrl: pullRequest.repositoryUrl,
+                          status: displayedStatus,
+                          url: displayedUrl,
+                          headBranch: pullRequest.headRefName,
+                          jiraKey: pullRequest.jiraKey,
+                          worktreeId: pullRequest.worktreeId,
+                        },
+                        {
+                          pullRequest: {
+                            id: pullRequest.id,
+                            number: pullRequest.number,
+                            title: pullRequest.title,
+                            url: pullRequest.url,
+                            jiraKey: pullRequest.jiraKey,
+                          },
+                          worktree: pullRequest.worktreeId
+                            ? {
+                                id: pullRequest.worktreeId,
+                                branch: pullRequest.headRefName,
+                              }
+                            : null,
+                          ticketKey: pullRequest.jiraKey,
+                        },
+                      );
                       return (
                         <Fragment key={pipeline.id}>
                           <TableRow>
@@ -571,6 +607,7 @@ export function PullRequestDetailPage({
                                         )
                                       : null
                                   }
+                                  workflowResource={workflowResource}
                                 />
                               </div>
                             </TableCell>
@@ -601,6 +638,12 @@ export function PullRequestDetailPage({
                                         repositoryId={
                                           pullRequest.repositoryGithubId
                                         }
+                                        workflowResource={githubJobWorkflowResource(
+                                          workflowResource,
+                                          job,
+                                          pullRequest.codebaseRepositoryId,
+                                          pullRequest.repositoryGithubId,
+                                        )}
                                       />
                                     ))}
                                   </div>

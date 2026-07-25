@@ -51,7 +51,8 @@ export type CodebaseRepository = {
     name: string;
     description: string;
     enabled: boolean;
-    globalQuickAction: boolean;
+    quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS";
+    quickActionRepositories: Array<{ id: string; name: string }>;
   }>;
   codebases: Codebase[];
   createdAt: string;

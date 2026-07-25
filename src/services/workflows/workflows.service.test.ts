@@ -100,9 +100,6 @@ describe("workflow quick actions", () => {
       },
     ];
     const ignored = emptyWorkflowDefinition("Ignored");
-    prisma.worktree.findUnique.mockResolvedValue({
-      codebase: { repositoryId: "repository-1" },
-    });
     prisma.workflow.findMany.mockResolvedValue([
       {
         id: "workflow-accepted",
@@ -116,14 +113,22 @@ describe("workflow quick actions", () => {
 
     const result = await new WorkflowsService(
       new WorkflowEventsService(),
-    ).quickActions("worktree-1");
+    ).quickActions({
+      kind: "STANDARD",
+      resourceKind: "WORKTREE",
+      repositoryId: "repository-1",
+    });
 
     expect(result.map(({ id }) => id)).toEqual(["workflow-accepted"]);
     expect(prisma.workflow.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          enabled: true,
+          archivedAt: null,
+          activeVersionId: { not: null },
+          quickActionKind: "STANDARD",
           OR: expect.arrayContaining([
-            { globalQuickAction: true },
+            { quickActionRepositories: { none: {} } },
             {
               quickActionRepositories: {
                 some: { repositoryId: "repository-1" },
@@ -148,7 +153,7 @@ describe("workflow quick actions", () => {
 
     await new WorkflowsService(new WorkflowEventsService()).setQuickAction({
       id: "workflow-1",
-      global: true,
+      kind: "GITHUB_ACTIONS",
       quickActionIconKey: "rocket",
       quickActionButtonVariant: "secondary",
       repositoryIds: ["repository-1", "repository-2", "repository-1"],
@@ -157,7 +162,7 @@ describe("workflow quick actions", () => {
     expect(prisma.workflow.update).toHaveBeenCalledWith({
       where: { id: "workflow-1" },
       data: {
-        globalQuickAction: true,
+        quickActionKind: "GITHUB_ACTIONS",
         quickActionIconKey: "rocket",
         quickActionButtonVariant: "secondary",
       },
@@ -170,6 +175,135 @@ describe("workflow quick actions", () => {
         { workflowId: "workflow-1", repositoryId: "repository-2" },
       ],
     });
+  });
+});
+
+describe("workflow resource session hydration", () => {
+  test("adds authoritative worktree context without replacing caller data", async () => {
+    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+      worktree: { id: "worktree-1", path: "/tmp/feature" },
+      repo: { id: "repository-derived", name: "widgets" },
+      pr: { number: 12, jiraKey: "APP-12" },
+      ticket: { key: "APP-12" },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree,
+      },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    const result = await service.hydrateResourceSessionData(
+      "GITHUB_JOB",
+      "repository-1:job:44",
+      {
+        worktree: { id: "worktree-1", headSha: "caller-sha" },
+        repo: { id: "repository-explicit" },
+        pipeline: { id: "run-1" },
+        job: { id: "44" },
+        pr: { number: 99, jiraKey: "APP-99" },
+      },
+    );
+
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
+    expect(result).toMatchObject({
+      worktree: {
+        id: "worktree-1",
+        path: "/tmp/feature",
+        headSha: "caller-sha",
+      },
+      repo: { id: "repository-explicit", name: "widgets" },
+      pipeline: { id: "run-1" },
+      job: { id: "44" },
+      pr: { number: 99, jiraKey: "APP-99" },
+      ticket: { key: "APP-12" },
+    });
+  });
+
+  test("falls back to legacy ticket hydration for worktree resources", async () => {
+    const ticketKeyForWorktree = vi.fn().mockResolvedValue("APP-42");
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { ticketKeyForWorktree },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("WORKTREE", "worktree-1", {
+        worktree: { id: "worktree-1" },
+      }),
+    ).resolves.toMatchObject({ ticket: { key: "APP-42" } });
+  });
+
+  test("uses the first run PR only when a linked worktree has none", async () => {
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree: vi.fn().mockResolvedValue({
+          worktree: { id: "worktree-1" },
+          repo: { id: "repository-1" },
+        }),
+      },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData(
+        "GITHUB_PIPELINE",
+        "repository-1:run:1",
+        {
+          worktree: { id: "worktree-1" },
+          pipeline: {
+            pullRequests: [
+              {
+                number: 12,
+                url: "https://github.com/acme/widgets/pull/12",
+              },
+              {
+                number: 13,
+                url: "https://github.com/acme/widgets/pull/13",
+              },
+            ],
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ pr: { number: 12 } });
   });
 });
 

@@ -272,6 +272,8 @@ model Worktree {
   baseBehind               Int?
   hasStagedChanges         Boolean                    @default(false)
   hasUnstagedChanges       Boolean                    @default(false)
+  rebaseInProgress         Boolean                    @default(false)
+  hasConflicts             Boolean                    @default(false)
   pushStatus               String                     @default("UNKNOWN")
   highlightColor           String?
   availability             String                     @default("AVAILABLE")
@@ -2015,7 +2017,7 @@ model Workflow {
   enabled             Boolean           @default(false)
   overlapPolicy       String            @default("QUEUE")
   maxConcurrentRuns   Int               @default(1)
-  globalQuickAction   Boolean           @default(false)
+  quickActionKind     String            @default("NONE")
   quickActionIconKey  String            @default("play")
   quickActionButtonVariant String       @default("default")
   archivedAt          DateTime?

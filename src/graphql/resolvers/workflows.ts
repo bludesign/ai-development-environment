@@ -11,6 +11,7 @@ import type {
   TriggerWorkflowInput,
   WorkflowsService,
 } from "@/services/workflows";
+import type { WorkflowQuickActionKind } from "@/lib/workflows/kinds";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId)
@@ -224,11 +225,15 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     },
     workflowQuickActions: (
       _root: unknown,
-      { worktreeId }: { worktreeId: string },
+      input: {
+        kind: WorkflowQuickActionKind;
+        resourceKind: string;
+        repositoryId?: string | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.quickActions(worktreeId);
+      return service.quickActions(input);
     },
     exportWorkflow: (
       _root: unknown,
@@ -300,7 +305,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       }: {
         input: {
           id: string;
-          global: boolean;
+          kind: WorkflowQuickActionKind;
           quickActionIconKey: string;
           quickActionButtonVariant: string;
           repositoryIds: string[];

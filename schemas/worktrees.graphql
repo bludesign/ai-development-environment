@@ -9,6 +9,7 @@ enum WorktreeOperation {
   FORCE_PUSH
   SYNC
   REBASE
+  CANCEL_REBASE
   PUSH
   RESET
   STASH_ALL
@@ -95,6 +96,8 @@ type Worktree {
   baseBehind: Int
   hasStagedChanges: Boolean!
   hasUnstagedChanges: Boolean!
+  rebaseInProgress: Boolean!
+  hasConflicts: Boolean!
   pushStatus: WorktreePushStatus!
   highlightColor: String
   availability: String!
@@ -118,6 +121,7 @@ type WorktreeCodebaseGroup {
   worktrees: [Worktree!]!
   iosBuildConfigured: Boolean!
   quickActions: [Workflow!]!
+  mergeConflictQuickActions: [Workflow!]!
 }
 
 type WorktreeAgentGroup {
@@ -240,6 +244,8 @@ type WorktreeActivity {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  rebaseInProgress: Boolean
+  hasConflicts: Boolean
   pushStatus: WorktreePushStatus
   observedAt: String!
 }
@@ -268,6 +274,8 @@ input WorktreeInventoryInput {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  rebaseInProgress: Boolean
+  hasConflicts: Boolean
   pushStatus: WorktreePushStatus
   availability: String!
   error: String
@@ -300,6 +308,8 @@ input WorktreeActivityReportInput {
   baseBehind: Int
   hasStagedChanges: Boolean
   hasUnstagedChanges: Boolean
+  rebaseInProgress: Boolean
+  hasConflicts: Boolean
   pushStatus: WorktreePushStatus
   observedAt: String!
 }

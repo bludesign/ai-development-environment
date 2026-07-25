@@ -10,7 +10,6 @@ import {
   Pencil,
   RefreshCw,
   Save,
-  Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -89,7 +88,7 @@ type WorkflowDetail = WorkflowSummary & {
 };
 
 const DETAIL_FIELDS = `
-  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
+  id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt quickActionKind quickActionIconKey quickActionButtonVariant
   hasPlainTrigger
   triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
@@ -128,7 +127,9 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const [repositories, setRepositories] = useState<
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);
-  const [globalQuickAction, setGlobalQuickAction] = useState(false);
+  const [quickActionKind, setQuickActionKind] = useState<
+    "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE"
+  >("NONE");
   const [quickActionIconKey, setQuickActionIconKey] = useState("play");
   const [quickActionButtonVariant, setQuickActionButtonVariant] = useState<
     "default" | "outline" | "secondary" | "destructive"
@@ -162,7 +163,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       setRuns(data.workflowRuns.items);
       setRepositories(data.codebaseOverview?.repositories ?? []);
       if (data.workflow) {
-        setGlobalQuickAction(data.workflow.globalQuickAction ?? false);
+        setQuickActionKind(data.workflow.quickActionKind ?? "NONE");
         setQuickActionIconKey(data.workflow.quickActionIconKey ?? "play");
         setQuickActionButtonVariant(
           data.workflow.quickActionButtonVariant ?? "default",
@@ -241,7 +242,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         {
           input: {
             id: workflow.id,
-            global: globalQuickAction,
+            kind: quickActionKind,
             quickActionIconKey,
             quickActionButtonVariant,
             repositoryIds: quickActionRepositoryIds,
@@ -419,9 +420,16 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap /> {t("quickActions")}
-          </CardTitle>
+          <CardTitle>{t("graph")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <WorkflowGraph definition={shownDefinition} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("quickActions")}</CardTitle>
           <CardDescription>{t("quickActionsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -503,23 +511,35 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
               </Select>
             </div>
           </div>
-          <div className="flex items-start gap-3 rounded-lg border p-3">
-            <Checkbox
-              checked={globalQuickAction}
-              className="mt-0.5"
-              id="workflow-global-quick-action"
-              onCheckedChange={(checked) =>
-                setGlobalQuickAction(checked === true)
+          <div className="space-y-2">
+            <Label htmlFor="workflow-quick-action-kind">
+              {t("quickActionKind")}
+            </Label>
+            <Select
+              onValueChange={(value) =>
+                setQuickActionKind(value as typeof quickActionKind)
               }
-            />
-            <div className="space-y-1">
-              <Label htmlFor="workflow-global-quick-action">
-                {t("globalQuickAction")}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t("globalQuickActionHelp")}
-              </p>
-            </div>
+              value={quickActionKind}
+            >
+              <SelectTrigger
+                className="w-full sm:w-72"
+                id="workflow-quick-action-kind"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["STANDARD", "MERGE_CONFLICT", "GITHUB_ACTIONS", "NONE"].map(
+                  (kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {t(`quickActionKinds.${kind}` as never)}
+                    </SelectItem>
+                  ),
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t(`quickActionKindHelp.${quickActionKind}` as never)}
+            </p>
           </div>
           <div className="space-y-2">
             <Label>{t("repositoryQuickActions")}</Label>
@@ -572,15 +592,6 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
               {t("saveQuickActions")}
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("graph")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <WorkflowGraph definition={shownDefinition} />
         </CardContent>
       </Card>
 

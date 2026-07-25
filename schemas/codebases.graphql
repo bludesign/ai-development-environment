@@ -217,7 +217,6 @@ input UpdateCodebaseRepositoryInput {
   jiraBranchRegex: String
   keepBaseBranchUpToDate: Boolean!
   skillGroupIds: [ID!]
-  quickActionWorkflowIds: [ID!]
 }
 
 input UpdateCodebaseSettingsInput {

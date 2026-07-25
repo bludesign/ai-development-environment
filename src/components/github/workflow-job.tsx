@@ -4,17 +4,30 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  MoreHorizontal,
   RotateCcw,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { MouseEvent, useState } from "react";
+import { useState } from "react";
 
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { GitHubWorkflowJobView } from "@/services/github/types";
+import {
+  WorkflowResourceDialog,
+  WorkflowResourceMenuItems,
+  type WorkflowMenuResource,
+} from "@/components/workflows/workflow-resource-actions";
 
 export function WorkflowJob({
   job,
@@ -22,12 +35,14 @@ export function WorkflowJob({
   checkSuiteId,
   onRetried,
   onError,
+  workflowResource,
 }: {
   job: GitHubWorkflowJobView;
   repositoryId: string;
   checkSuiteId: string | null;
   onRetried: () => void;
   onError: (error: string | null) => void;
+  workflowResource?: WorkflowMenuResource | null;
 }) {
   const t = useTranslations("pullRequestDetail");
   const tp = useTranslations("pullRequests");
@@ -57,25 +72,13 @@ export function WorkflowJob({
             {tp(`pipelineStates.${job.status}`)}
           </Badge>
         </button>
-        {job.url && (
-          <Button asChild size="sm" variant="outline">
-            <a
-              aria-label={t("viewJob", { job: job.name })}
-              href={job.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {t("viewPipeline")}
-              <ExternalLink />
-            </a>
-          </Button>
-        )}
-        <RetryWorkflowJobButton
+        <WorkflowJobActionsMenu
           checkSuiteId={checkSuiteId}
           job={job}
           onError={onError}
           onRetried={onRetried}
           repositoryId={repositoryId}
+          workflowResource={workflowResource}
         />
       </div>
       {expanded && (
@@ -109,25 +112,27 @@ export function WorkflowJob({
   );
 }
 
-function RetryWorkflowJobButton({
+function WorkflowJobActionsMenu({
   job,
   repositoryId,
   checkSuiteId,
   onRetried,
   onError,
+  workflowResource,
 }: {
   job: GitHubWorkflowJobView;
   repositoryId: string;
   checkSuiteId: string | null;
   onRetried: () => void;
   onError: (error: string | null) => void;
+  workflowResource?: WorkflowMenuResource | null;
 }) {
   const t = useTranslations("pullRequestDetail");
   const tp = useTranslations("pullRequests");
   const [retrying, setRetrying] = useState(false);
+  const [linkedOpen, setLinkedOpen] = useState(false);
 
-  const retry = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
+  const retry = async () => {
     if (!job.canRetry || !checkSuiteId) return;
     setRetrying(true);
     try {
@@ -158,16 +163,54 @@ function RetryWorkflowJobButton({
     ? tp(`retryUnavailable.${job.retryUnavailableReason}`)
     : undefined;
   return (
-    <Button
-      aria-label={t("retryJob", { job: job.name })}
-      disabled={retrying || !job.canRetry || !checkSuiteId}
-      onClick={(event) => void retry(event)}
-      size="sm"
-      title={unavailableMessage}
-      variant="outline"
-    >
-      {retrying ? <Spinner /> : <RotateCcw />}
-      {retrying ? tp("retrying") : tp("retry")}
-    </Button>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label={t("jobActions", { job: job.name })}
+            size="icon-sm"
+            variant="outline"
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {job.url ? (
+            <DropdownMenuItem asChild>
+              <a href={job.url} rel="noreferrer" target="_blank">
+                <ExternalLink /> {t("viewPipeline")}
+              </a>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem disabled>
+              <ExternalLink /> {t("viewPipeline")}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={retrying || !job.canRetry || !checkSuiteId}
+            onSelect={() => void retry()}
+            title={unavailableMessage}
+          >
+            {retrying ? <Spinner /> : <RotateCcw />}
+            {retrying ? tp("retrying") : tp("retry")}
+          </DropdownMenuItem>
+          {workflowResource ? (
+            <WorkflowResourceMenuItems
+              onError={onError}
+              onOpenLinked={() => setLinkedOpen(true)}
+              resource={workflowResource}
+            />
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {workflowResource ? (
+        <WorkflowResourceDialog
+          onOpenChange={setLinkedOpen}
+          open={linkedOpen}
+          resource={workflowResource}
+        />
+      ) : null}
+    </>
   );
 }

@@ -240,8 +240,13 @@ export function WorkflowResourcePanel({
               <div className="flex flex-wrap gap-2">
                 {runs.slice(1, 6).map((run) => (
                   <Button asChild key={run.id} size="sm" variant="ghost">
-                    <Link href={`/workflows/runs/${run.id}`}>
-                      #{run.displayNumber} · {labels.status(run.status)}
+                    <Link className="gap-2" href={`/workflows/runs/${run.id}`}>
+                      <span>
+                        #{run.displayNumber} · {run.workflow.name}
+                      </span>
+                      <Badge variant={workflowStatusVariant(run.status)}>
+                        {labels.status(run.status)}
+                      </Badge>
                     </Link>
                   </Button>
                 ))}

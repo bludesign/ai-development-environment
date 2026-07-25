@@ -19,6 +19,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -504,7 +505,11 @@ describe("ActionsPage", () => {
     expect(screen.getByText("Set up job")).toBeDefined();
     expect(screen.getByText("Run tests")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry test" }));
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Actions for test" }),
+      { button: 0, ctrlKey: false, pointerType: "mouse" },
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubWorkflowJob"),

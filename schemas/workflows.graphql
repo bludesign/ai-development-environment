@@ -16,6 +16,13 @@ enum WorkflowRunStatus {
   CANCELLED
 }
 
+enum WorkflowQuickActionKind {
+  STANDARD
+  MERGE_CONFLICT
+  GITHUB_ACTIONS
+  NONE
+}
+
 type Workflow {
   id: ID!
   name: String!
@@ -27,7 +34,7 @@ type Workflow {
   enabled: Boolean!
   overlapPolicy: WorkflowOverlapPolicy!
   maxConcurrentRuns: Int!
-  globalQuickAction: Boolean!
+  quickActionKind: WorkflowQuickActionKind!
   quickActionIconKey: String!
   quickActionButtonVariant: String!
   quickActionRepositories: [CodebaseRepository!]!
@@ -304,7 +311,7 @@ input TriggerWorkflowInput {
 
 input SetWorkflowQuickActionInput {
   id: ID!
-  global: Boolean!
+  kind: WorkflowQuickActionKind!
   quickActionIconKey: String!
   quickActionButtonVariant: String!
   repositoryIds: [ID!]!
@@ -342,7 +349,11 @@ extend type Query {
   ): [WorkflowRunEvent!]!
   workflowRunsForResource(kind: String!, resourceId: ID!): [WorkflowRun!]!
   workflowsAcceptingResource(kind: String!): [Workflow!]!
-  workflowQuickActions(worktreeId: ID!): [Workflow!]!
+  workflowQuickActions(
+    kind: WorkflowQuickActionKind!
+    resourceKind: String!
+    repositoryId: ID
+  ): [Workflow!]!
   exportWorkflow(id: ID!, versionId: ID): JSON!
   prepareWorkflowReplay(runId: ID!, nodeId: ID!): WorkflowReplayPreview!
   workflowJobSecrets(jobId: ID!): [WorkflowJobSecret!]!

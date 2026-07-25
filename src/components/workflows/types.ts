@@ -99,7 +99,7 @@ export type WorkflowSummary = {
   enabled: boolean;
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   maxConcurrentRuns: number;
-  globalQuickAction: boolean;
+  quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   quickActionRepositories: Array<{

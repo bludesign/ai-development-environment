@@ -139,7 +139,12 @@ const WorkflowSchema = z.object({
   maxConcurrentRuns: z.number(),
   activeVersionId: z.string().nullable(),
   draftSchemaVersion: z.number(),
-  globalQuickAction: z.boolean(),
+  quickActionKind: z.enum([
+    "STANDARD",
+    "MERGE_CONFLICT",
+    "GITHUB_ACTIONS",
+    "NONE",
+  ]),
   archivedAt: z.string().nullable(),
   versionCount: z.number(),
   runCount: z.number(),

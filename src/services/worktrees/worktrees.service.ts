@@ -440,8 +440,9 @@ export class WorktreesService {
         enabled: true,
         archivedAt: null,
         activeVersionId: { not: null },
+        quickActionKind: { in: ["STANDARD", "MERGE_CONFLICT"] },
         OR: [
-          { globalQuickAction: true },
+          { quickActionRepositories: { none: {} } },
           {
             quickActionRepositories: {
               some: { repositoryId: { in: repositoryIds } },
@@ -533,6 +534,7 @@ export class WorktreesService {
       worktrees: View[];
       iosBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
+      mergeConflictQuickActions: typeof eligibleQuickActions;
     };
     type AgentGroup = {
       agent: View["codebase"]["agent"];
@@ -559,11 +561,21 @@ export class WorktreesService {
             ) ?? false,
           quickActions: eligibleQuickActions.filter(
             (workflow) =>
-              workflow.globalQuickAction ||
-              workflow.quickActionRepositories.some(
-                ({ repositoryId }) =>
-                  repositoryId === worktree.codebase.repository.id,
-              ),
+              workflow.quickActionKind === "STANDARD" &&
+              (workflow.quickActionRepositories.length === 0 ||
+                workflow.quickActionRepositories.some(
+                  ({ repositoryId }) =>
+                    repositoryId === worktree.codebase.repository.id,
+                )),
+          ),
+          mergeConflictQuickActions: eligibleQuickActions.filter(
+            (workflow) =>
+              workflow.quickActionKind === "MERGE_CONFLICT" &&
+              (workflow.quickActionRepositories.length === 0 ||
+                workflow.quickActionRepositories.some(
+                  ({ repositoryId }) =>
+                    repositoryId === worktree.codebase.repository.id,
+                )),
           ),
         };
         agentGroup.codebaseMap.set(worktree.codebase.id, codebaseGroup);
@@ -739,6 +751,8 @@ export class WorktreesService {
       hasCommitStatus ||
       report.hasStagedChanges !== undefined ||
       report.hasUnstagedChanges !== undefined ||
+      report.rebaseInProgress !== undefined ||
+      report.hasConflicts !== undefined ||
       report.codeStateHash !== undefined ||
       report.pushStatus !== undefined;
     if (hasState) {
@@ -774,6 +788,12 @@ export class WorktreesService {
           ...(report.hasUnstagedChanges === undefined
             ? {}
             : { hasUnstagedChanges: report.hasUnstagedChanges }),
+          ...(report.rebaseInProgress === undefined
+            ? {}
+            : { rebaseInProgress: report.rebaseInProgress }),
+          ...(report.hasConflicts === undefined
+            ? {}
+            : { hasConflicts: report.hasConflicts }),
           ...(report.codeStateHash === undefined
             ? {}
             : { codeStateHash: report.codeStateHash }),
@@ -809,6 +829,12 @@ export class WorktreesService {
       ...(report.hasUnstagedChanges === undefined
         ? {}
         : { hasUnstagedChanges: report.hasUnstagedChanges }),
+      ...(report.rebaseInProgress === undefined
+        ? {}
+        : { rebaseInProgress: report.rebaseInProgress }),
+      ...(report.hasConflicts === undefined
+        ? {}
+        : { hasConflicts: report.hasConflicts }),
       ...(report.pushStatus === undefined
         ? {}
         : { pushStatus: report.pushStatus }),
@@ -838,6 +864,8 @@ export class WorktreesService {
       baseBehind: item.baseBehind,
       hasStagedChanges: item.hasStagedChanges ?? false,
       hasUnstagedChanges: item.hasUnstagedChanges ?? false,
+      rebaseInProgress: item.rebaseInProgress ?? false,
+      hasConflicts: item.hasConflicts ?? false,
       pushStatus: item.pushStatus ?? "UNKNOWN",
       availability: item.availability,
       statusError: item.error,
@@ -1071,6 +1099,102 @@ export class WorktreesService {
       settings?.defaultJiraBranchRegex ??
       "";
     return ticketKey(worktree.branch, pattern);
+  }
+
+  async workflowSessionDataForWorktree(
+    worktreeId: string,
+  ): Promise<Record<string, unknown>> {
+    const prisma = await getPrismaClient();
+    const [worktree, settings] = await Promise.all([
+      prisma.worktree.findFirst({
+        where: { id: worktreeId, missingAt: null },
+        select: {
+          id: true,
+          folder: true,
+          branch: true,
+          baseBranchOverride: true,
+          headSha: true,
+          rebaseInProgress: true,
+          hasConflicts: true,
+          codebase: {
+            select: {
+              id: true,
+              folder: true,
+              defaultBranch: true,
+              repository: {
+                select: {
+                  id: true,
+                  name: true,
+                  displayOrigin: true,
+                  canonicalOrigin: true,
+                  jiraBranchRegex: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.codebaseSettings.findUnique({ where: { id: SETTINGS_ID } }),
+    ]);
+    if (!worktree) return {};
+    const repository = worktree.codebase.repository;
+    const pattern =
+      repository.jiraBranchRegex ?? settings?.defaultJiraBranchRegex ?? "";
+    const issueKey = ticketKey(worktree.branch, pattern);
+    let pullRequest:
+      | Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>[number]
+      | null = null;
+    if (worktree.branch) {
+      try {
+        pullRequest =
+          (
+            await this.gitHubService.pullRequestsForOrigin(
+              repository.canonicalOrigin,
+            )
+          ).find((item) => item.headRefName === worktree.branch) ?? null;
+      } catch {
+        // Workflow launch remains available when GitHub cannot be queried.
+      }
+    }
+    const resolvedIssueKey = pullRequest?.jiraKey ?? issueKey;
+    return {
+      worktree: {
+        id: worktree.id,
+        path: worktree.folder,
+        branch: worktree.branch,
+        baseBranch:
+          worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
+        headSha: worktree.headSha,
+        rebaseInProgress: worktree.rebaseInProgress,
+        hasConflicts: worktree.hasConflicts,
+      },
+      codebase: {
+        id: worktree.codebase.id,
+        folder: worktree.codebase.folder,
+      },
+      repo: {
+        id: repository.id,
+        name: repository.name,
+        displayOrigin: repository.displayOrigin,
+      },
+      ...(pullRequest
+        ? {
+            pr: {
+              id: pullRequest.id,
+              number: pullRequest.number,
+              title: pullRequest.title,
+              url: pullRequest.url,
+              repositoryGithubId: pullRequest.repositoryGithubId,
+              repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+              headRefName: pullRequest.headRefName,
+              state: pullRequest.state,
+              labels: pullRequest.labels,
+              jiraKey: pullRequest.jiraKey,
+            },
+          }
+        : {}),
+      ...(resolvedIssueKey ? { ticket: { key: resolvedIssueKey } } : {}),
+    };
   }
 
   private async resolveBranchSelection(
@@ -2480,6 +2604,8 @@ export class WorktreesService {
         baseBehind: item.baseBehind,
         hasStagedChanges: item.hasStagedChanges ?? false,
         hasUnstagedChanges: item.hasUnstagedChanges ?? false,
+        rebaseInProgress: item.rebaseInProgress ?? false,
+        hasConflicts: item.hasConflicts ?? false,
         pushStatus: item.pushStatus ?? "UNKNOWN",
         availability: item.availability,
         statusError: item.error,

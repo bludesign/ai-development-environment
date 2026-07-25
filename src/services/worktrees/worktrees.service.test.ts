@@ -150,7 +150,7 @@ describe("WorktreesService", () => {
       id: "workflow-1",
       name: "Prepare review",
       description: "",
-      globalQuickAction: false,
+      quickActionKind: "STANDARD",
       activeVersion: {
         triggers: [
           {
@@ -257,6 +257,63 @@ describe("WorktreesService", () => {
       "AIDE-7",
     );
     expect(findUnique).toHaveBeenCalledWith({ where: { id: "default" } });
+  });
+
+  test("hydrates workflow sessions with the linked pull request and ticket", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          folder: "/repo-feature",
+          branch: "feature/APP-42",
+          baseBranchOverride: "release",
+          headSha: "abc123",
+          rebaseInProgress: false,
+          hasConflicts: false,
+          codebase: {
+            id: "codebase-1",
+            folder: "/repo",
+            defaultBranch: "main",
+            repository: {
+              id: "repository-1",
+              name: "Widgets",
+              displayOrigin: "github.com/acme/widgets",
+              canonicalOrigin: "github.com/acme/widgets",
+              jiraBranchRegex: "([A-Z]+-\\d+)",
+            },
+          },
+        }),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    const pullRequestsForOrigin = vi.fn().mockResolvedValue([
+      {
+        id: "pull-request-1",
+        number: 42,
+        title: "Ship widgets",
+        url: "https://github.com/acme/widgets/pull/42",
+        repositoryGithubId: "github-repository-1",
+        repositoryNameWithOwner: "acme/widgets",
+        headRefName: "feature/APP-42",
+        state: "OPEN",
+        labels: ["ready"],
+        jiraKey: "APP-99",
+      },
+    ]);
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      { pullRequestsForOrigin } as unknown as GitHubService,
+    );
+
+    await expect(
+      worktrees.workflowSessionDataForWorktree("worktree-1"),
+    ).resolves.toMatchObject({
+      worktree: { id: "worktree-1", baseBranch: "release" },
+      repo: { id: "repository-1" },
+      pr: { id: "pull-request-1", number: 42, jiraKey: "APP-99" },
+      ticket: { key: "APP-99" },
+    });
   });
 
   test("returns null when the worktree is missing or has no ticket", async () => {

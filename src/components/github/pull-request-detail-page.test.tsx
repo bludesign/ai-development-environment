@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe: vi.fn() }),
 }));
 
 const requestMock = vi.mocked(controlPlaneRequest);
@@ -222,12 +223,11 @@ describe("PullRequestDetailPage", () => {
       stepsPanel?.parentElement?.parentElement?.parentElement;
     expect(jobsContainer?.className).toContain("px-4");
     expect(jobsContainer?.className).not.toContain("pl-4");
-    const jobViewButton = screen.getByRole("link", {
-      name: "View test on GitHub",
+    const jobActionsButton = screen.getByRole("button", {
+      name: "Actions for test",
     });
-    expect(jobViewButton.getAttribute("data-variant")).toBe("outline");
-    expect(jobViewButton.getAttribute("data-size")).toBe("sm");
-    expect(jobViewButton.textContent).toContain("View");
+    expect(jobActionsButton.getAttribute("data-variant")).toBe("outline");
+    expect(jobActionsButton.getAttribute("data-size")).toBe("icon-sm");
     expect(screen.getByText("Changes requested")).toBeDefined();
     const jiraBadge = screen.getByRole("button", { name: "APP-42" });
     for (const className of ["rounded-4xl", "px-2", "py-0.5", "text-xs"]) {
@@ -272,7 +272,13 @@ describe("PullRequestDetailPage", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry test" }));
+    fireEvent.pointerDown(jobActionsButton, {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.getByRole("menuitem", { name: "View" })).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubWorkflowJob"),

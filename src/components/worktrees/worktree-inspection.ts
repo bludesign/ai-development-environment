@@ -60,6 +60,8 @@ export type WorktreeActivity = {
   baseBehind: number | null;
   hasStagedChanges: boolean | null;
   hasUnstagedChanges: boolean | null;
+  rebaseInProgress: boolean | null;
+  hasConflicts: boolean | null;
   pushStatus: Worktree["pushStatus"] | null;
   observedAt: string;
 };
@@ -76,6 +78,8 @@ type LiveWorktreeFields = Pick<
   | "baseBehind"
   | "hasStagedChanges"
   | "hasUnstagedChanges"
+  | "rebaseInProgress"
+  | "hasConflicts"
   | "pushStatus"
 >;
 
@@ -104,6 +108,12 @@ export function useLiveWorktree(source: Worktree) {
       }
       if (activity.hasUnstagedChanges !== null) {
         value.hasUnstagedChanges = activity.hasUnstagedChanges;
+      }
+      if (activity.rebaseInProgress !== null) {
+        value.rebaseInProgress = activity.rebaseInProgress;
+      }
+      if (activity.hasConflicts !== null) {
+        value.hasConflicts = activity.hasConflicts;
       }
       if (activity.pushStatus !== null) value.pushStatus = activity.pushStatus;
       if (typeof activity.headSha === "string") {
@@ -166,7 +176,7 @@ export function useWorktreeActivitySubscription(
           query: `subscription WorktreeInspectionChanged($worktreeId: ID!) {
             worktreeInspectionChanged(worktreeId: $worktreeId) {
               worktreeId branch headSha upstream ahead behind syncState baseAhead baseBehind
-              hasStagedChanges hasUnstagedChanges pushStatus observedAt
+              hasStagedChanges hasUnstagedChanges rebaseInProgress hasConflicts pushStatus observedAt
             }
           }`,
           variables: { worktreeId },

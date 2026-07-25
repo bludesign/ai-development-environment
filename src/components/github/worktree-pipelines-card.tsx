@@ -3,13 +3,16 @@
 import { useTranslations } from "next-intl";
 import { Fragment, useEffect, useMemo, useState } from "react";
 
-import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import {
   PipelineMenu,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
+import {
+  githubJobWorkflowResource,
+  githubPipelineWorkflowResource,
+} from "@/components/github/workflow-resource-context";
 import {
   actionsForBranchHref,
   WorkflowRunActionsMenu,
@@ -178,6 +181,11 @@ export function WorktreePipelinesCard({
         </div>
         {runs.length ? (
           <div className="flex flex-wrap items-center gap-2">
+            <PipelineMenu
+              pipelineStatus={aggregateStatus(runs)}
+              pipelines={pipelines}
+              repositoryId={runs[0].repositoryGithubId}
+            />
             {branch ? (
               <Button asChild size="sm" variant="outline">
                 <Link
@@ -190,24 +198,6 @@ export function WorktreePipelinesCard({
                 </Link>
               </Button>
             ) : null}
-            <AutoRetryDialog
-              allowFuture={Boolean(branch)}
-              branch={branch}
-              codebaseRepositoryId={runs[0].codebaseRepositoryId}
-              currentRuns={runs.map((run) => ({
-                id: run.id,
-                workflowId: run.workflowId,
-                name: run.name,
-                jobs: jobs[run.id],
-              }))}
-              repositoryGithubId={runs[0].repositoryGithubId}
-              worktreeId={worktreeId}
-            />
-            <PipelineMenu
-              pipelineStatus={aggregateStatus(runs)}
-              pipelines={pipelines}
-              repositoryId={runs[0].repositoryGithubId}
-            />
           </div>
         ) : null}
       </CardHeader>
@@ -232,6 +222,10 @@ export function WorktreePipelinesCard({
               {runs.map((run) => {
                 const historical = attempts[run.id] ?? null;
                 const displayedJobs = historical?.jobs ?? jobs[run.id] ?? [];
+                const workflowResource = githubPipelineWorkflowResource(
+                  { ...run, workflowRunId: run.id },
+                  { worktree: { id: worktreeId, branch } },
+                );
                 return (
                   <Fragment key={run.id}>
                     <TableRow>
@@ -265,6 +259,19 @@ export function WorktreePipelinesCard({
                       <TableCell>
                         <div className="flex justify-end">
                           <WorkflowRunActionsMenu
+                            autoRetryContext={{
+                              allowFuture: Boolean(branch),
+                              branch,
+                              worktreeId,
+                              currentRuns: runs.map((item) => ({
+                                id: item.id,
+                                workflowId: item.workflowId,
+                                name: item.name,
+                                jobs: jobs[item.id],
+                              })),
+                            }}
+                            includeAutoRetry
+                            jobs={displayedJobs}
                             onCancelled={() => onCancelled(run.id)}
                             onError={onError}
                             onRetried={() => onRetried(run.id)}
@@ -288,6 +295,7 @@ export function WorktreePipelinesCard({
                                   )
                                 : null
                             }
+                            workflowResource={workflowResource}
                           />
                         </div>
                       </TableCell>
@@ -312,6 +320,12 @@ export function WorktreePipelinesCard({
                                   onError={onError}
                                   onRetried={() => jobRetried(run.id, job.id)}
                                   repositoryId={run.repositoryGithubId}
+                                  workflowResource={githubJobWorkflowResource(
+                                    workflowResource,
+                                    job,
+                                    run.codebaseRepositoryId,
+                                    run.repositoryGithubId,
+                                  )}
                                 />
                               ))}
                             </div>

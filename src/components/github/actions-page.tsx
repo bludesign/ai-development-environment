@@ -25,6 +25,11 @@ import {
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowRunActionsMenu } from "@/components/github/workflow-run-actions-menu";
+import { WorkflowJob as WorkflowJobMenu } from "@/components/github/workflow-job";
+import {
+  githubJobWorkflowResource,
+  githubPipelineWorkflowResource,
+} from "@/components/github/workflow-resource-context";
 import { pullRequestDetailHref } from "@/components/github/pull-request-links";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -1028,6 +1033,10 @@ function ActionsTable({
                             onRetried={() => onRunRetried(run)}
                             run={run}
                             jobs={jobState?.jobs ?? []}
+                            workflowResource={githubPipelineWorkflowResource({
+                              ...run,
+                              workflowRunId: run.id,
+                            })}
                           />
                         </div>
                       </TableCell>
@@ -1102,13 +1111,22 @@ function WorkflowJobsPanel({
       ) : state?.jobs ? (
         <div className="divide-y">
           {state.jobs.map((job) => (
-            <WorkflowJob
+            <WorkflowJobMenu
               checkSuiteId={run.checkSuiteId}
               job={job}
               key={job.id}
               onError={onError}
               onRetried={() => onRetried(job.id)}
               repositoryId={run.repositoryGithubId}
+              workflowResource={githubJobWorkflowResource(
+                githubPipelineWorkflowResource({
+                  ...run,
+                  workflowRunId: run.id,
+                }),
+                job,
+                run.codebaseRepositoryId,
+                run.repositoryGithubId,
+              )}
             />
           ))}
         </div>
@@ -1117,7 +1135,7 @@ function WorkflowJobsPanel({
   );
 }
 
-function WorkflowJob({
+export function LegacyWorkflowJob({
   job,
   repositoryId,
   checkSuiteId,

@@ -45,6 +45,10 @@ import {
 } from "@/lib/workflows/session";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
+  WORKFLOW_QUICK_ACTION_KINDS,
+  type WorkflowQuickActionKind,
+} from "@/lib/workflows/kinds";
+import {
   agentEventBus,
   type AgentControlService,
 } from "@/services/agent-control";
@@ -283,6 +287,9 @@ export class WorkflowsService {
     private readonly runsService?: RunsService,
     private readonly worktrees?: {
       ticketKeyForWorktree(id: string): Promise<string | null>;
+      workflowSessionDataForWorktree?(
+        id: string,
+      ): Promise<Record<string, unknown>>;
     },
   ) {
     if (this.agentControl) {
@@ -699,7 +706,7 @@ export class WorkflowsService {
 
   async setQuickAction(input: {
     id: string;
-    global: boolean;
+    kind: WorkflowQuickActionKind;
     quickActionIconKey: string;
     quickActionButtonVariant: string;
     repositoryIds: string[];
@@ -720,6 +727,9 @@ export class WorkflowsService {
       throw new Error("One or more repositories were not found");
     }
     const quickActionIconKey = input.quickActionIconKey.trim();
+    if (!WORKFLOW_QUICK_ACTION_KINDS.includes(input.kind)) {
+      throw new Error("Quick action kind is invalid");
+    }
     if (
       quickActionIconKey !== "none" &&
       !(BUILD_CONFIGURATION_ICON_KEYS as readonly string[]).includes(
@@ -740,7 +750,7 @@ export class WorkflowsService {
       await transaction.workflow.update({
         where: { id: input.id },
         data: {
-          globalQuickAction: input.global,
+          quickActionKind: input.kind,
           quickActionIconKey,
           quickActionButtonVariant,
         },
@@ -1582,23 +1592,28 @@ export class WorkflowsService {
     });
   }
 
-  async quickActions(worktreeId: string) {
+  async quickActions(input: {
+    kind: WorkflowQuickActionKind;
+    resourceKind: string;
+    repositoryId?: string | null;
+  }) {
     const prisma = await getPrismaClient();
-    const worktree = await prisma.worktree.findUnique({
-      where: { id: worktreeId },
-      select: { codebase: { select: { repositoryId: true } } },
-    });
-    if (!worktree) throw new Error("Worktree not found");
+    if (!WORKFLOW_QUICK_ACTION_KINDS.includes(input.kind)) {
+      throw new Error("Quick action kind is invalid");
+    }
+    const normalizedResourceKind = input.resourceKind.trim().toUpperCase();
+    const repositoryId = input.repositoryId?.trim() || null;
     const workflows = await prisma.workflow.findMany({
       where: {
         enabled: true,
         archivedAt: null,
         activeVersionId: { not: null },
+        quickActionKind: input.kind,
         OR: [
-          { globalQuickAction: true },
+          { quickActionRepositories: { none: {} } },
           {
             quickActionRepositories: {
-              some: { repositoryId: worktree.codebase.repositoryId },
+              some: { repositoryId: repositoryId ?? "" },
             },
           },
         ],
@@ -1614,7 +1629,7 @@ export class WorkflowsService {
       return definition.triggers.some(
         (trigger) =>
           isResourceTriggerKind(trigger.kind) &&
-          workflowResourceKind(trigger.config) === "WORKTREE",
+          workflowResourceKind(trigger.config) === normalizedResourceKind,
       );
     });
   }
@@ -1635,16 +1650,54 @@ export class WorkflowsService {
     resourceId: string | null | undefined,
     sessionData: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (
-      resourceKind?.toUpperCase() !== "WORKTREE" ||
-      !resourceId ||
-      !this.worktrees
-    ) {
-      return sessionData;
+    if (!this.worktrees) return sessionData;
+    const normalized = resourceKind?.toUpperCase() ?? null;
+    const sessionWorktreeId = getSessionValue(sessionData, "worktree.id");
+    const worktreeId =
+      normalized === "WORKTREE"
+        ? resourceId
+        : normalized === "GITHUB_PIPELINE" || normalized === "GITHUB_JOB"
+          ? typeof sessionWorktreeId === "string"
+            ? sessionWorktreeId
+            : null
+          : null;
+    let derived: Record<string, unknown> = {};
+    if (worktreeId) {
+      if (this.worktrees.workflowSessionDataForWorktree) {
+        derived =
+          await this.worktrees.workflowSessionDataForWorktree(worktreeId);
+      } else {
+        const key = await this.worktrees.ticketKeyForWorktree(worktreeId);
+        if (key) derived = { ticket: { key } };
+      }
     }
-    const ticketKey = await this.worktrees.ticketKeyForWorktree(resourceId);
-    if (!ticketKey) return sessionData;
-    return mergeSessionData({ ticket: { key: ticketKey } }, sessionData);
+    const associatedPullRequests = getSessionValue(
+      sessionData,
+      "pipeline.pullRequests",
+    );
+    if (
+      !getSessionValue(derived, "pr") &&
+      !getSessionValue(sessionData, "pr") &&
+      Array.isArray(associatedPullRequests) &&
+      associatedPullRequests[0] &&
+      typeof associatedPullRequests[0] === "object" &&
+      !Array.isArray(associatedPullRequests[0])
+    ) {
+      derived = mergeSessionData(derived, {
+        pr: associatedPullRequests[0] as Record<string, unknown>,
+      });
+    }
+    const jiraKey =
+      getSessionValue(sessionData, "pr.jiraKey") ??
+      getSessionValue(sessionData, "pipeline.jiraKey");
+    if (
+      typeof getSessionValue(derived, "ticket.key") !== "string" &&
+      typeof jiraKey === "string" &&
+      jiraKey.trim()
+    ) {
+      derived = mergeSessionData(derived, { ticket: { key: jiraKey } });
+    }
+    return mergeSessionData(derived, sessionData);
   }
 
   async trigger(input: TriggerWorkflowInput) {

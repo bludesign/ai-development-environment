@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, FolderGit2, Save, Zap } from "lucide-react";
+import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
@@ -40,7 +40,7 @@ import type { CodebaseRepository } from "./types";
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
   skillGroups { id name }
-  quickActionWorkflows { id name description enabled globalQuickAction }
+  quickActionWorkflows { id name description enabled quickActionKind quickActionRepositories { id name } }
   codebases {
     id folder observedOrigin branch headSha upstream ahead behind syncState availability statusError
     defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
@@ -75,11 +75,9 @@ export function RepositoryDetailPage({
       name: string;
       description: string;
       enabled: boolean;
-      globalQuickAction: boolean;
+      quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS";
+      quickActionRepositories: Array<{ id: string; name: string }>;
     }>
-  >([]);
-  const [quickActionWorkflowIds, setQuickActionWorkflowIds] = useState<
-    string[]
   >([]);
 
   const applyRepository = useCallback((value: CodebaseRepository) => {
@@ -89,9 +87,7 @@ export function RepositoryDetailPage({
     setJiraBranchRegex(value.jiraBranchRegex ?? "");
     setKeepBaseBranchUpToDate(value.keepBaseBranchUpToDate);
     setSkillGroupIds(value.skillGroups?.map((group) => group.id) ?? []);
-    setQuickActionWorkflowIds(
-      value.quickActionWorkflows?.map((workflow) => workflow.id) ?? [],
-    );
+    setQuickActionWorkflows(value.quickActionWorkflows ?? []);
   }, []);
 
   const load = useCallback(async () => {
@@ -99,29 +95,16 @@ export function RepositoryDetailPage({
       const data = await controlPlaneRequest<{
         codebaseRepository: CodebaseRepository | null;
         skillsOverview?: { groups: Array<{ id: string; name: string }> };
-        workflows?: {
-          items: Array<{
-            id: string;
-            name: string;
-            description: string;
-            enabled: boolean;
-            globalQuickAction: boolean;
-          }>;
-        };
       }>(
         `query RepositoryDetail($id: ID!) {
           codebaseRepository(id: $id) { ${REPOSITORY_FIELDS} }
           skillsOverview { groups { id name } }
-          workflows(first: 200) {
-            items { id name description enabled globalQuickAction }
-          }
         }`,
         { id: repositoryId },
       );
       if (data.codebaseRepository) applyRepository(data.codebaseRepository);
       else setRepository(null);
       setSkillGroups(data.skillsOverview?.groups ?? []);
-      setQuickActionWorkflows(data.workflows?.items ?? []);
       setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -174,7 +157,6 @@ export function RepositoryDetailPage({
             jiraBranchRegex: jiraBranchRegex || null,
             keepBaseBranchUpToDate,
             skillGroupIds,
-            quickActionWorkflowIds,
           },
         },
       );
@@ -393,73 +375,61 @@ export function RepositoryDetailPage({
           </Card>
         </TabsContent>
         <TabsContent value="quick-actions">
-          <form onSubmit={save}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap /> {t("quickActions")}
-                </CardTitle>
-                <CardDescription>
-                  {t("repositoryQuickActionsDescription")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="max-h-80 space-y-1 overflow-auto rounded-lg border p-2">
-                  {quickActionWorkflows.map((workflow) => (
-                    <label
-                      className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-muted"
-                      key={workflow.id}
-                    >
-                      <Checkbox
-                        checked={quickActionWorkflowIds.includes(workflow.id)}
-                        className="mt-0.5"
-                        onCheckedChange={(checked) =>
-                          setQuickActionWorkflowIds((current) =>
-                            checked === true
-                              ? [...new Set([...current, workflow.id])]
-                              : current.filter((id) => id !== workflow.id),
-                          )
-                        }
-                      />
-                      <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                          {workflow.name}
-                          {workflow.globalQuickAction && (
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {t("alreadyGlobal")}
-                            </span>
-                          )}
-                          {!workflow.enabled && (
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {t("workflowPaused")}
-                            </span>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("quickActions")}</CardTitle>
+              <CardDescription>
+                {t("repositoryQuickActionsDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="max-h-80 space-y-1 overflow-auto rounded-lg border p-2">
+                {quickActionWorkflows.map((workflow) => (
+                  <Link
+                    className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-muted"
+                    href={`/workflows/${workflow.id}`}
+                    key={workflow.id}
+                  >
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                        {workflow.name}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {t(
+                            `quickActionKinds.${workflow.quickActionKind}` as never,
                           )}
                         </span>
-                        {workflow.description && (
-                          <span className="block text-xs text-muted-foreground">
-                            {workflow.description}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {workflow.quickActionRepositories.length
+                            ? t("limitedRepositories", {
+                                count: workflow.quickActionRepositories.length,
+                              })
+                            : t("allRepositories")}
+                        </span>
+                        {!workflow.enabled && (
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {t("workflowPaused")}
                           </span>
                         )}
                       </span>
-                    </label>
-                  ))}
-                  {!quickActionWorkflows.length && (
-                    <p className="px-2 py-1 text-sm text-muted-foreground">
-                      {t("noWorkflows")}
-                    </p>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("quickActionEligibility")}
-                </p>
-                <div className="flex justify-end">
-                  <Button disabled={busy || !name.trim()} type="submit">
-                    {busy ? <Spinner /> : <Save />} {t("saveQuickActions")}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </form>
+                      {workflow.description && (
+                        <span className="block text-xs text-muted-foreground">
+                          {workflow.description}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                ))}
+                {!quickActionWorkflows.length && (
+                  <p className="px-2 py-1 text-sm text-muted-foreground">
+                    {t("noWorkflows")}
+                  </p>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("quickActionEligibility")}
+              </p>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </section>

@@ -150,6 +150,7 @@ import {
   type WorktreeActivity,
 } from "./worktree-inspection";
 import { waitForWorktreeJob, waitForWorktreeMove } from "./worktree-jobs";
+import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import {
   shouldNavigateWorktreeSurface,
   worktreeDetailHref,
@@ -315,6 +316,7 @@ type Operation =
   | "FORCE_PUSH"
   | "SYNC"
   | "REBASE"
+  | "CANCEL_REBASE"
   | "PUSH"
   | "RESET"
   | "STASH_ALL"
@@ -442,6 +444,11 @@ export function WorktreesPage() {
               codebases {
                 iosBuildConfigured
                 quickActions {
+            id name description quickActionIconKey quickActionButtonVariant
+            hasPlainTrigger(resourceKind: "WORKTREE")
+            triggerChoices(resourceKind: "WORKTREE") { key label description }
+          }
+                mergeConflictQuickActions {
             id name description quickActionIconKey quickActionButtonVariant
             hasPlainTrigger(resourceKind: "WORKTREE")
             triggerChoices(resourceKind: "WORKTREE") { key label description }
@@ -1329,6 +1336,12 @@ function WorktreeCard(props: WorktreeItemProps) {
           detailsExpanded={expanded}
           onToggleDetails={toggle}
         />
+        <WorktreeRebaseConflictItem
+          group={props.group}
+          onCompleted={props.onReload}
+          onError={props.onError}
+          worktree={worktree}
+        />
         {detailLoading && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner /> {t("loadingDetails")}
@@ -1964,6 +1977,7 @@ function moveDisabledReason(
   if (
     props.worktree.availability !== "AVAILABLE" ||
     props.worktree.activeJob ||
+    props.worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
         move.sourceCodebaseId === props.group.codebase.id ||
@@ -2036,6 +2050,7 @@ export function WorktreeMenus(
     !sourceAgent.agent.capabilities.includes("worktree.delete") ||
     worktree.availability !== "AVAILABLE" ||
     Boolean(worktree.activeJob) ||
+    worktree.rebaseInProgress ||
     props.overview.activeMoves.some(
       (move) =>
         move.sourceCodebaseId === props.group.codebase.id ||
@@ -2161,7 +2176,8 @@ export function WorktreeMenus(
               disabled={
                 !props.branchManagementEnabled ||
                 worktree.availability !== "AVAILABLE" ||
-                Boolean(worktree.activeJob)
+                Boolean(worktree.activeJob) ||
+                worktree.rebaseInProgress
               }
               onSelect={() => {
                 openChangeBranchOnMenuClose.current = true;
@@ -2704,7 +2720,9 @@ export function ActionRow(
   const { worktree, editorVariant } = props;
   const t = useTranslations("worktrees");
   const unavailable =
-    worktree.availability !== "AVAILABLE" || Boolean(worktree.activeJob);
+    worktree.availability !== "AVAILABLE" ||
+    Boolean(worktree.activeJob) ||
+    worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
   const agent = props.overview.agents.find((entry) =>
     entry.codebases.some(
@@ -2886,6 +2904,11 @@ function OperationButton({
       await waitForWorktreeJob(data.runWorktreeOperation.id);
       await props.onCompleted();
     } catch (value) {
+      try {
+        await props.onCompleted();
+      } catch {
+        // Preserve the operation failure while allowing live state to catch up.
+      }
       props.onError(value instanceof Error ? value.message : String(value));
     } finally {
       setBusy(false);
@@ -3059,6 +3082,18 @@ function WorktreeTableRows(props: WorktreeItemProps) {
           </div>
         </TableCell>
       </TableRow>
+      {worktree.rebaseInProgress && (
+        <TableRow className={cn(highlight)}>
+          <TableCell colSpan={8}>
+            <WorktreeRebaseConflictItem
+              group={props.group}
+              onCompleted={props.onReload}
+              onError={props.onError}
+              worktree={worktree}
+            />
+          </TableCell>
+        </TableRow>
+      )}
       <TableRow className={cn(highlight)}>
         <TableCell colSpan={8}>
           <ActionRow
