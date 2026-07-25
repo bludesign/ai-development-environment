@@ -90,10 +90,24 @@ export function totalUsageCostForChartRow(
   return series.reduce((sum, model) => sum + Number(values[model.key] ?? 0), 0);
 }
 
-export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
+export function UsageCostChart({
+  days,
+  onSelectModel,
+  selectedModel,
+}: {
+  days: UsageDayRow[];
+  /** Called with the model to isolate, or null to chart every model again. */
+  onSelectModel: (modelName: string | null) => void;
+  selectedModel: string | null;
+}) {
   const t = useTranslations("usage");
   const locale = useLocale();
   const { data, series } = useMemo(() => buildUsageCostChartData(days), [days]);
+  const activeKey =
+    series.find((item) => item.modelName === selectedModel)?.key ?? null;
+  const visibleSeries = activeKey
+    ? series.filter((item) => item.key === activeKey)
+    : series;
   const config = useMemo<ChartConfig>(
     () =>
       Object.fromEntries(
@@ -128,7 +142,15 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
     <Card className="gap-0 py-0">
       <CardHeader>
         <CardTitle>{t("costChartTitle")}</CardTitle>
-        <CardDescription>{t("costChartDescription")}</CardDescription>
+        <CardDescription>
+          {`${t("costChartDescription")} ${
+            activeKey
+              ? t("costChartShowingOnly", {
+                  model: String(config[activeKey]?.label ?? activeKey),
+                })
+              : t("costChartLegendHint")
+          }`}
+        </CardDescription>
       </CardHeader>
       <CardContent className="px-2 pt-4 sm:px-6">
         <ChartContainer className="h-80 w-full aspect-auto" config={config}>
@@ -158,7 +180,7 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
               content={
                 <ChartTooltipContent
                   formatter={(value, name, item, index, row) => {
-                    const total = totalUsageCostForChartRow(row, series);
+                    const total = totalUsageCostForChartRow(row, visibleSeries);
                     return (
                       <div className="grid w-full min-w-40 gap-1.5">
                         <div className="flex items-center gap-2">
@@ -174,14 +196,15 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
                             {currency.format(Number(value))}
                           </span>
                         </div>
-                        {index === series.length - 1 && (
-                          <div className="flex items-center justify-between gap-4 border-t pt-1.5 font-medium">
-                            <span>{t("total")}</span>
-                            <span className="font-mono tabular-nums">
-                              {currency.format(total)}
-                            </span>
-                          </div>
-                        )}
+                        {visibleSeries.length > 1 &&
+                          index === visibleSeries.length - 1 && (
+                            <div className="flex items-center justify-between gap-4 border-t pt-1.5 font-medium">
+                              <span>{t("total")}</span>
+                              <span className="font-mono tabular-nums">
+                                {currency.format(total)}
+                              </span>
+                            </div>
+                          )}
                       </div>
                     );
                   }}
@@ -191,13 +214,32 @@ export function UsageCostChart({ days }: { days: UsageDayRow[] }) {
             />
             <ChartLegend
               content={
-                <ChartLegendContent className="flex-wrap gap-y-2 pb-2" />
+                <ChartLegendContent
+                  className="flex-wrap gap-y-2 pb-2"
+                  itemLabel={(key, active) =>
+                    active && activeKey
+                      ? t("costChartShowAllModels")
+                      : t("costChartShowOnlyModel", {
+                          model: String(config[key]?.label ?? key),
+                        })
+                  }
+                  onItemClick={(key) => {
+                    const model = series.find((item) => item.key === key);
+                    if (!model) return;
+                    onSelectModel(
+                      model.modelName === selectedModel
+                        ? null
+                        : model.modelName,
+                    );
+                  }}
+                />
               }
             />
             {series.map((item) => (
               <Bar
                 dataKey={item.key}
                 fill={`var(--color-${item.key})`}
+                hide={activeKey !== null && activeKey !== item.key}
                 key={item.key}
                 maxBarSize={48}
                 stackId="cost"

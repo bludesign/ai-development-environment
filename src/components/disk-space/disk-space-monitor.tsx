@@ -1,20 +1,30 @@
 "use client";
 
-import { HardDrive, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import { DateTime } from "@/components/common/date-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -27,11 +37,15 @@ import {
 import { DISK_SPACE_FIELDS, type DiskSpaceOverview } from "./types";
 import { VolumeBar } from "./volume-bar";
 
+const ACTIVE_CONTROL_CLASS =
+  "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300";
+
 export function DiskSpaceMonitor() {
   const t = useTranslations("diskSpace");
   const [overview, setOverview] = useState<DiskSpaceOverview | null>(null);
   const [normal, setNormal] = useState("40");
   const [pressure, setPressure] = useState("10");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,41 +87,72 @@ export function DiskSpaceMonitor() {
     key: string,
     query: string,
     variables: Record<string, unknown>,
-  ) => {
+  ): Promise<boolean> => {
     setBusy(key);
     setError(null);
     try {
       await controlPlaneRequest(query, variables);
       await load();
+      return true;
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
   return (
-    <Card className="gap-0 py-0">
+    <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <HardDrive className="size-5" />
-          <CardTitle>{t("title")}</CardTitle>
-        </div>
+        <CardTitle>{t("title")}</CardTitle>
         <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5 pb-6">
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        {!overview ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner /> {t("loading")}
-          </p>
-        ) : (
-          <>
-            <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <Dialog
+          onOpenChange={(open) => {
+            if (open && overview) {
+              setNormal(String(overview.settings.normalThresholdGiB));
+              setPressure(String(overview.settings.pressureThresholdGiB));
+            }
+            setSettingsOpen(open);
+          }}
+          open={settingsOpen}
+        >
+          <CardAction>
+            <DialogTrigger asChild>
+              <Button disabled={!overview} size="sm" variant="outline">
+                {t("settings")}
+              </Button>
+            </DialogTrigger>
+          </CardAction>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("settings")}</DialogTitle>
+              <DialogDescription>{t("description")}</DialogDescription>
+            </DialogHeader>
+            <form
+              className="space-y-4"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const saved = await mutate(
+                  "settings",
+                  `mutation UpdateDiskSpaceSettings($input: UpdateDiskSpaceSettingsInput!) {
+                    updateDiskSpaceSettings(input: $input) { normalThresholdGiB }
+                  }`,
+                  {
+                    input: {
+                      normalThresholdGiB: Number(normal),
+                      pressureThresholdGiB: Number(pressure),
+                    },
+                  },
+                );
+                if (saved) setSettingsOpen(false);
+              }}
+            >
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="disk-normal-threshold">
                   {t("normalThreshold")}
@@ -134,27 +179,28 @@ export function DiskSpaceMonitor() {
                   value={pressure}
                 />
               </div>
-              <Button
-                disabled={busy !== null}
-                onClick={() =>
-                  void mutate(
-                    "settings",
-                    `mutation UpdateDiskSpaceSettings($input: UpdateDiskSpaceSettingsInput!) {
-                      updateDiskSpaceSettings(input: $input) { normalThresholdGiB }
-                    }`,
-                    {
-                      input: {
-                        normalThresholdGiB: Number(normal),
-                        pressureThresholdGiB: Number(pressure),
-                      },
-                    },
-                  )
-                }
-              >
-                {busy === "settings" ? <Spinner /> : <Save />}{" "}
-                {t("saveThresholds")}
-              </Button>
-            </div>
+              <DialogFooter>
+                <Button disabled={busy !== null} type="submit">
+                  {busy === "settings" ? <Spinner /> : <Save />}{" "}
+                  {t("saveThresholds")}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {!overview ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner /> {t("loading")}
+          </p>
+        ) : (
+          <>
             <div className="grid gap-4 xl:grid-cols-2">
               {overview.agents.map((agent) => (
                 <div
@@ -180,45 +226,57 @@ export function DiskSpaceMonitor() {
                         )}
                       </div>
                     </div>
-                    <div className="space-y-2 text-sm">
-                      <Label className="flex items-center gap-2">
-                        <Checkbox
-                          checked={agent.enabled}
-                          disabled={busy !== null}
-                          onCheckedChange={(checked) =>
-                            void mutate(
-                              `monitor:${agent.agent.id}`,
-                              `mutation SetAgentDiskSpaceMonitoring($agentId: ID!, $enabled: Boolean!) {
-                                setAgentDiskSpaceMonitoring(agentId: $agentId, enabled: $enabled) { enabled }
-                              }`,
-                              {
-                                agentId: agent.agent.id,
-                                enabled: checked === true,
-                              },
-                            )
-                          }
-                        />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        aria-pressed={agent.enabled}
+                        className={
+                          agent.enabled ? ACTIVE_CONTROL_CLASS : undefined
+                        }
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void mutate(
+                            `monitor:${agent.agent.id}`,
+                            `mutation SetAgentDiskSpaceMonitoring($agentId: ID!, $enabled: Boolean!) {
+                              setAgentDiskSpaceMonitoring(agentId: $agentId, enabled: $enabled) { enabled }
+                            }`,
+                            {
+                              agentId: agent.agent.id,
+                              enabled: !agent.enabled,
+                            },
+                          )
+                        }
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
                         {t("monitorAgent")}
-                      </Label>
-                      <Label className="flex items-center gap-2">
-                        <Checkbox
-                          checked={agent.manualPressureMode}
-                          disabled={!agent.enabled || busy !== null}
-                          onCheckedChange={(checked) =>
-                            void mutate(
-                              `pressure:${agent.agent.id}`,
-                              `mutation SetAgentDiskSpacePressureMode($agentId: ID!, $enabled: Boolean!) {
-                                setAgentDiskSpacePressureMode(agentId: $agentId, enabled: $enabled) { manualPressureMode }
-                              }`,
-                              {
-                                agentId: agent.agent.id,
-                                enabled: checked === true,
-                              },
-                            )
-                          }
-                        />
+                      </Button>
+                      <Button
+                        aria-pressed={agent.manualPressureMode}
+                        className={
+                          agent.manualPressureMode
+                            ? ACTIVE_CONTROL_CLASS
+                            : undefined
+                        }
+                        disabled={!agent.enabled || busy !== null}
+                        onClick={() =>
+                          void mutate(
+                            `pressure:${agent.agent.id}`,
+                            `mutation SetAgentDiskSpacePressureMode($agentId: ID!, $enabled: Boolean!) {
+                              setAgentDiskSpacePressureMode(agentId: $agentId, enabled: $enabled) { manualPressureMode }
+                            }`,
+                            {
+                              agentId: agent.agent.id,
+                              enabled: !agent.manualPressureMode,
+                            },
+                          )
+                        }
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
                         {t("pressureModeControl")}
-                      </Label>
+                      </Button>
                     </div>
                   </div>
                   {agent.volumes.length ? (
@@ -235,8 +293,9 @@ export function DiskSpaceMonitor() {
                   {agent.lastReportedAt && (
                     <p className="text-xs text-muted-foreground">
                       {t("observedAt", {
-                        value: new Date(agent.lastReportedAt).toLocaleString(),
+                        value: "",
                       })}
+                      <DateTime value={agent.lastReportedAt} />
                     </p>
                   )}
                   {(agent.lastError || agent.warnings.length > 0) && (

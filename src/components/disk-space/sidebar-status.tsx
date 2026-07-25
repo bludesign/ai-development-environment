@@ -4,7 +4,6 @@ import {
   CircleDollarSign,
   ClipboardList,
   Hammer,
-  HardDrive,
   MessagesSquare,
   Waypoints,
 } from "lucide-react";
@@ -202,7 +201,6 @@ export function SidebarStatusFooter() {
             className="h-auto w-full justify-start px-2 py-2"
             variant="ghost"
           >
-            <HardDrive className="size-4" />
             <div className="min-w-0 flex-1 text-left">
               <p className="text-xs font-medium">{t("freeDiskSpace")}</p>
               {enabledAgents.length === 1 &&
@@ -210,6 +208,7 @@ export function SidebarStatusFooter() {
                 <div className="mt-1">
                   <VolumeBar
                     compact
+                    hideLabel
                     volume={mostConstrainedVolume(enabledAgents[0]!)!}
                   />
                 </div>

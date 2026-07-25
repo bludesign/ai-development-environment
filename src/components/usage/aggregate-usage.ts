@@ -241,6 +241,25 @@ function localPeriod(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/**
+ * Totals for a single model, so a view filtered to one model can summarize the
+ * same rows it is showing. Unattributed tokens belong to no model and are left
+ * out, which is the split the cost chart already draws.
+ */
+export function totalsForModel(
+  days: UsageDayRow[],
+  modelName: string,
+): UsageMetrics {
+  const totals = emptyUsageMetrics();
+  days.forEach((day) =>
+    day.models.forEach((model) => {
+      if (model.unattributed || model.modelName !== modelName) return;
+      addMetrics(totals, model);
+    }),
+  );
+  return totals;
+}
+
 export function filterUsageByDays(
   usage: AggregatedUsage,
   days: UsageRangeDays,

@@ -2,12 +2,19 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import {
+  CCUSAGE_REPORT_JOB_KIND,
+  parseCcusageJobResult,
+} from "@ai-development-environment/agent-contract";
+
+import { aggregateUsage } from "@/components/usage/aggregate-usage";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentEventBus,
   SIDEBAR_STATUS_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import type { CcusageService } from "@/services/ccusage";
+import type { CcusageCollectionSnapshot } from "@/services/ccusage";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { PollingService } from "@/services/polling";
 
@@ -28,7 +35,20 @@ export class SystemStatusService {
     private readonly ccusage: CcusageService,
     private readonly diskSpace: DiskSpaceService,
     private readonly polling: PollingService,
-  ) {}
+  ) {
+    this.ccusage.registerCompletionObserver((snapshot) =>
+      this.recordCompletedUsage(snapshot),
+    );
+  }
+
+  private async recordCompletedUsage(
+    snapshot: CcusageCollectionSnapshot,
+  ): Promise<void> {
+    if (snapshot.progress.successfulCount === 0) return;
+    const period = localDay();
+    const today = snapshot.aggregate.days.find((day) => day.period === period);
+    await this.persistUsage(period, today?.totalCost ?? 0, new Date());
+  }
 
   startRuntime(): void {
     this.polling.register({
@@ -87,31 +107,69 @@ export class SystemStatusService {
     successfulAgents: number;
   }> {
     const id = `sidebar-usage:${randomUUID()}`;
-    const snapshot = await this.ccusage.collect(id);
-    const period = localDay();
-    if (snapshot.progress.successfulCount > 0) {
-      const today = snapshot.aggregate.days.find(
-        (day) => day.period === period,
-      );
-      const prisma = await getPrismaClient();
-      await prisma.sidebarUsageSummary.upsert({
-        where: { id: "default" },
-        create: {
-          id: "default",
-          period,
-          totalCost: today?.totalCost ?? 0,
-          collectedAt: new Date(),
-        },
-        update: {
-          period,
-          totalCost: today?.totalCost ?? 0,
-          collectedAt: new Date(),
-        },
-      });
-      this.publish();
+    try {
+      const snapshot = await this.ccusage.collect(id);
+      const period = localDay();
+      return { period, successfulAgents: snapshot.progress.successfulCount };
+    } finally {
+      await this.removeCollection(id);
     }
-    await this.removeCollection(id);
-    return { period, successfulAgents: snapshot.progress.successfulCount };
+  }
+
+  private async persistUsage(
+    period: string,
+    totalCost: number,
+    collectedAt: Date,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    await prisma.sidebarUsageSummary.upsert({
+      where: { id: "default" },
+      create: { id: "default", period, totalCost, collectedAt },
+      update: { period, totalCost, collectedAt },
+    });
+    this.publish();
+  }
+
+  private async latestSuccessfulUsage(period: string): Promise<{
+    totalCost: number;
+    collectedAt: Date;
+  } | null> {
+    const prisma = await getPrismaClient();
+    const jobs = await prisma.agentJob.findMany({
+      where: {
+        kind: CCUSAGE_REPORT_JOB_KIND,
+        status: "SUCCEEDED",
+        resultJson: { not: null },
+      },
+      orderBy: [{ finishedAt: "desc" }, { createdAt: "desc" }],
+      distinct: ["agentId"],
+      select: {
+        resultJson: true,
+        finishedAt: true,
+        createdAt: true,
+        agent: { select: { id: true, name: true, hostname: true } },
+      },
+    });
+    const reports = jobs.flatMap((job) => {
+      try {
+        const result = parseCcusageJobResult(JSON.parse(job.resultJson!));
+        return [{ agent: job.agent, report: result.report }];
+      } catch {
+        return [];
+      }
+    });
+    if (!reports.length) return null;
+    const today = aggregateUsage(reports).days.find(
+      (day) => day.period === period,
+    );
+    if (!today) return null;
+    return {
+      totalCost: today.totalCost,
+      collectedAt: jobs.reduce((latest, job) => {
+        const completedAt = job.finishedAt ?? job.createdAt;
+        return completedAt > latest ? completedAt : latest;
+      }, new Date(0)),
+    };
   }
 
   private async removeCollection(id: string): Promise<void> {
@@ -136,48 +194,67 @@ export class SystemStatusService {
 
   async status() {
     const prisma = await getPrismaClient();
-    const [usage, plans, sessions, builds, workflows, diskSpace] =
+    const period = localDay();
+    const [storedUsage, plans, sessions, builds, workflows, diskSpace] =
       await Promise.all([
         prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
         prisma.agentRun.count({
           where: {
             kind: "PLAN",
             archivedAt: null,
-            status: { in: ["IN_PROGRESS", "PAUSED"] },
+            status: "IN_PROGRESS",
+            attempts: {
+              some: {
+                status: { in: ["STARTING", "RUNNING"] },
+                supersededAt: null,
+              },
+            },
           },
         }),
         prisma.agentRun.count({
           where: {
             kind: "SESSION",
             archivedAt: null,
-            status: { in: ["IN_PROGRESS", "PAUSED"] },
-          },
-        }),
-        prisma.build.count({
-          where: { status: { in: ["QUEUED", "PREPARING", "RUNNING"] } },
-        }),
-        prisma.workflowRun.count({
-          where: {
-            archivedAt: null,
-            status: {
-              in: [
-                "QUEUED",
-                "RUNNING",
-                "PAUSING",
-                "PAUSED",
-                "WAITING",
-                "BLOCKED",
-              ],
+            status: "IN_PROGRESS",
+            attempts: {
+              some: {
+                status: { in: ["STARTING", "RUNNING"] },
+                supersededAt: null,
+              },
             },
           },
         }),
+        prisma.build.count({
+          where: { status: { in: ["PREPARING", "RUNNING"] } },
+        }),
+        prisma.workflowRun.count({
+          where: { archivedAt: null, status: "RUNNING" },
+        }),
         this.diskSpace.overview(),
       ]);
-    const currentUsage = usage?.period === localDay() ? usage : null;
+    let usageToday =
+      storedUsage?.period === period
+        ? {
+            totalCost: storedUsage.totalCost,
+            collectedAt: storedUsage.collectedAt,
+          }
+        : null;
+    if (!usageToday) {
+      const recovered = await this.latestSuccessfulUsage(period);
+      if (recovered) {
+        usageToday = recovered;
+        void this.persistUsage(
+          period,
+          recovered.totalCost,
+          recovered.collectedAt,
+        );
+      }
+      void this.runUsagePoll();
+    }
     return {
       usageToday: {
-        totalCost: currentUsage?.totalCost ?? null,
-        collectedAt: currentUsage?.collectedAt.toISOString() ?? null,
+        totalCost: usageToday?.totalCost ?? null,
+        collectedAt: usageToday?.collectedAt.toISOString() ?? null,
       },
       activity: { plans, sessions, builds, workflows },
       diskSpace,

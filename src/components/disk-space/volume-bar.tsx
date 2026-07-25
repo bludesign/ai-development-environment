@@ -27,9 +27,11 @@ export function diskStatusColor(status: DiskSpaceStatus): string {
 export function VolumeBar({
   volume,
   compact = false,
+  hideLabel = false,
 }: {
   volume: DiskSpaceVolume;
   compact?: boolean;
+  hideLabel?: boolean;
 }) {
   const locale = useLocale();
   const t = useTranslations("diskSpace");
@@ -47,7 +49,11 @@ export function VolumeBar({
   return (
     <div className={cn("space-y-1.5", compact && "space-y-1")}>
       <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
-        <span className="truncate font-medium">{roleLabel || t("volume")}</span>
+        {!hideLabel && (
+          <span className="truncate font-medium">
+            {roleLabel || t("volume")}
+          </span>
+        )}
         <span className="shrink-0 tabular-nums text-muted-foreground">
           {formatDiskBytes(volume.freeBytes, locale)} {t("freeOf")}{" "}
           {formatDiskBytes(volume.totalBytes, locale)}

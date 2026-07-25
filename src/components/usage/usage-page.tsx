@@ -35,6 +35,7 @@ import {
 import { formatDateValue } from "@/lib/date-format";
 
 import type { AggregatedUsage, UsageMetrics } from "./aggregate-usage";
+import { totalsForModel } from "./aggregate-usage";
 import { UsageCostChart } from "./usage-cost-chart";
 
 const RECONCILE_INTERVAL_MS = 2_000;
@@ -114,6 +115,7 @@ export function UsagePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [range, setRange] = useState<UsageRange>("ALL");
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -211,6 +213,22 @@ export function UsagePage() {
   const failures = records.filter(
     (record) => terminal(record.status) && record.status !== "SUCCEEDED",
   );
+  // A model the current range no longer covers is treated as no filter at all,
+  // so changing the range falls back to the totals for everything rather than
+  // to a row of zeros.
+  const activeModel =
+    selectedModel &&
+    usage?.days.some((day) =>
+      day.models.some(
+        (model) => !model.unattributed && model.modelName === selectedModel,
+      ),
+    )
+      ? selectedModel
+      : null;
+  const summaryMetrics =
+    usage && activeModel
+      ? totalsForModel(usage.days, activeModel)
+      : usage?.totals;
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -320,10 +338,14 @@ export function UsagePage() {
           title={t("noUsageInRange")}
           description={t("noUsageInRangeDescription")}
         />
-      ) : successful.length > 0 && usage ? (
+      ) : successful.length > 0 && usage && summaryMetrics ? (
         <>
-          <UsageCostChart days={usage.days} />
-          <SummaryTiles metrics={usage.totals} />
+          <UsageCostChart
+            days={usage.days}
+            onSelectModel={setSelectedModel}
+            selectedModel={activeModel}
+          />
+          <SummaryTiles metrics={summaryMetrics} model={activeModel} />
           <UsageTable days={usage.days} locale={locale} totals={usage.totals} />
         </>
       ) : null}
@@ -383,7 +405,14 @@ function CollectionStatusPanel({
   );
 }
 
-function SummaryTiles({ metrics }: { metrics: UsageMetrics }) {
+function SummaryTiles({
+  metrics,
+  model,
+}: {
+  metrics: UsageMetrics;
+  /** Set when the totals cover one model rather than the whole range. */
+  model: string | null;
+}) {
   const t = useTranslations("usage");
   const locale = useLocale();
   const number = new Intl.NumberFormat(locale);
@@ -402,15 +431,24 @@ function SummaryTiles({ metrics }: { metrics: UsageMetrics }) {
     [t("cacheReadTokens"), number.format(metrics.cacheReadTokens)],
   ];
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {tiles.map(([label, value]) => (
-        <Card key={label}>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="flex flex-col gap-3">
+      {model && (
+        <p className="text-sm text-muted-foreground">
+          {t("summaryFilteredByModel", { model })}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {tiles.map(([label, value]) => (
+          <Card key={label}>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">{label}</p>
+              <p className="mt-2 text-2xl font-semibold tabular-nums">
+                {value}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

@@ -114,6 +114,8 @@ describe("CcusageService", () => {
     } as unknown as AgentControlService;
     const now = () => new Date("2026-07-16T12:00:00Z");
     const service = new CcusageService(agentControl, now);
+    const observer = vi.fn();
+    service.registerCompletionObserver(observer);
 
     const first = await service.collect("request-1");
     const second = await service.collect("request-1");
@@ -123,6 +125,8 @@ describe("CcusageService", () => {
     expect(second.id).toBe(first.id);
     expect(prisma.ccusageCollection.create).toHaveBeenCalledTimes(1);
     expect(agentControl.createJob).not.toHaveBeenCalled();
+    expect(observer).toHaveBeenCalledTimes(2);
+    expect(observer).toHaveBeenLastCalledWith(second);
   });
 
   test("parses successful jobs, excludes failures, and returns a typed partial aggregate", async () => {

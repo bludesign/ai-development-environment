@@ -106,6 +106,10 @@ export type CcusageCollectionSnapshot = {
   aggregate: AggregatedUsage;
 };
 
+export type CcusageCompletionObserver = (
+  snapshot: CcusageCollectionSnapshot,
+) => Promise<void> | void;
+
 function isOnline(agent: PersistedAgent, now: number): boolean {
   return (
     agent.lastSeenAt !== null &&
@@ -198,6 +202,7 @@ export class CcusageService {
   >();
   private initialized = false;
   private initializationPromise: Promise<void> | null = null;
+  private readonly completionObservers = new Set<CcusageCompletionObserver>();
 
   constructor(
     private readonly agentControlService: AgentControlService,
@@ -235,7 +240,23 @@ export class CcusageService {
   async collect(requestId?: string | null): Promise<CcusageCollectionSnapshot> {
     const id = requestId?.trim() || randomUUID();
     await this.ensureCollection(id);
-    return this.waitForCompletion(id);
+    const snapshot = await this.waitForCompletion(id);
+    for (const observer of this.completionObservers) {
+      try {
+        await observer(snapshot);
+      } catch (error) {
+        console.error(
+          "ccusage completion observer failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    return snapshot;
+  }
+
+  registerCompletionObserver(observer: CcusageCompletionObserver): () => void {
+    this.completionObservers.add(observer);
+    return () => this.completionObservers.delete(observer);
   }
 
   async getCollection(id: string): Promise<CcusageCollectionSnapshot | null> {
