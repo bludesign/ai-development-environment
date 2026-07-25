@@ -184,12 +184,40 @@ describe("NotificationsSidebar", () => {
     expect(articles[0]?.className).toContain("w-full");
     expect(articles[0]?.className).toContain("rounded-none");
     expect(articles[0]?.parentElement?.className).toContain("gap-0");
-    expect(articles[0]?.className).toContain("bg-primary/20");
+    // A highlighted notification arrives in a heavier shade of its own color
+    // rather than the generic primary flash.
+    expect(articles[0]?.className).toContain("bg-blue-500/30");
+    expect(articles[0]?.className).toContain("ring-blue-500/50");
+    expect(articles[0]?.className).not.toContain("bg-primary/20");
     expect(articles[0]?.className).toContain("border-l-blue-500");
     expect(nativeNotification).toHaveBeenCalledWith(
       "iOS build failed",
       expect.objectContaining({ body: "Example · Debug · main" }),
     );
+  });
+
+  test("flashes uncolored arrivals with the primary highlight", async () => {
+    renderSidebar();
+    expect(await screen.findByText("Example · Debug · main")).toBeDefined();
+
+    await act(async () =>
+      nextChange?.({
+        kind: "CREATED",
+        notificationId: "notification-3",
+        notification: {
+          ...existing,
+          id: "notification-3",
+          title: "Agent finished",
+          highlightColor: null,
+          createdAt: "2026-07-22T03:00:00.000Z",
+        },
+      }),
+    );
+
+    const articles = screen.getAllByRole("article");
+    expect(articles[0]?.textContent).toContain("Agent finished");
+    expect(articles[0]?.className).toContain("bg-primary/20");
+    expect(articles[0]?.className).toContain("ring-primary/30");
   });
 
   test("dismisses one item without deleting notification history", async () => {
