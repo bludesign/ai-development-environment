@@ -23,6 +23,25 @@ const payload = (script: string) => ({
 });
 
 describe("saved command handler", () => {
+  test("falls back to the POSIX shell when SHELL is unset", async () => {
+    const shell = process.env.SHELL;
+    delete process.env.SHELL;
+
+    try {
+      const result = await runCommand(
+        payload("printf done"),
+        0,
+        new AbortController().signal,
+        vi.fn(),
+        context(async () => undefined),
+      );
+      expect(result.exitCode).toBe(0);
+    } finally {
+      if (shell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = shell;
+    }
+  });
+
   test("preserves raw ANSI and UTF-8 bytes in sequence", async () => {
     const uploaded: CommandOutputChunk[] = [];
     const result = await runCommand(

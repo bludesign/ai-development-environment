@@ -114,7 +114,7 @@ export const runCommand: AgentJobHandler = async (
     return await new Promise<ProcessResult>((resolve, reject) => {
       let cancelled = false;
       let settled = false;
-      const child = spawn(process.env.SHELL || "/bin/zsh", ["-l", scriptPath], {
+      const child = spawn(process.env.SHELL || "/bin/sh", ["-l", scriptPath], {
         cwd,
         detached: process.platform !== "win32",
         env: {
