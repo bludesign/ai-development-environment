@@ -4,12 +4,7 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardAction, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export type TerminalOutputEntry = {
@@ -62,7 +57,6 @@ export function TerminalOutputCard({
   const fitRef = useRef<import("@xterm/addon-fit").FitAddon | null>(null);
   const entriesRef = useRef(entries);
   const writtenRef = useRef(new Set<string>());
-  const renderedRef = useRef<string[]>([]);
   const dividerRef = useRef<string | null>(null);
   const followRef = useRef(true);
   const [follow, setFollow] = useState(true);
@@ -70,30 +64,24 @@ export function TerminalOutputCard({
   const writeEntries = useCallback((nextEntries: TerminalOutputEntry[]) => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    const appendOnly = renderedRef.current.every(
-      (id, index) => nextEntries[index]?.id === id,
-    );
-    if (!appendOnly) {
-      terminal.reset();
-      writtenRef.current.clear();
-      renderedRef.current = [];
-      dividerRef.current = null;
-    }
+    // Catch-up queries can insert a late chunk before entries already shown.
+    // Keep the live terminal stable and append only that unseen chunk; a new
+    // terminal lifecycle still replays the complete canonical entry order.
     for (const entry of nextEntries) {
       if (writtenRef.current.has(entry.id)) continue;
+      const hasRenderedEntries = writtenRef.current.size > 0;
       writtenRef.current.add(entry.id);
       const dividerKey = entry.dividerKey ?? entry.divider;
       if (entry.divider && dividerKey !== dividerRef.current) {
         dividerRef.current = dividerKey ?? null;
         // The blank line separates a divider from the block above it, so the
         // first divider skips it and stays flush with the top of the terminal.
-        const lead = renderedRef.current.length ? "\r\n" : "";
+        const lead = hasRenderedEntries ? "\r\n" : "";
         terminal.write(`${lead}\x1b[90m── ${entry.divider} ──\x1b[0m\r\n`);
       }
       terminal.write(entry.data, () => {
         if (followRef.current) terminal.scrollToBottom();
       });
-      renderedRef.current.push(entry.id);
     }
   }, []);
 
@@ -108,7 +96,6 @@ export function TerminalOutputCard({
     let observer: ResizeObserver | null = null;
     let scrollDisposable: { dispose(): void } | null = null;
     writtenRef.current.clear();
-    renderedRef.current = [];
     dividerRef.current = null;
     followRef.current = true;
     void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(

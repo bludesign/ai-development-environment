@@ -16,6 +16,7 @@ import {
 import { CommandRunPage } from "./command-run-page";
 
 const terminalWrite = vi.hoisted(() => vi.fn());
+const terminalReset = vi.hoisted(() => vi.fn());
 const terminalOptions = vi.hoisted(() => vi.fn());
 const terminalOnScroll = vi.hoisted(() => vi.fn());
 const terminalScrollToBottom = vi.hoisted(() => vi.fn());
@@ -64,7 +65,9 @@ vi.mock("@xterm/xterm", () => ({
     scrollToBottom() {
       terminalScrollToBottom();
     }
-    reset() {}
+    reset() {
+      terminalReset();
+    }
     dispose() {}
   },
 }));
@@ -77,6 +80,7 @@ vi.mock("@xterm/addon-fit", () => ({
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const timestamp = "2026-07-25T12:00:00.000Z";
+let nextOutput: ((chunk: Record<string, unknown>) => void) | null = null;
 const run = {
   id: "run-1",
   displayNumber: 42,
@@ -126,6 +130,7 @@ beforeEach(() => {
     },
   );
   terminalWrite.mockReset();
+  terminalReset.mockReset();
   terminalOptions.mockReset();
   terminalOnScroll.mockReset();
   terminalScrollToBottom.mockReset();
@@ -136,7 +141,16 @@ beforeEach(() => {
     configurable: true,
     value: { writeText },
   });
-  subscriptions.mockReturnValue({ subscribe: vi.fn(() => vi.fn()) } as never);
+  nextOutput = null;
+  subscriptions.mockReturnValue({
+    subscribe: vi.fn((operation, sink) => {
+      if (String(operation.query).includes("subscription CommandOutput")) {
+        nextOutput = (chunk) =>
+          sink.next({ data: { commandRunOutputAdded: chunk } } as never);
+      }
+      return vi.fn();
+    }),
+  } as never);
   request.mockImplementation(async (query) => {
     if (query.includes("CommandRunDetail")) return { commandRun: run } as never;
     if (query.includes("CommandOutput")) {
@@ -256,6 +270,39 @@ describe("CommandRunPage", () => {
     expect(terminalOptions).toHaveBeenCalledWith(
       expect.objectContaining({ convertEol: true }),
     );
+  });
+
+  test("appends late output chunks without resetting visible output", async () => {
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText("Color output")).toBeDefined();
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(2),
+    );
+    await waitFor(() => expect(nextOutput).not.toBeNull());
+
+    nextOutput?.({
+      id: "late-chunk",
+      attemptId: "attempt-1",
+      attemptNumber: 1,
+      sequence: -1,
+      stream: "STDOUT",
+      dataBase64: Buffer.from("late output\n").toString("base64"),
+      byteLength: 12,
+      createdAt: timestamp,
+    });
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(3),
+    );
+    expect(terminalReset).not.toHaveBeenCalled();
   });
 
   test("offers follow output after the terminal is scrolled away from the bottom", async () => {

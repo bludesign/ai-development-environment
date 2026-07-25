@@ -18,6 +18,7 @@ import { formatDateValue } from "@/lib/date-format";
 import { BuildDetailPage } from "./build-detail-page";
 
 const terminalWrite = vi.hoisted(() => vi.fn());
+const terminalReset = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -36,7 +37,9 @@ vi.mock("@xterm/xterm", () => ({
       return { dispose: vi.fn() };
     }
     scrollToBottom() {}
-    reset() {}
+    reset() {
+      terminalReset();
+    }
     dispose() {}
   },
 }));
@@ -200,6 +203,7 @@ beforeEach(() => {
   });
   writeText.mockReset();
   terminalWrite.mockReset();
+  terminalReset.mockReset();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText },
@@ -503,6 +507,36 @@ describe("BuildDetailPage", () => {
         ),
       ).toHaveLength(1),
     );
+  });
+
+  test("appends late log chunks without resetting visible output", async () => {
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+    expect(await screen.findByText("Development")).toBeDefined();
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(1),
+    );
+    await waitFor(() => expect(nextLog).not.toBeNull());
+
+    act(() =>
+      nextLog?.({
+        ...buildLogChunk(-1, "late output\r\n"),
+        id: "late-log",
+        createdAt: new Date(Date.parse(now) - 1).toISOString(),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.filter(
+          ([value]) => value instanceof Uint8Array,
+        ),
+      ).toHaveLength(2),
+    );
+    expect(terminalReset).not.toHaveBeenCalled();
   });
 
   test("filters compact test results grouped by suite and file", async () => {
