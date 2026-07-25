@@ -144,6 +144,13 @@ type WorkflowValidation {
   diagnostics: [WorkflowDiagnostic!]!
 }
 
+type WorkflowRunWorktreeRef {
+  id: ID!
+  folder: String!
+  branch: String
+  highlightColor: String
+}
+
 type WorkflowRun {
   id: ID!
   displayNumber: Int!
@@ -165,6 +172,7 @@ type WorkflowRun {
   generation: Int!
   sessionData: JSON!
   sessionRevision: Int!
+  worktree: WorkflowRunWorktreeRef
   blockedReason: String
   error: String
   queuedAt: String!

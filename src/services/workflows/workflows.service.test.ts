@@ -851,3 +851,38 @@ describe("workflow choice triggers", () => {
     expect(state("draft")).toBe("INACTIVE");
   });
 });
+
+describe("workflow run worktree tint", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("resolves the linked worktree from session data", async () => {
+    prisma.worktree.findUnique.mockResolvedValue({
+      id: "worktree-1",
+      folder: "/tmp/feature",
+      branch: "feature",
+      highlightColor: "violet",
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const worktree = await service.runWorktree(
+      JSON.stringify({ worktree: { id: "worktree-1" } }),
+    );
+
+    expect(prisma.worktree.findUnique).toHaveBeenCalledWith({
+      where: { id: "worktree-1" },
+      select: { id: true, folder: true, branch: true, highlightColor: true },
+    });
+    expect(worktree).toMatchObject({ highlightColor: "violet" });
+  });
+
+  test("skips the lookup when the run has no worktree", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    expect(
+      await service.runWorktree(JSON.stringify({ codebase: { id: "code-1" } })),
+    ).toBeNull();
+    expect(prisma.worktree.findUnique).not.toHaveBeenCalled();
+  });
+});

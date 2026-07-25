@@ -351,6 +351,25 @@ export class WorkflowsService {
     );
   }
 
+  /**
+   * A run reaches its worktree through session data rather than a column, so
+   * the tint has to be resolved from `worktree.id` on demand. Reading the
+   * worktree live rather than snapshotting the colour into session data keeps
+   * recolouring a worktree from stranding its runs on the old tint.
+   */
+  async runWorktree(sessionDataJson: string) {
+    const worktreeId = getSessionValue(
+      json<SessionData>(sessionDataJson),
+      "worktree.id",
+    );
+    if (typeof worktreeId !== "string" || !worktreeId) return null;
+    const prisma = await getPrismaClient();
+    return prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      select: { id: true, folder: true, branch: true, highlightColor: true },
+    });
+  }
+
   private async notifyRun(
     runId: string,
     typeKey:
@@ -364,6 +383,11 @@ export class WorkflowsService {
   ): Promise<void> {
     if (!this.notifications) return;
     const prisma = await getPrismaClient();
+    const run = await prisma.workflowRun.findUnique({
+      where: { id: runId },
+      select: { sessionDataJson: true },
+    });
+    const worktree = run ? await this.runWorktree(run.sessionDataJson) : null;
     const notification = await prisma.$transaction((transaction) =>
       this.notifications!.recordInTransaction(transaction, {
         dedupeKey: `workflow:${runId}:${dedupeSuffix}`,
@@ -373,6 +397,8 @@ export class WorkflowsService {
         href: `/workflows/runs/${runId}`,
         resourceKind: "WORKFLOW_RUN",
         resourceId: runId,
+        worktreeId: worktree?.id ?? null,
+        highlightColor: worktree?.highlightColor ?? null,
       }),
     );
     this.notifications.created(notification);

@@ -177,6 +177,12 @@ export type WorkflowRun = {
   generation: number;
   sessionData: Record<string, unknown>;
   sessionRevision: number;
+  worktree?: {
+    id: string;
+    folder: string;
+    branch: string | null;
+    highlightColor: string | null;
+  } | null;
   blockedReason: string | null;
   error: string | null;
   queuedAt: string;

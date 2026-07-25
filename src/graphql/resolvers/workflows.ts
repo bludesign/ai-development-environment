@@ -95,6 +95,8 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       JSON.parse(value.triggerPayloadJson),
     sessionData: (value: { sessionDataJson: string }) =>
       JSON.parse(value.sessionDataJson),
+    worktree: (value: { sessionDataJson: string }) =>
+      service.runWorktree(value.sessionDataJson),
     attemptCount: (value: {
       _count?: { attempts?: number };
       attempts?: unknown[];
