@@ -169,7 +169,7 @@ describe("CommandsPage", () => {
   });
 
   test("shows running commands before newer completed commands", async () => {
-    request.mockResolvedValueOnce({
+    request.mockResolvedValue({
       commandDefinitions: [],
       agents: [],
       worktreeOverview: { agents: [] },
@@ -180,7 +180,6 @@ describe("CommandsPage", () => {
             id: "running",
             displayNumber: 41,
             status: "RUNNING",
-            createdAt: "2026-07-24T12:00:00.000Z",
           }),
         ],
       },
@@ -190,5 +189,9 @@ describe("CommandsPage", () => {
 
     const runLinks = await screen.findAllByRole("link", { name: /^#\d+$/ });
     expect(runLinks.map((link) => link.textContent)).toEqual(["#41", "#43"]);
+    expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
+    expect(screen.getAllByRole("cell", { name: /July 25, 2026/ })).toHaveLength(
+      1,
+    );
   });
 });

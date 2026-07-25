@@ -191,14 +191,25 @@ export function WorkflowsPage() {
     [runs, search],
   );
   const runGroups = useMemo(() => {
-    const result: Array<{ key: string; value: string; items: WorkflowRun[] }> =
-      [];
+    const result: Array<{
+      key: string;
+      value: string;
+      prioritized: boolean;
+      items: WorkflowRun[];
+    }> = [];
     for (const run of filteredRuns) {
+      const prioritized = hasPrioritizedTableStatus(run.status);
       const dateKey = dayKey(run.createdAt) ?? run.createdAt;
-      const key = `${hasPrioritizedTableStatus(run.status) ? "priority" : "remaining"}:${dateKey}`;
+      const key = prioritized ? "priority" : dateKey;
       const group = result.at(-1);
       if (group?.key === key) group.items.push(run);
-      else result.push({ key, value: run.createdAt, items: [run] });
+      else
+        result.push({
+          key,
+          value: run.createdAt,
+          prioritized,
+          items: [run],
+        });
     }
     return result;
   }, [filteredRuns]);
@@ -599,12 +610,16 @@ export function WorkflowsPage() {
                       <TableCell className="py-1.5">
                         <SelectAllCheckbox
                           ids={group.items.map(({ id }) => id)}
-                          label={t("selectDay", {
-                            day: formatDateValue(group.value, "long", {
-                              locale,
-                              showTime: false,
-                            }),
-                          })}
+                          label={
+                            group.prioritized
+                              ? t("selectAll")
+                              : t("selectDay", {
+                                  day: formatDateValue(group.value, "long", {
+                                    locale,
+                                    showTime: false,
+                                  }),
+                                })
+                          }
                           onChange={setSelected}
                           selected={selected}
                         />
@@ -614,10 +629,12 @@ export function WorkflowsPage() {
                       className="py-1.5 text-xs font-normal text-muted-foreground"
                       colSpan={7}
                     >
-                      {formatDateValue(group.value, "long", {
-                        locale,
-                        showTime: false,
-                      })}
+                      {group.prioritized
+                        ? t("active")
+                        : formatDateValue(group.value, "long", {
+                            locale,
+                            showTime: false,
+                          })}
                     </TableCell>
                   </TableRow>
                   {group.items.map((run) => (
@@ -692,7 +709,11 @@ export function WorkflowsPage() {
                       <TableCell>{run.generation}</TableCell>
                       <TableCell>
                         {run.startedAt ? (
-                          <DateTime kind="relative" value={run.startedAt} />
+                          <DateTime
+                            kind="time"
+                            relativeToday
+                            value={run.startedAt}
+                          />
                         ) : (
                           t("queued")
                         )}

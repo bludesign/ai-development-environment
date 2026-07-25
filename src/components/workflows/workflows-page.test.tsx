@@ -150,20 +150,8 @@ describe("WorkflowsPage", () => {
           workflowRuns: {
             items: [
               workflowRun("complete", 303, null),
-              workflowRun(
-                "paused",
-                202,
-                null,
-                "PAUSED",
-                "2026-07-24T12:00:00.000Z",
-              ),
-              workflowRun(
-                "waiting",
-                101,
-                null,
-                "WAITING",
-                "2026-07-23T12:00:00.000Z",
-              ),
+              workflowRun("paused", 202, null, "PAUSED", timestamp),
+              workflowRun("waiting", 101, null, "WAITING", timestamp),
             ],
           },
         }) as never,
@@ -177,5 +165,9 @@ describe("WorkflowsPage", () => {
       "#101",
       "#303",
     ]);
+    expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
+    expect(screen.getAllByRole("cell", { name: /July 25, 2026/ })).toHaveLength(
+      1,
+    );
   });
 });

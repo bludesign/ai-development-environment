@@ -219,13 +219,25 @@ export function CommandsPage() {
     [runs, search],
   );
   const groups = useMemo(() => {
-    const result: Array<{ key: string; date: string; runs: CommandRun[] }> = [];
+    const result: Array<{
+      key: string;
+      date: string;
+      prioritized: boolean;
+      runs: CommandRun[];
+    }> = [];
     for (const run of filteredRuns) {
+      const prioritized = hasPrioritizedTableStatus(run.status);
       const dateKey = dayKey(run.createdAt) ?? run.createdAt;
-      const key = `${hasPrioritizedTableStatus(run.status) ? "priority" : "remaining"}:${dateKey}`;
+      const key = prioritized ? "priority" : dateKey;
       const current = result.at(-1);
       if (current?.key === key) current.runs.push(run);
-      else result.push({ key, date: run.createdAt, runs: [run] });
+      else
+        result.push({
+          key,
+          date: run.createdAt,
+          prioritized,
+          runs: [run],
+        });
     }
     return result;
   }, [filteredRuns]);
@@ -430,29 +442,33 @@ export function CommandsPage() {
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     {editMode && (
                       <TableCell className="py-2">
-                        <SelectAllCheckbox
-                          ids={group.runs
-                            .filter((run) => !activeCommandRun(run.status))
-                            .map((run) => run.id)}
-                          label={t("selectDay", {
-                            day: formatDateValue(group.date, "long", {
-                              locale,
-                              showTime: false,
-                            }),
-                          })}
-                          onChange={setSelected}
-                          selected={selected}
-                        />
+                        {!group.prioritized && (
+                          <SelectAllCheckbox
+                            ids={group.runs
+                              .filter((run) => !activeCommandRun(run.status))
+                              .map((run) => run.id)}
+                            label={t("selectDay", {
+                              day: formatDateValue(group.date, "long", {
+                                locale,
+                                showTime: false,
+                              }),
+                            })}
+                            onChange={setSelected}
+                            selected={selected}
+                          />
+                        )}
                       </TableCell>
                     )}
                     <TableCell
                       colSpan={7}
                       className="py-2 text-xs font-medium text-muted-foreground"
                     >
-                      {formatDateValue(group.date, "long", {
-                        locale,
-                        showTime: false,
-                      })}
+                      {group.prioritized
+                        ? t("active")
+                        : formatDateValue(group.date, "long", {
+                            locale,
+                            showTime: false,
+                          })}
                     </TableCell>
                   </TableRow>
                   {group.runs.map((run) => (
@@ -558,7 +574,11 @@ export function CommandsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <DateTime value={run.startedAt ?? run.queuedAt} />
+                        <DateTime
+                          kind="time"
+                          relativeToday
+                          value={run.startedAt ?? run.queuedAt}
+                        />
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

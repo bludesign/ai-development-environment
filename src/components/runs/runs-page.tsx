@@ -257,14 +257,25 @@ export function RunsPage({
   }, [refresh]);
 
   const groups = useMemo(() => {
-    const result: Array<{ key: string; value: string; items: AgentRunView[] }> =
-      [];
+    const result: Array<{
+      key: string;
+      value: string;
+      prioritized: boolean;
+      items: AgentRunView[];
+    }> = [];
     for (const item of prioritizeActiveTableRows(items)) {
+      const prioritized = hasPrioritizedTableStatus(item.status);
       const dateKey = dayKey(item.createdAt) ?? item.createdAt;
-      const key = `${hasPrioritizedTableStatus(item.status) ? "priority" : "remaining"}:${dateKey}`;
+      const key = prioritized ? "priority" : dateKey;
       const group = result.at(-1);
       if (group?.key === key) group.items.push(item);
-      else result.push({ key, value: item.createdAt, items: [item] });
+      else
+        result.push({
+          key,
+          value: item.createdAt,
+          prioritized,
+          items: [item],
+        });
     }
     return result;
   }, [items]);
@@ -527,12 +538,16 @@ export function RunsPage({
                       <TableCell className="py-1.5">
                         <SelectAllCheckbox
                           ids={group.items.map(({ id }) => id)}
-                          label={t("selectDay", {
-                            day: formatDateValue(group.value, "long", {
-                              locale,
-                              showTime: false,
-                            }),
-                          })}
+                          label={
+                            group.prioritized
+                              ? t("selectAll")
+                              : t("selectDay", {
+                                  day: formatDateValue(group.value, "long", {
+                                    locale,
+                                    showTime: false,
+                                  }),
+                                })
+                          }
                           onChange={setSelected}
                           selected={selected}
                         />
@@ -542,10 +557,12 @@ export function RunsPage({
                       className="py-1.5 text-xs font-normal text-muted-foreground"
                       colSpan={8 + (session ? 1 : 0)}
                     >
-                      {formatDateValue(group.value, "long", {
-                        locale,
-                        showTime: false,
-                      })}
+                      {group.prioritized
+                        ? t("active")
+                        : formatDateValue(group.value, "long", {
+                            locale,
+                            showTime: false,
+                          })}
                     </TableCell>
                   </TableRow>
                   {group.items.map((run) => {
@@ -730,7 +747,11 @@ export function RunsPage({
                             <EffortIcon effort={run.effort} />
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            <DateTime kind="relative" value={run.createdAt} />
+                            <DateTime
+                              kind="time"
+                              relativeToday
+                              value={run.startedAt ?? run.createdAt}
+                            />
                           </div>
                         </TableCell>
                         <TableCell>

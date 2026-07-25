@@ -70,8 +70,8 @@ beforeEach(() => {
     agentRuns: {
       items: [
         run("complete", 303, "COMPLETED", timestamp),
-        run("in-progress", 202, "IN_PROGRESS", "2026-07-24T12:00:00.000Z"),
-        run("paused", 101, "PAUSED", "2026-07-23T12:00:00.000Z"),
+        run("in-progress", 202, "IN_PROGRESS", timestamp),
+        run("paused", 101, "PAUSED", timestamp),
       ],
       nextCursor: null,
       totalCount: 3,
@@ -101,6 +101,10 @@ describe("RunsPage", () => {
         "#101",
         "#303",
       ]);
+      expect(screen.getAllByRole("cell", { name: "Active" })).toHaveLength(1);
+      expect(
+        screen.getAllByRole("cell", { name: /July 25, 2026/ }),
+      ).toHaveLength(1);
     },
   );
 });
