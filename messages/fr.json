@@ -641,6 +641,8 @@
     "pushChannel": "Push web",
     "toggleChannel": "Basculer {channel} pour {type}",
     "history": "Historique",
+    "settingsTab": "Paramètres",
+    "refresh": "Actualiser",
     "historyCount": "{count, plural, one {# notification} other {# notifications}}",
     "historyEmpty": "Aucune notification pour le moment.",
     "notification": "Notification",
@@ -712,12 +714,33 @@
       "RUN_RECOVERY_PAUSED": {
         "title": "Plan ou session en pause après récupération",
         "description": "Un plan ou une session gérée est mise en pause après le redémarrage de son agent."
+      },
+      "WORKFLOW_MESSAGE": {
+        "title": "Message de workflow",
+        "description": "Un workflow envoie une notification générique."
+      },
+      "WORKFLOW_NEEDS_ATTENTION": {
+        "title": "Le workflow requiert une intervention",
+        "description": "Un workflow attend des données ou une décision."
+      },
+      "WORKFLOW_COMPLETED": {
+        "title": "Workflow terminé",
+        "description": "Une exécution de workflow se termine avec succès."
+      },
+      "WORKFLOW_FAILED": {
+        "title": "Workflow en échec",
+        "description": "Une exécution de workflow échoue."
+      },
+      "WORKFLOW_RECOVERY_PAUSED": {
+        "title": "Workflow en pause après récupération",
+        "description": "Un workflow se met en pause pendant la récupération de son travail durable."
       }
     },
     "categories": {
       "BUILDS": "Builds",
       "GITHUB": "GitHub",
-      "RUNS": "Plans et sessions"
+      "RUNS": "Plans et sessions",
+      "WORKFLOWS": "Workflows"
     }
   },
   "credentialEncryption": {

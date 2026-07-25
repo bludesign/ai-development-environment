@@ -8,12 +8,24 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
 import { NotificationsPage } from "./notifications-page";
+
+/* The page's toolbar hangs tooltips off its refresh control, and Radix reads
+   the provider out of context rather than defaulting — so the page only mounts
+   under one, the same way the app shell supplies it. */
+function renderPage() {
+  return render(
+    <TooltipProvider>
+      <NotificationsPage />
+    </TooltipProvider>,
+  );
+}
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -187,9 +199,10 @@ afterEach(() => {
 
 describe("NotificationsPage", () => {
   test("renders channel preferences and saves independent changes", async () => {
-    render(<NotificationsPage />);
+    renderPage();
 
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     const pushToggle = screen.getByRole("checkbox", {
       name: "Toggle Web Push for iOS build succeeded",
     });
@@ -212,7 +225,7 @@ describe("NotificationsPage", () => {
   });
 
   test("uses telemetry-style day selection and permanently deletes it", async () => {
-    render(<NotificationsPage />);
+    renderPage();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -239,7 +252,7 @@ describe("NotificationsPage", () => {
   });
 
   test("does not materialize loaded IDs when selecting every notification", async () => {
-    render(<NotificationsPage />);
+    renderPage();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -259,7 +272,7 @@ describe("NotificationsPage", () => {
   });
 
   test("reselects one notification from an excluded day", async () => {
-    render(<NotificationsPage />);
+    renderPage();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -296,7 +309,7 @@ describe("NotificationsPage", () => {
   });
 
   test("prepends live notifications", async () => {
-    render(<NotificationsPage />);
+    renderPage();
     expect(await screen.findByText("Example · Debug · main")).toBeDefined();
 
     await act(async () =>
@@ -312,12 +325,31 @@ describe("NotificationsPage", () => {
       }),
     );
 
-    expect(screen.getAllByText("iOS build failed").length).toBeGreaterThan(1);
+    /* Both notifications share a day, so the group holds them in arrival
+       order — the newest one has to sit at the top of it. */
+    expect(
+      screen
+        .getAllByRole("link", { name: /^iOS build/ })
+        .map((link) => link.textContent),
+    ).toEqual(["iOS build failed", "iOS build succeeded"]);
+  });
+
+  test("keeps delivery setup and preferences on the settings tab", async () => {
+    renderPage();
+    expect(await screen.findByText("Example · Debug · main")).toBeDefined();
+    expect(screen.queryByText("Notification types")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+
+    expect(screen.getByText("Notification types")).toBeDefined();
+    expect(screen.getByText("Subscribed browsers")).toBeDefined();
+    expect(screen.queryByText("Example · Debug · main")).toBeNull();
   });
 
   test("sends a test notification to a subscribed browser", async () => {
-    render(<NotificationsPage />);
+    renderPage();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
     expect(await screen.findByText("Chrome · macOS")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
@@ -363,7 +395,8 @@ describe("NotificationsPage", () => {
       ready: Promise.resolve({ pushManager: activePushManager }),
     } as unknown as ServiceWorkerContainer);
 
-    render(<NotificationsPage />);
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
     const subscribe = await screen.findByRole("button", { name: "Subscribe" });
     await waitFor(() => expect(subscribe.hasAttribute("disabled")).toBe(false));
     fireEvent.click(subscribe);
@@ -401,7 +434,8 @@ describe("NotificationsPage", () => {
       ready: Promise.resolve({ pushManager }),
     } as unknown as ServiceWorkerContainer);
 
-    render(<NotificationsPage />);
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
     const subscribe = await screen.findByRole("button", { name: "Subscribe" });
     await waitFor(() => expect(subscribe.hasAttribute("disabled")).toBe(false));
     fireEvent.click(subscribe);

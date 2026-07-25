@@ -641,6 +641,8 @@
     "pushChannel": "Push web",
     "toggleChannel": "Cambiar {channel} para {type}",
     "history": "Historial",
+    "settingsTab": "Configuración",
+    "refresh": "Actualizar",
     "historyCount": "{count, plural, one {# notificación} other {# notificaciones}}",
     "historyEmpty": "Todavía no hay notificaciones.",
     "notification": "Notificación",
@@ -712,12 +714,33 @@
       "RUN_RECOVERY_PAUSED": {
         "title": "Plan o sesión en pausa tras la recuperación",
         "description": "Un plan o una sesión gestionada se pausa tras reiniciarse su agente."
+      },
+      "WORKFLOW_MESSAGE": {
+        "title": "Mensaje de flujo de trabajo",
+        "description": "Un flujo de trabajo envía una notificación genérica."
+      },
+      "WORKFLOW_NEEDS_ATTENTION": {
+        "title": "El flujo de trabajo necesita atención",
+        "description": "Un flujo de trabajo espera datos o una decisión."
+      },
+      "WORKFLOW_COMPLETED": {
+        "title": "Flujo de trabajo completado",
+        "description": "Una ejecución de flujo de trabajo se completa correctamente."
+      },
+      "WORKFLOW_FAILED": {
+        "title": "Flujo de trabajo fallido",
+        "description": "Una ejecución de flujo de trabajo falla."
+      },
+      "WORKFLOW_RECOVERY_PAUSED": {
+        "title": "Flujo de trabajo en pausa tras la recuperación",
+        "description": "Un flujo de trabajo se pausa mientras recupera trabajo duradero."
       }
     },
     "categories": {
       "BUILDS": "Compilaciones",
       "GITHUB": "GitHub",
-      "RUNS": "Planes y sesiones"
+      "RUNS": "Planes y sesiones",
+      "WORKFLOWS": "Flujos de trabajo"
     }
   },
   "credentialEncryption": {

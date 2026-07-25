@@ -641,6 +641,8 @@
     "pushChannel": "Web-Push",
     "toggleChannel": "{channel} für {type} umschalten",
     "history": "Verlauf",
+    "settingsTab": "Einstellungen",
+    "refresh": "Aktualisieren",
     "historyCount": "{count, plural, one {# Benachrichtigung} other {# Benachrichtigungen}}",
     "historyEmpty": "Noch keine Benachrichtigungen.",
     "notification": "Benachrichtigung",
@@ -712,12 +714,33 @@
       "RUN_RECOVERY_PAUSED": {
         "title": "Plan oder Sitzung nach Wiederherstellung pausiert",
         "description": "Ein verwalteter Plan oder eine Sitzung wird nach einem Neustart des Agenten pausiert."
+      },
+      "WORKFLOW_MESSAGE": {
+        "title": "Workflow-Nachricht",
+        "description": "Ein Workflow sendet eine allgemeine Benachrichtigung."
+      },
+      "WORKFLOW_NEEDS_ATTENTION": {
+        "title": "Workflow braucht Aufmerksamkeit",
+        "description": "Ein Workflow wartet auf Daten oder eine Entscheidung."
+      },
+      "WORKFLOW_COMPLETED": {
+        "title": "Workflow abgeschlossen",
+        "description": "Ein Workflow-Lauf wird erfolgreich abgeschlossen."
+      },
+      "WORKFLOW_FAILED": {
+        "title": "Workflow fehlgeschlagen",
+        "description": "Ein Workflow-Lauf schlägt fehl."
+      },
+      "WORKFLOW_RECOVERY_PAUSED": {
+        "title": "Workflow nach Wiederherstellung pausiert",
+        "description": "Ein Workflow pausiert, während dauerhafte Arbeit wiederhergestellt wird."
       }
     },
     "categories": {
       "BUILDS": "Build-Prozesse",
       "GITHUB": "GitHub",
-      "RUNS": "Pläne und Sitzungen"
+      "RUNS": "Pläne und Sitzungen",
+      "WORKFLOWS": "Workflows"
     }
   },
   "credentialEncryption": {
