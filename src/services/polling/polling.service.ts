@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   DEFAULT_AGENT_JOB_RECONCILIATION_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract";
+import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   agentOnlineWindowMs,
@@ -200,6 +201,14 @@ export class PollingService {
               lastFetchError: true,
             },
           },
+          diskSpaceState: {
+            select: {
+              enabled: true,
+              lastReportedAt: true,
+              lastError: true,
+              volumesJson: true,
+            },
+          },
         },
       }),
       prisma.agentJob.groupBy({
@@ -252,6 +261,49 @@ export class PollingService {
           agentId: agent.id,
           agentName: agent.name,
           connection: online ? "ONLINE" : "OFFLINE",
+        },
+      });
+      const diskState = agent.diskSpaceState;
+      const diskEnabled = diskState?.enabled ?? true;
+      const diskReportedAt = diskState?.lastReportedAt ?? null;
+      let volumeCount = 0;
+      try {
+        const parsed: unknown = JSON.parse(diskState?.volumesJson ?? "[]");
+        volumeCount = Array.isArray(parsed) ? parsed.length : 0;
+      } catch {
+        volumeCount = 0;
+      }
+      agentViews.push({
+        id: `agent-disk-space:${agent.id}`,
+        kind: "AGENT_DISK_SPACE",
+        runtime: "AGENT",
+        status: diskEnabled
+          ? derivedStatus(
+              true,
+              false,
+              DISK_SPACE_POLL_INTERVAL_SECONDS,
+              diskReportedAt,
+              diskState?.lastError ?? null,
+            )
+          : "DISABLED",
+        enabled: diskEnabled,
+        cadenceSeconds: DISK_SPACE_POLL_INTERVAL_SECONDS,
+        lastStartedAt: null,
+        lastCompletedAt: iso(diskReportedAt),
+        lastSucceededAt: diskState?.lastError ? null : iso(diskReportedAt),
+        nextScheduledAt:
+          diskEnabled && diskReportedAt
+            ? new Date(
+                diskReportedAt.getTime() +
+                  DISK_SPACE_POLL_INTERVAL_SECONDS * 1_000,
+              ).toISOString()
+            : null,
+        durationMs: null,
+        lastError: diskState?.lastError ?? null,
+        details: {
+          agentId: agent.id,
+          agentName: agent.name,
+          volumes: volumeCount,
         },
       });
       agentViews.push({

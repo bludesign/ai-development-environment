@@ -45,11 +45,17 @@ import {
   BUILD_DATA_JOB_KINDS,
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
+  buildDataDeletePayload,
   buildDataScanPayload,
   buildDataTargetsPayload,
   parseDerivedDataLocationMode,
   type DerivedDataLocationMode,
 } from "@ai-development-environment/agent-contract/build-data";
+import {
+  DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB,
+  DISK_SPACE_STALE_AFTER_SECONDS,
+  type AgentDiskSpaceVolumeReport,
+} from "@ai-development-environment/agent-contract/disk-space";
 import {
   CODEBASE_BROWSE_JOB_KIND,
   CODEBASE_FETCH_JOB_KIND,
@@ -236,11 +242,12 @@ export function validateJob(kind: string, payload: unknown): void {
     buildDataScanPayload(value);
     return;
   }
-  if (
-    kind === BUILD_DATA_SIZE_JOB_KIND ||
-    kind === BUILD_DATA_DELETE_JOB_KIND
-  ) {
+  if (kind === BUILD_DATA_SIZE_JOB_KIND) {
     buildDataTargetsPayload(value);
+    return;
+  }
+  if (kind === BUILD_DATA_DELETE_JOB_KIND) {
+    buildDataDeletePayload(value);
     return;
   }
   if (kind === CODEBASE_BROWSE_JOB_KIND) {
@@ -533,6 +540,18 @@ export class AgentControlService {
     return supportedAgents.length;
   }
 
+  requestDiskSpacePoll(agentId: string): void {
+    agentEventBus.publish(agentEventsTopic(agentId), {
+      agentEvents: { type: "DISK_SPACE_POLL_REQUESTED", job: null },
+    });
+  }
+
+  requestAgentConfigurationRefresh(agentId: string): void {
+    agentEventBus.publish(agentEventsTopic(agentId), {
+      agentEvents: { type: "AGENT_CONFIGURATION_CHANGED", job: null },
+    });
+  }
+
   private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
     await this.completionHandlers.get(job.kind)?.(job);
     await Promise.allSettled(
@@ -805,6 +824,7 @@ export class AgentControlService {
       data: { baseRepoDirectory },
     });
     publishAgent(agent);
+    this.requestAgentConfigurationRefresh(agentId);
     return agent;
   }
 
@@ -825,6 +845,7 @@ export class AgentControlService {
       data: { buildsDirectory },
     });
     publishAgent(agent);
+    this.requestAgentConfigurationRefresh(agentId);
     return agent;
   }
 
@@ -872,6 +893,7 @@ export class AgentControlService {
       },
     });
     publishAgent(agent);
+    this.requestAgentConfigurationRefresh(agentId);
     return agent;
   }
 
@@ -987,6 +1009,59 @@ export class AgentControlService {
 
   async claimJob(agentId: string, jobId: string) {
     const prisma = await getPrismaClient();
+    await prisma.derivedDataCleanupLease.deleteMany({
+      where: { expiresAt: { lte: new Date() } },
+    });
+    const queued = await prisma.agentJob.findUnique({
+      where: { id: jobId },
+      select: { agentId: true, status: true, worktreeId: true, kind: true },
+    });
+    if (!queued || queued.agentId !== agentId) {
+      throw new Error("Job not found for this agent");
+    }
+    if (queued.status === "QUEUED" && queued.worktreeId) {
+      const lease = await prisma.derivedDataCleanupLease.findUnique({
+        where: { worktreeId: queued.worktreeId },
+      });
+      if (lease) {
+        throw new Error(
+          "Derived Data cleanup is in progress for this worktree; try again shortly",
+        );
+      }
+    }
+    if (queued.status === "QUEUED" && queued.kind === IOS_BUILD_JOB_KIND) {
+      const [diskState, diskSettings] = await Promise.all([
+        prisma.agentDiskSpaceState.findUnique({ where: { agentId } }),
+        prisma.diskSpaceSettings.findUnique({ where: { id: "default" } }),
+      ]);
+      if (
+        diskState?.enabled &&
+        diskState.lastReportedAt &&
+        !diskState.lastError &&
+        Date.now() - diskState.lastReportedAt.getTime() <=
+          DISK_SPACE_STALE_AFTER_SECONDS * 1_000
+      ) {
+        let volumes: AgentDiskSpaceVolumeReport[] = [];
+        try {
+          const parsed: unknown = JSON.parse(diskState.volumesJson);
+          if (Array.isArray(parsed)) {
+            volumes = parsed as AgentDiskSpaceVolumeReport[];
+          }
+        } catch {
+          // Malformed telemetry fails open like unavailable telemetry.
+        }
+        const thresholdGiB =
+          diskSettings?.pressureThresholdGiB ??
+          DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB;
+        if (
+          volumes.some((volume) => volume.freeBytes <= thresholdGiB * 1024 ** 3)
+        ) {
+          throw new Error(
+            `New builds are paused because this agent has ${thresholdGiB} GiB or less free disk space`,
+          );
+        }
+      }
+    }
     const claimed = await prisma.agentJob.updateMany({
       where: { id: jobId, agentId, status: "QUEUED" },
       data: { status: "RUNNING", startedAt: new Date() },
@@ -1102,6 +1177,9 @@ export class AgentControlService {
         ? { status: "CANCELLING" }
         : { status: "CANCELLED", finishedAt: new Date() },
     });
+    if (updated.status === "CANCELLED") {
+      await this.projectCompletion(updated);
+    }
     publishJob(updated);
     agentEventBus.publish(agentEventsTopic(job.agentId), {
       agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
@@ -1128,6 +1206,7 @@ export class AgentControlService {
         where: { id: job.id },
       });
       if (!updated) continue;
+      await this.projectCompletion(updated);
       timedOut.push(updated);
       publishJob(updated);
       agentEventBus.publish(agentEventsTopic(updated.agentId), {
@@ -1157,6 +1236,7 @@ export class AgentControlService {
         where: { id: job.id },
       });
       if (!updated) continue;
+      await this.projectCompletion(updated);
       timedOut.push(updated);
       publishJob(updated);
       agentEventBus.publish(agentEventsTopic(updated.agentId), {

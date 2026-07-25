@@ -17,6 +17,8 @@ import { JobExecutor } from "./job-executor.js";
 import { CodebaseMonitor } from "./codebase-monitor.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
 import { RunManager } from "./runs/run-manager.js";
+import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
+import { collectAgentDiskSpace } from "./handlers/build-data.js";
 
 function configuredIntervalMs(
   value: number,
@@ -53,6 +55,9 @@ export async function runAgent(
   let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
   let jobReconciliationTimer: ReturnType<typeof setTimeout> | undefined;
   let codebaseTimer: ReturnType<typeof setTimeout> | undefined;
+  let diskSpaceTimer: ReturnType<typeof setTimeout> | undefined;
+  let diskSpaceRunning = false;
+  let diskSpaceIntervalMs = DISK_SPACE_POLL_INTERVAL_SECONDS * 1_000;
   let startupRecoveryPending = true;
   const interruptedJobs = new Set<string>();
 
@@ -215,11 +220,49 @@ export async function runAgent(
     void reconcileCodebases();
   };
 
+  const scheduleDiskSpacePoll = () => {
+    if (diskSpaceTimer) clearTimeout(diskSpaceTimer);
+    if (!signal.aborted) {
+      diskSpaceTimer = setTimeout(
+        () => void runDiskSpacePoll(),
+        diskSpaceIntervalMs,
+      );
+    }
+  };
+  const runDiskSpacePoll = async () => {
+    if (diskSpaceRunning || signal.aborted) return;
+    diskSpaceRunning = true;
+    if (diskSpaceTimer) clearTimeout(diskSpaceTimer);
+    diskSpaceTimer = undefined;
+    try {
+      const configuration = await client.diskSpaceConfiguration();
+      diskSpaceIntervalMs = Math.max(
+        1_000,
+        configuration.pollIntervalSeconds * 1_000,
+      );
+      if (configuration.enabled) {
+        const report = await collectAgentDiskSpace(configuration, signal);
+        await client.reportDiskSpace(report);
+      }
+    } catch (error) {
+      if (!signal.aborted) {
+        console.error(
+          "Disk space poll failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    } finally {
+      diskSpaceRunning = false;
+      scheduleDiskSpacePoll();
+    }
+  };
+
   await refreshCadence();
   await heartbeat();
   await runJobReconciliation();
   await runManager.start();
   void reconcileCodebases();
+  void runDiskSpacePoll();
 
   const subscriptionClient = createAgentSubscriptionClient(config);
   const unsubscribe = subscribeToAgentEvents(
@@ -233,11 +276,14 @@ export async function runAgent(
         requestCodebaseReconcile();
       } else if (event.type === "RUN_COMMAND_AVAILABLE") {
         runManager.execute(event.runCommand);
+      } else if (event.type === "DISK_SPACE_POLL_REQUESTED") {
+        void runDiskSpacePoll();
       } else {
         void refreshCadence().then(() => {
           scheduleHeartbeat();
           scheduleJobReconciliation();
           requestCodebaseReconcile();
+          void runDiskSpacePoll();
         });
       }
     },
@@ -251,6 +297,7 @@ export async function runAgent(
   if (heartbeatTimer) clearTimeout(heartbeatTimer);
   if (jobReconciliationTimer) clearTimeout(jobReconciliationTimer);
   if (codebaseTimer) clearTimeout(codebaseTimer);
+  if (diskSpaceTimer) clearTimeout(diskSpaceTimer);
   unsubscribe();
   await subscriptionClient.dispose();
   await executor.cancelAll();

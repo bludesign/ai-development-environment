@@ -50,6 +50,7 @@ import {
 } from "@/lib/workflows/kinds";
 import {
   agentEventBus,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   type AgentControlService,
 } from "@/services/agent-control";
 import type { CredentialService } from "@/services/credentials";
@@ -228,6 +229,9 @@ function publishRunChanged(runId: string): void {
   agentEventBus.publish(runTopic(runId), payload);
   agentEventBus.publish(WORKFLOWS_CHANGED_TOPIC, {
     workflowChanged: { id: "runs", runId },
+  });
+  agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+    sidebarStatusChanged: true,
   });
 }
 

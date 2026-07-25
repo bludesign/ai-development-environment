@@ -130,6 +130,21 @@ describe("agent job validation", () => {
     expect(() =>
       validateJob("buildData.delete", { targets: [{ path: "/tmp/App" }] }),
     ).toThrow("rootPath");
+    expect(() =>
+      validateJob("buildData.delete", {
+        source: "AUTOMATIC",
+        targets: [
+          {
+            path: "/DerivedData/App",
+            rootPath: "/DerivedData",
+            name: "App",
+            kind: "PROJECT",
+            worktreeId: "worktree-1",
+            worktreePath: "/worktrees/App",
+          },
+        ],
+      }),
+    ).not.toThrow();
   });
 });
 

@@ -16,6 +16,10 @@ import type {
 } from "@ai-development-environment/agent-contract/worktrees";
 import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
 import type { BuildLogChunk } from "@ai-development-environment/agent-contract/builds";
+import type {
+  AgentDiskSpaceConfiguration,
+  AgentDiskSpaceReport,
+} from "@ai-development-environment/agent-contract/disk-space";
 
 export type AgentJob = {
   id: string;
@@ -93,7 +97,10 @@ export type AgentEvent =
       job: AgentJob;
     }
   | {
-      type: "CODEBASE_RECONCILE_REQUESTED" | "AGENT_CONFIGURATION_CHANGED";
+      type:
+        | "CODEBASE_RECONCILE_REQUESTED"
+        | "AGENT_CONFIGURATION_CHANGED"
+        | "DISK_SPACE_POLL_REQUESTED";
       job: null;
       runCommand?: null;
     }
@@ -272,6 +279,28 @@ export class AgentGraphQLClient {
           defaultBuildsDirectory,
         },
       },
+    );
+  }
+
+  async diskSpaceConfiguration(): Promise<AgentDiskSpaceConfiguration> {
+    const data = await this.request<{
+      agentDiskSpaceConfiguration: AgentDiskSpaceConfiguration;
+    }>(`query AgentDiskSpaceConfiguration {
+      agentDiskSpaceConfiguration {
+        enabled pollIntervalSeconds baseRepoDirectory
+        derivedDataLocationMode derivedDataPath
+        worktrees { id folder }
+      }
+    }`);
+    return data.agentDiskSpaceConfiguration;
+  }
+
+  reportDiskSpace(input: AgentDiskSpaceReport) {
+    return this.request<{ reportAgentDiskSpace: boolean }>(
+      `mutation ReportAgentDiskSpace($input: AgentDiskSpaceReportInput!) {
+        reportAgentDiskSpace(input: $input)
+      }`,
+      { input },
     );
   }
 

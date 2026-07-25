@@ -41,6 +41,7 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
+import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
 import {
   Sidebar,
   SidebarContent,
@@ -48,6 +49,7 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarFooter,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -820,6 +822,9 @@ function NavigationSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="p-0">
+        <SidebarStatusFooter />
+      </SidebarFooter>
     </Sidebar>
   );
 }

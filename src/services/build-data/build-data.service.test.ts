@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+vi.mock("@/services/disk-space/executing-work", () => ({
+  executingResourcesByWorktree: vi.fn(
+    async (ids: string[]) => new Map(ids.map((id) => [id, []])),
+  ),
+}));
 
 import type { AgentControlService } from "@/services/agent-control";
 
@@ -33,6 +38,10 @@ function agent() {
     updatedAt: new Date(0),
   };
 }
+
+const unlockedEntries = () => ({
+  derivedDataLock: { findMany: vi.fn().mockResolvedValue([]) },
+});
 
 function collectionWithOperation(operation?: {
   id: string;
@@ -166,6 +175,7 @@ describe("BuildDataService", () => {
       ],
     };
     const prisma = {
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -240,6 +250,7 @@ describe("BuildDataService", () => {
   test("rejects operations when an agent went offline after its scan", async () => {
     const collection = collectionWithOperation();
     const prisma = {
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -290,6 +301,7 @@ describe("BuildDataService", () => {
   ])("surfaces an invalid $kind result on its target entry", async (input) => {
     const collection = collectionWithOperation({ id: "operation-1", ...input });
     getPrismaClient.mockResolvedValue({
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },

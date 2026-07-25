@@ -3,9 +3,11 @@
 import {
   Calculator,
   Check,
+  Lock,
   MoreHorizontal,
   RefreshCw,
   Trash2,
+  Unlock,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -20,6 +22,7 @@ import {
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { DiskSpaceMonitor } from "@/components/disk-space/disk-space-monitor";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -91,6 +94,15 @@ type DerivedDataEntry = {
   operation: "IDLE" | "SIZING" | "DELETING";
   error: string | null;
   agent: Agent;
+  modifiedAt?: string | null;
+  volumeId?: string | null;
+  locked?: boolean;
+  activeResources?: Array<{
+    kind: string;
+    id: string;
+    label: string;
+    href: string;
+  }>;
 };
 
 type DerivedDataCollection = {
@@ -128,6 +140,7 @@ const COLLECTION_FIELDS = `
   }
   entries {
     id name kind status workspacePath worktreeId worktreePath sizeBytes operation error
+    modifiedAt volumeId locked activeResources { kind id label href }
     agent { ${AGENT_FIELDS} }
   }
 `;
@@ -287,6 +300,7 @@ export function BuildDataPage() {
   const runOperation = async (
     operation: "calculateDerivedDataSizes" | "deleteDerivedDataEntries",
     entryIds: string[],
+    overrideProtection = false,
   ) => {
     if (!collection) return;
     setOperationBusy(true);
@@ -295,12 +309,25 @@ export function BuildDataPage() {
       const data = await controlPlaneRequest<
         Record<string, DerivedDataCollection>
       >(
-        `mutation BuildDataOperation($collectionId: ID!, $entryIds: [ID!]!, $requestId: ID!) {
-          ${operation}(collectionId: $collectionId, entryIds: $entryIds, requestId: $requestId) {
+        `mutation BuildDataOperation($collectionId: ID!, $entryIds: [ID!]!, $requestId: ID!${
+          operation === "deleteDerivedDataEntries"
+            ? ", $overrideProtection: Boolean"
+            : ""
+        }) {
+          ${operation}(collectionId: $collectionId, entryIds: $entryIds, requestId: $requestId${
+            operation === "deleteDerivedDataEntries"
+              ? ", overrideProtection: $overrideProtection"
+              : ""
+          }) {
             ${COLLECTION_FIELDS}
           }
         }`,
-        { collectionId: collection.id, entryIds, requestId: createClientId() },
+        {
+          collectionId: collection.id,
+          entryIds,
+          requestId: createClientId(),
+          overrideProtection,
+        },
       );
       applyCollection(data[operation]);
       if (operation === "deleteDerivedDataEntries") {
@@ -352,7 +379,49 @@ export function BuildDataPage() {
       armedDeleteTimer.current = null;
     }
     setArmedDeleteKey(null);
-    void runOperation("deleteDerivedDataEntries", entryIds);
+    const protectedEntries = allEntries.filter(
+      (entry) =>
+        entryIds.includes(entry.id) &&
+        (entry.locked || (entry.activeResources?.length ?? 0) > 0),
+    );
+    if (protectedEntries.length) {
+      const details = protectedEntries
+        .map((entry) => {
+          const resources = entry.activeResources
+            ?.map((item) => item.label)
+            .join(", ");
+          return `${entry.name}${entry.locked ? " (locked)" : ""}${resources ? ` (${resources})` : ""}`;
+        })
+        .join("\n");
+      if (!window.confirm(t("protectedDeleteWarning", { details }))) return;
+    }
+    void runOperation(
+      "deleteDerivedDataEntries",
+      entryIds,
+      protectedEntries.length > 0,
+    );
+  };
+
+  const setLocked = async (entry: DerivedDataEntry, locked: boolean) => {
+    if (!collection) return;
+    setOperationBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        setDerivedDataEntryLocked: DerivedDataCollection;
+      }>(
+        `mutation SetDerivedDataEntryLocked($collectionId: ID!, $entryId: ID!, $locked: Boolean!) {
+          setDerivedDataEntryLocked(collectionId: $collectionId, entryId: $entryId, locked: $locked) {
+            ${COLLECTION_FIELDS}
+          }
+        }`,
+        { collectionId: collection.id, entryId: entry.id, locked },
+      );
+      applyCollection(data.setDerivedDataEntryLocked);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setOperationBusy(false);
+    }
   };
 
   const groupedHistory = useMemo(() => {
@@ -417,6 +486,8 @@ export function BuildDataPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      <DiskSpaceMonitor />
 
       {collection && <ProgressPanel collection={collection} />}
 
@@ -486,6 +557,7 @@ export function BuildDataPage() {
                     </TableHead>
                     <TableHead>{t("folder")}</TableHead>
                     <TableHead>{t("worktree")}</TableHead>
+                    <TableHead>{t("modified")}</TableHead>
                     <TableHead>{t("size")}</TableHead>
                     <TableHead>{t("agent")}</TableHead>
                     <TableHead className="w-12 text-right">
@@ -522,7 +594,26 @@ export function BuildDataPage() {
                             </Badge>
                           )}
                           {entry.operation !== "IDLE" && <Spinner />}
+                          {entry.locked && (
+                            <Badge variant="outline">
+                              <Lock /> {t("locked")}
+                            </Badge>
+                          )}
                         </div>
+                        {(entry.activeResources?.length ?? 0) > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.activeResources?.map((resource) => (
+                              <Link
+                                href={resource.href}
+                                key={`${resource.kind}:${resource.id}`}
+                              >
+                                <Badge variant="secondary">
+                                  {resource.label}
+                                </Badge>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
                         {entry.error && (
                           <p className="mt-1 text-xs text-destructive">
                             {entry.error}
@@ -537,6 +628,13 @@ export function BuildDataPage() {
                           >
                             {entry.worktreePath}
                           </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {entry.modifiedAt ? (
+                          <DateTime value={entry.modifiedAt} />
                         ) : (
                           "—"
                         )}
@@ -580,6 +678,14 @@ export function BuildDataPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                void setLocked(entry, !entry.locked)
+                              }
+                            >
+                              {entry.locked ? <Unlock /> : <Lock />}
+                              {entry.locked ? t("unlock") : t("lock")}
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               onSelect={(event) => {
                                 if (armedDeleteKey !== `row:${entry.id}`) {

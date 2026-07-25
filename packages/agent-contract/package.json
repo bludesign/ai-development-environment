@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./build-data": "./src/build-data.ts",
+    "./disk-space": "./src/disk-space.ts",
     "./builds": "./src/builds.ts",
     "./codebases": "./src/codebases.ts",
     "./commands": "./src/commands.ts",

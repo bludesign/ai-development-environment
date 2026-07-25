@@ -61,11 +61,34 @@ export const createBuildDataResolvers = (service: BuildDataService) => ({
         collectionId,
         entryIds,
         requestId,
-      }: { collectionId: string; entryIds: string[]; requestId: string },
+        overrideProtection,
+      }: {
+        collectionId: string;
+        entryIds: string[];
+        requestId: string;
+        overrideProtection?: boolean;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.deleteEntries(collectionId, entryIds, requestId);
+      return service.deleteEntries(
+        collectionId,
+        entryIds,
+        requestId,
+        overrideProtection,
+      );
+    },
+    setDerivedDataEntryLocked: (
+      _root: unknown,
+      {
+        collectionId,
+        entryId,
+        locked,
+      }: { collectionId: string; entryId: string; locked: boolean },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.setEntryLocked(collectionId, entryId, locked);
     },
     clearDerivedDataDeletionHistory: (
       _root: unknown,
