@@ -169,6 +169,57 @@ afterEach(() => {
 });
 
 describe("CommandRunPage", () => {
+  test("initializes output after a delayed run load mounts the terminal", async () => {
+    let resolveRun: (value: { commandRun: typeof run }) => void = () =>
+      undefined;
+    const runDetail = new Promise<{ commandRun: typeof run }>((resolve) => {
+      resolveRun = resolve;
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) return runDetail as never;
+      if (query.includes("CommandOutput")) {
+        return {
+          commandRunOutput: [
+            {
+              id: "delayed-chunk",
+              attemptId: "attempt-1",
+              attemptNumber: 1,
+              sequence: 0,
+              stream: "STDOUT",
+              dataBase64: Buffer.from("delayed output\n").toString("base64"),
+              byteLength: 15,
+              createdAt: timestamp,
+            },
+          ],
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(([query]) =>
+          String(query).includes("CommandRunDetail"),
+        ),
+      ).toBe(true),
+    );
+    expect(terminalOptions).not.toHaveBeenCalled();
+
+    resolveRun({ commandRun: run });
+
+    expect(await screen.findByText("Color output")).toBeDefined();
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls.some(
+          ([value]) =>
+            value instanceof Uint8Array &&
+            Buffer.from(value).toString("utf8") === "delayed output\n",
+        ),
+      ).toBe(true),
+    );
+  });
+
   test("writes ordered raw ANSI and split UTF-8 bytes to xterm", async () => {
     render(<CommandRunPage runId="run-1" />);
     expect(await screen.findByText("Color output")).toBeDefined();

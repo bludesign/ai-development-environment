@@ -2,6 +2,7 @@
 
 import {
   Archive,
+  CircleStop,
   FilePenLine,
   MoreHorizontal,
   Play,
@@ -9,7 +10,6 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Square,
   TerminalSquare,
   Trash2,
   Undo2,
@@ -541,7 +541,7 @@ export function CommandsPage() {
                                   )
                                 }
                               >
-                                <Square />
+                                <CircleStop />
                                 {t("terminate")}
                               </DropdownMenuItem>
                             ) : (

@@ -450,20 +450,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{commandsT("commandQuickActions")}</CardTitle>
-          <CardDescription>
-            {commandsT("agentQuickActionsDescription")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <CommandQuickActions
-            agentCapabilities={agent.capabilities}
-            agentId={agent.id}
-          />
-        </CardContent>
-      </Card>
+      <CommandQuickActions
+        agentCapabilities={agent.capabilities}
+        agentId={agent.id}
+        description={commandsT("agentQuickActionsDescription")}
+        title={commandsT("commandQuickActions")}
+      />
 
       <CommandResourcePanel
         agentCapabilities={agent.capabilities}

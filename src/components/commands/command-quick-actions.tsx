@@ -7,6 +7,13 @@ import { useEffect, useState } from "react";
 import { ConfigurationIcon } from "@/components/builds/configuration-icon";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -17,10 +24,14 @@ export function CommandQuickActions({
   agentId,
   worktreeId,
   agentCapabilities,
+  title,
+  description,
 }: {
   agentId?: string;
   worktreeId?: string;
   agentCapabilities: string[];
+  title?: string;
+  description?: string;
 }) {
   const t = useTranslations("commands");
   const [commands, setCommands] = useState<CommandDefinition[]>([]);
@@ -82,7 +93,7 @@ export function CommandQuickActions({
   };
 
   if (!commands.length && !error) return null;
-  return (
+  const actions = (
     <div
       className="w-full space-y-2"
       onClick={(event) => event.stopPropagation()}
@@ -150,6 +161,16 @@ export function CommandQuickActions({
         </Alert>
       )}
     </div>
+  );
+  if (!title) return actions;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+      </CardHeader>
+      <CardContent>{actions}</CardContent>
+    </Card>
   );
 }
 

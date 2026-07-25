@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, TerminalSquare } from "lucide-react";
+import { Play } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
@@ -97,10 +97,7 @@ export function CommandResourcePanel({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <TerminalSquare />
-              {t("title")}
-            </CardTitle>
+            <CardTitle>{t("title")}</CardTitle>
             <CardDescription>
               {t(
                 agentId

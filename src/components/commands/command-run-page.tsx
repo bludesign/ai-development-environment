@@ -72,7 +72,9 @@ function decodeBase64(value: string): Uint8Array {
 export function CommandRunPage({ runId }: { runId: string }) {
   const t = useTranslations("commands");
   const router = useRouter();
-  const terminalElement = useRef<HTMLDivElement>(null);
+  const [terminalElement, setTerminalElement] = useState<HTMLDivElement | null>(
+    null,
+  );
   const terminalRef = useRef<import("@xterm/xterm").Terminal | null>(null);
   const fitRef = useRef<import("@xterm/addon-fit").FitAddon | null>(null);
   const followRef = useRef(true);
@@ -116,6 +118,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
   );
 
   useEffect(() => {
+    if (!terminalElement) return;
     let cancelled = false;
     let observer: ResizeObserver | null = null;
     let scrollDisposable: { dispose(): void } | null = null;
@@ -123,7 +126,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
     lastAttemptRef.current = 0;
     void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
       ([{ Terminal }, { FitAddon }]) => {
-        if (cancelled || !terminalElement.current) return;
+        if (cancelled) return;
         const terminal = new Terminal({
           convertEol: true,
           cursorBlink: false,
@@ -141,7 +144,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
         });
         const fit = new FitAddon();
         terminal.loadAddon(fit);
-        terminal.open(terminalElement.current);
+        terminal.open(terminalElement);
         fit.fit();
         terminalRef.current = terminal;
         fitRef.current = fit;
@@ -152,7 +155,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
           setFollow(atBottom);
         });
         observer = new ResizeObserver(() => fit.fit());
-        observer.observe(terminalElement.current);
+        observer.observe(terminalElement);
         void (async () => {
           let afterAttempt = 0;
           let afterSequence = -1;
@@ -185,7 +188,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [runId, writeChunk]);
+  }, [runId, terminalElement, writeChunk]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadRun(), 0);
@@ -433,7 +436,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
         </CardHeader>
         <div
           className="h-[min(60vh,42rem)] bg-[#09090b] p-2"
-          ref={terminalElement}
+          ref={setTerminalElement}
         />
       </Card>
       <Card className="gap-0 py-0">
