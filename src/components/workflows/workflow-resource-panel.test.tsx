@@ -1,4 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -30,7 +36,10 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 vi.mock("./workflow-labels", () => ({
-  useWorkflowLabels: () => ({ status: (status: string) => status }),
+  useWorkflowLabels: () => ({
+    status: (status: string) => status,
+    kind: (kind: string) => kind,
+  }),
 }));
 
 vi.mock("./workflow-graph", () => ({
@@ -120,5 +129,108 @@ describe("linked workflow resource highlighting", () => {
     expect(
       await screen.findByText("Highlighted: resource-trigger"),
     ).toBeTruthy();
+  });
+});
+
+describe("answering a waiting workflow from a resource page", () => {
+  const waitingRun = {
+    ...linkedRun,
+    status: "WAITING",
+    attempts: [
+      {
+        ...linkedRun.attempts[0],
+        kind: "HUMAN_CONFIRM",
+        questionBatches: [
+          {
+            id: "batch-1",
+            status: "PENDING",
+            questions: [
+              {
+                id: "question-1",
+                prompt: "Deploy to production?",
+                multiSelect: false,
+                allowCustom: false,
+                options: [
+                  { id: "confirm", label: "Confirm" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("submits the picked option without leaving the page", async () => {
+    request.mockResolvedValue({
+      workflowRunsForResource: [waitingRun],
+      workflowsAcceptingResource: [],
+    });
+
+    render(
+      <WorkflowResourcePanel
+        resourceId="AIDE-1"
+        resourceKind="JIRA_TICKET"
+        sessionData={{}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation AnswerWorkflowQuestion"),
+        {
+          batchId: "batch-1",
+          answers: { "question-1": { answers: ["Confirm"] } },
+        },
+      ),
+    );
+  });
+
+  test("sends people to the run page when a question needs typing", async () => {
+    request.mockResolvedValue({
+      workflowRunsForResource: [
+        {
+          ...waitingRun,
+          attempts: [
+            {
+              ...waitingRun.attempts[0],
+              kind: "HUMAN_CHOICE",
+              questionBatches: [
+                {
+                  id: "batch-2",
+                  status: "PENDING",
+                  questions: [
+                    {
+                      id: "question-2",
+                      prompt: "What should change?",
+                      multiSelect: false,
+                      allowCustom: true,
+                      options: [],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      workflowsAcceptingResource: [],
+    });
+
+    render(
+      <WorkflowResourcePanel
+        resourceId="AIDE-1"
+        resourceKind="JIRA_TICKET"
+        sessionData={{}}
+      />,
+    );
+
+    const link = await screen.findByRole("link", {
+      name: "Answer on the run page",
+    });
+    expect(link.getAttribute("href")).toBe("/workflows/runs/workflow-run-1");
   });
 });

@@ -85,7 +85,10 @@ test("starts a selected worktree quick action and links to the run", async () =>
 });
 
 test("hides the view button five seconds after the run starts", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  // A frozen clock, deliberately: `shouldAdvanceTime` would tick the hide timer
+  // along with real time, so the 4999ms assertion below raced the machine and
+  // failed whenever the surrounding suite made the render slow.
+  vi.useFakeTimers();
   vi.mocked(controlPlaneRequest).mockResolvedValue({
     triggerWorkflow: { id: "run-1" },
   } as never);

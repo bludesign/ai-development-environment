@@ -1535,6 +1535,15 @@ export class WorkflowsService {
           orderBy: [{ generation: "asc" }, { createdAt: "asc" }],
           include: {
             resourceLinks: { orderBy: { createdAt: "asc" } },
+            questionBatches: {
+              orderBy: { createdAt: "asc" },
+              include: {
+                questions: {
+                  orderBy: { position: "asc" },
+                  include: { options: { orderBy: { position: "asc" } } },
+                },
+              },
+            },
           },
         },
         resourceLinks: { orderBy: { createdAt: "asc" } },

@@ -15,13 +15,7 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import {
-  Copy,
-  ExternalLink,
-  Pencil,
-  RotateCcw,
-  Trash2,
-} from "lucide-react";
+import { Copy, ExternalLink, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,

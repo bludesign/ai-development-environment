@@ -32,6 +32,7 @@ import { currentPageWorkflowNodeIds } from "@/lib/workflows/resource-navigation"
 
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
+import { WorkflowQuestionActions } from "./workflow-question-actions";
 import type { WorkflowRun } from "./types";
 
 type AcceptedWorkflow = {
@@ -47,7 +48,14 @@ const LINKED_RUN_FIELDS = `
   workflow { id name }
   trigger { nodeId }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
-  attempts { id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt resourceLinks { id attemptId kind resourceId label url metadata createdAt } }
+  attempts {
+    id nodeId kind generation iterationKey attempt status phase input output error startedAt finishedAt supersededAt
+    resourceLinks { id attemptId kind resourceId label url metadata createdAt }
+    questionBatches {
+      id status
+      questions { id header prompt multiSelect options { id label description } }
+    }
+  }
   resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
@@ -203,6 +211,7 @@ export function WorkflowResourcePanel({
                 </Link>
               </Button>
             </div>
+            <WorkflowQuestionActions onAnswered={load} run={current} />
             <WorkflowGraph
               attempts={current.attempts}
               compact

@@ -91,9 +91,7 @@ describe("workflow resource graph projection", () => {
               value: { jobId: "job-1" },
               sessionPatch: { worktree: { id: "worktree-1" } },
             },
-            resourceLinks: [
-              { kind: "AGENT_JOB", resourceId: "job-1" },
-            ],
+            resourceLinks: [{ kind: "AGENT_JOB", resourceId: "job-1" }],
           },
         ],
         resourceLinks: [],

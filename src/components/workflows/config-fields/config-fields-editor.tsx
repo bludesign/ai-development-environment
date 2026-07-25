@@ -52,6 +52,22 @@ import {
 } from "@/components/ui/tooltip";
 import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
+import {
+  parseChoiceOptions,
+  serializeChoiceOptions,
+  type ChoiceOptionRow,
+} from "./choice-options";
+import {
+  CONDITION_OPERATORS,
+  conditionOperatorTakesValue,
+  conditionValueText,
+  parseConditionDraft,
+  parseConditionValue,
+  serializeConditionDraft,
+  type ConditionDraft,
+  type ConditionOperatorKey,
+  type ConditionRow,
+} from "./condition";
 import { getConfigDescriptor } from "./descriptors";
 import type { ConfigFieldDescriptor, ConfigFieldScope } from "./types";
 import { useResourceOptions } from "./use-resource-options";
@@ -541,6 +557,291 @@ function JsonField({ field, value, onChange }: FieldProps) {
   );
 }
 
+/**
+ * Row-per-comparison builder for an if / wait-until condition. The stored shape
+ * is a nested boolean tree, but the shape people actually write is a flat list
+ * of "session value / operator / value" rows joined by all-or-any, so that is
+ * what the form edits. Anything richer than that — a nested group, a left side
+ * that is not a session binding — falls back to the JSON control rather than
+ * being rewritten into something the builder can draw.
+ */
+function ConditionField(props: FieldProps) {
+  const { field, value, onChange, sessionPaths } = props;
+  const t = useTranslations("workflows");
+  const draft = parseConditionDraft(value);
+  const sessionOptions = sessionPaths.map(({ path, description }) => ({
+    value: path,
+    label: path,
+    description,
+  }));
+
+  if (!draft) {
+    return (
+      <div className="space-y-1.5">
+        <JsonField {...props} />
+        <FieldDescription className="text-[10px]">
+          {t("conditionAdvanced")}
+        </FieldDescription>
+      </div>
+    );
+  }
+
+  const commit = (next: ConditionDraft) =>
+    onChange(serializeConditionDraft(next));
+  const patchRow = (index: number, changes: Partial<ConditionRow>) =>
+    commit({
+      ...draft,
+      rows: draft.rows.map((row, position) =>
+        position === index ? { ...row, ...changes } : row,
+      ),
+    });
+
+  return (
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      {draft.rows.length > 1 && (
+        <Select
+          onValueChange={(mode) =>
+            commit({ ...draft, mode: mode === "ANY" ? "ANY" : "ALL" })
+          }
+          value={draft.mode}
+        >
+          <SelectTrigger
+            aria-label={t("conditionMatchMode")}
+            className="w-full"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{t("conditionMatchAll")}</SelectItem>
+            <SelectItem value="ANY">{t("conditionMatchAny")}</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      <FieldGroup className="gap-1.5">
+        {draft.rows.map((row, index) => (
+          <div className="space-y-1.5 rounded-lg border p-2" key={index}>
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <SearchableSelect
+                  allowCustomValue
+                  ariaLabel={t("conditionField")}
+                  emptyMessage={t("noOptions")}
+                  onValueChange={(path) => patchRow(index, { path })}
+                  options={sessionOptions}
+                  placeholder={t("sessionPathPlaceholder")}
+                  searchPlaceholder={t("searchPlaceholder")}
+                  value={row.path}
+                />
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("removeRow")}
+                    className="size-7 shrink-0"
+                    onClick={() =>
+                      commit({
+                        ...draft,
+                        rows: draft.rows.filter(
+                          (_entry, position) => position !== index,
+                        ),
+                      })
+                    }
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("removeRow")}</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex items-center gap-2">
+              <Select
+                onValueChange={(operator) =>
+                  patchRow(index, {
+                    operator: operator as ConditionOperatorKey,
+                  })
+                }
+                value={row.operator}
+              >
+                <SelectTrigger
+                  aria-label={t("conditionOperator")}
+                  className="w-40 shrink-0"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONDITION_OPERATORS.map((operator) => (
+                    <SelectItem key={operator.value} value={operator.value}>
+                      {t(`conditionOperators.${operator.value}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {conditionOperatorTakesValue(row.operator) && (
+                <>
+                  {isSessionBinding(row.value) ? (
+                    <div className="min-w-0 flex-1">
+                      <SearchableSelect
+                        allowCustomValue
+                        ariaLabel={t("sessionBindingLabel")}
+                        emptyMessage={t("noOptions")}
+                        onValueChange={(path) =>
+                          patchRow(index, {
+                            value: { source: "SESSION", path },
+                          })
+                        }
+                        options={sessionOptions}
+                        placeholder={t("sessionPathPlaceholder")}
+                        searchPlaceholder={t("searchPlaceholder")}
+                        value={row.value.path}
+                      />
+                    </div>
+                  ) : (
+                    <Input
+                      aria-label={t("conditionValue")}
+                      className="min-w-0 flex-1"
+                      onChange={(event) =>
+                        patchRow(index, {
+                          value: parseConditionValue(event.target.value),
+                        })
+                      }
+                      placeholder={t("conditionValuePlaceholder")}
+                      value={conditionValueText(row.value)}
+                    />
+                  )}
+                  <ValueModeToggle
+                    mode={isSessionBinding(row.value) ? "session" : "literal"}
+                    onValueChange={(mode) =>
+                      patchRow(index, {
+                        value:
+                          mode === "session"
+                            ? { source: "SESSION", path: "" }
+                            : "",
+                      })
+                    }
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </FieldGroup>
+      <Button
+        onClick={() =>
+          commit({
+            ...draft,
+            rows: [...draft.rows, { path: "", operator: "EQ", value: "" }],
+          })
+        }
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Plus className="size-3.5" /> {t("addCondition")}
+      </Button>
+      <FieldDescription className="text-[10px]">
+        {draft.rows.length ? t("conditionHelp") : t("conditionEmpty")}
+      </FieldDescription>
+    </Field>
+  );
+}
+
+/**
+ * The buttons a `HUMAN_CHOICE` step offers, edited as labelled rows instead of
+ * an options array typed as JSON. Entries the runtime would not accept as
+ * `{ label, description }` keep the JSON control.
+ */
+function ChoiceOptionsField(props: FieldProps) {
+  const { field, value, onChange } = props;
+  const t = useTranslations("workflows");
+  const rows = parseChoiceOptions(value);
+
+  if (!rows) {
+    return (
+      <div className="space-y-1.5">
+        <JsonField {...props} />
+        <FieldDescription className="text-[10px]">
+          {t("choiceOptionsAdvanced")}
+        </FieldDescription>
+      </div>
+    );
+  }
+
+  const commit = (next: ChoiceOptionRow[]) =>
+    onChange(serializeChoiceOptions(next));
+  const patchRow = (index: number, changes: Partial<ChoiceOptionRow>) =>
+    commit(
+      rows.map((row, position) =>
+        position === index ? { ...row, ...changes } : row,
+      ),
+    );
+
+  return (
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <FieldGroup className="gap-1.5">
+        {rows.map((row, index) => (
+          <div className="space-y-1.5 rounded-lg border p-2" key={index}>
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={t("choiceOptionLabel")}
+                className="min-w-0 flex-1"
+                onChange={(event) =>
+                  patchRow(index, { label: event.target.value })
+                }
+                placeholder={t("choiceOptionLabel")}
+                value={row.label}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("removeRow")}
+                    className="size-7 shrink-0"
+                    onClick={() =>
+                      commit(
+                        rows.filter((_entry, position) => position !== index),
+                      )
+                    }
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("removeRow")}</TooltipContent>
+              </Tooltip>
+            </div>
+            <Input
+              aria-label={t("choiceOptionDescription")}
+              className="text-xs"
+              onChange={(event) =>
+                patchRow(index, { description: event.target.value })
+              }
+              placeholder={t("choiceOptionDescription")}
+              value={row.description}
+            />
+          </div>
+        ))}
+      </FieldGroup>
+      <Button
+        onClick={() => commit([...rows, { label: "", description: "" }])}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Plus className="size-3.5" /> {t("addChoiceOption")}
+      </Button>
+      <FieldDescription className="text-[10px]">
+        {rows.length ? t("choiceOptionsHelp") : t("choiceOptionsEmpty")}
+      </FieldDescription>
+    </Field>
+  );
+}
+
 type ModelKeys = NonNullable<ConfigFieldDescriptor["modelKeys"]>;
 
 const DEFAULT_MODEL_KEYS: ModelKeys = {
@@ -711,6 +1012,10 @@ function ConfigFieldRow(props: FieldProps) {
       return <StringListField {...props} />;
     case "record":
       return <RecordField {...props} />;
+    case "condition":
+      return <ConditionField {...props} />;
+    case "choiceOptions":
+      return <ChoiceOptionsField {...props} />;
     case "json":
       return <JsonField {...props} />;
     default:

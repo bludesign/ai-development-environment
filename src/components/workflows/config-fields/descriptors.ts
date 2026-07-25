@@ -191,6 +191,28 @@ const json = (
   ...options,
 });
 
+const condition = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "condition",
+  ...options,
+});
+
+const choiceOptions = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "choiceOptions",
+  ...options,
+});
+
 // ---------------------------------------------------------------------------
 // Shared option sets and reused field groups.
 // ---------------------------------------------------------------------------
@@ -656,15 +678,13 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       multiline("prompt", "Prompt"),
       bool("multiSelect", "Allow multiple selections"),
       bool("allowCustom", "Allow a custom answer"),
-      json("options", "Options", {
-        placeholder: '[{ "label": "Yes" }, { "label": "No" }]',
-      }),
+      choiceOptions("options", "Buttons"),
       num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Control flow ----------------------------------------------------------
   CONTROL_IF: {
-    fields: [json("condition", "Condition", { required: true })],
+    fields: [condition("condition", "Condition", { required: true })],
   },
   CONTROL_JOIN: {
     fields: [enumField("mode", "Join mode", staticOptions(["ALL", "ANY"]))],

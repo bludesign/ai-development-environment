@@ -474,7 +474,7 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
-  test("loads attempt resource links for resource-panel runs", async () => {
+  test("loads attempt resource links and question batches for resource-panel runs", async () => {
     prisma.workflowRunResourceLink.findMany.mockResolvedValue([
       { runId: "run-1" },
     ]);
@@ -489,6 +489,15 @@ describe("workflow runtime lifecycle guards", () => {
           attempts: expect.objectContaining({
             include: {
               resourceLinks: { orderBy: { createdAt: "asc" } },
+              questionBatches: {
+                orderBy: { createdAt: "asc" },
+                include: {
+                  questions: {
+                    orderBy: { position: "asc" },
+                    include: { options: { orderBy: { position: "asc" } } },
+                  },
+                },
+              },
             },
           }),
         }),
