@@ -6,6 +6,7 @@ import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract
 
 import { getPrismaClient } from "@/data/prisma-client";
 import {
+  COMMAND_RUNS_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
   agentEventBus,
   commandRunChangedTopic,
@@ -139,6 +140,9 @@ function publishDefinition(definition: unknown): void {
 }
 
 function publishRun(run: { id: string }): void {
+  agentEventBus.publish(COMMAND_RUNS_CHANGED_TOPIC, {
+    commandRunsChanged: run,
+  });
   agentEventBus.publish(commandRunChangedTopic(run.id), {
     commandRunChanged: run,
   });
@@ -573,7 +577,10 @@ export class CommandsService {
     const worktreeTarget = new Set(["ANY_WORKTREE", "REPOSITORY_WORKTREE"]).has(
       run.snapshotTargetKind,
     );
-    if (worktreeTarget && (!run.worktreeId || !run.worktree)) {
+    if (
+      worktreeTarget &&
+      (!run.worktreeId || !run.worktree || run.worktree.missingAt)
+    ) {
       await this.failDispatch(
         run.id,
         "The command worktree is no longer available",
@@ -596,10 +603,27 @@ export class CommandsService {
       );
       return;
     }
-    const attemptNumber = run.attempts.length + 1;
-    let attempt = await prisma.commandRunAttempt.findUnique({
-      where: { runId_attempt: { runId, attempt: attemptNumber } },
-    });
+    const latestAttempt = run.attempts.reduce<
+      (typeof run.attempts)[number] | null
+    >(
+      (latest, candidate) =>
+        !latest || candidate.attempt > latest.attempt ? candidate : latest,
+      null,
+    );
+    const reuseLatestAttempt =
+      latestAttempt &&
+      !latestAttempt.agentJobId &&
+      !latestAttempt.completionProcessedAt &&
+      !latestAttempt.finishedAt;
+    const attemptNumber = reuseLatestAttempt
+      ? latestAttempt.attempt
+      : (latestAttempt?.attempt ?? 0) + 1;
+    let attempt =
+      latestAttempt?.attempt === attemptNumber
+        ? latestAttempt
+        : await prisma.commandRunAttempt.findUnique({
+            where: { runId_attempt: { runId, attempt: attemptNumber } },
+          });
     if (!attempt) {
       try {
         attempt = await prisma.commandRunAttempt.create({
@@ -1052,7 +1076,15 @@ export class CommandsService {
         }
         continue;
       }
-      if (!attempt && run.status === "QUEUED") await this.dispatch(run.id);
+      if (
+        run.status === "QUEUED" &&
+        (!attempt ||
+          (!attempt.agentJobId &&
+            !attempt.completionProcessedAt &&
+            !attempt.finishedAt))
+      ) {
+        await this.dispatch(run.id);
+      }
     }
   }
 }

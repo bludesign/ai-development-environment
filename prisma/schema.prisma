@@ -1170,7 +1170,7 @@ model BuildLogChunk {
   build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
 
   @@unique([scope, scopeId, sequence])
-  @@index([buildId, createdAt, id])
+  @@index([buildId, createdAt, sequence, id])
 }
 
 model TelemetryEntry {

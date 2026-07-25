@@ -373,6 +373,42 @@ describe("command reconciliation", () => {
     expect(dispatch).toHaveBeenCalledWith("run-1");
   });
 
+  test("resumes queued dispatch with an incomplete attempt", async () => {
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-1",
+            status: "QUEUED",
+            stopRequested: false,
+            nextRestartAt: null,
+            attempts: [
+              {
+                id: "attempt-1",
+                status: "QUEUED",
+                agentJobId: null,
+                agentJob: null,
+                completionProcessedAt: null,
+                finishedAt: null,
+              },
+            ],
+          },
+        ]),
+      },
+    });
+    const service = new CommandsService(agentControl());
+    const dispatch = vi.fn().mockResolvedValue(undefined);
+    (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch = dispatch;
+
+    await service.reconcile();
+
+    expect(dispatch).toHaveBeenCalledWith("run-1");
+  });
+
   test("keeps an offline agent job visibly queued until it is claimed", async () => {
     const update = vi.fn().mockResolvedValue({ id: "run-1" });
     getPrismaClient.mockResolvedValue({
@@ -452,6 +488,121 @@ describe("command reconciliation", () => {
         }),
       }),
     );
+  });
+
+  test("fails a worktree target marked as missing before creating a job", async () => {
+    const update = vi.fn().mockResolvedValue({ id: "run-1" });
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          status: "QUEUED",
+          stopRequested: false,
+          predecessorRunId: null,
+          snapshotTargetKind: "ANY_WORKTREE",
+          agentId: "agent-1",
+          agent: { capabilitiesJson: '["command.run"]' },
+          worktreeId: "worktree-1",
+          worktree: {
+            id: "worktree-1",
+            missingAt: new Date(),
+            codebase: { agentId: "agent-1" },
+          },
+          attempts: [],
+        }),
+        update,
+      },
+    });
+    const createJob = vi.fn();
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      createJob,
+    } as never);
+
+    await (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch("run-1");
+
+    expect(createJob).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          error: "The command worktree is no longer available",
+        }),
+      }),
+    );
+  });
+
+  test("reuses the latest attempt when dispatch was interrupted before linking its job", async () => {
+    const incompleteAttempt = {
+      id: "attempt-1",
+      runId: "run-1",
+      attempt: 1,
+      agentJobId: null,
+      status: "QUEUED",
+      completionProcessedAt: null,
+      finishedAt: null,
+    };
+    const createAttempt = vi.fn();
+    const updateAttempt = vi.fn().mockResolvedValue({
+      ...incompleteAttempt,
+      agentJobId: "job-1",
+    });
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          status: "QUEUED",
+          stopRequested: false,
+          predecessorRunId: null,
+          snapshotTargetKind: "ANY_AGENT_HOME",
+          snapshotScript: "printf safe",
+          agentId: "agent-1",
+          agent: { capabilitiesJson: '["command.run"]' },
+          worktreeId: null,
+          worktree: null,
+          startedAt: null,
+          attempts: [incompleteAttempt],
+        }),
+        update: vi.fn().mockResolvedValue({ id: "run-1", status: "QUEUED" }),
+      },
+      commandRunAttempt: {
+        findUnique: vi.fn(),
+        create: createAttempt,
+        update: updateAttempt,
+      },
+    });
+    const createJob = vi.fn().mockResolvedValue({
+      id: "job-1",
+      status: "QUEUED",
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      createJob,
+    } as never);
+
+    await (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch("run-1");
+
+    expect(createAttempt).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "command-run:run-1:attempt:1",
+        payload: expect.objectContaining({ attemptId: "attempt-1" }),
+      }),
+    );
+    expect(updateAttempt).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: { agentJobId: "job-1", status: "QUEUED" },
+    });
   });
 
   test.each([

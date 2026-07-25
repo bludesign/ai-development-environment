@@ -2072,7 +2072,7 @@ export class BuildsService {
     const cursor = after
       ? await prisma.buildLogChunk.findFirst({
           where: { id: after, buildId },
-          select: { id: true, createdAt: true },
+          select: { id: true, createdAt: true, sequence: true },
         })
       : null;
     if (after && !cursor) throw new Error("Build log cursor not found");
@@ -2083,12 +2083,20 @@ export class BuildsService {
           ? {
               OR: [
                 { createdAt: { gt: cursor.createdAt } },
-                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+                {
+                  createdAt: cursor.createdAt,
+                  sequence: { gt: cursor.sequence },
+                },
+                {
+                  createdAt: cursor.createdAt,
+                  sequence: cursor.sequence,
+                  id: { gt: cursor.id },
+                },
               ],
             }
           : {}),
       },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "asc" }, { sequence: "asc" }, { id: "asc" }],
       take: Math.max(1, Math.min(first, 5_000)),
     });
   }

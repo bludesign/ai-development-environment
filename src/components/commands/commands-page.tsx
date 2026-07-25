@@ -103,15 +103,6 @@ export function CommandsPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const activeRunKey = useMemo(
-    () =>
-      runs
-        .filter((run) => activeCommandRun(run.status))
-        .map((run) => run.id)
-        .join("|"),
-    [runs],
-  );
-
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
@@ -184,28 +175,23 @@ export function CommandsPage() {
           complete: () => undefined,
         },
       ),
-      ...activeRunKey
-        .split("|")
-        .filter(Boolean)
-        .map((runId) =>
-          client.subscribe(
-            {
-              query: `subscription CommandRunChanged($runId: ID!) { commandRunChanged(runId: $runId) { id status updatedAt } }`,
-              variables: { runId },
-            },
-            {
-              next: () => void load(),
-              error: () => undefined,
-              complete: () => undefined,
-            },
-          ),
-        ),
+      client.subscribe(
+        {
+          query:
+            "subscription CommandRunsChanged { commandRunsChanged { id } }",
+        },
+        {
+          next: () => void load(),
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      ),
     ];
     return () => {
       window.clearTimeout(initialLoad);
       disposers.forEach((dispose) => dispose());
     };
-  }, [activeRunKey, load]);
+  }, [load]);
 
   const filteredRuns = useMemo(
     () =>

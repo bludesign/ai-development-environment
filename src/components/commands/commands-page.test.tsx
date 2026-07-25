@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -193,5 +199,35 @@ describe("CommandsPage", () => {
     expect(screen.getAllByRole("cell", { name: /July 25, 2026/ })).toHaveLength(
       1,
     );
+  });
+
+  test("reloads when a command run is created outside this page", async () => {
+    let publishRun: (() => void) | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn((operation, sink) => {
+        if (String(operation.query).includes("CommandRunsChanged")) {
+          publishRun = () =>
+            sink.next({
+              data: { commandRunsChanged: { id: "run-2" } },
+            } as never);
+        }
+        return vi.fn();
+      }),
+    } as never);
+
+    render(<CommandsPage />);
+    expect(await screen.findByRole("link", { name: "#42" })).toBeDefined();
+    request.mockResolvedValue({
+      commandDefinitions: [],
+      agents: [],
+      worktreeOverview: { agents: [] },
+      commandRuns: {
+        nodes: [commandRun({ id: "run-2", displayNumber: 44 })],
+      },
+    } as never);
+
+    await act(async () => publishRun?.());
+
+    expect(await screen.findByRole("link", { name: "#44" })).toBeDefined();
   });
 });

@@ -1,5 +1,6 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import {
+  COMMAND_RUNS_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
   agentEventBus,
   commandRunChangedTopic,
@@ -215,6 +216,12 @@ export const createCommandResolvers = (service: CommandsService) => ({
       subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
         requireControlPlane(context);
         return agentEventBus.iterate(COMMANDS_CHANGED_TOPIC);
+      },
+    },
+    commandRunsChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return agentEventBus.iterate(COMMAND_RUNS_CHANGED_TOPIC);
       },
     },
     commandRunChanged: {

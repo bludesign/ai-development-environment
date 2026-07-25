@@ -185,6 +185,7 @@ function mergeBuildLogChunks(
   return [...chunks.values()].sort(
     (left, right) =>
       left.createdAt.localeCompare(right.createdAt) ||
+      left.sequence - right.sequence ||
       left.id.localeCompare(right.id),
   );
 }

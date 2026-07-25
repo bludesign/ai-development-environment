@@ -202,6 +202,7 @@ extend type Mutation {
 
 extend type Subscription {
   commandsChanged: CommandDefinition
+  commandRunsChanged: CommandRun!
   commandRunChanged(runId: ID!): CommandRun!
   commandRunOutputAdded(runId: ID!): CommandRunOutputChunk!
 }

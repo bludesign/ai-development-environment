@@ -1008,12 +1008,14 @@ describe("BuildsService", () => {
     );
   });
 
-  test("orders and paginates build-wide logs by timestamp and ID", async () => {
+  test("orders and paginates build-wide logs by timestamp and sequence", async () => {
     const createdAt = new Date("2026-07-18T12:00:00Z");
     const findMany = vi.fn().mockResolvedValue([]);
     getPrismaClient.mockResolvedValue({
       buildLogChunk: {
-        findFirst: vi.fn().mockResolvedValue({ id: "log-4", createdAt }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "log-4", createdAt, sequence: 4 }),
         findMany,
       },
     });
@@ -1025,10 +1027,11 @@ describe("BuildsService", () => {
         buildId: "build-1",
         OR: [
           { createdAt: { gt: createdAt } },
-          { createdAt, id: { gt: "log-4" } },
+          { createdAt, sequence: { gt: 4 } },
+          { createdAt, sequence: 4, id: { gt: "log-4" } },
         ],
       },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "asc" }, { sequence: "asc" }, { id: "asc" }],
       take: 25,
     });
   });

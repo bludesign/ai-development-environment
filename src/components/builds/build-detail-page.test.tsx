@@ -526,6 +526,41 @@ describe("BuildDetailPage", () => {
     );
   });
 
+  test("orders split chunks with identical timestamps by sequence", async () => {
+    const createdAt = "2026-07-25T12:00:00.000Z";
+    request.mockImplementation(async (query) => {
+      const operation = String(query);
+      if (operation.includes("query BuildDetail")) return { build } as never;
+      if (operation.includes("query BuildLogChunks")) {
+        return {
+          buildLogChunks: [
+            {
+              ...buildLogChunk(1, "second"),
+              id: "a-random-id",
+              createdAt,
+            },
+            {
+              ...buildLogChunk(0, "first"),
+              id: "z-random-id",
+              createdAt,
+            },
+          ],
+        } as never;
+      }
+      throw new Error(`Unexpected request: ${operation}`);
+    });
+
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    await waitFor(() =>
+      expect(
+        terminalWrite.mock.calls
+          .filter(([value]) => value instanceof Uint8Array)
+          .map(([value]) => Buffer.from(value).toString("utf8")),
+      ).toEqual(["first", "second"]),
+    );
+  });
+
   test("appends late log chunks without resetting visible output", async () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
     expect(await screen.findByText("Development")).toBeDefined();
