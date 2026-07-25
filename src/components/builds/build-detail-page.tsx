@@ -681,8 +681,12 @@ export function BuildDetailPage({
             expandLabel={t("expandLogs")}
             fitLabel={t("fitTerminal")}
             followLabel={t("followOutput")}
+            key={buildId}
+            nextMatchLabel={t("nextTerminalMatch")}
             onOpenChange={setLogsOpen}
             open={logsOpen}
+            previousMatchLabel={t("previousTerminalMatch")}
+            searchLabel={t("searchTerminal")}
             sourceKey={buildId}
             title={t("logs")}
           />

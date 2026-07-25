@@ -451,6 +451,10 @@ export function CommandRunPage({ runId }: { runId: string }) {
         entries={terminalEntries}
         fitLabel={t("fitTerminal")}
         followLabel={t("followOutput")}
+        key={runId}
+        nextMatchLabel={t("nextTerminalMatch")}
+        previousMatchLabel={t("previousTerminalMatch")}
+        searchLabel={t("searchTerminal")}
         sourceKey={runId}
         title={t("terminalOutput")}
       />

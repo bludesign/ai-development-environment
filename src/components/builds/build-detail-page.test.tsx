@@ -48,6 +48,20 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext() {
+      return false;
+    }
+    findPrevious() {
+      return false;
+    }
+    clearDecorations() {}
+    onDidChangeResults() {
+      return { dispose: vi.fn() };
+    }
+  },
+}));
 
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
@@ -369,6 +383,9 @@ describe("BuildDetailPage", () => {
       name: "Collapse logs",
     });
     expect(screen.getByRole("button", { name: "Fit terminal" })).toBeDefined();
+    expect(
+      screen.getByRole("searchbox", { name: "Search terminal" }),
+    ).toBeDefined();
     expect(collapseLogs.getAttribute("data-size")).toBe("icon-sm");
     expect(collapseLogs.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(collapseLogs);

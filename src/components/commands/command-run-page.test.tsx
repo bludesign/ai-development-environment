@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -20,6 +21,10 @@ const terminalReset = vi.hoisted(() => vi.fn());
 const terminalOptions = vi.hoisted(() => vi.fn());
 const terminalOnScroll = vi.hoisted(() => vi.fn());
 const terminalScrollToBottom = vi.hoisted(() => vi.fn());
+const terminalSearchNext = vi.hoisted(() => vi.fn());
+const terminalSearchPrevious = vi.hoisted(() => vi.fn());
+const terminalSearchClear = vi.hoisted(() => vi.fn());
+const terminalSearchResults = vi.hoisted(() => vi.fn());
 const terminalBuffers = vi.hoisted(
   () => [] as Array<{ active: { viewportY: number; baseY: number } }>,
 );
@@ -74,6 +79,25 @@ vi.mock("@xterm/xterm", () => ({
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {}
+  },
+}));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext(term: string, options: unknown) {
+      terminalSearchNext(term, options);
+      return true;
+    }
+    findPrevious(term: string, options: unknown) {
+      terminalSearchPrevious(term, options);
+      return true;
+    }
+    clearDecorations() {
+      terminalSearchClear();
+    }
+    onDidChangeResults(callback: unknown) {
+      terminalSearchResults(callback);
+      return { dispose: vi.fn() };
+    }
   },
 }));
 
@@ -134,6 +158,10 @@ beforeEach(() => {
   terminalOptions.mockReset();
   terminalOnScroll.mockReset();
   terminalScrollToBottom.mockReset();
+  terminalSearchNext.mockReset();
+  terminalSearchPrevious.mockReset();
+  terminalSearchClear.mockReset();
+  terminalSearchResults.mockReset();
   terminalBuffers.splice(0);
   push.mockReset();
   writeText.mockReset();
@@ -268,7 +296,7 @@ describe("CommandRunPage", () => {
     );
     expect(bytes.toString("utf8")).toBe("\u001b[31m🙂\u001b[0m");
     expect(terminalOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ convertEol: true }),
+      expect.objectContaining({ allowProposedApi: true, convertEol: true }),
     );
   });
 
@@ -320,6 +348,41 @@ describe("CommandRunPage", () => {
       await screen.findByRole("button", { name: "Follow output" }),
     );
     expect(terminalScrollToBottom).toHaveBeenCalled();
+  });
+
+  test("searches terminal output and navigates between matches", async () => {
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText("Color output")).toBeDefined();
+    await waitFor(() => expect(terminalSearchResults).toHaveBeenCalled());
+    const search = screen.getByRole("searchbox", {
+      name: "Search terminal",
+    });
+
+    fireEvent.change(search, { target: { value: "color" } });
+    expect(terminalSearchNext).toHaveBeenCalledWith(
+      "color",
+      expect.objectContaining({
+        incremental: true,
+        decorations: expect.any(Object),
+      }),
+    );
+    act(() =>
+      terminalSearchResults.mock.calls.at(-1)?.[0]({
+        resultIndex: 0,
+        resultCount: 2,
+      }),
+    );
+    expect(screen.getByText("1/2")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(terminalSearchPrevious).toHaveBeenCalledWith(
+      "color",
+      expect.any(Object),
+    );
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(terminalSearchNext).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(terminalSearchClear).toHaveBeenCalled();
   });
 
   test("replays persisted output when the terminal lifecycle is replaced", async () => {
