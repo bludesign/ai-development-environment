@@ -24,6 +24,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { DateTime } from "@/components/common/date-time";
+import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -470,7 +471,16 @@ export function RunsPage({
           >
             <TableHeader>
               <TableRow>
-                {editMode && <TableHead className="w-10" />}
+                {editMode && (
+                  <TableHead className="w-10">
+                    <SelectAllCheckbox
+                      ids={items.map(({ id }) => id)}
+                      label={t("selectAll")}
+                      onChange={setSelected}
+                      selected={selected}
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="w-[5%]">{t("id")}</TableHead>
                 <TableHead className={session ? "w-[11%]" : "w-[12%]"}>
                   {t("status")}
@@ -508,9 +518,24 @@ export function RunsPage({
               {groups.map((group) => (
                 <Fragment key={group.key}>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
+                    {editMode && (
+                      <TableCell className="py-1.5">
+                        <SelectAllCheckbox
+                          ids={group.items.map(({ id }) => id)}
+                          label={t("selectDay", {
+                            day: formatDateValue(group.value, "long", {
+                              locale,
+                              showTime: false,
+                            }),
+                          })}
+                          onChange={setSelected}
+                          selected={selected}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell
                       className="py-1.5 text-xs font-normal text-muted-foreground"
-                      colSpan={8 + (session ? 1 : 0) + (editMode ? 1 : 0)}
+                      colSpan={8 + (session ? 1 : 0)}
                     >
                       {formatDateValue(group.value, "long", {
                         locale,

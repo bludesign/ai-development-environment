@@ -171,6 +171,7 @@ type WorkflowRun {
   startedAt: String
   pausedAt: String
   finishedAt: String
+  archivedAt: String
   createdAt: String!
   updatedAt: String!
   attempts: [WorkflowStepAttempt!]!
@@ -338,6 +339,7 @@ extend type Query {
     workflowId: ID
     status: String
     search: String
+    archive: String = "ACTIVE"
     first: Int = 100
     after: ID
   ): WorkflowRunPage!
@@ -368,6 +370,8 @@ extend type Mutation {
   setWorkflowQuickAction(input: SetWorkflowQuickActionInput!): Workflow!
   archiveWorkflow(id: ID!, archived: Boolean!): Workflow!
   deleteWorkflow(id: ID!): Boolean!
+  archiveWorkflowRuns(ids: [ID!]!, archived: Boolean!): Int!
+  deleteWorkflowRuns(ids: [ID!]!): Int!
   triggerWorkflow(input: TriggerWorkflowInput!): WorkflowRun!
   pauseWorkflowRun(id: ID!): WorkflowRun!
   resumeWorkflowRun(id: ID!): WorkflowRun!

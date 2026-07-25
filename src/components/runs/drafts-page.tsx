@@ -20,6 +20,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
+import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -281,7 +282,16 @@ export function DraftsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                {editMode && <TableHead className="w-10" />}
+                {editMode && (
+                  <TableHead className="w-10">
+                    <SelectAllCheckbox
+                      ids={items.map(({ id }) => id)}
+                      label={t("selectAll")}
+                      onChange={setSelected}
+                      selected={selected}
+                    />
+                  </TableHead>
+                )}
                 <TableHead>{t("mode")}</TableHead>
                 <TableHead>{t("worktree")}</TableHead>
                 <TableHead>{t("ticket")}</TableHead>
@@ -296,9 +306,24 @@ export function DraftsPage() {
               {groups.map((group) => (
                 <Fragment key={group.key}>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
+                    {editMode && (
+                      <TableCell className="py-1.5">
+                        <SelectAllCheckbox
+                          ids={group.items.map(({ id }) => id)}
+                          label={t("selectDay", {
+                            day: formatDateValue(group.value, "long", {
+                              locale,
+                              showTime: false,
+                            }),
+                          })}
+                          onChange={setSelected}
+                          selected={selected}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell
                       className="py-1.5 text-xs font-normal text-muted-foreground"
-                      colSpan={editMode ? 9 : 8}
+                      colSpan={8}
                     >
                       {formatDateValue(group.value, "long", {
                         locale,

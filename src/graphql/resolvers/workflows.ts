@@ -105,6 +105,7 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     startedAt: (value: { startedAt?: Date | null }) => iso(value.startedAt),
     pausedAt: (value: { pausedAt?: Date | null }) => iso(value.pausedAt),
     finishedAt: (value: { finishedAt?: Date | null }) => iso(value.finishedAt),
+    archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
@@ -331,6 +332,22 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.delete(id);
+    },
+    archiveWorkflowRuns: (
+      _root: unknown,
+      { ids, archived }: { ids: string[]; archived: boolean },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.archiveRuns(ids, archived);
+    },
+    deleteWorkflowRuns: (
+      _root: unknown,
+      { ids }: { ids: string[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteRuns(ids);
     },
     triggerWorkflow: (
       _root: unknown,

@@ -183,6 +183,8 @@ export type WorkflowRun = {
   startedAt: string | null;
   pausedAt: string | null;
   finishedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
   attempts: WorkflowAttempt[];
   events: Array<{
     id: string;

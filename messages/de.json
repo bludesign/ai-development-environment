@@ -349,7 +349,22 @@
     "triggerChoiceDescription": "Beschreibung (optional)",
     "triggerChoicesHelp": "Jede Auswahl wird zu einem Menüeintrag unter der Ausführen-Schaltfläche und zu einem eigenen Ausgang am Auslöser.",
     "triggerChoicesEmpty": "Noch keine Auswahlmöglichkeiten. Füge die Optionen hinzu, die beim Start dieses Workflows angeboten werden.",
-    "triggerChoicesAdvanced": "Diese Auswahlmöglichkeiten sind keine einfachen Einträge aus Schlüssel, Bezeichnung und Beschreibung. Bearbeite sie als JSON."
+    "triggerChoicesAdvanced": "Diese Auswahlmöglichkeiten sind keine einfachen Einträge aus Schlüssel, Bezeichnung und Beschreibung. Bearbeite sie als JSON.",
+    "active": "Aktiv",
+    "all": "Alle",
+    "archived": "Archiviert",
+    "archiveFilter": "Archivfilter",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "deleteRunDescription": "Der Lauf und sein gesamter Schrittverlauf werden entfernt. Dies kann nicht rückgängig gemacht werden.",
+    "deleteRunTitle": "Workflow-Lauf löschen",
+    "done": "Fertig",
+    "editRuns": "Bearbeiten",
+    "restore": "Wiederherstellen",
+    "selectAll": "Alle auswählen",
+    "selectDay": "Alles vom {day} auswählen",
+    "selectRun": "Lauf #{id} auswählen",
+    "selectedRuns": "{count, plural, one {# Lauf ausgewählt} other {# Läufe ausgewählt}}"
   },
   "runs": {
     "actions": "Aktionen",
@@ -578,7 +593,9 @@
     "webSearchDescription": "Das native Websuchwerkzeug des Anbieters aktivieren, sofern unterstützt.",
     "worktree": "Arbeitsbaum",
     "reportedCost": "Vom Anbieter gemeldet",
-    "catalogCost": "Modellkostenkatalog"
+    "catalogCost": "Modellkostenkatalog",
+    "selectAll": "Alle auswählen",
+    "selectDay": "Alles vom {day} auswählen"
   },
   "notifications": {
     "title": "Benachrichtigungen",

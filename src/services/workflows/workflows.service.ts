@@ -871,6 +871,7 @@ export class WorkflowsService {
       workflowId?: string | null;
       status?: string | null;
       search?: string | null;
+      archive?: string | null;
       first?: number | null;
       after?: string | null;
     } = {},
@@ -878,8 +879,16 @@ export class WorkflowsService {
     const prisma = await getPrismaClient();
     const first = Math.min(Math.max(input.first ?? 100, 1), 200);
     const searchNumber = Number(input.search);
+    const archive = input.archive?.toUpperCase() ?? "ACTIVE";
+    const archiveWhere =
+      archive === "ALL"
+        ? {}
+        : archive === "ARCHIVED"
+          ? { archivedAt: { not: null } }
+          : { archivedAt: null };
     const items = await prisma.workflowRun.findMany({
       where: {
+        ...archiveWhere,
         ...(input.workflowId ? { workflowId: input.workflowId } : {}),
         ...(input.status ? { status: input.status.toUpperCase() } : {}),
         ...(Number.isInteger(searchNumber) && searchNumber > 0
@@ -902,9 +911,50 @@ export class WorkflowsService {
       items: items.slice(0, first),
       nextCursor: items.length > first ? items[first - 1]!.id : null,
       totalCount: await prisma.workflowRun.count({
-        where: input.workflowId ? { workflowId: input.workflowId } : {},
+        where: {
+          ...archiveWhere,
+          ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+        },
       }),
     };
+  }
+
+  async archiveRuns(ids: string[], archived: boolean) {
+    const prisma = await getPrismaClient();
+    const unique = [...new Set(ids)];
+    const result = await prisma.workflowRun.updateMany({
+      where: { id: { in: unique } },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+    for (const id of unique) publishRunChanged(id);
+    return result.count;
+  }
+
+  /**
+   * Child runs point at their parent with `onDelete: SetNull`, and every other
+   * row hanging off a run cascades, so a plain `deleteMany` is enough. The one
+   * thing worth guarding is a run that has not finished: the scheduler would
+   * keep holding a lease on a row that no longer exists.
+   */
+  async deleteRuns(ids: string[]) {
+    const prisma = await getPrismaClient();
+    const unique = [...new Set(ids)];
+    const unfinished = await prisma.workflowRun.count({
+      where: {
+        id: { in: unique },
+        status: { notIn: ["SUCCEEDED", "FAILED", "CANCELLED"] },
+      },
+    });
+    if (unfinished) {
+      throw new Error(
+        "Cancel runs that have not finished before deleting them",
+      );
+    }
+    const result = await prisma.workflowRun.deleteMany({
+      where: { id: { in: unique } },
+    });
+    for (const id of unique) publishRunChanged(id);
+    return result.count;
   }
 
   async run(id: string) {

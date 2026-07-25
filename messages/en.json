@@ -349,7 +349,22 @@
     "triggerChoiceDescription": "Description (optional)",
     "triggerChoicesHelp": "Each choice becomes a menu item under the run button and its own output on the trigger.",
     "triggerChoicesEmpty": "No choices yet. Add the options offered when this workflow is started.",
-    "triggerChoicesAdvanced": "These choices are not plain key, label and description entries. Edit them as JSON."
+    "triggerChoicesAdvanced": "These choices are not plain key, label and description entries. Edit them as JSON.",
+    "active": "Active",
+    "all": "All",
+    "archived": "Archived",
+    "archiveFilter": "Archive filter",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteRunDescription": "The run and its full step history will be removed. This cannot be undone.",
+    "deleteRunTitle": "Delete workflow run",
+    "done": "Done",
+    "editRuns": "Edit",
+    "restore": "Restore",
+    "selectAll": "Select all",
+    "selectDay": "Select everything from {day}",
+    "selectRun": "Select run #{id}",
+    "selectedRuns": "{count, plural, one {# run selected} other {# runs selected}}"
   },
   "runs": {
     "actions": "Actions",
@@ -578,7 +593,9 @@
     "webSearchDescription": "Enable the provider's native web-search tool when supported.",
     "worktree": "Worktree",
     "reportedCost": "Reported by provider",
-    "catalogCost": "Model cost catalog"
+    "catalogCost": "Model cost catalog",
+    "selectAll": "Select all",
+    "selectDay": "Select everything from {day}"
   },
   "notifications": {
     "title": "Notifications",

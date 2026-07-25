@@ -161,6 +161,8 @@ const pendingRun = {
   startedAt: "2026-07-24T12:00:01.000Z",
   pausedAt: null,
   finishedAt: null,
+  archivedAt: null,
+  createdAt: "2026-07-24T12:00:00.000Z",
   attempts: [
     {
       id: "attempt-1",

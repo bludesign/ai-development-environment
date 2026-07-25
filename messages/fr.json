@@ -349,7 +349,22 @@
     "triggerChoiceDescription": "Description (facultatif)",
     "triggerChoicesHelp": "Chaque choix devient une entrée de menu sous le bouton d'exécution et une sortie propre sur le déclencheur.",
     "triggerChoicesEmpty": "Aucun choix pour l'instant. Ajoutez les options proposées au démarrage de ce workflow.",
-    "triggerChoicesAdvanced": "Ces choix ne sont pas de simples entrées clé, libellé et description. Modifiez-les en JSON."
+    "triggerChoicesAdvanced": "Ces choix ne sont pas de simples entrées clé, libellé et description. Modifiez-les en JSON.",
+    "active": "Actives",
+    "all": "Toutes",
+    "archived": "Archivées",
+    "archiveFilter": "Filtre d’archive",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "deleteRunDescription": "L’exécution et tout son historique d’étapes seront supprimés. Cette action est irréversible.",
+    "deleteRunTitle": "Supprimer l’exécution du workflow",
+    "done": "Terminé",
+    "editRuns": "Modifier",
+    "restore": "Restaurer",
+    "selectAll": "Tout sélectionner",
+    "selectDay": "Sélectionner tout du {day}",
+    "selectRun": "Sélectionner l’exécution nº {id}",
+    "selectedRuns": "{count, plural, one {# exécution sélectionnée} other {# exécutions sélectionnées}}"
   },
   "runs": {
     "actions": "Opérations",
@@ -578,7 +593,9 @@
     "webSearchDescription": "Activer l’outil de recherche web natif du fournisseur lorsqu’il est pris en charge.",
     "worktree": "Arborescence",
     "reportedCost": "Communiqué par le fournisseur",
-    "catalogCost": "Catalogue des coûts de modèles"
+    "catalogCost": "Catalogue des coûts de modèles",
+    "selectAll": "Tout sélectionner",
+    "selectDay": "Sélectionner tout du {day}"
   },
   "notifications": {
     "title": "Notifications",

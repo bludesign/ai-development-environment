@@ -3,18 +3,30 @@
 import {
   Archive,
   CirclePlay,
+  FilePenLine,
   FileUp,
   GitFork,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
+  Trash2,
+  Undo2,
   Zap,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DateTime } from "@/components/common/date-time";
+import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +37,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +55,13 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -62,6 +82,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +101,7 @@ const WORKFLOW_FIELDS = `
 
 const RUN_FIELDS = `
   id displayNumber workflowId triggerKind triggerSubjectKey status phase generation
-  blockedReason error queuedAt startedAt pausedAt finishedAt
+  blockedReason error queuedAt startedAt pausedAt finishedAt archivedAt createdAt
   workflow { id name }
   version { id workflowId version name description schemaVersion definition contentHash publishedAt }
 `;
@@ -88,6 +109,7 @@ const RUN_FIELDS = `
 export function WorkflowsPage() {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
+  const locale = useLocale();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   // Runs first: the page is checked far more often to see what automation did
@@ -96,6 +118,10 @@ export function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [search, setSearch] = useState("");
+  const [runArchiveFilter, setRunArchiveFilter] = useState("ACTIVE");
+  const [editMode, setEditMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,10 +130,13 @@ export function WorkflowsPage() {
       const data = await controlPlaneRequest<{
         workflows: { items: WorkflowSummary[] };
         workflowRuns: { items: WorkflowRun[] };
-      }>(`query WorkflowManagement {
+      }>(
+        `query WorkflowManagement($archive: String!) {
         workflows(first: 200) { items { ${WORKFLOW_FIELDS} } }
-        workflowRuns(first: 200) { items { ${RUN_FIELDS} } }
-      }`);
+        workflowRuns(archive: $archive, first: 200) { items { ${RUN_FIELDS} } }
+      }`,
+        { archive: runArchiveFilter },
+      );
       setWorkflows(data.workflows.items);
       setRuns(data.workflowRuns.items);
       setError(null);
@@ -116,7 +145,7 @@ export function WorkflowsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [runArchiveFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -155,6 +184,50 @@ export function WorkflowsPage() {
       ),
     [runs, search],
   );
+  /* Runs arrive newest first, so a day boundary is simply the point where the
+     key changes — no sorting or bucketing pass needed. */
+  const runGroups = useMemo(() => {
+    const result: Array<{ key: string; value: string; items: WorkflowRun[] }> =
+      [];
+    for (const run of filteredRuns) {
+      const key = dayKey(run.createdAt) ?? run.createdAt;
+      const group = result.at(-1);
+      if (group?.key === key) group.items.push(run);
+      else result.push({ key, value: run.createdAt, items: [run] });
+    }
+    return result;
+  }, [filteredRuns]);
+
+  const mutateRuns = async (
+    query: string,
+    variables: Record<string, unknown>,
+  ) => {
+    try {
+      await controlPlaneRequest(query, variables);
+      setSelected(new Set());
+      setError(null);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    }
+  };
+  const archiveRuns = (ids: string[], archived: boolean) =>
+    mutateRuns(
+      "mutation ArchiveWorkflowRuns($ids: [ID!]!, $archived: Boolean!) { archiveWorkflowRuns(ids: $ids, archived: $archived) }",
+      { ids, archived },
+    );
+  const deleteRuns = (ids: string[]) =>
+    mutateRuns(
+      "mutation DeleteWorkflowRuns($ids: [ID!]!) { deleteWorkflowRuns(ids: $ids) }",
+      { ids },
+    );
+  const toggleSelected = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const mutateWorkflow = async (
     workflow: WorkflowSummary,
@@ -250,7 +323,7 @@ export function WorkflowsPage() {
             <TabsTrigger value="workflows">{t("workflowsTab")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <InputGroup className="w-64">
             <InputGroupAddon>
               <Search />
@@ -262,6 +335,37 @@ export function WorkflowsPage() {
               value={search}
             />
           </InputGroup>
+          {/* Archiving and bulk selection only exist for runs, so their
+              controls follow the tab rather than sitting inert over a grid of
+              workflow cards. */}
+          {tab === "runs" && (
+            <>
+              <Select
+                onValueChange={(value) =>
+                  setRunArchiveFilter(value ?? "ACTIVE")
+                }
+                value={runArchiveFilter}
+              >
+                <SelectTrigger aria-label={t("archiveFilter")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ACTIVE">{t("active")}</SelectItem>
+                  <SelectItem value="ARCHIVED">{t("archived")}</SelectItem>
+                  <SelectItem value="ALL">{t("all")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() => {
+                  setEditMode((value) => !value);
+                  setSelected(new Set());
+                }}
+                variant="outline"
+              >
+                <FilePenLine /> {editMode ? t("done") : t("editRuns")}
+              </Button>
+            </>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -277,6 +381,30 @@ export function WorkflowsPage() {
           </Tooltip>
         </div>
       </div>
+      {tab === "runs" && editMode && selected.size > 0 && (
+        <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/30 p-3">
+          <span className="mr-auto text-sm text-muted-foreground">
+            {t("selectedRuns", { count: selected.size })}
+          </span>
+          <Button
+            onClick={() =>
+              void archiveRuns([...selected], runArchiveFilter !== "ARCHIVED")
+            }
+            size="sm"
+            variant="outline"
+          >
+            {runArchiveFilter === "ARCHIVED" ? <Undo2 /> : <Archive />}{" "}
+            {runArchiveFilter === "ARCHIVED" ? t("restore") : t("archive")}
+          </Button>
+          <Button
+            onClick={() => setDeleteIds([...selected])}
+            size="sm"
+            variant="destructive"
+          >
+            <Trash2 /> {t("delete")}
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         tab === "runs" ? (
@@ -428,70 +556,180 @@ export function WorkflowsPage() {
               handing every spare pixel to the gaps, and the floor is the sum
               of what the columns actually need — below it the container
               scrolls rather than squeezing the run number into two lines. */}
-          <Table className="table-fixed min-w-[48rem]">
+          <Table
+            className={cn(
+              "table-fixed",
+              editMode ? "min-w-[51rem]" : "min-w-[48rem]",
+            )}
+          >
             <TableHeader>
               <TableRow>
+                {editMode && (
+                  <TableHead className="w-10">
+                    <SelectAllCheckbox
+                      ids={filteredRuns.map(({ id }) => id)}
+                      label={t("selectAll")}
+                      onChange={setSelected}
+                      selected={selected}
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="w-[8%]">{t("run")}</TableHead>
-                <TableHead className="w-[26%]">{t("workflow")}</TableHead>
-                <TableHead className="w-[14%]">{t("status")}</TableHead>
-                <TableHead className="w-[22%]">{t("trigger")}</TableHead>
-                <TableHead className="w-[12%]">{t("generation")}</TableHead>
-                <TableHead className="w-[18%]">{t("started")}</TableHead>
+                <TableHead className="w-[22%]">{t("workflow")}</TableHead>
+                <TableHead className="w-[13%]">{t("status")}</TableHead>
+                <TableHead className="w-[19%]">{t("trigger")}</TableHead>
+                <TableHead className="w-[10%]">{t("generation")}</TableHead>
+                <TableHead className="w-[16%]">{t("started")}</TableHead>
+                <TableHead className="w-[12%] text-right">
+                  {t("actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredRuns.map((run) => (
-                <TableRow
-                  className="cursor-pointer"
-                  key={run.id}
-                  /* Anything interactive inside the row — the workflow link,
-                     a text selection drag — opts the row out, so only a click
-                     on the row itself opens the run. */
-                  onClick={(event) => {
-                    if (!isRowActivation(event)) return;
-                    router.push(`/workflows/runs/${run.id}`);
-                  }}
-                >
-                  <TableCell>
-                    <Link
-                      className={cn(
-                        rowLinkClass,
-                        "inline-block font-mono font-medium",
-                      )}
-                      href={`/workflows/runs/${run.id}`}
-                    >
-                      #{run.displayNumber}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link
-                      className={cn(rowLinkClass, "block min-w-0 truncate")}
-                      href={`/workflows/${run.workflow.id}`}
-                      title={run.workflow.name}
-                    >
-                      {run.workflow.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={workflowStatusVariant(run.status)}>
-                      {labels.status(run.status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell
-                    className="truncate"
-                    title={labels.kind(run.triggerKind)}
-                  >
-                    {labels.kind(run.triggerKind)}
-                  </TableCell>
-                  <TableCell>{run.generation}</TableCell>
-                  <TableCell>
-                    {run.startedAt ? (
-                      <DateTime kind="relative" value={run.startedAt} />
-                    ) : (
-                      t("queued")
+              {runGroups.map((group) => (
+                <Fragment key={group.key}>
+                  <TableRow className="bg-muted/20 hover:bg-muted/20">
+                    {editMode && (
+                      <TableCell className="py-1.5">
+                        <SelectAllCheckbox
+                          ids={group.items.map(({ id }) => id)}
+                          label={t("selectDay", {
+                            day: formatDateValue(group.value, "long", {
+                              locale,
+                              showTime: false,
+                            }),
+                          })}
+                          onChange={setSelected}
+                          selected={selected}
+                        />
+                      </TableCell>
                     )}
-                  </TableCell>
-                </TableRow>
+                    <TableCell
+                      className="py-1.5 text-xs font-normal text-muted-foreground"
+                      colSpan={7}
+                    >
+                      {formatDateValue(group.value, "long", {
+                        locale,
+                        showTime: false,
+                      })}
+                    </TableCell>
+                  </TableRow>
+                  {group.items.map((run) => (
+                    <TableRow
+                      className="cursor-pointer"
+                      key={run.id}
+                      /* Anything interactive inside the row — the workflow link,
+                         a text selection drag — opts the row out, so only a click
+                         on the row itself opens the run. In edit mode the row is
+                         a selection target instead, so it toggles rather than
+                         navigating away mid-selection. */
+                      onClick={(event) => {
+                        if (!isRowActivation(event)) return;
+                        if (editMode) toggleSelected(run.id);
+                        else router.push(`/workflows/runs/${run.id}`);
+                      }}
+                    >
+                      {editMode && (
+                        <TableCell>
+                          <Checkbox
+                            aria-label={t("selectRun", {
+                              id: run.displayNumber,
+                            })}
+                            checked={selected.has(run.id)}
+                            onCheckedChange={(checked) =>
+                              setSelected((current) => {
+                                const next = new Set(current);
+                                if (checked) next.add(run.id);
+                                else next.delete(run.id);
+                                return next;
+                              })
+                            }
+                          />
+                        </TableCell>
+                      )}
+                      <TableCell>
+                        <Link
+                          className={cn(
+                            rowLinkClass,
+                            "inline-block font-mono font-medium",
+                          )}
+                          href={`/workflows/runs/${run.id}`}
+                        >
+                          #{run.displayNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          className={cn(rowLinkClass, "block min-w-0 truncate")}
+                          href={`/workflows/${run.workflow.id}`}
+                          title={run.workflow.name}
+                        >
+                          {run.workflow.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant={workflowStatusVariant(run.status)}>
+                            {labels.status(run.status)}
+                          </Badge>
+                          {run.archivedAt && (
+                            <Badge variant="outline">{t("archived")}</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        className="truncate"
+                        title={labels.kind(run.triggerKind)}
+                      >
+                        {labels.kind(run.triggerKind)}
+                      </TableCell>
+                      <TableCell>{run.generation}</TableCell>
+                      <TableCell>
+                        {run.startedAt ? (
+                          <DateTime kind="relative" value={run.startedAt} />
+                        ) : (
+                          t("queued")
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                aria-label={
+                                  run.archivedAt ? t("restore") : t("archive")
+                                }
+                                onClick={() =>
+                                  void archiveRuns([run.id], !run.archivedAt)
+                                }
+                                size="icon-sm"
+                                variant="ghost"
+                              >
+                                {run.archivedAt ? <Undo2 /> : <Archive />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {run.archivedAt ? t("restore") : t("archive")}
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                aria-label={t("delete")}
+                                onClick={() => setDeleteIds([run.id])}
+                                size="icon-sm"
+                                variant="destructive"
+                              >
+                                <Trash2 />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("delete")}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -504,6 +742,17 @@ export function WorkflowsPage() {
           </EmptyHeader>
         </Empty>
       )}
+      <ConfirmationDialog
+        actionLabel={t("delete")}
+        cancelLabel={t("cancel")}
+        description={t("deleteRunDescription")}
+        onConfirm={() => void deleteRuns(deleteIds)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteIds([]);
+        }}
+        open={deleteIds.length > 0}
+        title={t("deleteRunTitle")}
+      />
     </div>
   );
 }

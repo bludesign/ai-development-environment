@@ -349,7 +349,22 @@
     "triggerChoiceDescription": "Descripción (opcional)",
     "triggerChoicesHelp": "Cada opción se convierte en un elemento del menú bajo el botón de ejecución y en una salida propia del activador.",
     "triggerChoicesEmpty": "Aún no hay opciones. Añade las que se ofrecerán al iniciar este flujo de trabajo.",
-    "triggerChoicesAdvanced": "Estas opciones no son entradas simples de clave, texto y descripción. Edítalas como JSON."
+    "triggerChoicesAdvanced": "Estas opciones no son entradas simples de clave, texto y descripción. Edítalas como JSON.",
+    "active": "Activo",
+    "all": "Todos",
+    "archived": "Archivado",
+    "archiveFilter": "Filtro de archivo",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "deleteRunDescription": "Se eliminarán la ejecución y todo su historial de pasos. Esta acción no se puede deshacer.",
+    "deleteRunTitle": "Eliminar ejecución del flujo de trabajo",
+    "done": "Hecho",
+    "editRuns": "Editar",
+    "restore": "Restaurar",
+    "selectAll": "Seleccionar todo",
+    "selectDay": "Seleccionar todo del {day}",
+    "selectRun": "Seleccionar ejecución #{id}",
+    "selectedRuns": "{count, plural, one {# ejecución seleccionada} other {# ejecuciones seleccionadas}}"
   },
   "runs": {
     "actions": "Acciones",
@@ -578,7 +593,9 @@
     "webSearchDescription": "Activa la herramienta nativa de búsqueda web del proveedor cuando sea compatible.",
     "worktree": "Árbol de trabajo",
     "reportedCost": "Informado por el proveedor",
-    "catalogCost": "Catálogo de costes de modelos"
+    "catalogCost": "Catálogo de costes de modelos",
+    "selectAll": "Seleccionar todo",
+    "selectDay": "Seleccionar todo del {day}"
   },
   "notifications": {
     "title": "Notificaciones",

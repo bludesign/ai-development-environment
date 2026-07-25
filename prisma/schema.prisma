@@ -2134,6 +2134,7 @@ model WorkflowRun {
   startedAt          DateTime?
   pausedAt           DateTime?
   finishedAt         DateTime?
+  archivedAt         DateTime?
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
   workflow           Workflow                  @relation(fields: [workflowId], references: [id], onDelete: Restrict)
@@ -2152,6 +2153,7 @@ model WorkflowRun {
   @@index([versionId, createdAt])
   @@index([triggerEventId])
   @@index([parentRunId])
+  @@index([archivedAt, createdAt])
 }
 
 model WorkflowRunNumberSequence {
