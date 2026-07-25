@@ -32,6 +32,7 @@ function thread(
     resolved?: boolean;
     number?: number;
     replies?: Array<{ author: string; body: string }>;
+    highlightColor?: string | null;
   } = {},
 ): GitHubReviewThread {
   const number = options.number ?? 17;
@@ -55,6 +56,8 @@ function thread(
       title: number === 17 ? "Add review comments" : "Second pull request",
       url: `https://github.com/acme/widgets/pull/${number}`,
       repositoryNameWithOwner: "acme/widgets",
+      worktreeId: options.highlightColor ? "worktree-1" : null,
+      worktreeHighlightColor: options.highlightColor ?? null,
     },
     rootComment: {
       id: `${id}-root`,
@@ -161,6 +164,63 @@ afterEach(() => {
 });
 
 describe("CommentsPage", () => {
+  test("tints the thread card and table row for a highlighted worktree", async () => {
+    const tinted = thread("tinted", {
+      author: "octocat",
+      highlightColor: "violet",
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("GitHubCommentsConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubReviewThreads")) {
+        return {
+          githubReviewThreads: {
+            viewerLogin: "octocat",
+            truncated: false,
+            pullRequests: [tinted.pullRequest],
+            threads: [tinted],
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<CommentsPage />);
+
+    const card = (await screen.findByText("Root tinted")).closest(
+      '[data-slot="card"]',
+    ) as HTMLElement;
+    expect(card.className).toContain("bg-violet-500/10");
+    expect(card.className).toContain("border-l-violet-500");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Table layout" }));
+
+    const row = (await screen.findByText("Root tinted")).closest(
+      "tr",
+    ) as HTMLTableRowElement;
+    expect(row.className).toContain("bg-violet-500/10");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]?.className).toContain(
+      "shadow-[inset_4px_0_0_var(--color-violet-500)]",
+    );
+  });
+
+  test("leaves threads untinted when no worktree is linked", async () => {
+    render(<CommentsPage />);
+
+    const card = (await screen.findByText("Root mine")).closest(
+      '[data-slot="card"]',
+    ) as HTMLElement;
+    expect(card.className).not.toContain("bg-violet-500/10");
+    expect(card.className).not.toContain("border-l-4");
+  });
+
   test("applies root-author and unresolved filters and remembers table layout", async () => {
     render(<CommentsPage />);
 

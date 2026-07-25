@@ -139,6 +139,8 @@ type GitHubPullRequest {
   unresolvedReviewThreadCount: Int!
   state: GitHubPullRequestState!
   headRefName: String!
+  worktreeId: ID
+  worktreeHighlightColor: String
   createdAt: String!
 }
 
@@ -213,6 +215,7 @@ type GitHubActionsWorkflowRun {
   pullRequests: [GitHubActionsPullRequest!]!
   jiraKey: String
   worktreeId: ID
+  worktreeHighlightColor: String
   startedAt: String!
   createdAt: String!
   updatedAt: String!
@@ -363,6 +366,8 @@ type GitHubReviewThreadPullRequest {
   title: String!
   url: String!
   repositoryNameWithOwner: String!
+  worktreeId: ID
+  worktreeHighlightColor: String
 }
 
 type GitHubReviewThread {
@@ -432,6 +437,7 @@ type GitHubPullRequestDetail {
   updatedAt: String!
   mergedAt: String
   worktreeId: ID
+  worktreeHighlightColor: String
 }
 
 type GitHubPullRequestMergeOptions {

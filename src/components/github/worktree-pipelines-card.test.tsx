@@ -47,6 +47,7 @@ const run: GitHubActionsWorkflowRunView = {
   pullRequests: [],
   jiraKey: "APP-1",
   worktreeId: "worktree-1",
+  worktreeHighlightColor: null,
   startedAt: "2026-07-21T12:00:00.000Z",
   createdAt: "2026-07-21T12:00:00.000Z",
   updatedAt: "2026-07-21T12:01:00.000Z",

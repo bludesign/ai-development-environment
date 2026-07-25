@@ -107,6 +107,7 @@ const run = {
   ],
   jiraKey: "APP-42",
   worktreeId: "worktree-1",
+  worktreeHighlightColor: null as string | null,
   startedAt: "2026-07-17T12:00:00.000Z",
   createdAt: "2026-07-17T12:00:00.000Z",
   updatedAt: "2026-07-17T12:05:00.000Z",
@@ -220,6 +221,60 @@ afterEach(() => {
 });
 
 describe("ActionsPage", () => {
+  test("tints the row of a run whose worktree has a highlight", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitHubActionsConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+        } as never;
+      }
+      if (query.includes("query GitHubActionsWorkflowRuns")) {
+        return {
+          githubActionsWorkflowRuns: {
+            items: [{ ...run, worktreeHighlightColor: "violet" }],
+            repositories: [
+              {
+                id: "codebase-repository-1",
+                nameWithOwner: "acme/widgets",
+                url: "https://github.com/acme/widgets",
+              },
+            ],
+            repositoryErrors: [],
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<ActionsPage />);
+
+    const row = await screen.findByRole("row", {
+      name: /APP-42 Ship widgets/,
+    });
+    expect(row.className).toContain("bg-violet-500/10");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]?.className).toContain(
+      "shadow-[inset_4px_0_0_var(--color-violet-500)]",
+    );
+  });
+
+  test("leaves the run row untinted when its worktree has no highlight", async () => {
+    render(<ActionsPage />);
+
+    const row = await screen.findByRole("row", {
+      name: /APP-42 Ship widgets/,
+    });
+    expect(row.className).not.toContain("bg-violet-500/10");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]?.className).not.toContain("shadow-[inset");
+  });
+
   test("keeps paginated runs in creation order when an older run starts later", async () => {
     requestMock.mockImplementation(async (query, variables) => {
       if (query.includes("GitHubActionsConfiguration")) {

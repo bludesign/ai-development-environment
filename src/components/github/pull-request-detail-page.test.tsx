@@ -134,6 +134,7 @@ const detail = {
   updatedAt: "2026-07-15T00:00:00.000Z",
   mergedAt: null,
   worktreeId: "worktree-1",
+  worktreeHighlightColor: null as string | null,
 };
 
 beforeEach(() => {
@@ -164,6 +165,38 @@ afterEach(() => {
 });
 
 describe("PullRequestDetailPage", () => {
+  test("tints the header with the linked worktree colour", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestDetail")) {
+        return {
+          githubPullRequest: { ...detail, worktreeHighlightColor: "violet" },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+    render(
+      <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
+    );
+
+    const heading = await screen.findByRole("heading", {
+      name: "APP-42 Add the API",
+    });
+    const header = heading.closest("div.rounded-lg");
+    expect(header?.className).toContain("bg-violet-500/10");
+    expect(header?.className).toContain("border-l-violet-500");
+  });
+
+  test("leaves the header untinted when the worktree has no highlight", async () => {
+    render(
+      <PullRequestDetailPage number={17} owner="acme" repository="widgets" />,
+    );
+
+    const heading = await screen.findByRole("heading", {
+      name: "APP-42 Add the API",
+    });
+    expect(heading.closest("div.rounded-lg")).toBeNull();
+  });
+
   test("shows description, metadata, pipelines, and retries a check suite", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

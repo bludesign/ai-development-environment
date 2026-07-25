@@ -115,6 +115,8 @@ const pullRequest = {
   unresolvedReviewThreadCount: 2,
   state: "OPEN",
   headRefName: "feature/app-42",
+  worktreeId: null as string | null,
+  worktreeHighlightColor: null as string | null,
   createdAt: "2026-07-17T12:00:00.000Z",
 };
 
@@ -253,6 +255,62 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("tints the row of a pull request whose worktree has a highlight", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("GitHubPullRequestConfiguration")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`,
+            updatedAt: new Date(0).toISOString(),
+          },
+          githubRepositories: [repository],
+        } as never;
+      }
+      if (query.includes("query GitHubPullRequests")) {
+        return {
+          githubPullRequests: {
+            items: [
+              {
+                ...pullRequest,
+                worktreeId: "worktree-1",
+                worktreeHighlightColor: "violet",
+              },
+            ],
+            truncated: false,
+            hasNextPage: false,
+            endCursor: null,
+          },
+        } as never;
+      }
+      throw new Error(`Unexpected operation: ${query}`);
+    });
+
+    render(<PullRequestsPage />);
+
+    const row = (
+      await screen.findByRole("link", { name: "APP-42 Add the API" })
+    ).closest("tr") as HTMLTableRowElement;
+    expect(row.className).toContain("bg-violet-500/10");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]?.className).toContain(
+      "shadow-[inset_4px_0_0_var(--color-violet-500)]",
+    );
+  });
+
+  test("leaves the row untinted when the pull request has no linked worktree", async () => {
+    configureRequests();
+
+    render(<PullRequestsPage />);
+
+    const row = (
+      await screen.findByRole("link", { name: "APP-42 Add the API" })
+    ).closest("tr") as HTMLTableRowElement;
+    expect(row.className).not.toContain("bg-violet-500/10");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]?.className).not.toContain("shadow-[inset");
+  });
+
   test("preserves updated ordering when creation dates interleave", async () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("GitHubPullRequestConfiguration")) {

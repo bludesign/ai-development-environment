@@ -55,6 +55,11 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { cn } from "@/lib/utils";
+import {
+  worktreeHighlightAccentClasses,
+  worktreeHighlightBackgroundClasses,
+} from "@/lib/worktree-highlight";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import type {
   GitHubPipelineView,
@@ -66,7 +71,7 @@ import type {
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId";
+  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner worktreeId worktreeHighlightColor } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId worktreeHighlightColor";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -309,9 +314,18 @@ export function PullRequestDetailPage({
     );
   }
 
+  const highlighted = pullRequest.worktreeHighlightColor;
+
   return (
     <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-4",
+          highlighted && "rounded-lg border-l-4 p-4",
+          highlighted && worktreeHighlightBackgroundClasses[highlighted],
+          highlighted && worktreeHighlightAccentClasses[highlighted],
+        )}
+      >
         <div className="min-w-0">
           <Button asChild className="mb-3 -ml-2" variant="ghost">
             <Link href="/pull-requests">
