@@ -18,7 +18,6 @@ import {
 import {
   Copy,
   ExternalLink,
-  Link2,
   Pencil,
   RotateCcw,
   Trash2,
@@ -216,13 +215,6 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
               <RotateCcw className="size-3" /> {data.attemptLabel}
             </span>
           )}
-        </div>
-      )}
-      {data.currentPage && (
-        <div className="mt-2">
-          <Badge className="gap-1 text-[10px]" variant="secondary">
-            <Link2 className="size-3" /> {t("currentPage")}
-          </Badge>
         </div>
       )}
       {data.diagnostics.length > 0 && (

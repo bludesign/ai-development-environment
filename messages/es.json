@@ -295,7 +295,6 @@
     "quickActionView": "Ver",
     "runNamed": "Ejecutar {name}",
     "fullRun": "Ejecución completa",
-    "currentPage": "Página actual",
     "openLinkedResource": "Abrir detalles vinculados"
   },
   "runs": {
