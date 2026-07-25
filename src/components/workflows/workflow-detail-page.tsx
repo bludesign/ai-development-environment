@@ -69,6 +69,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import {
   BUILD_CONFIGURATION_ICON_KEYS,
@@ -89,6 +90,7 @@ type WorkflowDetail = WorkflowSummary & {
 
 const DETAIL_FIELDS = `
   id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
+  triggerChoices { key label description }
   quickActionRepositories { id name displayOrigin }
   versionCount runCount createdAt updatedAt
   activeVersion { id workflowId version name description schemaVersion definition contentHash publishedAt }
@@ -211,14 +213,14 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
     }
   };
 
-  const trigger = async () => {
+  const trigger = async (choice: string | null) => {
     if (!workflow) return;
     try {
       const data = await controlPlaneRequest<{
         triggerWorkflow: { id: string };
       }>(
         `mutation RunWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
-        { input: { workflowId: workflow.id, sessionData: {} } },
+        { input: { workflowId: workflow.id, sessionData: {}, choice } },
       );
       router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
     } catch (value) {
@@ -357,9 +359,15 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
             {workflow.enabled ? <CirclePause /> : <CirclePlay />}{" "}
             {workflow.enabled ? t("pauseDefinition") : t("enable")}
           </Button>
-          <Button disabled={!workflow.enabled} onClick={() => void trigger()}>
-            <CirclePlay /> {t("run")}
-          </Button>
+          <WorkflowChoiceMenu
+            button={
+              <Button disabled={!workflow.enabled}>
+                <CirclePlay /> {t("run")}
+              </Button>
+            }
+            choices={workflow.triggerChoices}
+            onRun={(choice) => void trigger(choice)}
+          />
         </div>
       </div>
       {error && (

@@ -102,6 +102,8 @@ export type WorkflowSummary = {
     name: string;
     displayOrigin: string;
   }>;
+  /** Options the published MANUAL_CHOICE trigger offers, if it has one. */
+  triggerChoices: Array<{ key: string; label: string; description: string }>;
   archivedAt: string | null;
   versionCount: number;
   runCount: number;

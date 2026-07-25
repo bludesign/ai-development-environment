@@ -30,7 +30,10 @@ import {
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
-import { workflowResourceKind } from "@/lib/workflows/definition";
+import {
+  isResourceTriggerKind,
+  workflowResourceKind,
+} from "@/lib/workflows/definition";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -454,7 +457,7 @@ export class WorktreesService {
     });
     const eligibleQuickActions = quickActionWorkflows.filter((workflow) =>
       workflow.activeVersion?.triggers.some((trigger) => {
-        if (trigger.kind !== "RESOURCE_MANUAL") return false;
+        if (!isResourceTriggerKind(trigger.kind)) return false;
         try {
           return (
             workflowResourceKind(JSON.parse(trigger.configJson)) === "WORKTREE"

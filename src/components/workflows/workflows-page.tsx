@@ -65,6 +65,7 @@ import {
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 
+import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun, WorkflowSummary } from "./types";
@@ -72,6 +73,7 @@ import type { WorkflowRun, WorkflowSummary } from "./types";
 const WORKFLOW_FIELDS = `
   id name description draftDefinition activeVersionId enabled overlapPolicy maxConcurrentRuns archivedAt globalQuickAction quickActionIconKey quickActionButtonVariant
   quickActionRepositories { id name displayOrigin }
+  triggerChoices { key label description }
   versionCount runCount createdAt updatedAt
 `;
 
@@ -156,6 +158,7 @@ export function WorkflowsPage() {
   const mutateWorkflow = async (
     workflow: WorkflowSummary,
     operation: "enabled" | "archive" | "run",
+    choice: string | null = null,
   ) => {
     try {
       if (operation === "enabled") {
@@ -173,7 +176,7 @@ export function WorkflowsPage() {
           triggerWorkflow: { id: string };
         }>(
           `mutation TriggerWorkflow($input: TriggerWorkflowInput!) { triggerWorkflow(input: $input) { id } }`,
-          { input: { workflowId: workflow.id, sessionData: {} } },
+          { input: { workflowId: workflow.id, sessionData: {}, choice } },
         );
         router.push(`/workflows/runs/${data.triggerWorkflow.id}`);
       }
@@ -393,13 +396,17 @@ export function WorkflowsPage() {
                         <GitFork /> {t("edit")}
                       </Link>
                     </Button>
-                    <Button
-                      className="flex-1"
-                      disabled={!workflow.enabled}
-                      onClick={() => void mutateWorkflow(workflow, "run")}
-                    >
-                      <CirclePlay /> {t("run")}
-                    </Button>
+                    <WorkflowChoiceMenu
+                      button={
+                        <Button className="flex-1" disabled={!workflow.enabled}>
+                          <CirclePlay /> {t("run")}
+                        </Button>
+                      }
+                      choices={workflow.triggerChoices}
+                      onRun={(choice) =>
+                        void mutateWorkflow(workflow, "run", choice)
+                      }
+                    />
                   </div>
                 </CardContent>
               </Card>

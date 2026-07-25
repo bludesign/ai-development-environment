@@ -1,3 +1,8 @@
+import {
+  parseWorkflowDefinition,
+  workflowResourceKind,
+  workflowTriggerChoices,
+} from "@/lib/workflows/definition";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   CreateWorkflowInput,
@@ -35,6 +40,25 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
       quickActionRepositories?: Array<{ repository: unknown }>;
     }) =>
       value.quickActionRepositories?.map(({ repository }) => repository) ?? [],
+    // Read off the published definition every caller already loads with the
+    // workflow, so listing a page of run buttons costs no extra queries.
+    triggerChoices: (
+      value: { activeVersion?: { definitionJson: string } | null },
+      { resourceKind }: { resourceKind?: string | null },
+    ) => {
+      if (!value.activeVersion) return [];
+      const wanted = resourceKind?.trim().toUpperCase() ?? null;
+      const definition = parseWorkflowDefinition(
+        JSON.parse(value.activeVersion.definitionJson),
+      );
+      const trigger = definition.triggers.find(
+        (candidate) =>
+          candidate.kind ===
+            (wanted ? "RESOURCE_MANUAL_CHOICE" : "MANUAL_CHOICE") &&
+          (!wanted || workflowResourceKind(candidate.config) === wanted),
+      );
+      return trigger ? workflowTriggerChoices(trigger.config) : [];
+    },
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),

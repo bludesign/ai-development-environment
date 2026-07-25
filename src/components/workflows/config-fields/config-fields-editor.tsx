@@ -54,8 +54,12 @@ import type { SessionFieldInfo } from "@/lib/workflows/session-schema";
 
 import {
   parseChoiceOptions,
+  parseTriggerChoices,
   serializeChoiceOptions,
+  serializeTriggerChoices,
+  triggerChoiceKeyFromLabel,
   type ChoiceOptionRow,
+  type TriggerChoiceRow,
 } from "./choice-options";
 import {
   CONDITION_OPERATORS,
@@ -842,6 +846,127 @@ function ChoiceOptionsField(props: FieldProps) {
   );
 }
 
+/**
+ * The options a choice trigger offers, each of which becomes an item in the
+ * menu under the run button and an output handle on the trigger card.
+ *
+ * The key is what the graph connects to, so it must survive a rename: it
+ * follows the label only while it still matches the label it was derived from,
+ * and stops the moment the author edits it directly.
+ */
+function TriggerChoicesField(props: FieldProps) {
+  const { field, value, onChange } = props;
+  const t = useTranslations("workflows");
+  const rows = parseTriggerChoices(value);
+
+  if (!rows) {
+    return (
+      <div className="space-y-1.5">
+        <JsonField {...props} />
+        <FieldDescription className="text-[10px]">
+          {t("triggerChoicesAdvanced")}
+        </FieldDescription>
+      </div>
+    );
+  }
+
+  const commit = (next: TriggerChoiceRow[]) =>
+    onChange(serializeTriggerChoices(next));
+  const patchRow = (index: number, changes: Partial<TriggerChoiceRow>) =>
+    commit(
+      rows.map((row, position) =>
+        position === index ? { ...row, ...changes } : row,
+      ),
+    );
+  const renameLabel = (index: number, label: string) => {
+    const row = rows[index]!;
+    const tracking =
+      !row.key || row.key === triggerChoiceKeyFromLabel(row.label);
+    patchRow(index, {
+      label,
+      ...(tracking ? { key: triggerChoiceKeyFromLabel(label) } : {}),
+    });
+  };
+  const duplicateKey = (index: number) =>
+    rows.some(
+      (row, position) => position !== index && row.key === rows[index]!.key,
+    );
+
+  return (
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <FieldGroup className="gap-1.5">
+        {rows.map((row, index) => (
+          <div className="space-y-1.5 rounded-lg border p-2" key={index}>
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={t("triggerChoiceLabel")}
+                className="min-w-0 flex-1"
+                onChange={(event) => renameLabel(index, event.target.value)}
+                placeholder={t("triggerChoiceLabel")}
+                value={row.label}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("removeRow")}
+                    className="size-7 shrink-0"
+                    onClick={() =>
+                      commit(
+                        rows.filter((_entry, position) => position !== index),
+                      )
+                    }
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("removeRow")}</TooltipContent>
+              </Tooltip>
+            </div>
+            <Input
+              aria-label={t("triggerChoiceKey")}
+              className="font-mono text-xs"
+              onChange={(event) => patchRow(index, { key: event.target.value })}
+              placeholder={t("triggerChoiceKey")}
+              value={row.key}
+            />
+            {duplicateKey(index) && (
+              <FieldError className="text-[10px]">
+                {t("triggerChoiceKeyDuplicate")}
+              </FieldError>
+            )}
+            <Input
+              aria-label={t("triggerChoiceDescription")}
+              className="text-xs"
+              onChange={(event) =>
+                patchRow(index, { description: event.target.value })
+              }
+              placeholder={t("triggerChoiceDescription")}
+              value={row.description}
+            />
+          </div>
+        ))}
+      </FieldGroup>
+      <Button
+        onClick={() =>
+          commit([...rows, { key: "", label: "", description: "" }])
+        }
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Plus className="size-3.5" /> {t("addTriggerChoice")}
+      </Button>
+      <FieldDescription className="text-[10px]">
+        {rows.length ? t("triggerChoicesHelp") : t("triggerChoicesEmpty")}
+      </FieldDescription>
+    </Field>
+  );
+}
+
 type ModelKeys = NonNullable<ConfigFieldDescriptor["modelKeys"]>;
 
 const DEFAULT_MODEL_KEYS: ModelKeys = {
@@ -1016,6 +1141,8 @@ function ConfigFieldRow(props: FieldProps) {
       return <ConditionField {...props} />;
     case "choiceOptions":
       return <ChoiceOptionsField {...props} />;
+    case "triggerChoices":
+      return <TriggerChoicesField {...props} />;
     case "json":
       return <JsonField {...props} />;
     default:

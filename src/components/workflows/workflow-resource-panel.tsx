@@ -30,6 +30,10 @@ import {
 } from "@/lib/control-plane-client";
 import { currentPageWorkflowNodeIds } from "@/lib/workflows/resource-navigation";
 
+import {
+  WorkflowChoiceMenu,
+  type WorkflowTriggerChoice,
+} from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import { WorkflowQuestionActions } from "./workflow-question-actions";
@@ -40,6 +44,7 @@ type AcceptedWorkflow = {
   name: string;
   description: string;
   enabled: boolean;
+  triggerChoices: WorkflowTriggerChoice[];
 };
 
 const LINKED_RUN_FIELDS = `
@@ -83,7 +88,10 @@ export function WorkflowResourcePanel({
       }>(
         `query ResourceWorkflows($kind: String!, $resourceId: ID!) {
         workflowRunsForResource(kind: $kind, resourceId: $resourceId) { ${LINKED_RUN_FIELDS} }
-        workflowsAcceptingResource(kind: $kind) { id name description enabled }
+        workflowsAcceptingResource(kind: $kind) {
+          id name description enabled
+          triggerChoices(resourceKind: $kind) { key label description }
+        }
       }`,
         { kind: resourceKind, resourceId },
       );
@@ -117,7 +125,7 @@ export function WorkflowResourcePanel({
     };
   }, [load]);
 
-  const trigger = async (workflowId: string) => {
+  const trigger = async (workflowId: string, choice: string | null) => {
     setTriggering(workflowId);
     try {
       await controlPlaneRequest<{ triggerWorkflow: { id: string } }>(
@@ -129,6 +137,7 @@ export function WorkflowResourcePanel({
             resourceKind,
             resourceId,
             subjectKey: `${resourceKind}:${resourceId}`,
+            choice,
           },
         },
       );
@@ -178,14 +187,19 @@ export function WorkflowResourcePanel({
                   )}
                 </ItemContent>
                 <ItemActions>
-                  <Button
-                    disabled={!workflow.enabled || triggering !== null}
-                    onClick={() => void trigger(workflow.id)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <CirclePlay /> {t("run")}
-                  </Button>
+                  <WorkflowChoiceMenu
+                    button={
+                      <Button
+                        disabled={!workflow.enabled || triggering !== null}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <CirclePlay /> {t("run")}
+                      </Button>
+                    }
+                    choices={workflow.triggerChoices}
+                    onRun={(choice) => void trigger(workflow.id, choice)}
+                  />
                 </ItemActions>
               </Item>
             ))}

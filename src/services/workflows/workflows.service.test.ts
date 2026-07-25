@@ -505,3 +505,142 @@ describe("workflow runtime lifecycle guards", () => {
     );
   });
 });
+
+describe("workflow choice triggers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+  });
+
+  const choiceDefinition = () => {
+    const definition = emptyWorkflowDefinition("Choice workflow");
+    definition.triggers = [
+      {
+        id: "choose",
+        kind: "MANUAL_CHOICE",
+        position: { x: 0, y: 0 },
+        config: {
+          choices: [
+            { key: "draft", label: "Draft" },
+            { key: "ready", label: "Ready" },
+          ],
+        },
+      },
+    ];
+    return definition;
+  };
+
+  const publishedWorkflow = (definition: WorkflowDefinition) => ({
+    id: "workflow-1",
+    enabled: true,
+    archivedAt: null,
+    overlapPolicy: "CONCURRENT",
+    activeVersion: {
+      id: "version-1",
+      name: definition.name,
+      definitionJson: JSON.stringify(definition),
+      triggers: definition.triggers.map((trigger) => ({
+        id: `db-${trigger.id}`,
+        nodeId: trigger.id,
+        kind: trigger.kind,
+        configJson: JSON.stringify(trigger.config),
+      })),
+    },
+  });
+
+  test("records the picked option on the run it starts", async () => {
+    const definition = choiceDefinition();
+    prisma.workflow.findUnique.mockResolvedValue(publishedWorkflow(definition));
+    // First lookup is the idempotency check inside the transaction; the second
+    // is `run()` reading the created run back out.
+    prisma.workflowRun.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "run-1" });
+    prisma.workflowRunNumberSequence.upsert.mockResolvedValue({ nextValue: 1 });
+    prisma.workflowRun.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => data,
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.trigger({ workflowId: "workflow-1", choice: "ready" });
+
+    const { data } = prisma.workflowRun.create.mock.calls[0]![0] as {
+      data: Record<string, string>;
+    };
+    expect(data.triggerKind).toBe("MANUAL_CHOICE");
+    expect(data.triggerId).toBe("db-choose");
+    expect(JSON.parse(data.triggerPayloadJson!).choice).toBe("ready");
+    expect(JSON.parse(data.sessionDataJson!).workflow.trigger.choice).toBe(
+      "ready",
+    );
+  });
+
+  test("rejects an option the trigger does not offer", async () => {
+    prisma.workflow.findUnique.mockResolvedValue(
+      publishedWorkflow(choiceDefinition()),
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      service.trigger({ workflowId: "workflow-1", choice: "shipped" }),
+    ).rejects.toThrow(/Unknown choice/);
+  });
+
+  test("refuses a plain run when the workflow only offers choices", async () => {
+    prisma.workflow.findUnique.mockResolvedValue(
+      publishedWorkflow(choiceDefinition()),
+    );
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(service.trigger({ workflowId: "workflow-1" })).rejects.toThrow(
+      /needs a choice: draft, ready/,
+    );
+  });
+
+  test("activates only the edge leaving the option that was picked", () => {
+    const definition = choiceDefinition();
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      selectedTrigger: (
+        run: unknown,
+        definition: WorkflowDefinition,
+      ) => { id: string | null; choice: string | null };
+      edgeState: (
+        edge: unknown,
+        selected: { id: string | null; choice: string | null },
+        attempts: Map<string, unknown>,
+        nodeById: Map<string, unknown>,
+      ) => string;
+    };
+    const selected = service.selectedTrigger(
+      {
+        triggerKind: "MANUAL_CHOICE",
+        trigger: { nodeId: "choose" },
+        triggerPayloadJson: JSON.stringify({ choice: "ready" }),
+      },
+      definition,
+    );
+
+    const edgeFrom = (sourceHandle: string) => ({
+      id: `edge-${sourceHandle}`,
+      source: "choose",
+      target: "step",
+      sourceHandle,
+      targetHandle: "input",
+    });
+    const state = (sourceHandle: string) =>
+      service.edgeState(edgeFrom(sourceHandle), selected, new Map(), new Map());
+
+    expect(selected.choice).toBe("ready");
+    expect(state("ready")).toBe("ACTIVE");
+    expect(state("draft")).toBe("INACTIVE");
+  });
+});

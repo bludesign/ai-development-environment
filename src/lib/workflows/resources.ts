@@ -1,3 +1,5 @@
+import { isResourceTriggerKind } from "./definition";
+
 export function pullRequestResourceId(
   owner: string,
   repository: string,
@@ -126,7 +128,7 @@ export function workflowTriggerResourceLink(
 ): WorkflowResourceLinkLike | null {
   const kind = triggerKind.trim().toUpperCase();
   const session = record(payload.sessionData);
-  if (kind === "RESOURCE_MANUAL") {
+  if (isResourceTriggerKind(kind)) {
     const resourceKind = payload.resourceKind;
     return typeof resourceKind === "string"
       ? resourceLink(resourceKind.toUpperCase(), payload.resourceId, {

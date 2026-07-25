@@ -32,6 +32,15 @@ vi.mock("@/i18n/navigation", () => ({
   ),
 }));
 
+// Radix opens a menu on pointerdown and captures the pointer; jsdom implements
+// neither, so the choice-menu test needs these stubs to reach the items.
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+  setPointerCapture: { configurable: true, value: () => undefined },
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -73,6 +82,7 @@ test("starts a selected worktree quick action and links to the run", async () =>
           resourceKind: "WORKTREE",
           resourceId: "worktree-1",
           subjectKey: "WORKTREE:worktree-1",
+          choice: null,
         },
       },
     ),
@@ -82,6 +92,59 @@ test("starts a selected worktree quick action and links to the run", async () =>
   expect(viewLink.querySelector('[data-slot="spinner"]')).not.toBeNull();
   expect(viewLink.className).toContain("rounded-r-none");
   expect(button.className).toContain("rounded-l-none");
+});
+
+test("asks which choice to run before starting a choice workflow", async () => {
+  vi.mocked(controlPlaneRequest).mockResolvedValue({
+    triggerWorkflow: { id: "run-2" },
+  } as never);
+  render(
+    <WorkflowQuickActions
+      sessionData={{ worktree: { id: "worktree-1" } }}
+      workflows={[
+        {
+          id: "workflow-1",
+          name: "Prepare review",
+          description: "Runs the review preparation workflow",
+          quickActionIconKey: "rocket",
+          quickActionButtonVariant: "secondary",
+          triggerChoices: [
+            { key: "draft", label: "Draft PR", description: "" },
+            {
+              key: "ready",
+              label: "Ready for review",
+              description: "Marks it ready",
+            },
+          ],
+        },
+      ]}
+      worktreeId="worktree-1"
+    />,
+  );
+
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Prepare review" }),
+    {
+      button: 0,
+      ctrlKey: false,
+    },
+  );
+  // The button opens the menu rather than starting a run of its own.
+  expect(controlPlaneRequest).not.toHaveBeenCalled();
+
+  const item = await screen.findByRole("menuitem", {
+    name: /Ready for review/,
+  });
+  fireEvent.click(item);
+
+  await waitFor(() =>
+    expect(controlPlaneRequest).toHaveBeenCalledWith(
+      expect.stringContaining("RunWorktreeQuickAction"),
+      expect.objectContaining({
+        input: expect.objectContaining({ choice: "ready" }),
+      }),
+    ),
+  );
 });
 
 test("hides the view button five seconds after the run starts", async () => {

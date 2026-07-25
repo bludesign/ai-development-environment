@@ -10,12 +10,18 @@ import { ConfigurationIcon } from "@/components/builds/configuration-icon";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
+import {
+  WorkflowChoiceMenu,
+  type WorkflowTriggerChoice,
+} from "./workflow-choice-menu";
+
 type QuickActionWorkflow = {
   id: string;
   name: string;
   description: string;
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
+  triggerChoices?: WorkflowTriggerChoice[];
 };
 
 const STARTED_RUN_VISIBLE_MS = 5000;
@@ -43,7 +49,10 @@ export function WorkflowQuickActions({
     };
   }, []);
 
-  const trigger = async (workflow: QuickActionWorkflow) => {
+  const trigger = async (
+    workflow: QuickActionWorkflow,
+    choice: string | null,
+  ) => {
     setTriggering(workflow.id);
     setError(null);
     try {
@@ -60,6 +69,7 @@ export function WorkflowQuickActions({
             resourceKind: "WORKTREE",
             resourceId: worktreeId,
             subjectKey: `WORKTREE:${worktreeId}`,
+            choice,
           },
         },
       );
@@ -111,21 +121,30 @@ export function WorkflowQuickActions({
                   </Link>
                 </Button>
               )}
-              <Button
-                className={startedRunId ? "-ml-px rounded-l-none" : undefined}
-                disabled={triggering !== null}
-                onClick={() => void trigger(workflow)}
-                size="sm"
-                title={workflow.description || workflow.name}
-                variant={workflow.quickActionButtonVariant}
-              >
-                {triggering === workflow.id ? (
-                  <Spinner />
-                ) : (
-                  <ConfigurationIcon iconKey={workflow.quickActionIconKey} />
-                )}
-                {workflow.name}
-              </Button>
+              <WorkflowChoiceMenu
+                button={
+                  <Button
+                    className={
+                      startedRunId ? "-ml-px rounded-l-none" : undefined
+                    }
+                    disabled={triggering !== null}
+                    size="sm"
+                    title={workflow.description || workflow.name}
+                    variant={workflow.quickActionButtonVariant}
+                  >
+                    {triggering === workflow.id ? (
+                      <Spinner />
+                    ) : (
+                      <ConfigurationIcon
+                        iconKey={workflow.quickActionIconKey}
+                      />
+                    )}
+                    {workflow.name}
+                  </Button>
+                }
+                choices={workflow.triggerChoices ?? []}
+                onRun={(choice) => void trigger(workflow, choice)}
+              />
             </div>
           );
         })}

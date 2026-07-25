@@ -31,6 +31,12 @@ type Workflow {
   quickActionIconKey: String!
   quickActionButtonVariant: String!
   quickActionRepositories: [CodebaseRepository!]!
+  """
+  Options the published manual trigger offers, for the menu that drops down
+  under a run button. Empty when the matching trigger takes no choice. Pass the
+  resource kind to read the resource trigger instead of the plain manual one.
+  """
+  triggerChoices(resourceKind: String): [WorkflowTriggerChoice!]!
   archivedAt: String
   versions: [WorkflowVersion!]!
   versionCount: Int!
@@ -60,6 +66,13 @@ type WorkflowTrigger {
   kind: String!
   config: JSON!
   createdAt: String!
+}
+
+"One option a choice trigger offers. `key` names the trigger's output handle."
+type WorkflowTriggerChoice {
+  key: String!
+  label: String!
+  description: String!
 }
 
 type WorkflowStepCatalogEntry {
@@ -267,6 +280,8 @@ input TriggerWorkflowInput {
   resourceKind: String
   resourceId: ID
   subjectKey: String
+  "Key of the option picked on a choice trigger. Omit to run the plain trigger."
+  choice: String
 }
 
 input SetWorkflowQuickActionInput {

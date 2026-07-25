@@ -213,6 +213,17 @@ const choiceOptions = (
   ...options,
 });
 
+const triggerChoices = (
+  key: string,
+  label: string,
+  options: FieldOptions = {},
+): ConfigFieldDescriptor => ({
+  key,
+  label,
+  control: "triggerChoices",
+  ...options,
+});
+
 // ---------------------------------------------------------------------------
 // Shared option sets and reused field groups.
 // ---------------------------------------------------------------------------
@@ -793,7 +804,9 @@ const THRESHOLD_TRIGGERS: WorkflowTriggerKind[] = [
 
 const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "MANUAL",
+  "MANUAL_CHOICE",
   "RESOURCE_MANUAL",
+  "RESOURCE_MANUAL_CHOICE",
   "SCHEDULE",
   "WORKFLOW_FINISHED",
   "GITHUB_PR_STATE",
@@ -844,7 +857,7 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
   ALL_TRIGGER_KINDS.map((kind) => {
-    if (kind === "RESOURCE_MANUAL") {
+    if (kind === "RESOURCE_MANUAL" || kind === "RESOURCE_MANUAL_CHOICE") {
       return [
         kind,
         triggerWithFilters([
@@ -854,6 +867,17 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             staticOptions(WORKFLOW_RESOURCE_KINDS),
             { required: true },
           ),
+          ...(kind === "RESOURCE_MANUAL_CHOICE"
+            ? [triggerChoices("choices", "Choices", { required: true })]
+            : []),
+        ]),
+      ];
+    }
+    if (kind === "MANUAL_CHOICE") {
+      return [
+        kind,
+        triggerWithFilters([
+          triggerChoices("choices", "Choices", { required: true }),
         ]),
       ];
     }

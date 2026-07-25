@@ -16,6 +16,8 @@ import { getPrismaClient } from "@/data/prisma-client";
 import {
   emptyWorkflowDefinition,
   hasWorkflowErrors,
+  isChoiceTriggerKind,
+  isResourceTriggerKind,
   parseWorkflowDefinition,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
@@ -24,6 +26,7 @@ import {
   WORKFLOW_STEP_CATALOG,
   WORKFLOW_TRIGGER_CATALOG,
   workflowResourceKind,
+  workflowTriggerChoices,
   type WorkflowDefinition,
   type WorkflowDiagnostic,
   type WorkflowNodeDefinition,
@@ -120,6 +123,8 @@ export type TriggerWorkflowInput = {
   resourceKind?: string | null;
   resourceId?: string | null;
   subjectKey?: string | null;
+  /** Key of the option picked on a choice trigger; null runs the plain one. */
+  choice?: string | null;
 };
 
 export type ImportWorkflowInput = {
@@ -1571,7 +1576,7 @@ export class WorkflowsService {
       );
       return definition.triggers.some(
         (trigger) =>
-          trigger.kind === "RESOURCE_MANUAL" &&
+          isResourceTriggerKind(trigger.kind) &&
           workflowResourceKind(trigger.config) === normalized,
       );
     });
@@ -1608,7 +1613,7 @@ export class WorkflowsService {
       );
       return definition.triggers.some(
         (trigger) =>
-          trigger.kind === "RESOURCE_MANUAL" &&
+          isResourceTriggerKind(trigger.kind) &&
           workflowResourceKind(trigger.config) === "WORKTREE",
       );
     });
@@ -1655,26 +1660,61 @@ export class WorkflowsService {
     if (!workflow.enabled || workflow.archivedAt) {
       throw new Error("Workflow is paused");
     }
-    const wantedKind = input.resourceKind ? "RESOURCE_MANUAL" : "MANUAL";
+    const resourceKind = input.resourceKind?.toUpperCase() ?? null;
+    const choice = input.choice?.trim() || null;
     const { triggers } = workflow.activeVersion;
-    const trigger = input.resourceKind
-      ? (triggers.find(
-          (candidate) =>
-            candidate.kind === "RESOURCE_MANUAL" &&
+    // Each manual entry point comes in a plain and a choice flavour. The caller
+    // naming an option picks the choice flavour; otherwise the plain one runs,
+    // and a workflow that only offers choices refuses rather than starting a run
+    // that no edge would carry.
+    const plainKind = resourceKind ? "RESOURCE_MANUAL" : "MANUAL";
+    const choiceKind = resourceKind
+      ? "RESOURCE_MANUAL_CHOICE"
+      : "MANUAL_CHOICE";
+    const find = (kind: string) =>
+      triggers.find(
+        (candidate) =>
+          candidate.kind === kind &&
+          (!resourceKind ||
             workflowResourceKind(
               parseObject(json(candidate.configJson), "Trigger configuration"),
-            ) === input.resourceKind!.toUpperCase(),
-        ) ?? null)
-      : (triggers.find(({ kind }) => kind === "MANUAL") ?? null);
-    if (input.resourceKind && !trigger) {
+            ) === resourceKind),
+      ) ?? null;
+    const choiceTrigger = find(choiceKind);
+    const plainTrigger = find(plainKind);
+    const trigger = choice ? choiceTrigger : plainTrigger;
+    if (choice && !choiceTrigger) {
+      throw new Error(
+        resourceKind
+          ? `No resource trigger offers choices for ${resourceKind} resources`
+          : "This workflow has no manual trigger with choices",
+      );
+    }
+    if (!choice && !plainTrigger && choiceTrigger) {
+      const options = workflowTriggerChoices(
+        parseObject(json(choiceTrigger.configJson), "Trigger configuration"),
+      );
+      throw new Error(
+        `This workflow needs a choice: ${options.map(({ key }) => key).join(", ")}`,
+      );
+    }
+    if (resourceKind && !trigger) {
       throw new Error(
         `No resource trigger accepts ${input.resourceKind} resources`,
       );
     }
+    if (choice && choiceTrigger) {
+      const options = workflowTriggerChoices(
+        parseObject(json(choiceTrigger.configJson), "Trigger configuration"),
+      );
+      if (!options.some(({ key }) => key === choice))
+        throw new Error(`Unknown choice ${choice}`);
+    }
+    const wantedKind = choice ? choiceKind : plainKind;
     const subjectKey =
       input.subjectKey?.trim() ||
-      (input.resourceKind && input.resourceId
-        ? `${input.resourceKind}:${input.resourceId}`
+      (resourceKind && input.resourceId
+        ? `${resourceKind}:${input.resourceId}`
         : `manual:${randomUUID()}`);
     const payload = {
       sessionData: await this.hydrateResourceSessionData(
@@ -1684,6 +1724,7 @@ export class WorkflowsService {
       ),
       resourceKind: input.resourceKind ?? null,
       resourceId: input.resourceId ?? null,
+      choice,
       manual: true,
     };
     const run = await this.createRunForTrigger(
@@ -1755,6 +1796,11 @@ export class WorkflowsService {
               id: trigger?.nodeId ?? null,
               kind: triggerKind,
               subjectKey,
+              // Steps can branch on which option started the run without
+              // needing an edge per option — `workflow.trigger.choice` is null
+              // for every trigger that does not offer a choice.
+              choice:
+                typeof payload.choice === "string" ? payload.choice : null,
             },
           },
           steps: {},
@@ -2402,15 +2448,28 @@ export class WorkflowsService {
     }
   }
 
-  private selectedTriggerId(
+  /**
+   * The trigger the run entered through, and — for a choice trigger — the
+   * option that was picked. The option names the trigger's output handle, so
+   * `edgeState` uses it to leave every other entry path inactive.
+   */
+  private selectedTrigger(
     run: WorkflowRun & { trigger?: WorkflowTrigger | null },
     definition: WorkflowDefinition,
-  ): string | null {
-    return (
+  ): { id: string | null; choice: string | null } {
+    const id =
       run.trigger?.nodeId ??
       definition.triggers.find(({ kind }) => kind === run.triggerKind)?.id ??
-      null
+      null;
+    if (!isChoiceTriggerKind(run.triggerKind)) return { id, choice: null };
+    const payload = parseObject(
+      json(run.triggerPayloadJson),
+      "Trigger payload",
     );
+    return {
+      id,
+      choice: typeof payload.choice === "string" ? payload.choice : null,
+    };
   }
 
   private attemptOutput(attempt: WorkflowStepAttempt): {
@@ -2426,12 +2485,18 @@ export class WorkflowsService {
 
   private edgeState(
     edge: WorkflowDefinition["edges"][number],
-    selectedTriggerId: string | null,
+    selectedTrigger: { id: string | null; choice: string | null },
     attempts: Map<string, WorkflowStepAttempt>,
     nodeById: Map<string, WorkflowNodeDefinition>,
   ): "ACTIVE" | "INACTIVE" | "PENDING" {
     if (!nodeById.has(edge.source)) {
-      return edge.source === selectedTriggerId ? "ACTIVE" : "INACTIVE";
+      if (edge.source !== selectedTrigger.id) return "INACTIVE";
+      // Triggers without a choice fan out of every handle they are wired from,
+      // as they always have; a choice run takes only the option's own path.
+      return !selectedTrigger.choice ||
+        edge.sourceHandle === selectedTrigger.choice
+        ? "ACTIVE"
+        : "INACTIVE";
     }
     const attempt = attempts.get(edge.source);
     if (!attempt || !TERMINAL_ATTEMPT_STATUSES.has(attempt.status))
@@ -2538,7 +2603,7 @@ export class WorkflowsService {
           .filter(({ iterationKey }) => !iterationKey)
           .map((attempt) => [attempt.nodeId, attempt]),
       );
-      const selectedTrigger = this.selectedTriggerId(run, definition);
+      const selectedTrigger = this.selectedTrigger(run, definition);
       for (const node of definition.nodes) {
         const attempt = base.get(node.id);
         if (!attempt || attempt.status !== "PENDING") continue;
@@ -3134,7 +3199,7 @@ export class WorkflowsService {
   private async progressIterationAttempts(
     definition: WorkflowDefinition,
     run: WorkflowRun,
-    selectedTrigger: string | null,
+    selectedTrigger: { id: string | null; choice: string | null },
     nodeById: Map<string, WorkflowNodeDefinition>,
     incoming: Map<string, WorkflowDefinition["edges"]>,
     latest: Map<string, WorkflowStepAttempt>,

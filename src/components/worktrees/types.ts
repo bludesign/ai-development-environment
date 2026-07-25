@@ -81,6 +81,11 @@ export type WorktreeCodebaseGroup = {
     quickActionIconKey: string;
     quickActionButtonVariant:
       "default" | "outline" | "secondary" | "destructive";
+    triggerChoices?: Array<{
+      key: string;
+      label: string;
+      description: string;
+    }>;
   }>;
 };
 

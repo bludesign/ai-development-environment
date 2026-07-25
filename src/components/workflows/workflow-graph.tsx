@@ -34,6 +34,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import {
+  isChoiceTriggerKind,
+  workflowTriggerChoices,
+} from "@/lib/workflows/definition";
 import type { WorkflowResourceDestination } from "@/lib/workflows/resources";
 
 import {
@@ -50,11 +54,15 @@ import type {
   WorkflowHandleLayout,
 } from "./types";
 
+/** One source connector on a card, in the order it is laid out along the edge. */
+type WorkflowSourceHandle = { id: string; label: string };
+
 type WorkflowNodeData = {
   label: string;
   kind: string;
   category: string;
   trigger: boolean;
+  handles: WorkflowSourceHandle[];
   handleLayout: WorkflowHandleLayout;
   status: string | null;
   phase: string | null;
@@ -115,7 +123,21 @@ function statusClass(status: string | null, diagnostic: boolean): string {
   return "border-border";
 }
 
-function sourceHandles(kind: string): Array<{ id: string; label: string }> {
+/**
+ * The connectors a card offers, which depend on config as well as kind: a
+ * choice trigger has one output per option it declares, so the graph reads
+ * config rather than assuming the success/failure pair every other card has.
+ */
+export function workflowSourceHandles(
+  kind: string,
+  config: unknown = {},
+): WorkflowSourceHandle[] {
+  if (isChoiceTriggerKind(kind)) {
+    return workflowTriggerChoices(config).map(({ key, label }) => ({
+      id: key,
+      label,
+    }));
+  }
   if (kind === "CONTROL_IF") {
     return [
       { id: "true", label: "true" },
@@ -145,8 +167,14 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
   const t = useTranslations("workflows");
   const actions = useContext(WorkflowNodeActionsContext);
   const store = useStoreApi();
-  const handles = sourceHandles(data.kind);
+  const handles = data.handles;
   const vertical = data.handleLayout === "TOP_BOTTOM";
+  // A choice trigger's outputs are user-named, so they are drawn as labelled
+  // rows with the connector on each row rather than as anonymous dots. Only the
+  // side layout can do that — a top/bottom card keeps its connectors on the
+  // bottom edge, with the same labels listed above them in the same order.
+  const choiceTrigger = data.trigger && isChoiceTriggerKind(data.kind);
+  const inlineChoiceHandles = choiceTrigger && !vertical;
   const card = (
     <div
       className={cn(
@@ -233,28 +261,54 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
           )}
         </div>
       )}
-      {handles.map((handle, index) => (
-        <Handle
-          className={cn(
-            "size-3! border-2! border-background!",
-            handle.id === "failure" || handle.id === "catch"
-              ? "bg-destructive!"
-              : "bg-primary!",
-          )}
-          id={handle.id}
-          key={handle.id}
-          position={vertical ? Position.Bottom : Position.Right}
-          /* The two outcomes share one edge of the card, so they are spread
-             along it — down the side, or across the bottom. */
-          style={
-            vertical
-              ? { left: `${35 + index * 28}%` }
-              : { top: `${35 + index * 28}%` }
-          }
-          title={handle.label}
-          type="source"
-        />
-      ))}
+      {choiceTrigger && (
+        <div className="mt-2 space-y-1">
+          {handles.map((handle) => (
+            <div
+              className="relative rounded-md bg-muted px-2 py-1 text-[10px] text-muted-foreground"
+              key={handle.id}
+            >
+              <span className="block truncate">{handle.label}</span>
+              {inlineChoiceHandles && (
+                <Handle
+                  className="size-3! border-2! border-background! bg-primary!"
+                  id={handle.id}
+                  position={Position.Right}
+                  /* The row sits inside the card's p-3, so pushing the
+                     connector out by that padding lands it on the card edge
+                     where every other card's connectors sit. */
+                  style={{ right: -12 }}
+                  title={handle.label}
+                  type="source"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {!inlineChoiceHandles &&
+        handles.map((handle, index) => (
+          <Handle
+            className={cn(
+              "size-3! border-2! border-background!",
+              handle.id === "failure" || handle.id === "catch"
+                ? "bg-destructive!"
+                : "bg-primary!",
+            )}
+            id={handle.id}
+            key={handle.id}
+            position={vertical ? Position.Bottom : Position.Right}
+            /* The outcomes share one edge of the card, so they are spread
+               evenly along it — down the side, or across the bottom. */
+            style={
+              vertical
+                ? { left: `${((index + 1) / (handles.length + 1)) * 100}%` }
+                : { top: `${((index + 1) / (handles.length + 1)) * 100}%` }
+            }
+            title={handle.label}
+            type="source"
+          />
+        ))}
     </div>
   );
   if (!actions) return card;
@@ -335,6 +389,7 @@ export function workflowFlowElements(
         kind: trigger.kind,
         category: workflowCategory(trigger.kind, true),
         trigger: true,
+        handles: workflowSourceHandles(trigger.kind, trigger.config),
         handleLayout,
         status: null,
         phase: null,
@@ -376,6 +431,7 @@ export function workflowFlowElements(
             options.categories?.get(node.kind) ??
             workflowCategory(node.kind, false),
           trigger: false,
+          handles: workflowSourceHandles(node.kind, node.config),
           handleLayout,
           status: base?.status ?? null,
           phase: base?.phase ?? null,
