@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Sitzungspfad",
     "sessionPathPlaceholder": "z. B. ticket.key",
     "sessionBindingHelp": "Liest diesen Wert bei der Ausführung aus den Sitzungsdaten.",
+    "interpolationHelp": "Mit {token} lassen sich bei der Ausführung Sitzungsdaten einsetzen – zum Beispiel {example}.",
     "modelProvider": "Anbieter",
     "modelModel": "Modell",
     "modelEffort": "Aufwand",

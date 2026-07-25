@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Session path",
     "sessionPathPlaceholder": "e.g. ticket.key",
     "sessionBindingHelp": "Reads this value from session data when the run executes.",
+    "interpolationHelp": "Use {token} to insert session data when the run executes — for example {example}.",
     "modelProvider": "Provider",
     "modelModel": "Model",
     "modelEffort": "Effort",

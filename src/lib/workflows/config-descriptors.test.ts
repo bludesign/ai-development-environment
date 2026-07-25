@@ -43,6 +43,48 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("allows interpolation wherever the runtime resolves strings", () => {
+    const interpolates = (
+      kind: string,
+      scope: "step" | "trigger",
+      key: string,
+    ) =>
+      getConfigDescriptor(kind, scope)
+        ?.fields.find((field) => field.key === key)
+        ?.valueModes?.includes("interpolation") ?? false;
+
+    // Scalars the author types, whether free text or a resource identifier.
+    expect(interpolates("RUN_CREATE_SESSION", "step", "prompt")).toBe(true);
+    expect(interpolates("RUN_CREATE_SESSION", "step", "worktreeId")).toBe(true);
+    // Composite values — every string inside them is resolved too.
+    expect(interpolates("RUN_CREATE_SESSION", "step", "attachmentIds")).toBe(
+      true,
+    );
+    expect(interpolates("TERMINAL_RUN", "step", "environment")).toBe(true);
+    expect(interpolates("MCP_CALL", "step", "arguments")).toBe(true);
+    expect(interpolates("CONTROL_IF", "step", "condition")).toBe(true);
+    expect(interpolates("HUMAN_CHOICE", "step", "options")).toBe(true);
+    // Triggers resolve their config against the event payload.
+    expect(interpolates("GITHUB_PR_STATE", "trigger", "filters")).toBe(true);
+    expect(
+      interpolates("GITHUB_ISSUE_COMMAND", "trigger", "commandPattern"),
+    ).toBe(true);
+
+    // Controls with no string to interpolate stay literal.
+    expect(interpolates("JIRA_LOAD_TICKET", "step", "force")).toBe(false);
+    expect(interpolates("GITHUB_MERGE_PR", "step", "method")).toBe(false);
+    expect(interpolates("CONTROL_DELAY", "step", "seconds")).toBe(false);
+  });
+
+  test("keeps command patterns free of session bindings", () => {
+    // The matcher compiles the pattern itself, so an object would break it.
+    expect(
+      getConfigDescriptor("GITHUB_ISSUE_COMMAND", "trigger")
+        ?.fields.find(({ key }) => key === "commandPattern")
+        ?.valueModes?.includes("session"),
+    ).toBe(false);
+  });
+
   test("edits terminal credential entries as structured JSON", () => {
     const credentialField = getConfigDescriptor(
       "TERMINAL_RUN",

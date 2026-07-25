@@ -81,6 +81,19 @@ function resourceOptions(
   };
 }
 
+/**
+ * A scalar string the author may pin, bind to a session path, or write with
+ * `{{path}}` tokens the runtime substitutes.
+ */
+const SCALAR_MODES = ["literal", "session", "interpolation"] as const;
+
+/**
+ * A composite value — a list, a record, a condition tree, a raw JSON blob. There
+ * is no single scalar to bind, but `resolveWorkflowValue` walks the whole config
+ * before a step runs, so every string *inside* one of these still interpolates.
+ */
+const NESTED_MODES = ["literal", "interpolation"] as const;
+
 const text = (
   key: string,
   label: string,
@@ -89,7 +102,7 @@ const text = (
   key,
   label,
   control: "text",
-  valueModes: ["literal", "session", "interpolation"],
+  valueModes: SCALAR_MODES,
   ...options,
 });
 
@@ -147,7 +160,9 @@ const resource = (
     label,
     control: "resource",
     options: resourceOptions(kind, scopeFrom),
-    valueModes: ["literal", "session"],
+    // The picker accepts a typed-in value, so an id assembled from session data
+    // is as valid here as one chosen from the list.
+    valueModes: SCALAR_MODES,
     ...rest,
   };
 };
@@ -164,6 +179,7 @@ const resourceMulti = (
     label,
     control: "resourceMulti",
     options: resourceOptions(kind, scopeFrom),
+    valueModes: NESTED_MODES,
     ...rest,
   };
 };
@@ -176,6 +192,7 @@ const stringList = (
   key,
   label,
   control: "stringList",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -187,6 +204,7 @@ const record = (
   key,
   label,
   control: "record",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -198,6 +216,7 @@ const json = (
   key,
   label,
   control: "json",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -209,6 +228,7 @@ const condition = (
   key,
   label,
   control: "condition",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -220,6 +240,7 @@ const choiceOptions = (
   key,
   label,
   control: "choiceOptions",
+  valueModes: NESTED_MODES,
   ...options,
 });
 
@@ -917,7 +938,10 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
           text("commandPattern", "Command pattern (regex)", {
             placeholder: "^/deploy\\b$",
             required: true,
-            valueModes: undefined,
+            // The matcher compiles this itself, so it has to stay a string: a
+            // session binding would arrive as an object. Interpolation keeps it
+            // a string, so tokens are still allowed.
+            valueModes: ["literal", "interpolation"],
           }),
         ]),
       ];

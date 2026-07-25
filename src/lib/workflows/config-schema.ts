@@ -84,14 +84,24 @@ function withValueModes(
   field: ConfigFieldDescriptor,
 ): JsonSchema {
   const modes = field.valueModes ?? [];
-  if (!modes.includes("session")) return { ...base, ...annotations };
-  const note = modes.includes("interpolation")
-    ? "May also be a session binding, or a string containing `{{path}}` interpolation tokens."
-    : "May also be a session binding.";
+  const notes = [
+    modes.includes("session") ? "May also be a session binding." : null,
+    modes.includes("interpolation")
+      ? "Strings here — including strings nested inside the value — may carry `{{path}}` interpolation tokens, e.g. `{{worktree.baseBranch}}`."
+      : null,
+  ].filter(Boolean);
+  const described = notes.length
+    ? {
+        ...annotations,
+        description: [annotations.description, ...notes]
+          .filter(Boolean)
+          .join(" "),
+      }
+    : annotations;
+  if (!modes.includes("session")) return { ...base, ...described };
   return {
     anyOf: [base, SESSION_BINDING_SCHEMA, LITERAL_BINDING_SCHEMA],
-    ...annotations,
-    description: [annotations.description, note].filter(Boolean).join(" "),
+    ...described,
   };
 }
 

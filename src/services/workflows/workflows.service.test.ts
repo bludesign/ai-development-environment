@@ -640,6 +640,79 @@ describe("workflow runtime lifecycle guards", () => {
   });
 });
 
+describe("workflow trigger interpolation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function matches(
+    kind: string,
+    config: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ) {
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as Record<string, (...args: unknown[]) => Promise<boolean>>;
+    return service.triggerMatches!(
+      { id: "trigger-1", kind, configJson: JSON.stringify(config) },
+      "PULL_REQUEST:1",
+      payload,
+    );
+  }
+
+  const pullRequest = {
+    pr: { author: "octocat", base: "main" },
+    repo: { owner: "octocat" },
+    worktree: { baseBranch: "main" },
+  };
+
+  test("resolves filter values against the event payload", async () => {
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        { filters: { "pr.author": "{{repo.owner}}" } },
+        pullRequest,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        { filters: { "pr.base": "{{worktree.baseBranch}}-next" } },
+        pullRequest,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  test("resolves a session binding in a filter", async () => {
+    await expect(
+      matches(
+        "GITHUB_PR_STATE",
+        {
+          filters: {
+            "pr.base": { source: "SESSION", path: "worktree.baseBranch" },
+          },
+        },
+        pullRequest,
+      ),
+    ).resolves.toBe(true);
+  });
+
+  test("interpolates the issue command pattern before compiling it", async () => {
+    const payload = {
+      ...pullRequest,
+      comment: { author: { login: "octocat" }, body: "/deploy main" },
+    };
+    await expect(
+      matches(
+        "GITHUB_ISSUE_COMMAND",
+        {
+          allowedLogins: ["octocat"],
+          commandPattern: "^/deploy {{worktree.baseBranch}}$",
+        },
+        payload,
+      ),
+    ).resolves.toBe(true);
+  });
+});
+
 describe("workflow choice triggers", () => {
   beforeEach(() => {
     vi.clearAllMocks();

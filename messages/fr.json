@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Chemin de session",
     "sessionPathPlaceholder": "p. ex. ticket.key",
     "sessionBindingHelp": "Lit cette valeur dans les données de session à l’exécution.",
+    "interpolationHelp": "Utilisez {token} pour insérer des données de session à l’exécution, par exemple {example}.",
     "modelProvider": "Fournisseur",
     "modelModel": "Modèle",
     "modelEffort": "Effort",

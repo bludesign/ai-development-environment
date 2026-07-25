@@ -1972,10 +1972,14 @@ export class WorkflowsService {
     subjectKey: string,
     payload: Record<string, unknown>,
   ): Promise<boolean> {
-    const config = parseObject(
-      json(trigger.configJson),
-      "Trigger configuration",
-    );
+    // Resolved against the event payload the same way a step's config is
+    // resolved against session data, so a filter, a threshold, or a command
+    // pattern can carry `{{path}}` tokens and session bindings rather than only
+    // constants.
+    const config = resolveWorkflowValue(
+      parseObject(json(trigger.configJson), "Trigger configuration"),
+      payload,
+    ) as Record<string, unknown>;
     let cursorChanged: boolean | null = null;
     if (
       payload.cursorValue !== undefined &&

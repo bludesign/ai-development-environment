@@ -186,6 +186,7 @@
     "sessionBindingLabel": "Ruta de sesión",
     "sessionPathPlaceholder": "p. ej. ticket.key",
     "sessionBindingHelp": "Lee este valor de los datos de sesión al ejecutar.",
+    "interpolationHelp": "Usa {token} para insertar datos de sesión al ejecutar; por ejemplo, {example}.",
     "modelProvider": "Proveedor",
     "modelModel": "Modelo",
     "modelEffort": "Esfuerzo",

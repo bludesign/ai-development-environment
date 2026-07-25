@@ -79,6 +79,7 @@ import type {
 import { getConfigDescriptor } from "@/lib/workflows/config-descriptors";
 import { useResourceOptions } from "./use-resource-options";
 import {
+  InterpolationHint,
   ValueModeToggle,
   ValueModeField,
   isSessionBinding,
@@ -100,6 +101,10 @@ function literalScope(
 
 function sessionModes(field: ConfigFieldDescriptor): boolean {
   return Boolean(field.valueModes?.includes("session"));
+}
+
+function interpolationModes(field: ConfigFieldDescriptor): boolean {
+  return Boolean(field.valueModes?.includes("interpolation"));
 }
 
 type FieldProps = {
@@ -147,6 +152,7 @@ function TextField({ field, value, onChange, sessionPaths }: FieldProps) {
   return (
     <ValueModeField
       help={field.help}
+      interpolationEnabled={interpolationModes(field)}
       label={field.label}
       onChange={onChange}
       sessionEnabled={sessionModes(field)}
@@ -261,6 +267,7 @@ function ResourceField({
       allowCustomSessionPath={!resourceSessionPath}
       defaultSessionPath={resourceSessionPath}
       help={field.help}
+      interpolationEnabled={interpolationModes(field)}
       label={field.label}
       onChange={onChange}
       sessionEnabled={sessionModes(field)}
@@ -353,6 +360,7 @@ function ResourceMultiField({ field, config, value, onChange }: FieldProps) {
           {field.help}
         </FieldDescription>
       )}
+      {interpolationModes(field) && <InterpolationHint />}
     </Field>
   );
 }
@@ -408,6 +416,7 @@ function StringListField({ field, value, onChange }: FieldProps) {
           {field.help}
         </FieldDescription>
       )}
+      {interpolationModes(field) && <InterpolationHint />}
     </Field>
   );
 }
@@ -498,6 +507,7 @@ function RecordField({ field, value, onChange }: FieldProps) {
           {field.help}
         </FieldDescription>
       )}
+      {interpolationModes(field) && <InterpolationHint />}
     </Field>
   );
 }
@@ -554,11 +564,14 @@ function JsonField({ field, value, onChange }: FieldProps) {
       {error ? (
         <FieldError className="text-[10px]">{error}</FieldError>
       ) : (
-        field.help && (
-          <FieldDescription className="text-[10px]">
-            {field.help}
-          </FieldDescription>
-        )
+        <>
+          {field.help && (
+            <FieldDescription className="text-[10px]">
+              {field.help}
+            </FieldDescription>
+          )}
+          {interpolationModes(field) && <InterpolationHint />}
+        </>
       )}
     </Field>
   );
@@ -752,6 +765,7 @@ function ConditionField(props: FieldProps) {
       <FieldDescription className="text-[10px]">
         {draft.rows.length ? t("conditionHelp") : t("conditionEmpty")}
       </FieldDescription>
+      {interpolationModes(field) && <InterpolationHint />}
     </Field>
   );
 }
@@ -845,6 +859,7 @@ function ChoiceOptionsField(props: FieldProps) {
       <FieldDescription className="text-[10px]">
         {rows.length ? t("choiceOptionsHelp") : t("choiceOptionsEmpty")}
       </FieldDescription>
+      {interpolationModes(field) && <InterpolationHint />}
     </Field>
   );
 }
@@ -1229,9 +1244,14 @@ export function RawConfigEditor({
         {error ? (
           <FieldError className="text-[10px]">{error}</FieldError>
         ) : (
-          <FieldDescription className="text-[10px]">
-            {t("advancedJsonHelp")}
-          </FieldDescription>
+          <>
+            <FieldDescription className="text-[10px]">
+              {t("advancedJsonHelp")}
+            </FieldDescription>
+            {/* The whole config is resolved before a step runs, so tokens work
+                in any key here — including ones no descriptor covers. */}
+            <InterpolationHint />
+          </>
         )}
       </CollapsibleContent>
     </Collapsible>

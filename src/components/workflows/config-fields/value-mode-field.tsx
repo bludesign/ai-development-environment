@@ -47,6 +47,28 @@ export function detectValueMode(value: unknown): FieldValueMode {
   return isSessionBinding(value) ? "session" : "literal";
 }
 
+/** The example path the interpolation hint teaches the syntax with. */
+const INTERPOLATION_EXAMPLE = "worktree.baseBranch";
+
+/**
+ * Tells the author that this control's text is a template: `{{path}}` tokens are
+ * replaced with session data when the run reaches the step. Shown wherever the
+ * descriptor allows interpolation — the prompt of a run step, but equally list
+ * rows, record values, and JSON blobs, since `resolveWorkflowValue` walks the
+ * whole config.
+ */
+export function InterpolationHint() {
+  const t = useTranslations("workflows");
+  return (
+    <FieldDescription className="text-[10px]">
+      {t("interpolationHelp", {
+        token: "{{path}}",
+        example: `{{${INTERPOLATION_EXAMPLE}}}`,
+      })}
+    </FieldDescription>
+  );
+}
+
 export function ValueModeToggle({
   mode,
   onValueChange,
@@ -107,6 +129,7 @@ export function ValueModeField({
   allowCustomSessionPath = true,
   defaultSessionPath,
   sessionEnabled,
+  interpolationEnabled = false,
   value,
   onChange,
   sessionPaths,
@@ -117,6 +140,7 @@ export function ValueModeField({
   allowCustomSessionPath?: boolean;
   defaultSessionPath?: string;
   sessionEnabled: boolean;
+  interpolationEnabled?: boolean;
   value: unknown;
   onChange: (next: unknown) => void;
   sessionPaths: readonly SessionFieldInfo[];
@@ -184,6 +208,7 @@ export function ValueModeField({
           {help && (
             <FieldDescription className="text-[10px]">{help}</FieldDescription>
           )}
+          {interpolationEnabled && <InterpolationHint />}
         </>
       )}
     </Field>
