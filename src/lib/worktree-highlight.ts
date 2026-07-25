@@ -52,6 +52,35 @@ export const worktreeHighlightBackgroundClasses: Record<string, string> = {
   pink: "bg-pink-500/10 hover:bg-pink-500/20",
 };
 
+/**
+ * The accent stripe for a cell in a `border-collapse` table, painted as an
+ * inset shadow rather than the left border `worktreeHighlightAccentClasses`
+ * uses. Collapsed borders miter at the corners, so a 4px left border wins the
+ * bottom-left corner against the 1px row divider and notches a matching gap
+ * out of it; a shadow paints inside the cell and leaves the divider whole.
+ */
+export const worktreeHighlightInsetAccentClasses: Record<string, string> = {
+  gray: "shadow-[inset_4px_0_0_var(--color-slate-500)]",
+  stone: "shadow-[inset_4px_0_0_var(--color-stone-500)]",
+  red: "shadow-[inset_4px_0_0_var(--color-red-500)]",
+  rose: "shadow-[inset_4px_0_0_var(--color-rose-500)]",
+  orange: "shadow-[inset_4px_0_0_var(--color-orange-500)]",
+  amber: "shadow-[inset_4px_0_0_var(--color-amber-500)]",
+  yellow: "shadow-[inset_4px_0_0_var(--color-yellow-500)]",
+  lime: "shadow-[inset_4px_0_0_var(--color-lime-500)]",
+  green: "shadow-[inset_4px_0_0_var(--color-green-500)]",
+  emerald: "shadow-[inset_4px_0_0_var(--color-emerald-500)]",
+  teal: "shadow-[inset_4px_0_0_var(--color-teal-500)]",
+  cyan: "shadow-[inset_4px_0_0_var(--color-cyan-500)]",
+  sky: "shadow-[inset_4px_0_0_var(--color-sky-500)]",
+  blue: "shadow-[inset_4px_0_0_var(--color-blue-500)]",
+  indigo: "shadow-[inset_4px_0_0_var(--color-indigo-500)]",
+  violet: "shadow-[inset_4px_0_0_var(--color-violet-500)]",
+  purple: "shadow-[inset_4px_0_0_var(--color-purple-500)]",
+  fuchsia: "shadow-[inset_4px_0_0_var(--color-fuchsia-500)]",
+  pink: "shadow-[inset_4px_0_0_var(--color-pink-500)]",
+};
+
 export const worktreeHighlightAccentClasses: Record<string, string> = {
   gray: "border-l-slate-500",
   stone: "border-l-stone-500",

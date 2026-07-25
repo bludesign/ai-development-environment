@@ -62,8 +62,8 @@ import { dayKey, formatDateValue } from "@/lib/date-format";
 import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 import { cn } from "@/lib/utils";
 import {
-  worktreeHighlightAccentClasses,
   worktreeHighlightBackgroundClasses,
+  worktreeHighlightInsetAccentClasses,
 } from "@/lib/worktree-highlight";
 
 import {
@@ -83,12 +83,15 @@ const PREFERENCE_FIELDS = `
 type TimeRange = { key: string; start: string; end: string };
 
 /**
- * The worktree accent runs down the left edge of a notification row, so every
- * other row in the table reserves the same four pixels in transparent. Without
- * it a column heading and a day separator sat four pixels to the left of the
- * notifications underneath them.
+ * The table runs edge to edge inside its card, so its outer columns reproduce
+ * the padding the card gives its other children (`--card-spacing`, 16px) —
+ * the 8px cell default left the whole table visibly outdented from the rest of
+ * the page. The 4px worktree accent sits inside that padding as an inset
+ * shadow — see `worktreeHighlightInsetAccentClasses` for why it cannot be the
+ * left border it is everywhere else.
  */
-const accentCell = "border-l-4 border-l-transparent";
+const firstColumn = "pl-4";
+const lastColumn = "pr-4";
 
 function localDayKey(value: string): string {
   return dayKey(value) ?? value;
@@ -855,7 +858,7 @@ export function NotificationsPage() {
               <TableHeader>
                 <TableRow>
                   {editMode && (
-                    <TableHead className={cn("w-10", accentCell)}>
+                    <TableHead className={cn("w-10", firstColumn)}>
                       <Checkbox
                         aria-label={t("selectAll")}
                         checked={
@@ -873,11 +876,13 @@ export function NotificationsPage() {
                       />
                     </TableHead>
                   )}
-                  <TableHead className={cn("w-[70%]", !editMode && accentCell)}>
+                  <TableHead
+                    className={cn("w-[70%]", !editMode && firstColumn)}
+                  >
                     {t("notification")}
                   </TableHead>
                   <TableHead className="w-[18%]">{t("channels")}</TableHead>
-                  <TableHead className="w-[12%] text-right">
+                  <TableHead className={cn("w-[12%] text-right", lastColumn)}>
                     {t("received")}
                   </TableHead>
                 </TableRow>
@@ -890,7 +895,7 @@ export function NotificationsPage() {
                     <Fragment key={group.key}>
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
                         {editMode && (
-                          <TableCell className={cn("py-1.5", accentCell)}>
+                          <TableCell className={cn("py-1.5", firstColumn)}>
                             <Checkbox
                               aria-label={t("selectDay", { day: group.label })}
                               checked={
@@ -909,7 +914,7 @@ export function NotificationsPage() {
                         <TableCell
                           className={cn(
                             "py-1.5 text-xs font-normal text-muted-foreground",
-                            !editMode && accentCell,
+                            !editMode && firstColumn,
                           )}
                           colSpan={3}
                         >
@@ -945,10 +950,9 @@ export function NotificationsPage() {
                             {editMode && (
                               <TableCell
                                 className={cn(
-                                  "border-l-4 pl-2",
-                                  color
-                                    ? worktreeHighlightAccentClasses[color]
-                                    : "border-l-transparent",
+                                  firstColumn,
+                                  color &&
+                                    worktreeHighlightInsetAccentClasses[color],
                                 )}
                               >
                                 <Checkbox
@@ -975,11 +979,10 @@ export function NotificationsPage() {
                             <TableCell
                               className={cn(
                                 "align-top break-words whitespace-normal",
-                                !editMode && "border-l-4 pl-2",
+                                !editMode && firstColumn,
                                 !editMode &&
-                                  (color
-                                    ? worktreeHighlightAccentClasses[color]
-                                    : "border-l-transparent"),
+                                  color &&
+                                  worktreeHighlightInsetAccentClasses[color],
                               )}
                             >
                               <Link
@@ -1014,7 +1017,12 @@ export function NotificationsPage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="align-top text-right text-xs text-muted-foreground">
+                            <TableCell
+                              className={cn(
+                                "align-top text-right text-xs text-muted-foreground",
+                                lastColumn,
+                              )}
+                            >
                               <DateTime
                                 kind="time"
                                 value={notification.createdAt}
