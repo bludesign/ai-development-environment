@@ -138,27 +138,32 @@ async function main(): Promise<void> {
   if (command === "doctor") return doctor();
   if (command === "run" || command === "dev") {
     const controller = new AbortController();
-    process.once("SIGINT", () => controller.abort());
-    process.once("SIGTERM", () => controller.abort());
-    if (command === "dev") {
-      const options = flags(args).values;
-      const server =
-        options.server ??
-        process.env.CONTROL_AGENT_DEV_SERVER ??
-        `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
-      return runDevelopmentAgent(
-        {
-          server,
-          websocketServer:
-            options["websocket-server"] ??
-            process.env.CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
-            process.env.NEXT_PUBLIC_AGENT_WS_URL,
-          name: options.name,
-        },
-        controller.signal,
-      );
+    const stop = () => controller.abort();
+    const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+    for (const signal of shutdownSignals) process.once(signal, stop);
+    try {
+      if (command === "dev") {
+        const options = flags(args).values;
+        const server =
+          options.server ??
+          process.env.CONTROL_AGENT_DEV_SERVER ??
+          `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
+        return await runDevelopmentAgent(
+          {
+            server,
+            websocketServer:
+              options["websocket-server"] ??
+              process.env.CONTROL_AGENT_DEV_WEBSOCKET_SERVER ??
+              process.env.NEXT_PUBLIC_AGENT_WS_URL,
+            name: options.name,
+          },
+          controller.signal,
+        );
+      }
+      return await runAgent(await loadConfig(), controller.signal);
+    } finally {
+      for (const signal of shutdownSignals) process.off(signal, stop);
     }
-    return runAgent(await loadConfig(), controller.signal);
   }
   throw new Error(`Unknown command: ${command}`);
 }

@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -369,7 +370,35 @@ export function CommandsPage() {
         </div>
       )}
 
-      {tab === "runs" ? (
+      {loading ? (
+        tab === "runs" ? (
+          <Card className="gap-0 overflow-hidden p-4">
+            <div className="space-y-3">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <Skeleton className="h-8 w-full" key={item} />
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {[0, 1, 2].map((item) => (
+              <Card key={item}>
+                <CardHeader>
+                  <Skeleton className="h-5 w-2/5" />
+                  <Skeleton className="h-4 w-4/5" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Skeleton className="h-5 w-16" />
+                    <Skeleton className="h-5 w-20" />
+                  </div>
+                  <Skeleton className="h-8 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
+      ) : tab === "runs" ? (
         <Card className="gap-0 overflow-hidden p-0">
           <Table>
             <TableHeader>
@@ -576,7 +605,7 @@ export function CommandsPage() {
                   ))}
                 </Fragment>
               ))}
-              {!loading && filteredRuns.length === 0 && (
+              {filteredRuns.length === 0 && (
                 <TableRow>
                   <TableCell
                     className="h-32 text-center text-muted-foreground"

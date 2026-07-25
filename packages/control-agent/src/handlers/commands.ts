@@ -55,12 +55,29 @@ export const runCommand: AgentJobHandler = async (
           queuedBytes -= bytes;
           return;
         } catch (error) {
+          // During agent shutdown the control plane may already be gone. Do
+          // not keep the agent (and its command cleanup) alive retrying output
+          // that can no longer be delivered.
+          if (signal.aborted) return;
           const delay = Math.min(30_000, 500 * 2 ** Math.min(retry++, 6));
           console.error(
             `Could not append command output; retrying in ${delay}ms:`,
             error instanceof Error ? error.message : error,
           );
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise<void>((resolve) => {
+            const onAbort = () => {
+              clearTimeout(retryTimer);
+              resolve();
+            };
+            const retryTimer = setTimeout(() => {
+              signal.removeEventListener("abort", onAbort);
+              resolve();
+            }, delay);
+            retryTimer.unref();
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) onAbort();
+          });
+          if (signal.aborted) return;
         }
       }
     });

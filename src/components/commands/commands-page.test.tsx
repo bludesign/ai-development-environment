@@ -103,6 +103,20 @@ afterEach(() => {
 });
 
 describe("CommandsPage", () => {
+  test("shows table and card skeletons while commands are loading", () => {
+    request.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = render(<CommandsPage />);
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      5,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Definitions" }));
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      15,
+    );
+  });
+
   test("links command runs and their concrete worktrees", async () => {
     render(<CommandsPage />);
     expect(

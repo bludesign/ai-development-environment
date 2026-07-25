@@ -94,4 +94,21 @@ describe("saved command handler", () => {
     expect(result.cancelled).toBe(true);
     expect(Date.now() - started).toBeLessThan(7_000);
   });
+
+  test("does not keep retrying output when shutdown cancels the command", async () => {
+    const controller = new AbortController();
+    const append = vi.fn().mockRejectedValue(new Error("server closed"));
+    const running = runCommand(
+      payload("printf ready; sleep 30"),
+      0,
+      controller.signal,
+      vi.fn(),
+      context(append),
+    );
+    await vi.waitFor(() => expect(append).toHaveBeenCalled());
+
+    controller.abort();
+
+    await expect(running).resolves.toMatchObject({ cancelled: true });
+  });
 });
