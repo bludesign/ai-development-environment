@@ -794,6 +794,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
 const filtersField = (): ConfigFieldDescriptor =>
   record("filters", "Filters", {
     help: "Match when each session path equals the given value.",
+    recordValueType: "json",
   });
 
 const thresholdFields = (): ConfigFieldDescriptor[] => [
@@ -911,9 +912,11 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
         triggerWithFilters([
           stringList("allowedLogins", "Allowed logins", {
             placeholder: "octocat",
+            required: true,
           }),
           text("commandPattern", "Command pattern (regex)", {
-            placeholder: "^/deploy\\b",
+            placeholder: "^/deploy\\b$",
+            required: true,
             valueModes: undefined,
           }),
         ]),

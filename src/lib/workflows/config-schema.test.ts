@@ -62,6 +62,18 @@ describe("configSchemaForKind", () => {
     });
   });
 
+  test("trigger filters accept JSON values without widening string records", () => {
+    const filters = properties("GITHUB_PR_STATE", "trigger").filters!;
+    expect(filters).toEqual({
+      type: "object",
+      additionalProperties: {},
+      description: expect.any(String),
+    });
+
+    const environment = properties("TERMINAL_RUN", "step").environment!;
+    expect(environment.additionalProperties).toEqual({ type: "string" });
+  });
+
   test("fields that accept session data widen to the binding shapes", () => {
     const prompt = properties("RUN_CREATE_SESSION", "step").prompt!;
     const options = prompt.anyOf as JsonSchema[];
@@ -112,6 +124,16 @@ describe("configSchemaForKind", () => {
     expect(issueKey.examples).toEqual(["APP-123"]);
     const assignee = properties("JIRA_ASSIGN", "step").accountId!;
     expect(assignee.description).toContain("unassign");
+  });
+
+  test("issue command triggers advertise publishable required config", () => {
+    const schema = configSchemaForKind("GITHUB_ISSUE_COMMAND", "trigger");
+    expect(schema.required).toEqual(
+      expect.arrayContaining(["allowedLogins", "commandPattern"]),
+    );
+    expect(
+      properties("GITHUB_ISSUE_COMMAND", "trigger").commandPattern!.examples,
+    ).toEqual(["^/deploy\\b$"]);
   });
 
   test("CONTROL_TRY describes an empty config rather than an opaque object", () => {

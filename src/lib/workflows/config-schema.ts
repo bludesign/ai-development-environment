@@ -134,7 +134,11 @@ function baseSchema(field: ConfigFieldDescriptor): JsonSchema {
     case "stringList":
       return { type: "array", items: { type: "string" } };
     case "record":
-      return { type: "object", additionalProperties: { type: "string" } };
+      return {
+        type: "object",
+        additionalProperties:
+          field.recordValueType === "json" ? {} : { type: "string" },
+      };
     case "condition":
       return { $ref: "#/$defs/condition" };
     case "choiceOptions":

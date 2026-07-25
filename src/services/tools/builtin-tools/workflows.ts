@@ -24,7 +24,6 @@ import {
   computeWorkflowPathAvailability,
   parseWorkflowDefinition,
   resourceManualSeedPaths,
-  validateWorkflowDefinition,
   WORKFLOW_RESOURCE_KINDS,
   WORKFLOW_STEP_CATALOG,
   WORKFLOW_STEP_KINDS,
@@ -208,6 +207,13 @@ const QuestionBatchSchema = z.object({
 
 type Service = () => WorkflowsService;
 
+const TRIGGER_WORKFLOW_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+
 function matches(haystack: string, search?: string | null): boolean {
   return !search || haystack.toLowerCase().includes(search.toLowerCase());
 }
@@ -241,12 +247,13 @@ async function saveDraft(
     edgeId?: string | null;
   } = {},
 ) {
-  await service().saveDraft({ id: workflowId, definition });
-  const { diagnostics } = validateWorkflowDefinition(definition);
+  const workflows = service();
+  await workflows.saveDraft({ id: workflowId, definition });
+  const { valid, diagnostics } = await workflows.validateDraft(workflowId);
   return {
     workflowId,
     definition: jsonSafe(definition),
-    valid: !diagnostics.some(({ severity }) => severity === "ERROR"),
+    valid,
     diagnostics: diagnostics.map((entry) => ({
       severity: entry.severity,
       code: entry.code,
@@ -1117,7 +1124,7 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
             .describe("Dedupe key. Defaults to the resource or a fresh id."),
         }),
         outputSchema: z.object({ run: RunSchema }),
-        annotations: WRITE_ANNOTATIONS,
+        annotations: TRIGGER_WORKFLOW_ANNOTATIONS,
         handler: async (input) => {
           const run = await workflows().trigger(input);
           if (!run) throw new Error("Workflow run could not be started");

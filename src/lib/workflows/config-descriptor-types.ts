@@ -76,6 +76,8 @@ export type ConfigFieldDescriptor = {
   help?: string;
   /** Render multi-line text for the `text` control. */
   multiline?: boolean;
+  /** Value type for entries in a `record` control. Defaults to strings. */
+  recordValueType?: "string" | "json";
   /** Value authoring modes. Undefined → literal only. */
   valueModes?: readonly ConfigValueMode[];
   /**

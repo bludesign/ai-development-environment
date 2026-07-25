@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { emptyWorkflowDefinition } from "@/lib/workflows/definition";
+import {
+  emptyWorkflowDefinition,
+  validateWorkflowDefinition,
+} from "@/lib/workflows/definition";
 import type { WorkflowsService } from "@/services/workflows";
 
 import {
@@ -23,6 +26,13 @@ function service(initial = emptyWorkflowDefinition("Test workflow")) {
       return null;
     },
   );
+  const validateDraft = vi.fn(async () => {
+    const { diagnostics } = validateWorkflowDefinition(state.definition);
+    return {
+      valid: !diagnostics.some(({ severity }) => severity === "ERROR"),
+      diagnostics,
+    };
+  });
   const value = {
     get: vi.fn(async (id: string) =>
       id === "wf-1"
@@ -33,12 +43,12 @@ function service(initial = emptyWorkflowDefinition("Test workflow")) {
         : null,
     ),
     saveDraft,
-    validateDraft: vi.fn(),
+    validateDraft,
     publish: vi.fn(),
     trigger: vi.fn(),
     run: vi.fn(),
   } as unknown as WorkflowsService;
-  return { state, saveDraft, value };
+  return { state, saveDraft, validateDraft, value };
 }
 
 function registry(double = service()) {
@@ -142,6 +152,7 @@ describe("workflow tool group", () => {
     for (const name of [
       "delete_workflow",
       "remove_workflow_node",
+      "trigger_workflow",
       "control_workflow_run",
       "replay_workflow_run",
     ]) {
@@ -150,6 +161,11 @@ describe("workflow tool group", () => {
     expect(byName.get("validate_workflow")?.annotations.readOnlyHint).toBe(
       true,
     );
+    expect(byName.get("trigger_workflow")?.annotations).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
   });
 
   test("routes catalog calls through the owning child group", async () => {
@@ -284,6 +300,37 @@ describe("authoring tools", () => {
     );
     expect(codes).toContain("UNREACHABLE_STEP");
     expect(codes).toContain("TRIGGER_DISCONNECTED");
+  });
+
+  test("edits include service-level publish diagnostics", async () => {
+    const double = registry();
+    double.validateDraft.mockResolvedValueOnce({
+      valid: false,
+      diagnostics: [
+        {
+          severity: "ERROR",
+          code: "SUBWORKFLOW_NOT_FOUND",
+          message: "The pinned sub-workflow version does not exist",
+          nodeId: "child",
+        },
+      ],
+    });
+
+    const result = await call(double.registry, "add_workflow_step", {
+      workflowId: "wf-1",
+      kind: "CONTROL_SUBWORKFLOW",
+      config: { versionId: "missing-version" },
+      connectFrom: { from: "manual" },
+    });
+
+    expect(double.validateDraft).toHaveBeenCalledWith("wf-1");
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "SUBWORKFLOW_NOT_FOUND",
+        nodeId: "child",
+      }),
+    );
   });
 
   test("connecting to a handle a step does not have fails loudly", async () => {
