@@ -371,7 +371,9 @@ export function WorkflowsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant={workflow.enabled ? "secondary" : "outline"}>
+                    <Badge
+                      variant={workflow.enabled ? "success" : "destructive"}
+                    >
                       {workflow.enabled ? t("enabled") : t("disabled")}
                     </Badge>
                     <Badge variant="outline">
