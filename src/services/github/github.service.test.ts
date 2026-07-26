@@ -2463,6 +2463,10 @@ describe("GitHub service", () => {
                 mergeable: "MERGEABLE",
                 mergeStateStatus: "CLEAN",
                 headRefOid: "head-oid-1",
+                mergedAt: null,
+                autoMergeRequest: null,
+                viewerCanEnableAutoMerge: false,
+                viewerCanDisableAutoMerge: false,
               },
             },
           },
@@ -2504,6 +2508,11 @@ describe("GitHub service", () => {
       defaultCommitHeadline: "APP-42 Add API",
       defaultCommitBody: "Detailed description",
       canMerge: true,
+      canEnableAutoMerge: false,
+      autoMergeEnabled: false,
+      viewerCanDisableAutoMerge: false,
+      mergeStateStatus: "CLEAN",
+      headRefOid: "head-oid-1",
       blockedReason: null,
     });
     await expect(
@@ -2570,6 +2579,92 @@ describe("GitHub service", () => {
         commitBody: "",
       }),
     ).rejects.toThrow("Required reviews");
+  });
+
+  test("enables GitHub-native auto merge for a blocked pull request", async () => {
+    let enabled = false;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      const pullRequest = {
+        id: "pull-request-auto-merge",
+        title: "APP-84 Add automation",
+        body: "Wait for required checks",
+        url: "https://github.com/acme/widgets/pull/84",
+        state: "OPEN",
+        isDraft: false,
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "BLOCKED",
+        headRefOid: "head-oid-84",
+        headRefName: "feature/APP-84",
+        headRepository: { nameWithOwner: "acme/widgets" },
+        mergedAt: null,
+        autoMergeRequest: enabled
+          ? { enabledAt: "2026-07-25T00:00:00Z" }
+          : null,
+        viewerCanEnableAutoMerge: !enabled,
+        viewerCanDisableAutoMerge: enabled,
+      };
+      if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+        return response({
+          data: {
+            viewer: { email: "" },
+            repository: {
+              mergeCommitAllowed: true,
+              rebaseMergeAllowed: true,
+              squashMergeAllowed: true,
+              viewerPermission: "WRITE",
+              pullRequest,
+            },
+          },
+        });
+      }
+      if (body.query.includes("mutation EnableGitHubPullRequestAutoMerge")) {
+        expect(body.variables).toEqual({
+          pullRequestId: "pull-request-auto-merge",
+          method: "SQUASH",
+          commitHeadline: "APP-84 Add automation",
+          commitBody: "Wait for required checks",
+          authorEmail: null,
+        });
+        enabled = true;
+        return response({
+          data: {
+            enablePullRequestAutoMerge: {
+              pullRequest: {
+                ...pullRequest,
+                autoMergeRequest: {
+                  enabledAt: "2026-07-25T00:00:00Z",
+                },
+                viewerCanEnableAutoMerge: false,
+                viewerCanDisableAutoMerge: true,
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitHubService().enablePullRequestAutoMerge({
+        owner: "acme",
+        name: "widgets",
+        number: 84,
+        method: "SQUASH",
+        commitHeadline: "APP-84 Add automation",
+        commitBody: "Wait for required checks",
+      }),
+    ).resolves.toMatchObject({
+      state: "OPEN",
+      autoMergeEnabled: true,
+      headRefName: "feature/APP-84",
+      headRepositoryNameWithOwner: "acme/widgets",
+      mergeStateStatus: "BLOCKED",
+    });
   });
 
   test("blocks merge options and mutations for viewers without write access", async () => {

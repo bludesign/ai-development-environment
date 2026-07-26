@@ -79,6 +79,7 @@ import {
   MAX_WORKTREE_FETCH_INTERVAL_SECONDS,
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
@@ -91,6 +92,7 @@ import {
   WORKTREE_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   worktreeJobPayload,
+  worktreeAutoSyncJobPayload,
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
@@ -307,6 +309,10 @@ export function validateJob(kind: string, payload: unknown): void {
     kind === WORKTREE_OPERATION_JOB_KIND
   ) {
     worktreeJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_AUTO_SYNC_JOB_KIND) {
+    worktreeAutoSyncJobPayload(value);
     return;
   }
   if (kind === WORKTREE_WATCH_JOB_KIND) {

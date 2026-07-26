@@ -77,6 +77,32 @@ type WorktreeLatestBuild {
   createdAt: String!
 }
 
+type WorktreeAutoSync {
+  worktreeId: ID!
+  state: String!
+  conflictWorkflowId: ID
+  conflictWorkflowChoice: String
+  lastError: String
+  lastSyncedAt: String
+  updatedAt: String!
+}
+
+type WorktreeAutoMerge {
+  worktreeId: ID!
+  state: String!
+  repositoryNameWithOwner: String!
+  pullRequestNumber: Int!
+  mergeMethod: GitHubMergeMethod!
+  commitHeadline: String!
+  commitBody: String!
+  authorEmail: String
+  deleteWorktree: Boolean!
+  moveTicketToDone: Boolean!
+  ticketKey: ID
+  lastError: String
+  updatedAt: String!
+}
+
 type Worktree {
   id: ID!
   codebaseId: ID!
@@ -109,6 +135,8 @@ type Worktree {
   latestBuild: WorktreeLatestBuild
   tags: [WorktreeTag!]!
   activeJob: AgentJob
+  autoSync: WorktreeAutoSync
+  autoMerge: WorktreeAutoMerge
   lastCheckedAt: String
   missingAt: String
   createdAt: String!
@@ -366,6 +394,24 @@ input DeleteWorktreeInput {
   requestId: ID!
 }
 
+input ConfigureWorktreeAutoSyncInput {
+  worktreeId: ID!
+  conflictWorkflowId: ID
+  conflictWorkflowChoice: String
+}
+
+input ConfigureWorktreeAutoMergeInput {
+  worktreeId: ID!
+  repositoryNameWithOwner: String!
+  pullRequestNumber: Int!
+  method: GitHubMergeMethod!
+  commitHeadline: String!
+  commitBody: String!
+  authorEmail: String
+  deleteWorktree: Boolean! = false
+  moveTicketToDone: Boolean! = false
+}
+
 extend type Query {
   worktreeOverview: WorktreeOverview!
   hiddenWorktrees: [Worktree!]!
@@ -374,6 +420,8 @@ extend type Query {
     input: PreviewWorktreeTicketBranchInput!
   ): WorktreeTicketBranchPreview!
   worktreeMove(id: ID!): WorktreeMove
+  worktreeAutoSync(worktreeId: ID!): WorktreeAutoSync
+  worktreeAutoMerge(worktreeId: ID!): WorktreeAutoMerge
 }
 
 extend type Mutation {
@@ -397,6 +445,16 @@ extend type Mutation {
   saveWorktreeSettings(editorVariant: WorktreeEditorVariant!): WorktreeSettings!
   purgeHiddenWorktree(id: ID!): Boolean!
   purgeAllHiddenWorktrees: Int!
+  configureWorktreeAutoSync(
+    input: ConfigureWorktreeAutoSyncInput!
+  ): WorktreeAutoSync!
+  cancelWorktreeAutoSync(worktreeId: ID!): Boolean!
+  retryWorktreeAutoSync(worktreeId: ID!): WorktreeAutoSync!
+  configureWorktreeAutoMerge(
+    input: ConfigureWorktreeAutoMergeInput!
+  ): WorktreeAutoMerge!
+  cancelWorktreeAutoMerge(worktreeId: ID!): Boolean!
+  retryWorktreeAutoMerge(worktreeId: ID!): WorktreeAutoMerge!
 }
 
 extend type Subscription {

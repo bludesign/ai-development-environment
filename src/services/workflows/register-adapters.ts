@@ -30,7 +30,10 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { RunsService } from "@/services/runs";
 import type { SkillsService } from "@/services/skills";
 import type { ToolsService } from "@/services/tools";
-import type { WorktreesService } from "@/services/worktrees";
+import type {
+  WorktreeAutomationService,
+  WorktreesService,
+} from "@/services/worktrees";
 import type { RunConfigurationInput } from "@/services/runs";
 import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue } from "@/lib/workflows/session";
@@ -48,6 +51,7 @@ export type WorkflowAdapterServices = {
   jira: JiraService;
   github: GitHubService;
   worktrees: WorktreesService;
+  worktreeAutomations: WorktreeAutomationService;
   codebases: CodebasesService;
   builds: BuildsService;
   skills: SkillsService;
@@ -1123,6 +1127,90 @@ function registerWorktreeAdapters(
       requestId(context, operation.toLowerCase()),
     );
     return jobResult(context, job, undefined, [worktreeLink(id)]);
+  });
+  executor.register("WORKTREE_SET_AUTO_SYNC", async (context) => {
+    const id = worktreeId(context);
+    const action = String(context.node.config.action ?? "ENABLE").toUpperCase();
+    const autoSync =
+      action === "CANCEL"
+        ? {
+            cancelled: await services.worktreeAutomations.cancelAutoSync(id),
+          }
+        : action === "RETRY"
+          ? await services.worktreeAutomations.retryAutoSync(id)
+          : action === "ENABLE"
+            ? await services.worktreeAutomations.configureAutoSync({
+                worktreeId: id,
+                conflictWorkflowId: optionalText(
+                  context.node.config.conflictWorkflowId,
+                  500,
+                ),
+                conflictWorkflowChoice: optionalText(
+                  context.node.config.conflictWorkflowChoice,
+                  500,
+                ),
+              })
+            : null;
+    if (!autoSync) throw new Error("Unknown Auto Sync action");
+    return {
+      output: autoSync,
+      sessionPatch: { worktree: { autoSync } },
+      links: [worktreeLink(id)],
+    };
+  });
+  executor.register("WORKTREE_SET_AUTO_MERGE", async (context) => {
+    const id = worktreeId(context);
+    const action = String(context.node.config.action ?? "ENABLE").toUpperCase();
+    let autoMerge: Record<string, unknown>;
+    if (action === "CANCEL") {
+      autoMerge = {
+        cancelled: await services.worktreeAutomations.cancelAutoMerge(id),
+      };
+    } else if (action === "RETRY") {
+      autoMerge = await services.worktreeAutomations.retryAutoMerge(id);
+    } else if (action === "ENABLE") {
+      const pullRequestNumber = Number(
+        context.node.config.pullRequestNumber ??
+          getSessionValue(context.sessionData, "pr.number"),
+      );
+      if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
+        throw new Error("Pull request number must be a positive integer");
+      }
+      const method = String(
+        context.node.config.method ?? "SQUASH",
+      ).toUpperCase();
+      if (!["MERGE", "REBASE", "SQUASH"].includes(method)) {
+        throw new Error("Merge method is invalid");
+      }
+      autoMerge = await services.worktreeAutomations.configureAutoMerge({
+        worktreeId: id,
+        repositoryNameWithOwner: text(
+          context.node.config.repositoryNameWithOwner ??
+            getSessionValue(context.sessionData, "repo.nameWithOwner"),
+          "Repository",
+          500,
+        ),
+        pullRequestNumber,
+        method: method as "MERGE" | "REBASE" | "SQUASH",
+        commitHeadline: text(
+          context.node.config.commitHeadline ??
+            getSessionValue(context.sessionData, "pr.title"),
+          "Commit headline",
+          1_000,
+        ),
+        commitBody: String(context.node.config.commitBody ?? ""),
+        authorEmail: optionalText(context.node.config.authorEmail, 500),
+        deleteWorktree: context.node.config.deleteWorktree === true,
+        moveTicketToDone: context.node.config.moveTicketToDone === true,
+      });
+    } else {
+      throw new Error("Unknown Auto Merge action");
+    }
+    return {
+      output: autoMerge,
+      sessionPatch: { worktree: { autoMerge } },
+      links: [worktreeLink(id)],
+    };
   });
   executor.register("WORKTREE_DELETE", async (context) => {
     const job = await services.worktrees.deleteWorktree({

@@ -45,7 +45,10 @@ import { buildStatusVariant } from "@/components/builds/build-format";
 import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
-import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
+import {
+  AutoMergeButton,
+  AutoSyncButton,
+} from "@/components/worktrees/worktree-automation-buttons";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
@@ -2785,12 +2788,6 @@ export function ActionRow(
         }
         worktreeId={worktree.id}
       />
-      {worktree.pullRequest && (
-        <MergePullRequestButton
-          onMerged={props.onCompleted}
-          pullRequest={worktree.pullRequest}
-        />
-      )}
       {editorVariant !== "NONE" && (
         <OperationButton
           icon={<Code2 />}
@@ -2866,6 +2863,20 @@ export function ActionRow(
         operation={changeActions.stageOperation}
         props={props}
         disabled={unavailable || !changeActions.hasChanges}
+      />
+      <AutoSyncButton
+        conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+        disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
+        onCompleted={props.onCompleted}
+        onError={props.onError}
+        worktree={worktree}
+      />
+      <AutoMergeButton
+        conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+        disabled={unavailable}
+        onCompleted={props.onCompleted}
+        onError={props.onError}
+        worktree={worktree}
       />
       {worktree.activeJob && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">

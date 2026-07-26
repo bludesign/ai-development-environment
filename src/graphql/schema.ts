@@ -24,7 +24,10 @@ import { CodebasesService } from "@/services/codebases";
 import { createCodebaseResolvers } from "./resolvers/codebases";
 import { createToolsResolvers } from "./resolvers/tools";
 import type { ToolsService } from "@/services/tools";
-import type { WorktreesService } from "@/services/worktrees";
+import type {
+  WorktreeAutomationService,
+  WorktreesService,
+} from "@/services/worktrees";
 import { createWorktreeResolvers } from "./resolvers/worktrees";
 import { createSkillResolvers } from "./resolvers/skills";
 import type { SkillsService } from "@/services/skills";
@@ -70,6 +73,7 @@ export const createSchema = (
   codebasesService: CodebasesService,
   toolsService: ToolsService,
   worktreesService: WorktreesService,
+  worktreeAutomationService: WorktreeAutomationService,
   buildDataService: BuildDataService,
   skillsService: SkillsService,
   buildsService: BuildsService,
@@ -97,7 +101,7 @@ export const createSchema = (
     createBuildDataResolvers(buildDataService),
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
-    createWorktreeResolvers(worktreesService),
+    createWorktreeResolvers(worktreesService, worktreeAutomationService),
     createSkillResolvers(skillsService),
     createBuildResolvers(buildsService),
     createIosDeviceResolvers(iosDevicesService),

@@ -296,6 +296,13 @@ export type GitHubPullRequestView = {
   reviewDecision: GitHubReviewDecision;
   unresolvedReviewThreadCount: number;
   state: GitHubPullRequestState;
+  isDraft: boolean;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  mergeStateStatus: string;
+  autoMergeEnabled: boolean;
+  viewerCanEnableAutoMerge: boolean;
+  viewerCanDisableAutoMerge: boolean;
+  headRefOid: string;
   headRefName: string;
   worktreeId: string | null;
   worktreeHighlightColor: string | null;
@@ -392,7 +399,27 @@ export type GitHubPullRequestMergeOptions = {
   defaultCommitHeadline: string;
   defaultCommitBody: string;
   canMerge: boolean;
+  canEnableAutoMerge: boolean;
+  autoMergeEnabled: boolean;
+  viewerCanDisableAutoMerge: boolean;
+  mergeStateStatus: string;
+  headRefOid: string;
   blockedReason: string | null;
+};
+
+export type GitHubPullRequestAutomationState = {
+  id: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  url: string;
+  mergedAt: string | null;
+  headRefOid: string;
+  headRefName: string;
+  headRepositoryNameWithOwner: string | null;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  mergeStateStatus: string;
+  autoMergeEnabled: boolean;
+  viewerCanEnableAutoMerge: boolean;
+  viewerCanDisableAutoMerge: boolean;
 };
 
 export type GitHubPullRequestMergeResult = {

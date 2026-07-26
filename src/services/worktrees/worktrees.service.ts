@@ -8,6 +8,7 @@ import {
   parseWorktreeInventoryItem,
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
@@ -22,6 +23,7 @@ import {
   WORKTREE_WATCH_JOB_KIND,
   type CodebaseWorktreeReport,
   type WorktreeActivityReport,
+  type WorktreeAutoSyncPhase,
   type WorktreeEditorVariant,
   type WorktreeGitOperation,
   type WorktreeOperation,
@@ -119,6 +121,8 @@ const worktreeInclude = {
       artifacts: { select: { id: true, kind: true } },
     },
   },
+  autoSync: true,
+  autoMerge: true,
   _count: {
     select: {
       builds: { where: { status: { in: ACTIVE_BUILD_STATUSES } } },
@@ -283,6 +287,10 @@ export class WorktreesService {
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
+      (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_AUTO_SYNC_JOB_KIND,
       (job) => this.projectOperation(job),
     );
     this.agentControl.registerCompletionHandler(
@@ -1579,6 +1587,8 @@ export class WorktreesService {
     worktreeId: string;
     deleteRemoteBranch: boolean;
     requestId: string;
+    requireClean?: boolean;
+    expectedHeadSha?: string | null;
   }) {
     const worktree = await this.requireRunnable(
       input.worktreeId,
@@ -1607,8 +1617,11 @@ export class WorktreesService {
         branch: worktree.branch,
         defaultBranch: worktree.codebase.defaultBranch,
         deleteRemoteBranch: input.deleteRemoteBranch,
-        requireClean: false,
-        expectedHeadSha: null,
+        requireClean: input.requireClean ?? false,
+        expectedHeadSha:
+          input.requireClean === true
+            ? (input.expectedHeadSha ?? worktree.headSha)
+            : null,
       },
       idempotencyKey: `worktree:delete:${input.requestId}:${worktree.id}`,
       timeoutSeconds: 600,
@@ -1852,6 +1865,40 @@ export class WorktreesService {
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
     });
+  }
+
+  async createAutoSyncJob(
+    id: string,
+    phase: WorktreeAutoSyncPhase,
+    requestId: string,
+  ) {
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_AUTO_SYNC_JOB_KIND,
+    );
+    const payload = this.payload(worktree);
+    if (!payload.baseBranch)
+      throw new Error("Auto Sync requires a base branch");
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_AUTO_SYNC_JOB_KIND,
+      payload: {
+        ...payload,
+        baseBranch: payload.baseBranch,
+        phase,
+      },
+      idempotencyKey: `worktree:auto-sync:${phase.toLowerCase()}:${requestId}:${id}`,
+      timeoutSeconds: 600,
+    });
+  }
+
+  publishAutomationChange(
+    worktreeId: string,
+    codebaseId: string | null = null,
+  ): void {
+    this.publish(worktreeId, codebaseId);
   }
 
   async inspectGitState(id: string, requestId: string) {

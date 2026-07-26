@@ -6,6 +6,7 @@ import type {
 
 export const WORKTREE_INSPECT_JOB_KIND = "worktree.inspect";
 export const WORKTREE_OPERATION_JOB_KIND = "worktree.operation";
+export const WORKTREE_AUTO_SYNC_JOB_KIND = "worktree.auto-sync";
 export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
@@ -18,6 +19,7 @@ export const WORKTREE_DIFF_ASSET_JOB_KIND = "worktree.diff.asset";
 export const WORKTREE_JOB_KINDS = [
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
@@ -68,6 +70,9 @@ export const WORKTREE_OPERATIONS = [
 ] as const;
 
 export type WorktreeOperation = (typeof WORKTREE_OPERATIONS)[number];
+export type WorktreeAutoSyncPhase = "SYNC" | "FINALIZE";
+export type WorktreeAutoSyncOutcome =
+  "NO_CHANGE" | "SYNCED" | "CONFLICT" | "UNRESOLVED";
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
 export type WorktreeWatchAction = "START" | "STOP";
 export type WorktreeBranchAction = "CREATE" | "CHANGE";
@@ -829,6 +834,54 @@ export function worktreeJobPayload(value: unknown): {
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
+  };
+}
+
+export function worktreeAutoSyncJobPayload(value: unknown): {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  baseBranch: string;
+  phase: WorktreeAutoSyncPhase;
+} {
+  const payload = objectValue(value, "worktree auto sync payload");
+  const allowed = new Set([
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "baseBranch",
+    "phase",
+  ]);
+  const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(
+      `Unexpected worktree auto sync payload field: ${unexpected}`,
+    );
+  }
+  if (payload.phase !== "SYNC" && payload.phase !== "FINALIZE") {
+    throw new Error("worktree auto sync payload.phase is invalid");
+  }
+  return {
+    codebaseId: stringValue(
+      payload.codebaseId,
+      "worktree auto sync payload.codebaseId",
+    ),
+    folder: stringValue(payload.folder, "worktree auto sync payload.folder"),
+    gitDirectory: stringValue(
+      payload.gitDirectory,
+      "worktree auto sync payload.gitDirectory",
+    ),
+    expectedOrigin: stringValue(
+      payload.expectedOrigin,
+      "worktree auto sync payload.expectedOrigin",
+    ),
+    baseBranch: stringValue(
+      payload.baseBranch,
+      "worktree auto sync payload.baseBranch",
+    ),
+    phase: payload.phase,
   };
 }
 

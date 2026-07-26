@@ -32,6 +32,7 @@ import {
 } from "./codebases.js";
 import {
   WORKTREE_INSPECT_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
@@ -68,6 +69,7 @@ import {
   operateWorktreeGit,
   pushMovedWorktree,
   operateWorktree,
+  autoSyncWorktree,
   watchWorktree,
 } from "./worktrees.js";
 import {
@@ -168,6 +170,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [CODEBASE_GIT_INSPECT_JOB_KIND]: inspectCodebaseGit,
   [CODEBASE_GIT_OPERATION_JOB_KIND]: operateCodebaseGit,
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
+  [WORKTREE_AUTO_SYNC_JOB_KIND]: autoSyncWorktree,
   [WORKTREE_BRANCH_JOB_KIND]: branchWorktree,
   [WORKTREE_MOVE_PUSH_JOB_KIND]: pushMovedWorktree,
   [WORKTREE_MOVE_CHECKOUT_JOB_KIND]: checkoutMovedWorktree,

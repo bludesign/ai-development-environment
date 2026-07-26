@@ -26,6 +26,32 @@ export type WorktreeLatestBuild = Pick<
   artifacts: Array<Pick<BuildArtifact, "id" | "kind">>;
 };
 
+export type WorktreeAutoSync = {
+  worktreeId: string;
+  state: string;
+  conflictWorkflowId: string | null;
+  conflictWorkflowChoice: string | null;
+  lastError: string | null;
+  lastSyncedAt: string | null;
+  updatedAt: string;
+};
+
+export type WorktreeAutoMerge = {
+  worktreeId: string;
+  state: string;
+  repositoryNameWithOwner: string;
+  pullRequestNumber: number;
+  mergeMethod: "MERGE" | "REBASE" | "SQUASH";
+  commitHeadline: string;
+  commitBody: string;
+  authorEmail: string | null;
+  deleteWorktree: boolean;
+  moveTicketToDone: boolean;
+  ticketKey: string | null;
+  lastError: string | null;
+  updatedAt: string;
+};
+
 export type Worktree = {
   id: string;
   codebaseId: string;
@@ -59,6 +85,8 @@ export type Worktree = {
   latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];
   activeJob: AgentJob | null;
+  autoSync?: WorktreeAutoSync | null;
+  autoMerge?: WorktreeAutoMerge | null;
   lastCheckedAt: string | null;
   missingAt: string | null;
   createdAt: string;

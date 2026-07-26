@@ -636,6 +636,7 @@ export class JiraService {
       ),
       hideCompletedTickets: project.hideCompletedTickets,
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
+      doneStatusId: project.doneStatusId,
       branchNamingScript:
         project.branchNamingScript ?? DEFAULT_JIRA_BRANCH_NAMING_SCRIPT,
       sources: project.sources.map(sourceView),
@@ -685,6 +686,7 @@ export class JiraService {
     ticketAssignmentFilter: JiraTicketAssignmentFilter;
     hideCompletedTickets: boolean;
     completedStatusIds: string[];
+    doneStatusId?: string | null;
   }): Promise<JiraProjectView[]> {
     if (!TICKET_ASSIGNMENT_FILTERS.has(input.ticketAssignmentFilter)) {
       throw new Error("Invalid Jira ticket assignment filter");
@@ -697,12 +699,23 @@ export class JiraService {
       ),
     ].slice(0, 200);
     const prisma = await getPrismaClient();
+    const doneStatusId =
+      input.doneStatusId === undefined
+        ? undefined
+        : input.doneStatusId?.trim() || null;
+    if (doneStatusId) {
+      const available = await this.projectStatuses(input.projectId);
+      if (!available.some((status) => status.id === doneStatusId)) {
+        throw new Error("The selected Jira done status is not available");
+      }
+    }
     await prisma.jiraProject.update({
       where: { id: input.projectId },
       data: {
         ticketAssignmentFilter: input.ticketAssignmentFilter,
         hideCompletedTickets: input.hideCompletedTickets,
         completedStatusIdsJson: JSON.stringify(completedStatusIds),
+        ...(doneStatusId === undefined ? {} : { doneStatusId }),
       },
     });
     return this.listProjects();
@@ -1330,6 +1343,37 @@ export class JiraService {
         transition: { id: transition.id },
       });
     });
+  }
+
+  async transitionTicketToConfiguredDone(
+    issueKey: string,
+  ): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(issueKey);
+    const projectKey = key.split("-")[0] ?? "";
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { key: projectKey },
+      select: { doneStatusId: true },
+    });
+    if (!project?.doneStatusId) {
+      throw new Error(
+        `Configure a done status for Jira project ${projectKey} before using this option`,
+      );
+    }
+    const ticket = await this.ticket(key);
+    if (ticket.statusId === project.doneStatusId) return ticket;
+    const transition = (await this.ticketTransitions(key))
+      .filter((item) => item.toStatusId === project.doneStatusId)
+      .sort(
+        (first, second) =>
+          first.requiredFields.length - second.requiredFields.length,
+      )[0];
+    if (!transition) {
+      throw new Error(
+        "Jira does not currently offer a transition to the configured done status",
+      );
+    }
+    return this.transitionTicket(key, transition.id);
   }
 
   async updateTicket(input: UpdateJiraTicketInput): Promise<JiraTicketDetail> {

@@ -60,6 +60,7 @@ type JiraProject {
   ticketAssignmentFilter: JiraTicketAssignmentFilter!
   hideCompletedTickets: Boolean!
   completedStatusIds: [ID!]!
+  doneStatusId: ID
   branchNamingScript: String!
   sources: [JiraSource!]!
 }
@@ -368,6 +369,7 @@ input UpdateJiraProjectDisplaySettingsInput {
   ticketAssignmentFilter: JiraTicketAssignmentFilter!
   hideCompletedTickets: Boolean!
   completedStatusIds: [ID!]!
+  doneStatusId: ID
 }
 
 input JiraTextInput {

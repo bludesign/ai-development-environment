@@ -504,6 +504,42 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       enumField("operation", "Operation", WORKTREE_OPERATION_OPTIONS),
     ],
   },
+  WORKTREE_SET_AUTO_SYNC: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      enumField(
+        "action",
+        "Action",
+        staticOptions(["ENABLE", "RETRY", "CANCEL"]),
+      ),
+      text("conflictWorkflowId", "Conflict workflow ID"),
+      text("conflictWorkflowChoice", "Conflict workflow choice"),
+    ],
+  },
+  WORKTREE_SET_AUTO_MERGE: {
+    fields: [
+      resource("worktreeId", "Worktree", "worktree"),
+      enumField(
+        "action",
+        "Action",
+        staticOptions(["ENABLE", "RETRY", "CANCEL"]),
+      ),
+      text("repositoryNameWithOwner", "Repository", {
+        placeholder: "owner/repository",
+      }),
+      num("pullRequestNumber", "Pull request number"),
+      enumField(
+        "method",
+        "Merge method",
+        staticOptions(["MERGE", "REBASE", "SQUASH"]),
+      ),
+      text("commitHeadline", "Commit headline"),
+      multiline("commitBody", "Commit body"),
+      text("authorEmail", "Author email"),
+      bool("deleteWorktree", "Delete worktree after merge"),
+      bool("moveTicketToDone", "Move Jira ticket to done"),
+    ],
+  },
   WORKTREE_DELETE: {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),
@@ -890,6 +926,8 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "WORKTREE_CREATE",
   "WORKTREE_CHANGE_BRANCH",
   "WORKTREE_OPERATION",
+  "WORKTREE_SET_AUTO_SYNC",
+  "WORKTREE_SET_AUTO_MERGE",
   "WORKTREE_DELETE",
   "WORKTREE_GIT_OPERATION",
   "WORKTREE_MOVE",

@@ -253,6 +253,14 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "conflicts", description: "Conflicting files" },
     { name: "missingAt", description: "When the worktree was found missing" },
     { name: "dirtySince", description: "When the worktree became dirty" },
+    {
+      name: "autoSync",
+      description: "Persistent Auto Sync configuration and current state",
+    },
+    {
+      name: "autoMerge",
+      description: "Persistent Auto Merge configuration and current state",
+    },
   ],
   pipeline: [
     { name: "id", description: "CI pipeline id" },
