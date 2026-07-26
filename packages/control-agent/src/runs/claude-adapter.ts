@@ -177,6 +177,18 @@ export function claudeEnvironment(): Record<string, string> {
   };
 }
 
+export function claudeMcpServers(server: ProviderStartInput["mcpServer"]) {
+  return server
+    ? {
+        [server.name]: {
+          type: "http" as const,
+          url: server.url,
+          headers: server.headers,
+        },
+      }
+    : undefined;
+}
+
 /**
  * A Claude result reports usage per real model id (`claude-sonnet-5`), each with
  * its own cache-read and cache-creation token counts and reported cost. Those
@@ -307,6 +319,9 @@ export class ClaudeAdapter implements ProviderAdapter {
         includePartialMessages: true,
         env: claudeEnvironment(),
         disallowedTools: input.run.webSearchEnabled ? [] : ["WebSearch"],
+        ...(input.mcpServer
+          ? { mcpServers: claudeMcpServers(input.mcpServer) }
+          : {}),
         canUseTool: async (toolName, toolInput, options) => {
           if (toolName !== "AskUserQuestion") {
             return { behavior: "allow", updatedInput: toolInput };

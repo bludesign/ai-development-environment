@@ -110,6 +110,20 @@ describe("configSchemaForKind", () => {
     );
   });
 
+  test("all run-producing steps advertise MCP preset id arrays", () => {
+    for (const kind of [
+      "RUN_CREATE_PLAN",
+      "RUN_CREATE_SESSION",
+      "RUN_PLAY_PLAN",
+      "RUN_FOLLOW_UP",
+    ]) {
+      expect(properties(kind, "step").mcpPresetIds).toMatchObject({
+        type: "array",
+        items: { type: "string" },
+      });
+    }
+  });
+
   test("conditions carry a recursive definition", () => {
     const schema = configSchemaForKind("CONTROL_IF", "step");
     const condition = (schema.properties as Record<string, JsonSchema>)

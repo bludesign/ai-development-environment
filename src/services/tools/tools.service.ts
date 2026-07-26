@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { BUILD_CONFIGURATION_ICON_KEYS } from "@ai-development-environment/agent-contract/builds";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -27,6 +29,8 @@ import type {
   ExternalMcpServerInput,
   ExternalMcpServerView,
   ExternalMcpTransport,
+  McpToolPresetInput,
+  McpToolPresetView,
   ToolCatalogGroup,
   ToolCatalogItem,
 } from "./types";
@@ -46,6 +50,7 @@ const RESERVED_HEADERS = new Set([
   "mcp-session-id",
   "transfer-encoding",
 ]);
+const MCP_PRESET_ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
 
 export type ServerWithSecrets = {
   id: string;
@@ -157,6 +162,30 @@ function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
 
+function presetView(preset: {
+  id: string;
+  name: string;
+  description: string;
+  iconKey: string;
+  enabledForPlans: boolean;
+  enabledForSessions: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  tools: Array<{ toolName: string }>;
+}): McpToolPresetView {
+  return {
+    id: preset.id,
+    name: preset.name,
+    description: preset.description,
+    iconKey: preset.iconKey,
+    enabledForPlans: preset.enabledForPlans,
+    enabledForSessions: preset.enabledForSessions,
+    toolNames: preset.tools.map(({ toolName }) => toolName).sort(),
+    createdAt: preset.createdAt.toISOString(),
+    updatedAt: preset.updatedAt.toISOString(),
+  };
+}
+
 export class ToolsService {
   readonly builtInTools: BuiltInToolRegistry;
 
@@ -174,6 +203,201 @@ export class ToolsService {
       toolAudit: this.audit,
       testExternalMcpServer: (id) => this.testExternalServer(id),
     });
+  }
+
+  async mcpToolPresets(kind?: string | null): Promise<McpToolPresetView[]> {
+    const normalizedKind = kind?.trim().toUpperCase() ?? null;
+    if (normalizedKind && !["PLAN", "SESSION"].includes(normalizedKind)) {
+      throw new Error("Run kind is not supported");
+    }
+    const prisma = await getPrismaClient();
+    const presets = await prisma.mcpToolPreset.findMany({
+      where:
+        normalizedKind === "PLAN"
+          ? { enabledForPlans: true }
+          : normalizedKind === "SESSION"
+            ? { enabledForSessions: true }
+            : undefined,
+      orderBy: { name: "asc" },
+      include: { tools: true },
+    });
+    return presets.map(presetView);
+  }
+
+  async createMcpToolPreset(
+    input: McpToolPresetInput,
+  ): Promise<McpToolPresetView> {
+    return this.saveMcpToolPreset(null, input);
+  }
+
+  async updateMcpToolPreset(
+    id: string,
+    input: McpToolPresetInput,
+  ): Promise<McpToolPresetView> {
+    return this.saveMcpToolPreset(id, input);
+  }
+
+  private async saveMcpToolPreset(
+    id: string | null,
+    input: McpToolPresetInput,
+  ): Promise<McpToolPresetView> {
+    const name = input.name.trim();
+    const description = input.description?.trim() ?? "";
+    if (!name) throw new Error("Preset name is required");
+    if (name.length > 80)
+      throw new Error("Preset name must be 80 characters or fewer");
+    if (description.length > 1_000)
+      throw new Error("Preset description must be 1,000 characters or fewer");
+    if (!MCP_PRESET_ICON_KEYS.has(input.iconKey)) {
+      throw new Error("Preset icon is not supported");
+    }
+    if (!input.toolNames.length) {
+      throw new Error("Select at least one built-in tool");
+    }
+    if (new Set(input.toolNames).size !== input.toolNames.length) {
+      throw new Error("Preset tool membership must not contain duplicates");
+    }
+    const knownNames = new Set(
+      this.builtInTools.definitions().map(({ name: toolName }) => toolName),
+    );
+    const toolNames = input.toolNames.map((toolName) => toolName.trim());
+    const invalid = toolNames.find(
+      (toolName) => !toolName || !knownNames.has(toolName),
+    );
+    if (invalid !== undefined) {
+      throw new Error(`Unknown built-in tool: ${invalid || "(empty)"}`);
+    }
+
+    const prisma = await getPrismaClient();
+    const names = await prisma.mcpToolPreset.findMany({
+      select: { id: true, name: true },
+    });
+    if (
+      names.some(
+        (preset) =>
+          preset.id !== id &&
+          preset.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+      )
+    ) {
+      throw new Error("An MCP tool preset with this name already exists");
+    }
+    if (id) {
+      const existing = await prisma.mcpToolPreset.findUnique({ where: { id } });
+      if (!existing) throw new Error("MCP tool preset not found");
+    }
+    const presetId = id ?? randomUUID();
+    await prisma.$transaction(async (transaction) => {
+      await transaction.mcpToolPreset.upsert({
+        where: { id: presetId },
+        create: {
+          id: presetId,
+          name,
+          description,
+          iconKey: input.iconKey,
+          enabledForPlans: input.enabledForPlans,
+          enabledForSessions: input.enabledForSessions,
+        },
+        update: {
+          name,
+          description,
+          iconKey: input.iconKey,
+          enabledForPlans: input.enabledForPlans,
+          enabledForSessions: input.enabledForSessions,
+        },
+      });
+      await transaction.mcpToolPresetTool.deleteMany({
+        where: { presetId },
+      });
+      await transaction.mcpToolPresetTool.createMany({
+        data: toolNames.map((toolName) => ({ presetId, toolName })),
+      });
+    });
+    const saved = await prisma.mcpToolPreset.findUniqueOrThrow({
+      where: { id: presetId },
+      include: { tools: true },
+    });
+    return presetView(saved);
+  }
+
+  async deleteMcpToolPreset(id: string): Promise<{ id: string }> {
+    const prisma = await getPrismaClient();
+    await prisma.mcpToolPreset.delete({ where: { id } });
+    return { id };
+  }
+
+  async resolveRunMcpPresets(
+    kind: "PLAN" | "SESSION",
+    ids: string[],
+  ): Promise<{ presetIds: string[]; toolNames: string[] }> {
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) return { presetIds: [], toolNames: [] };
+    const prisma = await getPrismaClient();
+    const presets = await prisma.mcpToolPreset.findMany({
+      where: {
+        id: { in: uniqueIds },
+        ...(kind === "PLAN"
+          ? { enabledForPlans: true }
+          : { enabledForSessions: true }),
+      },
+      include: { tools: true },
+    });
+    const byId = new Map(presets.map((preset) => [preset.id, preset]));
+    const presetIds = uniqueIds.filter((presetId) => byId.has(presetId));
+    const knownNames = new Set(
+      this.builtInTools.definitions().map(({ name }) => name),
+    );
+    const toolNames = new Set<string>();
+    for (const presetId of presetIds) {
+      for (const { toolName } of byId.get(presetId)!.tools) {
+        if (knownNames.has(toolName)) toolNames.add(toolName);
+      }
+    }
+    return { presetIds, toolNames: [...toolNames].sort() };
+  }
+
+  async mcpPresetToolNames(id: string): Promise<string[] | null> {
+    const prisma = await getPrismaClient();
+    const preset = await prisma.mcpToolPreset.findUnique({
+      where: { id },
+      include: { tools: true },
+    });
+    if (!preset) return null;
+    const knownNames = new Set(
+      this.builtInTools.definitions().map(({ name }) => name),
+    );
+    return preset.tools
+      .map(({ toolName }) => toolName)
+      .filter((toolName) => knownNames.has(toolName));
+  }
+
+  async mcpRunToolNames(
+    runId: string,
+    agentId: string,
+  ): Promise<
+    | { status: "OK"; toolNames: string[] }
+    | { status: "NOT_FOUND" }
+    | { status: "FORBIDDEN" }
+  > {
+    const prisma = await getPrismaClient();
+    const run = await prisma.agentRun.findUnique({
+      where: { id: runId },
+      select: { agentId: true, mcpToolNamesJson: true },
+    });
+    if (!run) return { status: "NOT_FOUND" };
+    if (run.agentId !== agentId) return { status: "FORBIDDEN" };
+    const parsed: unknown = JSON.parse(run.mcpToolNamesJson);
+    const selected = new Set(
+      Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === "string")
+        : [],
+    );
+    return {
+      status: "OK",
+      toolNames: this.builtInTools
+        .definitions()
+        .map(({ name }) => name)
+        .filter((name) => selected.has(name)),
+    };
   }
 
   async externalServers(): Promise<ExternalMcpServerView[]> {

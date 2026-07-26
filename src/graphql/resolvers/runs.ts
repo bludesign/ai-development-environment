@@ -23,6 +23,10 @@ const json = (value: string | null | undefined) =>
 
 export const createRunResolvers = (service: RunsService) => ({
   AgentRun: {
+    mcpPresetIds: (value: { mcpPresetIdsJson?: string | null }) =>
+      value.mcpPresetIdsJson ? JSON.parse(value.mcpPresetIdsJson) : [],
+    mcpToolNames: (value: { mcpToolNamesJson?: string | null }) =>
+      value.mcpToolNamesJson ? JSON.parse(value.mcpToolNamesJson) : [],
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     nativeArchivedAt: (value: { nativeArchivedAt?: Date | null }) =>
       iso(value.nativeArchivedAt),
@@ -80,6 +84,8 @@ export const createRunResolvers = (service: RunsService) => ({
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
   },
   RunDraft: {
+    mcpPresetIds: (value: { mcpPresetIdsJson?: string | null }) =>
+      value.mcpPresetIdsJson ? JSON.parse(value.mcpPresetIdsJson) : [],
     archivedAt: (value: { archivedAt?: Date | null }) => iso(value.archivedAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
@@ -205,11 +211,14 @@ export const createRunResolvers = (service: RunsService) => ({
     },
     playPlan: (
       _root: unknown,
-      { planId }: { planId: string },
+      {
+        planId,
+        mcpPresetIds,
+      }: { planId: string; mcpPresetIds?: string[] | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.playPlan(planId);
+      return service.playPlan(planId, mcpPresetIds ?? []);
     },
     createRunFollowUp: (
       _root: unknown,

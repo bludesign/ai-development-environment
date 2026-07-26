@@ -2061,6 +2061,9 @@ function createRunInput(
     attachmentIds: Array.isArray(context.node.config.attachmentIds)
       ? context.node.config.attachmentIds.map(String)
       : [],
+    mcpPresetIds: Array.isArray(context.node.config.mcpPresetIds)
+      ? context.node.config.mcpPresetIds.map(String)
+      : [],
   };
 }
 
@@ -2079,7 +2082,12 @@ function registerRunAdapters(
     return runResult(context, run as unknown as Record<string, unknown>, true);
   });
   executor.register("RUN_PLAY_PLAN", async (context) => {
-    const run = await services.runs.playPlan(agentRunId(context));
+    const run = await services.runs.playPlan(
+      agentRunId(context),
+      Array.isArray(context.node.config.mcpPresetIds)
+        ? context.node.config.mcpPresetIds.map(String)
+        : [],
+    );
     if (!run) throw new Error("Plan could not be played");
     return runResult(context, run as unknown as Record<string, unknown>, true);
   });

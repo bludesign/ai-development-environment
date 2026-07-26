@@ -29,6 +29,27 @@ export type ExternalMcpServerInput = {
   }>;
 };
 
+export type McpToolPresetInput = {
+  name: string;
+  description?: string | null;
+  iconKey: string;
+  enabledForPlans: boolean;
+  enabledForSessions: boolean;
+  toolNames: string[];
+};
+
+export type McpToolPresetView = {
+  id: string;
+  name: string;
+  description: string;
+  iconKey: string;
+  enabledForPlans: boolean;
+  enabledForSessions: boolean;
+  toolNames: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ToolAnnotations = {
   readOnlyHint: boolean;
   destructiveHint: boolean;

@@ -313,4 +313,32 @@ describe("codebases MCP server", () => {
       },
     });
   });
+
+  test("registers only allowlisted tools and rejects calls outside the snapshot", async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    const registry = createBuiltInToolRegistry({
+      codebaseTools: { list } as unknown as CodebaseToolsService,
+    });
+    const server = createBuiltInMcpServer(
+      registry,
+      undefined,
+      new Set(["get_codebases"]),
+    );
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    closeCallbacks.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    await expect(client.listTools()).resolves.toMatchObject({
+      tools: [{ name: "get_codebases" }],
+    });
+    await expect(
+      client.callTool({ name: "get_codebase", arguments: { path: "/tmp" } }),
+    ).resolves.toMatchObject({ isError: true });
+  });
 });

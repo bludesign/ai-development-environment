@@ -76,6 +76,11 @@ export type ProviderStartInput = {
   attachments: StagedAttachment[];
   resumeNativeId?: string;
   fork?: boolean;
+  mcpServer?: {
+    name: string;
+    url: string;
+    headers: Record<string, string>;
+  };
 };
 
 export type ProviderCompletion = {

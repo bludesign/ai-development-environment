@@ -26,6 +26,32 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("builds a run-scoped MCP descriptor with agent authorization taking precedence", () => {
+    const client = new AgentGraphQLClient(
+      "https://control.test/",
+      "agent-credential",
+      10_000,
+      {
+        "CF-Access-Client-Id": "client-id",
+        Authorization: "Bearer custom",
+      },
+    );
+
+    expect(client.mcpServerDescriptor("run/1")).toEqual({
+      name: "ai-development-environment",
+      url: "https://control.test/api/mcp?run=run%2F1",
+      headers: {
+        "CF-Access-Client-Id": "client-id",
+        authorization: "Bearer agent-credential",
+      },
+    });
+    expect(
+      new AgentGraphQLClient("https://control.test").mcpServerDescriptor(
+        "run-1",
+      ),
+    ).toBeNull();
+  });
+
   test("aborts a hung fetch at the configured request timeout", async () => {
     vi.stubGlobal(
       "fetch",

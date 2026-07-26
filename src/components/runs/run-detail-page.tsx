@@ -83,6 +83,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { formatProviderLabel } from "@/lib/enum-label";
+import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -530,6 +531,7 @@ export function RunDetailPage({
   const [followModel, setFollowModel] = useState("");
   const [followEffort, setFollowEffort] = useState("auto");
   const [followWebSearch, setFollowWebSearch] = useState(false);
+  const [followMcpPresetIds, setFollowMcpPresetIds] = useState<string[]>([]);
   const [followAttachments, setFollowAttachments] = useState<
     RunAttachmentView[]
   >([]);
@@ -537,6 +539,8 @@ export function RunDetailPage({
   const [contextMode, setContextMode] = useState("NORMALIZED");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [followConfirm, setFollowConfirm] = useState(false);
+  const [playOpen, setPlayOpen] = useState(false);
+  const [playMcpPresetIds, setPlayMcpPresetIds] = useState<string[]>([]);
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const activityPinnedRef = useRef(true);
   const handleActivityScroll = useCallback(() => {
@@ -764,10 +768,17 @@ export function RunDetailPage({
     try {
       const query =
         action === "play"
-          ? "mutation Play($id: ID!) { playPlan(planId: $id) { id } }"
+          ? "mutation Play($id: ID!, $mcpPresetIds: [ID!]!) { playPlan(planId: $id, mcpPresetIds: $mcpPresetIds) { id } }"
           : `mutation Lifecycle($id: ID!) { ${action}AgentRun(id: $id) { id } }`;
-      await controlPlaneRequest(query, { id: runId });
+      await controlPlaneRequest(query, {
+        id: runId,
+        ...(action === "play" ? { mcpPresetIds: playMcpPresetIds } : {}),
+      });
       await refresh();
+      if (action === "play") {
+        setPlayOpen(false);
+        setPlayMcpPresetIds([]);
+      }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -855,6 +866,7 @@ export function RunDetailPage({
             webSearchEnabled: followWebSearch,
             prompt,
             attachmentIds: followAttachments.map(({ id }) => id),
+            mcpPresetIds: followMcpPresetIds,
             followUpMode: followMode,
             contextMode:
               followProvider === run.provider ? "NATIVE" : contextMode,
@@ -1047,7 +1059,10 @@ export function RunDetailPage({
               !run.playedAt && (
                 <Button
                   disabled={Boolean(busy) || !run.finalOutput}
-                  onClick={() => void lifecycle("play")}
+                  onClick={() => {
+                    setPlayMcpPresetIds([]);
+                    setPlayOpen(true);
+                  }}
                 >
                   <Play /> {t("play")}
                 </Button>
@@ -1589,6 +1604,14 @@ export function RunDetailPage({
             }
             uploading={busy === "upload"}
           />
+          <div className="space-y-2">
+            <Label>{t("mcpPresets")}</Label>
+            <McpPresetPicker
+              kind={run.kind}
+              onChange={setFollowMcpPresetIds}
+              selectedIds={followMcpPresetIds}
+            />
+          </div>
           <div className="flex flex-wrap items-center justify-end gap-4">
             <label className="flex items-center gap-2">
               <Checkbox
@@ -1685,6 +1708,36 @@ export function RunDetailPage({
         open={deleteOpen}
         title={t("deleteTitle")}
       />
+      <Dialog
+        onOpenChange={(open) => {
+          setPlayOpen(open);
+          if (!open) setPlayMcpPresetIds([]);
+        }}
+        open={playOpen}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("playPlan")}</DialogTitle>
+            <DialogDescription>{t("playPlanDescription")}</DialogDescription>
+          </DialogHeader>
+          <McpPresetPicker
+            kind="SESSION"
+            onChange={setPlayMcpPresetIds}
+            selectedIds={playMcpPresetIds}
+          />
+          <DialogFooter>
+            <Button onClick={() => setPlayOpen(false)} variant="outline">
+              {t("cancel")}
+            </Button>
+            <Button
+              disabled={Boolean(busy)}
+              onClick={() => void lifecycle("play")}
+            >
+              {busy === "play" ? <Spinner /> : <Play />} {t("play")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ConfirmationDialog
         actionLabel={t("cancelAndTransfer")}
         cancelLabel={t("cancel")}

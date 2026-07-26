@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
+import type { AgentControlService } from "@/services/agent-control";
+
 import type { ToolInvocationContext } from "./tool-call-audit.service";
 
 type ToolEndpoint = "MCP" | "TOOLS_PAGE";
@@ -41,6 +43,18 @@ function unauthorized(message: string): Response {
   );
 }
 
+function tokenNotConfigured(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "TOOL_API_TOKEN_NOT_CONFIGURED",
+        message: "TOOLS_API_TOKEN must be configured for preset MCP URLs",
+      },
+    },
+    { status: 503 },
+  );
+}
+
 export function authorizeToolRequest(
   request: Request,
   endpoint: ToolEndpoint,
@@ -68,6 +82,37 @@ export function authorizeToolRequest(
       caller: `bearer:${fingerprint}@${requestAddress(request)}`,
       correlationId: requestCorrelationId(request),
       source: endpoint,
+    },
+  };
+}
+
+export function authorizeMcpPresetRequest(
+  request: Request,
+): { context: ToolInvocationContext } | { response: Response } {
+  if (!process.env.TOOLS_API_TOKEN?.trim()) {
+    return { response: tokenNotConfigured() };
+  }
+  return authorizeToolRequest(request, "MCP");
+}
+
+export async function authorizeRunMcpRequest(
+  request: Request,
+  agents: AgentControlService,
+): Promise<
+  { agentId: string; context: ToolInvocationContext } | { response: Response }
+> {
+  const agentId = await agents.authenticate(bearerCredential(request.headers));
+  if (!agentId) {
+    return {
+      response: unauthorized("A valid enrolled agent credential is required"),
+    };
+  }
+  return {
+    agentId,
+    context: {
+      caller: `agent:${agentId}@${requestAddress(request)}`,
+      correlationId: requestCorrelationId(request),
+      source: "MCP",
     },
   };
 }

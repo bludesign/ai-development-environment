@@ -31,6 +31,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -85,6 +93,7 @@ import { EffortIcon } from "./effort-icon";
 import { ProviderIcon } from "./provider-icon";
 import { useRunLabels } from "./run-labels";
 import type { AgentRunView } from "./types";
+import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
 
 function IconAction({
   label,
@@ -146,6 +155,8 @@ export function RunsPage({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [drawerIssueKey, setDrawerIssueKey] = useState<string | null>(null);
+  const [playPlanId, setPlayPlanId] = useState<string | null>(null);
+  const [playPresetIds, setPlayPresetIds] = useState<string[]>([]);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -291,10 +302,15 @@ export function RunsPage({
     }
   };
 
-  const play = (id: string) =>
-    mutate("mutation PlayPlan($id: ID!) { playPlan(planId: $id) { id } }", {
-      id,
-    });
+  const play = async () => {
+    if (!playPlanId) return;
+    await mutate(
+      "mutation PlayPlan($id: ID!, $mcpPresetIds: [ID!]!) { playPlan(planId: $id, mcpPresetIds: $mcpPresetIds) { id } }",
+      { id: playPlanId, mcpPresetIds: playPresetIds },
+    );
+    setPlayPlanId(null);
+    setPlayPresetIds([]);
+  };
   const archive = (ids: string[], archived: boolean) =>
     mutate(
       "mutation ArchiveRuns($ids: [ID!]!, $archived: Boolean!) { archiveAgentRuns(ids: $ids, archived: $archived) }",
@@ -764,7 +780,10 @@ export function RunsPage({
                                   !run.finalOutput
                                 }
                                 label={t("play")}
-                                onClick={() => void play(run.id)}
+                                onClick={() => {
+                                  setPlayPresetIds([]);
+                                  setPlayPlanId(run.id);
+                                }}
                               >
                                 <Play />
                               </IconAction>
@@ -828,6 +847,35 @@ export function RunsPage({
         open={deleteIds.length > 0}
         title={t("deleteTitle")}
       />
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPlayPlanId(null);
+            setPlayPresetIds([]);
+          }
+        }}
+        open={Boolean(playPlanId)}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("playPlan")}</DialogTitle>
+            <DialogDescription>{t("playPlanDescription")}</DialogDescription>
+          </DialogHeader>
+          <McpPresetPicker
+            kind="SESSION"
+            onChange={setPlayPresetIds}
+            selectedIds={playPresetIds}
+          />
+          <DialogFooter>
+            <Button onClick={() => setPlayPlanId(null)} variant="outline">
+              {t("cancel")}
+            </Button>
+            <Button onClick={() => void play()}>
+              <Play /> {t("play")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <JiraTicketDrawer
         issueKey={drawerIssueKey}
         onClose={() => setDrawerIssueKey(null)}

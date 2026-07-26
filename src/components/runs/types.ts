@@ -46,6 +46,8 @@ export type AgentRunView = RunLinkView & {
   model: string;
   effort: string | null;
   webSearchEnabled: boolean;
+  mcpPresetIds?: string[];
+  mcpToolNames?: string[];
   initialPrompt: string;
   finalOutput: string | null;
   error: string | null;
@@ -187,6 +189,7 @@ export type RunDraftView = {
   model: string;
   effort: string | null;
   webSearchEnabled: boolean;
+  mcpPresetIds?: string[];
   prompt: string;
   attachments: RunAttachmentView[];
   archivedAt: string | null;

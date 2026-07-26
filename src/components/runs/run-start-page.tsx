@@ -43,6 +43,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 import { JIRA_SUMMARY_FIELDS } from "@/components/jira/ticket-graphql";
 import type { JiraTicketSummary } from "@/services/jira/types";
+import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
 
 import { RUN_DRAFT_FIELDS } from "./graphql-fields";
 import { AttachmentPicker } from "./attachment-picker";
@@ -100,6 +101,7 @@ export function RunStartPage({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("auto");
   const [webSearch, setWebSearch] = useState(true);
+  const [mcpPresetIds, setMcpPresetIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<RunAttachmentView[]>([]);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -168,6 +170,7 @@ export function RunStartPage({
         setModel(draft.model);
         setEffort(draft.effort ?? "auto");
         setWebSearch(draft.webSearchEnabled);
+        setMcpPresetIds(draft.mcpPresetIds ?? []);
         setAttachments(draft.attachments);
       }
       setError(null);
@@ -334,6 +337,7 @@ export function RunStartPage({
     webSearchEnabled: webSearch,
     prompt,
     attachmentIds: attachments.map(({ id }) => id),
+    mcpPresetIds,
   });
 
   const save = async () => {
@@ -576,6 +580,17 @@ export function RunStartPage({
               </p>
             </div>
           </label>
+          <div className="space-y-2">
+            <Label>{t("mcpPresets")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("mcpPresetsDescription")}
+            </p>
+            <McpPresetPicker
+              kind={kind}
+              onChange={setMcpPresetIds}
+              selectedIds={mcpPresetIds}
+            />
+          </div>
           {kind === "SESSION" && (
             <Alert>
               <AlertDescription>{t("unrestrictedWarning")}</AlertDescription>

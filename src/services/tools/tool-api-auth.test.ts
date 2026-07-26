@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { authorizeToolRequest } from "./tool-api-auth";
+import {
+  authorizeMcpPresetRequest,
+  authorizeRunMcpRequest,
+  authorizeToolRequest,
+} from "./tool-api-auth";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -85,5 +89,51 @@ describe("tool API authorization", () => {
       },
     });
     expect(JSON.stringify(allowed)).not.toContain("deployment-secret");
+  });
+
+  test("always requires a configured deployment token for preset URLs", () => {
+    vi.stubEnv("TOOLS_API_TOKEN", "");
+    expect(
+      "response" in
+        authorizeMcpPresetRequest(
+          new Request("https://control.example/api/mcp?preset=preset-1"),
+        ),
+    ).toBe(true);
+    const missing = authorizeMcpPresetRequest(
+      new Request("https://control.example/api/mcp?preset=preset-1"),
+    );
+    expect("response" in missing && missing.response.status).toBe(503);
+
+    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
+    const allowed = authorizeMcpPresetRequest(
+      new Request("https://control.example/api/mcp?preset=preset-1", {
+        headers: { authorization: "Bearer deployment-secret" },
+      }),
+    );
+    expect(allowed).toMatchObject({ context: { source: "MCP" } });
+  });
+
+  test("accepts only enrolled agent credentials for run-scoped URLs", async () => {
+    const authenticate = vi.fn(async (credential: string | null) =>
+      credential === "agent-secret" ? "agent-1" : null,
+    );
+    const denied = await authorizeRunMcpRequest(
+      new Request("https://control.example/api/mcp?run=run-1", {
+        headers: { authorization: "Bearer deployment-secret" },
+      }),
+      { authenticate } as never,
+    );
+    expect("response" in denied && denied.response.status).toBe(401);
+
+    const allowed = await authorizeRunMcpRequest(
+      new Request("https://control.example/api/mcp?run=run-1", {
+        headers: { authorization: "Bearer agent-secret" },
+      }),
+      { authenticate } as never,
+    );
+    expect(allowed).toMatchObject({
+      agentId: "agent-1",
+      context: { caller: "agent:agent-1@unknown", source: "MCP" },
+    });
   });
 });

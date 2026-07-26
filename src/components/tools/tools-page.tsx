@@ -77,12 +77,14 @@ import type {
   ExternalMcpServerView,
   ToolCatalogGroup,
 } from "./types";
+import { McpPresetManagement } from "./mcp-preset-management";
 
 const SERVER_FIELDS =
   "id name url transport toolNamePrefix createdAt updatedAt headers { id name valueConfigured }";
 
 /** Suggested key for the client's own MCP config file; purely a local alias. */
 const BUILT_IN_SERVER_NAME = "ai-development-environment";
+const CUSTOM_SERVER_ORIGIN = "__custom__";
 const ToolApiTokenContext = createContext("");
 
 type JsonSchema = Record<string, unknown>;
@@ -126,7 +128,11 @@ async function responseJson(response: Response): Promise<unknown> {
   return body;
 }
 
-export function ToolsPage() {
+export function ToolsPage({
+  localServerOrigins = [],
+}: {
+  localServerOrigins?: string[];
+}) {
   const t = useTranslations("tools");
   const tc = useTranslations("common");
   const [query, setQuery] = useState("");
@@ -141,6 +147,24 @@ export function ToolsPage() {
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [toolApiToken, setToolApiToken] = useState("");
+  const browserOrigin = useSyncExternalStore(
+    subscribeToNothing,
+    readOrigin,
+    () => "",
+  );
+  const [selectedServerOrigin, setSelectedServerOrigin] = useState<
+    string | null
+  >(null);
+  const [customServerOrigin, setCustomServerOrigin] = useState("");
+  const serverOrigins = useMemo(
+    () => [...new Set([browserOrigin, ...localServerOrigins].filter(Boolean))],
+    [browserOrigin, localServerOrigins],
+  );
+  const selectedOrigin =
+    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
+      ? customServerOrigin.trim()
+      : (selectedServerOrigin ?? browserOrigin);
+  const mcpBaseUrl = `${selectedOrigin.replace(/\/$/, "")}/api/mcp`;
 
   const loadServers = useCallback(async () => {
     const data = await controlPlaneRequest<{
@@ -267,9 +291,17 @@ export function ToolsPage() {
       </div>
 
       <ConnectClientsCard
+        baseMcpUrl={mcpBaseUrl}
+        customServerOrigin={customServerOrigin}
+        onCustomServerOriginChange={setCustomServerOrigin}
+        onServerOriginChange={setSelectedServerOrigin}
         onTokenChange={setToolApiToken}
+        selectedServerOrigin={selectedServerOrigin}
+        serverOrigins={serverOrigins}
         token={toolApiToken}
       />
+
+      <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
 
       {error && (
         <Alert variant="destructive">
@@ -427,20 +459,29 @@ const readOrigin = () => window.location.origin;
  * which is mounted at /api/mcp on the same origin.
  */
 function ConnectClientsCard({
+  baseMcpUrl,
+  customServerOrigin,
+  onCustomServerOriginChange,
+  onServerOriginChange,
   onTokenChange,
+  selectedServerOrigin,
+  serverOrigins,
   token,
 }: {
+  baseMcpUrl: string;
+  customServerOrigin: string;
+  onCustomServerOriginChange: (value: string) => void;
+  onServerOriginChange: (value: string) => void;
   onTokenChange: (value: string) => void;
+  selectedServerOrigin: string | null;
+  serverOrigins: string[];
   token: string;
 }) {
   const t = useTranslations("tools");
-  // The server cannot know the browsing origin — the port comes from however
-  // the process was started — so the client fills it in on hydration.
-  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, () => "");
   const [copied, setCopied] = useState<"URL" | "CONFIG" | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
 
-  const url = `${origin}/api/mcp`;
+  const url = baseMcpUrl;
   const config = JSON.stringify(
     {
       mcpServers: {
@@ -475,6 +516,41 @@ function ConnectClientsCard({
         <CardDescription>{t("connectDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>{t("serverHost")}</Label>
+          <Select
+            onValueChange={onServerOriginChange}
+            value={selectedServerOrigin ?? serverOrigins[0]}
+          >
+            <SelectTrigger
+              aria-label={t("serverHost")}
+              className="w-full sm:max-w-md"
+            >
+              <SelectValue placeholder={t("serverHost")} />
+            </SelectTrigger>
+            <SelectContent>
+              {serverOrigins.map((origin) => (
+                <SelectItem key={origin} value={origin}>
+                  {origin}
+                </SelectItem>
+              ))}
+              <SelectItem value={CUSTOM_SERVER_ORIGIN}>
+                {t("customServerHost")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
+            <Input
+              aria-label={t("customServerHost")}
+              onChange={(event) =>
+                onCustomServerOriginChange(event.target.value)
+              }
+              placeholder="https://aide.example.com"
+              type="url"
+              value={customServerOrigin}
+            />
+          )}
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="tools-api-token">{t("toolApiToken")}</Label>
           <Input

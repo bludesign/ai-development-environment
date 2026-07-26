@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { SearchableSelect } from "@/components/common/searchable-select";
 import { ModelEffortPicker } from "@/components/runs/model-effort-picker";
+import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
 import { useProviderCatalog } from "@/components/runs/use-provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -233,6 +234,26 @@ function BooleanField({ field, value, onChange }: FieldProps) {
           </FieldDescription>
         )}
       </FieldContent>
+    </Field>
+  );
+}
+
+function McpPresetMultiField({ field, value, onChange }: FieldProps) {
+  const selectedIds = Array.isArray(value) ? value.map(String) : [];
+  return (
+    <Field>
+      <FieldLabel className="text-xs">{field.label}</FieldLabel>
+      <McpPresetPicker
+        kind={field.presetKind}
+        onChange={onChange}
+        selectedIds={selectedIds}
+        showAvailability={field.presetKind == null}
+      />
+      {field.help && (
+        <FieldDescription className="text-[10px]">
+          {field.help}
+        </FieldDescription>
+      )}
     </Field>
   );
 }
@@ -1161,6 +1182,8 @@ function ConfigFieldRow(props: FieldProps) {
       return <ChoiceOptionsField {...props} />;
     case "triggerChoices":
       return <TriggerChoicesField {...props} />;
+    case "mcpPresetMulti":
+      return <McpPresetMultiField {...props} />;
     case "json":
       return <JsonField {...props} />;
     default:

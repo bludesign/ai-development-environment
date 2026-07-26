@@ -24,6 +24,22 @@ type ExternalMcpServerRemoval {
   id: ID!
 }
 
+type McpToolPreset {
+  id: ID!
+  name: String!
+  description: String!
+  iconKey: String!
+  enabledForPlans: Boolean!
+  enabledForSessions: Boolean!
+  toolNames: [String!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type McpToolPresetRemoval {
+  id: ID!
+}
+
 input ExternalMcpServerHeaderInput {
   id: ID
   name: String!
@@ -38,8 +54,18 @@ input ExternalMcpServerInput {
   headers: [ExternalMcpServerHeaderInput!]!
 }
 
+input McpToolPresetInput {
+  name: String!
+  description: String
+  iconKey: String!
+  enabledForPlans: Boolean!
+  enabledForSessions: Boolean!
+  toolNames: [String!]!
+}
+
 extend type Query {
   externalMcpServers: [ExternalMcpServer!]!
+  mcpToolPresets(kind: RunKind): [McpToolPreset!]!
 }
 
 extend type Mutation {
@@ -49,4 +75,7 @@ extend type Mutation {
     input: ExternalMcpServerInput!
   ): ExternalMcpServer!
   deleteExternalMcpServer(id: ID!): ExternalMcpServerRemoval!
+  createMcpToolPreset(input: McpToolPresetInput!): McpToolPreset!
+  updateMcpToolPreset(id: ID!, input: McpToolPresetInput!): McpToolPreset!
+  deleteMcpToolPreset(id: ID!): McpToolPresetRemoval!
 }

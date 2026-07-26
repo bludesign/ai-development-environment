@@ -60,6 +60,7 @@ export type RunRecord = {
   model: string;
   effort: string | null;
   webSearchEnabled: boolean;
+  mcpToolNames?: string[];
   initialPrompt: string;
   finalOutput: string | null;
   inputs: Array<{
@@ -148,7 +149,7 @@ const RUN_COMMAND_FIELDS = `
   run {
     id kind displayNumber status phase origin provider worktreeId agentId
     worktree { id folder branch }
-    model effort webSearchEnabled initialPrompt finalOutput
+    model effort webSearchEnabled mcpToolNames initialPrompt finalOutput
     inputs { id sequence kind prompt attachments { id filename contentType size sha256 downloadPath } }
     attempts { id generation nativeId status }
     sourcePlan { id provider attempts { id generation nativeId status } }
@@ -189,6 +190,21 @@ export class AgentGraphQLClient {
     this.credential = credential;
     this.requestTimeoutMs = requestTimeoutMs;
     this.headers = { ...headers };
+  }
+
+  mcpServerDescriptor(runId: string): {
+    name: string;
+    url: string;
+    headers: Record<string, string>;
+  } | null {
+    if (!this.credential) return null;
+    return {
+      name: "ai-development-environment",
+      url: `${this.server}/api/mcp?run=${encodeURIComponent(runId)}`,
+      headers: mergeHeaders(this.headers, {
+        authorization: `Bearer ${this.credential}`,
+      }),
+    };
   }
 
   async request<T>(

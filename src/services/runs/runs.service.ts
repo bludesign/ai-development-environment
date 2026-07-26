@@ -43,6 +43,11 @@ const RUN_REAP_GRACE_MS = 2 * 60_000;
 type RunKind = (typeof RUN_KINDS)[number];
 type Provider = (typeof PROVIDERS)[number];
 
+export type RunMcpPresetResolver = (
+  kind: RunKind,
+  ids: string[],
+) => Promise<{ presetIds: string[]; toolNames: string[] }>;
+
 export type RunConfigurationInput = {
   kind: string;
   worktreeId: string;
@@ -53,6 +58,7 @@ export type RunConfigurationInput = {
   webSearchEnabled?: boolean | null;
   prompt: string;
   attachmentIds?: string[] | null;
+  mcpPresetIds?: string[] | null;
   draftId?: string | null;
   sourcePlanId?: string | null;
   parentRunId?: string | null;
@@ -298,12 +304,17 @@ function jobResultObject(job: {
 
 export class RunsService {
   private reaperTimer?: ReturnType<typeof setInterval>;
+  private mcpPresetResolver?: RunMcpPresetResolver;
 
   constructor(
     private readonly notifications?: NotificationsService,
     private readonly agentControl?: AgentControlService,
     private readonly diskSpace?: DiskSpaceService,
   ) {}
+
+  setMcpPresetResolver(resolver: RunMcpPresetResolver): void {
+    this.mcpPresetResolver = resolver;
+  }
 
   private async waitForJob(jobId: string) {
     const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
@@ -730,6 +741,7 @@ export class RunsService {
     const prompt = requiredText(input.prompt, "Prompt", 200_000);
     const worktree = await this.requireWorktree(input.worktreeId);
     const attachmentIds = [...new Set(input.attachmentIds ?? [])];
+    const mcpPresetIds = [...new Set(input.mcpPresetIds ?? [])];
     await this.requireAttachments(attachmentIds, input.id ?? undefined);
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
@@ -746,6 +758,7 @@ export class RunsService {
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
           webSearchEnabled: input.webSearchEnabled !== false,
+          mcpPresetIdsJson: JSON.stringify(mcpPresetIds),
           prompt,
         },
         update: {
@@ -757,6 +770,7 @@ export class RunsService {
           model: requiredText(input.model, "Model", 200),
           effort: optionalText(input.effort, 100),
           webSearchEnabled: input.webSearchEnabled !== false,
+          mcpPresetIdsJson: JSON.stringify(mcpPresetIds),
           prompt,
         },
       });
@@ -795,6 +809,11 @@ export class RunsService {
     const model = requiredText(input.model, "Model", 200);
     const worktree = await this.requireWorktree(input.worktreeId, provider);
     await this.diskSpace?.assertWorktreeCanStart(worktree.id);
+    const mcp = this.mcpPresetResolver
+      ? await this.mcpPresetResolver(kind, [
+          ...new Set(input.mcpPresetIds ?? []),
+        ])
+      : { presetIds: [], toolNames: [] };
     const attachmentIds = [...new Set(input.attachmentIds ?? [])];
     await this.requireAttachments(attachmentIds, input.draftId ?? undefined);
 
@@ -866,6 +885,8 @@ export class RunsService {
           model,
           effort: optionalText(input.effort, 100),
           webSearchEnabled: input.webSearchEnabled !== false,
+          mcpPresetIdsJson: JSON.stringify(mcp.presetIds),
+          mcpToolNamesJson: JSON.stringify(mcp.toolNames),
           initialPrompt: prompt,
           sourcePlanId: sourcePlan?.id,
           sourcePlanNumber: sourcePlan?.displayNumber,
@@ -918,7 +939,7 @@ export class RunsService {
     return this.get(result.run.id);
   }
 
-  async playPlan(planId: string) {
+  async playPlan(planId: string, mcpPresetIds: string[] = []) {
     const plan = await this.get(planId);
     if (!plan) throw new Error("Plan not found");
     if (plan.playedAt) throw new Error("This plan has already been run");
@@ -937,6 +958,7 @@ export class RunsService {
       followUpMode: "PLAN_PLAY",
       contextMode: "NATIVE",
       attachmentIds: [],
+      mcpPresetIds,
     });
   }
 

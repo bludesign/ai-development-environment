@@ -184,6 +184,9 @@ function createServerServices(): ServerServices {
     },
     credentialService,
   );
+  runsService.setMcpPresetResolver((kind, ids) =>
+    toolsService.resolveRunMcpPresets(kind, ids),
+  );
   const workflowStepExecutor = new WorkflowStepExecutor();
   const workflowsService = new WorkflowsService(
     workflowEventsService,

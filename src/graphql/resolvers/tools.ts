@@ -1,6 +1,9 @@
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { ToolsService } from "@/services/tools";
-import type { ExternalMcpServerInput } from "@/services/tools/types";
+import type {
+  ExternalMcpServerInput,
+  McpToolPresetInput,
+} from "@/services/tools/types";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId) {
@@ -19,6 +22,14 @@ export const createToolsResolvers = (service: ToolsService) => ({
     ) => {
       requireControlPlane(context);
       return service.externalServers();
+    },
+    mcpToolPresets: (
+      _root: unknown,
+      { kind }: { kind?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.mcpToolPresets(kind);
     },
   },
   Mutation: {
@@ -45,6 +56,30 @@ export const createToolsResolvers = (service: ToolsService) => ({
     ) => {
       requireControlPlane(context);
       return service.deleteExternalServer(id);
+    },
+    createMcpToolPreset: (
+      _root: unknown,
+      { input }: { input: McpToolPresetInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.createMcpToolPreset(input);
+    },
+    updateMcpToolPreset: (
+      _root: unknown,
+      { id, input }: { id: string; input: McpToolPresetInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.updateMcpToolPreset(id, input);
+    },
+    deleteMcpToolPreset: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteMcpToolPreset(id);
     },
   },
 });

@@ -1,13 +1,41 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { GET, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe("MCP endpoint authentication", () => {
-  test.each([GET, POST])(
+  test("rejects mixed and duplicate scope query modes", async () => {
+    await expect(
+      POST(
+        new Request(
+          "https://control.example/api/mcp?preset=preset-1&run=run-1",
+          { method: "POST" },
+        ),
+      ),
+    ).resolves.toMatchObject({ status: 400 });
+    await expect(
+      POST(
+        new Request("https://control.example/api/mcp?preset=one&preset=two", {
+          method: "POST",
+        }),
+      ),
+    ).resolves.toMatchObject({ status: 400 });
+  });
+
+  test("requires TOOLS_API_TOKEN to be configured for preset URLs", async () => {
+    vi.stubEnv("TOOLS_API_TOKEN", "");
+    const response = await POST(
+      new Request("https://control.example/api/mcp?preset=preset-1", {
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(503);
+  });
+
+  test.each([GET, POST, DELETE])(
     "does not require authentication when no token is configured",
     async (handler) => {
       vi.stubEnv("TOOLS_API_TOKEN", "");

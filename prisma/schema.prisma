@@ -456,6 +456,8 @@ model AgentRun {
   model               String
   effort              String?
   webSearchEnabled    Boolean            @default(false)
+  mcpPresetIdsJson    String             @default("[]")
+  mcpToolNamesJson    String             @default("[]")
   initialPrompt       String
   finalOutput         String?
   error               String?
@@ -553,6 +555,7 @@ model RunDraft {
   model            String
   effort           String?
   webSearchEnabled Boolean         @default(false)
+  mcpPresetIdsJson String          @default("[]")
   prompt           String
   archivedAt       DateTime?
   createdAt        DateTime        @default(now())
@@ -1847,6 +1850,32 @@ model ExternalMcpServerHeader {
 
   @@unique([serverId, name])
   @@index([serverId])
+}
+
+model McpToolPreset {
+  id                 String              @id
+  name               String
+  description        String              @default("")
+  iconKey            String              @default("wrench")
+  enabledForPlans    Boolean             @default(false)
+  enabledForSessions Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  tools              McpToolPresetTool[]
+
+  @@index([name])
+  @@index([enabledForPlans, name])
+  @@index([enabledForSessions, name])
+}
+
+model McpToolPresetTool {
+  presetId  String
+  toolName  String
+  createdAt DateTime      @default(now())
+  preset    McpToolPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+
+  @@id([presetId, toolName])
+  @@index([toolName])
 }
 
 model ToolCallAudit {

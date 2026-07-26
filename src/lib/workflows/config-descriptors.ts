@@ -198,6 +198,16 @@ const stringList = (
   ...options,
 });
 
+const mcpPresets = (
+  kind: "PLAN" | "SESSION" | null,
+): ConfigFieldDescriptor => ({
+  key: "mcpPresetIds",
+  label: "MCP tool presets",
+  control: "mcpPresetMulti",
+  presetKind: kind,
+  default: [],
+});
+
 const record = (
   key: string,
   label: string,
@@ -306,13 +316,16 @@ const modelField = (): ConfigFieldDescriptor => ({
   },
 });
 
-const runInputFields = (): ConfigFieldDescriptor[] => [
+const runInputFields = (
+  kind: "PLAN" | "SESSION" | null,
+): ConfigFieldDescriptor[] => [
   resource("worktreeId", "Worktree", "worktree"),
   resource("jiraIssueKey", "Jira issue key", "jiraTicket", {
     placeholder: "APP-123",
   }),
   modelField(),
   bool("webSearchEnabled", "Enable web search"),
+  mcpPresets(kind),
   multiline("prompt", "Prompt", { required: true }),
   stringList("attachmentIds", "Attachment IDs"),
 ];
@@ -890,15 +903,15 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     ],
   },
   // -- Plans and sessions ----------------------------------------------------
-  RUN_CREATE_PLAN: { fields: runInputFields() },
-  RUN_CREATE_SESSION: { fields: runInputFields() },
+  RUN_CREATE_PLAN: { fields: runInputFields("PLAN") },
+  RUN_CREATE_SESSION: { fields: runInputFields("SESSION") },
   RUN_PLAY_PLAN: {
-    fields: [text("runId", "Plan run ID")],
+    fields: [text("runId", "Plan run ID"), mcpPresets("SESSION")],
   },
   RUN_FOLLOW_UP: {
     fields: [
       text("runId", "Source run ID"),
-      ...runInputFields(),
+      ...runInputFields(null),
       enumField(
         "followUpMode",
         "Follow-up mode",

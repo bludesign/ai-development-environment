@@ -108,7 +108,7 @@ describe("RunStartPage", () => {
   test("progressively selects a tool, model, and effort with web search enabled", async () => {
     render(<RunStartPage initialKind="PLAN" />);
 
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
     const [query, variables] = request.mock.calls.find(([operation]) =>
       String(operation).includes("query RunStartPage"),
     )!;
@@ -352,7 +352,7 @@ describe("RunStartPage", () => {
     vi.stubGlobal("fetch", upload);
 
     render(<RunStartPage initialKind="PLAN" />);
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
     const dropTarget = screen.getByText("Attach files").closest("label")!;
     fireEvent.drop(dropTarget, {
       dataTransfer: {

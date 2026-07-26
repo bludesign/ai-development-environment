@@ -109,6 +109,23 @@ describe("workflow run adapters", () => {
     );
   });
 
+  test("passes selected MCP presets to newly created runs", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValue({ id: "agent-run", kind: "SESSION" });
+    const executor = executorWithCreate(create);
+    const input = context("actual-worktree");
+    input.node.config.mcpPresetIds = ["preset-1", "preset-2"];
+
+    await executor.execute(input);
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpPresetIds: ["preset-1", "preset-2"],
+      }),
+    );
+  });
+
   test("links created runs to their internal detail pages", async () => {
     const create = vi
       .fn()

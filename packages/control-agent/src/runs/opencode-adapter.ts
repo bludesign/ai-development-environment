@@ -272,36 +272,56 @@ export class OpenCodeAdapter implements ProviderAdapter {
     input: ProviderStartInput,
     callbacks: ProviderCallbacks,
   ): Promise<ProviderHandle> {
-    const client = await this.client();
+    const isolatedRuntime = input.mcpServer
+      ? await createOpencode({
+          port: 0,
+          config: {
+            mcp: {
+              [input.mcpServer.name]: {
+                type: "remote",
+                url: input.mcpServer.url,
+                headers: input.mcpServer.headers,
+                oauth: false,
+              },
+            },
+          },
+        })
+      : undefined;
+    const client = isolatedRuntime?.client ?? (await this.client());
     const cwd = input.run.worktree!.folder;
     let nativeId: string;
-    if (input.resumeNativeId && input.fork !== false) {
-      const forked = resultData(
-        await client.session.fork({
-          sessionID: input.resumeNativeId,
-          directory: cwd,
-        }),
-      );
-      nativeId = String(asRecord(forked).id);
-    } else if (input.resumeNativeId) {
-      nativeId = input.resumeNativeId;
-    } else {
-      const created = resultData(
-        await client.session.create({
-          directory: cwd,
-          agent: input.run.kind === "PLAN" ? "plan" : "build",
-          permission:
-            input.run.kind === "SESSION"
-              ? [{ permission: "*", pattern: "*", action: "allow" }]
-              : undefined,
-        }),
-      );
-      nativeId = String(asRecord(created).id);
+    try {
+      if (input.resumeNativeId && input.fork !== false) {
+        const forked = resultData(
+          await client.session.fork({
+            sessionID: input.resumeNativeId,
+            directory: cwd,
+          }),
+        );
+        nativeId = String(asRecord(forked).id);
+      } else if (input.resumeNativeId) {
+        nativeId = input.resumeNativeId;
+      } else {
+        const created = resultData(
+          await client.session.create({
+            directory: cwd,
+            agent: input.run.kind === "PLAN" ? "plan" : "build",
+            permission:
+              input.run.kind === "SESSION"
+                ? [{ permission: "*", pattern: "*", action: "allow" }]
+                : undefined,
+          }),
+        );
+        nativeId = String(asRecord(created).id);
+      }
+      if (!nativeId || nativeId === "undefined") {
+        throw new Error("OpenCode did not return a session ID");
+      }
+      await callbacks.onNativeId(nativeId, "1.18.4");
+    } catch (error) {
+      isolatedRuntime?.server.close();
+      throw error;
     }
-    if (!nativeId || nativeId === "undefined") {
-      throw new Error("OpenCode did not return a session ID");
-    }
-    await callbacks.onNativeId(nativeId, "1.18.4");
 
     let stopReason: "PAUSED" | "CANCELLED" | null = null;
     const streamController = new AbortController();
@@ -504,6 +524,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
           legacyQuestionReconciliationTask,
           v2QuestionReconciliationTask,
         ]);
+        isolatedRuntime?.server.close();
       }
     })();
 
