@@ -31,6 +31,22 @@ export const createToolsResolvers = (service: ToolsService) => ({
       requireControlPlane(context);
       return service.mcpToolPresets(kind);
     },
+    toolCallAudits: (
+      _root: unknown,
+      {
+        first,
+        toolName,
+        resultStatus,
+      }: {
+        first?: number;
+        toolName?: string | null;
+        resultStatus?: string | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.toolCallAudits({ first, toolName, resultStatus });
+    },
   },
   Mutation: {
     createExternalMcpServer: (

@@ -43,18 +43,6 @@ function unauthorized(message: string): Response {
   );
 }
 
-function tokenNotConfigured(): Response {
-  return Response.json(
-    {
-      error: {
-        code: "TOOL_API_TOKEN_NOT_CONFIGURED",
-        message: "TOOLS_API_TOKEN must be configured for preset MCP URLs",
-      },
-    },
-    { status: 503 },
-  );
-}
-
 export function authorizeToolRequest(
   request: Request,
   endpoint: ToolEndpoint,
@@ -89,9 +77,6 @@ export function authorizeToolRequest(
 export function authorizeMcpPresetRequest(
   request: Request,
 ): { context: ToolInvocationContext } | { response: Response } {
-  if (!process.env.TOOLS_API_TOKEN?.trim()) {
-    return { response: tokenNotConfigured() };
-  }
   return authorizeToolRequest(request, "MCP");
 }
 

@@ -30,6 +30,57 @@ afterEach(() => {
 });
 
 describe("ToolsPage", () => {
+  test("switches to a searchable tool call audit table", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("ToolCallAudits")) {
+        return {
+          toolCallAudits: [
+            {
+              id: "audit-1",
+              correlationId: "correlation-1",
+              caller: "runner-1",
+              source: "WORKFLOW",
+              groupId: "builtin:codebases",
+              toolName: "get_codebase",
+              argumentsSha256:
+                "807074c963aab9d3d09b49b6056652a6b05b1f1e88066dbac57e2a03658be3dc",
+              resultStatus: "SUCCEEDED",
+              durationMs: 42,
+              startedAt: "2026-07-26T12:00:00.000Z",
+              finishedAt: "2026-07-26T12:00:00.042Z",
+            },
+          ],
+        } as never;
+      }
+      return { externalMcpServers: [] } as never;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ groups: [] })),
+    );
+
+    render(<ToolsPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Audit" }));
+
+    expect(await screen.findByText("get_codebase")).toBeDefined();
+    expect(screen.getByText("Succeeded")).toBeDefined();
+    expect(screen.getByText("Workflow")).toBeDefined();
+    expect(screen.getByText("42 ms")).toBeDefined();
+    expect(screen.getByTitle("correlation-1")).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("toolCallAudits(first: 200)"),
+    );
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search tool call audit" }),
+      { target: { value: "no-match" } },
+    );
+    expect(screen.queryByText("get_codebase")).toBeNull();
+    expect(
+      screen.getByText("No audit records match the search."),
+    ).toBeDefined();
+  });
+
   test("searches, expands, runs a tool, and renders its response", async () => {
     requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

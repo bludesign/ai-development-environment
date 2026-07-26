@@ -1,9 +1,10 @@
 import type {
   ExternalMcpServerView,
   ToolCatalogGroup,
+  ToolCallAuditView,
 } from "@/services/tools/types";
 
-export type { ExternalMcpServerView, ToolCatalogGroup };
+export type { ExternalMcpServerView, ToolCatalogGroup, ToolCallAuditView };
 
 export type ExternalMcpHeaderDraft = {
   id?: string;

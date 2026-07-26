@@ -66,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { copyText } from "@/lib/browser-utils";
@@ -78,6 +79,7 @@ import type {
   ToolCatalogGroup,
 } from "./types";
 import { McpPresetManagement } from "./mcp-preset-management";
+import { ToolAuditTable } from "./tool-audit-table";
 
 const SERVER_FIELDS =
   "id name url transport toolNamePrefix createdAt updatedAt headers { id name valueConfigured }";
@@ -135,6 +137,7 @@ export function ToolsPage({
 }) {
   const t = useTranslations("tools");
   const tc = useTranslations("common");
+  const [tab, setTab] = useState<"tools" | "audit">("tools");
   const [query, setQuery] = useState("");
   const [servers, setServers] = useState<ExternalMcpServerView[]>([]);
   const [groups, setGroups] = useState<ToolCatalogGroup[]>([]);
@@ -284,169 +287,191 @@ export function ToolsPage({
             {t("description")}
           </p>
         </div>
-        <Button onClick={openCreate} type="button">
-          <Plus />
-          {t("addServer")}
-        </Button>
+        {tab === "tools" && (
+          <Button onClick={openCreate} type="button">
+            <Plus />
+            {t("addServer")}
+          </Button>
+        )}
       </div>
 
-      <ConnectClientsCard
-        baseMcpUrl={mcpBaseUrl}
-        customServerOrigin={customServerOrigin}
-        onCustomServerOriginChange={setCustomServerOrigin}
-        onServerOriginChange={setSelectedServerOrigin}
-        onTokenChange={setToolApiToken}
-        selectedServerOrigin={selectedServerOrigin}
-        serverOrigins={serverOrigins}
-        token={toolApiToken}
-      />
+      <Tabs
+        onValueChange={(value) => setTab(value as "tools" | "audit")}
+        value={tab}
+      >
+        <TabsList>
+          <TabsTrigger value="tools">{t("toolsTab")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("auditTab")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
+      {tab === "tools" ? (
+        <>
+          <ConnectClientsCard
+            baseMcpUrl={mcpBaseUrl}
+            customServerOrigin={customServerOrigin}
+            onCustomServerOriginChange={setCustomServerOrigin}
+            onServerOriginChange={setSelectedServerOrigin}
+            onTokenChange={setToolApiToken}
+            selectedServerOrigin={selectedServerOrigin}
+            serverOrigins={serverOrigins}
+            token={toolApiToken}
+          />
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+          <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
 
-      <Card className="gap-0 py-0">
-        <CardHeader>
-          <CardTitle>{t("serversTitle")}</CardTitle>
-          <CardDescription>{t("serversDescription")}</CardDescription>
-        </CardHeader>
-        {loading ? (
-          <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-            <Spinner /> {t("loadingServers")}
-          </div>
-        ) : servers.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">{t("noServers")}</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("url")}</TableHead>
-                <TableHead>{t("transport")}</TableHead>
-                <TableHead>{t("prefix")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {servers.map((server) => (
-                <TableRow key={server.id}>
-                  <TableCell className="font-medium">{server.name}</TableCell>
-                  <TableCell className="max-w-md truncate font-mono text-xs">
-                    {server.url}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {server.transport === "STREAMABLE_HTTP"
-                        ? t("http")
-                        : t("sse")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {server.toolNamePrefix || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        aria-label={t("editServer", { name: server.name })}
-                        onClick={() => openEdit(server)}
-                        size="icon-sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Pencil />
-                      </Button>
-                      <ConfirmationDialog
-                        actionLabel={t("delete")}
-                        cancelLabel={tc("cancel")}
-                        description={t("confirmDeleteDescription", {
-                          name: server.name,
-                        })}
-                        onConfirm={() => deleteServer(server.id)}
-                        title={t("confirmDelete")}
-                        trigger={
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card className="gap-0 py-0">
+            <CardHeader>
+              <CardTitle>{t("serversTitle")}</CardTitle>
+              <CardDescription>{t("serversDescription")}</CardDescription>
+            </CardHeader>
+            {loading ? (
+              <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                <Spinner /> {t("loadingServers")}
+              </div>
+            ) : servers.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                {t("noServers")}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("name")}</TableHead>
+                    <TableHead>{t("url")}</TableHead>
+                    <TableHead>{t("transport")}</TableHead>
+                    <TableHead>{t("prefix")}</TableHead>
+                    <TableHead className="text-right">{t("actions")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {servers.map((server) => (
+                    <TableRow key={server.id}>
+                      <TableCell className="font-medium">
+                        {server.name}
+                      </TableCell>
+                      <TableCell className="max-w-md truncate font-mono text-xs">
+                        {server.url}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {server.transport === "STREAMABLE_HTTP"
+                            ? t("http")
+                            : t("sse")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {server.toolNamePrefix || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
                           <Button
-                            aria-label={t("deleteServer", {
-                              name: server.name,
-                            })}
+                            aria-label={t("editServer", { name: server.name })}
+                            onClick={() => openEdit(server)}
                             size="icon-sm"
                             type="button"
                             variant="ghost"
                           >
-                            <Trash2 />
+                            <Pencil />
                           </Button>
-                        }
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+                          <ConfirmationDialog
+                            actionLabel={t("delete")}
+                            cancelLabel={tc("cancel")}
+                            description={t("confirmDeleteDescription", {
+                              name: server.name,
+                            })}
+                            onConfirm={() => deleteServer(server.id)}
+                            title={t("confirmDelete")}
+                            trigger={
+                              <Button
+                                aria-label={t("deleteServer", {
+                                  name: server.name,
+                                })}
+                                size="icon-sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 />
+                              </Button>
+                            }
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Card>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">{t("catalogTitle")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("catalogDescription")}
-            </p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">{t("catalogTitle")}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t("catalogDescription")}
+                </p>
+              </div>
+              <Button
+                disabled={catalogLoading}
+                onClick={() => void loadCatalog()}
+                type="button"
+                variant="outline"
+              >
+                {catalogLoading ? <Spinner /> : <RotateCw />}
+                {t("refresh")}
+              </Button>
+            </div>
+
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label={t("search")}
+                className="pl-9"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("searchPlaceholder")}
+                type="search"
+                value={query}
+              />
+            </div>
           </div>
-          <Button
-            disabled={catalogLoading}
-            onClick={() => void loadCatalog()}
-            type="button"
-            variant="outline"
-          >
-            {catalogLoading ? <Spinner /> : <RotateCw />}
-            {t("refresh")}
-          </Button>
-        </div>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label={t("search")}
-            className="pl-9"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("searchPlaceholder")}
-            type="search"
-            value={query}
+          <ToolApiTokenContext.Provider value={toolApiToken}>
+            {catalogLoading && groups.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner /> {t("loadingTools")}
+              </div>
+            ) : visibleGroups.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t("noMatchingTools")}
+              </p>
+            ) : (
+              visibleGroups.map((group) => (
+                <ToolGroup group={group} key={group.id} />
+              ))
+            )}
+          </ToolApiTokenContext.Provider>
+
+          <ServerDialog
+            draft={draft}
+            editing={editing}
+            error={dialogError}
+            onDraftChange={setDraft}
+            onOpenChange={setDialogOpen}
+            onSubmit={saveServer}
+            open={dialogOpen}
+            saving={saving}
           />
-        </div>
-      </div>
-
-      <ToolApiTokenContext.Provider value={toolApiToken}>
-        {catalogLoading && groups.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner /> {t("loadingTools")}
-          </div>
-        ) : visibleGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {t("noMatchingTools")}
-          </p>
-        ) : (
-          visibleGroups.map((group) => (
-            <ToolGroup group={group} key={group.id} />
-          ))
-        )}
-      </ToolApiTokenContext.Provider>
-
-      <ServerDialog
-        draft={draft}
-        editing={editing}
-        error={dialogError}
-        onDraftChange={setDraft}
-        onOpenChange={setDialogOpen}
-        onSubmit={saveServer}
-        open={dialogOpen}
-        saving={saving}
-      />
+        </>
+      ) : (
+        <ToolAuditTable />
+      )}
     </section>
   );
 }

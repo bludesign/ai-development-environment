@@ -33,6 +33,7 @@ import type {
   McpToolPresetView,
   ToolCatalogGroup,
   ToolCatalogItem,
+  ToolCallAuditView,
 } from "./types";
 
 const EXTERNAL_GROUP_PREFIX = "external:";
@@ -222,6 +223,16 @@ export class ToolsService {
       include: { tools: true },
     });
     return presets.map(presetView);
+  }
+
+  async toolCallAudits(
+    input: {
+      first?: number;
+      toolName?: string | null;
+      resultStatus?: string | null;
+    } = {},
+  ): Promise<ToolCallAuditView[]> {
+    return this.audit.list(input);
   }
 
   async createMcpToolPreset(

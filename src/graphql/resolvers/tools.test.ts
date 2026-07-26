@@ -13,6 +13,7 @@ describe("tools resolvers", () => {
   test("forwards external server CRUD for control-plane callers", async () => {
     const service = {
       externalServers: vi.fn().mockResolvedValue([]),
+      toolCallAudits: vi.fn().mockResolvedValue([]),
       createExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
       updateExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
       deleteExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
@@ -27,6 +28,11 @@ describe("tools resolvers", () => {
     };
 
     await resolvers.Query.externalMcpServers({}, {}, context(null));
+    await resolvers.Query.toolCallAudits(
+      {},
+      { first: 25, toolName: "get_codebase", resultStatus: "SUCCEEDED" },
+      context(null),
+    );
     await resolvers.Mutation.createExternalMcpServer(
       {},
       { input },
@@ -44,6 +50,11 @@ describe("tools resolvers", () => {
     );
 
     expect(service.createExternalServer).toHaveBeenCalledWith(input);
+    expect(service.toolCallAudits).toHaveBeenCalledWith({
+      first: 25,
+      toolName: "get_codebase",
+      resultStatus: "SUCCEEDED",
+    });
     expect(service.updateExternalServer).toHaveBeenCalledWith(
       "server-1",
       input,

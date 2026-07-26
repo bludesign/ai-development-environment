@@ -418,6 +418,9 @@ export function McpPresetManagement({
               <div className="space-y-2">
                 <Label htmlFor="mcp-preset-name">{t("name")}</Label>
                 <Input
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
                   id="mcp-preset-name"
                   maxLength={80}
                   onChange={(event) =>
@@ -496,7 +499,10 @@ export function McpPresetManagement({
                   value={search}
                 />
               </div>
-              <div className="max-h-80 overflow-y-auto rounded-lg border p-3">
+              {/* `relative` keeps Radix's absolutely positioned hidden checkbox
+                  inputs anchored here; without it they resolve against the
+                  fixed dialog and add their full height to its scroll range. */}
+              <div className="relative max-h-80 overflow-y-auto rounded-lg border p-3">
                 {visibleGroups.length ? (
                   visibleGroups.map((group) => (
                     <ToolGroupPicker

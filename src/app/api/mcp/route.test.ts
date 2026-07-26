@@ -25,14 +25,17 @@ describe("MCP endpoint authentication", () => {
     ).resolves.toMatchObject({ status: 400 });
   });
 
-  test("requires TOOLS_API_TOKEN to be configured for preset URLs", async () => {
+  test("does not require authentication for preset URLs when no token is configured", async () => {
     vi.stubEnv("TOOLS_API_TOKEN", "");
     const response = await POST(
       new Request("https://control.example/api/mcp?preset=preset-1", {
         method: "POST",
       }),
     );
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "MCP_PRESET_NOT_FOUND" },
+    });
   });
 
   test.each([GET, POST, DELETE])(

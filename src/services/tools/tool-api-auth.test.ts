@@ -91,20 +91,29 @@ describe("tool API authorization", () => {
     expect(JSON.stringify(allowed)).not.toContain("deployment-secret");
   });
 
-  test("always requires a configured deployment token for preset URLs", () => {
+  test("allows unauthenticated preset URLs when no token is configured", () => {
     vi.stubEnv("TOOLS_API_TOKEN", "");
-    expect(
-      "response" in
-        authorizeMcpPresetRequest(
-          new Request("https://control.example/api/mcp?preset=preset-1"),
-        ),
-    ).toBe(true);
-    const missing = authorizeMcpPresetRequest(
+    const allowedWithoutToken = authorizeMcpPresetRequest(
+      new Request("https://control.example/api/mcp?preset=preset-1", {
+        headers: { "x-request-id": "preset-without-auth" },
+      }),
+    );
+    expect(allowedWithoutToken).toMatchObject({
+      context: {
+        source: "MCP",
+        correlationId: "preset-without-auth",
+        caller: "anonymous@unknown",
+      },
+    });
+  });
+
+  test("requires a valid deployment token for preset URLs when configured", () => {
+    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
+    const denied = authorizeMcpPresetRequest(
       new Request("https://control.example/api/mcp?preset=preset-1"),
     );
-    expect("response" in missing && missing.response.status).toBe(503);
+    expect("response" in denied && denied.response.status).toBe(401);
 
-    vi.stubEnv("TOOLS_API_TOKEN", "deployment-secret");
     const allowed = authorizeMcpPresetRequest(
       new Request("https://control.example/api/mcp?preset=preset-1", {
         headers: { authorization: "Bearer deployment-secret" },
