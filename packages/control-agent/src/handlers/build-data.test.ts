@@ -255,6 +255,17 @@ describe("Build Data agent handlers", () => {
     await mkdir(entry);
     const modifiedAt = new Date("2025-02-03T04:05:06.000Z");
     await utimes(entry, modifiedAt, modifiedAt);
+    capture.mockImplementation(async ({ command }) => ({
+      exitCode: command === "/usr/sbin/diskutil" ? 0 : 1,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      stdout:
+        command === "/usr/sbin/diskutil"
+          ? '<?xml version="1.0"?><plist version="1.0"><dict><key>APFSContainerReference</key><string>disk3</string></dict></plist>'
+          : "",
+      stderr: "",
+    }));
 
     const report = await collectAgentDiskSpace(
       {
@@ -274,6 +285,7 @@ describe("Build Data agent handlers", () => {
     expect(configuredVolume?.roles).toEqual(
       expect.arrayContaining(["BASE_REPO", "DERIVED_DATA"]),
     );
+    expect(configuredVolume?.capacityId).toBe("apfs:disk3");
     const canonicalRoot = await realpath(root);
     expect(configuredVolume?.paths).toEqual(
       expect.arrayContaining([canonicalRoot]),

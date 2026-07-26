@@ -29,7 +29,7 @@ const COLLECTION_DEADLINE_MS = 60_000;
 const SCAN_TIMEOUT_SECONDS = 45;
 const OPERATION_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
 const HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
-const CLEANUP_LEASE_MS = 10 * 60_000;
+const CLEANUP_LEASE_MS = OPERATION_TIMEOUT_SECONDS * 1_000;
 const TERMINAL_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -510,34 +510,12 @@ export class BuildDataService {
         const job = await this.agentControlService.createJob({
           agentId,
           kind,
-          payload:
-            kind === BUILD_DATA_DELETE_JOB_KIND
-              ? {
-                  source: "USER",
-                  targets: group.map(
-                    ({
-                      path,
-                      rootPath,
-                      name,
-                      kind: entryKind,
-                      worktreeId,
-                      worktreePath,
-                    }) => ({
-                      path,
-                      rootPath,
-                      name,
-                      kind: entryKind,
-                      worktreeId,
-                      worktreePath,
-                    }),
-                  ),
-                }
-              : {
-                  targets: group.map(({ path, rootPath }) => ({
-                    path,
-                    rootPath,
-                  })),
-                },
+          payload: {
+            targets: group.map(({ path, rootPath }) => ({
+              path,
+              rootPath,
+            })),
+          },
           idempotencyKey: `${kind}:${snapshot.id}:${requestId}:${agentId}`,
           timeoutSeconds: OPERATION_TIMEOUT_SECONDS,
           buildDataCollectionId: snapshot.id,

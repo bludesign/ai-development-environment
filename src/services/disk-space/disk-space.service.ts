@@ -244,7 +244,7 @@ export class DiskSpaceService {
   }> {
     const prisma = await getPrismaClient();
     await prisma.derivedDataCleanupLease.deleteMany({
-      where: { expiresAt: { lte: new Date() } },
+      where: { jobId: null, expiresAt: { lte: new Date() } },
     });
     const [settings, agents, leases] = await Promise.all([
       this.settings(),
@@ -253,7 +253,6 @@ export class DiskSpaceService {
         include: { diskSpaceState: true },
       }),
       prisma.derivedDataCleanupLease.findMany({
-        where: { expiresAt: { gt: new Date() } },
         select: { agentId: true },
       }),
     ]);
@@ -358,7 +357,9 @@ export class DiskSpaceService {
       },
     });
     if (!enabled) {
-      await prisma.derivedDataCleanupLease.deleteMany({ where: { agentId } });
+      await prisma.derivedDataCleanupLease.deleteMany({
+        where: { agentId, jobId: null },
+      });
     }
     this.publish(agentId);
     this.agentControl.requestAgentConfigurationRefresh(agentId);
@@ -381,7 +382,7 @@ export class DiskSpaceService {
   async assertWorktreeCanStart(worktreeId: string): Promise<void> {
     const prisma = await getPrismaClient();
     await prisma.derivedDataCleanupLease.deleteMany({
-      where: { worktreeId, expiresAt: { lte: new Date() } },
+      where: { worktreeId, jobId: null, expiresAt: { lte: new Date() } },
     });
     const [lease, worktree] = await Promise.all([
       prisma.derivedDataCleanupLease.findUnique({ where: { worktreeId } }),
@@ -390,7 +391,7 @@ export class DiskSpaceService {
         select: { codebase: { select: { agentId: true } } },
       }),
     ]);
-    if (lease && lease.expiresAt > new Date()) {
+    if (lease) {
       throw new Error(
         "Derived Data cleanup is in progress for this worktree; try again shortly",
       );
@@ -430,7 +431,7 @@ export class DiskSpaceService {
   private async reconcileAgent(agentId: string): Promise<void> {
     const prisma = await getPrismaClient();
     await prisma.derivedDataCleanupLease.deleteMany({
-      where: { expiresAt: { lte: new Date() } },
+      where: { jobId: null, expiresAt: { lte: new Date() } },
     });
     const [settings, state, locks, activeLease, agent] = await Promise.all([
       this.settings(),
@@ -440,7 +441,7 @@ export class DiskSpaceService {
         select: { path: true },
       }),
       prisma.derivedDataCleanupLease.findFirst({
-        where: { agentId, expiresAt: { gt: new Date() } },
+        where: { agentId },
       }),
       prisma.agent.findUnique({ where: { id: agentId } }),
     ]);
@@ -481,17 +482,25 @@ export class DiskSpaceService {
     const normalLow = volumes.filter(
       (volume) => volume.freeBytes < normalBytes,
     );
-    const hasCandidate = (volumeId: string) =>
-      entries.some((entry) => entry.volumeId === volumeId);
+    const capacityId = (volume: AgentDiskSpaceVolumeReport) =>
+      volume.capacityId ?? volume.id;
+    const capacityByVolumeId = new Map(
+      volumes.map((volume) => [volume.id, capacityId(volume)]),
+    );
+    const hasCandidate = (volume: AgentDiskSpaceVolumeReport) =>
+      entries.some(
+        (entry) =>
+          capacityByVolumeId.get(entry.volumeId) === capacityId(volume),
+      );
     let automaticPressureMode = state.automaticPressureMode;
     if (!state.manualPressureMode) {
       const shouldEnter =
         normalLow.length > 0 &&
-        normalLow.some((volume) => !hasCandidate(volume.id));
+        normalLow.some((volume) => !hasCandidate(volume));
       const shouldExit =
         automaticPressureMode &&
         (normalLow.length === 0 ||
-          normalLow.every((volume) => hasCandidate(volume.id)));
+          normalLow.every((volume) => hasCandidate(volume)));
       if (shouldEnter) automaticPressureMode = true;
       else if (shouldExit) automaticPressureMode = false;
       if (automaticPressureMode !== state.automaticPressureMode) {
@@ -505,13 +514,15 @@ export class DiskSpaceService {
 
     const pressure = state.manualPressureMode || automaticPressureMode;
     const targetBytes = pressure ? pressureBytes : normalBytes;
-    const lowVolumeIds = new Set(
+    const lowCapacityIds = new Set(
       volumes
         .filter((volume) => volume.freeBytes < targetBytes)
-        .map((volume) => volume.id),
+        .map(capacityId),
     );
     const candidate = entries
-      .filter((entry) => lowVolumeIds.has(entry.volumeId))
+      .filter((entry) =>
+        lowCapacityIds.has(capacityByVolumeId.get(entry.volumeId) ?? ""),
+      )
       .sort(
         (first, second) =>
           new Date(first.modifiedAt).getTime() -

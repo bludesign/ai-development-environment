@@ -30,9 +30,25 @@ const report = () => ({
 describe("disk space report parser", () => {
   test("accepts a well-formed report", () => {
     expect(parseAgentDiskSpaceReport(report())).toMatchObject({
-      volumes: [{ id: "device-1" }],
+      volumes: [{ id: "device-1", capacityId: "device-1" }],
       entries: [{ name: "App-hash" }],
     });
+  });
+
+  test("preserves shared capacity identifiers while accepting legacy reports", () => {
+    const current = report();
+    expect(
+      parseAgentDiskSpaceReport({
+        ...current,
+        volumes: current.volumes.map((volume) => ({
+          ...volume,
+          capacityId: "apfs:disk3",
+        })),
+      }).volumes[0]?.capacityId,
+    ).toBe("apfs:disk3");
+    expect(parseAgentDiskSpaceReport(report()).volumes[0]?.capacityId).toBe(
+      "device-1",
+    );
   });
 
   test("rejects duplicate volumes and entries mapped to unknown filesystems", () => {

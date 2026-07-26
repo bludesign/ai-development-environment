@@ -1010,7 +1010,7 @@ export class AgentControlService {
   async claimJob(agentId: string, jobId: string) {
     const prisma = await getPrismaClient();
     await prisma.derivedDataCleanupLease.deleteMany({
-      where: { expiresAt: { lte: new Date() } },
+      where: { jobId: null, expiresAt: { lte: new Date() } },
     });
     const queued = await prisma.agentJob.findUnique({
       where: { id: jobId },

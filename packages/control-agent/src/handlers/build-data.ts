@@ -18,6 +18,7 @@ import {
   type BuildDataScanEntry,
   type BuildDataSizeResult,
 } from "@ai-development-environment/agent-contract/build-data";
+import { parsePlist } from "@ai-development-environment/agent-contract/plist";
 import type {
   AgentDiskSpaceConfiguration,
   AgentDiskSpaceReport,
@@ -340,11 +341,39 @@ export const deleteBuildData: AgentJobHandler = async (
 
 type MutableVolume = {
   id: string;
+  capacityId: string;
   totalBytes: number;
   freeBytes: number;
   roles: Set<DiskSpaceVolumeRole>;
   paths: Set<string>;
 };
+
+async function sharedCapacityId(
+  canonicalPath: string,
+  volumeId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  try {
+    const result = await captureCommand({
+      command: "/usr/sbin/diskutil",
+      args: ["info", "-plist", canonicalPath],
+      timeoutMs: 5_000,
+      signal,
+    });
+    signal.throwIfAborted();
+    if (result.exitCode !== 0) return volumeId;
+    const information = parsePlist(result.stdout);
+    if (!information || typeof information !== "object") return volumeId;
+    const container = (information as Record<string, unknown>)
+      .APFSContainerReference;
+    return typeof container === "string" && container.trim()
+      ? `apfs:${container.trim()}`
+      : volumeId;
+  } catch {
+    signal.throwIfAborted();
+    return volumeId;
+  }
+}
 
 async function inspectVolume(
   configuredPath: string,
@@ -357,10 +386,12 @@ async function inspectVolume(
     stat(canonicalPath),
     statfs(canonicalPath, { bigint: true }),
   ]);
+  const id = String(information.dev);
   return {
     canonicalPath,
     volume: {
-      id: String(information.dev),
+      id,
+      capacityId: id,
       totalBytes: Number(filesystem.blocks * filesystem.bsize),
       freeBytes: Number(filesystem.bavail * filesystem.bsize),
       roles: new Set([role]),
@@ -399,6 +430,11 @@ export async function collectAgentDiskSpace(
         existing.totalBytes = inspected.volume.totalBytes;
         existing.freeBytes = inspected.volume.freeBytes;
       } else {
+        inspected.volume.capacityId = await sharedCapacityId(
+          inspected.canonicalPath,
+          inspected.volume.id,
+          signal,
+        );
         volumes.set(inspected.volume.id, inspected.volume);
       }
     } catch (error) {
@@ -434,6 +470,7 @@ export async function collectAgentDiskSpace(
     observedAt: new Date().toISOString(),
     volumes: [...volumes.values()].map((volume) => ({
       id: volume.id,
+      capacityId: volume.capacityId,
       totalBytes: volume.totalBytes,
       freeBytes: volume.freeBytes,
       roles: [...volume.roles],

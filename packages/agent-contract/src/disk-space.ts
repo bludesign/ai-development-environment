@@ -30,6 +30,7 @@ export type AgentDiskSpaceConfiguration = {
 
 export type AgentDiskSpaceVolumeReport = {
   id: string;
+  capacityId: string;
   totalBytes: number;
   freeBytes: number;
   roles: DiskSpaceVolumeRole[];
@@ -146,6 +147,7 @@ export function parseAgentDiskSpaceReport(
       if (!Array.isArray(volume.roles) || !Array.isArray(volume.paths)) {
         throw new Error(`disk space volumes[${index}] arrays are invalid`);
       }
+      const id = text(volume.id, `disk space volumes[${index}].id`);
       const roles = volume.roles.map((role, roleIndex) => {
         if (
           typeof role !== "string" ||
@@ -158,7 +160,14 @@ export function parseAgentDiskSpaceReport(
         return role as DiskSpaceVolumeRole;
       });
       return {
-        id: text(volume.id, `disk space volumes[${index}].id`),
+        id,
+        capacityId:
+          volume.capacityId === undefined
+            ? id
+            : text(
+                volume.capacityId,
+                `disk space volumes[${index}].capacityId`,
+              ),
         totalBytes: bytes(
           volume.totalBytes,
           `disk space volumes[${index}].totalBytes`,
