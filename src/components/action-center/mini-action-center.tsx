@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 
@@ -15,7 +16,8 @@ export function MiniActionCenter() {
   const t = useTranslations("actionCenter");
   const center = useOptionalActionCenter();
   if (!center) return null;
-  const { items, totalCount, loading, loadingMore, hasMore, loadMore } = center;
+  const { items, totalCount, loading, loadingMore, error, hasMore, loadMore } =
+    center;
 
   return (
     <section
@@ -35,11 +37,18 @@ export function MiniActionCenter() {
         </Badge>
       </div>
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+        {error && (
+          <Alert className="m-2 w-auto py-2" variant="destructive">
+            <AlertDescription className="break-words text-xs">
+              {error}
+            </AlertDescription>
+          </Alert>
+        )}
         {loading && items.length === 0 ? (
           <div className="flex justify-center p-5">
             <Spinner />
           </div>
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && !error ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
             {t("miniEmpty")}
           </p>

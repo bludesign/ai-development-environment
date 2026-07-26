@@ -9,16 +9,11 @@ import {
 } from "@/services/agent-control";
 import { getSessionValue } from "@/lib/workflows/session";
 
-const ACTIVE_RUN_STATUSES = ["IN_PROGRESS", "PAUSED"];
-const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
-const ACTIVE_WORKFLOW_STATUSES = [
-  "QUEUED",
-  "RUNNING",
-  "PAUSING",
-  "PAUSED",
-  "WAITING",
-  "BLOCKED",
-];
+import {
+  queryActionCenterIndex,
+  type ActionCenterIndexCursor,
+} from "./action-center-index";
+
 const RESOURCE_KINDS = ["PLAN", "SESSION", "BUILD", "WORKFLOW"] as const;
 
 export type ActionCenterResourceKind = (typeof RESOURCE_KINDS)[number];
@@ -72,12 +67,6 @@ export type ActionCenterItemView = {
     preferredDestination: unknown;
   } | null;
   failureFingerprint: string | null;
-};
-
-type ActionCenterCursor = {
-  priority: number;
-  updatedAt: string;
-  key: string;
 };
 
 type AcknowledgeInput = {
@@ -141,34 +130,24 @@ function priority(reason: ActionCenterReason): number {
   }
 }
 
-function compareItems(
-  first: ActionCenterItemView,
-  second: ActionCenterItemView,
-): number {
-  const byPriority = priority(first.reason) - priority(second.reason);
-  if (byPriority) return byPriority;
-  const byUpdatedAt = second.updatedAt.localeCompare(first.updatedAt);
-  return byUpdatedAt || first.key.localeCompare(second.key);
-}
-
 function encodeCursor(item: ActionCenterItemView): string {
   return Buffer.from(
     JSON.stringify({
       priority: priority(item.reason),
       updatedAt: item.updatedAt,
       key: item.key,
-    } satisfies ActionCenterCursor),
+    } satisfies ActionCenterIndexCursor),
   ).toString("base64url");
 }
 
 function decodeCursor(
   value: string | null | undefined,
-): ActionCenterCursor | null {
+): ActionCenterIndexCursor | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
-    ) as Partial<ActionCenterCursor>;
+    ) as Partial<ActionCenterIndexCursor>;
     if (
       typeof parsed.priority !== "number" ||
       typeof parsed.updatedAt !== "string" ||
@@ -176,18 +155,10 @@ function decodeCursor(
     ) {
       return null;
     }
-    return parsed as ActionCenterCursor;
+    return parsed as ActionCenterIndexCursor;
   } catch {
     return null;
   }
-}
-
-function afterCursor(item: ActionCenterItemView, cursor: ActionCenterCursor) {
-  const itemPriority = priority(item.reason);
-  if (itemPriority !== cursor.priority) return itemPriority > cursor.priority;
-  if (item.updatedAt !== cursor.updatedAt)
-    return item.updatedAt < cursor.updatedAt;
-  return item.key > cursor.key;
 }
 
 function mapQuestionBatch(
@@ -226,17 +197,6 @@ function compactPrompt(value: string, maximum = 220): string {
     : normalized;
 }
 
-function buildTargetKey(build: {
-  id: string;
-  worktreeId: string | null;
-  configurationId: string | null;
-  destinationType: string;
-}): string {
-  return build.worktreeId && build.configurationId
-    ? [build.worktreeId, build.configurationId, build.destinationType].join(":")
-    : build.id;
-}
-
 function workflowWorktreeId(sessionDataJson: string): string | null {
   const value = getSessionValue(parseJson(sessionDataJson), "worktree.id");
   return typeof value === "string" && value ? value : null;
@@ -246,67 +206,68 @@ export class ActionCenterService {
   async list(input: { first?: number | null; after?: string | null } = {}) {
     const prisma = await getPrismaClient();
     const first = Math.max(1, Math.min(input.first ?? 50, 200));
-    const [runs, workflowRuns, activeOrFailedBuilds, unrunBuildCandidates] =
-      await Promise.all([
-        prisma.agentRun.findMany({
-          where: {
-            archivedAt: null,
-            status: { in: [...ACTIVE_RUN_STATUSES, "FAILED"] },
-          },
-          include: {
-            worktree: true,
-            questionBatches: {
-              where: { status: "PENDING" },
-              orderBy: { createdAt: "asc" },
-              include: questionInclude,
+    const index = await queryActionCenterIndex(prisma, {
+      first,
+      cursor: decodeCursor(input.after),
+    });
+    const selectedRows = index.rows.slice(0, first);
+    const runIds = selectedRows.flatMap((row) =>
+      row.resourceKind === "PLAN" || row.resourceKind === "SESSION"
+        ? [row.resourceId]
+        : [],
+    );
+    const workflowRunIds = selectedRows.flatMap((row) =>
+      row.resourceKind === "WORKFLOW" ? [row.resourceId] : [],
+    );
+    const buildIds = selectedRows.flatMap((row) =>
+      row.resourceKind === "BUILD" ? [row.resourceId] : [],
+    );
+    const [runs, workflowRuns, builds] = await Promise.all([
+      runIds.length
+        ? prisma.agentRun.findMany({
+            where: { id: { in: runIds } },
+            take: runIds.length,
+            include: {
+              worktree: true,
+              questionBatches: {
+                where: { status: "PENDING" },
+                orderBy: { createdAt: "asc" },
+                include: questionInclude,
+              },
             },
-          },
-        }),
-        prisma.workflowRun.findMany({
-          where: {
-            archivedAt: null,
-            status: { in: [...ACTIVE_WORKFLOW_STATUSES, "FAILED"] },
-          },
-          include: {
-            workflow: true,
-            attempts: {
-              where: { supersededAt: null },
-              include: {
-                questionBatches: {
-                  where: { status: "PENDING" },
-                  orderBy: { createdAt: "asc" },
-                  include: questionInclude,
+          })
+        : Promise.resolve([]),
+      workflowRunIds.length
+        ? prisma.workflowRun.findMany({
+            where: { id: { in: workflowRunIds } },
+            take: workflowRunIds.length,
+            include: {
+              workflow: true,
+              attempts: {
+                where: { supersededAt: null },
+                include: {
+                  questionBatches: {
+                    where: { status: "PENDING" },
+                    orderBy: { createdAt: "asc" },
+                    include: questionInclude,
+                  },
                 },
               },
             },
-          },
-        }),
-        prisma.build.findMany({
-          where: { status: { in: [...ACTIVE_BUILD_STATUSES, "FAILED"] } },
-          include: {
-            worktree: true,
-            codebase: { include: { repository: true } },
-            configuration: true,
-            artifacts: true,
-            deployments: true,
-          },
-        }),
-        prisma.build.findMany({
-          where: {
-            status: "SUCCEEDED",
-            artifacts: { some: { kind: "RUNNABLE_APP" } },
-            deployments: { none: {} },
-          },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          include: {
-            worktree: true,
-            codebase: { include: { repository: true } },
-            configuration: true,
-            artifacts: true,
-            deployments: true,
-          },
-        }),
-      ]);
+          })
+        : Promise.resolve([]),
+      buildIds.length
+        ? prisma.build.findMany({
+            where: { id: { in: buildIds } },
+            take: buildIds.length,
+            include: {
+              worktree: true,
+              codebase: { include: { repository: true } },
+              configuration: true,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
 
     const workflowWorktreeIds = [
       ...new Set(
@@ -332,29 +293,17 @@ export class ActionCenterService {
       workflowWorktrees.map((worktree) => [worktree.id, worktree]),
     );
 
-    const latestUnrunBuilds = new Map<
-      string,
-      (typeof unrunBuildCandidates)[number]
-    >();
-    for (const build of unrunBuildCandidates) {
-      const key = buildTargetKey(build);
-      if (!latestUnrunBuilds.has(key)) latestUnrunBuilds.set(key, build);
-    }
-
-    const items: ActionCenterItemView[] = [];
+    const indexedReasons = new Map(
+      selectedRows.map((row) => [row.key, row.reason as ActionCenterReason]),
+    );
+    const hydratedItems: ActionCenterItemView[] = [];
     for (const run of runs) {
+      const key = `${run.kind}:${run.id}`;
+      const reason = indexedReasons.get(key);
+      if (!reason) continue;
       const questions = run.questionBatches.map((batch) =>
         mapQuestionBatch(batch, null),
       );
-      const reason: ActionCenterReason =
-        questions.length > 0 && run.status !== "FAILED"
-          ? "QUESTION"
-          : run.status === "FAILED"
-            ? "FAILED"
-            : run.phase.endsWith("_FAILED") ||
-                run.phase === "IMPORTED_ACTIVE_COLLISION"
-              ? "BLOCKED"
-              : "ACTIVE";
       const fingerprint =
         reason === "FAILED"
           ? failureFingerprint(
@@ -363,8 +312,8 @@ export class ActionCenterService {
               run.finishedAt ?? run.updatedAt,
             )
           : null;
-      items.push({
-        key: `${run.kind}:${run.id}`,
+      hydratedItems.push({
+        key,
         resourceKind: run.kind as "PLAN" | "SESSION",
         reason,
         resourceId: run.id,
@@ -386,20 +335,15 @@ export class ActionCenterService {
     }
 
     for (const run of workflowRuns) {
+      const key = `WORKFLOW:${run.id}`;
+      const reason = indexedReasons.get(key);
+      if (!reason) continue;
       const worktreeId = workflowWorktreeId(run.sessionDataJson);
       const questions = run.attempts.flatMap((attempt) =>
         attempt.questionBatches.map((batch) =>
           mapQuestionBatch(batch, attempt.kind),
         ),
       );
-      const reason: ActionCenterReason =
-        questions.length > 0 && run.status !== "FAILED"
-          ? "QUESTION"
-          : run.status === "BLOCKED"
-            ? "BLOCKED"
-            : run.status === "FAILED"
-              ? "FAILED"
-              : "ACTIVE";
       const fingerprint =
         reason === "FAILED"
           ? failureFingerprint(
@@ -409,8 +353,8 @@ export class ActionCenterService {
               run.generation,
             )
           : null;
-      items.push({
-        key: `WORKFLOW:${run.id}`,
+      hydratedItems.push({
+        key,
         resourceKind: "WORKFLOW",
         reason,
         resourceId: run.id,
@@ -432,20 +376,10 @@ export class ActionCenterService {
       });
     }
 
-    const builds = [
-      ...activeOrFailedBuilds,
-      ...latestUnrunBuilds.values(),
-    ].filter(
-      (build, index, all) =>
-        all.findIndex((candidate) => candidate.id === build.id) === index,
-    );
     for (const build of builds) {
-      const reason: ActionCenterReason =
-        build.status === "FAILED"
-          ? "FAILED"
-          : build.status === "SUCCEEDED"
-            ? "UNRUN_BUILD"
-            : "ACTIVE";
+      const key = `BUILD:${build.id}`;
+      const reason = indexedReasons.get(key);
+      if (!reason) continue;
       const fingerprint =
         reason === "FAILED"
           ? failureFingerprint(
@@ -456,8 +390,8 @@ export class ActionCenterService {
           : null;
       const repository = build.codebase?.repository.name ?? null;
       const configuration = build.configuration?.name ?? null;
-      items.push({
-        key: `BUILD:${build.id}`,
+      hydratedItems.push({
+        key,
         resourceKind: "BUILD",
         reason,
         resourceId: build.id,
@@ -486,63 +420,22 @@ export class ActionCenterService {
       });
     }
 
-    const failureKeys = items.flatMap((item) =>
-      item.failureFingerprint
-        ? [
-            {
-              resourceKind: item.resourceKind,
-              resourceId: item.resourceId,
-              failureFingerprint: item.failureFingerprint,
-            },
-          ]
-        : [],
+    const hydratedByKey = new Map(
+      hydratedItems.map((item) => [item.key, item]),
     );
-    const acknowledged = failureKeys.length
-      ? await prisma.actionCenterAcknowledgement.findMany({
-          where: { OR: failureKeys },
-          select: {
-            resourceKind: true,
-            resourceId: true,
-            failureFingerprint: true,
-          },
-        })
-      : [];
-    const acknowledgedKeys = new Set(
-      acknowledged.map((entry) =>
-        [entry.resourceKind, entry.resourceId, entry.failureFingerprint].join(
-          "\0",
-        ),
-      ),
+    const items = selectedRows.flatMap((row) =>
+      hydratedByKey.has(row.key) ? [hydratedByKey.get(row.key)!] : [],
     );
-    const visible = items
-      .filter(
-        (item) =>
-          !item.failureFingerprint ||
-          !acknowledgedKeys.has(
-            [item.resourceKind, item.resourceId, item.failureFingerprint].join(
-              "\0",
-            ),
-          ),
-      )
-      .sort(compareItems);
-    const cursor = decodeCursor(input.after);
-    const remaining = cursor
-      ? visible.filter((item) => afterCursor(item, cursor))
-      : visible;
-    const page = remaining.slice(0, first);
-    const needsAttentionCount = visible.filter(
-      ({ reason }) => reason !== "ACTIVE",
-    ).length;
 
     return {
-      items: page,
+      items,
       nextCursor:
-        remaining.length > first && page.length
-          ? encodeCursor(page[page.length - 1]!)
+        index.rows.length > first && items.length
+          ? encodeCursor(items[items.length - 1]!)
           : null,
-      totalCount: visible.length,
-      needsAttentionCount,
-      activeCount: visible.length - needsAttentionCount,
+      totalCount: index.totalCount,
+      needsAttentionCount: index.needsAttentionCount,
+      activeCount: index.activeCount,
     };
   }
 

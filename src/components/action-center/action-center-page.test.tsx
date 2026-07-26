@@ -334,4 +334,35 @@ describe("MiniActionCenter", () => {
         .getAttribute("data-size"),
     ).toBe("icon-xs");
   });
+
+  test("shows initial query errors instead of the empty state", async () => {
+    request.mockRejectedValueOnce(new Error("Action Center is unavailable"));
+
+    render(
+      <ActionCenterProvider>
+        <MiniActionCenter />
+      </ActionCenterProvider>,
+    );
+
+    expect(
+      await screen.findByText("Action Center is unavailable"),
+    ).toBeDefined();
+    expect(screen.queryByText("Nothing needs action.")).toBeNull();
+  });
+
+  test("shows compact action failures", async () => {
+    render(
+      <ActionCenterProvider>
+        <MiniActionCenter />
+      </ActionCenterProvider>,
+    );
+    const acknowledge = await screen.findByRole("button", {
+      name: "Acknowledge Debug",
+    });
+    request.mockRejectedValueOnce(new Error("Acknowledge failed"));
+
+    fireEvent.click(acknowledge);
+
+    expect(await screen.findByText("Acknowledge failed")).toBeDefined();
+  });
 });

@@ -69,7 +69,96 @@ function build(overrides: Record<string, unknown>) {
   };
 }
 
-function prisma(overrides: Record<string, unknown> = {}) {
+const reasonPriority = {
+  QUESTION: 0,
+  BLOCKED: 1,
+  FAILED: 2,
+  UNRUN_BUILD: 3,
+  ACTIVE: 4,
+} as const;
+
+function actionCenterIndex(acknowledgedResourceIds: string[] = []) {
+  const acknowledged = new Set(acknowledgedResourceIds);
+  const rows = [
+    {
+      resourceKind: "PLAN",
+      resourceId: "plan-question",
+      reason: "QUESTION",
+      key: "PLAN:plan-question",
+      updatedAt: at(12).toISOString(),
+    },
+    {
+      resourceKind: "WORKFLOW",
+      resourceId: "workflow-blocked",
+      reason: "BLOCKED",
+      key: "WORKFLOW:workflow-blocked",
+      updatedAt: at(10).toISOString(),
+    },
+    {
+      resourceKind: "SESSION",
+      resourceId: "session-failed",
+      reason: "FAILED",
+      key: "SESSION:session-failed",
+      updatedAt: at(11).toISOString(),
+    },
+    {
+      resourceKind: "BUILD",
+      resourceId: "build-failed",
+      reason: "FAILED",
+      key: "BUILD:build-failed",
+      updatedAt: at(9).toISOString(),
+    },
+    {
+      resourceKind: "BUILD",
+      resourceId: "build-unrun-new",
+      reason: "UNRUN_BUILD",
+      key: "BUILD:build-unrun-new",
+      updatedAt: at(7).toISOString(),
+    },
+    {
+      resourceKind: "BUILD",
+      resourceId: "build-active",
+      reason: "ACTIVE",
+      key: "BUILD:build-active",
+      updatedAt: at(8).toISOString(),
+    },
+  ].filter(({ resourceId }) => !acknowledged.has(resourceId));
+
+  return vi.fn().mockImplementation((query: string, ...values: unknown[]) => {
+    if (query.includes("COUNT(*)")) {
+      return Promise.resolve([
+        {
+          totalCount: rows.length,
+          needsAttentionCount: rows.filter(({ reason }) => reason !== "ACTIVE")
+            .length,
+        },
+      ]);
+    }
+    const hasCursor = values[0] === 1;
+    const cursorPriority = Number(values[1]);
+    const cursorUpdatedAt = String(values[3]);
+    const cursorKey = String(values[5]);
+    const limit = Number(values[6]);
+    const remaining = hasCursor
+      ? rows.filter((row) => {
+          const priority =
+            reasonPriority[row.reason as keyof typeof reasonPriority];
+          return (
+            priority > cursorPriority ||
+            (priority === cursorPriority &&
+              (row.updatedAt < cursorUpdatedAt ||
+                (row.updatedAt === cursorUpdatedAt && row.key > cursorKey)))
+          );
+        })
+      : rows;
+    return Promise.resolve(remaining.slice(0, limit));
+  });
+}
+
+function prisma(
+  overrides: Record<string, unknown> = {},
+  acknowledgedResourceIds: string[] = [],
+) {
   const plan = {
     id: "plan-question",
     kind: "PLAN",
@@ -140,22 +229,39 @@ function prisma(overrides: Record<string, unknown> = {}) {
     updatedAt: at(5),
     artifacts: [{ kind: "RUNNABLE_APP" }],
   });
+  const allBuilds = [activeBuild, failedBuild, newestUnrun, olderUnrun];
   return {
-    agentRun: { findMany: vi.fn().mockResolvedValue([plan, sessionFailure]) },
-    workflowRun: { findMany: vi.fn().mockResolvedValue([blockedWorkflow]) },
+    $queryRawUnsafe: actionCenterIndex(acknowledgedResourceIds),
+    agentRun: {
+      findMany: vi
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            [plan, sessionFailure].filter((run) =>
+              where.id.in.includes(run.id),
+            ),
+          ),
+        ),
+    },
+    workflowRun: {
+      findMany: vi
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            [blockedWorkflow].filter((run) => where.id.in.includes(run.id)),
+          ),
+        ),
+    },
     build: {
       findMany: vi
         .fn()
         .mockImplementation(({ where }) =>
-          where.status === "SUCCEEDED"
-            ? Promise.resolve([newestUnrun, olderUnrun])
-            : Promise.resolve([activeBuild, failedBuild]),
+          Promise.resolve(
+            allBuilds.filter((candidate) => where.id.in.includes(candidate.id)),
+          ),
         ),
     },
     worktree: { findMany: vi.fn().mockResolvedValue([worktree]) },
-    actionCenterAcknowledgement: {
-      findMany: vi.fn().mockResolvedValue([]),
-    },
     ...overrides,
   };
 }
@@ -193,17 +299,26 @@ describe("ActionCenterService", () => {
     });
   });
 
-  test("hides an acknowledged failure and paginates the mixed feed", async () => {
+  test("hydrates only resources on the requested page", async () => {
     const database = prisma();
-    database.actionCenterAcknowledgement.findMany.mockImplementation(
-      ({ where }) => {
-        const failure = where.OR.find(
-          (entry: { resourceId: string }) =>
-            entry.resourceId === "session-failed",
-        );
-        return Promise.resolve(failure ? [failure] : []);
-      },
+    getPrismaClient.mockResolvedValue(database);
+
+    const result = await new ActionCenterService().list({ first: 1 });
+
+    expect(result.items.map(({ key }) => key)).toEqual(["PLAN:plan-question"]);
+    expect(result.nextCursor).not.toBeNull();
+    expect(database.agentRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["plan-question"] } },
+        take: 1,
+      }),
     );
+    expect(database.workflowRun.findMany).not.toHaveBeenCalled();
+    expect(database.build.findMany).not.toHaveBeenCalled();
+  });
+
+  test("hides an acknowledged failure and paginates the mixed feed", async () => {
+    const database = prisma({}, ["session-failed"]);
     getPrismaClient.mockResolvedValue(database);
     const service = new ActionCenterService();
 
