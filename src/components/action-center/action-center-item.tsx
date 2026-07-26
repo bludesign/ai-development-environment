@@ -58,6 +58,11 @@ function itemTitle(item: ActionCenterItemView, kind: string): string {
   return item.label;
 }
 
+function worktreeName(folder: string): string {
+  const normalized = folder.replaceAll("\\", "/").replace(/\/+$/, "");
+  return normalized.split("/").pop() || folder;
+}
+
 function reasonClass(
   reason: ActionCenterItemView["reason"],
 ): string | undefined {
@@ -87,6 +92,10 @@ export function ActionCenterItem({
   const worktreeLabel = item.worktree
     ? `${item.worktree.folder}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
     : null;
+  const rawWorktreeSummary =
+    item.resourceKind === "WORKFLOW" &&
+    item.worktree &&
+    item.summary === `WORKTREE:${item.worktree.id}`;
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);
@@ -119,7 +128,7 @@ export function ActionCenterItem({
           }
           disabled={acknowledging}
           onClick={() => void acknowledgeFailure()}
-          size={compact ? "icon-sm" : "sm"}
+          size={compact ? "icon-xs" : "sm"}
           title={compact ? t("acknowledge") : undefined}
           type="button"
           variant="outline"
@@ -138,7 +147,9 @@ export function ActionCenterItem({
       title={worktreeLabel ?? undefined}
     >
       <GitBranch className="size-3 shrink-0" />
-      <span className="min-w-0 truncate">{worktreeLabel}</span>
+      <span className="min-w-0 truncate">
+        {compact ? worktreeName(item.worktree.folder) : worktreeLabel}
+      </span>
     </Link>
   );
 
@@ -147,7 +158,7 @@ export function ActionCenterItem({
     return (
       <div
         className={cn(
-          "space-y-2 overflow-hidden border-b border-l-4 p-2.5 last:border-b-0",
+          "space-y-1.5 overflow-hidden border-b border-l-4 px-2 py-1.5 last:border-b-0",
           color
             ? worktreeHighlightAccentClasses[color]
             : "border-l-transparent",
@@ -155,8 +166,8 @@ export function ActionCenterItem({
         )}
         data-slot="action-center-compact-item"
       >
-        <div className="flex items-start gap-2">
-          <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="flex items-start gap-1.5">
+          <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <Link
               className="block truncate text-sm font-medium hover:underline"
@@ -165,29 +176,32 @@ export function ActionCenterItem({
               {title}
             </Link>
             {item.resourceKind !== "WORKFLOW" && item.label !== title && (
-              <p className="line-clamp-2 break-words text-xs text-muted-foreground">
+              <p className="line-clamp-2 break-words text-xs leading-tight text-muted-foreground">
                 {item.label}
               </p>
             )}
           </div>
           <Badge
-            className={cn("shrink-0 text-[10px]", reasonClass(item.reason))}
+            className={cn(
+              "h-4 shrink-0 px-1.5 py-0 text-[9px]",
+              reasonClass(item.reason),
+            )}
             variant={item.reason === "FAILED" ? "destructive" : "outline"}
           >
             {t(`reasons.${item.reason}`)}
           </Badge>
         </div>
         {question && (
-          <p className="line-clamp-2 break-words text-xs font-medium">
+          <p className="line-clamp-2 break-words text-xs leading-tight font-medium">
             {question.header || question.prompt}
           </p>
         )}
         {item.error && (
-          <p className="line-clamp-2 break-words text-xs text-destructive">
+          <p className="line-clamp-2 break-words text-xs leading-tight text-destructive">
             {item.error}
           </p>
         )}
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
           <div className="min-w-0 overflow-hidden">{worktree}</div>
           {actions}
         </div>
@@ -215,9 +229,20 @@ export function ActionCenterItem({
               </Link>
             </CardTitle>
             <CardDescription className="mt-1 line-clamp-2 break-words">
-              {item.resourceKind === "PLAN" || item.resourceKind === "SESSION"
-                ? item.label
-                : item.summary || item.label}
+              {rawWorktreeSummary && item.worktree ? (
+                <Link
+                  className="block max-w-full truncate font-mono hover:text-foreground hover:underline"
+                  href={`/worktrees/${item.worktree.id}`}
+                  title={worktreeLabel ?? undefined}
+                >
+                  {worktreeName(item.worktree.folder)}
+                </Link>
+              ) : item.resourceKind === "PLAN" ||
+                item.resourceKind === "SESSION" ? (
+                item.label
+              ) : (
+                item.summary || item.label
+              )}
             </CardDescription>
           </div>
         </div>

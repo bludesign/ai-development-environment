@@ -89,7 +89,7 @@ const workflowQuestion = {
   href: "/workflows/runs/workflow-1",
   displayNumber: 8,
   label: "Deploy application",
-  summary: "AIDE-101",
+  summary: "WORKTREE:worktree-1",
   questionBatches: [
     {
       ...question.questionBatches[0],
@@ -221,6 +221,23 @@ describe("ActionCenterPage", () => {
     expect(
       within(activeCard as HTMLElement).getByText("Active").className,
     ).toContain("bg-emerald-500/10");
+
+    const workflowCard = screen
+      .getByRole("link", { name: "Deploy application #8" })
+      .closest('[data-slot="card"]');
+    expect(workflowCard).not.toBeNull();
+    const workflowWorktreeLinks = within(
+      workflowCard as HTMLElement,
+    ).getAllByRole("link", { name: /feature-aide/ });
+    expect(workflowWorktreeLinks).toHaveLength(2);
+    expect(workflowWorktreeLinks[0]?.textContent).toBe("feature-aide");
+    expect(workflowWorktreeLinks[0]?.getAttribute("href")).toBe(
+      "/worktrees/worktree-1",
+    );
+    expect(workflowWorktreeLinks[1]?.textContent).toContain("feature/AIDE-101");
+    expect(
+      within(workflowCard as HTMLElement).queryByText("WORKTREE:worktree-1"),
+    ).toBeNull();
   });
 
   test("answers plan and workflow questions with their existing mutations", async () => {
@@ -303,10 +320,18 @@ describe("MiniActionCenter", () => {
       '[data-slot="action-center-compact-item"]',
     );
     expect(compactItem?.className).toContain("overflow-hidden");
+    expect(compactItem?.className).toContain("space-y-1.5");
+    expect(compactItem?.className).toContain("py-1.5");
     const worktreeLink = compactItem?.querySelector(
       'a[href="/worktrees/worktree-1"]',
     );
     expect(worktreeLink?.className).toContain("overflow-hidden");
+    expect(worktreeLink?.textContent).toBe("feature-aide");
     expect(worktreeLink?.querySelectorAll("span")).toHaveLength(1);
+    expect(
+      screen
+        .getByRole("button", { name: "Acknowledge Debug" })
+        .getAttribute("data-size"),
+    ).toBe("icon-xs");
   });
 });
