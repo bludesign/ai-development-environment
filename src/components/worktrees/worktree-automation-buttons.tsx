@@ -155,7 +155,7 @@ export function AutoSyncButton({
         }}
         size="sm"
         type="button"
-        variant={paused ? "destructive" : "outline"}
+        variant={paused ? "destructive" : rule ? "default" : "outline"}
       >
         <RefreshCw />
         {paused ? t("autoSyncPaused") : rule ? t("autoSyncing") : t("autoSync")}
@@ -478,7 +478,7 @@ export function AutoMergeButton({
         }}
         size="sm"
         type="button"
-        variant={paused ? "destructive" : "outline"}
+        variant={paused ? "destructive" : rule ? "default" : "outline"}
       >
         <GitMerge />
         {completed
