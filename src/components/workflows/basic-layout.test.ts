@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { basicWorkflowLayout } from "./basic-layout";
+import {
+  basicLayoutTranslateExtent,
+  basicWorkflowLayout,
+} from "./basic-layout";
 
 const item = (id: string, x: number, y: number) => ({
   id,
@@ -98,5 +101,12 @@ describe("basicWorkflowLayout", () => {
     expect(result.positions.get("first")!.x).toBe(
       result.positions.get("second")!.x,
     );
+  });
+
+  test("bounds Basic panning with a small content margin", () => {
+    expect(basicLayoutTranslateExtent({ width: 600, height: 320 })).toEqual([
+      [-24, -24],
+      [624, 344],
+    ]);
   });
 });

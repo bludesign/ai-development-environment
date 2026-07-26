@@ -6,7 +6,6 @@ import {
   Handle,
   MarkerType,
   MiniMap,
-  PanOnScrollMode,
   Position,
   ReactFlow,
   useReactFlow,
@@ -28,6 +27,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +59,10 @@ import type {
   WorkflowDiagnostic,
   WorkflowHandleLayout,
 } from "./types";
-import { basicWorkflowLayout } from "./basic-layout";
+import {
+  basicLayoutTranslateExtent,
+  basicWorkflowLayout,
+} from "./basic-layout";
 
 /** One source connector on a card, in the order it is laid out along the edge. */
 type WorkflowSourceHandle = { id: string; label: string };
@@ -331,6 +334,73 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
 }
 
 export const workflowNodeTypes = { workflow: WorkflowCard };
+
+export function workflowConstrainViewportAxis(
+  position: number,
+  viewportSize: number,
+  zoom: number,
+  extent: [number, number],
+): number {
+  const lower = viewportSize - extent[1] * zoom;
+  const upper = -extent[0] * zoom;
+  if (lower > upper) return (lower + upper) / 2;
+  return Math.min(upper, Math.max(lower, position));
+}
+
+export function workflowBasicHorizontalWheelDelta(
+  event: Pick<WheelEvent, "deltaMode" | "deltaX" | "deltaY" | "shiftKey">,
+  pageWidth: number,
+): number | null {
+  const horizontalIntent =
+    event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
+  if (!horizontalIntent) return null;
+  const rawDelta =
+    event.shiftKey && Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+  const normalization =
+    event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? pageWidth : 1;
+  return rawDelta * normalization;
+}
+
+function WorkflowBasicHorizontalWheel({
+  containerRef,
+  enabled,
+  extent,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>;
+  enabled: boolean;
+  extent: [[number, number], [number, number]] | undefined;
+}) {
+  const { getViewport, setViewport } = useReactFlow<WorkflowFlowNode, Edge>();
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !enabled) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = workflowBasicHorizontalWheelDelta(
+        event,
+        container.clientWidth,
+      );
+      // A normal vertical wheel gesture belongs to the page. Only a native
+      // horizontal gesture (or Shift+wheel) is captured for the graph.
+      if (delta === null || delta === 0) return;
+      event.preventDefault();
+      const viewport = getViewport();
+      const nextX = extent
+        ? workflowConstrainViewportAxis(
+            viewport.x - delta * 0.5,
+            container.clientWidth,
+            viewport.zoom,
+            [extent[0][0], extent[1][0]],
+          )
+        : viewport.x - delta * 0.5;
+      void setViewport({ ...viewport, x: nextX });
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [containerRef, enabled, extent, getViewport, setViewport]);
+  return null;
+}
 
 /**
  * Fits a derived layout without centering clipped overflow. Wide workflows
@@ -670,6 +740,11 @@ export function WorkflowGraph({
     () => (basic ? { padding: 0.08, minZoom: 0.8, maxZoom: 1 } : undefined),
     [basic],
   );
+  const basicTranslateExtent = useMemo(
+    () =>
+      basicLayout ? basicLayoutTranslateExtent(basicLayout.bounds) : undefined,
+    [basicLayout],
+  );
   // A read-only graph is there to be read, so it starts pinned to the pane:
   // no stray scroll wheel zooming it into a corner, nothing to fit back. The
   // control stack keeps one button to hand panning and zooming back.
@@ -724,13 +799,13 @@ export function WorkflowGraph({
         }
         onNodesChange={onNodesChange}
         panOnDrag={!locked || (basic && basicDirection === "HORIZONTAL")}
-        panOnScroll={basic && basicDirection === "HORIZONTAL"}
-        panOnScrollMode={PanOnScrollMode.Horizontal}
-        preventScrolling={!locked}
+        panOnScroll={false}
+        preventScrolling={!locked && !basic}
         proOptions={{ hideAttribution: true }}
+        translateExtent={basicTranslateExtent}
         zoomOnDoubleClick={!locked}
         zoomOnPinch={!locked}
-        zoomOnScroll={!locked}
+        zoomOnScroll={!locked && !basic}
       >
         <Background gap={20} size={1} />
         <Controls
@@ -745,10 +820,17 @@ export function WorkflowGraph({
           />
         </Controls>
         {basic ? (
-          <WorkflowBasicViewport
-            direction={basicDirection}
-            signature={signature}
-          />
+          <>
+            <WorkflowBasicHorizontalWheel
+              containerRef={wrapperRef}
+              enabled={basicDirection === "HORIZONTAL"}
+              extent={basicTranslateExtent}
+            />
+            <WorkflowBasicViewport
+              direction={basicDirection}
+              signature={signature}
+            />
+          </>
         ) : (
           <WorkflowFitLock locked={locked} signature={signature} />
         )}

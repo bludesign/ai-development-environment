@@ -14,6 +14,16 @@ export type BasicLayoutResult = {
   bounds: { width: number; height: number };
 };
 
+export function basicLayoutTranslateExtent(
+  bounds: BasicLayoutResult["bounds"],
+  padding = 24,
+): [[number, number], [number, number]] {
+  return [
+    [-padding, -padding],
+    [bounds.width + padding, bounds.height + padding],
+  ];
+}
+
 const DEFAULT_WIDTH = 208;
 const DEFAULT_HEIGHT = 88;
 const LAYER_GAP = 64;
