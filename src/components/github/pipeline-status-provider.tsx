@@ -37,6 +37,93 @@ function recordKey(key: GitHubPipelineRecordKeyInput): string {
   return `${key.repositoryGithubId}\u0000${key.workflowRunId}`;
 }
 
+type PipelineProjection = GitHubPipelineStatusSnapshotView["pipelines"][number];
+type JobProjection = PipelineProjection["jobs"][number];
+
+function mergeJobProjection(
+  existing: JobProjection | undefined,
+  incoming: JobProjection,
+): JobProjection {
+  if (!existing) return incoming;
+  return {
+    ...existing,
+    ...incoming,
+    steps: incoming.steps ?? existing.steps,
+    runAttempt:
+      incoming.runAttempt === undefined
+        ? existing.runAttempt
+        : incoming.runAttempt,
+  };
+}
+
+function mergePipelineProjection(
+  existing: PipelineProjection | undefined,
+  incoming: PipelineProjection,
+): PipelineProjection {
+  if (!existing) return incoming;
+  const existingJobs = existing.jobs ?? [];
+  const incomingJobs = incoming.jobs;
+  const existingJobsById = new Map(existingJobs.map((job) => [job.id, job]));
+  return {
+    ...existing,
+    ...incoming,
+    jobs:
+      incomingJobs === undefined
+        ? existingJobs
+        : incomingJobs.map((job) =>
+            mergeJobProjection(existingJobsById.get(job.id), job),
+          ),
+    workflowRunId:
+      incoming.workflowRunId === undefined
+        ? existing.workflowRunId
+        : incoming.workflowRunId,
+    workflowId:
+      incoming.workflowId === undefined
+        ? existing.workflowId
+        : incoming.workflowId,
+    runNumber:
+      incoming.runNumber === undefined
+        ? existing.runNumber
+        : incoming.runNumber,
+    runAttempt:
+      incoming.runAttempt === undefined
+        ? existing.runAttempt
+        : incoming.runAttempt,
+  };
+}
+
+function mergeEqualRevisionSnapshot(
+  existing: GitHubPipelineStatusSnapshotView,
+  incoming: GitHubPipelineStatusSnapshotView,
+): GitHubPipelineStatusSnapshotView {
+  const existingById = new Map(
+    existing.pipelines.map((pipeline) => [pipeline.id, pipeline]),
+  );
+  const incomingIds = new Set(
+    incoming.pipelines.map((pipeline) => pipeline.id),
+  );
+  return {
+    ...existing,
+    ...incoming,
+    pipelines: [
+      ...incoming.pipelines.map((pipeline) =>
+        mergePipelineProjection(existingById.get(pipeline.id), pipeline),
+      ),
+      ...existing.pipelines.filter((pipeline) => !incomingIds.has(pipeline.id)),
+    ],
+  };
+}
+
+function latestSnapshotProjection(
+  existing: GitHubPipelineStatusSnapshotView | undefined,
+  incoming: GitHubPipelineStatusSnapshotView | null | undefined,
+): GitHubPipelineStatusSnapshotView | null {
+  if (!existing) return incoming ?? null;
+  if (!incoming || existing.revision > incoming.revision) return existing;
+  if (incoming.revision > existing.revision) return incoming;
+  return mergeEqualRevisionSnapshot(existing, incoming);
+}
+
 type PipelineStatusContextValue = {
   snapshots: Map<string, GitHubPipelineStatusSnapshotView>;
   records: Map<string, GitHubPipelineRecordView>;
@@ -73,9 +160,14 @@ export function GitHubPipelineStatusProvider({
       setSnapshots((current) => {
         const key = snapshotKey(incoming);
         const existing = current.get(key);
-        if (existing && existing.revision >= incoming.revision) return current;
+        if (existing && existing.revision > incoming.revision) return current;
         const next = new Map(current);
-        next.set(key, incoming);
+        next.set(
+          key,
+          existing && existing.revision === incoming.revision
+            ? mergeEqualRevisionSnapshot(existing, incoming)
+            : incoming,
+        );
         return next;
       });
     },
@@ -259,7 +351,7 @@ export function useGitHubPipelineSnapshot(
     const [repositoryGithubId, headSha] = id.split("\u0000");
     return watchSnapshot({ repositoryGithubId, headSha });
   }, [id, watchSnapshot]);
-  return id ? (context?.snapshots.get(id) ?? seed ?? null) : null;
+  return id ? latestSnapshotProjection(context?.snapshots.get(id), seed) : null;
 }
 
 export function useGitHubPipelineRecord(

@@ -724,6 +724,12 @@ export class WorktreesService {
     }
   }
 
+  private async hydratedView(worktree: WorktreeRecord, defaultRegex = "") {
+    const view = this.view(worktree, defaultRegex);
+    await this.hydratePullRequestPipelines([view]);
+    return view;
+  }
+
   async refreshPullRequest(id: string) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
@@ -757,7 +763,7 @@ export class WorktreesService {
       include: worktreeInclude,
     });
     this.publish(id, worktree.codebaseId);
-    return this.view(updated);
+    return this.hydratedView(updated);
   }
 
   async attachPullRequestForBranch(
@@ -975,9 +981,11 @@ export class WorktreesService {
       include: worktreeInclude,
       orderBy: { missingAt: "desc" },
     });
-    return worktrees.map((worktree) =>
+    const views = worktrees.map((worktree) =>
       this.view(worktree, settings?.defaultJiraBranchRegex ?? ""),
     );
+    await this.hydratePullRequestPipelines(views);
+    return views;
   }
 
   async report(agentId: string, values: CodebaseWorktreeReport[]) {
@@ -1295,7 +1303,7 @@ export class WorktreesService {
     });
     this.publish(id, worktree.codebaseId);
     await this.restartWatch(id);
-    return this.view(updated);
+    return this.hydratedView(updated);
   }
 
   private requireColor(color: string | null): string | null {
@@ -1314,7 +1322,7 @@ export class WorktreesService {
       include: worktreeInclude,
     });
     this.publish(id, worktree.codebaseId);
-    return this.view(worktree);
+    return this.hydratedView(worktree);
   }
 
   async setTags(id: string, tagIds: string[]) {
@@ -1340,7 +1348,7 @@ export class WorktreesService {
       include: worktreeInclude,
     });
     this.publish(id, worktree.codebaseId);
-    return this.view(worktree);
+    return this.hydratedView(worktree);
   }
 
   async saveTag(input: { id?: string | null; name: string; color: string }) {

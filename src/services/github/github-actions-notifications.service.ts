@@ -320,8 +320,11 @@ export class GitHubActionsNotificationsService {
     target: RepositoryTarget,
     run: WorkflowRun,
     source: "REST" | "WEBHOOK",
+    appConfigured = true,
   ): Promise<boolean> {
     if (!run.repositoryGithubId || !run.headSha) return false;
+    const completed = run.status === "completed";
+    const workflowRunAvailable = Boolean(run.checkSuiteId);
     await this.pipelineStatus.observeSnapshot({
       repositoryGithubId: run.repositoryGithubId,
       repositoryNameWithOwner: run.repositoryNameWithOwner,
@@ -337,13 +340,14 @@ export class GitHubActionsNotificationsService {
           workflowRunId: run.id,
           workflowId: run.workflowId,
           runAttempt: run.runAttempt,
-          canRetry: run.status === "completed" && Boolean(run.checkSuiteId),
-          retryUnavailableReason:
-            run.status !== "completed"
-              ? "NOT_COMPLETED"
-              : run.checkSuiteId
+          canRetry: completed && workflowRunAvailable && appConfigured,
+          retryUnavailableReason: !completed
+            ? "NOT_COMPLETED"
+            : !workflowRunAvailable
+              ? "WORKFLOW_RUN_UNAVAILABLE"
+              : appConfigured
                 ? null
-                : "WORKFLOW_RUN_UNAVAILABLE",
+                : "GITHUB_APP_NOT_CONFIGURED",
           source,
           githubUpdatedAt: run.updatedAt,
         },
@@ -1087,6 +1091,7 @@ export class GitHubActionsNotificationsService {
   private async pollRepository(
     target: RepositoryTarget,
     token: string,
+    appConfigured: boolean,
   ): Promise<number> {
     const prisma = await getPrismaClient();
     const startedAt = new Date();
@@ -1139,7 +1144,7 @@ export class GitHubActionsNotificationsService {
       );
       await Promise.allSettled(
         runs.flatMap((run) => [
-          this.observePipelineRun(target, run, "REST"),
+          this.observePipelineRun(target, run, "REST", appConfigured),
           this.recordWorkflowRunEvent(target, run),
         ]),
       );
@@ -1161,9 +1166,21 @@ export class GitHubActionsNotificationsService {
       CREDENTIALS.githubPersonalAccessToken,
     );
     if (!token) throw new Error("GitHub personal access token is unavailable");
-    const repositories = await this.repositories();
+    const [repositories, appSettings, privateKeyConfigured] = await Promise.all(
+      [
+        this.repositories(),
+        (await getPrismaClient()).gitHubAppSettings.findUnique({
+          where: { id: "default" },
+          select: { id: true },
+        }),
+        this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey),
+      ],
+    );
+    const appConfigured = Boolean(appSettings && privateKeyConfigured);
     const results = await Promise.allSettled(
-      repositories.map((repository) => this.pollRepository(repository, token)),
+      repositories.map((repository) =>
+        this.pollRepository(repository, token, appConfigured),
+      ),
     );
     const failures = results.filter((result) => result.status === "rejected");
     const notificationsCreated = results.reduce(

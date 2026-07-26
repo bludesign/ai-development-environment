@@ -70,6 +70,20 @@ function Status({ seed }: { seed: GitHubPipelineStatusSnapshotView }) {
   );
 }
 
+function PipelineDetails({ seed }: { seed: GitHubPipelineStatusSnapshotView }) {
+  const value = useGitHubPipelineSnapshot(
+    {
+      repositoryGithubId: seed.repositoryGithubId,
+      headSha: seed.headSha,
+    },
+    seed,
+  );
+  const pipeline = value!.pipelines[0]!;
+  return (
+    <div>{`${pipeline.workflowRunId}:${pipeline.jobs.length}:${pipeline.jobs[0]?.runAttempt}`}</div>
+  );
+}
+
 describe("GitHubPipelineStatusProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -124,6 +138,73 @@ describe("GitHubPipelineStatusProvider", () => {
       </GitHubPipelineStatusProvider>,
     );
     expect(screen.getByText("sha-2:FAILURE:1")).toBeDefined();
+  });
+
+  test("uses a richer projection immediately at the same revision", async () => {
+    const sparse = {
+      ...snapshot("repo-1", "sha-rich", 3, "SUCCESS"),
+      pipelines: [
+        {
+          id: "pipeline-1",
+          name: "CI",
+          status: "SUCCESS",
+          url: null,
+          checkSuiteId: "suite-1",
+          canRetry: true,
+          retryUnavailableReason: null,
+        },
+      ],
+    } as unknown as GitHubPipelineStatusSnapshotView;
+    const rich: GitHubPipelineStatusSnapshotView = {
+      ...sparse,
+      pipelines: [
+        {
+          ...sparse.pipelines[0]!,
+          workflowRunId: "run-1",
+          workflowId: "workflow-1",
+          runNumber: 7,
+          runAttempt: 2,
+          jobs: [
+            {
+              id: "job-1",
+              name: "test",
+              status: "SUCCESS",
+              url: null,
+              canRetry: true,
+              retryUnavailableReason: null,
+              runAttempt: 2,
+              steps: [],
+            },
+          ],
+        },
+      ],
+    };
+    const { rerender } = render(
+      <GitHubPipelineStatusProvider>
+        <Status seed={sparse} />
+      </GitHubPipelineStatusProvider>,
+    );
+    await waitFor(() => expect(client.observer).not.toBeNull());
+
+    rerender(
+      <GitHubPipelineStatusProvider>
+        <PipelineDetails seed={rich} />
+      </GitHubPipelineStatusProvider>,
+    );
+
+    expect(screen.getByText("run-1:1:2")).toBeDefined();
+
+    act(() => {
+      client.observer!.next({
+        data: {
+          githubPipelineStatusChanged: {
+            snapshot: sparse,
+            changedPipeline: null,
+          },
+        },
+      });
+    });
+    expect(screen.getByText("run-1:1:2")).toBeDefined();
   });
 
   test("subscribes once and reconciles watched keys after reconnect", async () => {

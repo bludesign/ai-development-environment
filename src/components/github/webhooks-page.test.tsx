@@ -102,15 +102,17 @@ describe("GitHubWebhooksPage", () => {
   });
 
   test("clears webhook delivery history after confirmation", async () => {
+    let items = [delivery];
     requestMock.mockImplementation(async (query) => {
       if (query.includes("clearGitHubWebhookDeliveries")) {
+        items = [];
         return { clearGitHubWebhookDeliveries: true } as never;
       }
       return {
         githubWebhookDeliveries: {
           enabled: true,
-          items: [delivery],
-          total: 1,
+          items,
+          total: items.length,
           limit: 50,
           offset: 0,
         },

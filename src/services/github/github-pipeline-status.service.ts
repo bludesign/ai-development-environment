@@ -570,6 +570,8 @@ export class GitHubPipelineStatusService {
           ...pipelineView(existing as unknown as PipelineRecordRow),
           status: patch.status,
           jobs: patch.jobs,
+          canRetry: false,
+          retryUnavailableReason: "NOT_COMPLETED",
           source: "MUTATION",
           githubUpdatedAt: existing.githubUpdatedAt,
           sourceFetchedAt: now,
@@ -685,7 +687,10 @@ export class GitHubPipelineStatusService {
         const incomingFetchedAt =
           observation.sourceFetchedAt ?? sourceFetchedAt;
         const incomingUpdatedAt = observation.githubUpdatedAt ?? null;
-        const incomingAttempt = observation.runAttempt ?? null;
+        const incomingAttempt =
+          observation.runAttempt === undefined
+            ? (existing?.runAttempt ?? null)
+            : observation.runAttempt;
         const nextJobs =
           observation.jobs !== undefined
             ? JSON.stringify(observation.jobs)
@@ -764,21 +769,44 @@ export class GitHubPipelineStatusService {
                   githubPipelineId: observation.id,
                   name: observation.name,
                   status: observation.status,
-                  url: observation.url ?? null,
-                  checkSuiteId: observation.checkSuiteId ?? null,
-                  workflowRunId: observation.workflowRunId ?? null,
-                  workflowId: observation.workflowId ?? null,
-                  runNumber: observation.runNumber ?? null,
+                  url:
+                    observation.url === undefined
+                      ? existing.url
+                      : observation.url,
+                  checkSuiteId:
+                    observation.checkSuiteId === undefined
+                      ? existing.checkSuiteId
+                      : observation.checkSuiteId,
+                  workflowRunId:
+                    observation.workflowRunId === undefined
+                      ? existing.workflowRunId
+                      : observation.workflowRunId,
+                  workflowId:
+                    observation.workflowId === undefined
+                      ? existing.workflowId
+                      : observation.workflowId,
+                  runNumber:
+                    observation.runNumber === undefined
+                      ? existing.runNumber
+                      : observation.runNumber,
                   runAttempt: incomingAttempt,
-                  canRetry: observation.canRetry ?? false,
+                  canRetry:
+                    observation.canRetry === undefined
+                      ? existing.canRetry
+                      : observation.canRetry,
                   retryUnavailableReason:
-                    observation.retryUnavailableReason ?? null,
+                    observation.retryUnavailableReason === undefined
+                      ? existing.retryUnavailableReason
+                      : observation.retryUnavailableReason,
                   jobsJson: nextJobs,
                   source: observation.source,
                   githubUpdatedAt: incomingUpdatedAt,
                   sourceFetchedAt: incomingFetchedAt,
                   lastObservedAt: now,
-                  optimisticUntil: observation.optimisticUntil ?? null,
+                  optimisticUntil:
+                    observation.optimisticUntil === undefined
+                      ? existing.optimisticUntil
+                      : observation.optimisticUntil,
                   isCurrent: nextCurrent,
                 }
               : {

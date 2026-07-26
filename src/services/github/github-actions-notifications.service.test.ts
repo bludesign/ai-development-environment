@@ -67,6 +67,7 @@ function setup(
   workflowEvents?: { record: ReturnType<typeof vi.fn> },
   jiraBranchRegex: string | null = "([A-Z]+-\\d+)",
   enhancedPipelineWebhooksEnabled = false,
+  appConfigured = true,
 ) {
   const deliveries = new Map<string, Record<string, unknown>>();
   const observations = new Map<string, Observation>();
@@ -88,6 +89,9 @@ function setup(
   const credentials = {
     getText: vi.fn(async (descriptor: { id: string }) =>
       descriptor.id.endsWith("webhook-secret") ? SECRET : "personal-token",
+    ),
+    isConfigured: vi.fn(async (descriptor: { id: string }) =>
+      descriptor.id.endsWith("private-key") ? appConfigured : true,
     ),
   };
   const pipelineStatus = {
@@ -179,10 +183,15 @@ function setup(
       })),
     },
     gitHubAppSettings: {
-      findUnique: vi.fn(async () => ({
-        installationId: "456",
-        enhancedPipelineWebhooksEnabled,
-      })),
+      findUnique: vi.fn(async () =>
+        appConfigured
+          ? {
+              id: "default",
+              installationId: "456",
+              enhancedPipelineWebhooksEnabled,
+            }
+          : null,
+      ),
     },
     gitHubWebhookDelivery: {
       create: vi.fn(async ({ data }) => {
@@ -665,6 +674,55 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test("keeps completed PAT-polled runs non-retryable without a GitHub App", async () => {
+    const { service, pipelineStatus } = setup(
+      undefined,
+      undefined,
+      false,
+      false,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        githubResponse([
+          {
+            id: 101,
+            workflow_id: 202,
+            run_attempt: 1,
+            name: "CI",
+            status: "completed",
+            conclusion: "success",
+            head_sha: "abc123",
+            updated_at: "2026-07-22T13:00:00.000Z",
+            check_suite_node_id: "suite-node-1",
+            repository: {
+              node_id: "repository-node-1",
+              full_name: "acme/widgets",
+              html_url: "https://github.com/acme/widgets",
+            },
+          },
+        ]),
+      ),
+    );
+
+    await (
+      service as unknown as {
+        pollRepositories(): Promise<Record<string, unknown>>;
+      }
+    ).pollRepositories();
+
+    expect(pipelineStatus.observeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipelines: [
+          expect.objectContaining({
+            canRetry: false,
+            retryUnavailableReason: "GITHUB_APP_NOT_CONFIGURED",
+          }),
+        ],
+      }),
+    );
+  });
+
   test("paginates until it reaches runs older than the previous successful poll", async () => {
     const { service, notifications, pollingStates } = setup();
     const previousPoll = new Date("2026-07-22T12:00:00.000Z");

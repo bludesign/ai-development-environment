@@ -337,6 +337,79 @@ describe("GitHubPipelineStatusService", () => {
     });
   });
 
+  test("preserves workflow metadata when a newer partial webhook wins", async () => {
+    await service.observeWorkflowRuns(
+      [
+        run({
+          id: "metadata-run",
+          workflowId: "metadata-workflow",
+          checkSuiteId: "metadata-suite",
+          headSha: "sha-metadata",
+          runNumber: 42,
+          runAttempt: 3,
+          updatedAt: "2026-07-26T10:06:00.000Z",
+        }),
+      ],
+      "REST",
+      true,
+    );
+    await service.observeSnapshot({
+      repositoryGithubId: "repository-1",
+      repositoryNameWithOwner: "acme/widgets",
+      repositoryUrl: "https://github.com/acme/widgets",
+      headSha: "sha-metadata",
+      pipelines: [
+        {
+          id: "check-run-1",
+          name: "test",
+          status: "SUCCESS",
+          checkSuiteId: "metadata-suite",
+          source: "WEBHOOK",
+          githubUpdatedAt: new Date("2026-07-26T10:07:00.000Z"),
+        },
+      ],
+    });
+
+    const [record] = await service.records([
+      {
+        repositoryGithubId: "repository-1",
+        workflowRunId: "metadata-run",
+      },
+    ]);
+    expect(record).toMatchObject({
+      workflowRunId: "metadata-run",
+      workflowId: "metadata-workflow",
+      runNumber: 42,
+      runAttempt: 3,
+      canRetry: true,
+      retryUnavailableReason: null,
+    });
+  });
+
+  test("disables retryability while a rerun is optimistically queued", async () => {
+    await service.observeWorkflowRuns(
+      [
+        run({
+          id: "optimistic-run",
+          checkSuiteId: "optimistic-suite",
+          headSha: "sha-optimistic",
+        }),
+      ],
+      "REST",
+      true,
+    );
+
+    await expect(
+      service.optimisticByWorkflowRun("repository-1", "optimistic-run", {
+        status: "QUEUED",
+      }),
+    ).resolves.toMatchObject({
+      status: "QUEUED",
+      canRetry: false,
+      retryUnavailableReason: "NOT_COMPLETED",
+    });
+  });
+
   test("reconciles a stale pending webhook from complete REST jobs and the GraphQL rollup", async () => {
     const updatedAt = new Date("2026-07-26T10:05:00.000Z");
     await service.observeSnapshot({

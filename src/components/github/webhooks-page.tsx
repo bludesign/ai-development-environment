@@ -80,7 +80,7 @@ export function GitHubWebhooksPage() {
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestOffset: number) => {
     setLoading(true);
     try {
       const data = await controlPlaneRequest<{
@@ -95,7 +95,7 @@ export function GitHubWebhooksPage() {
             }
           }
         }`,
-        { limit: PAGE_SIZE, offset },
+        { limit: PAGE_SIZE, offset: requestOffset },
       );
       setPage(data.githubWebhookDeliveries);
       setError(null);
@@ -104,7 +104,7 @@ export function GitHubWebhooksPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset]);
+  }, []);
 
   const clearHistory = async () => {
     setClearing(true);
@@ -116,7 +116,7 @@ export function GitHubWebhooksPage() {
           ? { ...current, items: [], total: 0, limit: PAGE_SIZE, offset: 0 }
           : current,
       );
-      setError(null);
+      await load(0);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -125,9 +125,9 @@ export function GitHubWebhooksPage() {
   };
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
+    const timeout = window.setTimeout(() => void load(offset), 0);
     return () => window.clearTimeout(timeout);
-  }, [load]);
+  }, [load, offset]);
 
   useEffect(() => {
     if (page?.enabled === false) router.replace("/");
@@ -213,7 +213,7 @@ export function GitHubWebhooksPage() {
           <Button
             aria-label={t("refresh")}
             disabled={clearing}
-            onClick={() => void load()}
+            onClick={() => void load(offset)}
             size="icon"
             type="button"
             variant="outline"
