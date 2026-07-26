@@ -431,8 +431,9 @@ export function GitHubCachePage() {
                         <TableHead>{t("operation")}</TableHead>
                         <TableHead>{t("callInfo")}</TableHead>
                         <TableHead>{t("source")}</TableHead>
-                        <TableHead>{t("status")}</TableHead>
-                        <TableHead>{t("pointRate")}</TableHead>
+                        <TableHead className="min-w-56">
+                          {t("status")}
+                        </TableHead>
                         <TableHead>{t("error")}</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -442,7 +443,7 @@ export function GitHubCachePage() {
                           <TableRow className="bg-muted/20 hover:bg-muted/20">
                             <TableCell
                               className="py-1.5 text-xs font-normal text-muted-foreground"
-                              colSpan={7}
+                              colSpan={6}
                             >
                               {group.label}
                             </TableCell>
@@ -460,10 +461,10 @@ export function GitHubCachePage() {
                                   <Badge variant="secondary">
                                     {call.authentication}
                                   </Badge>
-                                  <span>
-                                    {call.operation.replaceAll("_", " ")}
-                                  </span>
                                 </div>
+                                <p className="mt-1">
+                                  {call.operation.replaceAll("_", " ")}
+                                </p>
                                 <p className="mt-1 max-w-sm truncate font-mono text-xs font-normal text-muted-foreground">
                                   {call.method} {call.endpoint}
                                 </p>
@@ -495,31 +496,34 @@ export function GitHubCachePage() {
                               <TableCell>
                                 {t(`requestSources.${call.requestSource}`)}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="min-w-56 whitespace-normal">
                                 <Badge className={statusClass(call.source)}>
                                   {t(`statuses.${call.source}`)}
                                   {call.servedStale ? ` · ${t("stale")}` : ""}
                                 </Badge>
-                              </TableCell>
-                              <TableCell className="whitespace-normal">
-                                <span className="font-medium">
-                                  {call.pointCost ?? "—"}
-                                </span>
-                                <span className="ml-2 text-xs text-muted-foreground">
-                                  {t("avoided", { count: call.pointsAvoided })}
-                                </span>
-                                <span className="block text-xs text-muted-foreground">
-                                  {call.rateLimitResource ?? "—"} · {t("used")}{" "}
-                                  {call.rateLimitUsed ?? "—"} · {t("remaining")}{" "}
-                                  {call.rateLimitRemaining ?? "—"}/
-                                  {call.rateLimitLimit ?? "—"}
-                                </span>
-                                {call.rateLimitResetAt && (
-                                  <span className="block text-xs text-muted-foreground">
-                                    {t("reset")}{" "}
-                                    <DateTime value={call.rateLimitResetAt} />
+                                <div className="mt-2">
+                                  <span className="font-medium">
+                                    {call.pointCost ?? "—"}
                                   </span>
-                                )}
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    {t("avoided", {
+                                      count: call.pointsAvoided,
+                                    })}
+                                  </span>
+                                  <span className="block text-xs text-muted-foreground">
+                                    {call.rateLimitResource ?? "—"} ·{" "}
+                                    {t("used")} {call.rateLimitUsed ?? "—"} ·{" "}
+                                    {t("remaining")}{" "}
+                                    {call.rateLimitRemaining ?? "—"}/
+                                    {call.rateLimitLimit ?? "—"}
+                                  </span>
+                                  {call.rateLimitResetAt && (
+                                    <span className="block text-xs text-muted-foreground">
+                                      {t("reset")}{" "}
+                                      <DateTime value={call.rateLimitResetAt} />
+                                    </span>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="max-w-xs whitespace-normal text-destructive">
                                 {call.error ?? "—"}
@@ -694,7 +698,9 @@ function RateLimitPanel({
       {snapshots.length === 0 ? (
         <EmptyState>{t("noRateData")}</EmptyState>
       ) : (
-        <div className="grid gap-3 p-4 sm:grid-cols-2">
+        <div
+          className={`grid gap-3 p-4 ${snapshots.length > 1 ? "sm:grid-cols-2" : ""}`}
+        >
           {snapshots.map((snapshot) => (
             <Card key={`${snapshot.authentication}-${snapshot.resource}`}>
               <CardContent>

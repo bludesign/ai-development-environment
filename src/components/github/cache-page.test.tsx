@@ -148,15 +148,26 @@ describe("GitHubCachePage", () => {
     const { container } = render(<GitHubCachePage />);
     expect(await screen.findByText("PAT · graphql")).toBeDefined();
     expect(screen.getByText("APP · core")).toBeDefined();
+    const graphqlRateGrid = screen
+      .getByText("PAT · graphql")
+      .closest('[data-slot="card"]')?.parentElement;
+    const restRateGrid = screen
+      .getByText("APP · core")
+      .closest('[data-slot="card"]')?.parentElement;
+    expect(graphqlRateGrid?.className).not.toContain("sm:grid-cols-2");
+    expect(restRateGrid?.className).not.toContain("sm:grid-cols-2");
     expect(screen.getByText("4993 / 5000")).toBeDefined();
-    expect(screen.getByText("Points and rate")).toBeDefined();
+    expect(screen.getByText("Status").closest("th")?.className).toContain(
+      "min-w-56",
+    );
     expect(screen.getByText("Calls by source")).toBeDefined();
     expect(screen.getAllByText(/L 1 · C 0 · E 0 · P 7\/0/)).toHaveLength(2);
     expect(screen.getByText("7 points used · 0 avoided")).toBeDefined();
     expect(screen.getAllByText("Source")).toHaveLength(2);
-    expect(screen.getByText("Status")).toBeDefined();
     expect(screen.getAllByText("Pull request details")).toHaveLength(2);
-    expect(screen.getByText("Live")).toBeDefined();
+    const pointRateCell = screen.getByText("Live").closest("td");
+    expect(pointRateCell?.firstElementChild?.textContent).toBe("Live");
+    expect(pointRateCell?.textContent).toContain("0 avoided");
     expect(screen.getByText("pullRequestId=PR_kwDO123")).toBeDefined();
     expect(screen.queryByText(/cursor=null/)).toBeNull();
     expect(screen.getAllByText(/PR_kwDO123/)).toHaveLength(1);
@@ -172,8 +183,13 @@ describe("GitHubCachePage", () => {
           ?.textContent,
       ).toContain('"cursor": null'),
     );
-    expect(container.querySelector('td[colspan="7"]')).not.toBeNull();
+    expect(container.querySelector('td[colspan="6"]')).not.toBeNull();
     const callRow = screen.getByText("pullRequestId=PR_kwDO123").closest("tr");
+    const callOperation = callRow?.querySelector("td:nth-child(2) > p");
+    expect(callOperation?.textContent).toBe("Viewer");
+    expect(callOperation?.previousElementSibling?.textContent).toContain(
+      "GRAPHQLPAT",
+    );
     const callTime = callRow?.querySelector(
       'time[datetime="2026-07-26T05:00:00.000Z"]',
     );
