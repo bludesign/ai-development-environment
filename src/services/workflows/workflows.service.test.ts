@@ -41,7 +41,9 @@ const prisma = vi.hoisted(() => ({
   workflowTriggerEvent: {
     findMany: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
   },
+  workflowTriggerDelivery: { findUnique: vi.fn(), create: vi.fn() },
   workflowResourceLease: { deleteMany: vi.fn() },
   workflowRunEvent: { findFirst: vi.fn(), create: vi.fn() },
 }));
@@ -817,6 +819,9 @@ describe("workflow trigger event processing", () => {
           : Promise.all(operation),
     );
     prisma.workflowTriggerEvent.update.mockResolvedValue({});
+    prisma.workflowTriggerEvent.delete.mockResolvedValue({});
+    prisma.workflowTriggerDelivery.findUnique.mockResolvedValue(null);
+    prisma.workflowTriggerDelivery.create.mockResolvedValue({});
   });
 
   function internals(service: WorkflowsService) {
@@ -825,7 +830,7 @@ describe("workflow trigger event processing", () => {
     };
   }
 
-  test("loads active workflows once for a batch and compacts every success", async () => {
+  test("loads active workflows once for a batch and deletes every success", async () => {
     prisma.workflowTriggerEvent.findMany.mockResolvedValue([
       {
         id: "event-1",
@@ -851,17 +856,13 @@ describe("workflow trigger event processing", () => {
     ).processTriggerEvents();
 
     expect(prisma.workflow.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.workflowTriggerEvent.update).toHaveBeenCalledTimes(2);
-    expect(prisma.workflowTriggerEvent.update).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        where: { id: "event-1" },
-        data: expect.objectContaining({
-          status: "PROCESSED",
-          payloadJson: "{}",
-        }),
-      }),
-    );
+    expect(prisma.workflowTriggerEvent.delete).toHaveBeenNthCalledWith(1, {
+      where: { id: "event-1" },
+    });
+    expect(prisma.workflowTriggerEvent.delete).toHaveBeenNthCalledWith(2, {
+      where: { id: "event-2" },
+    });
+    expect(prisma.workflowTriggerEvent.update).not.toHaveBeenCalled();
   });
 
   test("uses the producer dedupe key for run idempotency", async () => {
@@ -899,11 +900,105 @@ describe("workflow trigger event processing", () => {
       new WorkflowsService(new WorkflowEventsService()),
     ).processTriggerEvents();
 
+    const deliveryId = prisma.workflowTriggerDelivery.findUnique.mock
+      .calls[0]?.[0].where.id as string;
+    expect(deliveryId).toMatch(/^[a-f0-9]{64}$/);
     expect(prisma.workflowRun.findUnique).toHaveBeenCalledWith({
-      where: {
-        idempotencyKey:
-          "workflow-event:run-status:run-1:COMPLETED:workflow-1:trigger-1",
+      where: { idempotencyKey: deliveryId },
+    });
+    expect(prisma.workflowTriggerDelivery.create).toHaveBeenCalledWith({
+      data: { id: deliveryId, runId: "existing-run" },
+    });
+  });
+
+  test("skips trigger evaluation when the target delivery already exists", async () => {
+    prisma.workflowTriggerEvent.findMany.mockResolvedValue([
+      {
+        id: "event-1",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-1",
+        dedupeKey: "run-status:run-1:COMPLETED",
+        payloadJson: JSON.stringify({ sessionData: {}, cursorValue: "done" }),
+        receivedAt: new Date(),
       },
+    ]);
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow-1",
+        overlapPolicy: "CONCURRENT",
+        activeVersion: {
+          id: "version-1",
+          name: "Run completion",
+          triggers: [
+            {
+              id: "trigger-1",
+              nodeId: "completed",
+              kind: "RUN_COMPLETED",
+              configJson: "{}",
+            },
+          ],
+        },
+      },
+    ]);
+    prisma.workflowTriggerDelivery.findUnique.mockResolvedValue({
+      id: "delivered",
+    });
+
+    await internals(
+      new WorkflowsService(new WorkflowEventsService()),
+    ).processTriggerEvents();
+
+    expect(prisma.workflowTriggerState.findUnique).not.toHaveBeenCalled();
+    expect(prisma.workflowRun.findUnique).not.toHaveBeenCalled();
+    expect(prisma.workflowTriggerEvent.delete).toHaveBeenCalledWith({
+      where: { id: "event-1" },
+    });
+  });
+
+  test("records a delivery when an event coalesces into a queued run", async () => {
+    prisma.workflowTriggerEvent.findMany.mockResolvedValue([
+      {
+        id: "event-1",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-1",
+        dedupeKey: "run-status:run-1:COMPLETED",
+        payloadJson: JSON.stringify({ sessionData: {} }),
+        receivedAt: new Date(),
+      },
+    ]);
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow-1",
+        overlapPolicy: "COALESCE_LATEST",
+        activeVersion: {
+          id: "version-1",
+          name: "Run completion",
+          triggers: [
+            {
+              id: "trigger-1",
+              nodeId: "completed",
+              kind: "RUN_COMPLETED",
+              configJson: "{}",
+            },
+          ],
+        },
+      },
+    ]);
+    prisma.workflowRun.findUnique.mockResolvedValue(null);
+    prisma.workflowRun.findFirst.mockResolvedValue({ id: "queued-run" });
+    prisma.workflowRun.update.mockResolvedValue({ id: "queued-run" });
+
+    await internals(
+      new WorkflowsService(new WorkflowEventsService()),
+    ).processTriggerEvents();
+
+    const deliveryId = prisma.workflowTriggerDelivery.findUnique.mock
+      .calls[0]?.[0].where.id as string;
+    expect(prisma.workflowTriggerDelivery.create).toHaveBeenCalledWith({
+      data: { id: deliveryId, runId: "queued-run" },
+    });
+    expect(prisma.workflowTriggerEvent.delete).toHaveBeenCalledWith({
+      where: { id: "event-1" },
     });
   });
 

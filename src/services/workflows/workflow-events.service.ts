@@ -5,11 +5,9 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
 
-const PROCESSED_RECEIPT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const FAILED_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1_000;
 const MAINTENANCE_BATCH_SIZE = 1_000;
-const COMPACTED_PAYLOAD = "{}";
 
 export type RecordWorkflowEventInput = {
   kind: string;
@@ -65,12 +63,7 @@ export class WorkflowEventsService {
     const expired = await prisma.workflowTriggerEvent.findMany({
       where: {
         OR: [
-          {
-            status: "PROCESSED",
-            receivedAt: {
-              lt: new Date(now - PROCESSED_RECEIPT_RETENTION_MS),
-            },
-          },
+          { status: "PROCESSED" },
           {
             status: "FAILED",
             receivedAt: { lt: new Date(now - FAILED_EVENT_RETENTION_MS) },
@@ -86,25 +79,6 @@ export class WorkflowEventsService {
         where: { id: { in: expired.map(({ id }) => id) } },
       });
       // Keep draining a legacy backlog on subsequent runtime ticks.
-      this.nextMaintenanceAt = 0;
-      return;
-    }
-
-    const uncompacted = await prisma.workflowTriggerEvent.findMany({
-      where: {
-        status: "PROCESSED",
-        payloadJson: { not: COMPACTED_PAYLOAD },
-      },
-      select: { id: true },
-      orderBy: { receivedAt: "asc" },
-      take: MAINTENANCE_BATCH_SIZE,
-    });
-    if (uncompacted.length) {
-      await prisma.workflowTriggerEvent.updateMany({
-        where: { id: { in: uncompacted.map(({ id }) => id) } },
-        data: { payloadJson: COMPACTED_PAYLOAD },
-      });
-      // Keep compacting a legacy backlog on subsequent runtime ticks.
       this.nextMaintenanceAt = 0;
       return;
     }

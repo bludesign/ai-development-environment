@@ -156,4 +156,43 @@ describe("workflow additive migration", () => {
         .get(),
     ).toEqual({ rebaseInProgress: 0, hasConflicts: 0 });
   });
+
+  test("adds trigger delivery receipts that follow their workflow run", () => {
+    database = new Database(":memory:");
+    database.pragma("foreign_keys = ON");
+    database.exec(`
+      CREATE TABLE "WorkflowRun" (
+        "id" TEXT NOT NULL PRIMARY KEY
+      );
+      INSERT INTO "WorkflowRun" ("id") VALUES ('run-1');
+    `);
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "prisma/migrations/20260726080000_add_workflow_trigger_deliveries/migration.sql",
+      ),
+      "utf8",
+    );
+    database.exec(migration);
+    database
+      .prepare(
+        `INSERT INTO "WorkflowTriggerDelivery" ("id", "runId") VALUES (?, ?)`,
+      )
+      .run("delivery-1", "run-1");
+
+    expect(
+      database
+        .prepare(
+          `SELECT "id", "runId" FROM "WorkflowTriggerDelivery" WHERE "id" = ?`,
+        )
+        .get("delivery-1"),
+    ).toEqual({ id: "delivery-1", runId: "run-1" });
+
+    database.prepare(`DELETE FROM "WorkflowRun" WHERE "id" = ?`).run("run-1");
+    expect(
+      database
+        .prepare(`SELECT COUNT(*) AS count FROM "WorkflowTriggerDelivery"`)
+        .get(),
+    ).toEqual({ count: 0 });
+  });
 });

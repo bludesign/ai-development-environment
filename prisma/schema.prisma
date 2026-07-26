@@ -2450,6 +2450,15 @@ model WorkflowTriggerEvent {
   @@index([kind, subjectKey, receivedAt])
 }
 
+model WorkflowTriggerDelivery {
+  id        String      @id
+  runId     String
+  createdAt DateTime    @default(now())
+  run       WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
 model WorkflowRun {
   id                 String                    @id
   displayNumber      Int                       @unique
@@ -2487,6 +2496,7 @@ model WorkflowRun {
   events             WorkflowRunEvent[]
   resourceLinks      WorkflowRunResourceLink[]
   leases             WorkflowResourceLease[]
+  triggerDeliveries  WorkflowTriggerDelivery[]
 
   @@index([workflowId, status, queuedAt])
   @@index([versionId, createdAt])

@@ -8,7 +8,6 @@ const prisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn(),
-    updateMany: vi.fn(),
     deleteMany: vi.fn(),
   },
 }));
@@ -67,7 +66,7 @@ describe("WorkflowEventsService", () => {
     );
   });
 
-  test("deletes expired terminal rows before compacting recent receipts", async () => {
+  test("deletes legacy processed rows and expired failures in bounded batches", async () => {
     prisma.workflowTriggerEvent.findMany.mockResolvedValueOnce([
       { id: "expired-1" },
     ]);
@@ -78,20 +77,19 @@ describe("WorkflowEventsService", () => {
     expect(prisma.workflowTriggerEvent.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["expired-1"] } },
     });
-    expect(prisma.workflowTriggerEvent.updateMany).not.toHaveBeenCalled();
-  });
-
-  test("compacts legacy processed payloads in bounded batches", async () => {
-    prisma.workflowTriggerEvent.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "processed-1" }]);
-    const service = new WorkflowEventsService();
-
-    await service.maintain();
-
-    expect(prisma.workflowTriggerEvent.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["processed-1"] } },
-      data: { payloadJson: "{}" },
-    });
+    expect(prisma.workflowTriggerEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { status: "PROCESSED" },
+            {
+              status: "FAILED",
+              receivedAt: { lt: expect.any(Date) },
+            },
+          ],
+        },
+        take: 1_000,
+      }),
+    );
   });
 });
