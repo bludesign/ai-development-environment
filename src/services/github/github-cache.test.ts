@@ -456,7 +456,7 @@ describe("GitHubCache", () => {
     });
     const metrics = await cache.metrics();
     expect(metrics.windows[0]).toMatchObject({
-      pointsUsed: 4,
+      pointsUsed: 5,
       pointsAvoided: 4,
       total: 3,
     });
@@ -470,7 +470,7 @@ describe("GitHubCache", () => {
     expect(metrics.apiTypes[1]).toMatchObject({ apiType: "REST" });
     expect(metrics.apiTypes[1]?.windows[0]).toMatchObject({
       total: 1,
-      pointsUsed: 0,
+      pointsUsed: 1,
       pointsAvoided: 0,
     });
     const graphqlOperation = metrics.operations.find(
@@ -597,6 +597,7 @@ describe("GitHubCache", () => {
       method: "GET",
       operation: "actions.listJobsForWorkflowRun",
       requestSource: "ACTIONS_PAGE",
+      pointCost: 1,
     });
     expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({
       path: "/repos/acme/widgets/actions/runs/44/jobs",
@@ -658,7 +659,7 @@ describe("GitHubCache", () => {
       metrics.operations.find(
         ({ operation }) => operation === "actions.listJobsForWorkflowRun",
       )?.windows[0],
-    ).toMatchObject({ total: 2, live: 2 });
+    ).toMatchObject({ total: 2, live: 2, pointsUsed: 2 });
   });
 
   test("filters paginated API calls by API type, request source, and live/cache source", async () => {

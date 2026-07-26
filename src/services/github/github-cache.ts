@@ -529,6 +529,7 @@ export class GitHubCache {
       durationMs: input.durationMs,
       statusCode: input.statusCode,
       error: input.error,
+      pointCost: 1,
       rateLimit: input.rateLimit,
     });
   }
