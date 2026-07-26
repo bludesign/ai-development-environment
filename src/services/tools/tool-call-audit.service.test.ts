@@ -70,4 +70,15 @@ describe("tool-call auditing", () => {
       }),
     );
   });
+
+  test("clears completed records while preserving running calls", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 3 });
+    getPrismaClient.mockResolvedValue({ toolCallAudit: { deleteMany } });
+    const service = new ToolCallAuditService();
+
+    await expect(service.clear()).resolves.toEqual({ count: 3 });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { resultStatus: { not: "RUNNING" } },
+    });
+  });
 });

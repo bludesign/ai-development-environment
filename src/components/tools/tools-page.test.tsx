@@ -31,25 +31,32 @@ afterEach(() => {
 
 describe("ToolsPage", () => {
   test("switches to a searchable tool call audit table", async () => {
+    let cleared = false;
     requestMock.mockImplementation(async (query) => {
-      if (query.includes("ToolCallAudits")) {
+      if (query.includes("mutation ClearToolCallAudits")) {
+        cleared = true;
+        return { clearToolCallAudits: { count: 1 } } as never;
+      }
+      if (query.includes("query ToolCallAudits")) {
         return {
-          toolCallAudits: [
-            {
-              id: "audit-1",
-              correlationId: "correlation-1",
-              caller: "runner-1",
-              source: "WORKFLOW",
-              groupId: "builtin:codebases",
-              toolName: "get_codebase",
-              argumentsSha256:
-                "807074c963aab9d3d09b49b6056652a6b05b1f1e88066dbac57e2a03658be3dc",
-              resultStatus: "SUCCEEDED",
-              durationMs: 42,
-              startedAt: "2026-07-26T12:00:00.000Z",
-              finishedAt: "2026-07-26T12:00:00.042Z",
-            },
-          ],
+          toolCallAudits: cleared
+            ? []
+            : [
+                {
+                  id: "audit-1",
+                  correlationId: "correlation-1",
+                  caller: "runner-1",
+                  source: "WORKFLOW",
+                  groupId: "builtin:codebases",
+                  toolName: "get_codebase",
+                  argumentsSha256:
+                    "807074c963aab9d3d09b49b6056652a6b05b1f1e88066dbac57e2a03658be3dc",
+                  resultStatus: "SUCCEEDED",
+                  durationMs: 42,
+                  startedAt: "2026-07-26T12:00:00.000Z",
+                  finishedAt: "2026-07-26T12:00:00.042Z",
+                },
+              ],
         } as never;
       }
       return { externalMcpServers: [] } as never;
@@ -79,6 +86,23 @@ describe("ToolsPage", () => {
     expect(
       screen.getByText("No audit records match the search."),
     ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear audit" }));
+    expect(
+      await screen.findByText(
+        "Delete all completed tool-call audit records? Calls currently running will be preserved.",
+      ),
+    ).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete audit records" }),
+    );
+
+    expect(
+      await screen.findByText("No tool calls have been audited."),
+    ).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      "mutation ClearToolCallAudits { clearToolCallAudits { count } }",
+    );
   });
 
   test("searches, expands, runs a tool, and renders its response", async () => {

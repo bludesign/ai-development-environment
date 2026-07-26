@@ -10,10 +10,11 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("tools resolvers", () => {
-  test("forwards external server CRUD for control-plane callers", async () => {
+  test("forwards tool operations for control-plane callers", async () => {
     const service = {
       externalServers: vi.fn().mockResolvedValue([]),
       toolCallAudits: vi.fn().mockResolvedValue([]),
+      clearToolCallAudits: vi.fn().mockResolvedValue({ count: 3 }),
       createExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
       updateExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
       deleteExternalServer: vi.fn().mockResolvedValue({ id: "server-1" }),
@@ -33,6 +34,7 @@ describe("tools resolvers", () => {
       { first: 25, toolName: "get_codebase", resultStatus: "SUCCEEDED" },
       context(null),
     );
+    await resolvers.Mutation.clearToolCallAudits({}, {}, context(null));
     await resolvers.Mutation.createExternalMcpServer(
       {},
       { input },
@@ -55,6 +57,7 @@ describe("tools resolvers", () => {
       toolName: "get_codebase",
       resultStatus: "SUCCEEDED",
     });
+    expect(service.clearToolCallAudits).toHaveBeenCalledOnce();
     expect(service.updateExternalServer).toHaveBeenCalledWith(
       "server-1",
       input,

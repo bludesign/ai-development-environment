@@ -235,6 +235,10 @@ export class ToolsService {
     return this.audit.list(input);
   }
 
+  async clearToolCallAudits(): Promise<{ count: number }> {
+    return this.audit.clear();
+  }
+
   async createMcpToolPreset(
     input: McpToolPresetInput,
   ): Promise<McpToolPresetView> {

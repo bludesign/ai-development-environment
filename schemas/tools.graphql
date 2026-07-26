@@ -54,6 +54,10 @@ type ToolCallAudit {
   finishedAt: String
 }
 
+type ToolCallAuditClearResult {
+  count: Int!
+}
+
 input ExternalMcpServerHeaderInput {
   id: ID
   name: String!
@@ -88,6 +92,7 @@ extend type Query {
 }
 
 extend type Mutation {
+  clearToolCallAudits: ToolCallAuditClearResult!
   createExternalMcpServer(input: ExternalMcpServerInput!): ExternalMcpServer!
   updateExternalMcpServer(
     id: ID!

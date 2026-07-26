@@ -49,6 +49,14 @@ export const createToolsResolvers = (service: ToolsService) => ({
     },
   },
   Mutation: {
+    clearToolCallAudits: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.clearToolCallAudits();
+    },
     createExternalMcpServer: (
       _root: unknown,
       { input }: { input: ExternalMcpServerInput },

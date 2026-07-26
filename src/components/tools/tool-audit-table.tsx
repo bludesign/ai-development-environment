@@ -1,10 +1,11 @@
 "use client";
 
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,10 +37,12 @@ function statusVariant(status: string) {
 
 export function ToolAuditTable() {
   const t = useTranslations("tools");
+  const tc = useTranslations("common");
   const locale = useLocale();
   const [audits, setAudits] = useState<ToolCallAuditView[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -63,6 +66,21 @@ export function ToolAuditTable() {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  const clear = async () => {
+    setClearing(true);
+    try {
+      await controlPlaneRequest(
+        "mutation ClearToolCallAudits { clearToolCallAudits { count } }",
+      );
+      setQuery("");
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const visibleAudits = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -94,6 +112,9 @@ export function ToolAuditTable() {
     () => new Intl.NumberFormat(locale),
     [locale],
   );
+  const hasCompletedAudits = audits.some(
+    (audit) => audit.resultStatus !== "RUNNING",
+  );
 
   return (
     <div className="space-y-4">
@@ -104,15 +125,34 @@ export function ToolAuditTable() {
             {t("auditDescription")}
           </p>
         </div>
-        <Button
-          disabled={loading}
-          onClick={() => void load()}
-          type="button"
-          variant="outline"
-        >
-          {loading ? <Spinner /> : <RefreshCw />}
-          {t("auditRefresh")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            disabled={loading || clearing}
+            onClick={() => void load()}
+            type="button"
+            variant="outline"
+          >
+            {loading ? <Spinner /> : <RefreshCw />}
+            {t("auditRefresh")}
+          </Button>
+          <ConfirmationDialog
+            actionLabel={t("auditClearAction")}
+            cancelLabel={tc("cancel")}
+            description={t("auditClearDescription")}
+            onConfirm={clear}
+            title={t("auditClearTitle")}
+            trigger={
+              <Button
+                disabled={loading || clearing || !hasCompletedAudits}
+                type="button"
+                variant="destructive"
+              >
+                {clearing ? <Spinner /> : <Trash2 />}
+                {t("auditClear")}
+              </Button>
+            }
+          />
+        </div>
       </div>
 
       <div className="relative">

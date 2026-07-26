@@ -72,6 +72,13 @@ function auditView(value: {
 }
 
 export class ToolCallAuditService {
+  async clear(): Promise<{ count: number }> {
+    const prisma = await getPrismaClient();
+    return prisma.toolCallAudit.deleteMany({
+      where: { resultStatus: { not: "RUNNING" } },
+    });
+  }
+
   async execute<T>(
     input: AuditedToolCall,
     operation: () => Promise<T>,
