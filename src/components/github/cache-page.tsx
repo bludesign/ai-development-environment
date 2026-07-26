@@ -32,6 +32,13 @@ import {
 } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -46,17 +53,43 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import type {
   GitHubApiCallView,
+  GitHubApiType,
   GitHubCachedEntryView,
   GitHubCacheMetrics,
+  GitHubCallSource,
   GitHubMetricWindow,
   GitHubPaginatedResult,
   GitHubRateLimitSnapshotView,
+  GitHubRequestSource,
   GitHubSettingsView,
 } from "@/services/github/types";
 
 const PAGE_SIZE = 50;
 const WINDOW_FIELDS =
   "window total live cache errors averageMs pointsUsed pointsAvoided";
+const API_TYPE_FILTERS = ["ALL", "GRAPHQL", "REST"] as const;
+const CALL_SOURCE_FILTERS = ["ALL", "LIVE", "CACHE"] as const;
+const REQUEST_SOURCE_FILTERS = [
+  "ALL",
+  "GITHUB_API",
+  "GITHUB_SETTINGS",
+  "COMMENTS_PAGE",
+  "CODEBASE_REPOSITORY",
+  "PULL_REQUESTS_PAGE",
+  "PULL_REQUEST_DETAILS",
+  "ACTIONS_PAGE",
+  "WORKTREES",
+  "WORKTREE_PIPELINES",
+  "WORKTREE_AUTOMATION",
+  "AUTO_RETRY",
+  "WORKFLOW_AUTOMATION",
+  "ACTIONS_NOTIFICATIONS",
+  "CACHE_MANAGEMENT",
+] as const;
+
+type ApiTypeFilter = GitHubApiType | "ALL";
+type CallSourceFilter = Exclude<GitHubCallSource, "ERROR"> | "ALL";
+type RequestSourceFilter = GitHubRequestSource | "ALL";
 
 type CachePageData = {
   githubSettings: GitHubSettingsView;
@@ -108,6 +141,11 @@ export function GitHubCachePage() {
   const [ttlMinutes, setTtlMinutes] = useState("5");
   const [callOffset, setCallOffset] = useState(0);
   const [entryOffset, setEntryOffset] = useState(0);
+  const [apiTypeFilter, setApiTypeFilter] = useState<ApiTypeFilter>("ALL");
+  const [requestSourceFilter, setRequestSourceFilter] =
+    useState<RequestSourceFilter>("ALL");
+  const [callSourceFilter, setCallSourceFilter] =
+    useState<CallSourceFilter>("ALL");
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -116,7 +154,7 @@ export function GitHubCachePage() {
     setLoading(true);
     try {
       const result = await controlPlaneRequest<CachePageData>(
-        `query GitHubCachePage($limit: Int!, $callOffset: Int!, $entryOffset: Int!) {
+        `query GitHubCachePage($limit: Int!, $callOffset: Int!, $entryOffset: Int!, $apiType: GitHubApiType, $requestSource: GitHubRequestSource, $callSource: GitHubCallSource) {
           githubSettings { tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt }
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
           githubCacheMetrics {
@@ -124,7 +162,7 @@ export function GitHubCachePage() {
             operations { operation windows { ${WINDOW_FIELDS} } }
             requestSources { requestSource windows { ${WINDOW_FIELDS} } }
           }
-          githubApiCalls(limit: $limit, offset: $callOffset) {
+          githubApiCalls(limit: $limit, offset: $callOffset, apiType: $apiType, requestSource: $requestSource, source: $callSource) {
             items { id authentication apiType method endpoint operation requestSource requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
             total limit offset
           }
@@ -133,7 +171,16 @@ export function GitHubCachePage() {
             total limit offset
           }
         }`,
-        { limit: PAGE_SIZE, callOffset, entryOffset },
+        {
+          limit: PAGE_SIZE,
+          callOffset,
+          entryOffset,
+          apiType: apiTypeFilter === "ALL" ? undefined : apiTypeFilter,
+          requestSource:
+            requestSourceFilter === "ALL" ? undefined : requestSourceFilter,
+          callSource:
+            callSourceFilter === "ALL" ? undefined : callSourceFilter,
+        },
       );
       setData(result);
       setTtlMinutes(
@@ -145,7 +192,13 @@ export function GitHubCachePage() {
     } finally {
       setLoading(false);
     }
-  }, [callOffset, entryOffset]);
+  }, [
+    apiTypeFilter,
+    callOffset,
+    callSourceFilter,
+    entryOffset,
+    requestSourceFilter,
+  ]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);
@@ -420,6 +473,75 @@ export function GitHubCachePage() {
                 />
               }
             >
+              <div className="flex flex-wrap gap-2 border-b p-3">
+                <Select
+                  onValueChange={(value) => {
+                    setCallOffset(0);
+                    setApiTypeFilter(value as ApiTypeFilter);
+                  }}
+                  value={apiTypeFilter}
+                >
+                  <SelectTrigger
+                    aria-label={t("filterApiType")}
+                    className="min-w-40"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    {API_TYPE_FILTERS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value === "ALL" ? t("allApiTypes") : value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  onValueChange={(value) => {
+                    setCallOffset(0);
+                    setRequestSourceFilter(value as RequestSourceFilter);
+                  }}
+                  value={requestSourceFilter}
+                >
+                  <SelectTrigger
+                    aria-label={t("filterRequestSource")}
+                    className="min-w-52"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    {REQUEST_SOURCE_FILTERS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value === "ALL"
+                          ? t("allRequestSources")
+                          : t(`requestSources.${value}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  onValueChange={(value) => {
+                    setCallOffset(0);
+                    setCallSourceFilter(value as CallSourceFilter);
+                  }}
+                  value={callSourceFilter}
+                >
+                  <SelectTrigger
+                    aria-label={t("filterCallSource")}
+                    className="min-w-40"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    {CALL_SOURCE_FILTERS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value === "ALL"
+                          ? t("liveAndCache")
+                          : t(`statuses.${value}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               {data.githubApiCalls.items.length === 0 ? (
                 <EmptyState>{t("noCalls")}</EmptyState>
               ) : (

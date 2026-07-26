@@ -155,13 +155,29 @@ vi.mock("@/data/prisma-client", () => ({
         take,
         skip,
       }: {
-        where?: { createdAt?: { gte?: Date } };
+        where?: {
+          createdAt?: { gte?: Date };
+          apiType?: string;
+          requestSource?: string;
+          source?: string;
+        };
         take?: number;
         skip?: number;
       }) => {
         let calls = [...state.calls];
         const gte = where?.createdAt?.gte;
         if (gte) calls = calls.filter((call) => call.createdAt >= gte);
+        if (where?.apiType) {
+          calls = calls.filter((call) => call.apiType === where.apiType);
+        }
+        if (where?.requestSource) {
+          calls = calls.filter(
+            (call) => call.requestSource === where.requestSource,
+          );
+        }
+        if (where?.source) {
+          calls = calls.filter((call) => call.source === where.source);
+        }
         calls.sort(
           (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
         );
@@ -169,7 +185,22 @@ vi.mock("@/data/prisma-client", () => ({
           ? calls
           : calls.slice(skip ?? 0, (skip ?? 0) + take);
       },
-      count: async () => state.calls.length,
+      count: async ({
+        where,
+      }: {
+        where?: {
+          apiType?: string;
+          requestSource?: string;
+          source?: string;
+        };
+      } = {}) =>
+        state.calls.filter(
+          (call) =>
+            (!where?.apiType || call.apiType === where.apiType) &&
+            (!where?.requestSource ||
+              call.requestSource === where.requestSource) &&
+            (!where?.source || call.source === where.source),
+        ).length,
       deleteMany: async ({
         where,
       }: { where?: { createdAt: { lt: Date } } } = {}) => {
@@ -416,6 +447,43 @@ describe("GitHubCache", () => {
     expect(JSON.parse(state.calls[1]!.variablesJson)).toEqual({
       apiToken: "[REDACTED]",
       pullRequestId: "PR_kwDO123",
+    });
+  });
+
+  test("filters paginated API calls by API type, request source, and live/cache source", async () => {
+    const cache = new GitHubCache();
+    const fetcher = vi.fn(async () => ({
+      data: { value: 1 },
+      statusCode: 200,
+      pointCost: 3,
+      rateLimit: null,
+    }));
+    await cache.query(input("PAT", fetcher));
+    await cache.query(input("PAT", fetcher));
+    await cache.recordRestCall({
+      authentication: "APP",
+      method: "GET",
+      endpoint: "https://api.github.com/repos/acme/widgets",
+      requestSource: "CODEBASE_REPOSITORY",
+      durationMs: 12,
+      statusCode: 200,
+    });
+
+    await expect(
+      cache.calls(50, 0, {
+        apiType: "GRAPHQL",
+        requestSource: "PULL_REQUESTS_PAGE",
+        source: "CACHE",
+      }),
+    ).resolves.toMatchObject({
+      total: 1,
+      items: [
+        {
+          apiType: "GRAPHQL",
+          requestSource: "PULL_REQUESTS_PAGE",
+          source: "CACHE",
+        },
+      ],
     });
   });
 

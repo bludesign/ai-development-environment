@@ -513,6 +513,12 @@ const mockTranslations = {
     confirmClearCalls:
       "Clear all recent GitHub API calls? Cached responses and rate-limit snapshots will be kept.",
     noCalls: "No calls recorded.",
+    filterApiType: "Filter calls by API type",
+    allApiTypes: "GraphQL & REST",
+    filterRequestSource: "Filter calls by source",
+    allRequestSources: "All sources",
+    filterCallSource: "Filter calls by live or cache",
+    liveAndCache: "Live & cache",
     time: "Time",
     source: "Source",
     callInfo: "Call information",

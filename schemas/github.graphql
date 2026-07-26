@@ -663,7 +663,13 @@ extend type Query {
   githubSettings: GitHubSettings!
   githubRateLimitSnapshots: [GitHubRateLimitSnapshot!]!
   githubCacheMetrics: GitHubCacheMetrics!
-  githubApiCalls(limit: Int = 50, offset: Int = 0): GitHubApiCallPage!
+  githubApiCalls(
+    limit: Int = 50
+    offset: Int = 0
+    apiType: GitHubApiType
+    requestSource: GitHubRequestSource
+    source: GitHubCallSource
+  ): GitHubApiCallPage!
   githubCachedEntries(limit: Int = 50, offset: Int = 0): GitHubCachedEntryPage!
   githubCachedEntry(id: ID!): GitHubCachedEntryDetail
   githubAppSettings: GitHubAppSettings!

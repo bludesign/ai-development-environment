@@ -7,6 +7,7 @@ import { getPrismaClient } from "@/data/prisma-client";
 import type { GitHubRateLimitMetadata } from "./github-rate-limit";
 import type {
   GitHubApiCallView,
+  GitHubApiCallFilters,
   GitHubApiType,
   GitHubAuthentication,
   GitHubCachedEntryDetail,
@@ -517,17 +518,26 @@ export class GitHubCache {
   async calls(
     limit = 50,
     offset = 0,
+    filters: GitHubApiCallFilters = {},
   ): Promise<GitHubPaginatedResult<GitHubApiCallView>> {
     const pagination = this.pagination(limit, offset);
     await this.pruneLogs();
     const prisma = await getPrismaClient();
+    const where = {
+      ...(filters.apiType ? { apiType: filters.apiType } : {}),
+      ...(filters.requestSource
+        ? { requestSource: filters.requestSource }
+        : {}),
+      ...(filters.source ? { source: filters.source } : {}),
+    };
     const [calls, total] = await Promise.all([
       prisma.gitHubApiCallLog.findMany({
+        where,
         take: pagination.limit,
         skip: pagination.offset,
         orderBy: { createdAt: "desc" },
       }),
-      prisma.gitHubApiCallLog.count(),
+      prisma.gitHubApiCallLog.count({ where }),
     ]);
     return {
       ...pagination,

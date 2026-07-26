@@ -18,6 +18,7 @@ import {
 } from "@/server/github/github-app";
 
 import type {
+  GitHubApiCallFilters,
   GitHubApiCallView,
   GitHubActionsRepositoryErrorView,
   GitHubActionsRepositoryView,
@@ -1511,8 +1512,9 @@ export class GitHubService {
   async apiCalls(
     limit = 50,
     offset = 0,
+    filters: GitHubApiCallFilters = {},
   ): Promise<GitHubPaginatedResult<GitHubApiCallView>> {
-    return this.cache.calls(limit, offset);
+    return this.cache.calls(limit, offset, filters);
   }
 
   async cachedEntries(

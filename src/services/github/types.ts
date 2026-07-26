@@ -125,6 +125,12 @@ export type GitHubApiCallView = {
   createdAt: string;
 };
 
+export type GitHubApiCallFilters = {
+  apiType?: GitHubApiType;
+  requestSource?: GitHubRequestSource;
+  source?: GitHubCallSource;
+};
+
 export type GitHubCachedEntryView = {
   id: string;
   authentication: GitHubAuthentication;

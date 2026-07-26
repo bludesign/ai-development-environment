@@ -3,6 +3,7 @@ import type { GraphQLResolveInfo, SelectionSetNode } from "graphql";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   GitHubAuditContext,
+  GitHubApiCallFilters,
   GitHubMergeMethod,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
@@ -116,11 +117,21 @@ export const createGitHubResolvers = (
     },
     githubApiCalls: (
       _root: unknown,
-      { limit, offset }: { limit?: number; offset?: number },
+      {
+        limit,
+        offset,
+        apiType,
+        requestSource,
+        source,
+      }: { limit?: number; offset?: number } & GitHubApiCallFilters,
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.apiCalls(limit, offset);
+      return gitHubService.apiCalls(limit, offset, {
+        apiType,
+        requestSource,
+        source,
+      });
     },
     githubCachedEntries: (
       _root: unknown,

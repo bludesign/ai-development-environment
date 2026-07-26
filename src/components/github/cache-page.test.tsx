@@ -17,6 +17,11 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  configurable: true,
+  value: () => undefined,
+});
+
 afterEach(() => {
   cleanup();
   requestMock.mockReset();
@@ -165,6 +170,53 @@ describe("GitHubCachePage", () => {
     expect(screen.getByText("7 points used · 0 avoided")).toBeDefined();
     expect(screen.getAllByText("Source")).toHaveLength(2);
     expect(screen.getAllByText("Pull request details")).toHaveLength(2);
+    expect(
+      screen.getByRole("combobox", { name: "Filter calls by API type" })
+        .textContent,
+    ).toContain("GraphQL & REST");
+    expect(
+      screen.getByRole("combobox", { name: "Filter calls by source" })
+        .textContent,
+    ).toContain("All sources");
+    expect(
+      screen.getByRole("combobox", { name: "Filter calls by live or cache" })
+        .textContent,
+    ).toContain("Live & cache");
+
+    const apiTypeFilter = screen.getByRole("combobox", {
+      name: "Filter calls by API type",
+    });
+    apiTypeFilter.focus();
+    fireEvent.keyDown(apiTypeFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "REST" }));
+
+    const requestSourceFilter = screen.getByRole("combobox", {
+      name: "Filter calls by source",
+    });
+    requestSourceFilter.focus();
+    fireEvent.keyDown(requestSourceFilter, { key: "ArrowDown" });
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Actions page" }),
+    );
+
+    const callSourceFilter = screen.getByRole("combobox", {
+      name: "Filter calls by live or cache",
+    });
+    callSourceFilter.focus();
+    fireEvent.keyDown(callSourceFilter, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Cache" }));
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("query GitHubCachePage") &&
+            variables?.apiType === "REST" &&
+            variables?.requestSource === "ACTIONS_PAGE" &&
+            variables?.callSource === "CACHE" &&
+            variables?.callOffset === 0,
+        ),
+      ).toBe(true),
+    );
     const pointRateCell = screen.getByText("Live").closest("td");
     expect(pointRateCell?.firstElementChild?.textContent).toBe("Live");
     expect(pointRateCell?.textContent).toContain("0 avoided");
