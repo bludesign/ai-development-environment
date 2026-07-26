@@ -47,6 +47,10 @@ import {
   worktreeInspectionTopic,
 } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
+import type {
+  GitHubPullRequestLiveStatus,
+  GitHubPullRequestView,
+} from "@/services/github/types";
 import type { JiraService } from "@/services/jira";
 import { jiraBranchCandidates } from "@/services/jira";
 import type { SkillsService } from "@/services/skills";
@@ -123,6 +127,7 @@ const worktreeInclude = {
   },
   autoSync: true,
   autoMerge: true,
+  pullRequest: true,
   _count: {
     select: {
       builds: { where: { status: { in: ACTIVE_BUILD_STATUSES } } },
@@ -133,6 +138,18 @@ const worktreeInclude = {
 type WorktreeRecord = Prisma.WorktreeGetPayload<{
   include: typeof worktreeInclude;
 }>;
+
+type StoredPullRequest = NonNullable<WorktreeRecord["pullRequest"]>;
+
+type PullRequestTarget = {
+  id: string;
+  branch: string | null;
+  pullRequestLookupOrigin: string | null;
+  pullRequestLookupBranch: string | null;
+  pullRequestLookupAt: Date | null;
+  pullRequest: GitHubPullRequestView | null;
+  codebase: { repository: { canonicalOrigin: string } };
+};
 type WorktreePayloadSource = {
   id: string;
   codebaseId: string;
@@ -217,6 +234,105 @@ function ticketKey(branch: string | null, pattern: string): string | null {
   }
 }
 
+function jsonArray<T>(value: string): T[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function storedPullRequestView(
+  value: StoredPullRequest,
+): GitHubPullRequestView {
+  return {
+    id: value.githubId,
+    number: value.number,
+    title: value.title,
+    url: value.url,
+    repositoryGithubId: value.repositoryGithubId,
+    repositoryNameWithOwner: value.repositoryNameWithOwner,
+    repositoryUrl: value.repositoryUrl,
+    labels: jsonArray<string>(value.labelsJson),
+    jiraKey: value.jiraKey,
+    pipelineStatus:
+      value.pipelineStatus as GitHubPullRequestView["pipelineStatus"],
+    pipelines: jsonArray<GitHubPullRequestView["pipelines"][number]>(
+      value.pipelinesJson,
+    ),
+    reviewDecision:
+      value.reviewDecision as GitHubPullRequestView["reviewDecision"],
+    unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
+    state: value.state as GitHubPullRequestView["state"],
+    isDraft: value.isDraft,
+    mergeable: value.mergeable as GitHubPullRequestView["mergeable"],
+    mergeStateStatus: value.mergeStateStatus,
+    autoMergeEnabled: value.autoMergeEnabled,
+    viewerCanEnableAutoMerge: value.viewerCanEnableAutoMerge,
+    viewerCanDisableAutoMerge: value.viewerCanDisableAutoMerge,
+    headRefOid: value.headRefOid,
+    headRefName: value.headRefName,
+    worktreeId: value.worktreeId,
+    worktreeHighlightColor: null,
+    createdAt: value.githubCreatedAt.toISOString(),
+  };
+}
+
+function pullRequestData(value: GitHubPullRequestView) {
+  return {
+    githubId: value.id,
+    number: value.number,
+    title: value.title,
+    url: value.url,
+    repositoryGithubId: value.repositoryGithubId,
+    repositoryNameWithOwner: value.repositoryNameWithOwner,
+    repositoryUrl: value.repositoryUrl,
+    labelsJson: JSON.stringify(value.labels),
+    jiraKey: value.jiraKey,
+    pipelineStatus: value.pipelineStatus,
+    pipelinesJson: JSON.stringify(value.pipelines),
+    reviewDecision: value.reviewDecision,
+    unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
+    state: value.state,
+    isDraft: value.isDraft,
+    mergeable: value.mergeable,
+    mergeStateStatus: value.mergeStateStatus,
+    autoMergeEnabled: value.autoMergeEnabled,
+    viewerCanEnableAutoMerge: value.viewerCanEnableAutoMerge,
+    viewerCanDisableAutoMerge: value.viewerCanDisableAutoMerge,
+    headRefOid: value.headRefOid,
+    headRefName: value.headRefName,
+    githubCreatedAt: new Date(value.createdAt),
+  };
+}
+
+function pullRequestLiveData(value: GitHubPullRequestLiveStatus) {
+  return {
+    pipelineStatus: value.pipelineStatus,
+    pipelinesJson: JSON.stringify(value.pipelines),
+    reviewDecision: value.reviewDecision,
+    unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
+    state: value.state,
+    isDraft: value.isDraft,
+    mergeable: value.mergeable,
+    mergeStateStatus: value.mergeStateStatus,
+    autoMergeEnabled: value.autoMergeEnabled,
+    viewerCanEnableAutoMerge: value.viewerCanEnableAutoMerge,
+    viewerCanDisableAutoMerge: value.viewerCanDisableAutoMerge,
+    headRefOid: value.headRefOid,
+  };
+}
+
+function workflowPullRequestData(value: GitHubPullRequestView) {
+  return {
+    ...value,
+    headBranch: value.headRefName,
+    headSha: value.headRefOid,
+    merged: value.state === "MERGED",
+  };
+}
+
 function windowsPath(value: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
@@ -269,13 +385,6 @@ function activeCodebaseJobConflict(error: unknown): boolean {
 }
 
 export class WorktreesService {
-  private readonly pullRequestCache = new Map<
-    string,
-    {
-      expiresAt: number;
-      items: Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>;
-    }
-  >();
   private readonly watchDemand = new Map<string, WorktreeWatchDemand>();
 
   constructor(
@@ -348,15 +457,6 @@ export class WorktreesService {
     );
   }
 
-  invalidatePullRequestsForOrigin(canonicalOrigin: string): void {
-    const normalizedOrigin = canonicalOrigin.toLowerCase();
-    for (const origin of this.pullRequestCache.keys()) {
-      if (origin.toLowerCase() === normalizedOrigin) {
-        this.pullRequestCache.delete(origin);
-      }
-    }
-  }
-
   private async cleanupExpired() {
     const prisma = await getPrismaClient();
     await prisma.worktree.deleteMany({
@@ -388,9 +488,9 @@ export class WorktreesService {
       ticketKey: ticketKey(worktree.branch, String(pattern)),
       ticketTitle: null as string | null,
       ticketStatus: null as string | null,
-      pullRequest: null as
-        | Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>[number]
-        | null,
+      pullRequest: worktree.pullRequest
+        ? storedPullRequestView(worktree.pullRequest)
+        : null,
       latestBuild: worktree.builds?.[0]
         ? {
             ...worktree.builds[0],
@@ -401,6 +501,261 @@ export class WorktreesService {
           }
         : null,
     };
+  }
+
+  private async storePullRequest(
+    worktreeId: string,
+    canonicalOrigin: string,
+    branch: string,
+    pullRequest: GitHubPullRequestView | null,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    const lookupAt = new Date();
+    await prisma.$transaction(async (transaction) => {
+      await transaction.worktree.update({
+        where: { id: worktreeId },
+        data: {
+          pullRequestLookupOrigin: canonicalOrigin,
+          pullRequestLookupBranch: branch,
+          pullRequestLookupAt: lookupAt,
+        },
+      });
+      if (pullRequest) {
+        const data = pullRequestData(pullRequest);
+        await transaction.worktreePullRequest.upsert({
+          where: { worktreeId },
+          create: { worktreeId, ...data },
+          update: data,
+        });
+      } else {
+        await transaction.worktreePullRequest.deleteMany({
+          where: { worktreeId },
+        });
+      }
+    });
+  }
+
+  private async clearPullRequest(
+    worktreeId: string,
+    clearLookup = true,
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    await prisma.$transaction([
+      prisma.worktreePullRequest.deleteMany({ where: { worktreeId } }),
+      ...(clearLookup
+        ? [
+            prisma.worktree.update({
+              where: { id: worktreeId },
+              data: {
+                pullRequestLookupOrigin: null,
+                pullRequestLookupBranch: null,
+                pullRequestLookupAt: null,
+              },
+            }),
+          ]
+        : []),
+    ]);
+  }
+
+  private async synchronizePullRequests(
+    worktrees: PullRequestTarget[],
+  ): Promise<void> {
+    const prisma = await getPrismaClient();
+    const settings = await prisma.gitHubSettings.findUnique({
+      where: { id: SETTINGS_ID },
+    });
+    const retryAfterMs = (settings?.cacheTtlSeconds ?? 300) * 1_000;
+    const forceDiscovery = new Set<string>();
+    const terminalFallbacks = new Map<string, GitHubPullRequestView>();
+
+    for (const worktree of worktrees) {
+      const origin = worktree.codebase.repository.canonicalOrigin;
+      const lookupMatches =
+        Boolean(worktree.branch) &&
+        worktree.pullRequestLookupOrigin?.toLowerCase() ===
+          origin.toLowerCase() &&
+        worktree.pullRequestLookupBranch === worktree.branch;
+      if (
+        !lookupMatches &&
+        (worktree.pullRequest ||
+          worktree.pullRequestLookupOrigin ||
+          worktree.pullRequestLookupBranch ||
+          worktree.pullRequestLookupAt)
+      ) {
+        await this.clearPullRequest(worktree.id);
+        worktree.pullRequest = null;
+        worktree.pullRequestLookupOrigin = null;
+        worktree.pullRequestLookupBranch = null;
+        worktree.pullRequestLookupAt = null;
+      }
+    }
+
+    const linked = worktrees.filter((worktree) => worktree.pullRequest);
+    if (linked.length) {
+      try {
+        const statuses = await this.gitHubService.pullRequestLiveStatuses(
+          linked.flatMap((worktree) =>
+            worktree.pullRequest ? [worktree.pullRequest.id] : [],
+          ),
+          { requestSource: "WORKTREES" },
+        );
+        for (const worktree of linked) {
+          const current = worktree.pullRequest;
+          if (!current) continue;
+          const status = statuses.get(current.id) ?? null;
+          if (!status || status.state !== "OPEN") {
+            terminalFallbacks.set(worktree.id, current);
+            worktree.pullRequest = null;
+            forceDiscovery.add(worktree.id);
+            continue;
+          }
+          const data = pullRequestLiveData(status);
+          const currentData = pullRequestLiveData(current);
+          if (JSON.stringify(data) !== JSON.stringify(currentData)) {
+            await prisma.worktreePullRequest.updateMany({
+              where: { worktreeId: worktree.id },
+              data,
+            });
+            worktree.pullRequest = { ...current, ...status };
+          }
+        }
+      } catch {
+        // Stored PR state remains usable when the optional live refresh fails.
+      }
+    }
+
+    const now = Date.now();
+    const candidates = worktrees.filter((worktree) => {
+      if (worktree.pullRequest || !worktree.branch) return false;
+      const origin = worktree.codebase.repository.canonicalOrigin;
+      if (!/^github\.com\/[^/]+\/[^/]+$/i.test(origin)) return false;
+      if (forceDiscovery.has(worktree.id)) return true;
+      const lookupMatches =
+        worktree.pullRequestLookupOrigin?.toLowerCase() ===
+          origin.toLowerCase() &&
+        worktree.pullRequestLookupBranch === worktree.branch;
+      return (
+        !lookupMatches ||
+        !worktree.pullRequestLookupAt ||
+        now - worktree.pullRequestLookupAt.getTime() >= retryAfterMs
+      );
+    });
+    const groups = new Map<string, PullRequestTarget[]>();
+    for (const worktree of candidates) {
+      const origin = worktree.codebase.repository.canonicalOrigin;
+      const key = `${forceDiscovery.has(worktree.id) ? "force" : "cached"}\0${origin}`;
+      groups.set(key, [...(groups.get(key) ?? []), worktree]);
+    }
+    await Promise.all(
+      [...groups.entries()].map(async ([key, targets]) => {
+        const force = key.startsWith("force\0");
+        const origin = targets[0]!.codebase.repository.canonicalOrigin;
+        try {
+          const found = await this.gitHubService.pullRequestsForBranches(
+            origin,
+            targets.flatMap((target) => (target.branch ? [target.branch] : [])),
+            {
+              force,
+              allowStaleOnError: !force,
+              requestSource: "WORKTREES",
+            },
+          );
+          await Promise.all(
+            targets.map(async (target) => {
+              const branch = target.branch!;
+              const pullRequest = found.get(branch) ?? null;
+              await this.storePullRequest(
+                target.id,
+                origin,
+                branch,
+                pullRequest,
+              );
+              target.pullRequest = pullRequest;
+              target.pullRequestLookupOrigin = origin;
+              target.pullRequestLookupBranch = branch;
+              target.pullRequestLookupAt = new Date();
+            }),
+          );
+        } catch {
+          for (const target of targets) {
+            const fallback = terminalFallbacks.get(target.id);
+            if (fallback) target.pullRequest = fallback;
+          }
+          // Discovery is optional in an overview; a manual refresh surfaces errors.
+        }
+      }),
+    );
+  }
+
+  async refreshPullRequest(id: string) {
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id },
+      include: worktreeInclude,
+    });
+    if (!worktree || worktree.missingAt) throw new Error("Worktree not found");
+    const origin = worktree.codebase.repository.canonicalOrigin;
+    if (!worktree.branch)
+      throw new Error("A named worktree branch is required");
+    if (!/^github\.com\/[^/]+\/[^/]+$/i.test(origin)) {
+      throw new Error("The worktree repository is not hosted on GitHub");
+    }
+    const found = await this.gitHubService.pullRequestsForBranches(
+      origin,
+      [worktree.branch],
+      {
+        force: true,
+        allowStaleOnError: false,
+        requestSource: "WORKTREES",
+      },
+    );
+    await this.storePullRequest(
+      id,
+      origin,
+      worktree.branch,
+      found.get(worktree.branch) ?? null,
+    );
+    const updated = await prisma.worktree.findUniqueOrThrow({
+      where: { id },
+      include: worktreeInclude,
+    });
+    this.publish(id, worktree.codebaseId);
+    return this.view(updated);
+  }
+
+  async attachPullRequestForBranch(
+    canonicalOrigin: string,
+    branch: string,
+    pullRequest: GitHubPullRequestView,
+  ): Promise<number> {
+    const prisma = await getPrismaClient();
+    const candidates = await prisma.worktree.findMany({
+      where: { branch, missingAt: null },
+      select: {
+        id: true,
+        codebaseId: true,
+        codebase: {
+          select: { repository: { select: { canonicalOrigin: true } } },
+        },
+      },
+    });
+    const matches = candidates.filter(
+      (worktree) =>
+        worktree.codebase.repository.canonicalOrigin.toLowerCase() ===
+        canonicalOrigin.toLowerCase(),
+    );
+    await Promise.all(
+      matches.map(async (worktree) => {
+        await this.storePullRequest(
+          worktree.id,
+          canonicalOrigin,
+          branch,
+          pullRequest,
+        );
+        this.publish(worktree.id, worktree.codebaseId);
+      }),
+    );
+    return matches.length;
   }
 
   async overview() {
@@ -475,32 +830,7 @@ export class WorktreesService {
       }),
     );
 
-    const origins = [
-      ...new Set(views.map((item) => item.codebase.repository.canonicalOrigin)),
-    ];
-    const pullRequestsByOrigin = new Map<
-      string,
-      Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>
-    >();
-    await Promise.all(
-      origins.map(async (origin) => {
-        const cached = this.pullRequestCache.get(origin);
-        if (cached && cached.expiresAt > Date.now()) {
-          pullRequestsByOrigin.set(origin, cached.items);
-          return;
-        }
-        try {
-          const items = await this.gitHubService.pullRequestsForOrigin(origin);
-          this.pullRequestCache.set(origin, {
-            items,
-            expiresAt: Date.now() + 60_000,
-          });
-          pullRequestsByOrigin.set(origin, items);
-        } catch {
-          pullRequestsByOrigin.set(origin, []);
-        }
-      }),
-    );
+    await this.synchronizePullRequests(views);
     const keys = [
       ...new Set(views.map((item) => item.ticketKey).filter(Boolean)),
     ] as string[];
@@ -526,11 +856,6 @@ export class WorktreesService {
       item.ticketStatus = item.ticketKey
         ? (tickets.get(item.ticketKey)?.status ?? null)
         : null;
-      item.pullRequest =
-        pullRequestsByOrigin
-          .get(item.codebase.repository.canonicalOrigin)
-          ?.find((pullRequest) => pullRequest.headRefName === item.branch) ??
-        null;
     }
 
     type View = (typeof views)[number];
@@ -693,7 +1018,8 @@ export class WorktreesService {
             },
             update: {},
           });
-          await transaction.worktree.updateMany({
+          const branchChanged = worktree.branch !== item.branch;
+          const updated = await transaction.worktree.updateMany({
             where: {
               id: worktree.id,
               OR: [
@@ -701,8 +1027,23 @@ export class WorktreesService {
                 { lastCheckedAt: { lt: new Date(item.checkedAt) } },
               ],
             },
-            data: { ...this.inventoryData(item), missingAt: null },
+            data: {
+              ...this.inventoryData(item),
+              missingAt: null,
+              ...(branchChanged
+                ? {
+                    pullRequestLookupOrigin: null,
+                    pullRequestLookupBranch: null,
+                    pullRequestLookupAt: null,
+                  }
+                : {}),
+            },
           });
+          if (branchChanged && updated.count > 0) {
+            await transaction.worktreePullRequest.deleteMany({
+              where: { worktreeId: worktree.id },
+            });
+          }
           updatedIds.push(worktree.id);
         }
         if (report.complete) {
@@ -740,7 +1081,7 @@ export class WorktreesService {
         missingAt: null,
         codebase: { agentId },
       },
-      select: { id: true, codebaseId: true },
+      select: { id: true, codebaseId: true, branch: true },
     });
     if (!worktree) throw new Error("Worktree activity source was not found");
     const hasCommitStatus =
@@ -762,6 +1103,8 @@ export class WorktreesService {
       report.codeStateHash !== undefined ||
       report.pushStatus !== undefined;
     if (hasState) {
+      const branchChanged =
+        report.branch !== undefined && report.branch !== worktree.branch;
       const updated = await prisma.worktree.updateMany({
         where: {
           id: worktree.id,
@@ -772,6 +1115,13 @@ export class WorktreesService {
         },
         data: {
           ...(report.branch === undefined ? {} : { branch: report.branch }),
+          ...(branchChanged
+            ? {
+                pullRequestLookupOrigin: null,
+                pullRequestLookupBranch: null,
+                pullRequestLookupAt: null,
+              }
+            : {}),
           ...(report.headSha === undefined ? {} : { headSha: report.headSha }),
           ...(report.upstream === undefined
             ? {}
@@ -810,6 +1160,11 @@ export class WorktreesService {
       });
       observationAccepted = updated.count > 0;
       if (observationAccepted) {
+        if (branchChanged) {
+          await prisma.worktreePullRequest.deleteMany({
+            where: { worktreeId: worktree.id },
+          });
+        }
         this.publish(worktree.id, worktree.codebaseId);
       }
     }
@@ -1136,6 +1491,7 @@ export class WorktreesService {
           hasStagedChanges: true,
           hasUnstagedChanges: true,
           missingAt: true,
+          pullRequest: true,
           codebase: {
             select: {
               id: true,
@@ -1170,10 +1526,8 @@ export class WorktreesService {
     const repository = worktree.codebase.repository;
     const pattern =
       repository.jiraBranchRegex ?? settings?.defaultJiraBranchRegex ?? "";
-    // The ticket key comes from the branch name alone. Reading it off a linked
-    // pull request instead meant fetching every open pull request in the
-    // repository on every workflow event, which is far too expensive for a
-    // fallback that only helps when the branch name omits the key.
+    // The branch remains authoritative for worktree ticket correlation. The
+    // persisted PR snapshot is seeded independently below without a GitHub read.
     const issueKey = ticketKey(worktree.branch, pattern);
     let ticket: Awaited<ReturnType<JiraService["cachedTicket"]>> = null;
     if (issueKey) {
@@ -1219,6 +1573,13 @@ export class WorktreesService {
         displayOrigin: repository.displayOrigin,
         defaultBranch: worktree.codebase.defaultBranch,
       },
+      ...(worktree.pullRequest
+        ? {
+            pr: workflowPullRequestData(
+              storedPullRequestView(worktree.pullRequest),
+            ),
+          }
+        : {}),
       ...(issueKey
         ? {
             ticket: {

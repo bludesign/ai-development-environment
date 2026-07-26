@@ -17,6 +17,7 @@ import type {
   GitHubOperationMetric,
   GitHubPaginatedResult,
   GitHubRequestSource,
+  GitHubRequestSourceMetric,
   GitHubSettingsView,
 } from "./types";
 
@@ -588,7 +589,29 @@ export class GitHubCache {
         ),
       }),
     );
-    return { windows, operations: operationRows };
+    const requestSources = [
+      ...new Set(calls.map((call) => call.requestSource)),
+    ].sort();
+    const requestSourceRows: GitHubRequestSourceMetric[] = requestSources.map(
+      (requestSource) => ({
+        requestSource: requestSource as GitHubRequestSource,
+        windows: WINDOW_DEFINITIONS.map((definition) =>
+          this.metricWindow(
+            definition.window,
+            calls.filter(
+              (call) =>
+                call.requestSource === requestSource &&
+                call.createdAt.getTime() >= now - definition.milliseconds,
+            ),
+          ),
+        ),
+      }),
+    );
+    return {
+      windows,
+      operations: operationRows,
+      requestSources: requestSourceRows,
+    };
   }
 
   private entryView(

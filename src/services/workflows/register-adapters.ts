@@ -307,6 +307,9 @@ function normalizePullRequest(value: unknown): Record<string, unknown> {
     : [];
   return {
     ...pullRequest,
+    headBranch: pullRequest.headRefName,
+    headSha: pullRequest.headRefOid,
+    merged: pullRequest.state === "MERGED",
     unresolvedThreads: threads.filter(
       (entry) =>
         entry &&
@@ -894,6 +897,11 @@ function registerGitHubAdapters(
           : null,
       draft: context.node.config.draft === true,
     });
+    await services.worktrees.attachPullRequestForBranch(
+      `github.com/${repository.owner}/${repository.name}`,
+      pullRequest.headRefName,
+      pullRequest,
+    );
     const normalized = normalizePullRequest(pullRequest);
     return {
       output: normalized,
@@ -1121,6 +1129,31 @@ function registerWorktreeAdapters(
       },
       [worktreeLink(id)],
     );
+  });
+  executor.register("WORKTREE_REFRESH_PULL_REQUEST", async (context) => {
+    const id = worktreeId(context);
+    const worktree = await services.worktrees.refreshPullRequest(id);
+    const pullRequest = worktree.pullRequest;
+    const normalized = pullRequest ? normalizePullRequest(pullRequest) : null;
+    const links = [worktreeLink(id)];
+    if (pullRequest) {
+      const [owner, name] = pullRequest.repositoryNameWithOwner.split("/");
+      if (owner && name) {
+        links.push(
+          detailLink(
+            "PULL_REQUEST",
+            pullRequestResourceId(owner, name, pullRequest.number),
+            pullRequest.title,
+            pullRequest.url,
+          ),
+        );
+      }
+    }
+    return {
+      output: { found: Boolean(pullRequest), pullRequest },
+      sessionPatch: { pr: normalized },
+      links,
+    };
   });
   executor.register("WORKTREE_OPERATION", async (context) => {
     const operation = String(

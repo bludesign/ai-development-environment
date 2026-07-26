@@ -118,7 +118,11 @@ export function GitHubCachePage() {
         `query GitHubCachePage($limit: Int!, $callOffset: Int!, $entryOffset: Int!) {
           githubSettings { tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt }
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
-          githubCacheMetrics { windows { ${WINDOW_FIELDS} } operations { operation windows { ${WINDOW_FIELDS} } } }
+          githubCacheMetrics {
+            windows { ${WINDOW_FIELDS} }
+            operations { operation windows { ${WINDOW_FIELDS} } }
+            requestSources { requestSource windows { ${WINDOW_FIELDS} } }
+          }
           githubApiCalls(limit: $limit, offset: $callOffset) {
             items { id authentication apiType method endpoint operation requestSource requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
             total limit offset
@@ -332,12 +336,42 @@ export function GitHubCachePage() {
                         </TableCell>
                         {operation.windows.map((window) => (
                           <TableCell key={window.window}>
-                            <span className="font-medium">{window.total}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              L {window.live} · C {window.cache} · E{" "}
-                              {window.errors} · P {window.pointsUsed}/
-                              {window.pointsAvoided}
-                            </span>
+                            <MetricWindowDetails metric={window} />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Panel>
+            <Panel
+              title={t("sourcesTitle")}
+              description={t("sourcesDescription")}
+            >
+              {data.githubCacheMetrics.requestSources.length === 0 ? (
+                <EmptyState>{t("noMetrics")}</EmptyState>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("source")}</TableHead>
+                      {data.githubCacheMetrics.windows.map((window) => (
+                        <TableHead key={window.window}>
+                          {window.window}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.githubCacheMetrics.requestSources.map((source) => (
+                      <TableRow key={source.requestSource}>
+                        <TableCell className="font-medium">
+                          {t(`requestSources.${source.requestSource}`)}
+                        </TableCell>
+                        {source.windows.map((window) => (
+                          <TableCell key={window.window}>
+                            <MetricWindowDetails metric={window} />
                           </TableCell>
                         ))}
                       </TableRow>
@@ -695,6 +729,18 @@ function MetricCard({ metric }: { metric: GitHubMetricWindow }) {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function MetricWindowDetails({ metric }: { metric: GitHubMetricWindow }) {
+  return (
+    <>
+      <span className="font-medium">{metric.total}</span>
+      <span className="ml-2 text-xs text-muted-foreground">
+        L {metric.live} · C {metric.cache} · E {metric.errors} · P{" "}
+        {metric.pointsUsed}/{metric.pointsAvoided}
+      </span>
+    </>
   );
 }
 

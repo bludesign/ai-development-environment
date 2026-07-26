@@ -358,6 +358,20 @@ describe("GitHubCache", () => {
       total: 2,
     });
     expect(metrics.operations[0]?.operation).toBe("TestQuery");
+    expect(metrics.operations[0]?.windows[0]).toMatchObject({
+      total: 2,
+      pointsUsed: 4,
+      pointsAvoided: 4,
+    });
+    expect(metrics.requestSources).toHaveLength(1);
+    expect(metrics.requestSources[0]).toMatchObject({
+      requestSource: "PULL_REQUESTS_PAGE",
+    });
+    expect(metrics.requestSources[0]?.windows[0]).toMatchObject({
+      total: 2,
+      pointsUsed: 4,
+      pointsAvoided: 4,
+    });
   });
 
   test("records uncached REST and GraphQL transport calls with sanitized request context", async () => {

@@ -539,6 +539,116 @@ describe("disk-space workflow adapters", () => {
   );
 });
 
+describe("worktree pull request refresh workflow adapter", () => {
+  test.each([
+    [
+      "returns and seeds a discovered pull request",
+      {
+        id: "pull-request-1",
+        number: 42,
+        title: "Refresh persisted PR",
+        url: "https://github.com/acme/widgets/pull/42",
+        repositoryNameWithOwner: "acme/widgets",
+        headRefName: "feature/AIDE-79",
+        headRefOid: "abc123",
+        state: "OPEN",
+      },
+      true,
+    ],
+    ["clears PR context when none is open", null, false],
+  ] as const)("%s", async (_label, pullRequest, found) => {
+    const executor = new WorkflowStepExecutor();
+    const refreshPullRequest = vi.fn().mockResolvedValue({
+      id: "actual-worktree",
+      pullRequest,
+    });
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        worktrees: { refreshPullRequest },
+      } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "refresh-pr",
+      kind: "WORKTREE_REFRESH_PULL_REQUEST",
+      config: {},
+    };
+
+    const result = await executor.execute(input);
+
+    expect(refreshPullRequest).toHaveBeenCalledWith("actual-worktree");
+    expect(result.output).toEqual({ found, pullRequest });
+    expect(result.sessionPatch).toEqual({
+      pr: pullRequest
+        ? expect.objectContaining({
+            id: "pull-request-1",
+            headBranch: "feature/AIDE-79",
+            headSha: "abc123",
+            merged: false,
+          })
+        : null,
+    });
+    expect(result.links).toEqual(
+      pullRequest
+        ? expect.arrayContaining([
+            expect.objectContaining({ kind: "WORKTREE" }),
+            expect.objectContaining({
+              kind: "PULL_REQUEST",
+              resourceId: "acme/widgets#42",
+            }),
+          ])
+        : [expect.objectContaining({ kind: "WORKTREE" })],
+    );
+  });
+
+  test("attaches pull requests created by workflow actions", async () => {
+    const executor = new WorkflowStepExecutor();
+    const pullRequest = {
+      id: "pull-request-created",
+      number: 43,
+      title: "Workflow-created pull request",
+      url: "https://github.com/acme/widgets/pull/43",
+      headRefName: "feature/AIDE-80",
+      headRefOid: "def456",
+      state: "OPEN",
+    };
+    const createPullRequest = vi.fn().mockResolvedValue(pullRequest);
+    const attachPullRequestForBranch = vi.fn().mockResolvedValue(1);
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        github: { createPullRequest },
+        worktrees: { attachPullRequestForBranch },
+      } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "create-pr",
+      kind: "GITHUB_CREATE_PR",
+      config: {
+        owner: "acme",
+        name: "widgets",
+        baseRefName: "main",
+        headRefName: "feature/AIDE-80",
+        title: "Workflow-created pull request",
+      },
+    };
+
+    await executor.execute(input);
+
+    expect(attachPullRequestForBranch).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      "feature/AIDE-80",
+      pullRequest,
+    );
+  });
+});
+
 describe("saved command workflow adapter", () => {
   function commandExecutor(restartPolicy = "NEVER") {
     const executor = new WorkflowStepExecutor();

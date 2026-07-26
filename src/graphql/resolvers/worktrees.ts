@@ -143,6 +143,14 @@ export const createWorktreeResolvers = (
     },
   },
   Mutation: {
+    refreshWorktreePullRequest: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.refreshPullRequest(id);
+    },
     refreshWorktrees: (
       _root: unknown,
       _args: unknown,

@@ -84,11 +84,8 @@ export function workflowTriggerChoices(
  * a step bound to a missing linked resource resolves to `undefined` at run
  * time.
  *
- * Worktree-derived kinds do not seed `pr.*`. Resolving a worktree's pull
- * request meant listing every open pull request in the repository on each
- * event; the kinds that still advertise `pr.*` get it from a source that names
- * the pull request directly — a webhook payload, a pipeline's associated pull
- * requests, or a PULL_REQUEST resource id.
+ * Worktree-derived kinds seed `pr.*` from the persisted worktree association,
+ * so doing so does not require a GitHub request.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   BUILD: [
@@ -136,7 +133,14 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "codebase.*",
     "agent.*",
   ],
-  WORKTREE: ["worktree.*", "codebase.*", "agent.*", "repo.*", "ticket.*"],
+  WORKTREE: [
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+    "repo.*",
+    "ticket.*",
+    "pr.*",
+  ],
 };
 
 /** The resource kind a resource trigger config targets, if valid. */
@@ -232,6 +236,7 @@ const WORKTREE_CONTEXT_PATHS = [
   "agent.*",
   "repo.*",
   "ticket.*",
+  "pr.*",
 ];
 
 /** Related resources refreshed after a successful codebase-backed agent job. */
@@ -525,6 +530,22 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       details:
         'Same branch modes as Create worktree. Uncommitted changes block the switch unless "Stash on failure" is set, which stashes them and retries — the stash is left for a human to deal with. Refreshes the worktree and all of its related resource context.',
       mutatesWorktree: true,
+    },
+  ),
+  step(
+    "WORKTREE_REFRESH_PULL_REQUEST",
+    "Worktrees",
+    "Refresh pull request",
+    "SERVER",
+    ["worktree.id"],
+    ["pr.*"],
+    {
+      description:
+        "Forces exact-branch pull request discovery and refreshes the worktree's persisted pull request context.",
+      details:
+        "Uses the configured worktree, falling back to `worktree.id`. The step succeeds with `found: false` and clears `pr` when the branch has no open pull request.",
+      mutatesWorktree: true,
+      mutatesExternal: false,
     },
   ),
   step(
@@ -1317,6 +1338,7 @@ const WORKTREE_SEED_PATHS = [
   "agent.*",
   "repo.*",
   "ticket.*",
+  "pr.*",
 ];
 
 /** Jira observations include the latest comment when one exists. */

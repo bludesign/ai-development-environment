@@ -54,7 +54,54 @@ describe("GitHubCachePage", () => {
               observedAt: "2026-07-26T05:00:00.000Z",
             },
           ],
-          githubCacheMetrics: { windows: [], operations: [] },
+          githubCacheMetrics: {
+            windows: [
+              {
+                window: "5m",
+                total: 1,
+                live: 1,
+                cache: 0,
+                errors: 0,
+                averageMs: 20,
+                pointsUsed: 7,
+                pointsAvoided: 0,
+              },
+            ],
+            operations: [
+              {
+                operation: "Viewer",
+                windows: [
+                  {
+                    window: "5m",
+                    total: 1,
+                    live: 1,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 20,
+                    pointsUsed: 7,
+                    pointsAvoided: 0,
+                  },
+                ],
+              },
+            ],
+            requestSources: [
+              {
+                requestSource: "PULL_REQUEST_DETAILS",
+                windows: [
+                  {
+                    window: "5m",
+                    total: 1,
+                    live: 1,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 20,
+                    pointsUsed: 7,
+                    pointsAvoided: 0,
+                  },
+                ],
+              },
+            ],
+          },
           githubApiCalls: {
             items: [
               {
@@ -100,9 +147,12 @@ describe("GitHubCachePage", () => {
     expect(screen.getByText("APP · core")).toBeDefined();
     expect(screen.getByText("4993 / 5000")).toBeDefined();
     expect(screen.getByText("Points and rate")).toBeDefined();
-    expect(screen.getByText("Source")).toBeDefined();
+    expect(screen.getByText("Calls by source")).toBeDefined();
+    expect(screen.getAllByText(/L 1 · C 0 · E 0 · P 7\/0/)).toHaveLength(2);
+    expect(screen.getByText("7 points used · 0 avoided")).toBeDefined();
+    expect(screen.getAllByText("Source")).toHaveLength(2);
     expect(screen.getByText("Status")).toBeDefined();
-    expect(screen.getByText("Pull request details")).toBeDefined();
+    expect(screen.getAllByText("Pull request details")).toHaveLength(2);
     expect(screen.getByText("Live")).toBeDefined();
     expect(screen.getByText("pullRequestId=PR_kwDO123")).toBeDefined();
     expect(screen.queryByText(/cursor=null/)).toBeNull();

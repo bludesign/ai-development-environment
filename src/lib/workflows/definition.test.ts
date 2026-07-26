@@ -500,9 +500,7 @@ describe("workflow catalog", () => {
           "ticket.*",
         ]),
       );
-      // A worktree's pull request is not seeded: resolving it meant listing
-      // every open pull request in the repository on each event.
-      expect(entry.seedPaths, entry.kind).not.toContain("pr.*");
+      expect(entry.seedPaths, entry.kind).toContain("pr.*");
     }
   });
 
@@ -547,7 +545,7 @@ describe("workflow catalog", () => {
           "ticket.*",
         ]),
       );
-      expect(entry?.providedPaths, kind).not.toContain("pr.*");
+      expect(entry?.providedPaths, kind).toContain("pr.*");
     }
   });
 
@@ -600,14 +598,17 @@ describe("workflow catalog", () => {
         "ticket.*",
       ]),
     );
-    // Only the kinds that name a pull request directly seed `pr.*`; the
-    // worktree-derived kinds above do not.
-    for (const resourceKind of ["BUILD", "AGENT_RUN", "WORKTREE"]) {
+    for (const resourceKind of ["BUILD", "AGENT_RUN"]) {
       expect(
         resourceManualSeedPaths("RESOURCE_MANUAL", { resourceKind }),
         resourceKind,
       ).not.toContain("pr.*");
     }
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", {
+        resourceKind: "WORKTREE",
+      }),
+    ).toContain("pr.*");
     expect(
       resourceManualSeedPaths("RESOURCE_MANUAL", {
         resourceKind: "PULL_REQUEST",

@@ -1804,6 +1804,87 @@ describe("GitHub service", () => {
     ).toBe("Bearer secret-token");
   });
 
+  test("discovers open pull requests through exact refs and deduplicates branches", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      expect(body.query).toContain("query GitHubWorktreePullRequests");
+      expect(body.query).toContain("ref(qualifiedName: $branch0)");
+      expect(body.query).toContain("associatedPullRequests");
+      expect(body.query).not.toContain("pullRequests(first:");
+      expect(body.variables).toMatchObject({
+        owner: "acme",
+        name: "widgets",
+        branch0: "refs/heads/feature/app-42",
+      });
+      return response({
+        data: {
+          repository: {
+            branch0: {
+              associatedPullRequests: {
+                nodes: [rawPullRequest("pull-request-1", "APP-42 exact ref")],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequestsForBranches(
+      "github.com/acme/widgets",
+      ["feature/app-42", "feature/app-42", "  feature/app-42  "],
+      { requestSource: "WORKTREES" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.get("feature/app-42")).toMatchObject({
+      id: "pull-request-1",
+      headRefName: "feature/app-42",
+    });
+  });
+
+  test("loads only live operational fields for stored pull request node ids", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      expect(body.query).toContain("query GitHubWorktreePullRequestStatuses");
+      expect(body.query).toContain("nodes(ids: $ids)");
+      expect(body.query).not.toContain("title");
+      expect(body.variables).toEqual({ ids: ["pull-request-1"] });
+      return response({
+        data: {
+          nodes: [
+            rawPullRequest("pull-request-1", "ignored", {
+              pipeline: "SUCCESS",
+              reviewDecision: "APPROVED",
+            }),
+          ],
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequestLiveStatuses(
+      ["pull-request-1", "pull-request-1"],
+      { requestSource: "WORKTREES" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.get("pull-request-1")).toMatchObject({
+      id: "pull-request-1",
+      pipelineStatus: "SUCCESS",
+      reviewDecision: "APPROVED",
+      unresolvedReviewThreadCount: 1,
+      state: "OPEN",
+    });
+  });
+
   test("requires credentials and redacts a token echoed by GitHub", async () => {
     state.apiToken = null;
     await expect(new GitHubService().testConnection()).rejects.toThrow(

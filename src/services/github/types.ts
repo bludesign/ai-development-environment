@@ -89,9 +89,15 @@ export type GitHubOperationMetric = {
   windows: GitHubMetricWindow[];
 };
 
+export type GitHubRequestSourceMetric = {
+  requestSource: GitHubRequestSource;
+  windows: GitHubMetricWindow[];
+};
+
 export type GitHubCacheMetrics = {
   windows: GitHubMetricWindow[];
   operations: GitHubOperationMetric[];
+  requestSources: GitHubRequestSourceMetric[];
 };
 
 export type GitHubApiCallView = {
@@ -407,6 +413,23 @@ export type GitHubPullRequestView = {
   worktreeHighlightColor: string | null;
   createdAt: string;
 };
+
+export type GitHubPullRequestLiveStatus = Pick<
+  GitHubPullRequestView,
+  | "id"
+  | "pipelineStatus"
+  | "pipelines"
+  | "reviewDecision"
+  | "unresolvedReviewThreadCount"
+  | "state"
+  | "isDraft"
+  | "mergeable"
+  | "mergeStateStatus"
+  | "autoMergeEnabled"
+  | "viewerCanEnableAutoMerge"
+  | "viewerCanDisableAutoMerge"
+  | "headRefOid"
+>;
 
 export type GitHubPullRequestActor = {
   login: string;

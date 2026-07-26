@@ -35,6 +35,7 @@ import type {
   GitHubMergeMethod,
   GitHubPaginatedResult,
   GitHubPullRequestDetail,
+  GitHubPullRequestLiveStatus,
   GitHubPullRequestMergeOptions,
   GitHubPullRequestMergeResult,
   GitHubPullRequestPage,
@@ -131,6 +132,29 @@ type RawPullRequest = {
   viewerCanEnableAutoMerge: boolean;
   viewerCanDisableAutoMerge: boolean;
   headRefOid: string;
+};
+
+type RawPullRequestLiveStatus = Pick<
+  RawPullRequest,
+  | "id"
+  | "state"
+  | "mergedAt"
+  | "statusCheckRollup"
+  | "reviewDecision"
+  | "reviewThreads"
+  | "isDraft"
+  | "mergeable"
+  | "mergeStateStatus"
+  | "autoMergeRequest"
+  | "viewerCanEnableAutoMerge"
+  | "viewerCanDisableAutoMerge"
+  | "headRefOid"
+>;
+
+type GitHubQueryOptions = {
+  force?: boolean;
+  allowStaleOnError?: boolean;
+  requestSource?: GitHubRequestSource;
 };
 
 type RawCheckSuite = {
@@ -424,6 +448,33 @@ const PULL_REQUEST_FRAGMENT = `
       nodes { isResolved }
       pageInfo { hasNextPage endCursor }
     }
+  }
+`;
+
+const PULL_REQUEST_LIVE_FRAGMENT = `
+  fragment PullRequestLiveFields on PullRequest {
+    id
+    state
+    mergedAt
+    headRefOid
+    statusCheckRollup {
+      state
+      contexts(first: 100) {
+        nodes { ${PIPELINE_CONTEXT_FIELDS} }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+    reviewDecision
+    reviewThreads(first: 100) {
+      nodes { isResolved }
+      pageInfo { hasNextPage endCursor }
+    }
+    isDraft
+    mergeable
+    mergeStateStatus
+    autoMergeRequest { enabledAt }
+    viewerCanEnableAutoMerge
+    viewerCanDisableAutoMerge
   }
 `;
 
@@ -3470,6 +3521,7 @@ export class GitHubService {
     after: string,
     token: string,
     requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<string[]> {
     const labels: string[] = [];
     let cursor: string | null = after;
@@ -3489,7 +3541,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
-        { requestSource },
+        { requestSource, ...options },
       );
       if (!data.node) break;
       labels.push(
@@ -3507,6 +3559,7 @@ export class GitHubService {
     after: string,
     token: string,
     requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<number> {
     let count = 0;
     let cursor: string | null = after;
@@ -3528,7 +3581,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
-        { requestSource },
+        { requestSource, ...options },
       );
       if (!data.node) break;
       count += connectionNodes(data.node.reviewThreads).filter(
@@ -3546,6 +3599,7 @@ export class GitHubService {
     after: string,
     token: string,
     requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<RawPipelineContext[]> {
     const contexts: RawPipelineContext[] = [];
     let cursor: string | null = after;
@@ -3571,7 +3625,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
-        { requestSource },
+        { requestSource, ...options },
       );
       const connection = data.node?.statusCheckRollup?.contexts;
       if (!connection) break;
@@ -3583,29 +3637,13 @@ export class GitHubService {
     return contexts;
   }
 
-  private async normalizePullRequest(
-    pullRequest: RawPullRequest,
-    jiraKeyRegex: string | null,
+  private async normalizePullRequestLiveStatus(
+    pullRequest: RawPullRequestLiveStatus,
     token: string,
     appConfigured: boolean,
     requestSource: GitHubRequestSource,
-  ): Promise<GitHubPullRequestView> {
-    const labels = connectionNodes(pullRequest.labels).map(
-      (label) => label.name,
-    );
-    if (
-      pullRequest.labels.pageInfo.hasNextPage &&
-      pullRequest.labels.pageInfo.endCursor
-    ) {
-      labels.push(
-        ...(await this.remainingLabels(
-          pullRequest.id,
-          pullRequest.labels.pageInfo.endCursor,
-          token,
-          requestSource,
-        )),
-      );
-    }
+    options: GitHubQueryOptions = {},
+  ): Promise<GitHubPullRequestLiveStatus> {
     let unresolvedReviewThreadCount = connectionNodes(
       pullRequest.reviewThreads,
     ).filter((thread) => !thread.isResolved).length;
@@ -3618,6 +3656,7 @@ export class GitHubService {
         pullRequest.reviewThreads.pageInfo.endCursor,
         token,
         requestSource,
+        options,
       );
     }
     const pipelineContexts = pullRequest.statusCheckRollup
@@ -3633,19 +3672,12 @@ export class GitHubService {
           pullRequest.statusCheckRollup.contexts.pageInfo.endCursor,
           token,
           requestSource,
+          options,
         )),
       );
     }
     return {
       id: pullRequest.id,
-      number: pullRequest.number,
-      title: pullRequest.title,
-      url: pullRequest.url,
-      repositoryGithubId: pullRequest.repository.id,
-      repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
-      repositoryUrl: pullRequest.repository.url,
-      labels,
-      jiraKey: parseJiraKey(pullRequest.title, jiraKeyRegex),
       pipelineStatus: pipelineStatus(pullRequest.statusCheckRollup?.state),
       pipelines: normalizePipelines(pipelineContexts, appConfigured),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
@@ -3658,6 +3690,51 @@ export class GitHubService {
       viewerCanEnableAutoMerge: Boolean(pullRequest.viewerCanEnableAutoMerge),
       viewerCanDisableAutoMerge: Boolean(pullRequest.viewerCanDisableAutoMerge),
       headRefOid: pullRequest.headRefOid,
+    };
+  }
+
+  private async normalizePullRequest(
+    pullRequest: RawPullRequest,
+    jiraKeyRegex: string | null,
+    token: string,
+    appConfigured: boolean,
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
+  ): Promise<GitHubPullRequestView> {
+    const labels = connectionNodes(pullRequest.labels).map(
+      (label) => label.name,
+    );
+    if (
+      pullRequest.labels.pageInfo.hasNextPage &&
+      pullRequest.labels.pageInfo.endCursor
+    ) {
+      labels.push(
+        ...(await this.remainingLabels(
+          pullRequest.id,
+          pullRequest.labels.pageInfo.endCursor,
+          token,
+          requestSource,
+          options,
+        )),
+      );
+    }
+    const live = await this.normalizePullRequestLiveStatus(
+      pullRequest,
+      token,
+      appConfigured,
+      requestSource,
+      options,
+    );
+    return {
+      ...live,
+      number: pullRequest.number,
+      title: pullRequest.title,
+      url: pullRequest.url,
+      repositoryGithubId: pullRequest.repository.id,
+      repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
+      repositoryUrl: pullRequest.repository.url,
+      labels,
+      jiraKey: parseJiraKey(pullRequest.title, jiraKeyRegex),
       headRefName: pullRequest.headRefName,
       // Callers that show the pull request alongside its worktree overlay the
       // tint from `worktreeHighlights`; on its own a pull request carries no
@@ -4113,62 +4190,170 @@ export class GitHubService {
     branch: string,
   ): Promise<GitHubPullRequestView | null> {
     return (
-      (await this.pullRequestsForOrigin(canonicalOrigin)).find(
-        (pullRequest) =>
-          (pullRequest as GitHubPullRequestView & { headRefName?: string })
-            .headRefName === branch,
+      (await this.pullRequestsForBranches(canonicalOrigin, [branch])).get(
+        branch,
       ) ?? null
     );
   }
 
-  async pullRequestsForOrigin(
+  async pullRequestsForBranches(
     canonicalOrigin: string,
-  ): Promise<Array<GitHubPullRequestView & { headRefName: string }>> {
+    branchValues: string[],
+    options: GitHubQueryOptions = {},
+  ): Promise<Map<string, GitHubPullRequestView | null>> {
+    const branches = [
+      ...new Set(branchValues.map((branch) => branch.trim()).filter(Boolean)),
+    ];
+    const result = new Map<string, GitHubPullRequestView | null>(
+      branches.map((branch) => [branch, null]),
+    );
+    if (!branches.length) return result;
     const match = canonicalOrigin.match(/^github\.com\/([^/]+)\/([^/]+)$/i);
-    if (!match?.[1] || !match[2]) return [];
+    if (!match?.[1] || !match[2]) return result;
     const token = await this.requireToken();
     const owner = match[1];
     const name = match[2];
-    const repository: GitHubRepositoryView = {
-      id: canonicalOrigin,
-      githubId: "",
-      owner,
-      name,
-      nameWithOwner: `${owner}/${name}`,
-      url: `https://github.com/${owner}/${name}`,
-      jiraKeyRegex: null,
-    };
-    const [rawItems, appSettings] = await Promise.all([
-      this.repositoryPullRequests(repository, token, "WORKTREES"),
+    const requestSource = options.requestSource ?? "WORKTREES";
+    const [appSettings, settings] = await Promise.all([
       (await getPrismaClient()).gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
+      (await getPrismaClient()).gitHubSettings.findUnique({
+        where: { id: SETTINGS_ID },
+      }),
     ]);
-    const settings = await (
-      await getPrismaClient()
-    ).gitHubSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
     const appConfigured =
       Boolean(appSettings) &&
       (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
-    const matching = rawItems.filter(
-      (pullRequest) =>
-        pullRequest.headRepository?.nameWithOwner.toLowerCase() ===
-        repository.nameWithOwner.toLowerCase(),
+    for (
+      let offset = 0;
+      offset < branches.length;
+      offset += PULL_REQUEST_PAGE_SIZE
+    ) {
+      const chunk = branches.slice(offset, offset + PULL_REQUEST_PAGE_SIZE);
+      const definitions = chunk
+        .map((_, index) => `$branch${index}: String!`)
+        .join(", ");
+      const selections = chunk
+        .map(
+          (_, index) => `branch${index}: ref(qualifiedName: $branch${index}) {
+            associatedPullRequests(
+              states: [OPEN]
+              first: 1
+              orderBy: { field: UPDATED_AT, direction: DESC }
+            ) { nodes { ...PullRequestTableFields } }
+          }`,
+        )
+        .join("\n");
+      const variables = Object.fromEntries(
+        chunk.map((branch, index) => [
+          `branch${index}`,
+          `refs/heads/${branch}`,
+        ]),
+      );
+      const data = await this.request<{
+        repository: Record<
+          string,
+          { associatedPullRequests: RawConnection<RawPullRequest> } | null
+        > | null;
+      }>(
+        `query GitHubWorktreePullRequests(
+          $owner: String!
+          $name: String!
+          ${definitions}
+        ) {
+          repository(owner: $owner, name: $name) { ${selections} }
+        }
+        ${PULL_REQUEST_FRAGMENT}`,
+        { owner, name, ...variables },
+        token,
+        { requestSource, ...options },
+      );
+      if (!data.repository) {
+        throw new Error(
+          "Managed repository was not found or is not accessible",
+        );
+      }
+      await Promise.all(
+        chunk.map(async (branch, index) => {
+          const raw = connectionNodes(
+            data.repository?.[`branch${index}`]?.associatedPullRequests ?? {
+              nodes: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          )[0];
+          if (!raw) return;
+          result.set(
+            branch,
+            await this.normalizePullRequest(
+              raw,
+              settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
+              token,
+              appConfigured,
+              requestSource,
+              options,
+            ),
+          );
+        }),
+      );
+    }
+    return result;
+  }
+
+  async pullRequestLiveStatuses(
+    idValues: string[],
+    options: GitHubQueryOptions = {},
+  ): Promise<Map<string, GitHubPullRequestLiveStatus | null>> {
+    const ids = [...new Set(idValues.map((id) => id.trim()).filter(Boolean))];
+    const result = new Map<string, GitHubPullRequestLiveStatus | null>(
+      ids.map((id) => [id, null]),
     );
-    return Promise.all(
-      matching.map(async (raw) => ({
-        ...(await this.normalizePullRequest(
-          raw,
-          settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
-          token,
-          appConfigured,
-          "WORKTREES",
-        )),
-        headRefName: raw.headRefName,
-      })),
-    );
+    if (!ids.length) return result;
+    const token = await this.requireToken();
+    const requestSource = options.requestSource ?? "WORKTREES";
+    const appSettings = await (
+      await getPrismaClient()
+    ).gitHubAppSettings.findUnique({ where: { id: GITHUB_APP_SETTINGS_ID } });
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
+    for (
+      let offset = 0;
+      offset < ids.length;
+      offset += PULL_REQUEST_PAGE_SIZE
+    ) {
+      const chunk = ids.slice(offset, offset + PULL_REQUEST_PAGE_SIZE);
+      const data = await this.request<{
+        nodes: Array<RawPullRequestLiveStatus | null>;
+      }>(
+        `query GitHubWorktreePullRequestStatuses($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on PullRequest { ...PullRequestLiveFields }
+          }
+        }
+        ${PULL_REQUEST_LIVE_FRAGMENT}`,
+        { ids: chunk },
+        token,
+        { requestSource, ...options },
+      );
+      await Promise.all(
+        chunk.map(async (id, index) => {
+          const raw = data.nodes[index];
+          if (!raw) return;
+          result.set(
+            id,
+            await this.normalizePullRequestLiveStatus(
+              raw,
+              token,
+              appConfigured,
+              requestSource,
+              options,
+            ),
+          );
+        }),
+      );
+    }
+    return result;
   }
 
   async pullRequest(

@@ -304,10 +304,46 @@ model Worktree {
   derivedDataCleanupLease  DerivedDataCleanupLease?
   autoSync                 WorktreeAutoSync?
   autoMerge                WorktreeAutoMerge?
+  pullRequestLookupOrigin  String?
+  pullRequestLookupBranch  String?
+  pullRequestLookupAt      DateTime?
+  pullRequest              WorktreePullRequest?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model WorktreePullRequest {
+  worktreeId                  String   @id
+  githubId                    String
+  number                      Int
+  title                       String
+  url                         String
+  repositoryGithubId          String
+  repositoryNameWithOwner     String
+  repositoryUrl               String
+  labelsJson                  String
+  jiraKey                     String?
+  pipelineStatus              String
+  pipelinesJson               String
+  reviewDecision              String
+  unresolvedReviewThreadCount Int
+  state                       String
+  isDraft                     Boolean
+  mergeable                   String
+  mergeStateStatus            String
+  autoMergeEnabled            Boolean
+  viewerCanEnableAutoMerge    Boolean
+  viewerCanDisableAutoMerge   Boolean
+  headRefOid                  String
+  headRefName                 String
+  githubCreatedAt             DateTime
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  worktree                    Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@index([githubId])
 }
 
 model WorktreeAutoSync {

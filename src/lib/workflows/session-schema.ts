@@ -183,6 +183,10 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
       description: "Combined pull request check status",
     },
     {
+      name: "unresolvedReviewThreadCount",
+      description: "Number of unresolved pull request review threads",
+    },
+    {
       name: "pipelines",
       description: "CI pipelines linked to the pull request",
     },

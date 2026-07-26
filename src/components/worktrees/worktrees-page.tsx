@@ -2048,6 +2048,7 @@ export function WorktreeMenus(
   const [moveOpen, setMoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [changeBusy, setChangeBusy] = useState(false);
+  const [pullRequestBusy, setPullRequestBusy] = useState(false);
   const [failedSelection, setFailedSelection] =
     useState<WorktreeBranchSelection | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -2099,6 +2100,25 @@ export function WorktreeMenus(
       onError(null);
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const refreshPullRequest = async () => {
+    setPullRequestBusy(true);
+    try {
+      const data = await controlPlaneRequest<{
+        refreshWorktreePullRequest: Worktree;
+      }>(
+        `mutation RefreshWorktreePullRequest($id: ID!) {
+          refreshWorktreePullRequest(id: $id) { ${WORKTREE_FIELDS} }
+        }`,
+        { id: worktree.id },
+      );
+      onUpdate(data.refreshWorktreePullRequest);
+      onError(null);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPullRequestBusy(false);
     }
   };
   const changeBranch = async (
@@ -2212,6 +2232,18 @@ export function WorktreeMenus(
                 <FolderGit2 /> {t("viewRepository")}
               </Link>
             </DropdownMenuItem>
+            {worktree.branch &&
+              /^github\.com\/[^/]+\/[^/]+$/i.test(
+                props.group.repository.canonicalOrigin,
+              ) && (
+                <DropdownMenuItem
+                  disabled={pullRequestBusy}
+                  onSelect={() => void refreshPullRequest()}
+                >
+                  {pullRequestBusy ? <Spinner /> : <RefreshCw />}{" "}
+                  {t("refreshPullRequest")}
+                </DropdownMenuItem>
+              )}
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center gap-1.5 leading-none">
               <Tags className="size-3" />

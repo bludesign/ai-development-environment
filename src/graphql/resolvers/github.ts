@@ -487,21 +487,24 @@ export const createGitHubResolvers = (
     ) => {
       requireControlPlane(context);
       const result = await gitHubService.mergePullRequest(input, source);
-      const { owner, name } = normalizeGitHubRepositoryName(
-        `${input.owner}/${input.name}`,
-      );
-      worktreesService.invalidatePullRequestsForOrigin(
-        `github.com/${owner}/${name}`,
-      );
       return result;
     },
-    createGitHubPullRequest: (
+    createGitHubPullRequest: async (
       _root: unknown,
       { input }: { input: Parameters<GitHubService["createPullRequest"]>[0] },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.createPullRequest(input);
+      const pullRequest = await gitHubService.createPullRequest(input);
+      const { owner, name } = normalizeGitHubRepositoryName(
+        `${input.owner}/${input.name}`,
+      );
+      await worktreesService.attachPullRequestForBranch(
+        `github.com/${owner}/${name}`,
+        pullRequest.headRefName,
+        pullRequest,
+      );
+      return pullRequest;
     },
     setGitHubPullRequestLabels: (
       _root: unknown,

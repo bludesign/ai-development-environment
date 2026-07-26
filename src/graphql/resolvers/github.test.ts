@@ -17,7 +17,7 @@ function context(agentId: string | null): GraphQLContext {
 
 function worktreesService() {
   return {
-    invalidatePullRequestsForOrigin: vi.fn(),
+    attachPullRequestForBranch: vi.fn().mockResolvedValue(0),
   } as unknown as WorktreesService;
 }
 
@@ -104,6 +104,10 @@ describe("GitHub resolvers", () => {
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       pullRequestMergeOptions: vi.fn().mockResolvedValue({ canMerge: true }),
       mergePullRequest: vi.fn().mockResolvedValue({ state: "MERGED" }),
+      createPullRequest: vi.fn().mockResolvedValue({
+        id: "pull-request-created",
+        headRefName: "feature/APP-43",
+      }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
       cancelActionsWorkflowRun: vi.fn().mockResolvedValue(true),
@@ -215,6 +219,20 @@ describe("GitHub resolvers", () => {
       { input: mergeInput, source: "PULL_REQUEST_DETAILS" },
       context(null),
     );
+    const createInput = {
+      owner: "acme",
+      name: "widgets",
+      baseRefName: "main",
+      headRefName: "feature/APP-43",
+      title: "Create and attach a pull request",
+      body: null,
+      draft: false,
+    };
+    await resolvers.Mutation.createGitHubPullRequest(
+      {},
+      { input: createInput },
+      context(null),
+    );
     await resolvers.Mutation.retryGitHubPipeline(
       {},
       {
@@ -279,8 +297,10 @@ describe("GitHub resolvers", () => {
       mergeInput,
       "PULL_REQUEST_DETAILS",
     );
-    expect(worktrees.invalidatePullRequestsForOrigin).toHaveBeenCalledWith(
+    expect(worktrees.attachPullRequestForBranch).toHaveBeenCalledWith(
       "github.com/acme/widgets",
+      "feature/APP-43",
+      expect.objectContaining({ id: "pull-request-created" }),
     );
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
