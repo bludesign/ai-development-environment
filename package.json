@@ -43,7 +43,7 @@
     "lint:fix": "eslint --fix .",
     "pretype-check": "npm run generate",
     "type-check": "npm run type-check:generated",
-    "type-check:generated": "tsc --noEmit && npm run agent:type-check",
+    "type-check:generated": "next typegen && tsc --noEmit --project tsconfig.typecheck.json && npm run agent:type-check",
     "test": "vitest",
     "test:run": "vitest run",
     "test:standalone-credentials": "node scripts/test-standalone-credentials.mjs",

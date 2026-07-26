@@ -178,8 +178,7 @@ export function GitHubCachePage() {
           apiType: apiTypeFilter === "ALL" ? undefined : apiTypeFilter,
           requestSource:
             requestSourceFilter === "ALL" ? undefined : requestSourceFilter,
-          callSource:
-            callSourceFilter === "ALL" ? undefined : callSourceFilter,
+          callSource: callSourceFilter === "ALL" ? undefined : callSourceFilter,
         },
       );
       setData(result);
