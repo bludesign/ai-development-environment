@@ -166,10 +166,7 @@ test("serves raw output inline as a saveable text file", async () => {
       controller.close();
     },
   });
-  const response = rawOutputResponse(
-    output,
-    "command-run-1-output.txt",
-  );
+  const response = rawOutputResponse(output, "command-run-1-output.txt");
 
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe(

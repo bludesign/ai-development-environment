@@ -82,10 +82,7 @@ describe("buildAppBreadcrumbs", () => {
 
   test("does not translate dynamic identifiers that match static segments", () => {
     expect(
-      buildAppBreadcrumbs(
-        "/pull-requests/actions/settings/42",
-        translate,
-      ),
+      buildAppBreadcrumbs("/pull-requests/actions/settings/42", translate),
     ).toEqual([
       {
         href: "/pull-requests",
