@@ -60,15 +60,12 @@ export class WorkflowEventsService {
     if (now < this.nextMaintenanceAt) return;
 
     const prisma = await getPrismaClient();
+    // Legacy PROCESSED rows are durable producer-key receipts. Deleting them
+    // without equivalent delivery rows would let a provider retry create a run.
     const expired = await prisma.workflowTriggerEvent.findMany({
       where: {
-        OR: [
-          { status: "PROCESSED" },
-          {
-            status: "FAILED",
-            receivedAt: { lt: new Date(now - FAILED_EVENT_RETENTION_MS) },
-          },
-        ],
+        status: "FAILED",
+        receivedAt: { lt: new Date(now - FAILED_EVENT_RETENTION_MS) },
       },
       select: { id: true },
       orderBy: { receivedAt: "asc" },

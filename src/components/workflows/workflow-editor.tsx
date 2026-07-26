@@ -830,6 +830,8 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
       if (!imported || typeof imported !== "object")
         throw new Error(t("invalidImport"));
       const next = imported as WorkflowDefinition;
+      setBasicPreview(false);
+      setPreviewSelectedId(null);
       setDefinition(next);
       rebuildGraph(next);
       setNotice(t("importLoaded"));

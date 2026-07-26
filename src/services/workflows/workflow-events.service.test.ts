@@ -66,7 +66,7 @@ describe("WorkflowEventsService", () => {
     );
   });
 
-  test("deletes legacy processed rows and expired failures in bounded batches", async () => {
+  test("retains legacy processed receipts and deletes expired failures in bounded batches", async () => {
     prisma.workflowTriggerEvent.findMany.mockResolvedValueOnce([
       { id: "expired-1" },
     ]);
@@ -80,13 +80,8 @@ describe("WorkflowEventsService", () => {
     expect(prisma.workflowTriggerEvent.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          OR: [
-            { status: "PROCESSED" },
-            {
-              status: "FAILED",
-              receivedAt: { lt: expect.any(Date) },
-            },
-          ],
+          status: "FAILED",
+          receivedAt: { lt: expect.any(Date) },
         },
         take: 1_000,
       }),

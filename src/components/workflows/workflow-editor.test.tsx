@@ -510,4 +510,61 @@ describe("workflow editor basic layout preview", () => {
       ),
     );
   });
+
+  test("exits Basic preview when importing a regular definition", async () => {
+    const definition = emptyDefinition("Basic preview import");
+    definition.editor.displayLayout = "BASIC";
+    request.mockResolvedValue({
+      workflowCatalog: {
+        schemaVersion: 1,
+        globalConcurrency: 1,
+        steps: [],
+        triggers: [],
+      },
+      workflow: {
+        id: "workflow-1",
+        name: definition.name,
+        description: definition.description,
+        draftDefinition: definition,
+        activeVersionId: null,
+        enabled: false,
+        overlapPolicy: "QUEUE",
+        maxConcurrentRuns: 1,
+        archivedAt: null,
+        versionCount: 0,
+        runCount: 0,
+        createdAt: "2026-07-24T00:00:00.000Z",
+        updatedAt: "2026-07-24T00:00:00.000Z",
+      },
+    } as never);
+    const { container } = render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Preview basic layout" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Basic preview graph" }),
+    ).toBeTruthy();
+
+    const regular = emptyDefinition("Imported regular workflow");
+    const file = new File([JSON.stringify(regular)], "regular.workflow.json", {
+      type: "application/json",
+    });
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [file] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Basic preview graph" }),
+      ).toBeNull(),
+    );
+    expect(
+      screen.getByRole("button", { name: "Select test edge" }),
+    ).toBeTruthy();
+  });
 });
