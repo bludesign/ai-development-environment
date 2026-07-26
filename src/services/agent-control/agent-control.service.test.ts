@@ -73,6 +73,39 @@ describe("AgentControlService.completeJob", () => {
   });
 });
 
+describe("AgentControlService.claimJob", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("does not expire a cleanup lease after it is linked to a job", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({
+      derivedDataCleanupLease: {
+        deleteMany,
+        findUnique: vi.fn().mockResolvedValue({
+          worktreeId: "worktree-1",
+          jobId: "delete-1",
+          expiresAt: new Date(0),
+        }),
+      },
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({
+          agentId: "agent-1",
+          status: "QUEUED",
+          worktreeId: "worktree-1",
+          kind: "ios.build.run",
+        }),
+      },
+    });
+
+    await expect(
+      new AgentControlService().claimJob("agent-1", "build-1"),
+    ).rejects.toThrow("cleanup is in progress");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { jobId: null, expiresAt: { lte: expect.any(Date) } },
+    });
+  });
+});
+
 describe("agent job validation", () => {
   test("validates iOS artifact download payloads", () => {
     expect(SUPPORTED_AGENT_JOBS).toContain(IOS_ARTIFACT_DOWNLOAD_JOB_KIND);
@@ -130,6 +163,21 @@ describe("agent job validation", () => {
     expect(() =>
       validateJob("buildData.delete", { targets: [{ path: "/tmp/App" }] }),
     ).toThrow("rootPath");
+    expect(() =>
+      validateJob("buildData.delete", {
+        source: "AUTOMATIC",
+        targets: [
+          {
+            path: "/DerivedData/App",
+            rootPath: "/DerivedData",
+            name: "App",
+            kind: "PROJECT",
+            worktreeId: "worktree-1",
+            worktreePath: "/worktrees/App",
+          },
+        ],
+      }),
+    ).not.toThrow();
   });
 });
 

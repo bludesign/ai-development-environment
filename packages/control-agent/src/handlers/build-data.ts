@@ -1,14 +1,29 @@
-import { lstat, opendir, readdir, realpath, rm } from "node:fs/promises";
+import {
+  lstat,
+  opendir,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  statfs,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   buildDataScanPayload,
+  buildDataDeletePayload,
   buildDataTargetsPayload,
   type BuildDataDeleteResult,
   type BuildDataScanEntry,
   type BuildDataSizeResult,
 } from "@ai-development-environment/agent-contract/build-data";
+import { parsePlist } from "@ai-development-environment/agent-contract/plist";
+import type {
+  AgentDiskSpaceConfiguration,
+  AgentDiskSpaceReport,
+  DiskSpaceVolumeRole,
+} from "@ai-development-environment/agent-contract/disk-space";
 
 import { captureCommand } from "../capture-command.js";
 import type { AgentJobHandler } from "./index.js";
@@ -33,7 +48,7 @@ function safeRelativePath(value: string): boolean {
   );
 }
 
-async function configuredRoots(
+export async function configuredRoots(
   payload: ReturnType<typeof buildDataScanPayload>,
 ): Promise<string[]> {
   if (payload.mode === "DEFAULT") {
@@ -106,10 +121,13 @@ async function scanRoot(
   }
 
   const entries: BuildDataScanEntry[] = [];
+  const rootStats = await stat(rootPath);
+  const volumeId = String(rootStats.dev);
   for (const child of children) {
     signal.throwIfAborted();
     if (!child.isDirectory()) continue;
     const path = join(rootPath, child.name);
+    const information = await lstat(path);
     const projectPath = await workspacePath(
       join(path, "info.plist"),
       timeoutMs,
@@ -125,6 +143,8 @@ async function scanRoot(
           ? "SHARED_CACHE"
           : "PENDING",
       workspacePath: projectPath,
+      modifiedAt: information.mtime.toISOString(),
+      volumeId,
     });
   }
   entries.sort((first, second) => first.name.localeCompare(second.name));
@@ -164,6 +184,8 @@ async function scanDeviceSupport(
           name: child.name,
           kind: "DEVICE_SUPPORT" as const,
           workspacePath: null,
+          modifiedAt: null,
+          volumeId: null,
         }))
         .sort((first, second) => first.name.localeCompare(second.name)),
       warning: null,
@@ -286,7 +308,7 @@ export const deleteBuildData: AgentJobHandler = async (
   _timeoutMs,
   signal,
 ) => {
-  const payload = buildDataTargetsPayload(rawPayload);
+  const payload = buildDataDeletePayload(rawPayload);
   const deleted: BuildDataDeleteResult["deleted"] = [];
   for (const target of payload.targets) {
     signal.throwIfAborted();
@@ -316,3 +338,145 @@ export const deleteBuildData: AgentJobHandler = async (
   }
   return { ...successfulProcess, deleted };
 };
+
+type MutableVolume = {
+  id: string;
+  capacityId: string;
+  totalBytes: number;
+  freeBytes: number;
+  roles: Set<DiskSpaceVolumeRole>;
+  paths: Set<string>;
+};
+
+async function sharedCapacityId(
+  canonicalPath: string,
+  volumeId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  try {
+    const result = await captureCommand({
+      command: "/usr/sbin/diskutil",
+      args: ["info", "-plist", canonicalPath],
+      timeoutMs: 5_000,
+      signal,
+    });
+    signal.throwIfAborted();
+    if (result.exitCode !== 0) return volumeId;
+    const information = parsePlist(result.stdout);
+    if (!information || typeof information !== "object") return volumeId;
+    const container = (information as Record<string, unknown>)
+      .APFSContainerReference;
+    return typeof container === "string" && container.trim()
+      ? `apfs:${container.trim()}`
+      : volumeId;
+  } catch {
+    signal.throwIfAborted();
+    return volumeId;
+  }
+}
+
+async function inspectVolume(
+  configuredPath: string,
+  role: DiskSpaceVolumeRole,
+  signal: AbortSignal,
+): Promise<{ canonicalPath: string; volume: MutableVolume }> {
+  signal.throwIfAborted();
+  const canonicalPath = await realpath(configuredPath);
+  const [information, filesystem] = await Promise.all([
+    stat(canonicalPath),
+    statfs(canonicalPath, { bigint: true }),
+  ]);
+  const id = String(information.dev);
+  return {
+    canonicalPath,
+    volume: {
+      id,
+      capacityId: id,
+      totalBytes: Number(filesystem.blocks * filesystem.bsize),
+      freeBytes: Number(filesystem.bavail * filesystem.bsize),
+      roles: new Set([role]),
+      paths: new Set([canonicalPath]),
+    },
+  };
+}
+
+export async function collectAgentDiskSpace(
+  configuration: AgentDiskSpaceConfiguration,
+  signal: AbortSignal,
+): Promise<AgentDiskSpaceReport> {
+  const scanPayload = buildDataScanPayload({
+    mode: configuration.derivedDataLocationMode,
+    path: configuration.derivedDataPath,
+    worktrees: configuration.worktrees,
+  });
+  const roots = await configuredRoots(scanPayload);
+  const requested: Array<{ path: string; role: DiskSpaceVolumeRole }> = [
+    { path: "/", role: "MAIN" },
+    ...(configuration.baseRepoDirectory
+      ? [{ path: configuration.baseRepoDirectory, role: "BASE_REPO" as const }]
+      : []),
+    ...roots.map((path) => ({ path, role: "DERIVED_DATA" as const })),
+  ];
+  const warnings: string[] = [];
+  const volumes = new Map<string, MutableVolume>();
+  for (const request of requested) {
+    signal.throwIfAborted();
+    try {
+      const inspected = await inspectVolume(request.path, request.role, signal);
+      const existing = volumes.get(inspected.volume.id);
+      if (existing) {
+        existing.roles.add(request.role);
+        existing.paths.add(inspected.canonicalPath);
+        existing.totalBytes = inspected.volume.totalBytes;
+        existing.freeBytes = inspected.volume.freeBytes;
+      } else {
+        inspected.volume.capacityId = await sharedCapacityId(
+          inspected.canonicalPath,
+          inspected.volume.id,
+          signal,
+        );
+        volumes.set(inspected.volume.id, inspected.volume);
+      }
+    } catch (error) {
+      warnings.push(`${request.path}: ${errorMessage(error)}`);
+    }
+  }
+
+  const entries: AgentDiskSpaceReport["entries"] = [];
+  const scannedRoots = new Set<string>();
+  for (const root of roots) {
+    signal.throwIfAborted();
+    let canonical = root;
+    try {
+      canonical = await realpath(root);
+    } catch {
+      // scanRoot returns a useful warning for inaccessible roots.
+    }
+    if (scannedRoots.has(canonical)) continue;
+    scannedRoots.add(canonical);
+    const result = await scanRoot(root, 45_000, signal);
+    if (result.warning) warnings.push(result.warning);
+    for (const entry of result.entries) {
+      if (!entry.modifiedAt || !entry.volumeId) continue;
+      entries.push({
+        ...entry,
+        modifiedAt: entry.modifiedAt,
+        volumeId: entry.volumeId,
+      });
+    }
+  }
+
+  return {
+    observedAt: new Date().toISOString(),
+    volumes: [...volumes.values()].map((volume) => ({
+      id: volume.id,
+      capacityId: volume.capacityId,
+      totalBytes: volume.totalBytes,
+      freeBytes: volume.freeBytes,
+      roles: [...volume.roles],
+      paths: [...volume.paths],
+    })),
+    entries,
+    warnings: [...new Set(warnings)],
+  };
+}

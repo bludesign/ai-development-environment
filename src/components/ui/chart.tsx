@@ -255,9 +255,17 @@ function ChartLegendContent({
   payload,
   verticalAlign = "bottom",
   nameKey,
+  itemLabel,
+  onItemClick,
 }: React.ComponentProps<"div"> & {
   hideIcon?: boolean;
   nameKey?: string;
+  /**
+   * Accessible name for a clickable entry. The legend knows the series but not
+   * what selecting one means to the chart, so the caller supplies the wording.
+   */
+  itemLabel?: (dataKey: string, active: boolean) => string;
+  onItemClick?: (dataKey: string) => void;
 } & RechartsPrimitive.DefaultLegendContentProps) {
   const { config } = useChart();
   if (!payload?.length) return null;
@@ -275,11 +283,12 @@ function ChartLegendContent({
         .map((item, index) => {
           const key = `${nameKey ?? item.dataKey ?? "value"}`;
           const itemConfig = getPayloadConfigFromPayload(config, item, key);
-          return (
-            <div
-              key={index}
-              className="flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"
-            >
+          const itemClassName = cn(
+            "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground",
+            item.inactive && "opacity-40",
+          );
+          const content = (
+            <>
               {itemConfig?.icon && !hideIcon ? (
                 <itemConfig.icon />
               ) : (
@@ -289,7 +298,31 @@ function ChartLegendContent({
                 />
               )}
               {itemConfig?.label}
-            </div>
+            </>
+          );
+          if (!onItemClick) {
+            return (
+              <div key={index} className={itemClassName}>
+                {content}
+              </div>
+            );
+          }
+          const dataKey = String(item.dataKey ?? "");
+          const active = !item.inactive;
+          return (
+            <button
+              aria-label={itemLabel?.(dataKey, active)}
+              aria-pressed={active}
+              className={cn(
+                itemClassName,
+                "cursor-pointer rounded-sm px-1 py-0.5 transition-all outline-none hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50",
+              )}
+              key={index}
+              onClick={() => onItemClick(dataKey)}
+              type="button"
+            >
+              {content}
+            </button>
           );
         })}
     </div>

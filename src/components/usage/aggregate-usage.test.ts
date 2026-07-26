@@ -6,7 +6,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   aggregateUsage,
+  emptyUsageMetrics,
   filterUsageByDays,
+  totalsForModel,
+  type UsageDayRow,
   type UsageReportSource,
 } from "./aggregate-usage";
 
@@ -249,5 +252,54 @@ describe("aggregateUsage", () => {
       totalCost: 1.1,
     });
     expect(filterUsageByDays(usage, null)).toBe(usage);
+  });
+});
+
+describe("totalsForModel", () => {
+  test("sums one model across days and leaves unattributed tokens out", () => {
+    const metrics = (input: number, cost: number) => ({
+      inputTokens: input,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: input,
+      totalCost: cost,
+    });
+    const days: UsageDayRow[] = [
+      {
+        period: "2026-07-16",
+        sources: ["codex"],
+        ...metrics(30, 3),
+        models: [
+          { modelName: "gpt-5", agents: [], ...metrics(10, 1) },
+          { modelName: "claude", agents: [], ...metrics(15, 2) },
+          {
+            modelName: "Unattributed tokens",
+            agents: [],
+            unattributed: true,
+            ...metrics(5, 0),
+          },
+        ],
+      },
+      {
+        period: "2026-07-15",
+        sources: ["codex"],
+        ...metrics(7, 0.5),
+        models: [{ modelName: "gpt-5", agents: [], ...metrics(7, 0.5) }],
+      },
+    ];
+
+    expect(totalsForModel(days, "gpt-5")).toEqual({
+      inputTokens: 17,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 17,
+      totalCost: 1.5,
+    });
+    expect(totalsForModel(days, "Unattributed tokens")).toEqual(
+      emptyUsageMetrics(),
+    );
+    expect(totalsForModel(days, "missing-model")).toEqual(emptyUsageMetrics());
   });
 });

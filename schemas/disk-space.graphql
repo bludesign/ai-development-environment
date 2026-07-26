@@ -1,0 +1,144 @@
+enum DiskSpaceVolumeRole {
+  MAIN
+  BASE_REPO
+  DERIVED_DATA
+}
+
+enum DiskSpaceAgentStatus {
+  DISABLED
+  STALE
+  IDLE
+  CLEANUP_REQUIRED
+  DELETING
+  PRESSURE
+  CRITICAL
+  ERROR
+}
+
+enum DiskSpacePressureMode {
+  NORMAL
+  MANUAL
+  AUTOMATIC
+}
+
+type DiskSpaceSettings {
+  normalThresholdGiB: Float!
+  pressureThresholdGiB: Float!
+  pollIntervalSeconds: Int!
+  staleAfterSeconds: Int!
+}
+
+type DiskSpaceVolume {
+  id: ID!
+  totalBytes: Float!
+  freeBytes: Float!
+  roles: [DiskSpaceVolumeRole!]!
+  paths: [String!]!
+  status: DiskSpaceAgentStatus!
+  effectiveThresholdBytes: Float!
+}
+
+type AgentDiskSpace {
+  agent: Agent!
+  enabled: Boolean!
+  status: DiskSpaceAgentStatus!
+  pressureMode: DiskSpacePressureMode!
+  manualPressureMode: Boolean!
+  automaticPressureMode: Boolean!
+  lastReportedAt: String
+  lastError: String
+  warnings: [String!]!
+  volumes: [DiskSpaceVolume!]!
+}
+
+type DiskSpaceOverview {
+  settings: DiskSpaceSettings!
+  agents: [AgentDiskSpace!]!
+}
+
+type AgentDiskSpaceWorktree {
+  id: ID!
+  folder: String!
+}
+
+type AgentDiskSpaceConfiguration {
+  enabled: Boolean!
+  pollIntervalSeconds: Int!
+  baseRepoDirectory: String
+  derivedDataLocationMode: DerivedDataLocationMode!
+  derivedDataPath: String
+  worktrees: [AgentDiskSpaceWorktree!]!
+}
+
+input AgentDiskSpaceVolumeInput {
+  id: ID!
+  totalBytes: Float!
+  freeBytes: Float!
+  roles: [DiskSpaceVolumeRole!]!
+  paths: [String!]!
+}
+
+input AgentDiskSpaceEntryInput {
+  path: String!
+  rootPath: String!
+  name: String!
+  kind: BuildDataEntryKind!
+  workspacePath: String
+  modifiedAt: String!
+  volumeId: ID!
+}
+
+input AgentDiskSpaceReportInput {
+  observedAt: String!
+  volumes: [AgentDiskSpaceVolumeInput!]!
+  entries: [AgentDiskSpaceEntryInput!]!
+  warnings: [String!]!
+}
+
+input UpdateDiskSpaceSettingsInput {
+  normalThresholdGiB: Float!
+  pressureThresholdGiB: Float!
+}
+
+type SidebarActivityCounts {
+  plans: Int!
+  sessions: Int!
+  builds: Int!
+  workflows: Int!
+}
+
+type SidebarUsageToday {
+  totalCost: Float
+  collectedAt: String
+}
+
+type SidebarStatus {
+  usageToday: SidebarUsageToday!
+  activity: SidebarActivityCounts!
+  diskSpace: DiskSpaceOverview!
+}
+
+extend type Query {
+  diskSpaceSettings: DiskSpaceSettings!
+  diskSpaceOverview: DiskSpaceOverview!
+  agentDiskSpace(agentId: ID!): AgentDiskSpace!
+  sidebarStatus: SidebarStatus!
+  agentDiskSpaceConfiguration: AgentDiskSpaceConfiguration!
+}
+
+extend type Mutation {
+  updateDiskSpaceSettings(
+    input: UpdateDiskSpaceSettingsInput!
+  ): DiskSpaceSettings!
+  setAgentDiskSpaceMonitoring(agentId: ID!, enabled: Boolean!): AgentDiskSpace!
+  setAgentDiskSpacePressureMode(
+    agentId: ID!
+    enabled: Boolean!
+  ): AgentDiskSpace!
+  reportAgentDiskSpace(input: AgentDiskSpaceReportInput!): Boolean!
+}
+
+extend type Subscription {
+  diskSpaceChanged: ID!
+  sidebarStatusChanged: Boolean!
+}

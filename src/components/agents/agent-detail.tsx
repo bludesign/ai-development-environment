@@ -50,6 +50,11 @@ import type {
   AgentJob,
 } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import {
+  AGENT_DISK_SPACE_FIELDS,
+  type AgentDiskSpace,
+} from "@/components/disk-space/types";
+import { VolumeBar } from "@/components/disk-space/volume-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -134,11 +139,13 @@ function upsertJob(jobs: AgentJob[], changed: AgentJob): AgentJob[] {
 
 export function AgentDetail({ agentId }: { agentId: string }) {
   const t = useTranslations("agentDetail");
+  const diskT = useTranslations("diskSpace");
   const commandsT = useTranslations("commands");
   const common = useTranslations("common");
   const locale = useLocale();
   const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
+  const [diskSpace, setDiskSpace] = useState<AgentDiskSpace | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [cadenceSettings, setCadenceSettings] =
     useState<AgentCadenceSettings | null>(null);
@@ -159,9 +166,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         agentCadenceSettings: AgentCadenceSettings;
         agentJobs: AgentJob[];
         codebaseOverview: { repositories: CodebaseOverviewRepository[] };
+        agentDiskSpace: AgentDiskSpace;
       }>(
         `query AgentDetail($id: ID!) {
           agent(id: $id) { ${AGENT_FIELDS} }
+          agentDiskSpace(agentId: $id) { ${AGENT_DISK_SPACE_FIELDS} }
           agentCadenceSettings(agentId: $id) {
             agentId codebaseScanIntervalSeconds jobReconciliationIntervalSeconds
             gitFetchIntervalSeconds heartbeatIntervalSeconds
@@ -181,6 +190,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       );
       if (loadId !== latestLoad.current) return;
       setAgent(data.agent);
+      setDiskSpace(data.agentDiskSpace);
       setCadenceSettings(data.agentCadenceSettings);
       setJobs(data.agentJobs);
       setCodebases(
@@ -247,11 +257,29 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeDiskSpace = client.subscribe<{ diskSpaceChanged: string }>(
+      {
+        query: `subscription AgentDiskSpaceChanged { diskSpaceChanged }`,
+      },
+      {
+        next: (value) => {
+          if (
+            value.data?.diskSpaceChanged === agentId ||
+            value.data?.diskSpaceChanged === "settings"
+          ) {
+            void load();
+          }
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initialLoad);
       latestLoad.current += 1;
       unsubscribeAgent();
       unsubscribeCodebases();
+      unsubscribeDiskSpace();
     };
   }, [agentId, load]);
 
@@ -330,6 +358,14 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         {t("loading")}
       </p>
     );
+
+  const mainDisk = diskSpace?.volumes.find((volume) =>
+    volume.roles.includes("MAIN"),
+  );
+  const baseRepoDisk = diskSpace?.volumes.find(
+    (volume) =>
+      volume.roles.includes("BASE_REPO") && volume.id !== mainDisk?.id,
+  );
   if (loadError && !agent)
     return (
       <p className="mx-auto max-w-6xl text-sm text-destructive">{loadError}</p>
@@ -437,16 +473,44 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               usedLabel={t("used")}
               freeLabel={t("free")}
             />
-            <ResourceUsage
-              free={agent.diskFreeBytes}
-              label={t("disk")}
-              locale={locale}
-              total={agent.diskTotalBytes}
-              unavailable={t("unavailable")}
-              usedLabel={t("used")}
-              freeLabel={t("free")}
-            />
+            <div className="rounded-lg border p-3">
+              {mainDisk ? (
+                <VolumeBar volume={mainDisk} />
+              ) : (
+                <>
+                  <p className="text-sm font-medium">{diskT("mainDisk")}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {diskSpace?.enabled === false
+                      ? diskT("disabled")
+                      : diskT("noReport")}
+                  </p>
+                </>
+              )}
+            </div>
           </div>
+          {baseRepoDisk && (
+            <Card className="gap-3 py-4">
+              <CardHeader className="px-4">
+                <CardTitle>{diskT("baseRepoDisk")}</CardTitle>
+                <CardDescription>
+                  {diskT("baseRepoDiskDescription")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-4">
+                <VolumeBar volume={baseRepoDisk} />
+              </CardContent>
+            </Card>
+          )}
+          {diskSpace &&
+            (diskSpace.lastError || diskSpace.warnings.length > 0) && (
+              <Alert variant={diskSpace.lastError ? "destructive" : "default"}>
+                <AlertDescription>
+                  {[diskSpace.lastError, ...(diskSpace.warnings ?? [])]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </AlertDescription>
+              </Alert>
+            )}
         </CardContent>
       </Card>
 

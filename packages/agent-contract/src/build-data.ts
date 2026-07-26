@@ -34,6 +34,17 @@ export type BuildDataScanEntry = BuildDataTarget & {
   name: string;
   kind: BuildDataScanEntryKind;
   workspacePath: string | null;
+  modifiedAt: string | null;
+  volumeId: string | null;
+};
+
+export type BuildDataDeleteSource = "USER" | "AUTOMATIC";
+
+export type BuildDataDeleteTarget = BuildDataTarget & {
+  name?: string;
+  kind?: BuildDataScanEntryKind;
+  worktreeId?: string | null;
+  worktreePath?: string | null;
 };
 
 export type BuildDataScanResult = {
@@ -75,6 +86,11 @@ function stringValue(value: unknown, name: string): string {
 
 function nullableString(value: unknown, name: string): string | null {
   if (value === null) return null;
+  return stringValue(value, name);
+}
+
+function optionalNullableString(value: unknown, name: string): string | null {
+  if (value === undefined || value === null) return null;
   return stringValue(value, name);
 }
 
@@ -120,6 +136,56 @@ function target(value: unknown, index: number): BuildDataTarget {
   };
 }
 
+function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
+  const item = objectValue(value, `build data delete targets[${index}]`);
+  exactKeys(
+    item,
+    ["path", "rootPath", "name", "kind", "worktreeId", "worktreePath"],
+    "build data delete target",
+  );
+  const kind = item.kind;
+  if (
+    kind !== undefined &&
+    !(
+      ["PROJECT", "PENDING", "SHARED_CACHE", "DEVICE_SUPPORT"] as unknown[]
+    ).includes(kind)
+  ) {
+    throw new Error(`build data delete targets[${index}].kind is invalid`);
+  }
+  return {
+    path: stringValue(item.path, `build data delete targets[${index}].path`),
+    rootPath: stringValue(
+      item.rootPath,
+      `build data delete targets[${index}].rootPath`,
+    ),
+    ...(item.name === undefined
+      ? {}
+      : {
+          name: stringValue(
+            item.name,
+            `build data delete targets[${index}].name`,
+          ),
+        }),
+    ...(kind === undefined ? {} : { kind: kind as BuildDataScanEntryKind }),
+    ...(item.worktreeId === undefined
+      ? {}
+      : {
+          worktreeId: optionalNullableString(
+            item.worktreeId,
+            `build data delete targets[${index}].worktreeId`,
+          ),
+        }),
+    ...(item.worktreePath === undefined
+      ? {}
+      : {
+          worktreePath: optionalNullableString(
+            item.worktreePath,
+            `build data delete targets[${index}].worktreePath`,
+          ),
+        }),
+  };
+}
+
 export function buildDataScanPayload(value: unknown): {
   mode: DerivedDataLocationMode;
   path: string | null;
@@ -158,6 +224,27 @@ export function buildDataTargetsPayload(value: unknown): {
   return { targets: payload.targets.map(target) };
 }
 
+export function buildDataDeletePayload(value: unknown): {
+  targets: BuildDataDeleteTarget[];
+  source: BuildDataDeleteSource;
+} {
+  const payload = objectValue(value, "build data delete payload");
+  exactKeys(payload, ["targets", "source"], "build data delete payload");
+  if (!Array.isArray(payload.targets) || payload.targets.length > 10_000) {
+    throw new Error(
+      "build data delete targets must be an array of at most 10,000 items",
+    );
+  }
+  const source = payload.source ?? "USER";
+  if (source !== "USER" && source !== "AUTOMATIC") {
+    throw new Error("build data delete source is invalid");
+  }
+  return {
+    targets: payload.targets.map(deleteTarget),
+    source,
+  };
+}
+
 export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
   const result = objectValue(value, "build data scan result");
   if (!Array.isArray(result.entries) || !Array.isArray(result.warnings)) {
@@ -185,6 +272,14 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
         workspacePath: nullableString(
           entry.workspacePath,
           `build data entries[${index}].workspacePath`,
+        ),
+        modifiedAt: optionalNullableString(
+          entry.modifiedAt,
+          `build data entries[${index}].modifiedAt`,
+        ),
+        volumeId: optionalNullableString(
+          entry.volumeId,
+          `build data entries[${index}].volumeId`,
         ),
       };
     }),

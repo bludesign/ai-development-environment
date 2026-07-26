@@ -68,6 +68,17 @@ type DerivedDataEntry {
   operation: DerivedDataEntryOperation!
   error: String
   agent: Agent!
+  modifiedAt: String
+  volumeId: ID
+  locked: Boolean!
+  activeResources: [DerivedDataActiveResource!]!
+}
+
+type DerivedDataActiveResource {
+  kind: String!
+  id: ID!
+  label: String!
+  href: String!
 }
 
 type DerivedDataCollection {
@@ -116,8 +127,14 @@ extend type Mutation {
     collectionId: ID!
     entryIds: [ID!]!
     requestId: ID!
+    overrideProtection: Boolean = false
   ): DerivedDataCollection!
   clearDerivedDataDeletionHistory: Int!
+  setDerivedDataEntryLocked(
+    collectionId: ID!
+    entryId: ID!
+    locked: Boolean!
+  ): DerivedDataCollection!
 }
 
 extend type Subscription {

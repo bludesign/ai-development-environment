@@ -1,0 +1,241 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const getPrismaClient = vi.hoisted(() => vi.fn());
+
+vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+vi.mock("./executing-work", () => ({
+  executingResourcesByWorktree: vi.fn(
+    async (ids: string[]) => new Map(ids.map((id) => [id, []])),
+  ),
+}));
+
+import type { AgentControlService } from "@/services/agent-control";
+
+import { DiskSpaceService } from "./disk-space.service";
+
+function prismaForState(state: {
+  enabled: boolean;
+  lastReportedAt: Date | null;
+  lastError: string | null;
+  volumesJson: string;
+}) {
+  return {
+    diskSpaceSettings: {
+      upsert: vi.fn().mockResolvedValue({
+        normalThresholdGiB: 40,
+        pressureThresholdGiB: 10,
+      }),
+    },
+    agentDiskSpaceState: {
+      findUnique: vi.fn().mockResolvedValue(state),
+    },
+  };
+}
+
+function service() {
+  return new DiskSpaceService({
+    registerCompletionObserver: vi.fn(),
+  } as unknown as AgentControlService);
+}
+
+describe("DiskSpaceService admission control", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("blocks new work at or below the critical threshold", async () => {
+    getPrismaClient.mockResolvedValue(
+      prismaForState({
+        enabled: true,
+        lastReportedAt: new Date(),
+        lastError: null,
+        volumesJson: JSON.stringify([
+          {
+            id: "device-1",
+            totalBytes: 100 * 1024 ** 3,
+            freeBytes: 10 * 1024 ** 3,
+            roles: ["MAIN"],
+            paths: ["/"],
+          },
+        ]),
+      }),
+    );
+
+    await expect(service().assertAgentCanStart("agent-1")).rejects.toThrow(
+      "paused",
+    );
+  });
+
+  test.each([
+    {
+      label: "stale",
+      state: {
+        enabled: true,
+        lastReportedAt: new Date(Date.now() - 121_000),
+        lastError: null,
+      },
+    },
+    {
+      label: "disabled",
+      state: { enabled: false, lastReportedAt: new Date(), lastError: null },
+    },
+    {
+      label: "errored",
+      state: {
+        enabled: true,
+        lastReportedAt: new Date(),
+        lastError: "unavailable",
+      },
+    },
+  ])("fails open for $label telemetry", async ({ state }) => {
+    getPrismaClient.mockResolvedValue(
+      prismaForState({
+        ...state,
+        volumesJson: JSON.stringify([
+          {
+            id: "device-1",
+            totalBytes: 100,
+            freeBytes: 0,
+            roles: ["MAIN"],
+            paths: ["/"],
+          },
+        ]),
+      }),
+    );
+
+    await expect(
+      service().assertAgentCanStart("agent-1"),
+    ).resolves.toBeUndefined();
+  });
+
+  test("requires positive ordered global thresholds", async () => {
+    await expect(
+      service().updateSettings({
+        normalThresholdGiB: 10,
+        pressureThresholdGiB: 10,
+      }),
+    ).rejects.toThrow("lower than");
+    await expect(
+      service().updateSettings({
+        normalThresholdGiB: Number.NaN,
+        pressureThresholdGiB: 1,
+      }),
+    ).rejects.toThrow("positive finite");
+  });
+
+  test("does not expire a cleanup lease after it is linked to a job", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({
+      derivedDataCleanupLease: {
+        deleteMany,
+        findUnique: vi.fn().mockResolvedValue({
+          worktreeId: "worktree-1",
+          jobId: "delete-1",
+          expiresAt: new Date(0),
+        }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+
+    await expect(
+      service().assertWorktreeCanStart("worktree-1"),
+    ).rejects.toThrow("cleanup is in progress");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        worktreeId: "worktree-1",
+        jobId: null,
+        expiresAt: { lte: expect.any(Date) },
+      },
+    });
+  });
+});
+
+describe("DiskSpaceService cleanup selection", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("cleans a Derived Data volume that shares APFS capacity with root", async () => {
+    const gib = 1024 ** 3;
+    const state = {
+      enabled: true,
+      lastReportedAt: new Date(),
+      lastError: null,
+      manualPressureMode: false,
+      automaticPressureMode: false,
+      volumesJson: JSON.stringify([
+        {
+          id: "root-device",
+          capacityId: "apfs:disk3",
+          totalBytes: 100 * gib,
+          freeBytes: 20 * gib,
+          roles: ["MAIN"],
+          paths: ["/"],
+        },
+        {
+          id: "data-device",
+          capacityId: "apfs:disk3",
+          totalBytes: 100 * gib,
+          freeBytes: 20 * gib,
+          roles: ["DERIVED_DATA"],
+          paths: ["/DerivedData"],
+        },
+      ]),
+      entriesJson: JSON.stringify([
+        {
+          path: "/DerivedData/App-hash",
+          rootPath: "/DerivedData",
+          name: "App-hash",
+          kind: "PROJECT",
+          workspacePath: "/Repos/App/App.xcodeproj",
+          modifiedAt: new Date(0).toISOString(),
+          volumeId: "data-device",
+          worktreeId: "worktree-1",
+          worktreePath: "App",
+        },
+      ]),
+    };
+    const updateState = vi.fn().mockResolvedValue(state);
+    const createJob = vi.fn().mockResolvedValue({ id: "delete-1" });
+    getPrismaClient.mockResolvedValue({
+      diskSpaceSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          normalThresholdGiB: 40,
+          pressureThresholdGiB: 10,
+        }),
+      },
+      agentDiskSpaceState: {
+        findUnique: vi.fn().mockResolvedValue(state),
+        update: updateState,
+      },
+      derivedDataLock: { findMany: vi.fn().mockResolvedValue([]) },
+      derivedDataCleanupLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "agent-1",
+          disconnectedAt: null,
+          lastSeenAt: new Date(),
+          capabilitiesJson: '["buildData.delete"]',
+        }),
+      },
+    });
+    const instance = new DiskSpaceService({
+      registerCompletionObserver: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService) as unknown as {
+      reconcileAgent(agentId: string): Promise<void>;
+    };
+
+    await instance.reconcileAgent("agent-1");
+
+    expect(updateState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { automaticPressureMode: true } }),
+    );
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ source: "AUTOMATIC" }),
+      }),
+    );
+  });
+});

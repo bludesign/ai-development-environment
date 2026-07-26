@@ -4,6 +4,7 @@ import {
   BUILD_DATA_DELETE_JOB_KIND,
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
+  buildDataDeletePayload,
   buildDataTargetsPayload,
   parseBuildDataDeleteResult,
   parseBuildDataScanResult,
@@ -19,11 +20,16 @@ import {
   buildDataCollectionChangedTopic,
 } from "@/services/agent-control";
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
+import {
+  executingResourcesByWorktree,
+  type DerivedDataActiveResource,
+} from "@/services/disk-space/executing-work";
 
 const COLLECTION_DEADLINE_MS = 60_000;
 const SCAN_TIMEOUT_SECONDS = 45;
 const OPERATION_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
 const HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
+const CLEANUP_LEASE_MS = OPERATION_TIMEOUT_SECONDS * 1_000;
 const TERMINAL_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -69,6 +75,10 @@ export type BuildDataEntryView = {
   agent: PersistedAgent;
   path: string;
   rootPath: string;
+  modifiedAt: string | null;
+  volumeId: string | null;
+  locked: boolean;
+  activeResources: DerivedDataActiveResource[];
 };
 
 export type BuildDataCollectionSnapshot = {
@@ -127,10 +137,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function operationTargetPaths(job: { payloadJson: string }): string[] {
-  return buildDataTargetsPayload(parseResult(job.payloadJson)).targets.map(
-    (target) => target.path,
-  );
+function operationTargetPaths(job: {
+  kind: string;
+  payloadJson: string;
+}): string[] {
+  const payload = parseResult(job.payloadJson);
+  const targets =
+    job.kind === BUILD_DATA_DELETE_JOB_KIND
+      ? buildDataDeletePayload(payload).targets
+      : buildDataTargetsPayload(payload).targets;
+  return targets.map((target) => target.path);
 }
 
 function invalidOperationResultError(
@@ -143,7 +159,7 @@ function invalidOperationResultError(
 
 function applyOperationError(
   views: Map<string, BuildDataEntryView>,
-  job: { agentId: string; payloadJson: string },
+  job: { agentId: string; kind: string; payloadJson: string },
   error: string,
 ): void {
   try {
@@ -256,6 +272,7 @@ export class BuildDataService {
     collectionId: string,
     entryIds: string[],
     requestId: string,
+    overrideProtection = false,
   ): Promise<BuildDataCollectionSnapshot> {
     const snapshot = await this.requireCollection(collectionId);
     await this.createTargetJobs(
@@ -263,6 +280,7 @@ export class BuildDataService {
       entryIds,
       requestId,
       BUILD_DATA_DELETE_JOB_KIND,
+      overrideProtection,
     );
     return (await this.getCollection(collectionId))!;
   }
@@ -407,6 +425,7 @@ export class BuildDataService {
     requestedIds: string[],
     requestId: string,
     kind: typeof BUILD_DATA_SIZE_JOB_KIND | typeof BUILD_DATA_DELETE_JOB_KIND,
+    overrideProtection = false,
   ): Promise<void> {
     const uniqueIds = [...new Set(requestedIds)];
     if (!uniqueIds.length)
@@ -418,6 +437,18 @@ export class BuildDataService {
         throw new Error("A selected Derived Data entry is no longer available");
       return entry;
     });
+    if (kind === BUILD_DATA_DELETE_JOB_KIND && !overrideProtection) {
+      const protectedEntries = selected.filter(
+        (entry) => entry.locked || entry.activeResources.length > 0,
+      );
+      if (protectedEntries.length) {
+        throw new Error(
+          `Explicit override confirmation is required to delete protected Derived Data: ${protectedEntries
+            .map((entry) => entry.name)
+            .join(", ")}`,
+        );
+      }
+    }
     const groups = new Map<string, BuildDataEntryView[]>();
     for (const entry of selected) {
       const group = groups.get(entry.agent.id) ?? [];
@@ -447,17 +478,72 @@ export class BuildDataService {
       readyGroups.push({ agentId, entries: group });
     }
     for (const { agentId, entries: group } of readyGroups) {
-      await this.agentControlService.createJob({
-        agentId,
-        kind,
-        payload: {
-          targets: group.map(({ path, rootPath }) => ({ path, rootPath })),
-        },
-        idempotencyKey: `${kind}:${snapshot.id}:${requestId}:${agentId}`,
-        timeoutSeconds: OPERATION_TIMEOUT_SECONDS,
-        buildDataCollectionId: snapshot.id,
-        visibility: "SYSTEM",
-      });
+      const leasedWorktrees =
+        kind === BUILD_DATA_DELETE_JOB_KIND
+          ? [
+              ...new Map(
+                group
+                  .filter(
+                    (
+                      entry,
+                    ): entry is BuildDataEntryView & { worktreeId: string } =>
+                      Boolean(entry.worktreeId),
+                  )
+                  .map((entry) => [entry.worktreeId, entry]),
+              ).values(),
+            ]
+          : [];
+      const acquiredWorktreeIds: string[] = [];
+      try {
+        for (const entry of leasedWorktrees) {
+          await prisma.derivedDataCleanupLease.create({
+            data: {
+              worktreeId: entry.worktreeId,
+              agentId,
+              path: entry.path,
+              source: "USER",
+              expiresAt: new Date(Date.now() + CLEANUP_LEASE_MS),
+            },
+          });
+          acquiredWorktreeIds.push(entry.worktreeId);
+        }
+        const job = await this.agentControlService.createJob({
+          agentId,
+          kind,
+          payload: {
+            targets: group.map(({ path, rootPath }) => ({
+              path,
+              rootPath,
+            })),
+          },
+          idempotencyKey: `${kind}:${snapshot.id}:${requestId}:${agentId}`,
+          timeoutSeconds: OPERATION_TIMEOUT_SECONDS,
+          buildDataCollectionId: snapshot.id,
+          visibility: "SYSTEM",
+        });
+        if (leasedWorktrees.length) {
+          await prisma.derivedDataCleanupLease.updateMany({
+            where: {
+              worktreeId: {
+                in: leasedWorktrees.map((entry) => entry.worktreeId),
+              },
+              jobId: null,
+            },
+            data: { jobId: job.id },
+          });
+        }
+      } catch (error) {
+        if (acquiredWorktreeIds.length) {
+          await prisma.derivedDataCleanupLease.deleteMany({
+            where: {
+              worktreeId: { in: acquiredWorktreeIds },
+              source: "USER",
+              jobId: null,
+            },
+          });
+        }
+        throw error;
+      }
     }
   }
 
@@ -621,6 +707,10 @@ export class BuildDataService {
           agent,
           path: entry.path,
           rootPath: entry.rootPath,
+          modifiedAt: entry.modifiedAt,
+          volumeId: entry.volumeId,
+          locked: false,
+          activeResources: [],
         });
       }
     }
@@ -701,11 +791,68 @@ export class BuildDataService {
         }
       }
     }
-    return [...views.values()].sort(
+    const visible = [...views.values()];
+    const worktreeIds = visible
+      .map((entry) => entry.worktreeId)
+      .filter((id): id is string => Boolean(id));
+    const [locks, activeResources] = await Promise.all([
+      prisma.derivedDataLock.findMany({
+        where: {
+          OR: visible.map((entry) => ({
+            agentId: entry.agent.id,
+            path: entry.path,
+          })),
+        },
+        select: { agentId: true, path: true },
+      }),
+      executingResourcesByWorktree(worktreeIds),
+    ]);
+    const lockedKeys = new Set(
+      locks.map((lock) => `${lock.agentId}\0${lock.path}`),
+    );
+    for (const entry of visible) {
+      entry.locked = lockedKeys.has(`${entry.agent.id}\0${entry.path}`);
+      entry.activeResources = entry.worktreeId
+        ? (activeResources.get(entry.worktreeId) ?? [])
+        : [];
+    }
+    return visible.sort(
       (first, second) =>
         first.agent.name.localeCompare(second.agent.name) ||
+        (first.modifiedAt === null
+          ? 1
+          : second.modifiedAt === null
+            ? -1
+            : new Date(first.modifiedAt).getTime() -
+              new Date(second.modifiedAt).getTime()) ||
         first.name.localeCompare(second.name),
     );
+  }
+
+  async setEntryLocked(
+    collectionId: string,
+    entryIdValue: string,
+    locked: boolean,
+  ): Promise<BuildDataCollectionSnapshot> {
+    const snapshot = await this.requireCollection(collectionId);
+    const entry = snapshot.entries.find(
+      (candidate) => candidate.id === entryIdValue,
+    );
+    if (!entry) throw new Error("Derived Data entry not found");
+    const prisma = await getPrismaClient();
+    if (locked) {
+      await prisma.derivedDataLock.upsert({
+        where: { agentId_path: { agentId: entry.agent.id, path: entry.path } },
+        create: { id: randomUUID(), agentId: entry.agent.id, path: entry.path },
+        update: {},
+      });
+    } else {
+      await prisma.derivedDataLock.deleteMany({
+        where: { agentId: entry.agent.id, path: entry.path },
+      });
+    }
+    this.publish(collectionId);
+    return (await this.getCollection(collectionId))!;
   }
 
   private async expireCollection(collection: LoadedCollection): Promise<void> {
@@ -735,13 +882,10 @@ export class BuildDataService {
     buildDataCollectionId: string | null;
     status: string;
     resultJson: string | null;
+    payloadJson: string;
     error: string | null;
   }): Promise<void> {
-    if (
-      job.status !== "SUCCEEDED" ||
-      !job.buildDataCollectionId ||
-      !job.resultJson
-    ) {
+    if (job.status !== "SUCCEEDED" || !job.resultJson) {
       return;
     }
     await this.pruneHistory();
@@ -781,14 +925,21 @@ export class BuildDataService {
       });
       return;
     }
-    const collection = await this.loadCollection(job.buildDataCollectionId);
-    if (!collection) return;
-    const views = await this.entries(collection, true);
+    const payload = buildDataDeletePayload(parseResult(job.payloadJson));
+    const collection = job.buildDataCollectionId
+      ? await this.loadCollection(job.buildDataCollectionId)
+      : null;
+    const views = collection ? await this.entries(collection, true) : [];
     const byPath = new Map(
       views
         .filter((entry) => entry.agent.id === job.agentId)
         .map((entry) => [entry.path, entry]),
     );
+    const targetsByPath = new Map(
+      payload.targets.map((target) => [target.path, target]),
+    );
+    const agent = await prisma.agent.findUnique({ where: { id: job.agentId } });
+    if (!agent) return;
     try {
       await prisma.$transaction(async (transaction) => {
         const existing = await transaction.buildDataDeleteProjection.findUnique(
@@ -802,11 +953,13 @@ export class BuildDataService {
         });
         for (const deletion of deleted) {
           const entry = byPath.get(deletion.path);
-          if (!entry) continue;
-          const worktreeId = entry.worktreeId
+          const target = targetsByPath.get(deletion.path);
+          const requestedWorktreeId =
+            target?.worktreeId ?? entry?.worktreeId ?? null;
+          const worktreeId = requestedWorktreeId
             ? ((
                 await transaction.worktree.findUnique({
-                  where: { id: entry.worktreeId },
+                  where: { id: requestedWorktreeId },
                   select: { id: true },
                 })
               )?.id ?? null)
@@ -814,15 +967,15 @@ export class BuildDataService {
           await transaction.buildDataDeletionHistory.create({
             data: {
               id: randomUUID(),
-              agentId: entry.agent.id,
-              agentName: entry.agent.name,
-              folderName: entry.name,
+              agentId: job.agentId,
+              agentName: agent.name,
+              folderName: target?.name ?? entry?.name ?? deletion.path,
               worktreeId,
-              worktreePath: entry.worktreePath,
-              source: "USER",
-              entryKind: entry.kind,
+              worktreePath: target?.worktreePath ?? entry?.worktreePath ?? null,
+              source: payload.source,
+              entryKind: target?.kind ?? entry?.kind ?? "PROJECT",
               jobId: job.id,
-              targetKey: entry.id,
+              targetKey: entry?.id ?? entryId(job.agentId, deletion.path),
             },
           });
         }

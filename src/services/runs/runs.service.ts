@@ -6,6 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   RUNS_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   agentOnlineWindowMs,
   agentEventBus,
   agentEventsTopic,
@@ -17,6 +18,7 @@ import {
 import type { AgentControlService } from "@/services/agent-control";
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import type { NotificationsService } from "@/services/notifications";
+import type { DiskSpaceService } from "@/services/disk-space";
 
 import {
   MAX_RUN_INPUT_ATTACHMENT_BYTES,
@@ -146,6 +148,9 @@ function publishRun(runId: string): void {
   const payload = { runChanged: { id: runId } };
   agentEventBus.publish(runChangedTopic(runId), payload);
   agentEventBus.publish(RUNS_CHANGED_TOPIC, payload);
+  agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+    sidebarStatusChanged: true,
+  });
 }
 
 function publishCommand(command: unknown, agentId: string): void {
@@ -297,6 +302,7 @@ export class RunsService {
   constructor(
     private readonly notifications?: NotificationsService,
     private readonly agentControl?: AgentControlService,
+    private readonly diskSpace?: DiskSpaceService,
   ) {}
 
   private async waitForJob(jobId: string) {
@@ -788,6 +794,7 @@ export class RunsService {
     const prompt = requiredText(input.prompt, "Prompt", 200_000);
     const model = requiredText(input.model, "Model", 200);
     const worktree = await this.requireWorktree(input.worktreeId, provider);
+    await this.diskSpace?.assertWorktreeCanStart(worktree.id);
     const attachmentIds = [...new Set(input.attachmentIds ?? [])];
     await this.requireAttachments(attachmentIds, input.draftId ?? undefined);
 
@@ -1109,6 +1116,15 @@ export class RunsService {
 
   async lifecycle(runId: string, type: "PAUSE" | "CONTINUE" | "CANCEL") {
     const prisma = await getPrismaClient();
+    if (type === "CONTINUE") {
+      const resumable = await prisma.agentRun.findUnique({
+        where: { id: runId },
+        select: { worktreeId: true },
+      });
+      if (resumable?.worktreeId) {
+        await this.diskSpace?.assertWorktreeCanStart(resumable.worktreeId);
+      }
+    }
     const result = await prisma.$transaction(async (transaction) => {
       const run = await transaction.agentRun.findUnique({
         where: { id: runId },
@@ -1527,6 +1543,20 @@ export class RunsService {
 
   async claimCommand(agentId: string, commandId: string) {
     const prisma = await getPrismaClient();
+    const queued = await prisma.runCommand.findUnique({
+      where: { id: commandId },
+      select: {
+        agentId: true,
+        status: true,
+        run: { select: { worktreeId: true } },
+      },
+    });
+    if (!queued || queued.agentId !== agentId) {
+      throw new Error("Run command not found");
+    }
+    if (queued.status === "QUEUED" && queued.run.worktreeId) {
+      await this.diskSpace?.assertWorktreeCanStart(queued.run.worktreeId);
+    }
     await prisma.runCommand.updateMany({
       where: { id: commandId, agentId, status: "QUEUED" },
       data: { status: "RUNNING", claimedAt: new Date() },

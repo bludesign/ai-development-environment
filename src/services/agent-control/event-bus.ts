@@ -106,6 +106,8 @@ export const runChangedTopic = (runId: string) => `run.${runId}.changed`;
 export const runEventTopic = (runId: string) => `run.${runId}.event`;
 export const runQuestionTopic = (runId: string) => `run.${runId}.question`;
 export const POLLING_CHANGED_TOPIC = "polling.changed";
+export const DISK_SPACE_CHANGED_TOPIC = "disk-space.changed";
+export const SIDEBAR_STATUS_CHANGED_TOPIC = "sidebar-status.changed";
 export const TELEMETRY_CHANGED_TOPIC = "telemetry.changed";
 export const TELEMETRY_SETTINGS_CHANGED_TOPIC = "telemetry.settings.changed";
 export const buildTopic = (buildId: string) => `build.${buildId}.changed`;

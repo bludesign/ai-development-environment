@@ -64,6 +64,9 @@ model Agent {
   runProviderSyncs                 RunProviderSync[]
   targetedCommandDefinitions       CommandDefinition[]          @relation("CommandDefinitionTargetAgent")
   commandRuns                      CommandRun[]
+  diskSpaceState                   AgentDiskSpaceState?
+  derivedDataLocks                 DerivedDataLock[]
+  derivedDataCleanupLeases         DerivedDataCleanupLease[]
 }
 
 model AgentEnrollmentToken {
@@ -298,6 +301,7 @@ model Worktree {
   runDrafts                RunDraft[]
   runLease                 WorktreeRunLease?
   commandRuns              CommandRun[]
+  derivedDataCleanupLease  DerivedDataCleanupLease?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
@@ -1345,6 +1349,66 @@ model BuildDataDeletionHistory {
   @@unique([jobId, targetKey])
   @@index([deletedAt])
   @@index([agentId, deletedAt])
+}
+
+model DiskSpaceSettings {
+  id                   String   @id
+  normalThresholdGiB   Float    @default(40)
+  pressureThresholdGiB Float    @default(10)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model AgentDiskSpaceState {
+  agentId               String   @id
+  enabled               Boolean  @default(true)
+  manualPressureMode    Boolean  @default(false)
+  automaticPressureMode Boolean  @default(false)
+  volumesJson           String   @default("[]")
+  entriesJson           String   @default("[]")
+  warningsJson          String   @default("[]")
+  lastReportedAt        DateTime?
+  lastError             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  agent                  Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, lastReportedAt])
+}
+
+model DerivedDataLock {
+  id        String   @id
+  agentId   String
+  path      String
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, path])
+  @@index([agentId, createdAt])
+}
+
+model DerivedDataCleanupLease {
+  worktreeId String   @id
+  agentId    String
+  path       String
+  source     String
+  jobId      String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  worktree   Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, expiresAt])
+  @@index([jobId])
+}
+
+model SidebarUsageSummary {
+  id          String   @id
+  period      String
+  totalCost   Float
+  collectedAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model SigningProfileAsset {

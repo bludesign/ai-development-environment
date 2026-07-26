@@ -39,12 +39,14 @@ import {
   agentOnlineWindowMs,
   AgentControlService,
   BUILDS_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
   agentJobChangedTopic,
   buildLogChunkTopic,
   buildTopic,
 } from "@/services/agent-control";
 import type { TelemetryService } from "@/services/telemetry";
+import type { DiskSpaceService } from "@/services/disk-space";
 import type {
   NotificationRecord,
   NotificationsService,
@@ -406,6 +408,7 @@ export class BuildsService {
     private readonly agentControl: AgentControlService,
     private readonly telemetry?: TelemetryService,
     private readonly notifications?: NotificationsService,
+    private readonly diskSpace?: DiskSpaceService,
   ) {
     this.agentControl.registerCompletionHandler(IOS_BUILD_JOB_KIND, (job) =>
       this.projectBuildCompletion(job),
@@ -432,6 +435,9 @@ export class BuildsService {
     });
     agentEventBus.publish(BUILDS_CHANGED_TOPIC, {
       buildsChanged: { id: buildId },
+    });
+    agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+      sidebarStatusChanged: true,
     });
   }
 
@@ -1173,6 +1179,7 @@ export class BuildsService {
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
     );
+    await this.diskSpace?.assertWorktreeCanStart(worktree.id);
     if (
       input.worktreeCoverage &&
       !capabilities(worktree.codebase.agent).includes(

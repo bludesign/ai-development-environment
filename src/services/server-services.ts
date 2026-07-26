@@ -25,6 +25,8 @@ import { PollingService } from "@/services/polling";
 import { ModelCostsService } from "@/services/model-costs";
 import { RunsService } from "@/services/runs";
 import { CommandsService } from "@/services/commands";
+import { DiskSpaceService } from "@/services/disk-space";
+import { SystemStatusService } from "@/services/system-status";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -58,6 +60,8 @@ export type ServerServices = {
   modelCostsService: ModelCostsService;
   runsService: RunsService;
   commandsService: CommandsService;
+  diskSpaceService: DiskSpaceService;
+  systemStatusService: SystemStatusService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -69,6 +73,8 @@ function createServerServices(): ServerServices {
   const workflowEventsService = new WorkflowEventsService();
   const agentControlService = new AgentControlService();
   const notificationsService = new NotificationsService(credentialService);
+  const pollingService = new PollingService();
+  const diskSpaceService = new DiskSpaceService(agentControlService);
   const commandsService = new CommandsService(
     agentControlService,
     notificationsService,
@@ -82,7 +88,6 @@ function createServerServices(): ServerServices {
     undefined,
     credentialService,
   );
-  const pollingService = new PollingService();
   const modelCostsService = new ModelCostsService();
   const pushNotificationsService = new PushNotificationsService(
     undefined,
@@ -92,12 +97,14 @@ function createServerServices(): ServerServices {
   const runsService = new RunsService(
     notificationsService,
     agentControlService,
+    diskSpaceService,
   );
   runsService.startReaper();
   const buildsService = new BuildsService(
     agentControlService,
     telemetryService,
     notificationsService,
+    diskSpaceService,
   );
   const skillsService = new SkillsService(agentControlService);
   const codebasesService = new CodebasesService(
@@ -175,6 +182,12 @@ function createServerServices(): ServerServices {
   );
   workflowEventBridge.start();
   workflowsService.startRuntime();
+  const systemStatusService = new SystemStatusService(
+    ccusageService,
+    diskSpaceService,
+    pollingService,
+  );
+  systemStatusService.startRuntime();
   return {
     prismaService,
     credentialService,
@@ -199,6 +212,8 @@ function createServerServices(): ServerServices {
     modelCostsService,
     runsService,
     commandsService,
+    diskSpaceService,
+    systemStatusService,
     toolsService,
     workflowEventsService,
     workflowsService,

@@ -52,6 +52,9 @@ import { createWorkflowResolvers } from "./resolvers/workflows";
 import type { WorkflowsService } from "@/services/workflows";
 import { createCommandResolvers } from "./resolvers/commands";
 import type { CommandsService } from "@/services/commands";
+import { createDiskSpaceResolvers } from "./resolvers/disk-space";
+import type { DiskSpaceService } from "@/services/disk-space";
+import type { SystemStatusService } from "@/services/system-status";
 
 // Pre-generated SDL strings (see scripts/prebuild-schema.ts) → DocumentNodes for the subgraph.
 const typeDefs = schemaDefinitions.map((schema) => gql(schema));
@@ -82,6 +85,8 @@ export const createSchema = (
   runsService: RunsService,
   workflowsService: WorkflowsService,
   commandsService: CommandsService,
+  diskSpaceService: DiskSpaceService,
+  systemStatusService: SystemStatusService,
 ): GraphQLSchema => {
   const resolvers = mergeResolvers([
     createHealthResolvers(prismaService),
@@ -107,6 +112,7 @@ export const createSchema = (
     createRunResolvers(runsService),
     createWorkflowResolvers(workflowsService),
     createCommandResolvers(commandsService),
+    createDiskSpaceResolvers(diskSpaceService, systemStatusService),
   ]);
 
   return buildSubgraphSchema({

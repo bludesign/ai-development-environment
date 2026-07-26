@@ -6,6 +6,7 @@ import {
   realpath,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,7 +23,12 @@ import {
 } from "vitest";
 
 import { captureCommand } from "../capture-command.js";
-import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
+import {
+  collectAgentDiskSpace,
+  deleteBuildData,
+  scanBuildData,
+  sizeBuildData,
+} from "./build-data.js";
 
 vi.mock("../capture-command.js", () => ({ captureCommand: vi.fn() }));
 
@@ -241,5 +247,82 @@ describe("Build Data agent handlers", () => {
         log,
       ),
     ).rejects.toThrow("safe relative path");
+  });
+
+  test("deduplicates filesystem roles and reports direct-child modification dates", async () => {
+    const root = await temporaryDirectory();
+    const entry = join(root, "App-hash");
+    await mkdir(entry);
+    const modifiedAt = new Date("2025-02-03T04:05:06.000Z");
+    await utimes(entry, modifiedAt, modifiedAt);
+    capture.mockImplementation(async ({ command }) => ({
+      exitCode: command === "/usr/sbin/diskutil" ? 0 : 1,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      stdout:
+        command === "/usr/sbin/diskutil"
+          ? '<?xml version="1.0"?><plist version="1.0"><dict><key>APFSContainerReference</key><string>disk3</string></dict></plist>'
+          : "",
+      stderr: "",
+    }));
+
+    const report = await collectAgentDiskSpace(
+      {
+        enabled: true,
+        pollIntervalSeconds: 60,
+        baseRepoDirectory: root,
+        derivedDataLocationMode: "ABSOLUTE",
+        derivedDataPath: root,
+        worktrees: [],
+      },
+      signal(),
+    );
+
+    const configuredVolume = report.volumes.find((volume) =>
+      volume.roles.includes("DERIVED_DATA"),
+    );
+    expect(configuredVolume?.roles).toEqual(
+      expect.arrayContaining(["BASE_REPO", "DERIVED_DATA"]),
+    );
+    expect(configuredVolume?.capacityId).toBe("apfs:disk3");
+    const canonicalRoot = await realpath(root);
+    expect(configuredVolume?.paths).toEqual(
+      expect.arrayContaining([canonicalRoot]),
+    );
+    expect(
+      configuredVolume?.paths.filter((path) => path === canonicalRoot),
+    ).toHaveLength(1);
+    expect(report.entries).toEqual([
+      expect.objectContaining({
+        path: join(canonicalRoot, "App-hash"),
+        modifiedAt: modifiedAt.toISOString(),
+        volumeId: configuredVolume?.id,
+      }),
+    ]);
+    expect(report.observedAt).toEqual(expect.any(String));
+  });
+
+  test("surfaces missing configured filesystem paths without failing the poll", async () => {
+    const root = await temporaryDirectory();
+    const missing = join(root, "missing-base-repository");
+    const report = await collectAgentDiskSpace(
+      {
+        enabled: true,
+        pollIntervalSeconds: 60,
+        baseRepoDirectory: missing,
+        derivedDataLocationMode: "ABSOLUTE",
+        derivedDataPath: root,
+        worktrees: [],
+      },
+      signal(),
+    );
+
+    expect(report.volumes.some((volume) => volume.roles.includes("MAIN"))).toBe(
+      true,
+    );
+    expect(
+      report.warnings.some((warning) => warning.startsWith(`${missing}:`)),
+    ).toBe(true);
   });
 });

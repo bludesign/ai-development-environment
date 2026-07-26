@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+vi.mock("@/services/disk-space/executing-work", () => ({
+  executingResourcesByWorktree: vi.fn(
+    async (ids: string[]) => new Map(ids.map((id) => [id, []])),
+  ),
+}));
 
 import type { AgentControlService } from "@/services/agent-control";
 
@@ -33,6 +38,10 @@ function agent() {
     updatedAt: new Date(0),
   };
 }
+
+const unlockedEntries = () => ({
+  derivedDataLock: { findMany: vi.fn().mockResolvedValue([]) },
+});
 
 function collectionWithOperation(operation?: {
   id: string;
@@ -166,6 +175,7 @@ describe("BuildDataService", () => {
       ],
     };
     const prisma = {
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -240,6 +250,7 @@ describe("BuildDataService", () => {
   test("rejects operations when an agent went offline after its scan", async () => {
     const collection = collectionWithOperation();
     const prisma = {
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -274,6 +285,113 @@ describe("BuildDataService", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  test("keeps user deletion payloads compatible with legacy agents", async () => {
+    const collection = collectionWithOperation();
+    const prisma = {
+      ...unlockedEntries(),
+      buildDataDeletionHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      buildDataCollection: {
+        findUnique: vi.fn().mockResolvedValue(collection),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue(collection.agents[0]!.agent),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const createJob = vi.fn().mockResolvedValue({ id: "delete-1" });
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService);
+    const snapshot = await service.getCollection(collection.id);
+
+    await service.deleteEntries(
+      collection.id,
+      [snapshot!.entries[0]!.id],
+      "request-1",
+    );
+
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "buildData.delete",
+        payload: {
+          targets: [
+            {
+              path: "/DerivedData/App-hash",
+              rootPath: "/DerivedData",
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  test("holds provisional user cleanup leases for the full job timeout", async () => {
+    const collection = collectionWithOperation();
+    collection.jobs[0]!.resultJson = JSON.stringify({
+      entries: [
+        {
+          path: "/DerivedData/App-hash",
+          rootPath: "/DerivedData",
+          name: "App-hash",
+          kind: "PROJECT",
+          workspacePath: "/Repos/App/App.xcodeproj",
+        },
+      ],
+      warnings: [],
+    });
+    const createLease = vi.fn().mockResolvedValue({});
+    const prisma = {
+      ...unlockedEntries(),
+      buildDataDeletionHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      buildDataCollection: {
+        findUnique: vi.fn().mockResolvedValue(collection),
+      },
+      worktree: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "worktree-1",
+            folder: "/Repos/App",
+            codebase: { agentId: "agent-1" },
+          },
+        ]),
+      },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue(collection.agents[0]!.agent),
+      },
+      derivedDataCleanupLease: {
+        create: createLease,
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+      createJob: vi.fn().mockResolvedValue({ id: "delete-1" }),
+    } as unknown as AgentControlService);
+    const snapshot = await service.getCollection(collection.id);
+    const startedAt = Date.now();
+
+    await service.deleteEntries(
+      collection.id,
+      [snapshot!.entries[0]!.id],
+      "request-1",
+    );
+
+    const expiresAt = createLease.mock.calls[0]?.[0].data.expiresAt as Date;
+    expect(expiresAt.getTime()).toBeGreaterThanOrEqual(
+      startedAt + 7 * 24 * 60 * 60 * 1_000,
+    );
+  });
+
   test.each([
     {
       kind: "buildData.size" as const,
@@ -290,6 +408,7 @@ describe("BuildDataService", () => {
   ])("surfaces an invalid $kind result on its target entry", async (input) => {
     const collection = collectionWithOperation({ id: "operation-1", ...input });
     getPrismaClient.mockResolvedValue({
+      ...unlockedEntries(),
       buildDataDeletionHistory: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
