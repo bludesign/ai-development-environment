@@ -75,7 +75,7 @@ describe("ToolsPage", () => {
 
     render(<ToolsPage />);
     await screen.findByText("get_codebase");
-    fireEvent.change(screen.getByLabelText("Tool API token"), {
+    fireEvent.change(screen.getByLabelText("Tool API token (optional)"), {
       target: { value: "deployment-secret" },
     });
 
@@ -164,6 +164,9 @@ describe("ToolsPage", () => {
           groupId: "external:dynamic",
           name: "dynamic_lookup",
           arguments: { region: "us-east" },
+        });
+        expect(init?.headers).toEqual({
+          "content-type": "application/json",
         });
         return Response.json({ result: { found: true } });
       },
@@ -402,7 +405,6 @@ describe("ToolsPage", () => {
               "ai-development-environment": {
                 type: "http",
                 url,
-                headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" },
               },
             },
           },

@@ -31,12 +31,12 @@ function requestAddress(request: Request): string {
   );
 }
 
-function unauthorized(status: 401 | 503, message: string): Response {
+function unauthorized(message: string): Response {
   return Response.json(
     { error: { code: "TOOL_API_UNAUTHORIZED", message } },
     {
-      status,
-      headers: status === 401 ? { "www-authenticate": "Bearer" } : undefined,
+      status: 401,
+      headers: { "www-authenticate": "Bearer" },
     },
   );
 }
@@ -48,15 +48,16 @@ export function authorizeToolRequest(
   const configured = process.env.TOOLS_API_TOKEN?.trim();
   if (!configured) {
     return {
-      response: unauthorized(
-        503,
-        "Tool API access is disabled until TOOLS_API_TOKEN is configured",
-      ),
+      context: {
+        caller: `anonymous@${requestAddress(request)}`,
+        correlationId: requestCorrelationId(request),
+        source: endpoint,
+      },
     };
   }
   const supplied = bearerCredential(request.headers);
   if (!supplied || !equalSecret(supplied, configured)) {
-    return { response: unauthorized(401, "A valid bearer token is required") };
+    return { response: unauthorized("A valid bearer token is required") };
   }
   const fingerprint = createHash("sha256")
     .update(supplied)

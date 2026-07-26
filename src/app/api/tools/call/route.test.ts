@@ -7,18 +7,20 @@ afterEach(() => {
 });
 
 describe("tool-call endpoint authentication", () => {
-  test("rejects cross-origin requests when no bearer token is configured", async () => {
+  test("allows requests through authentication when no token is configured", async () => {
     vi.stubEnv("TOOLS_API_TOKEN", "");
     const response = await POST(
       new Request("https://control.example/api/tools/call", {
         method: "POST",
+        body: JSON.stringify({}),
         headers: {
+          "content-type": "application/json",
           origin: "https://attacker.example",
           "sec-fetch-site": "cross-site",
         },
       }),
     );
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(400);
   });
 
   test("rejects an invalid bearer token before parsing the call", async () => {

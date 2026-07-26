@@ -447,7 +447,9 @@ function ConnectClientsCard({
         [BUILT_IN_SERVER_NAME]: {
           type: "http",
           url,
-          headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" },
+          ...(token.trim()
+            ? { headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" } }
+            : {}),
         },
       },
     },
@@ -1065,13 +1067,16 @@ function ToolRunner({
     setError(null);
     setCopyState("IDLE");
     try {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (toolApiToken.trim()) {
+        headers.authorization = `Bearer ${toolApiToken.trim()}`;
+      }
       const body = (await responseJson(
         await fetch("/api/tools/call", {
           method: "POST",
-          headers: {
-            authorization: `Bearer ${toolApiToken}`,
-            "content-type": "application/json",
-          },
+          headers,
           body: JSON.stringify({
             groupId,
             name: toolName,

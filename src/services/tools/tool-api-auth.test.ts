@@ -41,13 +41,21 @@ describe("tool API authorization", () => {
     });
   });
 
-  test("rejects MCP calls when the deployment token is not configured", () => {
+  test("allows unauthenticated calls when the deployment token is not configured", () => {
     vi.stubEnv("TOOLS_API_TOKEN", "");
     const result = authorizeToolRequest(
-      new Request("https://control.example/api/mcp"),
+      new Request("https://control.example/api/mcp", {
+        headers: { "x-request-id": "request-without-auth" },
+      }),
       "MCP",
     );
-    expect("response" in result && result.response.status).toBe(503);
+    expect(result).toMatchObject({
+      context: {
+        source: "MCP",
+        correlationId: "request-without-auth",
+        caller: "anonymous@unknown",
+      },
+    });
   });
 
   test("requires and fingerprints a valid MCP bearer token", () => {
