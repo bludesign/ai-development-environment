@@ -168,6 +168,7 @@ describe("WorktreePipelinesCard", () => {
           codebaseRepositoryId: "codebase-repository-1",
           workflowRunId: "run-1",
           force: false,
+          source: "WORKTREE_PIPELINES",
         },
       ),
     );

@@ -120,6 +120,7 @@ export function WorktreePipelinesCard({
           }>(
             `query WorktreePipelineJobs($repositoryId: ID!, $workflowRunId: ID!) {
               githubActionsWorkflowJobs(
+                source: WORKTREE_PIPELINES
                 codebaseRepositoryId: $repositoryId
                 workflowRunId: $workflowRunId
               ) { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } }
@@ -185,6 +186,7 @@ export function WorktreePipelinesCard({
               pipelineStatus={aggregateStatus(runs)}
               pipelines={pipelines}
               repositoryId={runs[0].repositoryGithubId}
+              requestSource="WORKTREE_PIPELINES"
             />
             {branch ? (
               <Button asChild size="sm" variant="outline">
@@ -241,6 +243,7 @@ export function WorktreePipelinesCard({
                               }))
                             }
                             repositoryId={run.codebaseRepositoryId}
+                            requestSource="WORKTREE_PIPELINES"
                             workflowRunId={run.id}
                           />
                         </div>
@@ -275,6 +278,7 @@ export function WorktreePipelinesCard({
                             onCancelled={() => onCancelled(run.id)}
                             onError={onError}
                             onRetried={() => onRetried(run.id)}
+                            requestSource="WORKTREE_PIPELINES"
                             run={
                               historical
                                 ? {
@@ -320,6 +324,7 @@ export function WorktreePipelinesCard({
                                   onError={onError}
                                   onRetried={() => jobRetried(run.id, job.id)}
                                   repositoryId={run.repositoryGithubId}
+                                  requestSource="WORKTREE_PIPELINES"
                                   workflowResource={githubJobWorkflowResource(
                                     workflowResource,
                                     job,

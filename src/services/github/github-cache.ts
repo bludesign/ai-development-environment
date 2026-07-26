@@ -1,0 +1,965 @@
+import "server-only";
+
+import { createHash, randomUUID } from "node:crypto";
+
+import { getPrismaClient } from "@/data/prisma-client";
+
+import type { GitHubRateLimitMetadata } from "./github-rate-limit";
+import type { GitHubRestOperation } from "./github-rest-operations";
+import type {
+  GitHubApiCallView,
+  GitHubApiCallFilters,
+  GitHubApiType,
+  GitHubApiTypeMetric,
+  GitHubAuthentication,
+  GitHubCachedEntryDetail,
+  GitHubCachedEntryView,
+  GitHubCacheMetrics,
+  GitHubCacheTtlOverrideView,
+  GitHubCallSource,
+  GitHubMetricWindow,
+  GitHubOperationMetric,
+  GitHubPaginatedResult,
+  GitHubRequestSource,
+  GitHubRequestSourceMetric,
+  GitHubSettingsView,
+} from "./types";
+
+type LiveResult<T> = {
+  data: T;
+  statusCode: number | null;
+  pointCost: number | null;
+  rateLimit: GitHubRateLimitMetadata | null;
+};
+
+type QueryInput<T> = {
+  authentication: GitHubAuthentication;
+  requestSource: GitHubRequestSource;
+  endpoint: string;
+  operation: string;
+  query: string;
+  normalizedQuery: string;
+  variables: Record<string, unknown>;
+  force?: boolean;
+  allowStaleOnError?: boolean;
+  fetcher: () => Promise<LiveResult<T>>;
+};
+
+type MutationInput<T> = Omit<QueryInput<T>, "force" | "allowStaleOnError">;
+
+type CachedResult<T> = {
+  data: T;
+  source: GitHubCallSource;
+  stale: boolean;
+  fetchedAt: Date;
+  entryId: string | null;
+  pointCost: number | null;
+};
+
+const DEFAULT_TTL_SECONDS = 300;
+const MIN_OVERRIDE_TTL_SECONDS = 1;
+const MAX_OVERRIDE_TTL_SECONDS = 24 * 60 * 60;
+const GRAPHQL_OPERATION_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/;
+const BUILT_IN_TTL_OVERRIDES = new Map([
+  ["GitHubWorktreePullRequestStatuses", 60],
+]);
+const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const WINDOW_DEFINITIONS = [
+  { window: "5m", milliseconds: 5 * 60 * 1000 },
+  { window: "10m", milliseconds: 10 * 60 * 1000 },
+  { window: "1h", milliseconds: 60 * 60 * 1000 },
+  { window: "24h", milliseconds: 24 * 60 * 60 * 1000 },
+];
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => [
+        key,
+        canonicalize((value as Record<string, unknown>)[key]),
+      ]),
+  );
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+const SENSITIVE_REQUEST_KEY =
+  /(?:authorization|password|private.?key|secret|token)$/i;
+
+function sanitizeRequestValue(value: unknown, key = ""): unknown {
+  if (SENSITIVE_REQUEST_KEY.test(key)) return "[REDACTED]";
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeRequestValue(item));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([itemKey, item]) => [
+      itemKey,
+      sanitizeRequestValue(item, itemKey),
+    ]),
+  );
+}
+
+function requestSummary(variables: unknown): string {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
+    return "No variables";
+  }
+  const entries = Object.entries(variables as Record<string, unknown>);
+  if (!entries.length) return "No variables";
+  return entries
+    .map(([key, value]) => {
+      const encoded = typeof value === "string" ? value : JSON.stringify(value);
+      const serialized = encoded ?? String(value);
+      return `${key}=${serialized.length > 120 ? `${serialized.slice(0, 117)}…` : serialized}`;
+    })
+    .join(" · ");
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function errorMetadata(error: unknown): {
+  statusCode: number | null;
+  rateLimit: GitHubRateLimitMetadata | null;
+} {
+  if (!error || typeof error !== "object") {
+    return { statusCode: null, rateLimit: null };
+  }
+  const candidate = error as {
+    statusCode?: unknown;
+    rateLimit?: unknown;
+  };
+  return {
+    statusCode:
+      typeof candidate.statusCode === "number" ? candidate.statusCode : null,
+    rateLimit:
+      candidate.rateLimit && typeof candidate.rateLimit === "object"
+        ? (candidate.rateLimit as GitHubRateLimitMetadata)
+        : null,
+  };
+}
+
+export class GitHubCache {
+  private readonly inFlight = new Map<string, Promise<CachedResult<unknown>>>();
+  private readonly cacheWrites = new Set<Promise<unknown>>();
+  private cacheGeneration = 0;
+  private lastPrunedAt = 0;
+
+  private cacheKey(input: {
+    authentication: GitHubAuthentication;
+    endpoint: string;
+    normalizedQuery: string;
+    variables: Record<string, unknown>;
+  }): string {
+    return createHash("sha256")
+      .update(
+        stableStringify({
+          authentication: input.authentication,
+          endpoint: input.endpoint,
+          query: input.normalizedQuery,
+          variables: input.variables,
+        }),
+      )
+      .digest("hex");
+  }
+
+  private inFlightKey(
+    cacheKey: string,
+    input: Pick<QueryInput<unknown>, "force" | "allowStaleOnError">,
+    generation: number,
+  ): string {
+    return [
+      generation,
+      cacheKey,
+      input.force === true ? "force" : "normal",
+      input.allowStaleOnError === false ? "strict" : "stale",
+    ].join(":");
+  }
+
+  private async defaultTtlSeconds(): Promise<number> {
+    const prisma = await getPrismaClient();
+    const settings = await prisma.gitHubSettings.upsert({
+      where: { id: "default" },
+      create: { id: "default", cacheTtlSeconds: DEFAULT_TTL_SECONDS },
+      update: {},
+    });
+    return settings.cacheTtlSeconds;
+  }
+
+  async effectiveTtlSeconds(operation: string): Promise<number> {
+    const prisma = await getPrismaClient();
+    const [override, defaultTtlSeconds] = await Promise.all([
+      prisma.gitHubGraphqlCacheTtlOverride.findUnique({
+        where: { operation },
+      }),
+      this.defaultTtlSeconds(),
+    ]);
+    return override?.ttlSeconds ?? defaultTtlSeconds;
+  }
+
+  async query<T>(input: QueryInput<T>): Promise<CachedResult<T>> {
+    const generation = this.cacheGeneration;
+    const prisma = await getPrismaClient();
+    const key = this.cacheKey(input);
+    const pendingKey = this.inFlightKey(key, input, generation);
+    const startedAt = Date.now();
+    const [existing, ttlSeconds, rateLimit] = await Promise.all([
+      prisma.gitHubGraphqlCacheEntry.findUnique({ where: { cacheKey: key } }),
+      this.effectiveTtlSeconds(input.operation),
+      prisma.gitHubRateLimitSnapshot.findUnique({
+        where: {
+          authentication_resource: {
+            authentication: input.authentication,
+            resource: "graphql",
+          },
+        },
+      }),
+    ]);
+    if (generation !== this.cacheGeneration) return this.query(input);
+    const fresh =
+      existing !== null &&
+      Date.now() - existing.fetchedAt.getTime() < ttlSeconds * 1000;
+    if (!input.force && fresh) {
+      await this.log({
+        ...this.graphqlContext(input),
+        authentication: input.authentication,
+        operation: input.operation,
+        source: "CACHE",
+        durationMs: Date.now() - startedAt,
+        pointCost: 0,
+        pointsAvoided: existing.pointCost ?? 0,
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
+      return {
+        data: parseJson(existing.responseJson) as T,
+        source: "CACHE",
+        stale: false,
+        fetchedAt: existing.fetchedAt,
+        entryId: existing.id,
+        pointCost: existing.pointCost,
+      };
+    }
+
+    const pending = this.inFlight.get(pendingKey);
+    if (pending) {
+      const result = (await pending) as CachedResult<T>;
+      if (generation !== this.cacheGeneration) return this.query(input);
+      await this.log({
+        ...this.graphqlContext(input),
+        authentication: input.authentication,
+        operation: input.operation,
+        source: "CACHE",
+        durationMs: Date.now() - startedAt,
+        pointCost: 0,
+        pointsAvoided: result.pointCost ?? 0,
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
+      return { ...result, source: "CACHE" };
+    }
+
+    if (
+      rateLimit?.remaining === 0 &&
+      rateLimit.resetAt.getTime() > Date.now()
+    ) {
+      const error = `GitHub GraphQL rate limit is exhausted until ${rateLimit.resetAt.toISOString()}`;
+      const canServeStale =
+        existing !== null && input.allowStaleOnError !== false;
+      await this.log({
+        ...this.graphqlContext(input),
+        authentication: input.authentication,
+        operation: input.operation,
+        source: "ERROR",
+        durationMs: Date.now() - startedAt,
+        error,
+        servedStale: canServeStale,
+        pointCost: 0,
+        pointsAvoided: canServeStale ? (existing.pointCost ?? 0) : 0,
+        rateLimit: {
+          limit: rateLimit.limit,
+          remaining: rateLimit.remaining,
+          used: rateLimit.used,
+          resetAt: rateLimit.resetAt,
+          resource: rateLimit.resource,
+        },
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
+      if (canServeStale) {
+        return {
+          data: parseJson(existing.responseJson) as T,
+          source: "ERROR",
+          stale: true,
+          fetchedAt: existing.fetchedAt,
+          entryId: existing.id,
+          pointCost: existing.pointCost,
+        };
+      }
+      throw new Error(error);
+    }
+
+    const livePromise = (async (): Promise<CachedResult<T>> => {
+      try {
+        const live = await input.fetcher();
+        const fetchedAt = new Date();
+        let entry: { id: string } | null = null;
+        if (generation === this.cacheGeneration) {
+          const write = prisma.gitHubGraphqlCacheEntry.upsert({
+            where: { cacheKey: key },
+            create: {
+              id: randomUUID(),
+              cacheKey: key,
+              authentication: input.authentication,
+              endpoint: input.endpoint,
+              operation: input.operation,
+              query: input.query,
+              variablesJson: stableStringify(input.variables),
+              responseJson: JSON.stringify(live.data),
+              fetchedAt,
+              pointCost: live.pointCost,
+            },
+            update: {
+              operation: input.operation,
+              query: input.query,
+              variablesJson: stableStringify(input.variables),
+              responseJson: JSON.stringify(live.data),
+              fetchedAt,
+              pointCost: live.pointCost,
+            },
+          });
+          this.cacheWrites.add(write);
+          try {
+            entry = await write;
+          } finally {
+            this.cacheWrites.delete(write);
+          }
+        }
+        await this.log({
+          ...this.graphqlContext(input),
+          authentication: input.authentication,
+          operation: input.operation,
+          source: "LIVE",
+          durationMs: Date.now() - startedAt,
+          statusCode: live.statusCode,
+          pointCost: live.pointCost,
+          rateLimit: live.rateLimit,
+        }).catch(() => undefined);
+        return {
+          data: live.data,
+          source: "LIVE",
+          stale: false,
+          fetchedAt,
+          entryId:
+            generation === this.cacheGeneration ? (entry?.id ?? null) : null,
+          pointCost: live.pointCost,
+        };
+      } catch (error) {
+        const metadata = errorMetadata(error);
+        const canServeStale =
+          generation === this.cacheGeneration &&
+          existing !== null &&
+          input.allowStaleOnError !== false;
+        await this.log({
+          ...this.graphqlContext(input),
+          authentication: input.authentication,
+          operation: input.operation,
+          source: "ERROR",
+          durationMs: Date.now() - startedAt,
+          statusCode: metadata.statusCode,
+          error: error instanceof Error ? error.message : String(error),
+          servedStale: canServeStale,
+          pointsAvoided: canServeStale ? (existing?.pointCost ?? 0) : 0,
+          rateLimit: metadata.rateLimit,
+        }).catch(() => undefined);
+        if (generation !== this.cacheGeneration) throw error;
+        if (canServeStale) {
+          return {
+            data: parseJson(existing.responseJson) as T,
+            source: "ERROR",
+            stale: true,
+            fetchedAt: existing.fetchedAt,
+            entryId: existing.id,
+            pointCost: existing.pointCost,
+          };
+        }
+        throw error;
+      }
+    })();
+    this.inFlight.set(
+      pendingKey,
+      livePromise as Promise<CachedResult<unknown>>,
+    );
+    try {
+      return await livePromise;
+    } finally {
+      if (this.inFlight.get(pendingKey) === livePromise) {
+        this.inFlight.delete(pendingKey);
+      }
+    }
+  }
+
+  async mutation<T>(input: MutationInput<T>): Promise<T> {
+    const startedAt = Date.now();
+    let live: LiveResult<T>;
+    try {
+      live = await input.fetcher();
+    } catch (error) {
+      const metadata = errorMetadata(error);
+      await this.log({
+        ...this.graphqlContext(input),
+        authentication: input.authentication,
+        operation: input.operation,
+        source: "ERROR",
+        durationMs: Date.now() - startedAt,
+        statusCode: metadata.statusCode,
+        error: error instanceof Error ? error.message : String(error),
+        rateLimit: metadata.rateLimit,
+      }).catch(() => undefined);
+      throw error;
+    }
+    await this.clear();
+    await this.log({
+      ...this.graphqlContext(input),
+      authentication: input.authentication,
+      operation: input.operation,
+      source: "LIVE",
+      durationMs: Date.now() - startedAt,
+      statusCode: live.statusCode,
+      pointCost: null,
+      rateLimit: live.rateLimit,
+    }).catch(() => undefined);
+    return live.data;
+  }
+
+  async updateTtl(
+    ttlMinutes: number,
+    settingsView: () => Promise<GitHubSettingsView>,
+  ): Promise<GitHubSettingsView> {
+    if (!Number.isInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 1440) {
+      throw new Error("Cache TTL must be an integer from 1 to 1440 minutes");
+    }
+    const prisma = await getPrismaClient();
+    await prisma.gitHubSettings.upsert({
+      where: { id: "default" },
+      create: { id: "default", cacheTtlSeconds: ttlMinutes * 60 },
+      update: { cacheTtlSeconds: ttlMinutes * 60 },
+    });
+    return settingsView();
+  }
+
+  async ttlOverrides(): Promise<GitHubCacheTtlOverrideView[]> {
+    const prisma = await getPrismaClient();
+    const overrides = await prisma.gitHubGraphqlCacheTtlOverride.findMany({
+      orderBy: { operation: "asc" },
+    });
+    return overrides.map((override) => ({
+      operation: override.operation,
+      ttlSeconds: override.ttlSeconds,
+      builtIn: BUILT_IN_TTL_OVERRIDES.has(override.operation),
+      createdAt: override.createdAt.toISOString(),
+      updatedAt: override.updatedAt.toISOString(),
+    }));
+  }
+
+  async cacheableOperations(): Promise<string[]> {
+    const prisma = await getPrismaClient();
+    const [overrides, entries] = await Promise.all([
+      prisma.gitHubGraphqlCacheTtlOverride.findMany({
+        select: { operation: true },
+      }),
+      prisma.gitHubGraphqlCacheEntry.findMany({
+        distinct: ["operation"],
+        select: { operation: true },
+      }),
+    ]);
+    return [
+      ...new Set([
+        ...BUILT_IN_TTL_OVERRIDES.keys(),
+        ...overrides.map(({ operation }) => operation),
+        ...entries.map(({ operation }) => operation),
+      ]),
+    ].sort((left, right) => left.localeCompare(right));
+  }
+
+  async saveTtlOverride(
+    operationValue: string,
+    ttlSeconds: number,
+  ): Promise<GitHubCacheTtlOverrideView> {
+    const operation = operationValue.trim();
+    if (!GRAPHQL_OPERATION_NAME.test(operation)) {
+      throw new Error("Operation must be a valid GraphQL operation name");
+    }
+    if (
+      !Number.isInteger(ttlSeconds) ||
+      ttlSeconds < MIN_OVERRIDE_TTL_SECONDS ||
+      ttlSeconds > MAX_OVERRIDE_TTL_SECONDS
+    ) {
+      throw new Error(
+        `Cache TTL must be an integer from ${MIN_OVERRIDE_TTL_SECONDS} to ${MAX_OVERRIDE_TTL_SECONDS} seconds`,
+      );
+    }
+    const prisma = await getPrismaClient();
+    const override = await prisma.gitHubGraphqlCacheTtlOverride.upsert({
+      where: { operation },
+      create: { operation, ttlSeconds },
+      update: { ttlSeconds },
+    });
+    return {
+      operation: override.operation,
+      ttlSeconds: override.ttlSeconds,
+      builtIn: BUILT_IN_TTL_OVERRIDES.has(override.operation),
+      createdAt: override.createdAt.toISOString(),
+      updatedAt: override.updatedAt.toISOString(),
+    };
+  }
+
+  async deleteTtlOverride(operationValue: string): Promise<boolean> {
+    const operation = operationValue.trim();
+    if (BUILT_IN_TTL_OVERRIDES.has(operation)) {
+      throw new Error("Built-in cache TTL overrides cannot be deleted");
+    }
+    const prisma = await getPrismaClient();
+    const result = await prisma.gitHubGraphqlCacheTtlOverride.deleteMany({
+      where: { operation },
+    });
+    return result.count > 0;
+  }
+
+  async recordRestCall(input: {
+    authentication: GitHubAuthentication;
+    method: string;
+    endpoint: string;
+    operation: GitHubRestOperation;
+    requestSource: GitHubRequestSource;
+    durationMs: number;
+    statusCode?: number | null;
+    error?: string | null;
+    rateLimit?: GitHubRateLimitMetadata | null;
+  }): Promise<void> {
+    let path = input.endpoint;
+    let variables: Record<string, unknown> = {};
+    try {
+      const url = new URL(input.endpoint);
+      path = url.pathname;
+      variables = {
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+      };
+    } catch {
+      variables = { endpoint: input.endpoint };
+    }
+    await this.log({
+      authentication: input.authentication,
+      apiType: "REST",
+      method: input.method.toUpperCase(),
+      endpoint: input.endpoint,
+      operation: input.operation,
+      requestSource: input.requestSource,
+      requestSummary: `${input.method.toUpperCase()} ${path}`,
+      variables,
+      source: input.error ? "ERROR" : "LIVE",
+      durationMs: input.durationMs,
+      statusCode: input.statusCode,
+      error: input.error,
+      pointCost: 1,
+      rateLimit: input.rateLimit,
+    });
+  }
+
+  async recordGraphqlTransportCall(input: {
+    authentication: GitHubAuthentication;
+    endpoint: string;
+    operation: string;
+    requestSource: GitHubRequestSource;
+    variables: Record<string, unknown>;
+    durationMs: number;
+    statusCode?: number | null;
+    error?: string | null;
+    rateLimit?: GitHubRateLimitMetadata | null;
+  }): Promise<void> {
+    await this.log({
+      ...this.graphqlContext(input),
+      authentication: input.authentication,
+      operation: input.operation,
+      requestSource: input.requestSource,
+      source: input.error ? "ERROR" : "LIVE",
+      durationMs: input.durationMs,
+      statusCode: input.statusCode,
+      error: input.error,
+      rateLimit: input.rateLimit,
+    });
+  }
+
+  async clear(): Promise<boolean> {
+    const { cacheWrites } = this.beginInvalidation();
+    await Promise.allSettled(cacheWrites);
+    const prisma = await getPrismaClient();
+    await prisma.gitHubGraphqlCacheEntry.deleteMany();
+    return true;
+  }
+
+  async clearForCredentialChange(
+    authentication: GitHubAuthentication,
+  ): Promise<boolean> {
+    const { cacheWrites, inFlight } = this.beginInvalidation();
+    await Promise.allSettled(cacheWrites);
+    const prisma = await getPrismaClient();
+    await prisma.gitHubGraphqlCacheEntry.deleteMany();
+    await Promise.allSettled(inFlight);
+    await prisma.gitHubRateLimitSnapshot.deleteMany({
+      where: { authentication },
+    });
+    return true;
+  }
+
+  async clearCalls(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    await prisma.gitHubApiCallLog.deleteMany();
+    return true;
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    const result = await prisma.gitHubGraphqlCacheEntry.deleteMany({
+      where: { id },
+    });
+    return result.count > 0;
+  }
+
+  async entries(
+    limit = 50,
+    offset = 0,
+  ): Promise<GitHubPaginatedResult<GitHubCachedEntryView>> {
+    const pagination = this.pagination(limit, offset);
+    const prisma = await getPrismaClient();
+    const [entries, total, defaultTtlSeconds, overrides] = await Promise.all([
+      prisma.gitHubGraphqlCacheEntry.findMany({
+        take: pagination.limit,
+        skip: pagination.offset,
+        orderBy: { fetchedAt: "desc" },
+      }),
+      prisma.gitHubGraphqlCacheEntry.count(),
+      this.defaultTtlSeconds(),
+      prisma.gitHubGraphqlCacheTtlOverride.findMany({
+        select: { operation: true, ttlSeconds: true },
+      }),
+    ]);
+    const ttlOverrides = new Map(
+      overrides.map(({ operation, ttlSeconds }) => [operation, ttlSeconds]),
+    );
+    return {
+      ...pagination,
+      total,
+      items: entries.map((entry) =>
+        this.entryView(
+          entry,
+          ttlOverrides.get(entry.operation) ?? defaultTtlSeconds,
+        ),
+      ),
+    };
+  }
+
+  async entry(id: string): Promise<GitHubCachedEntryDetail | null> {
+    const prisma = await getPrismaClient();
+    const entry = await prisma.gitHubGraphqlCacheEntry.findUnique({
+      where: { id },
+    });
+    if (!entry) return null;
+    const ttlSeconds = await this.effectiveTtlSeconds(entry.operation);
+    return {
+      ...this.entryView(entry, ttlSeconds),
+      query: entry.query,
+      variables: parseJson(entry.variablesJson),
+      response: parseJson(entry.responseJson),
+    };
+  }
+
+  async calls(
+    limit = 50,
+    offset = 0,
+    filters: GitHubApiCallFilters = {},
+  ): Promise<GitHubPaginatedResult<GitHubApiCallView>> {
+    const pagination = this.pagination(limit, offset);
+    await this.pruneLogs();
+    const prisma = await getPrismaClient();
+    const where = {
+      ...(filters.apiType ? { apiType: filters.apiType } : {}),
+      ...(filters.requestSource
+        ? { requestSource: filters.requestSource }
+        : {}),
+      ...(filters.source ? { source: filters.source } : {}),
+    };
+    const [calls, total] = await Promise.all([
+      prisma.gitHubApiCallLog.findMany({
+        where,
+        take: pagination.limit,
+        skip: pagination.offset,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.gitHubApiCallLog.count({ where }),
+    ]);
+    return {
+      ...pagination,
+      total,
+      items: calls.map((call) => ({
+        id: call.id,
+        authentication: call.authentication as GitHubAuthentication,
+        apiType: call.apiType as GitHubApiType,
+        method: call.method,
+        endpoint: call.endpoint,
+        operation: call.operation,
+        requestSource: call.requestSource as GitHubRequestSource,
+        requestSummary: call.requestSummary,
+        variables: parseJson(call.variablesJson),
+        source: call.source as GitHubCallSource,
+        durationMs: call.durationMs,
+        statusCode: call.statusCode,
+        error: call.error,
+        servedStale: call.servedStale,
+        pointCost: call.pointCost,
+        pointsAvoided: call.pointsAvoided,
+        rateLimitLimit: call.rateLimitLimit,
+        rateLimitRemaining: call.rateLimitRemaining,
+        rateLimitUsed: call.rateLimitUsed,
+        rateLimitResetAt: call.rateLimitResetAt?.toISOString() ?? null,
+        rateLimitResource: call.rateLimitResource,
+        createdAt: call.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  async metrics(): Promise<GitHubCacheMetrics> {
+    await this.pruneLogs();
+    const prisma = await getPrismaClient();
+    const now = Date.now();
+    const calls = await prisma.gitHubApiCallLog.findMany({
+      where: {
+        createdAt: {
+          gte: new Date(now - WINDOW_DEFINITIONS.at(-1)!.milliseconds),
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const windows = WINDOW_DEFINITIONS.map((definition) =>
+      this.metricWindow(
+        definition.window,
+        calls.filter(
+          (call) => call.createdAt.getTime() >= now - definition.milliseconds,
+        ),
+      ),
+    );
+    const apiTypes: GitHubApiTypeMetric[] = (["GRAPHQL", "REST"] as const).map(
+      (apiType) => ({
+        apiType,
+        windows: WINDOW_DEFINITIONS.map((definition) =>
+          this.metricWindow(
+            definition.window,
+            calls.filter(
+              (call) =>
+                call.apiType === apiType &&
+                call.createdAt.getTime() >= now - definition.milliseconds,
+            ),
+          ),
+        ),
+      }),
+    );
+    const operations = [...new Set(calls.map((call) => call.operation))].sort();
+    const operationRows: GitHubOperationMetric[] = operations.map(
+      (operation) => ({
+        operation,
+        windows: WINDOW_DEFINITIONS.map((definition) =>
+          this.metricWindow(
+            definition.window,
+            calls.filter(
+              (call) =>
+                call.operation === operation &&
+                call.createdAt.getTime() >= now - definition.milliseconds,
+            ),
+          ),
+        ),
+      }),
+    );
+    const requestSources = [
+      ...new Set(calls.map((call) => call.requestSource)),
+    ].sort();
+    const requestSourceRows: GitHubRequestSourceMetric[] = requestSources.map(
+      (requestSource) => ({
+        requestSource: requestSource as GitHubRequestSource,
+        windows: WINDOW_DEFINITIONS.map((definition) =>
+          this.metricWindow(
+            definition.window,
+            calls.filter(
+              (call) =>
+                call.requestSource === requestSource &&
+                call.createdAt.getTime() >= now - definition.milliseconds,
+            ),
+          ),
+        ),
+      }),
+    );
+    return {
+      windows,
+      apiTypes,
+      operations: operationRows,
+      requestSources: requestSourceRows,
+    };
+  }
+
+  private entryView(
+    entry: {
+      id: string;
+      authentication: string;
+      operation: string;
+      endpoint: string;
+      fetchedAt: Date;
+      pointCost: number | null;
+    },
+    ttlSeconds: number,
+  ): GitHubCachedEntryView {
+    return {
+      id: entry.id,
+      authentication: entry.authentication as GitHubAuthentication,
+      operation: entry.operation,
+      endpoint: entry.endpoint,
+      fetchedAt: entry.fetchedAt.toISOString(),
+      pointCost: entry.pointCost,
+      stale: Date.now() - entry.fetchedAt.getTime() >= ttlSeconds * 1000,
+    };
+  }
+
+  private metricWindow(
+    window: string,
+    calls: Array<{
+      source: string;
+      durationMs: number;
+      pointCost: number | null;
+      pointsAvoided: number;
+    }>,
+  ): GitHubMetricWindow {
+    const total = calls.length;
+    return {
+      window,
+      total,
+      live: calls.filter((call) => call.source === "LIVE").length,
+      cache: calls.filter((call) => call.source === "CACHE").length,
+      errors: calls.filter((call) => call.source === "ERROR").length,
+      averageMs:
+        total === 0
+          ? 0
+          : Math.round(
+              calls.reduce((sum, call) => sum + call.durationMs, 0) / total,
+            ),
+      pointsUsed: calls.reduce(
+        (sum, call) => sum + Math.max(0, call.pointCost ?? 0),
+        0,
+      ),
+      pointsAvoided: calls.reduce(
+        (sum, call) => sum + Math.max(0, call.pointsAvoided),
+        0,
+      ),
+    };
+  }
+
+  private pagination(limit: number, offset: number) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("limit must be an integer from 1 to 100");
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative integer");
+    }
+    return { limit, offset };
+  }
+
+  private beginInvalidation(): {
+    cacheWrites: Promise<unknown>[];
+    inFlight: Promise<CachedResult<unknown>>[];
+  } {
+    const cacheWrites = [...this.cacheWrites];
+    const inFlight = [...new Set(this.inFlight.values())];
+    this.cacheGeneration += 1;
+    this.inFlight.clear();
+    return { cacheWrites, inFlight };
+  }
+
+  private graphqlContext(input: {
+    endpoint: string;
+    requestSource: GitHubRequestSource;
+    variables: Record<string, unknown>;
+  }) {
+    const variables = sanitizeRequestValue(input.variables);
+    return {
+      apiType: "GRAPHQL" as const,
+      method: "POST",
+      endpoint: input.endpoint,
+      requestSource: input.requestSource,
+      requestSummary: requestSummary(variables),
+      variables,
+    };
+  }
+
+  private async log(input: {
+    authentication: GitHubAuthentication;
+    apiType: GitHubApiType;
+    method: string;
+    endpoint: string;
+    operation: string;
+    requestSource: GitHubRequestSource;
+    requestSummary: string;
+    variables: unknown;
+    source: GitHubCallSource;
+    durationMs: number;
+    statusCode?: number | null;
+    error?: string | null;
+    servedStale?: boolean;
+    pointCost?: number | null;
+    pointsAvoided?: number;
+    rateLimit?: GitHubRateLimitMetadata | null;
+  }): Promise<void> {
+    await this.pruneLogs();
+    const prisma = await getPrismaClient();
+    await prisma.gitHubApiCallLog.create({
+      data: {
+        id: randomUUID(),
+        authentication: input.authentication,
+        apiType: input.apiType,
+        method: input.method,
+        endpoint: input.endpoint,
+        operation: input.operation,
+        requestSource: input.requestSource,
+        requestSummary: input.requestSummary,
+        variablesJson: stableStringify(sanitizeRequestValue(input.variables)),
+        source: input.source,
+        durationMs: Math.max(0, Math.round(input.durationMs)),
+        statusCode: input.statusCode ?? null,
+        error: input.error?.slice(0, 2000) ?? null,
+        servedStale: input.servedStale ?? false,
+        pointCost: input.pointCost ?? null,
+        pointsAvoided: Math.max(0, input.pointsAvoided ?? 0),
+        rateLimitLimit: input.rateLimit?.limit ?? null,
+        rateLimitRemaining: input.rateLimit?.remaining ?? null,
+        rateLimitUsed: input.rateLimit?.used ?? null,
+        rateLimitResetAt: input.rateLimit?.resetAt ?? null,
+        rateLimitResource: input.rateLimit?.resource ?? null,
+      },
+    });
+  }
+
+  private async pruneLogs(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;
+    this.lastPrunedAt = now;
+    const prisma = await getPrismaClient();
+    await prisma.gitHubApiCallLog.deleteMany({
+      where: { createdAt: { lt: new Date(now - LOG_RETENTION_MS) } },
+    });
+  }
+}

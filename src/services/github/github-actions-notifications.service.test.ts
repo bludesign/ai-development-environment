@@ -2,7 +2,12 @@ import { createHmac } from "node:crypto";
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getPrismaClient: vi.fn() }));
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+
+const mocks = vi.hoisted(() => ({
+  getPrismaClient: vi.fn(),
+  recordRestCall: vi.fn(async () => undefined),
+}));
 
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: mocks.getPrismaClient,
@@ -231,6 +236,7 @@ function setup(
     polling as never,
     false,
     workflowEvents as never,
+    { recordRestCall: mocks.recordRestCall } as never,
   );
   return {
     service,
@@ -258,6 +264,7 @@ function webhookInput(
 
 beforeEach(() => {
   mocks.getPrismaClient.mockReset();
+  mocks.recordRestCall.mockClear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -571,6 +578,18 @@ describe("GitHub Actions fallback polling", () => {
     ).resolves.toMatchObject({ notificationsCreated: 1 });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mocks.recordRestCall).toHaveBeenCalledTimes(2);
+    expect(mocks.recordRestCall).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        authentication: "PAT",
+        method: "GET",
+        endpoint: expect.stringContaining("page=2"),
+        operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
+        requestSource: "ACTIONS_NOTIFICATIONS",
+        statusCode: 200,
+      }),
+    );
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       expect.stringContaining("page=1"),
       expect.stringContaining("page=2"),

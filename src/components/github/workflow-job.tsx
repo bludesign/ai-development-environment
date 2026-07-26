@@ -22,7 +22,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import type { GitHubWorkflowJobView } from "@/services/github/types";
+import type {
+  GitHubRequestSource,
+  GitHubWorkflowJobView,
+} from "@/services/github/types";
 import {
   WorkflowResourceDialog,
   WorkflowResourceMenuItems,
@@ -33,6 +36,7 @@ export function WorkflowJob({
   job,
   repositoryId,
   checkSuiteId,
+  requestSource,
   onRetried,
   onError,
   workflowResource,
@@ -40,6 +44,7 @@ export function WorkflowJob({
   job: GitHubWorkflowJobView;
   repositoryId: string;
   checkSuiteId: string | null;
+  requestSource: GitHubRequestSource;
   onRetried: () => void;
   onError: (error: string | null) => void;
   workflowResource?: WorkflowMenuResource | null;
@@ -78,6 +83,7 @@ export function WorkflowJob({
           onError={onError}
           onRetried={onRetried}
           repositoryId={repositoryId}
+          requestSource={requestSource}
           workflowResource={workflowResource}
         />
       </div>
@@ -116,6 +122,7 @@ function WorkflowJobActionsMenu({
   job,
   repositoryId,
   checkSuiteId,
+  requestSource,
   onRetried,
   onError,
   workflowResource,
@@ -123,6 +130,7 @@ function WorkflowJobActionsMenu({
   job: GitHubWorkflowJobView;
   repositoryId: string;
   checkSuiteId: string | null;
+  requestSource: GitHubRequestSource;
   onRetried: () => void;
   onError: (error: string | null) => void;
   workflowResource?: WorkflowMenuResource | null;
@@ -141,14 +149,16 @@ function WorkflowJobActionsMenu({
           $repositoryId: ID!
           $checkSuiteId: ID!
           $jobId: ID!
+          $source: GitHubRequestSource!
         ) {
           retryGitHubWorkflowJob(
             repositoryId: $repositoryId
             checkSuiteId: $checkSuiteId
             jobId: $jobId
+            source: $source
           )
         }`,
-        { repositoryId, checkSuiteId, jobId: job.id },
+        { repositoryId, checkSuiteId, jobId: job.id, source: requestSource },
       );
       onRetried();
       onError(null);

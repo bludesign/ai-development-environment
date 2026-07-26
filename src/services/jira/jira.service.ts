@@ -1521,6 +1521,12 @@ export class JiraService {
     return true;
   }
 
+  async clearApiCalls(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    await prisma.jiraApiCallLog.deleteMany();
+    return true;
+  }
+
   async deleteCachedTicket(issueKey: string): Promise<boolean> {
     await this.invalidateIssueCaches(normalizeIssueKey(issueKey));
     return true;

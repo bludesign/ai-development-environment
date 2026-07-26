@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -128,6 +129,19 @@ export function JiraCachePage() {
     try {
       await controlPlaneRequest("mutation { clearJiraCache }");
       setTicketOffset(0);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const clearApiCalls = async () => {
+    setBusyKey("clear-calls");
+    try {
+      await controlPlaneRequest("mutation { clearJiraApiCalls }");
+      setCallOffset(0);
       await load();
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -279,6 +293,28 @@ export function JiraCachePage() {
             <Panel
               title={t("recentTitle")}
               description={t("recentDescription")}
+              action={
+                <ConfirmationDialog
+                  actionLabel={t("clearCalls")}
+                  cancelLabel={tc("cancel")}
+                  description={tc("cannotBeUndone")}
+                  onConfirm={clearApiCalls}
+                  title={t("confirmClearCalls")}
+                  trigger={
+                    <Button
+                      disabled={
+                        busyKey === "clear-calls" ||
+                        data.jiraApiCalls.total === 0
+                      }
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Trash2 />
+                      {t("clearCalls")}
+                    </Button>
+                  }
+                />
+              }
             >
               {data.jiraApiCalls.items.length === 0 ? (
                 <Empty>{t("noCalls")}</Empty>
@@ -488,10 +524,12 @@ function MetricCard({ metric }: { metric: JiraMetricWindow }) {
 function Panel({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -499,6 +537,7 @@ function Panel({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
+        {action && <CardAction>{action}</CardAction>}
       </CardHeader>
       {children}
     </Card>

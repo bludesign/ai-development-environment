@@ -62,6 +62,39 @@ function report(complete = true) {
   };
 }
 
+function githubPullRequest(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "pull-request-1",
+    number: 24,
+    title: "Persist pull requests",
+    url: "https://github.com/acme/widgets/pull/24",
+    repositoryGithubId: "repository-github-1",
+    repositoryNameWithOwner: "acme/widgets",
+    repositoryUrl: "https://github.com/acme/widgets",
+    labels: ["ready"],
+    jiraKey: "AIDE-24",
+    pipelineStatus: "SUCCESS",
+    pipelines: [],
+    reviewDecision: "APPROVED",
+    unresolvedReviewThreadCount: 0,
+    state: "OPEN",
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    autoMergeEnabled: false,
+    viewerCanEnableAutoMerge: true,
+    viewerCanDisableAutoMerge: false,
+    headRefOid: "head-2",
+    headRefName: "feature/AIDE-24",
+    worktreeId: null,
+    worktreeHighlightColor: null,
+    createdAt: new Date(3).toISOString(),
+    ...overrides,
+  };
+}
+
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -214,16 +247,16 @@ describe("WorktreesService", () => {
     );
   });
 
-  test("refetches pull requests after case-insensitive cache invalidation", async () => {
-    const pullRequest = {
-      id: "pull-request-1",
-      headRefName: "feature/AIDE-24",
-    };
-    const pullRequestsForOrigin = vi
+  test("discovers an exact branch pull request and persists the association", async () => {
+    const pullRequest = githubPullRequest();
+    const pullRequestsForBranches = vi
       .fn()
-      .mockResolvedValueOnce([pullRequest])
-      .mockResolvedValueOnce([]);
-    const github = { pullRequestsForOrigin } as unknown as GitHubService;
+      .mockResolvedValue(new Map([["feature/AIDE-24", pullRequest]]));
+    const github = {
+      pullRequestsForBranches,
+      pullRequestLiveStatuses: vi.fn().mockResolvedValue(new Map()),
+      effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
+    } as unknown as GitHubService;
     const jira = {
       cachedTicket: vi.fn(),
       ticket: vi.fn(),
@@ -237,6 +270,10 @@ describe("WorktreesService", () => {
       hasUnstagedChanges: false,
       folder: "/repo",
       baseBranchOverride: null,
+      pullRequest: null,
+      pullRequestLookupOrigin: null,
+      pullRequestLookupBranch: null,
+      pullRequestLookupAt: null,
       tags: [],
       builds: [
         {
@@ -272,6 +309,8 @@ describe("WorktreesService", () => {
       },
     };
     const findMany = vi.fn().mockResolvedValue([worktree]);
+    const worktreeUpdate = vi.fn().mockResolvedValue(worktree);
+    const pullRequestUpsert = vi.fn().mockResolvedValue(undefined);
     const quickActionWorkflow = {
       id: "workflow-1",
       name: "Prepare review",
@@ -291,8 +330,26 @@ describe("WorktreesService", () => {
       worktree: {
         deleteMany: vi.fn(),
         findMany,
+        update: worktreeUpdate,
         count: vi.fn().mockResolvedValue(0),
       },
+      worktreePullRequest: {
+        upsert: pullRequestUpsert,
+        deleteMany: vi.fn(),
+      },
+      $transaction: vi.fn(async (operation) => {
+        if (typeof operation === "function") {
+          return operation({
+            worktree: { update: worktreeUpdate },
+            worktreePullRequest: {
+              upsert: pullRequestUpsert,
+              deleteMany: vi.fn(),
+            },
+          });
+        }
+        return Promise.all(operation);
+      }),
+      gitHubSettings: { findUnique: vi.fn().mockResolvedValue(null) },
       worktreeTag: { findMany: vi.fn().mockResolvedValue([]) },
       worktreeSettings: {
         upsert: vi.fn().mockResolvedValue({
@@ -337,16 +394,268 @@ describe("WorktreesService", () => {
     expect(initial.agents[0]?.codebases[0]?.quickActions).toEqual([
       quickActionWorkflow,
     ]);
-    await worktrees.overview();
-    expect(pullRequestsForOrigin).toHaveBeenCalledOnce();
+    expect(pullRequestsForBranches).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      ["feature/AIDE-24"],
+      expect.objectContaining({ requestSource: "WORKTREES" }),
+    );
+    expect(pullRequestUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { worktreeId: "worktree-1" } }),
+    );
+  });
 
-    worktrees.invalidatePullRequestsForOrigin("GitHub.com/Acme/Widgets");
-    const refreshed = await worktrees.overview();
+  test("replaces a terminal pull request in the same synchronization cycle", async () => {
+    const current = githubPullRequest();
+    const replacement = githubPullRequest({
+      id: "pull-request-2",
+      number: 25,
+      title: "Replacement pull request",
+    });
+    const upsert = vi.fn().mockResolvedValue(undefined);
+    const update = vi.fn().mockResolvedValue(undefined);
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      gitHubSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktreePullRequest: { updateMany: vi.fn(), deleteMany },
+      worktree: { update },
+      $transaction: vi.fn(async (operation) => {
+        if (typeof operation !== "function") return Promise.all(operation);
+        return operation({
+          worktree: { update },
+          worktreePullRequest: { upsert, deleteMany },
+        });
+      }),
+    });
+    const pullRequestLiveStatuses = vi
+      .fn()
+      .mockResolvedValue(
+        new Map([["pull-request-1", { ...current, state: "CLOSED" }]]),
+      );
+    const pullRequestsForBranches = vi
+      .fn()
+      .mockResolvedValue(new Map([["feature/AIDE-24", replacement]]));
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestLiveStatuses,
+        pullRequestsForBranches,
+        effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(),
+      pullRequest: current,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
 
-    expect(pullRequestsForOrigin).toHaveBeenCalledTimes(2);
-    expect(
-      refreshed.agents[0]?.codebases[0]?.worktrees[0]?.pullRequest,
-    ).toBeNull();
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(target.pullRequest).toBe(replacement);
+    expect(pullRequestsForBranches).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      ["feature/AIDE-24"],
+      expect.objectContaining({ force: true, allowStaleOnError: false }),
+    );
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ githubId: "pull-request-2" }),
+      }),
+    );
+  });
+
+  test("keeps the last-known pull request when replacement discovery fails", async () => {
+    const current = githubPullRequest();
+    const deleteMany = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      gitHubSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktreePullRequest: { updateMany: vi.fn(), deleteMany },
+    });
+    const pullRequestsForBranches = vi
+      .fn()
+      .mockRejectedValue(new Error("GitHub unavailable"));
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestLiveStatuses: vi
+          .fn()
+          .mockResolvedValue(
+            new Map([["pull-request-1", { ...current, state: "MERGED" }]]),
+          ),
+        pullRequestsForBranches,
+        effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(),
+      pullRequest: current,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(target.pullRequest).toBe(current);
+    expect(pullRequestsForBranches).toHaveBeenCalledOnce();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
+  test("forced refresh preserves the stored snapshot when GitHub fails", async () => {
+    const transaction = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          codebaseId: "codebase-1",
+          branch: "feature/AIDE-24",
+          missingAt: null,
+          codebase: {
+            repository: { canonicalOrigin: "github.com/acme/widgets" },
+          },
+        }),
+      },
+      $transaction: transaction,
+    });
+    const pullRequestsForBranches = vi
+      .fn()
+      .mockRejectedValue(new Error("GitHub unavailable"));
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      { pullRequestsForBranches } as unknown as GitHubService,
+    );
+
+    await expect(worktrees.refreshPullRequest("worktree-1")).rejects.toThrow(
+      "GitHub unavailable",
+    );
+    expect(pullRequestsForBranches).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      ["feature/AIDE-24"],
+      {
+        force: true,
+        allowStaleOnError: false,
+        requestSource: "WORKTREES",
+      },
+    );
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  test("honors a recent successful negative pull request lookup", async () => {
+    getPrismaClient.mockResolvedValue({
+      gitHubSettings: {
+        findUnique: vi.fn().mockResolvedValue({ cacheTtlSeconds: 300 }),
+      },
+    });
+    const pullRequestsForBranches = vi.fn();
+    const pullRequestLiveStatuses = vi.fn();
+    const effectiveCacheTtlSeconds = vi.fn().mockResolvedValue(300);
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestsForBranches,
+        pullRequestLiveStatuses,
+        effectiveCacheTtlSeconds,
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(),
+      pullRequest: null,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(pullRequestsForBranches).not.toHaveBeenCalled();
+    expect(pullRequestLiveStatuses).not.toHaveBeenCalled();
+    expect(effectiveCacheTtlSeconds).toHaveBeenCalledWith(
+      "GitHubWorktreePullRequests",
+    );
+  });
+
+  test("retries negative pull request discovery using the operation TTL", async () => {
+    const worktreeUpdate = vi.fn().mockResolvedValue(undefined);
+    const pullRequestDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({
+      worktree: { update: worktreeUpdate },
+      worktreePullRequest: { deleteMany: pullRequestDeleteMany },
+      $transaction: vi.fn(async (operation) => {
+        if (typeof operation !== "function") return Promise.all(operation);
+        return operation({
+          worktree: { update: worktreeUpdate },
+          worktreePullRequest: { deleteMany: pullRequestDeleteMany },
+        });
+      }),
+    });
+    const pullRequestsForBranches = vi
+      .fn()
+      .mockResolvedValue(new Map([["feature/AIDE-24", null]]));
+    const effectiveCacheTtlSeconds = vi.fn().mockResolvedValue(60);
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestsForBranches,
+        pullRequestLiveStatuses: vi.fn(),
+        effectiveCacheTtlSeconds,
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(Date.now() - 61_000),
+      pullRequest: null,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(effectiveCacheTtlSeconds).toHaveBeenCalledWith(
+      "GitHubWorktreePullRequests",
+    );
+    expect(pullRequestsForBranches).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      ["feature/AIDE-24"],
+      expect.objectContaining({ requestSource: "WORKTREES" }),
+    );
   });
 
   test("resolves the linked ticket key from a worktree branch", async () => {
@@ -385,7 +694,7 @@ describe("WorktreesService", () => {
     expect(findUnique).toHaveBeenCalledWith({ where: { id: "default" } });
   });
 
-  test("hydrates workflow sessions with the linked pull request and ticket", async () => {
+  test("hydrates workflow sessions from the branch without reading GitHub", async () => {
     getPrismaClient.mockResolvedValue({
       worktree: {
         findFirst: vi.fn().mockResolvedValue({
@@ -399,6 +708,34 @@ describe("WorktreesService", () => {
           pushStatus: "READY",
           hasStagedChanges: false,
           hasUnstagedChanges: false,
+          pullRequest: {
+            worktreeId: "worktree-1",
+            githubId: "pull-request-1",
+            number: 42,
+            title: "Ship persisted PR context",
+            url: "https://github.com/acme/widgets/pull/42",
+            repositoryGithubId: "github-repository-1",
+            repositoryNameWithOwner: "acme/widgets",
+            repositoryUrl: "https://github.com/acme/widgets",
+            labelsJson: JSON.stringify(["ready"]),
+            jiraKey: "APP-99",
+            pipelineStatus: "SUCCESS",
+            pipelinesJson: "[]",
+            reviewDecision: "APPROVED",
+            unresolvedReviewThreadCount: 2,
+            state: "OPEN",
+            isDraft: false,
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+            autoMergeEnabled: false,
+            viewerCanEnableAutoMerge: true,
+            viewerCanDisableAutoMerge: false,
+            headRefOid: "abc123",
+            headRefName: "feature/APP-42",
+            githubCreatedAt: new Date("2026-07-01T00:00:00.000Z"),
+            createdAt: new Date("2026-07-01T00:00:00.000Z"),
+            updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+          },
           codebase: {
             id: "codebase-1",
             folder: "/repo",
@@ -421,29 +758,16 @@ describe("WorktreesService", () => {
       },
       codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
     });
-    const pullRequestsForOrigin = vi.fn().mockResolvedValue([
-      {
-        id: "pull-request-1",
-        number: 42,
-        title: "Ship widgets",
-        url: "https://github.com/acme/widgets/pull/42",
-        repositoryGithubId: "github-repository-1",
-        repositoryNameWithOwner: "acme/widgets",
-        headRefName: "feature/APP-42",
-        state: "OPEN",
-        labels: ["ready"],
-        jiraKey: "APP-99",
-      },
-    ]);
     const worktrees = new WorktreesService(
       { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
       {} as JiraService,
-      { pullRequestsForOrigin } as unknown as GitHubService,
+      {} as GitHubService,
     );
 
-    await expect(
-      worktrees.workflowSessionDataForWorktree("worktree-1"),
-    ).resolves.toMatchObject({
+    const session =
+      await worktrees.workflowSessionDataForWorktree("worktree-1");
+
+    expect(session).toMatchObject({
       worktree: { id: "worktree-1", baseBranch: "release" },
       codebase: { id: "codebase-1", agentId: "agent-1" },
       agent: { id: "agent-1", name: "Studio Mac" },
@@ -452,9 +776,60 @@ describe("WorktreesService", () => {
         name: "Widgets",
         url: "github.com/acme/widgets",
       },
-      pr: { id: "pull-request-1", number: 42, jiraKey: "APP-99" },
-      ticket: { key: "APP-99" },
+      // The branch regex is the only source of the key, so the pull request's
+      // own APP-99 does not win.
+      ticket: { key: "APP-42" },
+      pr: {
+        id: "pull-request-1",
+        number: 42,
+        headBranch: "feature/APP-42",
+        headSha: "abc123",
+        unresolvedReviewThreadCount: 2,
+      },
     });
+  });
+
+  test("resolves pull-request workflow data from its persisted worktree", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        worktreeId: "worktree-1",
+        repositoryNameWithOwner: "Acme/Widgets",
+      },
+    ]);
+    getPrismaClient.mockResolvedValue({
+      worktreePullRequest: { findMany },
+    });
+    const worktrees = service();
+    const snapshot = {
+      worktree: { id: "worktree-1" },
+      pr: { number: 42, title: "Stored pull request" },
+    };
+    const workflowSessionDataForWorktree = vi
+      .spyOn(worktrees, "workflowSessionDataForWorktree")
+      .mockResolvedValue(snapshot);
+
+    await expect(
+      worktrees.workflowSessionDataForPullRequest("ACME", "Widgets", 42),
+    ).resolves.toEqual(snapshot);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        number: 42,
+        worktree: { missingAt: null },
+      },
+      select: { worktreeId: true, repositoryNameWithOwner: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
+  });
+
+  test("returns no pull-request workflow data without a persisted snapshot", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktreePullRequest: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+
+    await expect(
+      service().workflowSessionDataForPullRequest("acme", "widgets", 42),
+    ).resolves.toEqual({});
   });
 
   test("records a deduplicated workflow event after creating a worktree", async () => {
@@ -591,7 +966,10 @@ describe("WorktreesService", () => {
     const transaction = {
       codebase: { update: vi.fn() },
       worktree: {
-        upsert: vi.fn().mockResolvedValue({ id: "worktree-1" }),
+        upsert: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          branch: "feature/AIDE-24",
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
@@ -657,8 +1035,11 @@ describe("WorktreesService", () => {
     const transaction = {
       codebase: { update: vi.fn() },
       worktree: {
-        upsert: vi.fn().mockResolvedValue({ id: "worktree-1" }),
-        updateMany: vi.fn(),
+        upsert: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          branch: "feature/AIDE-24",
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     const prisma = {
@@ -738,9 +1119,11 @@ describe("WorktreesService", () => {
   });
 
   test("accepts activity only from the agent that owns the worktree", async () => {
-    const findFirst = vi
-      .fn()
-      .mockResolvedValueOnce({ id: "worktree-1", codebaseId: "codebase-1" });
+    const findFirst = vi.fn().mockResolvedValueOnce({
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      branch: "feature/AIDE-24",
+    });
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     getPrismaClient.mockResolvedValue({
       worktree: { findFirst, updateMany },

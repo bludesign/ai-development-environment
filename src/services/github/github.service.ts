@@ -18,6 +18,8 @@ import {
 } from "@/server/github/github-app";
 
 import type {
+  GitHubApiCallFilters,
+  GitHubApiCallView,
   GitHubActionsRepositoryErrorView,
   GitHubActionsRepositoryView,
   GitHubActionsWorkflowRunPage,
@@ -25,11 +27,17 @@ import type {
   GitHubAutoRetryRuleView,
   GitHubAppSettingsView,
   GitHubAuditContext,
+  GitHubCachedEntryDetail,
+  GitHubCachedEntryView,
+  GitHubCacheMetrics,
+  GitHubCacheTtlOverrideView,
   GitHubPipelineState,
   GitHubPipelineStatus,
   GitHubPipelineView,
   GitHubMergeMethod,
+  GitHubPaginatedResult,
   GitHubPullRequestDetail,
+  GitHubPullRequestLiveStatus,
   GitHubPullRequestMergeOptions,
   GitHubPullRequestMergeResult,
   GitHubPullRequestPage,
@@ -46,6 +54,8 @@ import type {
   GitHubReviewThreadPage,
   GitHubReviewThreadPullRequest,
   GitHubReviewThreadState,
+  GitHubRateLimitSnapshotView,
+  GitHubRequestSource,
   GitHubSettingsView,
   GitHubViewer,
   GitHubWorkflowJobView,
@@ -54,6 +64,20 @@ import type {
 } from "./types";
 import { GitHubAutoRetryService } from "./github-auto-retry.service";
 import type { PollingService } from "@/services/polling";
+import { GitHubCache } from "./github-cache";
+import {
+  extractGitHubGraphqlCost,
+  prepareGitHubGraphql,
+} from "./github-graphql";
+import {
+  GITHUB_REST_OPERATIONS,
+  type GitHubRestOperation,
+} from "./github-rest-operations";
+import {
+  listGitHubRateLimitSnapshots,
+  observeGitHubRateLimit,
+  type GitHubRateLimitMetadata,
+} from "./github-rate-limit";
 
 const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
@@ -65,6 +89,14 @@ const PULL_REQUEST_PAGE_SIZE = 25;
 export const MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 30;
 export const MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
+
+function requestSourceFromAudit(
+  context: GitHubAuditContext,
+): GitHubRequestSource {
+  if (context.actor === "auto-retry") return "AUTO_RETRY";
+  if (context.actor === "workflow") return "WORKFLOW_AUTOMATION";
+  return "ACTIONS_PAGE";
+}
 
 type PageInfo = {
   hasNextPage: boolean;
@@ -106,6 +138,29 @@ type RawPullRequest = {
   viewerCanEnableAutoMerge: boolean;
   viewerCanDisableAutoMerge: boolean;
   headRefOid: string;
+};
+
+type RawPullRequestLiveStatus = Pick<
+  RawPullRequest,
+  | "id"
+  | "state"
+  | "mergedAt"
+  | "statusCheckRollup"
+  | "reviewDecision"
+  | "reviewThreads"
+  | "isDraft"
+  | "mergeable"
+  | "mergeStateStatus"
+  | "autoMergeRequest"
+  | "viewerCanEnableAutoMerge"
+  | "viewerCanDisableAutoMerge"
+  | "headRefOid"
+>;
+
+type GitHubQueryOptions = {
+  force?: boolean;
+  allowStaleOnError?: boolean;
+  requestSource?: GitHubRequestSource;
 };
 
 type RawCheckSuite = {
@@ -220,12 +275,12 @@ type RawPipelineContext =
       targetUrl: string | null;
     };
 
-type RawPullRequestDetail = RawPullRequest & {
+type RawPullRequestDetail = Omit<RawPullRequest, "reviewThreads"> & {
   body: string;
   bodyHTML: string;
   author: { login: string; avatarUrl: string; url: string } | null;
   assignees: RawConnection<{ login: string; avatarUrl: string; url: string }>;
-  reviewThreadsFull: RawConnection<RawReviewThread>;
+  reviewThreads: RawConnection<RawReviewThread>;
   baseRefName: string;
   headRefName: string;
   state: "OPEN" | "CLOSED" | "MERGED";
@@ -304,8 +359,11 @@ type RawReviewThread = {
   comments: RawConnection<RawReviewComment>;
 };
 
-type RawReviewPullRequest = RawReviewThreadPullRequest & {
+type RawReviewPullRequestMetadata = RawReviewThreadPullRequest & {
   updatedAt: string;
+};
+
+type RawReviewPullRequest = RawReviewPullRequestMetadata & {
   reviewThreads: RawConnection<RawReviewThread>;
 };
 
@@ -313,6 +371,17 @@ type GitHubResponse<T> = {
   data?: T;
   errors?: Array<{ message?: string }>;
 };
+
+class GitHubRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number | null,
+    public readonly rateLimit: GitHubRateLimitMetadata | null,
+  ) {
+    super(message);
+    this.name = "GitHubRequestError";
+  }
+}
 
 const PIPELINE_CONTEXT_FIELDS = `
   __typename
@@ -345,8 +414,7 @@ const PIPELINE_CONTEXT_FIELDS = `
   }
 `;
 
-const PULL_REQUEST_FRAGMENT = `
-  fragment PullRequestTableFields on PullRequest {
+const PULL_REQUEST_BASE_FIELDS = `
     id
     number
     title
@@ -377,10 +445,42 @@ const PULL_REQUEST_FRAGMENT = `
     autoMergeRequest { enabledAt }
     viewerCanEnableAutoMerge
     viewerCanDisableAutoMerge
+`;
+
+const PULL_REQUEST_FRAGMENT = `
+  fragment PullRequestTableFields on PullRequest {
+    ${PULL_REQUEST_BASE_FIELDS}
     reviewThreads(first: 100) {
       nodes { isResolved }
       pageInfo { hasNextPage endCursor }
     }
+  }
+`;
+
+const PULL_REQUEST_LIVE_FRAGMENT = `
+  fragment PullRequestLiveFields on PullRequest {
+    id
+    state
+    mergedAt
+    headRefOid
+    statusCheckRollup {
+      state
+      contexts(first: 100) {
+        nodes { ${PIPELINE_CONTEXT_FIELDS} }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+    reviewDecision
+    reviewThreads(first: 100) {
+      nodes { isResolved }
+      pageInfo { hasNextPage endCursor }
+    }
+    isDraft
+    mergeable
+    mergeStateStatus
+    autoMergeRequest { enabledAt }
+    viewerCanEnableAutoMerge
+    viewerCanDisableAutoMerge
   }
 `;
 
@@ -422,6 +522,16 @@ const REVIEW_THREAD_FIELDS = `
   comments(first: 100) {
     nodes { ${REVIEW_COMMENT_FIELDS} }
     pageInfo { hasNextPage endCursor }
+  }
+`;
+
+const PULL_REQUEST_DETAIL_FRAGMENT = `
+  fragment PullRequestDetailFields on PullRequest {
+    ${PULL_REQUEST_BASE_FIELDS}
+    reviewThreads(first: 100) {
+      nodes { ${REVIEW_THREAD_FIELDS} }
+      pageInfo { hasNextPage endCursor }
+    }
   }
 `;
 
@@ -907,6 +1017,7 @@ function normalizeReviewThreadState(thread: {
 
 export class GitHubService {
   private autoRetryService: GitHubAutoRetryService | null = null;
+  private readonly cache = new GitHubCache();
 
   constructor(
     startAutoRetry = false,
@@ -958,7 +1069,41 @@ export class GitHubService {
     query: string,
     variables: Record<string, unknown>,
     token: string,
+    options: {
+      requestSource: GitHubRequestSource;
+      force?: boolean;
+      allowStaleOnError?: boolean;
+    },
   ): Promise<T> {
+    const prepared = prepareGitHubGraphql(query);
+    const requestInput = {
+      authentication: "PAT" as const,
+      requestSource: options.requestSource,
+      endpoint: GITHUB_GRAPHQL_URL,
+      operation: prepared.operation,
+      query,
+      normalizedQuery: prepared.normalizedQuery,
+      variables,
+      fetcher: () =>
+        this.livePatGraphql<T>(prepared.liveQuery, variables, token),
+    };
+    if (prepared.kind === "mutation") {
+      return this.cache.mutation(requestInput);
+    }
+    const result = await this.cache.query({ ...requestInput, ...options });
+    return result.data;
+  }
+
+  private async livePatGraphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    token: string,
+  ): Promise<{
+    data: T;
+    statusCode: number;
+    pointCost: number | null;
+    rateLimit: GitHubRateLimitMetadata | null;
+  }> {
     let response: Response;
     try {
       response = await fetch(GITHUB_GRAPHQL_URL, {
@@ -974,19 +1119,27 @@ export class GitHubService {
         cache: "no-store",
       });
     } catch (error) {
-      throw new Error(
+      throw new GitHubRequestError(
         sanitizeError(
           error instanceof Error ? error.message : String(error),
           token,
         ),
+        null,
+        null,
       );
     }
+
+    const rateLimit = await observeGitHubRateLimit("PAT", response);
 
     let body: GitHubResponse<T>;
     try {
       body = (await response.json()) as GitHubResponse<T>;
     } catch {
-      throw new Error(`GitHub returned HTTP ${response.status}`);
+      throw new GitHubRequestError(
+        `GitHub returned HTTP ${response.status}`,
+        response.status,
+        rateLimit,
+      );
     }
 
     if (!response.ok || body.errors?.length || !body.data) {
@@ -995,12 +1148,44 @@ export class GitHubService {
           ?.map((error) => error.message)
           .filter(Boolean)
           .join("; ") || `GitHub returned HTTP ${response.status}`;
-      throw new Error(sanitizeError(message, token));
+      throw new GitHubRequestError(
+        sanitizeError(message, token),
+        response.status,
+        rateLimit,
+      );
     }
-    return body.data;
+    const extracted = extractGitHubGraphqlCost(body.data);
+    return {
+      data: extracted.data,
+      statusCode: response.status,
+      pointCost: extracted.pointCost,
+      rateLimit,
+    };
   }
 
-  private async restRequest<T>(url: string, token: string): Promise<T> {
+  private async restRequest<T>(
+    url: string,
+    operation: GitHubRestOperation,
+    token: string,
+    requestSource: GitHubRequestSource,
+  ): Promise<T> {
+    const startedAt = Date.now();
+    const record = (input: {
+      statusCode?: number | null;
+      error?: string | null;
+      rateLimit?: GitHubRateLimitMetadata | null;
+    }) =>
+      this.cache
+        .recordRestCall({
+          authentication: "PAT",
+          method: "GET",
+          endpoint: url,
+          operation,
+          requestSource,
+          durationMs: Date.now() - startedAt,
+          ...input,
+        })
+        .catch(() => undefined);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -1013,19 +1198,22 @@ export class GitHubService {
         cache: "no-store",
       });
     } catch (error) {
-      throw new Error(
-        sanitizeError(
-          error instanceof Error ? error.message : String(error),
-          token,
-        ),
+      const message = sanitizeError(
+        error instanceof Error ? error.message : String(error),
+        token,
       );
+      await record({ error: message });
+      throw new Error(message);
     }
+    const rateLimit = await observeGitHubRateLimit("PAT", response);
 
     let body: unknown;
     try {
       body = await response.json();
     } catch {
-      throw new Error(`GitHub returned HTTP ${response.status}`);
+      const message = `GitHub returned HTTP ${response.status}`;
+      await record({ statusCode: response.status, error: message, rateLimit });
+      throw new Error(message);
     }
     if (!response.ok) {
       const message =
@@ -1035,9 +1223,60 @@ export class GitHubService {
         typeof body.message === "string"
           ? body.message
           : `GitHub returned HTTP ${response.status}`;
-      throw new Error(sanitizeError(message, token));
+      const sanitized = sanitizeError(message, token);
+      await record({
+        statusCode: response.status,
+        error: sanitized,
+        rateLimit,
+      });
+      throw new Error(sanitized);
     }
+    await record({ statusCode: response.status, rateLimit });
     return body as T;
+  }
+
+  private async appRequest<T>(
+    credentials: GitHubAppCredentials,
+    query: string,
+    variables: Record<string, unknown>,
+    options: {
+      requestSource: GitHubRequestSource;
+      force?: boolean;
+      allowStaleOnError?: boolean;
+    },
+  ): Promise<{ data: T; githubRequestId: string | null }> {
+    const prepared = prepareGitHubGraphql(query);
+    let githubRequestId: string | null = null;
+    const requestInput = {
+      authentication: "APP" as const,
+      requestSource: options.requestSource,
+      endpoint: credentials.graphqlUrl,
+      operation: prepared.operation,
+      query,
+      normalizedQuery: prepared.normalizedQuery,
+      variables,
+      fetcher: async () => {
+        const result = await githubAppGraphql<T>(
+          credentials,
+          prepared.liveQuery,
+          variables,
+          options.requestSource,
+        );
+        githubRequestId = result.githubRequestId;
+        const extracted = extractGitHubGraphqlCost(result.data);
+        return {
+          data: extracted.data,
+          statusCode: result.statusCode ?? null,
+          pointCost: extracted.pointCost,
+          rateLimit: result.rateLimit ?? null,
+        };
+      },
+    };
+    const data =
+      prepared.kind === "mutation"
+        ? await this.cache.mutation(requestInput)
+        : (await this.cache.query({ ...requestInput, ...options })).data;
+    return { data, githubRequestId };
   }
 
   private async workflowJobs(
@@ -1046,14 +1285,23 @@ export class GitHubService {
     workflowRunId: string,
     token: string,
     appCredentials: GitHubAppCredentials | null,
+    requestSource: GitHubRequestSource,
   ): Promise<GitHubWorkflowJobView[]> {
     const jobs: GitHubActionsWorkflowJob[] = appCredentials
       ? await listGitHubActionsWorkflowJobs(appCredentials, {
           owner,
           repository,
           workflowRunId,
+          requestSource,
         })
-      : await this.patWorkflowJobs(owner, repository, workflowRunId, token);
+      : await this.patWorkflowJobs(
+          owner,
+          repository,
+          workflowRunId,
+          token,
+          "latest",
+          requestSource,
+        );
     return this.workflowJobViews(jobs, appCredentials !== null);
   }
 
@@ -1090,6 +1338,7 @@ export class GitHubService {
     workflowRunId: string,
     token: string,
     filter: "latest" | "all" = "latest",
+    requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubActionsWorkflowJob[]> {
     const jobs: GitHubActionsWorkflowJob[] = [];
     let page = 1;
@@ -1102,7 +1351,9 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
           repository,
         )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=${filter}&per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
         token,
+        requestSource,
       );
       totalCount = result.total_count;
       jobs.push(...result.jobs);
@@ -1115,6 +1366,7 @@ export class GitHubService {
     run: RawActionsWorkflowRun,
     target: ActionsRepositoryTarget,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<number[]> {
     const reported = [
       ...new Set(
@@ -1131,7 +1383,9 @@ export class GitHubService {
         )}/${encodeURIComponent(target.name)}/commits/${encodeURIComponent(
           run.head_sha,
         )}/pulls?per_page=100`,
+        GITHUB_REST_OPERATIONS.repos.listPullRequestsAssociatedWithCommit,
         token,
+        requestSource,
       );
       return [
         ...new Set(
@@ -1170,6 +1424,7 @@ export class GitHubService {
       defaultJiraKeyRegex: settings.defaultJiraKeyRegex,
       actionsNotificationPollIntervalSeconds:
         settings.actionsNotificationPollIntervalSeconds,
+      cacheTtlSeconds: settings.cacheTtlSeconds,
       updatedAt: settings.updatedAt.toISOString(),
     };
   }
@@ -1227,6 +1482,7 @@ export class GitHubService {
           });
         },
       );
+      await this.cache.clearForCredentialChange("PAT");
     } else {
       await prisma.gitHubSettings.upsert({
         where: { id: SETTINGS_ID },
@@ -1249,8 +1505,105 @@ export class GitHubService {
         });
       },
     );
+    await this.cache.clearForCredentialChange("PAT");
     this.pollingConfigurationChanged();
     return this.getSettings();
+  }
+
+  async rateLimitSnapshots(): Promise<GitHubRateLimitSnapshotView[]> {
+    return listGitHubRateLimitSnapshots();
+  }
+
+  async cacheMetrics(): Promise<GitHubCacheMetrics> {
+    return this.cache.metrics();
+  }
+
+  async apiCalls(
+    limit = 50,
+    offset = 0,
+    filters: GitHubApiCallFilters = {},
+  ): Promise<GitHubPaginatedResult<GitHubApiCallView>> {
+    return this.cache.calls(limit, offset, filters);
+  }
+
+  async cachedEntries(
+    limit = 50,
+    offset = 0,
+  ): Promise<GitHubPaginatedResult<GitHubCachedEntryView>> {
+    return this.cache.entries(limit, offset);
+  }
+
+  async cachedEntry(id: string): Promise<GitHubCachedEntryDetail | null> {
+    return this.cache.entry(id);
+  }
+
+  async cacheTtlOverrides(): Promise<GitHubCacheTtlOverrideView[]> {
+    return this.cache.ttlOverrides();
+  }
+
+  async cacheableGraphqlOperations(): Promise<string[]> {
+    return this.cache.cacheableOperations();
+  }
+
+  async effectiveCacheTtlSeconds(operation: string): Promise<number> {
+    return this.cache.effectiveTtlSeconds(operation);
+  }
+
+  async saveCacheTtlOverride(
+    operation: string,
+    ttlSeconds: number,
+  ): Promise<GitHubCacheTtlOverrideView> {
+    return this.cache.saveTtlOverride(operation, ttlSeconds);
+  }
+
+  async deleteCacheTtlOverride(operation: string): Promise<boolean> {
+    return this.cache.deleteTtlOverride(operation);
+  }
+
+  async updateCacheTtl(ttlMinutes: number): Promise<GitHubSettingsView> {
+    return this.cache.updateTtl(ttlMinutes, () => this.getSettings());
+  }
+
+  async clearCache(): Promise<boolean> {
+    return this.cache.clear();
+  }
+
+  async clearApiCalls(): Promise<boolean> {
+    return this.cache.clearCalls();
+  }
+
+  async deleteCachedEntry(id: string): Promise<boolean> {
+    return this.cache.delete(id);
+  }
+
+  async refreshCachedEntry(id: string): Promise<GitHubCachedEntryDetail> {
+    const entry = await this.cache.entry(id);
+    if (!entry) throw new Error("GitHub cached entry not found");
+    const variables =
+      entry.variables && typeof entry.variables === "object"
+        ? (entry.variables as Record<string, unknown>)
+        : {};
+    if (entry.authentication === "PAT") {
+      await this.request(entry.query, variables, await this.requireToken(), {
+        requestSource: "CACHE_MANAGEMENT",
+        force: true,
+        allowStaleOnError: false,
+      });
+    } else {
+      await this.appRequest(
+        await this.requireAppCredentials(),
+        entry.query,
+        variables,
+        {
+          requestSource: "CACHE_MANAGEMENT",
+          force: true,
+          allowStaleOnError: false,
+        },
+      );
+    }
+    const refreshed = await this.cache.entry(id);
+    if (!refreshed) throw new Error("GitHub cached entry not found");
+    return refreshed;
   }
 
   private async audit(
@@ -1399,6 +1752,75 @@ export class GitHubService {
       apiBaseUrl: settings.apiBaseUrl,
       graphqlUrl: settings.graphqlUrl,
       keyFingerprint: settings.keyFingerprint,
+      ...this.appTransportObservers(settings.graphqlUrl),
+    };
+  }
+
+  private appTransportObservers(
+    graphqlUrl: string,
+    logGraphqlTransport = false,
+  ) {
+    return {
+      responseObserver: (response: Response) =>
+        observeGitHubRateLimit("APP", response).then(() => undefined),
+      requestObserver: (observation: {
+        url: string;
+        method: string;
+        operation: GitHubRestOperation | null;
+        requestSource: GitHubRequestSource;
+        body: string | null;
+        durationMs: number;
+        statusCode: number | null;
+        error: string | null;
+        rateLimit: GitHubRateLimitMetadata | null;
+      }) => {
+        if (observation.url === graphqlUrl) {
+          if (!logGraphqlTransport) return;
+          let operation = "GitHubAppGraphql";
+          let variables: Record<string, unknown> = {};
+          try {
+            const body = JSON.parse(observation.body ?? "{}") as {
+              query?: unknown;
+              variables?: unknown;
+            };
+            if (typeof body.query === "string") {
+              operation = prepareGitHubGraphql(body.query).operation;
+            }
+            if (
+              body.variables &&
+              typeof body.variables === "object" &&
+              !Array.isArray(body.variables)
+            ) {
+              variables = body.variables as Record<string, unknown>;
+            }
+          } catch {
+            // Keep a generic operation when an observer cannot parse a body.
+          }
+          return this.cache.recordGraphqlTransportCall({
+            authentication: "APP",
+            endpoint: observation.url,
+            operation,
+            requestSource: observation.requestSource,
+            variables,
+            durationMs: observation.durationMs,
+            statusCode: observation.statusCode,
+            error: observation.error,
+            rateLimit: observation.rateLimit,
+          });
+        }
+        if (!observation.operation) return;
+        return this.cache.recordRestCall({
+          authentication: "APP",
+          method: observation.method,
+          endpoint: observation.url,
+          operation: observation.operation,
+          requestSource: observation.requestSource,
+          durationMs: observation.durationMs,
+          statusCode: observation.statusCode,
+          error: observation.error,
+          rateLimit: observation.rateLimit,
+        });
+      },
     };
   }
 
@@ -1450,6 +1872,7 @@ export class GitHubService {
         privateKey,
         apiBaseUrl: GITHUB_API_BASE_URL,
         graphqlUrl: GITHUB_GRAPHQL_URL,
+        ...this.appTransportObservers(GITHUB_GRAPHQL_URL, true),
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
       const existingWebhookSecret = await this.credentials.getText(
@@ -1514,6 +1937,7 @@ export class GitHubService {
         outcome: "SUCCESS",
         githubRequestId: verification.githubRequestId,
       });
+      await this.cache.clearForCredentialChange("APP");
       this.notificationsConfigurationChanged?.();
       return this.getAppSettings();
     } catch (error) {
@@ -1590,7 +2014,10 @@ export class GitHubService {
     try {
       const credentials = await this.requireAppCredentials();
       clearGitHubAppTokenCache();
-      const verification = await verifyGitHubAppConfiguration(credentials);
+      const verification = await verifyGitHubAppConfiguration({
+        ...credentials,
+        ...this.appTransportObservers(credentials.graphqlUrl, true),
+      });
       const prisma = await getPrismaClient();
       await prisma.gitHubAppSettings.update({
         where: { id: GITHUB_APP_SETTINGS_ID },
@@ -1636,6 +2063,7 @@ export class GitHubService {
       },
     );
     clearGitHubAppTokenCache();
+    await this.cache.clearForCredentialChange("APP");
     await this.audit(auditContext, {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
       outcome: "SUCCESS",
@@ -1644,17 +2072,22 @@ export class GitHubService {
     return this.getAppSettings();
   }
 
-  private async viewer(token: string): Promise<GitHubViewer> {
+  private async viewer(token: string, force = false): Promise<GitHubViewer> {
     const data = await this.request<{ viewer: GitHubViewer }>(
       `query GitHubViewer { viewer { login name avatarUrl url } }`,
       {},
       token,
+      {
+        requestSource: "GITHUB_SETTINGS",
+        force,
+        allowStaleOnError: !force,
+      },
     );
     return data.viewer;
   }
 
   async testConnection(): Promise<GitHubViewer> {
-    return this.viewer(await this.requireToken());
+    return this.viewer(await this.requireToken(), true);
   }
 
   async listRepositories(): Promise<GitHubRepositoryView[]> {
@@ -1696,6 +2129,7 @@ export class GitHubService {
       }`,
       { after: after || null },
       token,
+      { requestSource: "PULL_REQUESTS_PAGE" },
     );
     const prisma = await getPrismaClient();
     const managed = new Set(
@@ -1723,6 +2157,7 @@ export class GitHubService {
     after?: string | null,
     branch?: string | null,
     workflowId?: string | null,
+    requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubActionsWorkflowRunPage> {
     if (!Number.isInteger(first) || first < 1 || first > ACTIONS_PAGE_SIZE) {
       throw new Error(
@@ -1798,6 +2233,9 @@ export class GitHubService {
           const workflowPath = selectedWorkflowId
             ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
             : "/actions/runs";
+          const operation = selectedWorkflowId
+            ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
+            : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
           const result = await this.restRequest<{
             total_count: number;
             workflow_runs: RawActionsWorkflowRun[];
@@ -1811,7 +2249,9 @@ export class GitHubService {
                 ? `&branch=${encodeURIComponent(selectedBranch)}`
                 : ""
             }`,
+            operation,
             token,
+            requestSource,
           );
           if (
             !Number.isInteger(result.total_count) ||
@@ -1912,7 +2352,7 @@ export class GitHubService {
     const appConfigured = appSettings !== null;
     const pullRequestNumbersByRun = await Promise.all(
       selectedRuns.map(({ run, target }) =>
-        this.actionsPullRequestNumbers(run, target, token),
+        this.actionsPullRequestNumbers(run, target, token, requestSource),
       ),
     );
     const items: GitHubActionsWorkflowRunView[] = selectedRuns.map(
@@ -2002,6 +2442,7 @@ export class GitHubService {
   async actionsWorkflowJobs(
     codebaseRepositoryId: string,
     workflowRunId: string,
+    requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubWorkflowJobView[]> {
     if (!codebaseRepositoryId.trim() || !workflowRunId.trim()) {
       throw new Error("Codebase repository and workflow run IDs are required");
@@ -2028,6 +2469,8 @@ export class GitHubService {
       target.name,
       workflowRunId,
       token,
+      "latest",
+      requestSource,
     );
     return this.workflowJobViews(jobs, appSettings !== null);
   }
@@ -2092,6 +2535,7 @@ export class GitHubService {
     workflowRunId: string,
     attempt: number,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<GitHubActionsWorkflowJob[]> {
     const jobs: GitHubActionsWorkflowJob[] = [];
     let page = 1;
@@ -2104,7 +2548,9 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}/jobs?per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRunAttempt,
         token,
+        requestSource,
       );
       totalCount = result.total_count;
       jobs.push(...result.jobs);
@@ -2118,6 +2564,7 @@ export class GitHubService {
     workflowRunId: string,
     attempt: number,
     includeJobs = true,
+    requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubWorkflowRunAttemptView> {
     if (!repositoryId.trim() || !workflowRunId.trim()) {
       throw new Error("Repository and workflow run IDs are required");
@@ -2138,10 +2585,18 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}`,
+      GITHUB_REST_OPERATIONS.actions.getWorkflowRunAttempt,
       token,
+      requestSource,
     );
     const jobs = includeJobs
-      ? await this.patWorkflowAttemptJobs(target, workflowRunId, attempt, token)
+      ? await this.patWorkflowAttemptJobs(
+          target,
+          workflowRunId,
+          attempt,
+          token,
+          requestSource,
+        )
       : [];
     const appConfigured =
       Boolean(appSettings) &&
@@ -2215,7 +2670,9 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs?head_sha=${encodeURIComponent(worktree.headSha)}&per_page=100`,
+      GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       token,
+      "WORKTREE_PIPELINES",
     );
     let runs = result.workflow_runs;
     if (runs.length === 0 && worktree.branch) {
@@ -2225,7 +2682,9 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/runs?branch=${encodeURIComponent(worktree.branch)}&per_page=100`,
+        GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
         token,
+        "WORKTREE_PIPELINES",
       );
       const latestRemoteSha = branchResult.workflow_runs[0]?.head_sha;
       runs = latestRemoteSha
@@ -2279,6 +2738,7 @@ export class GitHubService {
 
   async repositoryWorkflows(
     codebaseRepositoryId: string,
+    requestSource: GitHubRequestSource = "ACTIONS_PAGE",
   ): Promise<GitHubRepositoryWorkflowView[]> {
     const target = await this.actionsTargetByIdentifier(codebaseRepositoryId);
     const token = await this.requireToken();
@@ -2293,7 +2753,9 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/workflows?per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listRepoWorkflows,
         token,
+        requestSource,
       );
       totalCount = result.total_count;
       workflows.push(...result.workflows);
@@ -2308,7 +2770,9 @@ export class GitHubService {
           `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
             target.name,
           )}/actions/workflows/${encodeURIComponent(String(workflow.id))}/runs?per_page=1`,
+          GITHUB_REST_OPERATIONS.actions.listWorkflowRuns,
           token,
+          requestSource,
         );
         const run = latest.workflow_runs[0];
         const jobs = run
@@ -2317,6 +2781,8 @@ export class GitHubService {
               target.name,
               String(run.id),
               token,
+              "latest",
+              requestSource,
             )
           : [];
         return {
@@ -2349,7 +2815,9 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs?per_page=100`,
+      GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       token,
+      "AUTO_RETRY",
     );
     return result.workflow_runs.map((run) => {
       const completed = run.status.toLowerCase() === "completed";
@@ -2402,6 +2870,7 @@ export class GitHubService {
     repositoryId: string,
     workflowRunId: string,
     includeJobs = true,
+    requestSource: GitHubRequestSource = "AUTO_RETRY",
   ): Promise<GitHubActionsWorkflowRunView & { jobs: GitHubWorkflowJobView[] }> {
     const [target, token, appSettings] = await Promise.all([
       this.actionsTargetByIdentifier(repositoryId),
@@ -2414,7 +2883,9 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+      GITHUB_REST_OPERATIONS.actions.getWorkflowRun,
       token,
+      requestSource,
     );
     const completed = run.status.toLowerCase() === "completed";
     const jobs =
@@ -2425,6 +2896,7 @@ export class GitHubService {
             workflowRunId,
             token,
             "all",
+            requestSource,
           )
         : [];
     const checkSuiteId = run.check_suite_node_id || null;
@@ -2500,6 +2972,7 @@ export class GitHubService {
             repository: target.name,
             workflowRunId,
             jobId,
+            requestSource: requestSourceFromAudit(auditContext),
           })
         ).githubRequestId;
       } else if (action === "FAILED_JOBS") {
@@ -2508,6 +2981,7 @@ export class GitHubService {
             owner: target.owner,
             repository: target.name,
             workflowRunId,
+            requestSource: requestSourceFromAudit(auditContext),
           })
         ).githubRequestId;
       } else {
@@ -2516,9 +2990,11 @@ export class GitHubService {
             owner: target.owner,
             repository: target.name,
             workflowRunId,
+            requestSource: requestSourceFromAudit(auditContext),
           })
         ).githubRequestId;
       }
+      await this.cache.clear();
       await this.audit(auditContext, {
         operation:
           action === "JOB"
@@ -2553,6 +3029,7 @@ export class GitHubService {
     codebaseRepositoryId: string,
     workflowRunId: string,
     force: boolean,
+    requestSource: GitHubRequestSource,
     auditContext: GitHubAuditContext,
   ): Promise<boolean> {
     if (!codebaseRepositoryId.trim() || !workflowRunId.trim()) {
@@ -2579,7 +3056,9 @@ export class GitHubService {
         repository: target.name,
         workflowRunId,
         force,
+        requestSource,
       });
+      await this.cache.clear();
       await this.audit(auditContext, {
         operation,
         repositoryId: codebaseRepositoryId,
@@ -2626,6 +3105,7 @@ export class GitHubService {
       }`,
       { owner, name },
       token,
+      { requestSource: "PULL_REQUESTS_PAGE" },
     );
     if (!data.repository) {
       throw new Error("Repository was not found or is not accessible");
@@ -2681,6 +3161,7 @@ export class GitHubService {
     threadId: string,
     after: string,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<RawReviewComment[]> {
     const comments: RawReviewComment[] = [];
     let cursor: string | null = after;
@@ -2700,6 +3181,7 @@ export class GitHubService {
         }`,
         { id: threadId, after: cursor },
         token,
+        { requestSource },
       );
       if (!data.node) break;
       comments.push(...connectionNodes(data.node.comments));
@@ -2713,6 +3195,7 @@ export class GitHubService {
   private async completeReviewThread(
     thread: RawReviewThread,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<RawReviewThread> {
     const comments = connectionNodes(thread.comments);
     if (
@@ -2724,6 +3207,7 @@ export class GitHubService {
           thread.id,
           thread.comments.pageInfo.endCursor,
           token,
+          requestSource,
         )),
       );
     }
@@ -2740,6 +3224,7 @@ export class GitHubService {
     pullRequestId: string,
     initial: RawConnection<RawReviewThread>,
     token: string,
+    requestSource: GitHubRequestSource,
     highlights?: Map<string, WorktreeHighlight>,
   ): Promise<GitHubReviewThread[]> {
     const threads = connectionNodes(initial);
@@ -2765,6 +3250,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
+        { requestSource },
       );
       if (!data.node) break;
       threads.push(...connectionNodes(data.node.reviewThreads));
@@ -2775,7 +3261,7 @@ export class GitHubService {
     const normalized = await Promise.all(
       threads.map(async (thread) =>
         normalizeReviewThread(
-          await this.completeReviewThread(thread, token),
+          await this.completeReviewThread(thread, token, requestSource),
           highlights,
         ),
       ),
@@ -2789,21 +3275,41 @@ export class GitHubService {
       );
   }
 
-  private async searchReviewPullRequests(
-    query: string,
+  private async searchReviewPullRequestScopes(
+    queries: string[],
     token: string,
-  ): Promise<{ items: RawReviewPullRequest[]; truncated: boolean }> {
-    const items: RawReviewPullRequest[] = [];
-    let after: string | null = null;
-    let truncated = false;
-    while (true) {
-      const data: { search: RawConnection<RawReviewPullRequest> } =
-        await this.request(
-          `query GitHubReviewThreadPullRequestSearch(
-            $query: String!
-            $after: String
-          ) {
-            search(query: $query, type: ISSUE, first: 50, after: $after) {
+  ): Promise<{
+    searches: Array<{
+      items: RawReviewPullRequestMetadata[];
+      truncated: boolean;
+    }>;
+    viewerLogin: string;
+  }> {
+    const scopes = queries.map((query) => ({
+      query,
+      after: null as string | null,
+      items: [] as RawReviewPullRequestMetadata[],
+      done: false,
+      truncated: false,
+    }));
+    let viewerLogin: string | null = null;
+    while (scopes.some((scope) => !scope.done)) {
+      const active = scopes
+        .map((scope, index) => ({ scope, index }))
+        .filter(({ scope }) => !scope.done);
+      for (let start = 0; start < active.length; start += 10) {
+        const batch = active.slice(start, start + 10);
+        const definitions = batch
+          .map(({ index }) => `$query${index}: String!, $after${index}: String`)
+          .join(", ");
+        const selections = batch
+          .map(
+            ({ index }) => `search${index}: search(
+              query: $query${index}
+              type: ISSUE
+              first: 50
+              after: $after${index}
+            ) {
               nodes {
                 ... on PullRequest {
                   id
@@ -2814,53 +3320,184 @@ export class GitHubService {
                   headRefName
                   headRepository { nameWithOwner }
                   repository { nameWithOwner }
-                  reviewThreads(first: 50) {
-                    nodes { ${REVIEW_THREAD_FIELDS} }
-                    pageInfo { hasNextPage endCursor }
-                  }
                 }
               }
               pageInfo { hasNextPage endCursor }
-            }
-          }`,
-          { query, after },
-          token,
+            }`,
+          )
+          .join("\n");
+        const variables = Object.fromEntries(
+          batch.flatMap(({ scope, index }) => [
+            [`query${index}`, scope.query],
+            [`after${index}`, scope.after],
+          ]),
         );
-      items.push(...connectionNodes(data.search));
-      if (items.length >= SEARCH_RESULT_LIMIT) {
-        truncated = data.search.pageInfo.hasNextPage;
-        break;
+        const data: Record<string, unknown> & {
+          viewer?: { login: string };
+        } = await this.request(
+          `query GitHubReviewThreadPullRequestSearch(${definitions}) {
+            ${viewerLogin ? "" : "viewer { login }"}
+            ${selections}
+          }`,
+          variables,
+          token,
+          { requestSource: "COMMENTS_PAGE" },
+        );
+        viewerLogin ??= data.viewer?.login ?? null;
+        for (const { scope, index } of batch) {
+          const connection = data[`search${index}`] as
+            RawConnection<RawReviewPullRequestMetadata> | undefined;
+          if (!connection) {
+            scope.done = true;
+            continue;
+          }
+          scope.items.push(...connectionNodes(connection));
+          if (scope.items.length >= SEARCH_RESULT_LIMIT) {
+            scope.items = scope.items.slice(0, SEARCH_RESULT_LIMIT);
+            scope.truncated = connection.pageInfo.hasNextPage;
+            scope.done = true;
+          } else if (
+            connection.pageInfo.hasNextPage &&
+            connection.pageInfo.endCursor
+          ) {
+            scope.after = connection.pageInfo.endCursor;
+          } else {
+            scope.done = true;
+          }
+        }
       }
-      if (!data.search.pageInfo.hasNextPage) break;
-      after = data.search.pageInfo.endCursor;
     }
-    return { items: items.slice(0, SEARCH_RESULT_LIMIT), truncated };
+    if (!viewerLogin) throw new Error("GitHub did not return the viewer");
+    return {
+      searches: scopes.map(({ items, truncated }) => ({ items, truncated })),
+      viewerLogin,
+    };
+  }
+
+  private async hydrateReviewPullRequests(
+    pullRequests: RawReviewPullRequestMetadata[],
+    token: string,
+  ): Promise<RawReviewPullRequest[]> {
+    const hydrated: RawReviewPullRequest[] = [];
+    for (let index = 0; index < pullRequests.length; index += 50) {
+      const batch = pullRequests.slice(index, index + 50);
+      const data = await this.request<{
+        nodes: Array<{
+          id: string;
+          reviewThreads: RawConnection<RawReviewThread>;
+        } | null>;
+      }>(
+        `query GitHubReviewThreadDetails($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on PullRequest {
+              id
+              reviewThreads(first: 50) {
+                nodes { ${REVIEW_THREAD_FIELDS} }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }`,
+        { ids: batch.map((pullRequest) => pullRequest.id) },
+        token,
+        { requestSource: "COMMENTS_PAGE" },
+      );
+      const connections = new Map(
+        data.nodes
+          .filter(
+            (
+              node,
+            ): node is {
+              id: string;
+              reviewThreads: RawConnection<RawReviewThread>;
+            } => node !== null,
+          )
+          .map((node) => [node.id, node.reviewThreads]),
+      );
+      for (const pullRequest of batch) {
+        const reviewThreads = connections.get(pullRequest.id);
+        if (reviewThreads) hydrated.push({ ...pullRequest, reviewThreads });
+      }
+    }
+    return hydrated;
   }
 
   private async searchPullRequestPage(
     query: string,
     token: string,
     after: string | null,
+    requestSource: GitHubRequestSource,
   ): Promise<RawConnection<RawPullRequest>> {
-    const data: {
-      search: RawConnection<RawPullRequest>;
-    } = await this.request(
-      `query GitHubPullRequestSearch($query: String!, $after: String) {
-        search(
-          query: $query
+    return (
+      await this.searchPullRequestPages(
+        [{ query, after }],
+        token,
+        requestSource,
+      )
+    )[0]!;
+  }
+
+  private async searchPullRequestPages(
+    requests: Array<{ query: string; after: string | null }>,
+    token: string,
+    requestSource: GitHubRequestSource,
+  ): Promise<RawConnection<RawPullRequest>[]> {
+    if (requests.length === 1) {
+      const data = await this.request<{
+        search: RawConnection<RawPullRequest>;
+      }>(
+        `query GitHubPullRequestSearch($query: String!, $after: String) {
+          search(
+            query: $query
+            type: ISSUE
+            first: ${PULL_REQUEST_PAGE_SIZE}
+            after: $after
+          ) {
+            nodes { ...PullRequestTableFields }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        ${PULL_REQUEST_FRAGMENT}`,
+        requests[0]!,
+        token,
+        { requestSource },
+      );
+      return [data.search];
+    }
+    const definitions = requests
+      .map((_, index) => `$query${index}: String!, $after${index}: String`)
+      .join(", ");
+    const selections = requests
+      .map(
+        (_, index) => `search${index}: search(
+          query: $query${index}
           type: ISSUE
           first: ${PULL_REQUEST_PAGE_SIZE}
-          after: $after
+          after: $after${index}
         ) {
           nodes { ...PullRequestTableFields }
           pageInfo { hasNextPage endCursor }
-        }
+        }`,
+      )
+      .join("\n");
+    const variables = Object.fromEntries(
+      requests.flatMap((request, index) => [
+        [`query${index}`, request.query],
+        [`after${index}`, request.after],
+      ]),
+    );
+    const data = await this.request<
+      Record<string, RawConnection<RawPullRequest>>
+    >(
+      `query GitHubPullRequestSearch(${definitions}) {
+        ${selections}
       }
       ${PULL_REQUEST_FRAGMENT}`,
-      { query, after },
+      variables,
       token,
+      { requestSource },
     );
-    return data.search;
+    return requests.map((_, index) => data[`search${index}`]!);
   }
 
   private async repositoryPullRequestPage(
@@ -2868,6 +3505,7 @@ export class GitHubService {
     token: string,
     state: GitHubPullRequestStateFilter,
     after: string | null,
+    requestSource: GitHubRequestSource,
   ): Promise<RawConnection<RawPullRequest>> {
     const data: {
       repository: {
@@ -2900,6 +3538,7 @@ export class GitHubService {
         after,
       },
       token,
+      { requestSource },
     );
     if (!data.repository) {
       throw new Error("Managed repository was not found or is not accessible");
@@ -2910,6 +3549,7 @@ export class GitHubService {
   private async repositoryPullRequests(
     repository: GitHubRepositoryView,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<RawPullRequest[]> {
     const items: RawPullRequest[] = [];
     let after: string | null = null;
@@ -2919,6 +3559,7 @@ export class GitHubService {
         token,
         "OPEN",
         after,
+        requestSource,
       );
       items.push(...connectionNodes(connection));
       if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
@@ -2932,6 +3573,8 @@ export class GitHubService {
     pullRequestId: string,
     after: string,
     token: string,
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<string[]> {
     const labels: string[] = [];
     let cursor: string | null = after;
@@ -2951,6 +3594,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
+        { requestSource, ...options },
       );
       if (!data.node) break;
       labels.push(
@@ -2967,6 +3611,8 @@ export class GitHubService {
     pullRequestId: string,
     after: string,
     token: string,
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<number> {
     let count = 0;
     let cursor: string | null = after;
@@ -2988,6 +3634,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
+        { requestSource, ...options },
       );
       if (!data.node) break;
       count += connectionNodes(data.node.reviewThreads).filter(
@@ -3004,6 +3651,8 @@ export class GitHubService {
     pullRequestId: string,
     after: string,
     token: string,
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
   ): Promise<RawPipelineContext[]> {
     const contexts: RawPipelineContext[] = [];
     let cursor: string | null = after;
@@ -3029,6 +3678,7 @@ export class GitHubService {
         }`,
         { id: pullRequestId, after: cursor },
         token,
+        { requestSource, ...options },
       );
       const connection = data.node?.statusCheckRollup?.contexts;
       if (!connection) break;
@@ -3040,27 +3690,13 @@ export class GitHubService {
     return contexts;
   }
 
-  private async normalizePullRequest(
-    pullRequest: RawPullRequest,
-    jiraKeyRegex: string | null,
+  private async normalizePullRequestLiveStatus(
+    pullRequest: RawPullRequestLiveStatus,
     token: string,
     appConfigured: boolean,
-  ): Promise<GitHubPullRequestView> {
-    const labels = connectionNodes(pullRequest.labels).map(
-      (label) => label.name,
-    );
-    if (
-      pullRequest.labels.pageInfo.hasNextPage &&
-      pullRequest.labels.pageInfo.endCursor
-    ) {
-      labels.push(
-        ...(await this.remainingLabels(
-          pullRequest.id,
-          pullRequest.labels.pageInfo.endCursor,
-          token,
-        )),
-      );
-    }
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
+  ): Promise<GitHubPullRequestLiveStatus> {
     let unresolvedReviewThreadCount = connectionNodes(
       pullRequest.reviewThreads,
     ).filter((thread) => !thread.isResolved).length;
@@ -3072,6 +3708,8 @@ export class GitHubService {
         pullRequest.id,
         pullRequest.reviewThreads.pageInfo.endCursor,
         token,
+        requestSource,
+        options,
       );
     }
     const pipelineContexts = pullRequest.statusCheckRollup
@@ -3086,19 +3724,13 @@ export class GitHubService {
           pullRequest.id,
           pullRequest.statusCheckRollup.contexts.pageInfo.endCursor,
           token,
+          requestSource,
+          options,
         )),
       );
     }
     return {
       id: pullRequest.id,
-      number: pullRequest.number,
-      title: pullRequest.title,
-      url: pullRequest.url,
-      repositoryGithubId: pullRequest.repository.id,
-      repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
-      repositoryUrl: pullRequest.repository.url,
-      labels,
-      jiraKey: parseJiraKey(pullRequest.title, jiraKeyRegex),
       pipelineStatus: pipelineStatus(pullRequest.statusCheckRollup?.state),
       pipelines: normalizePipelines(pipelineContexts, appConfigured),
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
@@ -3111,6 +3743,51 @@ export class GitHubService {
       viewerCanEnableAutoMerge: Boolean(pullRequest.viewerCanEnableAutoMerge),
       viewerCanDisableAutoMerge: Boolean(pullRequest.viewerCanDisableAutoMerge),
       headRefOid: pullRequest.headRefOid,
+    };
+  }
+
+  private async normalizePullRequest(
+    pullRequest: RawPullRequest,
+    jiraKeyRegex: string | null,
+    token: string,
+    appConfigured: boolean,
+    requestSource: GitHubRequestSource,
+    options: GitHubQueryOptions = {},
+  ): Promise<GitHubPullRequestView> {
+    const labels = connectionNodes(pullRequest.labels).map(
+      (label) => label.name,
+    );
+    if (
+      pullRequest.labels.pageInfo.hasNextPage &&
+      pullRequest.labels.pageInfo.endCursor
+    ) {
+      labels.push(
+        ...(await this.remainingLabels(
+          pullRequest.id,
+          pullRequest.labels.pageInfo.endCursor,
+          token,
+          requestSource,
+          options,
+        )),
+      );
+    }
+    const live = await this.normalizePullRequestLiveStatus(
+      pullRequest,
+      token,
+      appConfigured,
+      requestSource,
+      options,
+    );
+    return {
+      ...live,
+      number: pullRequest.number,
+      title: pullRequest.title,
+      url: pullRequest.url,
+      repositoryGithubId: pullRequest.repository.id,
+      repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
+      repositoryUrl: pullRequest.repository.url,
+      labels,
+      jiraKey: parseJiraKey(pullRequest.title, jiraKeyRegex),
       headRefName: pullRequest.headRefName,
       // Callers that show the pull request alongside its worktree overlay the
       // tint from `worktreeHighlights`; on its own a pull request carries no
@@ -3187,8 +3864,10 @@ export class GitHubService {
       state?: GitHubPullRequestStateFilter;
       first?: number;
       after?: string | null;
+      requestSource?: GitHubRequestSource;
     } = {},
   ): Promise<GitHubPullRequestPage> {
+    const requestSource = options.requestSource ?? "PULL_REQUESTS_PAGE";
     const first = options.first ?? PULL_REQUEST_PAGE_SIZE;
     if (
       !Number.isInteger(first) ||
@@ -3236,6 +3915,36 @@ export class GitHubService {
       string,
       (after: string | null) => Promise<RawConnection<RawPullRequest>>
     >();
+    const queuedSearches: Array<{
+      query: string;
+      after: string | null;
+      resolve: (connection: RawConnection<RawPullRequest>) => void;
+      reject: (error: unknown) => void;
+    }> = [];
+    let searchFlushScheduled = false;
+    const batchedSearchPage = (query: string, after: string | null) =>
+      new Promise<RawConnection<RawPullRequest>>((resolve, reject) => {
+        queuedSearches.push({ query, after, resolve, reject });
+        if (searchFlushScheduled) return;
+        searchFlushScheduled = true;
+        queueMicrotask(async () => {
+          searchFlushScheduled = false;
+          const batch = queuedSearches.splice(0);
+          try {
+            const pages = await this.searchPullRequestPages(
+              batch.map(({ query: itemQuery, after: itemAfter }) => ({
+                query: itemQuery,
+                after: itemAfter,
+              })),
+              token,
+              requestSource,
+            );
+            batch.forEach((item, index) => item.resolve(pages[index]!));
+          } catch (error) {
+            batch.forEach((item) => item.reject(error));
+          }
+        });
+      });
 
     if (scope === "REPOSITORY") {
       if (!repositoryId) {
@@ -3251,6 +3960,7 @@ export class GitHubService {
           token,
           state,
           after,
+          requestSource,
         ),
       );
     } else {
@@ -3259,36 +3969,35 @@ export class GitHubService {
           "repositoryId is only valid for repository pull requests",
         );
       }
-      const viewer = await this.viewer(token);
       if (scope === "REVIEW_REQUESTED") {
         const query = pullRequestSearchQuery(
           "is:pr",
           searchState,
-          `review-requested:${viewer.login}`,
+          "review-requested:@me",
           "sort:updated-desc",
         );
         loaders.set("review", (after) =>
-          this.searchPullRequestPage(query, token, after),
+          this.searchPullRequestPage(query, token, after, requestSource),
         );
       } else if (scope === "MINE") {
         const authoredQuery = pullRequestSearchQuery(
           "is:pr",
           searchState,
-          `author:${viewer.login}`,
+          "author:@me",
           "sort:updated-desc",
         );
         const assignedQuery = pullRequestSearchQuery(
           "is:pr",
           searchState,
-          `assignee:${viewer.login}`,
-          `-author:${viewer.login}`,
+          "assignee:@me",
+          "-author:@me",
           "sort:updated-desc",
         );
         loaders.set("authored", (after) =>
-          this.searchPullRequestPage(authoredQuery, token, after),
+          batchedSearchPage(authoredQuery, after),
         );
         loaders.set("assigned", (after) =>
-          this.searchPullRequestPage(assignedQuery, token, after),
+          batchedSearchPage(assignedQuery, after),
         );
       } else {
         throw new Error("Unknown GitHub pull request scope");
@@ -3418,6 +4127,7 @@ export class GitHubService {
           regexByGitHubId.get(pullRequest.repository.id) ?? defaultJiraKeyRegex,
           token,
           appConfigured,
+          requestSource,
         );
         const highlight = pullRequestWorktreeHighlight(pullRequest, highlights);
         return {
@@ -3450,6 +4160,7 @@ export class GitHubService {
                     pipeline.workflowRunId,
                     token,
                     appCredentials,
+                    requestSource,
                   ),
                 };
               }),
@@ -3465,37 +4176,33 @@ export class GitHubService {
 
   async reviewThreads(): Promise<GitHubReviewThreadPage> {
     const token = await this.requireToken();
-    const viewer = await this.viewer(token);
     const prisma = await getPrismaClient();
     const repositories = await prisma.gitHubRepository.findMany();
-    const searches = await Promise.all([
-      this.searchReviewPullRequests(
-        `is:pr is:open author:${viewer.login} sort:updated-desc`,
-        token,
-      ),
-      this.searchReviewPullRequests(
-        `is:pr is:open assignee:${viewer.login} sort:updated-desc`,
-        token,
-      ),
-      this.searchReviewPullRequests(
-        `is:pr is:open review-requested:${viewer.login} sort:updated-desc`,
-        token,
-      ),
-      ...repositories.map((repository) =>
-        this.searchReviewPullRequests(
-          `is:pr is:open repo:${repository.nameWithOwner} sort:updated-desc`,
-          token,
+    const discovery = await this.searchReviewPullRequestScopes(
+      [
+        "is:pr is:open author:@me sort:updated-desc",
+        "is:pr is:open assignee:@me sort:updated-desc",
+        "is:pr is:open review-requested:@me sort:updated-desc",
+        ...repositories.map(
+          (repository) =>
+            `is:pr is:open repo:${repository.nameWithOwner} sort:updated-desc`,
         ),
-      ),
-    ]);
-    const unique = new Map<string, RawReviewPullRequest>();
+      ],
+      token,
+    );
+    const searches = discovery.searches;
+    const unique = new Map<string, RawReviewPullRequestMetadata>();
     for (const search of searches) {
       for (const pullRequest of search.items) {
         unique.set(pullRequest.id, pullRequest);
       }
     }
-    const pullRequests = [...unique.values()].sort(
-      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    const pullRequests = await this.hydrateReviewPullRequests(
+      [...unique.values()].sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+      ),
+      token,
     );
     const highlights = await this.worktreeHighlights(
       pullRequests.map((pullRequest) => ({
@@ -3510,6 +4217,7 @@ export class GitHubService {
             pullRequest.id,
             pullRequest.reviewThreads,
             token,
+            "COMMENTS_PAGE",
             highlights,
           ),
         ),
@@ -3521,7 +4229,7 @@ export class GitHubService {
         Date.parse(left.rootComment.createdAt),
     );
     return {
-      viewerLogin: viewer.login,
+      viewerLogin: discovery.viewerLogin,
       pullRequests: pullRequests.map((pullRequest) =>
         reviewThreadPullRequest(pullRequest, highlights),
       ),
@@ -3535,67 +4243,177 @@ export class GitHubService {
     branch: string,
   ): Promise<GitHubPullRequestView | null> {
     return (
-      (await this.pullRequestsForOrigin(canonicalOrigin)).find(
-        (pullRequest) =>
-          (pullRequest as GitHubPullRequestView & { headRefName?: string })
-            .headRefName === branch,
+      (await this.pullRequestsForBranches(canonicalOrigin, [branch])).get(
+        branch,
       ) ?? null
     );
   }
 
-  async pullRequestsForOrigin(
+  async pullRequestsForBranches(
     canonicalOrigin: string,
-  ): Promise<Array<GitHubPullRequestView & { headRefName: string }>> {
+    branchValues: string[],
+    options: GitHubQueryOptions = {},
+  ): Promise<Map<string, GitHubPullRequestView | null>> {
+    const branches = [
+      ...new Set(branchValues.map((branch) => branch.trim()).filter(Boolean)),
+    ];
+    const result = new Map<string, GitHubPullRequestView | null>(
+      branches.map((branch) => [branch, null]),
+    );
+    if (!branches.length) return result;
     const match = canonicalOrigin.match(/^github\.com\/([^/]+)\/([^/]+)$/i);
-    if (!match?.[1] || !match[2]) return [];
+    if (!match?.[1] || !match[2]) return result;
     const token = await this.requireToken();
     const owner = match[1];
     const name = match[2];
-    const repository: GitHubRepositoryView = {
-      id: canonicalOrigin,
-      githubId: "",
-      owner,
-      name,
-      nameWithOwner: `${owner}/${name}`,
-      url: `https://github.com/${owner}/${name}`,
-      jiraKeyRegex: null,
-    };
-    const [rawItems, appSettings] = await Promise.all([
-      this.repositoryPullRequests(repository, token),
+    const requestSource = options.requestSource ?? "WORKTREES";
+    const [appSettings, settings] = await Promise.all([
       (await getPrismaClient()).gitHubAppSettings.findUnique({
         where: { id: GITHUB_APP_SETTINGS_ID },
       }),
+      (await getPrismaClient()).gitHubSettings.findUnique({
+        where: { id: SETTINGS_ID },
+      }),
     ]);
-    const settings = await (
-      await getPrismaClient()
-    ).gitHubSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
     const appConfigured =
       Boolean(appSettings) &&
       (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
-    const matching = rawItems.filter(
-      (pullRequest) =>
-        pullRequest.headRepository?.nameWithOwner.toLowerCase() ===
-        repository.nameWithOwner.toLowerCase(),
+    for (
+      let offset = 0;
+      offset < branches.length;
+      offset += PULL_REQUEST_PAGE_SIZE
+    ) {
+      const chunk = branches.slice(offset, offset + PULL_REQUEST_PAGE_SIZE);
+      const definitions = chunk
+        .map((_, index) => `$branch${index}: String!`)
+        .join(", ");
+      const selections = chunk
+        .map(
+          (_, index) => `branch${index}: ref(qualifiedName: $branch${index}) {
+            associatedPullRequests(
+              states: [OPEN]
+              first: 1
+              orderBy: { field: UPDATED_AT, direction: DESC }
+            ) { nodes { ...PullRequestTableFields } }
+          }`,
+        )
+        .join("\n");
+      const variables = Object.fromEntries(
+        chunk.map((branch, index) => [
+          `branch${index}`,
+          `refs/heads/${branch}`,
+        ]),
+      );
+      const data = await this.request<{
+        repository: Record<
+          string,
+          { associatedPullRequests: RawConnection<RawPullRequest> } | null
+        > | null;
+      }>(
+        `query GitHubWorktreePullRequests(
+          $owner: String!
+          $name: String!
+          ${definitions}
+        ) {
+          repository(owner: $owner, name: $name) { ${selections} }
+        }
+        ${PULL_REQUEST_FRAGMENT}`,
+        { owner, name, ...variables },
+        token,
+        { requestSource, ...options },
+      );
+      if (!data.repository) {
+        throw new Error(
+          "Managed repository was not found or is not accessible",
+        );
+      }
+      await Promise.all(
+        chunk.map(async (branch, index) => {
+          const raw = connectionNodes(
+            data.repository?.[`branch${index}`]?.associatedPullRequests ?? {
+              nodes: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          )[0];
+          if (!raw) return;
+          result.set(
+            branch,
+            await this.normalizePullRequest(
+              raw,
+              settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
+              token,
+              appConfigured,
+              requestSource,
+              options,
+            ),
+          );
+        }),
+      );
+    }
+    return result;
+  }
+
+  async pullRequestLiveStatuses(
+    idValues: string[],
+    options: GitHubQueryOptions = {},
+  ): Promise<Map<string, GitHubPullRequestLiveStatus | null>> {
+    const ids = [...new Set(idValues.map((id) => id.trim()).filter(Boolean))];
+    const result = new Map<string, GitHubPullRequestLiveStatus | null>(
+      ids.map((id) => [id, null]),
     );
-    return Promise.all(
-      matching.map(async (raw) => ({
-        ...(await this.normalizePullRequest(
-          raw,
-          settings?.defaultJiraKeyRegex ?? DEFAULT_JIRA_KEY_REGEX,
-          token,
-          appConfigured,
-        )),
-        headRefName: raw.headRefName,
-      })),
-    );
+    if (!ids.length) return result;
+    const token = await this.requireToken();
+    const requestSource = options.requestSource ?? "WORKTREES";
+    const appSettings = await (
+      await getPrismaClient()
+    ).gitHubAppSettings.findUnique({ where: { id: GITHUB_APP_SETTINGS_ID } });
+    const appConfigured =
+      Boolean(appSettings) &&
+      (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
+    for (
+      let offset = 0;
+      offset < ids.length;
+      offset += PULL_REQUEST_PAGE_SIZE
+    ) {
+      const chunk = ids.slice(offset, offset + PULL_REQUEST_PAGE_SIZE);
+      const data = await this.request<{
+        nodes: Array<RawPullRequestLiveStatus | null>;
+      }>(
+        `query GitHubWorktreePullRequestStatuses($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on PullRequest { ...PullRequestLiveFields }
+          }
+        }
+        ${PULL_REQUEST_LIVE_FRAGMENT}`,
+        { ids: chunk },
+        token,
+        { requestSource, ...options },
+      );
+      await Promise.all(
+        chunk.map(async (id, index) => {
+          const raw = data.nodes[index];
+          if (!raw) return;
+          result.set(
+            id,
+            await this.normalizePullRequestLiveStatus(
+              raw,
+              token,
+              appConfigured,
+              requestSource,
+              options,
+            ),
+          );
+        }),
+      );
+    }
+    return result;
   }
 
   async pullRequest(
     ownerValue: string,
     nameValue: string,
     number: number,
+    requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
   ): Promise<GitHubPullRequestDetail | null> {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${ownerValue}/${nameValue}`,
@@ -3614,16 +4432,12 @@ export class GitHubService {
       ) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
-            ...PullRequestTableFields
+            ...PullRequestDetailFields
             body
             bodyHTML
             author { login avatarUrl url }
             assignees(first: 100) {
               nodes { login avatarUrl url }
-              pageInfo { hasNextPage endCursor }
-            }
-            reviewThreadsFull: reviewThreads(first: 100) {
-              nodes { ${REVIEW_THREAD_FIELDS} }
               pageInfo { hasNextPage endCursor }
             }
             baseRefName
@@ -3639,9 +4453,10 @@ export class GitHubService {
           }
         }
       }
-      ${PULL_REQUEST_FRAGMENT}`,
+      ${PULL_REQUEST_DETAIL_FRAGMENT}`,
       { owner, name, number },
       token,
+      { requestSource },
     );
     const pullRequest = data.repository?.pullRequest;
     if (!pullRequest) return null;
@@ -3666,6 +4481,7 @@ export class GitHubService {
         DEFAULT_JIRA_KEY_REGEX,
       token,
       appConfigured,
+      requestSource,
     );
     const pipelines = await Promise.all(
       summary.pipelines.map(async (pipeline) => {
@@ -3677,7 +4493,9 @@ export class GitHubService {
             `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
               name,
             )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+            GITHUB_REST_OPERATIONS.actions.getWorkflowRun,
             token,
+            requestSource,
           );
         } catch {
           // Attempt metadata is additive; preserve the existing PR pipeline when
@@ -3698,14 +4516,16 @@ export class GitHubService {
             appSettings && appConfigured
               ? await this.appCredentials(appSettings)
               : null,
+            requestSource,
           ),
         };
       }),
     );
     const normalizedReviewThreads = await this.completeReviewThreads(
       pullRequest.id,
-      pullRequest.reviewThreadsFull,
+      pullRequest.reviewThreads,
       token,
+      requestSource,
     );
     const baseCanonicalOrigin = `github.com/${pullRequest.repository.nameWithOwner.toLowerCase()}`;
     const codebaseRepository = await prisma.codebaseRepository.findFirst({
@@ -3802,6 +4622,7 @@ export class GitHubService {
     name: string,
     number: number,
     token: string,
+    requestSource: GitHubRequestSource,
   ): Promise<{
     pullRequest: RawPullRequestMergeState;
     availableMethods: GitHubMergeMethod[];
@@ -3840,6 +4661,7 @@ export class GitHubService {
       }`,
       { owner, name, number },
       token,
+      { requestSource },
     );
     const pullRequest = data.repository?.pullRequest;
     if (!pullRequest) throw new Error("Pull request was not found");
@@ -3858,6 +4680,7 @@ export class GitHubService {
   private async commitEmailOptions(
     token: string,
     viewerEmail: string | null,
+    requestSource: GitHubRequestSource,
   ): Promise<{ emails: string[]; primaryEmail: string | null }> {
     const emails = new Set<string>();
     let primaryEmail: string | null = null;
@@ -3865,7 +4688,12 @@ export class GitHubService {
     try {
       const values = await this.restRequest<
         Array<{ email: string; verified: boolean; primary: boolean }>
-      >(`${GITHUB_API_BASE_URL}/user/emails?per_page=100`, token);
+      >(
+        `${GITHUB_API_BASE_URL}/user/emails?per_page=100`,
+        GITHUB_REST_OPERATIONS.users.listEmailsForAuthenticatedUser,
+        token,
+        requestSource,
+      );
       for (const value of values) {
         const email = value.email.trim();
         if (!value.verified || !email) continue;
@@ -3886,6 +4714,7 @@ export class GitHubService {
     ownerValue: string,
     nameValue: string,
     number: number,
+    requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
   ): Promise<GitHubPullRequestMergeOptions> {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${ownerValue}/${nameValue}`,
@@ -3894,10 +4723,17 @@ export class GitHubService {
       throw new Error("Pull request number must be a positive integer");
     }
     const token = await this.requireToken();
-    const state = await this.mergeState(owner, name, number, token);
+    const state = await this.mergeState(
+      owner,
+      name,
+      number,
+      token,
+      requestSource,
+    );
     const commitEmailOptions = await this.commitEmailOptions(
       token,
       state.viewerEmail,
+      requestSource,
     );
     const blockedReason =
       this.mergeBlockedReason(state.pullRequest, state.viewerPermission) ??
@@ -3936,7 +4772,17 @@ export class GitHubService {
       `${ownerValue}/${nameValue}`,
     );
     const token = await this.requireToken();
-    const { pullRequest } = await this.mergeState(owner, name, number, token);
+    const { pullRequest } = await this.mergeState(
+      owner,
+      name,
+      number,
+      token,
+      "WORKTREE_AUTOMATION",
+    );
+    return this.automationStateView(pullRequest);
+  }
+
+  private automationStateView(pullRequest: RawPullRequestMergeState) {
     return {
       id: pullRequest.id,
       state: pullRequest.mergedAt ? ("MERGED" as const) : pullRequest.state,
@@ -3954,20 +4800,29 @@ export class GitHubService {
     };
   }
 
-  async enablePullRequestAutoMerge(input: {
-    owner: string;
-    name: string;
-    number: number;
-    method: GitHubMergeMethod;
-    commitHeadline: string;
-    commitBody: string;
-    authorEmail?: string | null;
-  }) {
+  async enablePullRequestAutoMerge(
+    input: {
+      owner: string;
+      name: string;
+      number: number;
+      method: GitHubMergeMethod;
+      commitHeadline: string;
+      commitBody: string;
+      authorEmail?: string | null;
+    },
+    requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
+  ) {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
     );
     const token = await this.requireToken();
-    const state = await this.mergeState(owner, name, input.number, token);
+    const state = await this.mergeState(
+      owner,
+      name,
+      input.number,
+      token,
+      requestSource,
+    );
     if (state.pullRequest.state !== "OPEN" || state.pullRequest.isDraft) {
       throw new Error(
         "Only an open, non-draft pull request can use Auto Merge",
@@ -3990,11 +4845,16 @@ export class GitHubService {
       if (!state.pullRequest.viewerCanDisableAutoMerge) {
         throw new Error("You cannot update this Auto Merge request");
       }
-      await this.disablePullRequestAutoMerge({
-        owner,
-        name,
-        number: input.number,
-      });
+      await this.request(
+        `mutation ReplaceGitHubPullRequestAutoMerge($pullRequestId: ID!) {
+          disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) {
+            pullRequest { id }
+          }
+        }`,
+        { pullRequestId: state.pullRequest.id },
+        token,
+        { requestSource },
+      );
     }
     const commitHeadline = input.commitHeadline.trim();
     if (!commitHeadline) throw new Error("A commit message is required");
@@ -4034,50 +4894,81 @@ export class GitHubService {
         authorEmail: input.authorEmail?.trim() || null,
       },
       token,
+      { requestSource },
     );
     if (!data.enablePullRequestAutoMerge.pullRequest) {
       throw new Error("GitHub did not return the updated pull request");
     }
-    return this.pullRequestAutomationState(owner, name, input.number);
+    return this.automationStateView(
+      data.enablePullRequestAutoMerge.pullRequest,
+    );
   }
 
-  async disablePullRequestAutoMerge(input: {
-    owner: string;
-    name: string;
-    number: number;
-  }) {
+  async disablePullRequestAutoMerge(
+    input: {
+      owner: string;
+      name: string;
+      number: number;
+    },
+    requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
+  ) {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
     );
     const token = await this.requireToken();
-    const state = await this.mergeState(owner, name, input.number, token);
+    const state = await this.mergeState(
+      owner,
+      name,
+      input.number,
+      token,
+      requestSource,
+    );
     if (!state.pullRequest.autoMergeRequest) {
-      return this.pullRequestAutomationState(owner, name, input.number);
+      return this.automationStateView(state.pullRequest);
     }
     if (!state.pullRequest.viewerCanDisableAutoMerge) {
       throw new Error("You cannot disable this Auto Merge request");
     }
-    await this.request(
+    const data = await this.request<{
+      disablePullRequestAutoMerge: {
+        pullRequest: RawPullRequestMergeState | null;
+      };
+    }>(
       `mutation DisableGitHubPullRequestAutoMerge($pullRequestId: ID!) {
         disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) {
-          pullRequest { id }
+          pullRequest {
+            id title body url state isDraft mergeable mergeStateStatus
+            headRefOid headRefName headRepository { nameWithOwner } mergedAt
+            autoMergeRequest { enabledAt }
+            viewerCanEnableAutoMerge
+            viewerCanDisableAutoMerge
+          }
         }
       }`,
       { pullRequestId: state.pullRequest.id },
       token,
+      { requestSource },
     );
-    return this.pullRequestAutomationState(owner, name, input.number);
+    if (!data.disablePullRequestAutoMerge.pullRequest) {
+      throw new Error("GitHub did not return the updated pull request");
+    }
+    return this.automationStateView(
+      data.disablePullRequestAutoMerge.pullRequest,
+    );
   }
 
-  async mergePullRequest(input: {
-    owner: string;
-    name: string;
-    number: number;
-    method: GitHubMergeMethod;
-    commitHeadline: string;
-    commitBody: string;
-    authorEmail?: string | null;
-  }): Promise<GitHubPullRequestMergeResult> {
+  async mergePullRequest(
+    input: {
+      owner: string;
+      name: string;
+      number: number;
+      method: GitHubMergeMethod;
+      commitHeadline: string;
+      commitBody: string;
+      authorEmail?: string | null;
+    },
+    requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
+  ): Promise<GitHubPullRequestMergeResult> {
     const { owner, name } = normalizeGitHubRepositoryName(
       `${input.owner}/${input.name}`,
     );
@@ -4087,7 +4978,13 @@ export class GitHubService {
     const commitHeadline = input.commitHeadline.trim();
     if (!commitHeadline) throw new Error("A commit message is required");
     const token = await this.requireToken();
-    const state = await this.mergeState(owner, name, input.number, token);
+    const state = await this.mergeState(
+      owner,
+      name,
+      input.number,
+      token,
+      requestSource,
+    );
     const blockedReason = this.mergeBlockedReason(
       state.pullRequest,
       state.viewerPermission,
@@ -4103,6 +5000,7 @@ export class GitHubService {
       const availableEmails = await this.commitEmailOptions(
         token,
         state.viewerEmail,
+        requestSource,
       );
       if (!availableEmails.emails.includes(authorEmail)) {
         throw new Error(
@@ -4148,6 +5046,7 @@ export class GitHubService {
         expectedHeadOid: state.pullRequest.headRefOid,
       },
       token,
+      { requestSource },
     );
     const pullRequest = data.mergePullRequest.pullRequest;
     if (!pullRequest)
@@ -4174,7 +5073,7 @@ export class GitHubService {
       throw new Error("Base branch, head branch, and title are required");
     }
     const credentials = await this.requireAppCredentials();
-    const repository = await githubAppGraphql<{
+    const repository = await this.appRequest<{
       repository: {
         id: string;
         base: { id: string } | null;
@@ -4200,6 +5099,7 @@ export class GitHubService {
         base: `refs/heads/${baseRefName}`,
         head: `refs/heads/${headRefName}`,
       },
+      { requestSource: "WORKFLOW_AUTOMATION" },
     );
     if (!repository.data.repository)
       throw new Error("GitHub repository was not found");
@@ -4208,7 +5108,7 @@ export class GitHubService {
     if (!repository.data.repository.head) {
       throw new Error("Push the workflow branch before opening a pull request");
     }
-    const created = await githubAppGraphql<{
+    const created = await this.appRequest<{
       createPullRequest: {
         pullRequest: { number: number } | null;
       };
@@ -4239,10 +5139,16 @@ export class GitHubService {
         body: input.body ?? "",
         draft: Boolean(input.draft),
       },
+      { requestSource: "WORKFLOW_AUTOMATION" },
     );
     const number = created.data.createPullRequest.pullRequest?.number;
     if (!number) throw new Error("GitHub did not return the new pull request");
-    const detail = await this.pullRequest(owner, name, number);
+    const detail = await this.pullRequest(
+      owner,
+      name,
+      number,
+      "WORKFLOW_AUTOMATION",
+    );
     if (!detail) throw new Error("The new pull request could not be loaded");
     return detail;
   }
@@ -4260,7 +5166,7 @@ export class GitHubService {
       ...new Set(input.labels.map((label) => label.trim()).filter(Boolean)),
     ];
     const credentials = await this.requireAppCredentials();
-    const loaded = await githubAppGraphql<{
+    const loaded = await this.appRequest<{
       repository: {
         pullRequest: {
           id: string;
@@ -4277,6 +5183,7 @@ export class GitHubService {
         }
       }`,
       { owner, name, number: input.number },
+      { requestSource: "WORKFLOW_AUTOMATION" },
     );
     const pullRequest = loaded.data.repository?.pullRequest;
     if (!pullRequest) throw new Error("Pull request was not found");
@@ -4298,25 +5205,39 @@ export class GitHubService {
     const remove = [...current]
       .filter(([label]) => !labels.includes(label))
       .map(([, id]) => id);
-    if (add.length) {
-      await githubAppGraphql(
+    if (add.length || remove.length) {
+      await this.appRequest(
         credentials,
-        `mutation WorkflowAddPullRequestLabels($id: ID!, $labelIds: [ID!]!) {
-          addLabelsToLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId }
+        `mutation WorkflowSetPullRequestLabels(
+          $id: ID!
+          $addIds: [ID!]!
+          $removeIds: [ID!]!
+          $shouldAdd: Boolean!
+          $shouldRemove: Boolean!
+        ) {
+          add: addLabelsToLabelable(
+            input: { labelableId: $id, labelIds: $addIds }
+          ) @include(if: $shouldAdd) { clientMutationId }
+          remove: removeLabelsFromLabelable(
+            input: { labelableId: $id, labelIds: $removeIds }
+          ) @include(if: $shouldRemove) { clientMutationId }
         }`,
-        { id: pullRequest.id, labelIds: add },
+        {
+          id: pullRequest.id,
+          addIds: add,
+          removeIds: remove,
+          shouldAdd: add.length > 0,
+          shouldRemove: remove.length > 0,
+        },
+        { requestSource: "WORKFLOW_AUTOMATION" },
       );
     }
-    if (remove.length) {
-      await githubAppGraphql(
-        credentials,
-        `mutation WorkflowRemovePullRequestLabels($id: ID!, $labelIds: [ID!]!) {
-          removeLabelsFromLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId }
-        }`,
-        { id: pullRequest.id, labelIds: remove },
-      );
-    }
-    const detail = await this.pullRequest(owner, name, input.number);
+    const detail = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
     if (!detail)
       throw new Error("The updated pull request could not be loaded");
     return detail;
@@ -4325,6 +5246,7 @@ export class GitHubService {
   async replyToReviewThread(
     threadId: string,
     body: string,
+    requestSource: GitHubRequestSource = "COMMENTS_PAGE",
   ): Promise<GitHubReviewComment> {
     if (!threadId.trim()) throw new Error("Review thread ID is required");
     if (!body.trim()) throw new Error("A reply is required");
@@ -4344,6 +5266,7 @@ export class GitHubService {
       }`,
       { threadId, body },
       token,
+      { requestSource },
     );
     const comment = data.addPullRequestReviewThreadReply.comment;
     if (!comment) throw new Error("GitHub did not return the new reply");
@@ -4353,6 +5276,7 @@ export class GitHubService {
   async setReviewThreadResolved(
     threadId: string,
     resolved: boolean,
+    requestSource: GitHubRequestSource = "COMMENTS_PAGE",
   ): Promise<GitHubReviewThreadState> {
     if (!threadId.trim()) throw new Error("Review thread ID is required");
     const token = await this.requireToken();
@@ -4382,6 +5306,7 @@ export class GitHubService {
         }`,
         { threadId },
         token,
+        { requestSource },
       );
       const thread = data.resolveReviewThread.thread;
       if (!thread) throw new Error("GitHub did not return the resolved thread");
@@ -4405,6 +5330,7 @@ export class GitHubService {
       }`,
       { threadId },
       token,
+      { requestSource },
     );
     const thread = data.unresolveReviewThread.thread;
     if (!thread) throw new Error("GitHub did not return the reopened thread");
@@ -4414,6 +5340,7 @@ export class GitHubService {
   async retryPipeline(
     repositoryId: string,
     checkSuiteId: string,
+    requestSource: GitHubRequestSource,
     auditContext: GitHubAuditContext,
   ): Promise<GitHubPipelineView> {
     if (!repositoryId.trim() || !checkSuiteId.trim()) {
@@ -4442,6 +5369,7 @@ export class GitHubService {
         }`,
         { checkSuiteId },
         token,
+        { requestSource },
       );
       const checkSuite = data.node;
       if (!checkSuite) {
@@ -4476,7 +5404,7 @@ export class GitHubService {
       }
 
       const credentials = await this.requireAppCredentials();
-      const access = await githubAppGraphql<{
+      const access = await this.appRequest<{
         repository: { id: string } | null;
       }>(
         credentials,
@@ -4487,6 +5415,7 @@ export class GitHubService {
           owner: checkSuite.repository.owner.login,
           name: checkSuite.repository.name,
         },
+        { requestSource },
       );
       if (access.data.repository?.id !== repositoryId) {
         throw new GitHubAppError(
@@ -4500,7 +5429,9 @@ export class GitHubService {
         owner: checkSuite.repository.owner.login,
         repository: checkSuite.repository.name,
         workflowRunId: String(checkSuite.workflowRun.databaseId),
+        requestSource,
       });
+      await this.cache.clear();
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_WORKFLOW_RERUN",
         repositoryId,
@@ -4535,6 +5466,7 @@ export class GitHubService {
     repositoryId: string,
     checkSuiteId: string,
     jobId: string,
+    requestSource: GitHubRequestSource,
     auditContext: GitHubAuditContext,
   ): Promise<boolean> {
     if (!repositoryId.trim() || !checkSuiteId.trim() || !jobId.trim()) {
@@ -4563,6 +5495,7 @@ export class GitHubService {
         }`,
         { checkSuiteId },
         token,
+        { requestSource },
       );
       const checkSuite = data.node;
       if (!checkSuite) {
@@ -4597,7 +5530,7 @@ export class GitHubService {
       }
 
       const credentials = await this.requireAppCredentials();
-      const access = await githubAppGraphql<{
+      const access = await this.appRequest<{
         repository: { id: string } | null;
       }>(
         credentials,
@@ -4608,6 +5541,7 @@ export class GitHubService {
           owner: checkSuite.repository.owner.login,
           name: checkSuite.repository.name,
         },
+        { requestSource },
       );
       if (access.data.repository?.id !== repositoryId) {
         throw new GitHubAppError(
@@ -4622,7 +5556,9 @@ export class GitHubService {
         repository: checkSuite.repository.name,
         workflowRunId: String(checkSuite.workflowRun.databaseId),
         jobId,
+        requestSource,
       });
+      await this.cache.clear();
       await this.audit(auditContext, {
         operation: "GITHUB_ACTIONS_JOB_RERUN",
         repositoryId,

@@ -498,6 +498,9 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       bool("stashOnFailure", "Stash on failure"),
     ],
   },
+  WORKTREE_REFRESH_PULL_REQUEST: {
+    fields: [resource("worktreeId", "Worktree", "worktree")],
+  },
   WORKTREE_OPERATION: {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),

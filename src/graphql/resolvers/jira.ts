@@ -286,6 +286,14 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
       requireControlPlane(context);
       return jiraService.clearCache();
     },
+    clearJiraApiCalls: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return jiraService.clearApiCalls();
+    },
     refreshJiraCachedTicket: (
       _root: unknown,
       { issueKey }: { issueKey: string },

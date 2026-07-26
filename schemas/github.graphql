@@ -65,11 +65,158 @@ enum GitHubPipelineRetryUnavailableReason {
   HISTORICAL_ATTEMPT
 }
 
+enum GitHubAuthentication {
+  PAT
+  APP
+}
+
+enum GitHubCallSource {
+  LIVE
+  CACHE
+  ERROR
+}
+
+enum GitHubApiType {
+  GRAPHQL
+  REST
+}
+
+enum GitHubRequestSource {
+  GITHUB_API
+  GITHUB_SETTINGS
+  COMMENTS_PAGE
+  CODEBASE_REPOSITORY
+  PULL_REQUESTS_PAGE
+  PULL_REQUEST_DETAILS
+  ACTIONS_PAGE
+  WORKTREES
+  WORKTREE_PIPELINES
+  WORKTREE_AUTOMATION
+  AUTO_RETRY
+  WORKFLOW_AUTOMATION
+  ACTIONS_NOTIFICATIONS
+  CACHE_MANAGEMENT
+}
+
 type GitHubSettings {
   tokenConfigured: Boolean!
   defaultJiraKeyRegex: String!
   actionsNotificationPollIntervalSeconds: Int!
+  cacheTtlSeconds: Int!
   updatedAt: String!
+}
+
+type GitHubCacheTtlOverride {
+  operation: String!
+  ttlSeconds: Int!
+  builtIn: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type GitHubRateLimitSnapshot {
+  authentication: GitHubAuthentication!
+  resource: String!
+  limit: Int!
+  remaining: Int!
+  used: Int!
+  resetAt: String!
+  observedAt: String!
+}
+
+type GitHubMetricWindow {
+  window: String!
+  total: Int!
+  live: Int!
+  cache: Int!
+  errors: Int!
+  averageMs: Int!
+  pointsUsed: Int!
+  pointsAvoided: Int!
+}
+
+type GitHubOperationMetric {
+  operation: String!
+  windows: [GitHubMetricWindow!]!
+}
+
+type GitHubApiTypeMetric {
+  apiType: GitHubApiType!
+  windows: [GitHubMetricWindow!]!
+}
+
+type GitHubRequestSourceMetric {
+  requestSource: GitHubRequestSource!
+  windows: [GitHubMetricWindow!]!
+}
+
+type GitHubCacheMetrics {
+  windows: [GitHubMetricWindow!]!
+  apiTypes: [GitHubApiTypeMetric!]!
+  operations: [GitHubOperationMetric!]!
+  requestSources: [GitHubRequestSourceMetric!]!
+}
+
+type GitHubApiCall {
+  id: ID!
+  authentication: GitHubAuthentication!
+  apiType: GitHubApiType!
+  method: String!
+  endpoint: String!
+  operation: String!
+  requestSource: GitHubRequestSource!
+  requestSummary: String!
+  variables: JSON
+  source: GitHubCallSource!
+  durationMs: Int!
+  statusCode: Int
+  error: String
+  servedStale: Boolean!
+  pointCost: Int
+  pointsAvoided: Int!
+  rateLimitLimit: Int
+  rateLimitRemaining: Int
+  rateLimitUsed: Int
+  rateLimitResetAt: String
+  rateLimitResource: String
+  createdAt: String!
+}
+
+type GitHubApiCallPage {
+  items: [GitHubApiCall!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type GitHubCachedEntry {
+  id: ID!
+  authentication: GitHubAuthentication!
+  operation: String!
+  endpoint: String!
+  fetchedAt: String!
+  pointCost: Int
+  stale: Boolean!
+}
+
+type GitHubCachedEntryPage {
+  items: [GitHubCachedEntry!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type GitHubCachedEntryDetail {
+  id: ID!
+  authentication: GitHubAuthentication!
+  operation: String!
+  endpoint: String!
+  fetchedAt: String!
+  pointCost: Int
+  stale: Boolean!
+  query: String!
+  variables: JSON
+  response: JSON
 }
 
 type GitHubAppSettings {
@@ -482,6 +629,11 @@ input SaveGitHubSettingsInput {
   actionsNotificationPollIntervalSeconds: Int
 }
 
+input SaveGitHubCacheTtlOverrideInput {
+  operation: String!
+  ttlSeconds: Int!
+}
+
 input SaveGitHubAppSettingsInput {
   appId: String!
   installationId: String!
@@ -528,10 +680,24 @@ input SetGitHubPullRequestLabelsInput {
 
 extend type Query {
   githubSettings: GitHubSettings!
+  githubCacheTtlOverrides: [GitHubCacheTtlOverride!]!
+  githubCacheableGraphqlOperations: [String!]!
+  githubRateLimitSnapshots: [GitHubRateLimitSnapshot!]!
+  githubCacheMetrics: GitHubCacheMetrics!
+  githubApiCalls(
+    limit: Int = 50
+    offset: Int = 0
+    apiType: GitHubApiType
+    requestSource: GitHubRequestSource
+    source: GitHubCallSource
+  ): GitHubApiCallPage!
+  githubCachedEntries(limit: Int = 50, offset: Int = 0): GitHubCachedEntryPage!
+  githubCachedEntry(id: ID!): GitHubCachedEntryDetail
   githubAppSettings: GitHubAppSettings!
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubActionsWorkflowRuns(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID
     branch: String
     workflowId: ID
@@ -539,16 +705,19 @@ extend type Query {
     after: String
   ): GitHubActionsWorkflowRunPage!
   githubActionsWorkflowJobs(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID!
     workflowRunId: ID!
   ): [GitHubWorkflowJob!]!
   githubActionsWorkflowRunAttempt(
+    source: GitHubRequestSource!
     repositoryId: ID!
     workflowRunId: ID!
     attempt: Int!
   ): GitHubWorkflowRunAttempt!
   githubWorktreeWorkflowRuns(worktreeId: ID!): [GitHubActionsWorkflowRun!]!
   githubRepositoryWorkflows(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID!
   ): [GitHubRepositoryWorkflow!]!
   githubAutoRetryRules(
@@ -556,6 +725,7 @@ extend type Query {
     workflowRunId: ID
   ): [GitHubAutoRetryRule!]!
   githubPullRequests(
+    source: GitHubRequestSource!
     scope: GitHubPullRequestScope!
     repositoryId: ID
     state: GitHubPullRequestStateFilter = OPEN
@@ -568,6 +738,7 @@ extend type Query {
     number: Int!
   ): GitHubPullRequestDetail
   githubPullRequestMergeOptions(
+    source: GitHubRequestSource!
     owner: String!
     name: String!
     number: Int!
@@ -577,6 +748,15 @@ extend type Query {
 
 extend type Mutation {
   saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
+  updateGitHubCacheTtl(ttlMinutes: Int!): GitHubSettings!
+  saveGitHubCacheTtlOverride(
+    input: SaveGitHubCacheTtlOverrideInput!
+  ): GitHubCacheTtlOverride!
+  deleteGitHubCacheTtlOverride(operation: String!): Boolean!
+  clearGitHubCache: Boolean!
+  clearGitHubApiCalls: Boolean!
+  refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!
+  deleteGitHubCachedEntry(id: ID!): Boolean!
   saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!
   testGitHubConnection: GitHubViewer!
   testGitHubAppConnection: GitHubAppSettings!
@@ -589,6 +769,7 @@ extend type Mutation {
   removeGitHubRepository(id: ID!): [GitHubRepository!]!
   mergeGitHubPullRequest(
     input: MergeGitHubPullRequestInput!
+    source: GitHubRequestSource!
   ): GitHubPullRequestMergeResult!
   createGitHubPullRequest(
     input: CreateGitHubPullRequestInput!
@@ -596,16 +777,22 @@ extend type Mutation {
   setGitHubPullRequestLabels(
     input: SetGitHubPullRequestLabelsInput!
   ): GitHubPullRequestDetail!
-  retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
+  retryGitHubPipeline(
+    repositoryId: ID!
+    checkSuiteId: ID!
+    source: GitHubRequestSource!
+  ): GitHubPipeline!
   retryGitHubWorkflowJob(
     repositoryId: ID!
     checkSuiteId: ID!
     jobId: ID!
+    source: GitHubRequestSource!
   ): Boolean!
   cancelGitHubActionsWorkflowRun(
     codebaseRepositoryId: ID!
     workflowRunId: ID!
     force: Boolean! = false
+    source: GitHubRequestSource!
   ): Boolean!
   saveGitHubAutoRetryRule(
     input: SaveGitHubAutoRetryRuleInput!

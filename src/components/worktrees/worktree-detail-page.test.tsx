@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -576,6 +577,123 @@ describe("WorktreeDetailPage", () => {
     await waitFor(() => expect(overviewRequestCount()).toBe(beforeEvents + 1));
   });
 
+  test("does not reload GitHub pipelines from subscription events", async () => {
+    let worktreeSink: { next: (value: unknown) => void } | undefined;
+    let buildsSink: { next: (value: unknown) => void } | undefined;
+    let workflowsSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeDetailChanged")) {
+            worktreeSink = sink;
+          } else if (operation.query.includes("WorktreeDetailBuildsChanged")) {
+            buildsSink = sink;
+          } else if (
+            operation.query.includes("WorktreeDetailQuickActionsChanged")
+          ) {
+            workflowsSink = sink;
+          }
+          return vi.fn();
+        },
+      ),
+    } as never);
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: overview() } as never;
+      }
+      if (query.includes("GitHubWorktreeWorkflowRuns")) {
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    await screen.findByRole("heading", { name: "feature/AIDE-43" });
+    await waitFor(() => expect(worktreeSink).toBeDefined());
+    const requestCount = (operation: string) =>
+      request.mock.calls.filter(([query]) => query.includes(operation)).length;
+    expect(requestCount("GitHubWorktreeWorkflowRuns")).toBe(1);
+
+    const initialOverviewCount = requestCount("WorktreeDetailOverview");
+    worktreeSink!.next({
+      data: {
+        worktreeOverviewChanged: {
+          worktreeId: "worktree-1",
+          codebaseId: "codebase-1",
+        },
+      },
+    });
+    await waitFor(() =>
+      expect(requestCount("WorktreeDetailOverview")).toBe(
+        initialOverviewCount + 1,
+      ),
+    );
+
+    buildsSink!.next({ data: { buildsChanged: { id: "build-1" } } });
+    await waitFor(() =>
+      expect(requestCount("WorktreeDetailOverview")).toBe(
+        initialOverviewCount + 2,
+      ),
+    );
+
+    workflowsSink!.next({ data: { workflowsChanged: null } });
+    expect(requestCount("WorktreeDetailOverview")).toBe(
+      initialOverviewCount + 2,
+    );
+    workflowsSink!.next({ data: { workflowsChanged: { id: "workflow-1" } } });
+    await waitFor(() =>
+      expect(requestCount("WorktreeDetailOverview")).toBe(
+        initialOverviewCount + 3,
+      ),
+    );
+    expect(requestCount("GitHubWorktreeWorkflowRuns")).toBe(1);
+  });
+
+  test("refreshes GitHub pipelines on the thirty-second poll", async () => {
+    const nativeSetInterval = globalThis.setInterval.bind(globalThis);
+    let poll: (() => void) | undefined;
+    const interval = vi
+      .spyOn(globalThis, "setInterval")
+      .mockImplementation((handler, timeout, ...args) => {
+        if (timeout === 30_000 && typeof handler === "function") {
+          poll = () => handler(...args);
+          return nativeSetInterval(() => undefined, timeout);
+        }
+        return nativeSetInterval(handler, timeout, ...args);
+      });
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: overview() } as never;
+      }
+      if (query.includes("GitHubWorktreeWorkflowRuns")) {
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    await screen.findByRole("heading", { name: "feature/AIDE-43" });
+    const pipelineRequestCount = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("GitHubWorktreeWorkflowRuns"),
+      ).length;
+    await waitFor(() => expect(pipelineRequestCount()).toBe(1));
+    expect(poll).toBeDefined();
+
+    act(() => poll!());
+    await waitFor(() => expect(pipelineRequestCount()).toBe(2));
+    interval.mockRestore();
+  });
+
   test("shows an inspection error while keeping management controls available", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {
@@ -714,6 +832,9 @@ describe("WorktreeDetailPage", () => {
       if (query.includes("InspectWorktree")) {
         return { inspectWorktree: inspection } as never;
       }
+      if (query.includes("GitHubWorktreeWorkflowRuns")) {
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      }
       if (query.includes("RefreshWorktrees"))
         return { refreshWorktrees: 1 } as never;
       throw new Error(`Unexpected request: ${query}`);
@@ -755,6 +876,13 @@ describe("WorktreeDetailPage", () => {
           query.includes("RefreshWorktrees"),
         ),
       ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          query.includes("GitHubWorktreeWorkflowRuns"),
+        ),
+      ).toHaveLength(2),
     );
   });
 });

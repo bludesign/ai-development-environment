@@ -426,6 +426,7 @@ extend type Query {
 
 extend type Mutation {
   refreshWorktrees: Int!
+  refreshWorktreePullRequest(id: ID!): Worktree!
   reportWorktrees(reports: [CodebaseWorktreeReportInput!]!): [Worktree!]!
   reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
   inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!

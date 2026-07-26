@@ -118,7 +118,11 @@ vi.mock("@/data/prisma-client", () => ({
           state.calls.push(data);
           return data;
         },
-        deleteMany: async () => ({ count: 0 }),
+        deleteMany: async () => {
+          const count = state.calls.length;
+          state.calls = [];
+          return { count };
+        },
       },
       jiraCachedTicket,
       jiraCacheEntryIssue,
@@ -361,5 +365,22 @@ describe("Jira SDK cache wrapper", () => {
       }),
     ).rejects.toThrow("Authorization [REDACTED] was rejected");
     expect(state.calls[0]?.error).toBe("Authorization [REDACTED] was rejected");
+  });
+
+  test("clears API call history without clearing cached responses", async () => {
+    const service = new JiraService();
+    await (service as unknown as CacheInvoker).cachedCall({
+      operation: "ISSUE",
+      params: { issueKey: "APP-1" },
+      requestSummary: "Issue APP-1",
+      fetcher: async () => ({ key: "APP-1" }),
+    });
+    expect(state.calls).toHaveLength(1);
+    expect(state.entry).not.toBeNull();
+
+    await expect(service.clearApiCalls()).resolves.toBe(true);
+
+    expect(state.calls).toHaveLength(0);
+    expect(state.entry).not.toBeNull();
   });
 });

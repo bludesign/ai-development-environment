@@ -1,4 +1,5 @@
 AGENTS.md
+/.codegraph/**
 
 # shadcn registry components. Prettier reformatting these makes every
 # `shadcn add <name> --diff` report noise instead of real upstream changes, so

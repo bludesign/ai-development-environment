@@ -16,7 +16,10 @@ import {
 } from "@/components/ui/select";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
-import type { GitHubWorkflowRunAttemptView } from "@/services/github/types";
+import type {
+  GitHubRequestSource,
+  GitHubWorkflowRunAttemptView,
+} from "@/services/github/types";
 
 const ATTEMPT_METADATA_FIELDS =
   "workflowRunId runAttempt status url triggeringActor { login avatarUrl url } startedAt createdAt updatedAt";
@@ -33,11 +36,13 @@ export function WorkflowAttemptSelect({
   repositoryId,
   workflowRunId,
   latestAttempt,
+  requestSource,
   onAttemptChange,
 }: {
   repositoryId: string;
   workflowRunId: string;
   latestAttempt: number;
+  requestSource: GitHubRequestSource;
   onAttemptChange: (attempt: GitHubWorkflowRunAttemptView | null) => void;
 }) {
   const t = useTranslations("githubAutomation");
@@ -76,8 +81,10 @@ export function WorkflowAttemptSelect({
         $repositoryId: ID!
         $workflowRunId: ID!
         $attempt: Int!
+        $source: GitHubRequestSource!
       ) {
         githubActionsWorkflowRunAttempt(
+          source: $source
           repositoryId: $repositoryId
           workflowRunId: $workflowRunId
           attempt: $attempt
@@ -86,7 +93,7 @@ export function WorkflowAttemptSelect({
           ${includeJobs ? ATTEMPT_JOB_FIELDS : ""}
         }
       }`,
-      { repositoryId, workflowRunId, attempt },
+      { repositoryId, workflowRunId, attempt, source: requestSource },
     ).then((data) => {
       const loaded = data.githubActionsWorkflowRunAttempt;
       cacheRef.current[attempt] = loaded;

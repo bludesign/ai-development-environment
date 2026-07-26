@@ -269,6 +269,7 @@ export function PullRequestsPage() {
             $after: String
           ) {
             githubPullRequests(
+              source: PULL_REQUESTS_PAGE
               scope: $scope
               repositoryId: $repositoryId
               state: $state
@@ -835,6 +836,7 @@ function PullRequestTable({
                         pipelineStatus={pullRequest.pipelineStatus}
                         pipelines={pullRequest.pipelines}
                         repositoryId={pullRequest.repositoryGithubId}
+                        requestSource="PULL_REQUESTS_PAGE"
                       />
                     </TableCell>
                     <TableCell>
@@ -945,6 +947,7 @@ function PullRequestActionsMenu({
           onOpenChange={setMergeOpen}
           open={mergeOpen}
           pullRequest={pullRequest}
+          requestSource="PULL_REQUESTS_PAGE"
           showTrigger={false}
         />
       )}

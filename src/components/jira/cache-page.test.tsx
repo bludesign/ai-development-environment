@@ -65,4 +65,70 @@ describe("JiraCachePage", () => {
       expect(requestMock).toHaveBeenCalledWith("mutation { clearJiraCache }"),
     );
   });
+
+  test("clears recent calls only after alert-dialog confirmation", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query JiraCachePage")) {
+        return {
+          jiraSettings: {
+            siteUrl: "https://example.atlassian.net",
+            email: "user@example.com",
+            tokenConfigured: true,
+            cacheTtlSeconds: 300,
+            updatedAt: new Date(0).toISOString(),
+          },
+          jiraCacheMetrics: { windows: [], operations: [] },
+          jiraApiCalls: {
+            items: [
+              {
+                id: "call-1",
+                operation: "ISSUE",
+                requestSummary: "Issue APP-1",
+                source: "LIVE",
+                durationMs: 12,
+                statusCode: 200,
+                error: null,
+                itemCount: 1,
+                servedStale: false,
+                createdAt: "2026-07-26T05:00:00.000Z",
+              },
+            ],
+            total: 1,
+            limit: 50,
+            offset: 0,
+          },
+          jiraCachedTickets: { items: [], total: 0, limit: 50, offset: 0 },
+        } as never;
+      }
+      if (query.includes("clearJiraApiCalls")) {
+        return { clearJiraApiCalls: true } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<JiraCachePage />);
+    const clearButton = await screen.findByRole("button", {
+      name: "Clear recent calls",
+    });
+    fireEvent.click(clearButton);
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(
+      requestMock.mock.calls.some(([query]) =>
+        String(query).includes("clearJiraApiCalls"),
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    fireEvent.click(clearButton);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear recent calls" }),
+    );
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        "mutation { clearJiraApiCalls }",
+      ),
+    );
+  });
 });

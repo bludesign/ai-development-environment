@@ -348,6 +348,7 @@ export function AutoMergeButton({
         $number: Int!
       ) {
         githubPullRequestMergeOptions(
+          source: WORKTREE_AUTOMATION
           owner: $owner
           name: $name
           number: $number
@@ -401,6 +402,7 @@ export function AutoMergeButton({
           await onCompleted();
         }}
         pullRequest={pullRequest}
+        requestSource="WORKTREE_AUTOMATION"
       />
     );
   }

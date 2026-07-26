@@ -17,7 +17,7 @@ function context(agentId: string | null): GraphQLContext {
 
 function worktreesService() {
   return {
-    invalidatePullRequestsForOrigin: vi.fn(),
+    attachPullRequestForBranch: vi.fn().mockResolvedValue(0),
   } as unknown as WorktreesService;
 }
 
@@ -48,6 +48,11 @@ describe("GitHub resolvers", () => {
   test("rejects agent credentials from GitHub configuration and data", () => {
     const service = {
       getSettings: vi.fn(),
+      cacheMetrics: vi.fn(),
+      cacheTtlOverrides: vi.fn(),
+      saveCacheTtlOverride: vi.fn(),
+      clearCache: vi.fn(),
+      clearApiCalls: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
     } as unknown as GitHubService;
@@ -59,23 +64,92 @@ describe("GitHub resolvers", () => {
     expect(() =>
       resolvers.Query.githubActionsWorkflowRuns(
         {},
-        { first: 25 },
+        { first: 25, source: "ACTIONS_PAGE" },
         context("agent-1"),
       ),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Query.githubPullRequests(
         {},
-        { scope: "MINE" },
+        { scope: "MINE", source: "PULL_REQUESTS_PAGE" },
         context("agent-1"),
       ),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Query.githubReviewThreads({}, {}, context("agent-1")),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubCacheMetrics({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubCacheTtlOverrides({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearGitHubCache({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearGitHubApiCalls({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.saveGitHubCacheTtlOverride(
+        {},
+        { input: { operation: "Viewer", ttlSeconds: 30 } },
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.actionsWorkflowRuns).not.toHaveBeenCalled();
     expect(service.pullRequests).not.toHaveBeenCalled();
+    expect(service.cacheMetrics).not.toHaveBeenCalled();
+    expect(service.cacheTtlOverrides).not.toHaveBeenCalled();
+    expect(service.saveCacheTtlOverride).not.toHaveBeenCalled();
+    expect(service.clearCache).not.toHaveBeenCalled();
+    expect(service.clearApiCalls).not.toHaveBeenCalled();
+  });
+
+  test("delegates GraphQL cache TTL override management", async () => {
+    const override = {
+      operation: "GitHubWorktreePullRequestStatuses",
+      ttlSeconds: 60,
+      builtIn: true,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const service = {
+      cacheTtlOverrides: vi.fn().mockResolvedValue([override]),
+      cacheableGraphqlOperations: vi
+        .fn()
+        .mockResolvedValue([override.operation]),
+      saveCacheTtlOverride: vi.fn().mockResolvedValue(override),
+      deleteCacheTtlOverride: vi.fn().mockResolvedValue(true),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+
+    await expect(
+      resolvers.Query.githubCacheTtlOverrides({}, {}, context(null)),
+    ).resolves.toEqual([override]);
+    await expect(
+      resolvers.Query.githubCacheableGraphqlOperations({}, {}, context(null)),
+    ).resolves.toEqual([override.operation]);
+    await expect(
+      resolvers.Mutation.saveGitHubCacheTtlOverride(
+        {},
+        { input: { operation: override.operation, ttlSeconds: 45 } },
+        context(null),
+      ),
+    ).resolves.toEqual(override);
+    await expect(
+      resolvers.Mutation.deleteGitHubCacheTtlOverride(
+        {},
+        { operation: "Viewer" },
+        context(null),
+      ),
+    ).resolves.toBe(true);
+    expect(service.saveCacheTtlOverride).toHaveBeenCalledWith(
+      override.operation,
+      45,
+    );
+    expect(service.deleteCacheTtlOverride).toHaveBeenCalledWith("Viewer");
   });
 
   test("passes write-only credentials and repository scope to the service", async () => {
@@ -94,6 +168,10 @@ describe("GitHub resolvers", () => {
       pullRequest: vi.fn().mockResolvedValue({ id: "pull-request-1" }),
       pullRequestMergeOptions: vi.fn().mockResolvedValue({ canMerge: true }),
       mergePullRequest: vi.fn().mockResolvedValue({ state: "MERGED" }),
+      createPullRequest: vi.fn().mockResolvedValue({
+        id: "pull-request-created",
+        headRefName: "feature/APP-43",
+      }),
       retryPipeline: vi.fn().mockResolvedValue({ id: "check-suite-1" }),
       retryWorkflowJob: vi.fn().mockResolvedValue(true),
       cancelActionsWorkflowRun: vi.fn().mockResolvedValue(true),
@@ -120,6 +198,7 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubPullRequests(
         {},
         {
+          source: "PULL_REQUESTS_PAGE",
           scope: "REPOSITORY",
           repositoryId: "repository-1",
           state: "ALL",
@@ -133,6 +212,7 @@ describe("GitHub resolvers", () => {
     await resolvers.Query.githubActionsWorkflowRuns(
       {},
       {
+        source: "ACTIONS_PAGE",
         codebaseRepositoryId: "codebase-repository-1",
         branch: "feature/APP-42",
         workflowId: "workflow-1",
@@ -144,6 +224,7 @@ describe("GitHub resolvers", () => {
     await resolvers.Query.githubActionsWorkflowJobs(
       {},
       {
+        source: "ACTIONS_PAGE",
         codebaseRepositoryId: "codebase-repository-1",
         workflowRunId: "44",
       },
@@ -170,6 +251,7 @@ describe("GitHub resolvers", () => {
         state: "ALL",
         first: 10,
         after: "pull-request-cursor-1",
+        requestSource: "PULL_REQUESTS_PAGE",
       },
     );
     await resolvers.Query.githubPullRequest(
@@ -179,7 +261,12 @@ describe("GitHub resolvers", () => {
     );
     await resolvers.Query.githubPullRequestMergeOptions(
       {},
-      { owner: "acme", name: "widgets", number: 17 },
+      {
+        source: "PULL_REQUEST_DETAILS",
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+      },
       context(null),
     );
     const mergeInput = {
@@ -193,12 +280,30 @@ describe("GitHub resolvers", () => {
     };
     await resolvers.Mutation.mergeGitHubPullRequest(
       {},
-      { input: mergeInput },
+      { input: mergeInput, source: "PULL_REQUEST_DETAILS" },
+      context(null),
+    );
+    const createInput = {
+      owner: "acme",
+      name: "widgets",
+      baseRefName: "main",
+      headRefName: "feature/APP-43",
+      title: "Create and attach a pull request",
+      body: null,
+      draft: false,
+    };
+    await resolvers.Mutation.createGitHubPullRequest(
+      {},
+      { input: createInput },
       context(null),
     );
     await resolvers.Mutation.retryGitHubPipeline(
       {},
-      { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+      {
+        repositoryId: "repository-1",
+        checkSuiteId: "check-suite-1",
+        source: "PULL_REQUEST_DETAILS",
+      },
       context(null),
     );
     await resolvers.Mutation.retryGitHubWorkflowJob(
@@ -207,6 +312,7 @@ describe("GitHub resolvers", () => {
         repositoryId: "repository-1",
         checkSuiteId: "check-suite-1",
         jobId: "job-11",
+        source: "ACTIONS_PAGE",
       },
       context(null),
     );
@@ -216,6 +322,7 @@ describe("GitHub resolvers", () => {
         codebaseRepositoryId: "codebase-repository-1",
         workflowRunId: "44",
         force: true,
+        source: "WORKTREE_PIPELINES",
       },
       context(null),
     );
@@ -237,35 +344,46 @@ describe("GitHub resolvers", () => {
       "cursor-1",
       "feature/APP-42",
       "workflow-1",
+      "ACTIONS_PAGE",
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
       "codebase-repository-1",
       "44",
+      "ACTIONS_PAGE",
     );
     expect(service.pullRequestMergeOptions).toHaveBeenCalledWith(
       "acme",
       "widgets",
       17,
+      "PULL_REQUEST_DETAILS",
     );
-    expect(service.mergePullRequest).toHaveBeenCalledWith(mergeInput);
-    expect(worktrees.invalidatePullRequestsForOrigin).toHaveBeenCalledWith(
+    expect(service.mergePullRequest).toHaveBeenCalledWith(
+      mergeInput,
+      "PULL_REQUEST_DETAILS",
+    );
+    expect(worktrees.attachPullRequestForBranch).toHaveBeenCalledWith(
       "github.com/acme/widgets",
+      "feature/APP-43",
+      expect.objectContaining({ id: "pull-request-created" }),
     );
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
+      "PULL_REQUEST_DETAILS",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.retryWorkflowJob).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
       "job-11",
+      "ACTIONS_PAGE",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.cancelActionsWorkflowRun).toHaveBeenCalledWith(
       "codebase-repository-1",
       "44",
       true,
+      "WORKTREE_PIPELINES",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.reviewThreads).toHaveBeenCalledOnce();
@@ -302,7 +420,7 @@ describe("GitHub resolvers", () => {
 
     await resolvers.Query.githubPullRequests(
       {},
-      { scope: "MINE" },
+      { scope: "MINE", source: "PULL_REQUESTS_PAGE" },
       context(null),
       info,
     );
@@ -312,6 +430,7 @@ describe("GitHub resolvers", () => {
       state: "OPEN",
       first: 25,
       after: undefined,
+      requestSource: "PULL_REQUESTS_PAGE",
     });
   });
 
@@ -321,6 +440,7 @@ describe("GitHub resolvers", () => {
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
     const args = {
+      source: "ACTIONS_PAGE" as const,
       repositoryId: "repository-1",
       workflowRunId: "77",
       attempt: 2,
@@ -361,6 +481,7 @@ describe("GitHub resolvers", () => {
       "77",
       2,
       false,
+      "ACTIONS_PAGE",
     );
     expect(service.actionsWorkflowRunAttempt).toHaveBeenNthCalledWith(
       2,
@@ -368,6 +489,7 @@ describe("GitHub resolvers", () => {
       "77",
       2,
       true,
+      "ACTIONS_PAGE",
     );
   });
 });

@@ -563,6 +563,9 @@ describe("WorktreesPage", () => {
   test("links to the worktree codebase and repository from its menu", async () => {
     render(<WorktreesPage />);
     await screen.findByText("feature/AIDE-24");
+    const overviewResponse = (await request.mock.results[0]?.value) as {
+      worktreeOverview: WorktreeOverview;
+    };
 
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Customize worktree" }),
@@ -579,11 +582,32 @@ describe("WorktreesPage", () => {
     expect(repositoryLink.getAttribute("href")).toBe(
       "/codebases/repositories/repository-1",
     );
+    const refreshItem = screen.getByRole("menuitem", {
+      name: "Refresh pull request",
+    });
 
     const menuItems = screen.getAllByRole("menuitem");
     expect(
-      menuItems.slice(0, 3).map((item) => item.textContent?.trim()),
-    ).toEqual(["Change branch", "View codebase", "View repository"]);
+      menuItems.slice(0, 4).map((item) => item.textContent?.trim()),
+    ).toEqual([
+      "Change branch",
+      "View codebase",
+      "View repository",
+      "Refresh pull request",
+    ]);
+
+    request.mockResolvedValueOnce({
+      refreshWorktreePullRequest:
+        overviewResponse.worktreeOverview.agents[0]!.codebases[0]!
+          .worktrees[0]!,
+    } as never);
+    fireEvent.click(refreshItem);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RefreshWorktreePullRequest"),
+        { id: "worktree-1" },
+      ),
+    );
   });
 
   test("keeps the change branch popover open with an agent-relative path", async () => {

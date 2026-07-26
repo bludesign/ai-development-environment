@@ -251,6 +251,7 @@ export function ActionsPage() {
             $after: String
           ) {
             githubActionsWorkflowRuns(
+              source: ACTIONS_PAGE
               codebaseRepositoryId: $codebaseRepositoryId
               branch: $branch
               workflowId: $workflowId
@@ -444,6 +445,7 @@ export function ActionsPage() {
             $workflowRunId: ID!
           ) {
             githubActionsWorkflowJobs(
+              source: ACTIONS_PAGE
               codebaseRepositoryId: $codebaseRepositoryId
               workflowRunId: $workflowRunId
             ) { ${JOB_FIELDS} }
@@ -966,6 +968,7 @@ function ActionsTable({
                               }))
                             }
                             repositoryId={run.codebaseRepositoryId}
+                            requestSource="ACTIONS_PAGE"
                             workflowRunId={run.id}
                           />
                         </div>
@@ -1047,6 +1050,7 @@ function ActionsTable({
                             onCancelled={() => onRunCancelled(run)}
                             onError={onError}
                             onRetried={() => onRunRetried(run)}
+                            requestSource="ACTIONS_PAGE"
                             run={run}
                             jobs={jobState?.jobs ?? []}
                             workflowResource={githubPipelineWorkflowResource({
@@ -1134,6 +1138,7 @@ function WorkflowJobsPanel({
               onError={onError}
               onRetried={() => onRetried(job.id)}
               repositoryId={run.repositoryGithubId}
+              requestSource="ACTIONS_PAGE"
               workflowResource={githubJobWorkflowResource(
                 githubPipelineWorkflowResource({
                   ...run,
@@ -1179,14 +1184,21 @@ export function LegacyWorkflowJob({
           $repositoryId: ID!
           $checkSuiteId: ID!
           $jobId: ID!
+          $source: GitHubRequestSource!
         ) {
           retryGitHubWorkflowJob(
             repositoryId: $repositoryId
             checkSuiteId: $checkSuiteId
             jobId: $jobId
+            source: $source
           )
         }`,
-        { repositoryId, checkSuiteId, jobId: job.id },
+        {
+          repositoryId,
+          checkSuiteId,
+          jobId: job.id,
+          source: "ACTIONS_PAGE",
+        },
       );
       onRetried();
       onError(null);

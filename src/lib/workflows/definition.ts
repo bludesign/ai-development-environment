@@ -79,10 +79,13 @@ export function workflowTriggerChoices(
  * These mirror the `sessionData` the resource pages pass to `triggerWorkflow`,
  * and are what a RESOURCE_MANUAL trigger contributes to path availability.
  *
- * WORKTREE also seeds repository, pull-request, and ticket data resolved from
- * its codebase and branch. These links are optional, so the seed is an
- * optimistic contract: a step bound to a missing linked resource resolves to
- * `undefined` at run time.
+ * WORKTREE also seeds repository and ticket data resolved from its codebase
+ * and branch. These links are optional, so the seed is an optimistic contract:
+ * a step bound to a missing linked resource resolves to `undefined` at run
+ * time.
+ *
+ * Worktree-derived kinds seed `pr.*` from the persisted worktree association,
+ * so doing so does not require a GitHub request.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   BUILD: [
@@ -91,7 +94,6 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "codebase.*",
     "agent.*",
     "repo.*",
-    "pr.*",
     "ticket.*",
   ],
   CODEBASE: ["codebase.*", "agent.*", "repo.*"],
@@ -102,7 +104,6 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "codebase.*",
     "agent.*",
     "repo.*",
-    "pr.*",
     "ticket.*",
   ],
   GITHUB_PIPELINE: [
@@ -124,21 +125,14 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "agent.*",
     "ticket.*",
   ],
-  PULL_REQUEST: [
-    "pr.*",
-    "repo.*",
-    "ticket.*",
-    "worktree.*",
-    "codebase.*",
-    "agent.*",
-  ],
+  PULL_REQUEST: ["pr.number", "repo.displayOrigin"],
   WORKTREE: [
     "worktree.*",
     "codebase.*",
     "agent.*",
     "repo.*",
-    "pr.*",
     "ticket.*",
+    "pr.*",
   ],
 };
 
@@ -234,8 +228,8 @@ const WORKTREE_CONTEXT_PATHS = [
   "codebase.*",
   "agent.*",
   "repo.*",
-  "pr.*",
   "ticket.*",
+  "pr.*",
 ];
 
 /** Related resources refreshed after a successful codebase-backed agent job. */
@@ -512,7 +506,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       description:
         "Creates a Git worktree on the agent for a new, existing, or ticket-derived branch.",
       details:
-        "Dispatches a job to the agent that owns the codebase and waits for it, so the agent must be online. Branch mode NEW cuts a branch from the base, EXISTING checks one out, and TICKET derives the name from `ticket.key`. Base branch falls back to `worktree.baseBranch` then `repo.defaultBranch`. Refreshes the created worktree, codebase, owning agent, repository, and any linked pull request or ticket. Creates real directories on disk.",
+        "Dispatches a job to the agent that owns the codebase and waits for it, so the agent must be online. Branch mode NEW cuts a branch from the base, EXISTING checks one out, and TICKET derives the name from `ticket.key`. Base branch falls back to `worktree.baseBranch` then `repo.defaultBranch`. Refreshes the created worktree, codebase, owning agent, repository, and any linked ticket. Creates real directories on disk.",
       mutatesWorktree: true,
     },
   ),
@@ -529,6 +523,22 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       details:
         'Same branch modes as Create worktree. Uncommitted changes block the switch unless "Stash on failure" is set, which stashes them and retries — the stash is left for a human to deal with. Refreshes the worktree and all of its related resource context.',
       mutatesWorktree: true,
+    },
+  ),
+  step(
+    "WORKTREE_REFRESH_PULL_REQUEST",
+    "Worktrees",
+    "Refresh pull request",
+    "SERVER",
+    ["worktree.id"],
+    ["pr.*"],
+    {
+      description:
+        "Forces exact-branch pull request discovery and refreshes the worktree's persisted pull request context.",
+      details:
+        "Uses the configured worktree, falling back to `worktree.id`. The step succeeds with `found: false` and clears `pr` when the branch has no open pull request.",
+      mutatesWorktree: true,
+      mutatesExternal: false,
     },
   ),
   step(
@@ -1301,7 +1311,6 @@ const RUN_SEED_PATHS = [
   "codebase.*",
   "agent.*",
   "repo.*",
-  "pr.*",
   "ticket.*",
 ];
 
@@ -1312,7 +1321,6 @@ const BUILD_SEED_PATHS = [
   "codebase.*",
   "agent.*",
   "repo.*",
-  "pr.*",
   "ticket.*",
 ];
 
@@ -1322,8 +1330,8 @@ const WORKTREE_SEED_PATHS = [
   "codebase.*",
   "agent.*",
   "repo.*",
-  "pr.*",
   "ticket.*",
+  "pr.*",
 ];
 
 /** Jira observations include the latest comment when one exists. */
@@ -1399,7 +1407,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       description:
         "Fires when someone starts the workflow from a specific resource page — a worktree, pull request, build, codebase, ticket, or run.",
       details:
-        "Must target exactly one resource kind; add a second trigger to accept another. The page seeds that resource's namespace into session data, so a worktree-launched run gets its worktree, codebase, owning agent, repository, and any linked pull request or ticket. Those seeds are an optimistic contract — an optional link that is absent resolves to nothing at run time. This is also what makes the workflow show up on that resource's page.",
+        "Must target exactly one resource kind; add a second trigger to accept another. The page seeds that resource's namespace into session data, so a worktree-launched run gets its worktree, codebase, owning agent, repository, and any linked ticket. Those seeds are an optimistic contract — an optional link that is absent resolves to nothing at run time. A worktree does not seed `pr.*`; use a pull-request trigger or Load pull request to bring one into session data. This is also what makes the workflow show up on that resource's page.",
     }),
     trigger(
       "RESOURCE_MANUAL_CHOICE",
@@ -1618,13 +1626,12 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
         "codebase.*",
         "worktree.*",
         "repo.*",
-        "pr.*",
         "ticket.*",
       ],
       {
         description:
           "Fires when a job dispatched to an agent fails — a build, a Git operation, a terminal script.",
-        details: `The failing job is seeded under \`steps.trigger.*\`, including its kind and error. When it targeted a worktree, the owning agent, codebase, repository, pull request, and ticket are included too. Catches infrastructure failures that a workflow's own failure handles never see, because the job belonged to a different run. ${FILTERS_NOTE}`,
+        details: `The failing job is seeded under \`steps.trigger.*\`, including its kind and error. When it targeted a worktree, the owning agent, codebase, repository, and ticket are included too. Catches infrastructure failures that a workflow's own failure handles never see, because the job belonged to a different run. ${FILTERS_NOTE}`,
       },
     ),
     trigger(

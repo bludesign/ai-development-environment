@@ -511,34 +511,15 @@ describe("workflow resource session hydration", () => {
     expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
   });
 
-  test("hydrates a pull-request launch with PR, worktree, and ticket context", async () => {
-    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+  test("hydrates a pull-request launch from a persisted snapshot", async () => {
+    const workflowSessionDataForPullRequest = vi.fn().mockResolvedValue({
       worktree: { id: "worktree-1", branch: "feature/APP-42" },
       codebase: { id: "codebase-1", agentId: "agent-1" },
       agent: { id: "agent-1" },
       repo: { id: "repository-1" },
+      pr: { id: "pull-request-1", number: 42, title: "Stored title" },
       ticket: { key: "APP-42" },
     });
-    const github = {
-      pullRequest: vi.fn().mockResolvedValue({
-        id: "pull-request-1",
-        number: 42,
-        title: "Ship widgets",
-        url: "https://github.com/acme/widgets/pull/42",
-        codebaseRepositoryId: "repository-1",
-        repositoryGithubId: "github-repository-1",
-        repositoryNameWithOwner: "acme/widgets",
-        repositoryUrl: "https://github.com/acme/widgets",
-        headRefName: "feature/APP-42",
-        baseRefName: "main",
-        worktreeId: "worktree-1",
-        jiraKey: "APP-42",
-        reviewThreads: [
-          { id: "thread-1", isResolved: false },
-          { id: "thread-2", isResolved: true },
-        ],
-      }),
-    };
     const service = new WorkflowsService(
       new WorkflowEventsService(),
       undefined,
@@ -549,10 +530,53 @@ describe("workflow resource session hydration", () => {
       undefined,
       {
         ticketKeyForWorktree: vi.fn(),
-        workflowSessionDataForWorktree,
+        workflowSessionDataForPullRequest,
       },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("PULL_REQUEST", "acme/widgets#42", {
+        pr: { number: 42, title: "Caller title" },
+        repo: { displayOrigin: "github.com/acme/widgets" },
+      }),
+    ).resolves.toMatchObject({
+      pr: {
+        id: "pull-request-1",
+        number: 42,
+        title: "Caller title",
+      },
+      worktree: { id: "worktree-1" },
+      agent: { id: "agent-1" },
+      repo: { id: "repository-1" },
+      ticket: { key: "APP-42" },
+    });
+    expect(workflowSessionDataForPullRequest).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      42,
+    );
+  });
+
+  test("keeps minimal caller data when no pull-request snapshot exists", async () => {
+    const workflowSessionDataForPullRequest = vi.fn().mockResolvedValue({});
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
       undefined,
-      github as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForPullRequest,
+      },
     ) as unknown as {
       hydrateResourceSessionData(
         resourceKind: string,
@@ -564,19 +588,11 @@ describe("workflow resource session hydration", () => {
     await expect(
       service.hydrateResourceSessionData("PULL_REQUEST", "acme/widgets#42", {
         pr: { number: 42 },
+        repo: { displayOrigin: "github.com/acme/widgets" },
       }),
-    ).resolves.toMatchObject({
-      pr: {
-        id: "pull-request-1",
-        number: 42,
-        headBranch: "feature/APP-42",
-        baseBranch: "main",
-        unresolvedThreads: [{ id: "thread-1" }],
-      },
-      worktree: { id: "worktree-1" },
-      agent: { id: "agent-1" },
-      repo: { id: "repository-1" },
-      ticket: { key: "APP-42" },
+    ).resolves.toEqual({
+      pr: { number: 42 },
+      repo: { displayOrigin: "github.com/acme/widgets" },
     });
   });
 
@@ -599,7 +615,6 @@ describe("workflow resource session hydration", () => {
     };
     const service = new WorkflowsService(
       new WorkflowEventsService(),
-      undefined,
       undefined,
       undefined,
       undefined,

@@ -17,7 +17,9 @@ export type BreadcrumbLabelKey =
   | "drafts"
   | "edit"
   | "enroll"
+  | "entries"
   | "groups"
+  | "github"
   | "jira"
   | "new"
   | "notifications"
@@ -67,7 +69,9 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   drafts: "drafts",
   edit: "edit",
   enroll: "enroll",
+  entries: "entries",
   groups: "groups",
+  github: "github",
   jira: "jira",
   new: "new",
   notifications: "notifications",
@@ -103,6 +107,8 @@ const STATIC_NESTED_PATHS = new Set([
   "/commands/new",
   "/commands/runs",
   "/devices/enroll",
+  "/github/cache",
+  "/github/cache/entries",
   "/jira/cache",
   "/jira/cache/tickets",
   "/jira/tickets",
@@ -136,6 +142,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/devices",
   "/devices/enroll",
   "/drafts",
+  "/github/cache",
   "/jira/cache",
   "/jira/tickets",
   "/notifications",
@@ -161,6 +168,7 @@ const ROUTABLE_DYNAMIC_PATHS = [
   /^\/builds\/[^/]+$/,
   /^\/codebases\/(?!repositories(?:\/|$))[^/]+$/,
   /^\/devices\/(?!enroll$)[^/]+$/,
+  /^\/github\/cache\/entries\/[^/]+$/,
   /^\/jira\/cache\/tickets\/[^/]+$/,
   /^\/jira\/tickets\/[^/]+$/,
   /^\/plans\/[^/]+$/,

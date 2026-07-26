@@ -304,10 +304,46 @@ model Worktree {
   derivedDataCleanupLease  DerivedDataCleanupLease?
   autoSync                 WorktreeAutoSync?
   autoMerge                WorktreeAutoMerge?
+  pullRequestLookupOrigin  String?
+  pullRequestLookupBranch  String?
+  pullRequestLookupAt      DateTime?
+  pullRequest              WorktreePullRequest?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model WorktreePullRequest {
+  worktreeId                  String   @id
+  githubId                    String
+  number                      Int
+  title                       String
+  url                         String
+  repositoryGithubId          String
+  repositoryNameWithOwner     String
+  repositoryUrl               String
+  labelsJson                  String
+  jiraKey                     String?
+  pipelineStatus              String
+  pipelinesJson               String
+  reviewDecision              String
+  unresolvedReviewThreadCount Int
+  state                       String
+  isDraft                     Boolean
+  mergeable                   String
+  mergeStateStatus            String
+  autoMergeEnabled            Boolean
+  viewerCanEnableAutoMerge    Boolean
+  viewerCanDisableAutoMerge   Boolean
+  headRefOid                  String
+  headRefName                 String
+  githubCreatedAt             DateTime
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  worktree                    Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@index([githubId])
 }
 
 model WorktreeAutoSync {
@@ -1923,8 +1959,79 @@ model GitHubSettings {
   id                                     String   @id
   defaultJiraKeyRegex                    String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   actionsNotificationPollIntervalSeconds Int      @default(60)
+  cacheTtlSeconds                        Int      @default(300)
   createdAt                              DateTime @default(now())
   updatedAt                              DateTime @updatedAt
+}
+
+model GitHubGraphqlCacheEntry {
+  id             String   @id
+  cacheKey       String   @unique
+  authentication String
+  endpoint       String
+  operation      String
+  query          String
+  variablesJson  String
+  responseJson   String
+  fetchedAt      DateTime
+  pointCost      Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([authentication, operation, fetchedAt])
+  @@index([fetchedAt])
+}
+
+model GitHubGraphqlCacheTtlOverride {
+  operation  String   @id
+  ttlSeconds Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model GitHubApiCallLog {
+  id                 String    @id
+  authentication     String
+  apiType            String    @default("GRAPHQL")
+  method             String    @default("POST")
+  endpoint           String    @default("https://api.github.com/graphql")
+  operation          String
+  requestSource      String    @default("GITHUB_API")
+  requestSummary     String    @default("")
+  variablesJson      String    @default("{}")
+  source             String
+  durationMs         Int
+  statusCode         Int?
+  error              String?
+  servedStale        Boolean   @default(false)
+  pointCost          Int?
+  pointsAvoided      Int       @default(0)
+  rateLimitLimit     Int?
+  rateLimitRemaining Int?
+  rateLimitUsed      Int?
+  rateLimitResetAt   DateTime?
+  rateLimitResource  String?
+  createdAt          DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([operation, source, createdAt])
+  @@index([authentication, createdAt])
+}
+
+model GitHubRateLimitSnapshot {
+  id             String   @id
+  authentication String
+  resource       String
+  limit          Int
+  remaining      Int
+  used           Int
+  resetAt        DateTime
+  observedAt     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([authentication, resource])
+  @@index([resource, observedAt])
 }
 
 model GitHubAppSettings {

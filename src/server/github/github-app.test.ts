@@ -5,6 +5,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "@/services/github/github-rest-operations";
+
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
@@ -60,20 +62,34 @@ beforeEach(() => {
 
 describe("GitHub App authentication", () => {
   test("treats GitHub's 404 as a disabled App webhook", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async () =>
       response({ message: "Not Found" }, 404),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      configureGitHubAppWebhook(credentials, {
-        url: "https://control.example/api/public/github/webhook",
-        secret: "webhook-secret",
-      }),
+      configureGitHubAppWebhook(
+        { ...credentials, requestObserver },
+        {
+          url: "https://control.example/api/public/github/webhook",
+          secret: "webhook-secret",
+        },
+      ),
     ).resolves.toEqual({ configured: false, githubRequestId: "REQUEST-1" });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/app/hook/config",
       expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/app/hook/config",
+        method: "PATCH",
+        operation: GITHUB_REST_OPERATIONS.apps.updateWebhookConfigForApp,
+        body: null,
+        statusCode: 404,
+        error: "GitHub returned HTTP 404",
+      }),
     );
   });
 
@@ -152,11 +168,13 @@ describe("GitHub App authentication", () => {
         credentials,
         "query { viewer { login } }",
         {},
+        "PULL_REQUEST_DETAILS",
       ),
       githubAppGraphql<{ viewer: { login: string } }>(
         credentials,
         "query { viewer { login } }",
         {},
+        "PULL_REQUEST_DETAILS",
       ),
     ]);
     expect(first.data.viewer.login).toBe("rerunner[bot]");
@@ -164,8 +182,52 @@ describe("GitHub App authentication", () => {
     expect(tokenMints).toBe(2);
     expect(graphQlCalls).toBe(4);
 
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
     expect(tokenMints).toBe(2);
+  });
+
+  test("observes GitHub App REST and GraphQL requests with GraphQL context", async () => {
+    const requestObserver = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/access_tokens")) return tokenResponse();
+        return response({ data: { node: { id: "PR_kwDO123" } } });
+      }),
+    );
+
+    await githubAppGraphql(
+      { ...credentials, requestObserver },
+      "query PullRequest($id: ID!) { node(id: $id) { id } }",
+      { id: "PR_kwDO123" },
+      "PULL_REQUEST_DETAILS",
+    );
+
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/app/installations/456/access_tokens",
+        method: "POST",
+        operation: GITHUB_REST_OPERATIONS.apps.createInstallationAccessToken,
+        requestSource: "PULL_REQUEST_DETAILS",
+        body: null,
+        statusCode: 200,
+      }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/graphql",
+        method: "POST",
+        operation: null,
+        requestSource: "PULL_REQUEST_DETAILS",
+        body: expect.stringContaining('"id":"PR_kwDO123"'),
+        statusCode: 200,
+      }),
+    );
   });
 
   test("refreshes a cached token inside the expiry cushion", async () => {
@@ -186,8 +248,18 @@ describe("GitHub App authentication", () => {
       }),
     );
 
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
     expect(tokenMints).toBe(2);
   });
 
@@ -238,6 +310,7 @@ describe("GitHub App authentication", () => {
         owner: "acme",
         repository: "widgets",
         workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
       });
     } catch (error) {
       caught = error;
@@ -264,6 +337,7 @@ describe("GitHub App authentication", () => {
         owner: "acme",
         repository: "widgets",
         workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).resolves.toEqual({ githubRequestId: "FAILED-JOBS-1" });
   });
@@ -293,12 +367,14 @@ describe("GitHub App authentication", () => {
           repository: "widgets",
           workflowRunId: "987",
           force,
+          requestSource: "ACTIONS_PAGE",
         }),
       ).resolves.toEqual({ githubRequestId: "CANCEL-1" });
     },
   );
 
   test("lists workflow jobs with the installation token", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/access_tokens")) return tokenResponse();
       if (url.includes("/actions/runs/987/jobs")) {
@@ -324,15 +400,26 @@ describe("GitHub App authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      listGitHubActionsWorkflowJobs(credentials, {
-        owner: "acme",
-        repository: "widgets",
-        workflowRunId: "987",
-      }),
+      listGitHubActionsWorkflowJobs(
+        { ...credentials, requestObserver },
+        {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          requestSource: "ACTIONS_PAGE",
+        },
+      ),
     ).resolves.toEqual([expect.objectContaining({ id: 11, name: "test" })]);
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
+        url: expect.stringContaining("/actions/runs/987/jobs"),
+      }),
+    );
   });
 
   test("verifies a job belongs to the workflow run before rerunning it", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/access_tokens")) return tokenResponse();
       if (url.endsWith("/actions/jobs/11")) {
@@ -347,13 +434,27 @@ describe("GitHub App authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      rerunGitHubActionsJob(credentials, {
-        owner: "acme",
-        repository: "widgets",
-        workflowRunId: "987",
-        jobId: "11",
-      }),
+      rerunGitHubActionsJob(
+        { ...credentials, requestObserver },
+        {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          jobId: "11",
+          requestSource: "ACTIONS_PAGE",
+        },
+      ),
     ).resolves.toEqual({ githubRequestId: "JOB-RERUN-1" });
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.getJobForWorkflowRun,
+      }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.reRunJobForWorkflowRun,
+      }),
+    );
   });
 
   test("rejects a job from another workflow run", async () => {
@@ -371,6 +472,7 @@ describe("GitHub App authentication", () => {
         repository: "widgets",
         workflowRunId: "987",
         jobId: "11",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).rejects.toMatchObject({ code: "ACTIONS_JOB_RUN_MISMATCH" });
   });

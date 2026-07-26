@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+
 const state = vi.hoisted(() => ({
   apiToken: "secret-token" as string | null,
   webhookSecret: null as string | null,
@@ -103,6 +105,43 @@ const appClient = vi.hoisted(() => ({
   rerunJob: vi.fn(),
   verify: vi.fn(),
   configureWebhook: vi.fn(),
+}));
+
+const cacheClient = vi.hoisted(() => ({
+  clear: vi.fn(),
+  clearForCredentialChange: vi.fn(),
+  recordGraphqlTransportCall: vi.fn(),
+  recordRestCall: vi.fn(),
+}));
+
+vi.mock("@/services/github/github-cache", () => ({
+  GitHubCache: class {
+    async query<T>(input: { fetcher: () => Promise<{ data: T }> }) {
+      const result = await input.fetcher();
+      return {
+        data: result.data,
+        source: "LIVE",
+        stale: false,
+        fetchedAt: new Date(),
+        entryId: "test-entry",
+      };
+    }
+
+    async mutation<T>(input: { fetcher: () => Promise<{ data: T }> }) {
+      return (await input.fetcher()).data;
+    }
+
+    async clear() {
+      return cacheClient.clear();
+    }
+
+    async clearForCredentialChange(authentication: "PAT" | "APP") {
+      return cacheClient.clearForCredentialChange(authentication);
+    }
+
+    recordGraphqlTransportCall = cacheClient.recordGraphqlTransportCall;
+    recordRestCall = cacheClient.recordRestCall;
+  },
 }));
 
 vi.mock("@/server/github/github-app", async (importOriginal) => {
@@ -219,14 +258,30 @@ vi.mock("@/services/credentials", async (importOriginal) => {
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitHubSettings: {
-      findUnique: async () =>
-        state.apiToken
-          ? {
-              id: "default",
-              apiToken: state.apiToken,
-              defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
-            }
-          : null,
+      findUnique: async () => ({
+        id: "default",
+        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        actionsNotificationPollIntervalSeconds: 60,
+        cacheTtlSeconds: 300,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      }),
+      upsert: async ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => ({
+        id: "default",
+        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        actionsNotificationPollIntervalSeconds: 60,
+        cacheTtlSeconds: 300,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+        ...create,
+        ...update,
+      }),
     },
     gitHubRepository: {
       findMany: async () => state.repositories,
@@ -328,6 +383,20 @@ function response(data: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function aliasedSearchData<T>(
+  variables: Record<string, unknown>,
+  connection: (query: string) => T,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(variables)
+      .filter(([key]) => /^query\d*$/.test(key))
+      .map(([key, query]) => [
+        key === "query" ? "search" : `search${key.slice("query".length)}`,
+        connection(String(query)),
+      ]),
+  );
 }
 
 function rawPullRequest(
@@ -518,6 +587,14 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  cacheClient.clear.mockReset();
+  cacheClient.clear.mockResolvedValue(true);
+  cacheClient.clearForCredentialChange.mockReset();
+  cacheClient.clearForCredentialChange.mockResolvedValue(true);
+  cacheClient.recordGraphqlTransportCall.mockReset();
+  cacheClient.recordGraphqlTransportCall.mockResolvedValue(undefined);
+  cacheClient.recordRestCall.mockReset();
+  cacheClient.recordRestCall.mockResolvedValue(undefined);
   state.apiToken = "secret-token";
   state.webhookSecret = null;
   state.repositories = [
@@ -1090,6 +1167,15 @@ describe("GitHub service", () => {
       }),
     ]);
     expect(appClient.listJobs).not.toHaveBeenCalled();
+    expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authentication: "PAT",
+        method: "GET",
+        endpoint: expect.stringContaining("/actions/runs/44/jobs"),
+        operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
+        statusCode: 200,
+      }),
+    );
 
     state.appSettings = null;
     const jobs = await service.actionsWorkflowJobs(
@@ -1133,12 +1219,12 @@ describe("GitHub service", () => {
         });
       }
       if (body.query.includes("GitHubPullRequestSearch")) {
-        const searchQuery = String(body.variables.query);
-        const authored =
-          searchQuery.includes("author:") && !searchQuery.includes("-author:");
         return response({
-          data: {
-            search: {
+          data: aliasedSearchData(body.variables, (searchQuery) => {
+            const authored =
+              searchQuery.includes("author:") &&
+              !searchQuery.includes("-author:");
+            return {
               nodes: authored
                 ? [
                     rawPullRequest("pull-request-1", "APP-42 Add API", {
@@ -1156,8 +1242,8 @@ describe("GitHub service", () => {
                     rawPullRequest("pull-request-2", "Maintenance"),
                   ],
               pageInfo: { hasNextPage: false, endCursor: null },
-            },
-          },
+            };
+          }),
         });
       }
       throw new Error(`Unexpected query: ${body.query}`);
@@ -1296,9 +1382,9 @@ describe("GitHub service", () => {
     );
 
     expect(searchQueries).toEqual([
-      "is:pr is:closed is:unmerged review-requested:octocat sort:updated-desc",
-      "is:pr is:merged review-requested:octocat sort:updated-desc",
-      "is:pr review-requested:octocat sort:updated-desc",
+      "is:pr is:closed is:unmerged review-requested:@me sort:updated-desc",
+      "is:pr is:merged review-requested:@me sort:updated-desc",
+      "is:pr review-requested:@me sort:updated-desc",
     ]);
     expect(repositoryStates).toEqual([
       ["CLOSED"],
@@ -1401,12 +1487,11 @@ describe("GitHub service", () => {
           });
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
-          const query = String(body.variables.query);
-          searchQueries.push(query);
-          const authored = !query.includes("-author:");
           return response({
-            data: {
-              search: {
+            data: aliasedSearchData(body.variables, (query) => {
+              searchQueries.push(query);
+              const authored = !query.includes("-author:");
+              return {
                 nodes: [
                   rawPullRequest(
                     authored ? "pull-request-1" : "pull-request-2",
@@ -1414,8 +1499,8 @@ describe("GitHub service", () => {
                   ),
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+              };
+            }),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -1434,9 +1519,9 @@ describe("GitHub service", () => {
     expect(secondPage.items.map((item) => item.id)).toEqual(["pull-request-2"]);
     expect(secondPage.hasNextPage).toBe(false);
     expect(searchQueries).toEqual([
-      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
-      "is:pr is:open author:octocat sort:updated-desc",
-      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
+      "is:pr is:open assignee:@me -author:@me sort:updated-desc",
+      "is:pr is:open author:@me sort:updated-desc",
+      "is:pr is:open assignee:@me -author:@me sort:updated-desc",
     ]);
   });
 
@@ -1488,15 +1573,25 @@ describe("GitHub service", () => {
         });
       }
       if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
-        const authored = String(body.variables.query).includes("author:");
         return response({
           data: {
-            search: {
-              nodes: authored
+            viewer: { login: "octocat" },
+            ...aliasedSearchData(body.variables, (query) => ({
+              nodes: query.includes("author:")
                 ? [reviewPullRequest]
                 : [reviewPullRequest, emptyPullRequest],
               pageInfo: { hasNextPage: false, endCursor: null },
-            },
+            })),
+          },
+        });
+      }
+      if (body.query.includes("GitHubReviewThreadDetails")) {
+        return response({
+          data: {
+            nodes: [reviewPullRequest, emptyPullRequest].map((pullRequest) => ({
+              id: pullRequest.id,
+              reviewThreads: pullRequest.reviewThreads,
+            })),
           },
         });
       }
@@ -1571,15 +1666,17 @@ describe("GitHub service", () => {
         variables: Record<string, unknown>;
       };
       return body.query.includes("GitHubReviewThreadPullRequestSearch")
-        ? [String(body.variables.query)]
+        ? Object.entries(body.variables)
+            .filter(([key]) => /^query\d+$/.test(key))
+            .map(([, query]) => String(query))
         : [];
     });
     expect(searchQueries).toHaveLength(4);
     expect(searchQueries).toEqual(
       expect.arrayContaining([
-        "is:pr is:open author:octocat sort:updated-desc",
-        "is:pr is:open assignee:octocat sort:updated-desc",
-        "is:pr is:open review-requested:octocat sort:updated-desc",
+        "is:pr is:open author:@me sort:updated-desc",
+        "is:pr is:open assignee:@me sort:updated-desc",
+        "is:pr is:open review-requested:@me sort:updated-desc",
         "is:pr is:open repo:acme/widgets sort:updated-desc",
       ]),
     );
@@ -1736,6 +1833,87 @@ describe("GitHub service", () => {
     ).toBe("Bearer secret-token");
   });
 
+  test("discovers open pull requests through exact refs and deduplicates branches", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      expect(body.query).toContain("query GitHubWorktreePullRequests");
+      expect(body.query).toContain("ref(qualifiedName: $branch0)");
+      expect(body.query).toContain("associatedPullRequests");
+      expect(body.query).not.toContain("pullRequests(first:");
+      expect(body.variables).toMatchObject({
+        owner: "acme",
+        name: "widgets",
+        branch0: "refs/heads/feature/app-42",
+      });
+      return response({
+        data: {
+          repository: {
+            branch0: {
+              associatedPullRequests: {
+                nodes: [rawPullRequest("pull-request-1", "APP-42 exact ref")],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequestsForBranches(
+      "github.com/acme/widgets",
+      ["feature/app-42", "feature/app-42", "  feature/app-42  "],
+      { requestSource: "WORKTREES" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.get("feature/app-42")).toMatchObject({
+      id: "pull-request-1",
+      headRefName: "feature/app-42",
+    });
+  });
+
+  test("loads only live operational fields for stored pull request node ids", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        query: string;
+        variables: Record<string, unknown>;
+      };
+      expect(body.query).toContain("query GitHubWorktreePullRequestStatuses");
+      expect(body.query).toContain("nodes(ids: $ids)");
+      expect(body.query).not.toContain("title");
+      expect(body.variables).toEqual({ ids: ["pull-request-1"] });
+      return response({
+        data: {
+          nodes: [
+            rawPullRequest("pull-request-1", "ignored", {
+              pipeline: "SUCCESS",
+              reviewDecision: "APPROVED",
+            }),
+          ],
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new GitHubService().pullRequestLiveStatuses(
+      ["pull-request-1", "pull-request-1"],
+      { requestSource: "WORKTREES" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.get("pull-request-1")).toMatchObject({
+      id: "pull-request-1",
+      pipelineStatus: "SUCCESS",
+      reviewDecision: "APPROVED",
+      unresolvedReviewThreadCount: 1,
+      state: "OPEN",
+    });
+  });
+
   test("requires credentials and redacts a token echoed by GitHub", async () => {
     state.apiToken = null;
     await expect(new GitHubService().testConnection()).rejects.toThrow(
@@ -1810,7 +1988,7 @@ describe("GitHub service", () => {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
-                reviewThreadsFull: {
+                reviewThreads: {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -1892,14 +2070,24 @@ describe("GitHub service", () => {
     });
     expect(appClient.listJobs).toHaveBeenCalledWith(
       expect.objectContaining({ appId: "123", installationId: "456" }),
-      { owner: "acme", repository: "widgets", workflowRunId: "1" },
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "1",
+        requestSource: "PULL_REQUEST_DETAILS",
+      },
     );
     state.repositories = [];
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: "127.0.0.1",
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
     ).resolves.toMatchObject({
       id: "check-suite-1",
       name: "CI",
@@ -1910,10 +2098,16 @@ describe("GitHub service", () => {
       expect.objectContaining({ installationId: "456" }),
       expect.stringContaining("VerifyGitHubAppRepository"),
       { owner: "acme", name: "widgets" },
+      "ACTIONS_PAGE",
     );
     expect(appClient.rerun).toHaveBeenCalledWith(
       expect.objectContaining({ appId: "123" }),
-      { owner: "acme", repository: "widgets", workflowRunId: "987" },
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
+      },
     );
     expect(state.auditEvents).toContainEqual(
       expect.objectContaining({
@@ -1927,6 +2121,7 @@ describe("GitHub service", () => {
         "repository-1",
         "check-suite-1",
         "11",
+        "ACTIONS_PAGE",
         {
           actor: "control-plane",
           ipAddress: "127.0.0.1",
@@ -1940,6 +2135,7 @@ describe("GitHub service", () => {
         repository: "widgets",
         workflowRunId: "987",
         jobId: "11",
+        requestSource: "ACTIONS_PAGE",
       },
     );
     expect(state.auditEvents).toContainEqual(
@@ -1956,6 +2152,7 @@ describe("GitHub service", () => {
         "repository-1",
         "check-suite-1",
         "12",
+        "ACTIONS_PAGE",
         {
           actor: "control-plane",
           ipAddress: "127.0.0.1",
@@ -1982,6 +2179,7 @@ describe("GitHub service", () => {
           "codebase-repository-1",
           "987",
           force,
+          "ACTIONS_PAGE",
           { actor: "control-plane", ipAddress: "127.0.0.1" },
         ),
       ).resolves.toBe(true);
@@ -1993,6 +2191,7 @@ describe("GitHub service", () => {
           repository: "widgets",
           workflowRunId: "987",
           force,
+          requestSource: "ACTIONS_PAGE",
         },
       );
       expect(state.auditEvents).toContainEqual(
@@ -2013,7 +2212,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (!body.query.includes("query GitHubPullRequestDetail")) {
           throw new Error(`Unexpected query: ${body.query}`);
         }
@@ -2030,7 +2232,7 @@ describe("GitHub service", () => {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
-                reviewThreadsFull: {
+                reviewThreads: {
                   nodes: [rawReviewThread("detail-thread", { headRepository })],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -2121,6 +2323,7 @@ describe("GitHub service", () => {
       }),
     );
     expect(await service.getAppSettings()).not.toHaveProperty("privateKey");
+    expect(cacheClient.clearForCredentialChange).toHaveBeenCalledWith("APP");
 
     await expect(
       service.saveAppSettings(
@@ -2129,6 +2332,22 @@ describe("GitHub service", () => {
       ),
     ).rejects.toThrow("replacement private key");
     expect(state.appSettings?.appId).toBe("123");
+  });
+
+  test("clears PAT cache state only when credentials change in settings", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveSettings({ apiToken: "replacement-token" }),
+    ).resolves.toMatchObject({ tokenConfigured: true });
+    expect(state.apiToken).toBe("replacement-token");
+    expect(cacheClient.clearForCredentialChange).toHaveBeenCalledWith("PAT");
+
+    cacheClient.clearForCredentialChange.mockClear();
+    await expect(
+      service.saveSettings({ actionsNotificationPollIntervalSeconds: 120 }),
+    ).resolves.toMatchObject({ tokenConfigured: true });
+    expect(cacheClient.clearForCredentialChange).not.toHaveBeenCalled();
   });
 
   test("configures and preserves a signed webhook only for a public HTTPS origin", async () => {
@@ -2292,10 +2511,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toThrow("does not belong");
     expect(appClient.rerun).not.toHaveBeenCalled();
     expect(state.auditEvents).toContainEqual(
@@ -2336,10 +2560,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: errorCode });
     expect(appClient.rerun).not.toHaveBeenCalled();
     expect(state.auditEvents).toContainEqual(
@@ -2381,10 +2610,15 @@ describe("GitHub service", () => {
     });
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: "REPOSITORY_NOT_INSTALLED" });
     expect(appClient.rerun).not.toHaveBeenCalled();
   });
@@ -2420,10 +2654,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: "GITHUB_APP_NOT_CONFIGURED" });
     expect(appClient.rerun).not.toHaveBeenCalled();
   });
@@ -2533,7 +2772,10 @@ describe("GitHub service", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.includes("/user/emails")) return response([]);
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubPullRequestMergeOptions")) {
           return response({
             data: {
@@ -2819,12 +3061,10 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2854,7 +3094,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2869,17 +3112,15 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [
-                  {
-                    ...rawPullRequest("pull-request-1", "APP-42 Add API"),
-                    headRepository: null,
-                  },
-                ],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [
+                {
+                  ...rawPullRequest("pull-request-1", "APP-42 Add API"),
+                  headRepository: null,
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2909,7 +3150,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2924,12 +3168,10 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2974,7 +3216,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2990,10 +3235,23 @@ describe("GitHub service", () => {
         if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
           return response({
             data: {
-              search: {
+              viewer: { login: "octocat" },
+              ...aliasedSearchData(body.variables, () => ({
                 nodes: [reviewPullRequest],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
+              })),
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadDetails")) {
+          return response({
+            data: {
+              nodes: [
+                {
+                  id: reviewPullRequest.id,
+                  reviewThreads: reviewPullRequest.reviewThreads,
+                },
+              ],
             },
           });
         }
@@ -3044,7 +3302,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -3060,10 +3321,23 @@ describe("GitHub service", () => {
         if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
           return response({
             data: {
-              search: {
+              viewer: { login: "octocat" },
+              ...aliasedSearchData(body.variables, () => ({
                 nodes: [reviewPullRequest],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
+              })),
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadDetails")) {
+          return response({
+            data: {
+              nodes: [
+                {
+                  id: reviewPullRequest.id,
+                  reviewThreads: reviewPullRequest.reviewThreads,
+                },
+              ],
             },
           });
         }

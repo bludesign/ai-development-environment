@@ -53,7 +53,7 @@ import type {
 } from "@/services/github/types";
 
 const SETTINGS_FIELDS =
-  "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds updatedAt";
+  "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt";
 const APP_SETTINGS_FIELDS =
   "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
 

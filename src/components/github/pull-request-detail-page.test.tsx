@@ -301,7 +301,11 @@ describe("PullRequestDetailPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubPipeline"),
-        { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+        {
+          repositoryId: "repository-1",
+          checkSuiteId: "check-suite-1",
+          source: "PULL_REQUEST_DETAILS",
+        },
       ),
     );
 
@@ -319,6 +323,7 @@ describe("PullRequestDetailPage", () => {
           repositoryId: "repository-1",
           checkSuiteId: "check-suite-1",
           jobId: "job-11",
+          source: "PULL_REQUEST_DETAILS",
         },
       ),
     );
@@ -364,6 +369,7 @@ describe("PullRequestDetailPage", () => {
           codebaseRepositoryId: "codebase-repository-1",
           workflowRunId: "run-1",
           force: false,
+          source: "PULL_REQUEST_DETAILS",
         },
       ),
     );

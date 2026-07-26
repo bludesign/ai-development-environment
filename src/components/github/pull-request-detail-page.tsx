@@ -370,6 +370,7 @@ export function PullRequestDetailPage({
             <MergePullRequestButton
               onMerged={load}
               pullRequest={pullRequest}
+              requestSource="PULL_REQUEST_DETAILS"
               size="default"
             />
           )}
@@ -479,6 +480,7 @@ export function PullRequestDetailPage({
                       }))}
                     pullRequestNumber={pullRequest.number}
                     repositoryGithubId={pullRequest.repositoryGithubId}
+                    requestSource="PULL_REQUEST_DETAILS"
                   />
                 ) : null}
                 <PipelineMenu
@@ -486,6 +488,7 @@ export function PullRequestDetailPage({
                   pipelineStatus={pullRequest.pipelineStatus}
                   pipelines={pullRequest.pipelines}
                   repositoryId={pullRequest.repositoryGithubId}
+                  requestSource="PULL_REQUEST_DETAILS"
                 />
               </div>
             </CardHeader>
@@ -565,6 +568,7 @@ export function PullRequestDetailPage({
                                     repositoryId={
                                       pullRequest.repositoryGithubId
                                     }
+                                    requestSource="PULL_REQUEST_DETAILS"
                                     workflowRunId={pipeline.workflowRunId}
                                   />
                                 </div>
@@ -587,6 +591,7 @@ export function PullRequestDetailPage({
                                   onRetried={() =>
                                     pipelineRunRetried(pipeline.id)
                                   }
+                                  requestSource="PULL_REQUEST_DETAILS"
                                   run={{
                                     id: pipeline.workflowRunId ?? pipeline.id,
                                     workflowId:
@@ -652,6 +657,7 @@ export function PullRequestDetailPage({
                                         repositoryId={
                                           pullRequest.repositoryGithubId
                                         }
+                                        requestSource="PULL_REQUEST_DETAILS"
                                         workflowResource={githubJobWorkflowResource(
                                           workflowResource,
                                           job,

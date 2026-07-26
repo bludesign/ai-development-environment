@@ -167,7 +167,6 @@ function createServerServices(): ServerServices {
     runsService,
     worktreesService,
     commandsService,
-    gitHubService,
     jiraService,
   );
   const worktreeAutomationService = new WorktreeAutomationService(

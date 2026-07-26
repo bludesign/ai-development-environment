@@ -24,7 +24,9 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   drafts: "Drafts",
   edit: "Edit",
   enroll: "Enroll",
+  entries: "Entries",
   groups: "Groups",
+  github: "GitHub",
   jira: "Jira",
   new: "New",
   notifications: "Notifications",
@@ -62,6 +64,17 @@ describe("buildAppBreadcrumbs", () => {
       { href: undefined, isCurrent: false, label: "Jira" },
       { href: "/jira/tickets", isCurrent: false, label: "Tickets" },
       { href: undefined, isCurrent: true, label: "APP-123" },
+    ]);
+  });
+
+  test("links the GitHub cache from an entry detail route", () => {
+    expect(
+      buildAppBreadcrumbs("/github/cache/entries/cache-123", translate),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "GitHub" },
+      { href: "/github/cache", isCurrent: false, label: "Cache" },
+      { href: undefined, isCurrent: false, label: "Entries" },
+      { href: undefined, isCurrent: true, label: "cache-123" },
     ]);
   });
 
