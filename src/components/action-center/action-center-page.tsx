@@ -103,9 +103,14 @@ export function ActionCenterPage() {
               <Badge variant="outline">{needsAttentionCount}</Badge>
             </div>
             {attention.length ? (
-              attention.map((item) => (
-                <ActionCenterItem item={item} key={item.key} />
-              ))
+              <div
+                className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,32rem),1fr))] items-stretch gap-3"
+                data-slot="action-center-items"
+              >
+                {attention.map((item) => (
+                  <ActionCenterItem item={item} key={item.key} />
+                ))}
+              </div>
             ) : needsAttentionCount === 0 ? (
               <p className="rounded-lg border p-5 text-sm text-muted-foreground">
                 {t("noAttention")}
@@ -121,9 +126,14 @@ export function ActionCenterPage() {
               <Badge variant="secondary">{activeCount}</Badge>
             </div>
             {active.length ? (
-              active.map((item) => (
-                <ActionCenterItem item={item} key={item.key} />
-              ))
+              <div
+                className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,32rem),1fr))] items-stretch gap-3"
+                data-slot="action-center-items"
+              >
+                {active.map((item) => (
+                  <ActionCenterItem item={item} key={item.key} />
+                ))}
+              </div>
             ) : activeCount === 0 ? (
               <p className="rounded-lg border p-5 text-sm text-muted-foreground">
                 {t("noActive")}

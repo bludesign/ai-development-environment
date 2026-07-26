@@ -325,7 +325,7 @@ export function NotificationsSidebar() {
             </div>
           </div>
           <div
-            className="min-h-0 flex-[1_1_0%] border-t border-sidebar-border"
+            className="min-h-0 flex-[1_1_0%] overflow-hidden border-t border-sidebar-border"
             data-slot="mini-action-center"
           >
             <MiniActionCenter />

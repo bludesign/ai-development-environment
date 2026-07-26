@@ -130,12 +130,26 @@ const failed = {
   failureFingerprint: "BUILD:build-failed:0:2026-07-26T12:00:00.000Z",
 };
 
+const active = {
+  ...question,
+  key: "SESSION:session-active",
+  resourceKind: "SESSION",
+  reason: "ACTIVE",
+  resourceId: "session-active",
+  href: "/sessions/session-active",
+  displayNumber: 9,
+  label: "Continue implementation.",
+  status: "IN_PROGRESS",
+  phase: "RUNNING",
+  questionBatches: [],
+};
+
 const page = {
-  items: [question, workflowQuestion, failed],
+  items: [question, workflowQuestion, failed, active],
   nextCursor: null,
-  totalCount: 3,
+  totalCount: 4,
   needsAttentionCount: 3,
-  activeCount: 0,
+  activeCount: 1,
 };
 
 beforeEach(() => {
@@ -193,6 +207,20 @@ describe("ActionCenterPage", () => {
     expect(
       screen.getByRole("heading", { name: "Needs attention" }),
     ).toBeDefined();
+    expect(
+      document.querySelector('[data-slot="action-center-items"]')?.className,
+    ).toContain("repeat(auto-fit,minmax(min(100%,32rem),1fr))");
+    expect(
+      document.querySelector('[data-slot="action-center-items"]')?.className,
+    ).toContain("items-stretch");
+
+    const activeCard = screen
+      .getByRole("link", { name: "Session #9" })
+      .closest('[data-slot="card"]');
+    expect(activeCard).not.toBeNull();
+    expect(
+      within(activeCard as HTMLElement).getByText("Active").className,
+    ).toContain("bg-emerald-500/10");
   });
 
   test("answers plan and workflow questions with their existing mutations", async () => {
@@ -271,5 +299,14 @@ describe("MiniActionCenter", () => {
     expect(
       screen.getByRole("link", { name: "Action Center" }).getAttribute("href"),
     ).toBe("/action-center");
+    const compactItem = document.querySelector(
+      '[data-slot="action-center-compact-item"]',
+    );
+    expect(compactItem?.className).toContain("overflow-hidden");
+    const worktreeLink = compactItem?.querySelector(
+      'a[href="/worktrees/worktree-1"]',
+    );
+    expect(worktreeLink?.className).toContain("overflow-hidden");
+    expect(worktreeLink?.querySelectorAll("span")).toHaveLength(1);
   });
 });

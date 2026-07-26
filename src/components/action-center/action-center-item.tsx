@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -64,6 +65,8 @@ function reasonClass(
     return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   if (reason === "UNRUN_BUILD")
     return "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+  if (reason === "ACTIVE")
+    return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   return undefined;
 }
 
@@ -81,6 +84,9 @@ export function ActionCenterItem({
   const kind = t(`kinds.${item.resourceKind}`);
   const title = itemTitle(item, kind);
   const color = item.worktree?.highlightColor;
+  const worktreeLabel = item.worktree
+    ? `${item.worktree.folder}${item.worktree.branch ? ` · ${item.worktree.branch}` : ""}`
+    : null;
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);
@@ -94,7 +100,7 @@ export function ActionCenterItem({
   };
 
   const actions = (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
       {item.buildRun && (
         <RunBuildControls
           buildId={item.buildRun.buildId}
@@ -127,14 +133,12 @@ export function ActionCenterItem({
 
   const worktree = item.worktree && (
     <Link
-      className="inline-flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+      className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
       href={`/worktrees/${item.worktree.id}`}
+      title={worktreeLabel ?? undefined}
     >
       <GitBranch className="size-3 shrink-0" />
-      <span className="truncate">{item.worktree.folder}</span>
-      {item.worktree.branch && (
-        <span className="truncate">· {item.worktree.branch}</span>
-      )}
+      <span className="min-w-0 truncate">{worktreeLabel}</span>
     </Link>
   );
 
@@ -143,12 +147,13 @@ export function ActionCenterItem({
     return (
       <div
         className={cn(
-          "space-y-2 border-b border-l-4 p-2.5 last:border-b-0",
+          "space-y-2 overflow-hidden border-b border-l-4 p-2.5 last:border-b-0",
           color
             ? worktreeHighlightAccentClasses[color]
             : "border-l-transparent",
           color && worktreeHighlightBackgroundClasses[color],
         )}
+        data-slot="action-center-compact-item"
       >
         <div className="flex items-start gap-2">
           <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -160,7 +165,7 @@ export function ActionCenterItem({
               {title}
             </Link>
             {item.resourceKind !== "WORKFLOW" && item.label !== title && (
-              <p className="line-clamp-2 text-xs text-muted-foreground">
+              <p className="line-clamp-2 break-words text-xs text-muted-foreground">
                 {item.label}
               </p>
             )}
@@ -173,15 +178,17 @@ export function ActionCenterItem({
           </Badge>
         </div>
         {question && (
-          <p className="line-clamp-2 text-xs font-medium">
+          <p className="line-clamp-2 break-words text-xs font-medium">
             {question.header || question.prompt}
           </p>
         )}
         {item.error && (
-          <p className="line-clamp-2 text-xs text-destructive">{item.error}</p>
+          <p className="line-clamp-2 break-words text-xs text-destructive">
+            {item.error}
+          </p>
         )}
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="min-w-0">{worktree}</div>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+          <div className="min-w-0 overflow-hidden">{worktree}</div>
           {actions}
         </div>
       </div>
@@ -191,32 +198,30 @@ export function ActionCenterItem({
   return (
     <Card
       className={cn(
-        "border-l-4",
+        "min-w-0 border-l-4",
         color ? worktreeHighlightAccentClasses[color] : "border-l-transparent",
         color && worktreeHighlightBackgroundClasses[color],
       )}
     >
       <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="mt-0.5 rounded-md border bg-background p-2">
-              <Icon className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-base">
-                <Link className="hover:underline" href={item.href}>
-                  {title}
-                </Link>
-              </CardTitle>
-              <CardDescription className="mt-1 line-clamp-2">
-                {item.resourceKind === "PLAN" || item.resourceKind === "SESSION"
-                  ? item.label
-                  : item.summary || item.label}
-              </CardDescription>
-            </div>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 shrink-0 rounded-md border bg-background p-2">
+            <Icon className="size-4" />
           </div>
-          {actions}
+          <div className="min-w-0 flex-1">
+            <CardTitle className="min-w-0 text-base">
+              <Link className="block truncate hover:underline" href={item.href}>
+                {title}
+              </Link>
+            </CardTitle>
+            <CardDescription className="mt-1 line-clamp-2 break-words">
+              {item.resourceKind === "PLAN" || item.resourceKind === "SESSION"
+                ? item.label
+                : item.summary || item.label}
+            </CardDescription>
+          </div>
         </div>
+        <CardAction>{actions}</CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -237,7 +242,9 @@ export function ActionCenterItem({
         {worktree}
         {item.error && (
           <Alert variant="destructive">
-            <AlertDescription>{item.error}</AlertDescription>
+            <AlertDescription className="break-words">
+              {item.error}
+            </AlertDescription>
           </Alert>
         )}
         {item.questionBatches.map((batch) => (

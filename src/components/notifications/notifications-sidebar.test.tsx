@@ -148,6 +148,7 @@ describe("NotificationsSidebar", () => {
     expect(feed?.className).toContain("flex-[2_1_0%]");
     expect(feed?.className).toContain("overflow-y-auto");
     expect(actionCenter?.className).toContain("flex-[1_1_0%]");
+    expect(actionCenter?.className).toContain("overflow-hidden");
   });
 
   test("shows live relative times without a tooltip or hover card", async () => {

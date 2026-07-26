@@ -34,7 +34,7 @@ export function MiniActionCenter() {
           {totalCount}
         </Badge>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
         {loading && items.length === 0 ? (
           <div className="flex justify-center p-5">
             <Spinner />
