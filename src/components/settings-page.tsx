@@ -33,6 +33,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -55,7 +56,29 @@ import type {
 const SETTINGS_FIELDS =
   "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt";
 const APP_SETTINGS_FIELDS =
-  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
+  "configured appId installationId privateKeyConfigured keyFingerprint appSlug appOwnerLogin appOwnerType accountLogin repositorySelection actionsPermission checksPermission commitStatusesPermission webhookEvents enhancedPipelineWebhooksEnabled enhancedPipelineWebhooksReady enhancedPipelineWebhooksMissing verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
+
+export function githubAppSettingsUrl(
+  settings: Pick<
+    GitHubAppSettingsView,
+    "appSlug" | "appOwnerLogin" | "appOwnerType"
+  > | null,
+): string | null {
+  if (!settings?.appSlug) return null;
+  const slug = encodeURIComponent(settings.appSlug);
+  if (settings.appOwnerType === "User") {
+    return `https://github.com/settings/apps/${slug}`;
+  }
+  if (!settings.appOwnerLogin) return null;
+  const owner = encodeURIComponent(settings.appOwnerLogin);
+  if (settings.appOwnerType === "Organization") {
+    return `https://github.com/organizations/${owner}/settings/apps/${slug}`;
+  }
+  if (settings.appOwnerType === "Enterprise") {
+    return `https://github.com/enterprises/${owner}/settings/apps/${slug}`;
+  }
+  return null;
+}
 
 export function SettingsPage() {
   const t = useTranslations("settings");
@@ -246,11 +269,16 @@ function GitHubAppSettingsCard() {
   const [deploymentUrl, setDeploymentUrl] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookUrlIsExplicit, setWebhookUrlIsExplicit] = useState(false);
+  const [enhancedPipelineWebhooksEnabled, setEnhancedPipelineWebhooksEnabled] =
+    useState(false);
   const [draggingPem, setDraggingPem] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const appSettingsUrl = githubAppSettingsUrl(settings);
+  const enhancedPipelineWebhooksBlocked =
+    !settings || (settings.enhancedPipelineWebhooksMissing?.length ?? 0) > 0;
 
   const applySettings = useCallback((next: GitHubAppSettingsView) => {
     setSettings(next);
@@ -259,6 +287,9 @@ function GitHubAppSettingsCard() {
     setPrivateKey("");
     setWebhookUrl((current) => next.webhookUrl ?? current);
     setWebhookUrlIsExplicit(Boolean(next.webhookUrl));
+    setEnhancedPipelineWebhooksEnabled(
+      next.enhancedPipelineWebhooksEnabled ?? false,
+    );
   }, []);
 
   const load = useCallback(async () => {
@@ -303,6 +334,7 @@ function GitHubAppSettingsCard() {
             installationId: installationId.trim(),
             privateKey: privateKey || null,
             ...(webhookUrlIsExplicit ? { webhookUrl: webhookUrl.trim() } : {}),
+            enhancedPipelineWebhooksEnabled,
           },
         },
       );
@@ -531,6 +563,49 @@ function GitHubAppSettingsCard() {
                 </p>
               </div>
 
+              <div className="rounded-lg border p-4">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    checked={enhancedPipelineWebhooksEnabled}
+                    disabled={enhancedPipelineWebhooksBlocked}
+                    id="github-enhanced-pipeline-webhooks"
+                    onCheckedChange={(checked) =>
+                      setEnhancedPipelineWebhooksEnabled(checked === true)
+                    }
+                  />
+                  <div className="min-w-0">
+                    <Label
+                      className="font-medium"
+                      htmlFor="github-enhanced-pipeline-webhooks"
+                    >
+                      {t("enhancedWebhooks")}
+                    </Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("enhancedWebhooksHelp")}
+                    </p>
+                    {appSettingsUrl && (
+                      <p className="mt-2 text-xs">
+                        <SettingsHelpLink href={appSettingsUrl}>
+                          {t("openAppSettings")}
+                        </SettingsHelpLink>
+                      </p>
+                    )}
+                    {settings &&
+                      !settings.enhancedPipelineWebhooksReady &&
+                      (settings.enhancedPipelineWebhooksMissing?.length ?? 0) >
+                        0 && (
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-700 dark:text-amber-300">
+                          {(settings.enhancedPipelineWebhooksMissing ?? []).map(
+                            (requirement) => (
+                              <li key={requirement}>{requirement}</li>
+                            ),
+                          )}
+                        </ul>
+                      )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <Label
                   className="mb-1.5 block text-sm font-medium"
@@ -595,6 +670,12 @@ function GitHubAppSettingsCard() {
                       {t("connectionDetails", {
                         permission: settings.actionsPermission ?? "—",
                         selection: settings.repositorySelection ?? "—",
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs">
+                      {t("pipelinePermissions", {
+                        checks: settings.checksPermission ?? "none",
+                        statuses: settings.commitStatusesPermission ?? "none",
                       })}
                     </p>
                     {settings.verifiedAt && (

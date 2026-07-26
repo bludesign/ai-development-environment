@@ -38,6 +38,7 @@ export type BreadcrumbLabelKey =
   | "tools"
   | "unifiedEvents"
   | "usage"
+  | "webhooks"
   | "welcome"
   | "workflows"
   | "worktrees";
@@ -92,6 +93,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   tools: "tools",
   "unified-events": "unifiedEvents",
   usage: "usage",
+  webhooks: "webhooks",
   workflows: "workflows",
   worktrees: "worktrees",
 };
@@ -158,6 +160,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/tools",
   "/unified-events",
   "/usage",
+  "/webhooks",
   "/workflows",
   "/workflows/new",
   "/worktrees",

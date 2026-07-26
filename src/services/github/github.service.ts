@@ -6,6 +6,7 @@ import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
   configureGitHubAppWebhook,
+  getGitHubAppRegistration,
   githubAppGraphql,
   GitHubAppError,
   listGitHubActionsWorkflowJobs,
@@ -58,11 +59,17 @@ import type {
   GitHubRequestSource,
   GitHubSettingsView,
   GitHubViewer,
+  GitHubWebhookDeliveryPage,
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
   SaveGitHubAutoRetryRuleInput,
 } from "./types";
 import { GitHubAutoRetryService } from "./github-auto-retry.service";
+import {
+  GitHubPipelineStatusService,
+  type GitHubPipelineObservation,
+} from "./github-pipeline-status.service";
+import { normalizePipelineState } from "./pipeline-status";
 import type { PollingService } from "@/services/polling";
 import { GitHubCache } from "./github-cache";
 import {
@@ -89,6 +96,56 @@ const PULL_REQUEST_PAGE_SIZE = 25;
 export const MIN_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 30;
 export const MAX_ACTIONS_NOTIFICATION_POLL_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_JIRA_KEY_REGEX = String.raw`\b([A-Z][A-Z0-9_]*-\d+)\b`;
+
+const ENHANCED_PIPELINE_WEBHOOK_EVENTS = [
+  "workflow_run",
+  "workflow_job",
+  "check_run",
+  "check_suite",
+  "status",
+] as const;
+
+function jsonStringArray(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function permissionCanRead(value: string | null): boolean {
+  return value === "read" || value === "write";
+}
+
+function enhancedPipelineWebhookRequirements(input: {
+  webhookConfigured: boolean;
+  actionsPermission: string | null;
+  checksPermission: string | null;
+  commitStatusesPermission: string | null;
+  webhookEvents: string[];
+}): string[] {
+  const missing: string[] = [];
+  if (!input.webhookConfigured)
+    missing.push("configure the signed webhook URL");
+  if (!permissionCanRead(input.actionsPermission)) {
+    missing.push("grant Actions read permission");
+  }
+  if (!permissionCanRead(input.checksPermission)) {
+    missing.push("grant Checks read permission");
+  }
+  if (!permissionCanRead(input.commitStatusesPermission)) {
+    missing.push("grant Commit statuses read permission");
+  }
+  for (const event of ENHANCED_PIPELINE_WEBHOOK_EVENTS) {
+    if (!input.webhookEvents.includes(event)) {
+      missing.push(`subscribe to the ${event} event`);
+    }
+  }
+  return missing;
+}
 
 function requestSourceFromAudit(
   context: GitHubAuditContext,
@@ -155,6 +212,8 @@ type RawPullRequestLiveStatus = Pick<
   | "viewerCanEnableAutoMerge"
   | "viewerCanDisableAutoMerge"
   | "headRefOid"
+  | "updatedAt"
+  | "repository"
 >;
 
 type GitHubQueryOptions = {
@@ -173,6 +232,8 @@ type RawCheckSuite = {
     databaseId: string | number;
     url: string;
     runNumber: number;
+    runAttempt: number;
+    updatedAt: string;
     workflow: { name: string };
   } | null;
 };
@@ -264,6 +325,8 @@ type RawPipelineContext =
       status: string;
       conclusion: string | null;
       detailsUrl: string | null;
+      startedAt: string | null;
+      completedAt: string | null;
       checkSuite: RawCheckSuite;
     }
   | {
@@ -273,6 +336,7 @@ type RawPipelineContext =
       state: string;
       description: string | null;
       targetUrl: string | null;
+      updatedAt: string;
     };
 
 type RawPullRequestDetail = Omit<RawPullRequest, "reviewThreads"> & {
@@ -391,6 +455,8 @@ const PIPELINE_CONTEXT_FIELDS = `
     status
     conclusion
     detailsUrl
+    startedAt
+    completedAt
     checkSuite {
       id
       status
@@ -401,6 +467,8 @@ const PIPELINE_CONTEXT_FIELDS = `
         databaseId
         url
         runNumber
+        runAttempt
+        updatedAt
         workflow { name }
       }
     }
@@ -411,6 +479,7 @@ const PIPELINE_CONTEXT_FIELDS = `
     state
     description
     targetUrl
+    updatedAt
   }
 `;
 
@@ -460,9 +529,11 @@ const PULL_REQUEST_FRAGMENT = `
 const PULL_REQUEST_LIVE_FRAGMENT = `
   fragment PullRequestLiveFields on PullRequest {
     id
+    updatedAt
     state
     mergedAt
     headRefOid
+    repository { id nameWithOwner url }
     statusCheckRollup {
       state
       contexts(first: 100) {
@@ -832,27 +903,7 @@ function pipelineState(
   status: string | null | undefined,
   conclusion?: string | null,
 ): GitHubPipelineState {
-  const value = (conclusion || status || "NONE").toUpperCase();
-  if (
-    value === "ACTION_REQUIRED" ||
-    value === "CANCELLED" ||
-    value === "ERROR" ||
-    value === "EXPECTED" ||
-    value === "FAILURE" ||
-    value === "IN_PROGRESS" ||
-    value === "NEUTRAL" ||
-    value === "PENDING" ||
-    value === "QUEUED" ||
-    value === "SKIPPED" ||
-    value === "STALE" ||
-    value === "STARTUP_FAILURE" ||
-    value === "SUCCESS" ||
-    value === "TIMED_OUT"
-  ) {
-    return value;
-  }
-  if (value === "REQUESTED" || value === "WAITING") return "QUEUED";
-  return "NONE";
+  return normalizePipelineState(status, conclusion);
 }
 
 function retryUnavailableReason(
@@ -889,39 +940,66 @@ function checkSuitePipeline(
       : null,
     workflowId: null,
     runNumber: workflowRun?.runNumber ?? null,
-    runAttempt: null,
+    runAttempt: workflowRun?.runAttempt ?? null,
   };
 }
 
-function normalizePipelines(
-  contexts: RawPipelineContext[],
+function pipelineObservationFromContext(
+  context: RawPipelineContext,
   appConfigured: boolean,
-): GitHubPipelineView[] {
-  const pipelines = new Map<string, GitHubPipelineView>();
-  for (const context of contexts) {
-    if (context.__typename === "CheckRun") {
-      const pipeline = checkSuitePipeline(context.checkSuite, appConfigured);
-      pipelines.set(pipeline.id, pipeline);
-    } else {
-      pipelines.set(context.id, {
-        id: context.id,
-        name: context.context,
-        status: pipelineState(context.state),
-        url: context.targetUrl,
-        checkSuiteId: null,
-        canRetry: false,
-        retryUnavailableReason: "NOT_GITHUB_ACTIONS",
-        jobs: [],
-        workflowRunId: null,
-        workflowId: null,
-        runNumber: null,
-        runAttempt: null,
-      });
-    }
+  sourceFetchedAt: Date,
+): GitHubPipelineObservation {
+  if (context.__typename === "CheckRun") {
+    const pipeline = checkSuitePipeline(context.checkSuite, appConfigured);
+    const updatedAt =
+      context.checkSuite.workflowRun?.updatedAt ??
+      context.completedAt ??
+      context.startedAt;
+    return {
+      ...pipeline,
+      jobs: undefined,
+      source: "GRAPHQL",
+      githubUpdatedAt: updatedAt ? new Date(updatedAt) : null,
+      sourceFetchedAt,
+    };
   }
-  return [...pipelines.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
+  return {
+    id: context.id,
+    name: context.context,
+    status: pipelineState(context.state),
+    url: context.targetUrl,
+    checkSuiteId: null,
+    canRetry: false,
+    retryUnavailableReason: "NOT_GITHUB_ACTIONS",
+    jobs: [],
+    workflowRunId: null,
+    workflowId: null,
+    runNumber: null,
+    runAttempt: null,
+    statusContext: context.context,
+    source: "GRAPHQL",
+    githubUpdatedAt: new Date(context.updatedAt),
+    sourceFetchedAt,
+  };
+}
+
+function graphqlPipelineFetchedAt(
+  pullRequest: RawPullRequestLiveStatus,
+  contexts: RawPipelineContext[],
+): Date {
+  const timestamps = [
+    pullRequest.updatedAt,
+    ...contexts.map((context) =>
+      context.__typename === "StatusContext"
+        ? context.updatedAt
+        : (context.checkSuite.workflowRun?.updatedAt ??
+          context.completedAt ??
+          context.startedAt),
+    ),
+  ]
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
+    .filter(Number.isFinite);
+  return new Date(timestamps.length > 0 ? Math.max(...timestamps) : 0);
 }
 
 function reviewDecision(value: string | null): GitHubReviewDecision {
@@ -1018,12 +1096,14 @@ function normalizeReviewThreadState(thread: {
 export class GitHubService {
   private autoRetryService: GitHubAutoRetryService | null = null;
   private readonly cache = new GitHubCache();
+  private readonly graphqlFetchedAt = new WeakMap<object, Date>();
 
   constructor(
     startAutoRetry = false,
     private readonly credentials = new CredentialService(),
     private readonly polling?: PollingService,
     private readonly notificationsConfigurationChanged?: () => void,
+    readonly pipelineStatus = new GitHubPipelineStatusService(),
   ) {
     if (startAutoRetry)
       this.autoRetryService = new GitHubAutoRetryService(this, this.polling);
@@ -1034,6 +1114,20 @@ export class GitHubService {
       this,
       this.polling,
     ));
+  }
+
+  private rememberGraphqlFetchedAt(value: unknown, fetchedAt: Date): void {
+    const pending: unknown[] = [value];
+    const visited = new WeakSet<object>();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (!current || typeof current !== "object" || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+      this.graphqlFetchedAt.set(current, fetchedAt);
+      pending.push(...Object.values(current));
+    }
   }
 
   private pollingConfigurationChanged(): void {
@@ -1091,6 +1185,7 @@ export class GitHubService {
       return this.cache.mutation(requestInput);
     }
     const result = await this.cache.query({ ...requestInput, ...options });
+    this.rememberGraphqlFetchedAt(result.data, result.fetchedAt);
     return result.data;
   }
 
@@ -1272,10 +1367,14 @@ export class GitHubService {
         };
       },
     };
-    const data =
-      prepared.kind === "mutation"
-        ? await this.cache.mutation(requestInput)
-        : (await this.cache.query({ ...requestInput, ...options })).data;
+    let data: T;
+    if (prepared.kind === "mutation") {
+      data = await this.cache.mutation(requestInput);
+    } else {
+      const result = await this.cache.query({ ...requestInput, ...options });
+      data = result.data;
+      this.rememberGraphqlFetchedAt(data, result.fetchedAt);
+    }
     return { data, githubRequestId };
   }
 
@@ -1648,9 +1747,15 @@ export class GitHubService {
       installationId: string;
       keyFingerprint: string;
       appSlug: string;
+      appOwnerLogin: string | null;
+      appOwnerType: string | null;
       accountLogin: string;
       repositorySelection: string;
       actionsPermission: string;
+      checksPermission: string | null;
+      commitStatusesPermission: string | null;
+      webhookEventsJson: string;
+      enhancedPipelineWebhooksEnabled: boolean;
       verifiedAt: Date;
       webhookUrl: string | null;
       webhookConfiguredAt: Date | null;
@@ -1664,6 +1769,23 @@ export class GitHubService {
       error: string | null;
     } | null,
   ): GitHubAppSettingsView {
+    const webhookEvents = settings
+      ? jsonStringArray(settings.webhookEventsJson)
+      : [];
+    const webhookConfigured = Boolean(
+      settings?.webhookUrl &&
+      settings.webhookConfiguredAt &&
+      webhookSecretConfigured,
+    );
+    const enhancedPipelineWebhooksMissing = settings
+      ? enhancedPipelineWebhookRequirements({
+          webhookConfigured,
+          actionsPermission: settings.actionsPermission,
+          checksPermission: settings.checksPermission,
+          commitStatusesPermission: settings.commitStatusesPermission,
+          webhookEvents,
+        })
+      : ["Configure and verify the GitHub App"];
     return {
       configured: Boolean(settings && privateKeyConfigured),
       appId: settings?.appId ?? null,
@@ -1671,15 +1793,21 @@ export class GitHubService {
       privateKeyConfigured,
       keyFingerprint: settings?.keyFingerprint ?? null,
       appSlug: settings?.appSlug ?? null,
+      appOwnerLogin: settings?.appOwnerLogin ?? null,
+      appOwnerType: settings?.appOwnerType ?? null,
       accountLogin: settings?.accountLogin ?? null,
       repositorySelection: settings?.repositorySelection ?? null,
       actionsPermission: settings?.actionsPermission ?? null,
+      checksPermission: settings?.checksPermission ?? null,
+      commitStatusesPermission: settings?.commitStatusesPermission ?? null,
+      webhookEvents,
+      enhancedPipelineWebhooksEnabled:
+        settings?.enhancedPipelineWebhooksEnabled ?? false,
+      enhancedPipelineWebhooksReady:
+        enhancedPipelineWebhooksMissing.length === 0,
+      enhancedPipelineWebhooksMissing,
       verifiedAt: settings?.verifiedAt.toISOString() ?? null,
-      webhookConfigured: Boolean(
-        settings?.webhookUrl &&
-        settings.webhookConfiguredAt &&
-        webhookSecretConfigured,
-      ),
+      webhookConfigured,
       webhookUrl: settings?.webhookUrl ?? null,
       webhookConfiguredAt: settings?.webhookConfiguredAt?.toISOString() ?? null,
       webhookLastReceivedAt: lastDelivery?.receivedAt.toISOString() ?? null,
@@ -1692,7 +1820,7 @@ export class GitHubService {
   async getAppSettings(): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
     const [
-      settings,
+      storedSettings,
       privateKeyConfigured,
       webhookSecretConfigured,
       lastDelivery,
@@ -1707,12 +1835,96 @@ export class GitHubService {
         select: { receivedAt: true, outcome: true, error: true },
       }),
     ]);
+    let settings = storedSettings;
+    if (
+      settings &&
+      privateKeyConfigured &&
+      (!settings.appOwnerLogin || !settings.appOwnerType)
+    ) {
+      try {
+        const registration = await getGitHubAppRegistration(
+          await this.appCredentials(settings),
+        );
+        settings = await prisma.gitHubAppSettings.update({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+          data: {
+            appSlug: registration.appSlug,
+            appOwnerLogin: registration.appOwnerLogin,
+            appOwnerType: registration.appOwnerType,
+          },
+        });
+      } catch {
+        // Owner metadata is supplemental; keep settings available if GitHub
+        // cannot be reached during the one-time backfill.
+      }
+    }
     return this.appSettingsView(
       settings,
       privateKeyConfigured,
       webhookSecretConfigured,
       lastDelivery,
     );
+  }
+
+  async webhooksEnabled(): Promise<boolean> {
+    const [settings, secretConfigured] = await Promise.all([
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+        select: { webhookUrl: true, webhookConfiguredAt: true },
+      }),
+      this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
+    ]);
+    return Boolean(
+      settings?.webhookUrl && settings.webhookConfiguredAt && secretConfigured,
+    );
+  }
+
+  async webhookDeliveries(
+    limit = 50,
+    offset = 0,
+  ): Promise<GitHubWebhookDeliveryPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("limit must be an integer from 1 to 100");
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative integer");
+    }
+    const enabled = await this.webhooksEnabled();
+    if (!enabled) {
+      return { enabled, items: [], total: 0, limit, offset };
+    }
+    const prisma = await getPrismaClient();
+    const [deliveries, total] = await Promise.all([
+      prisma.gitHubWebhookDelivery.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: [{ receivedAt: "desc" }, { deliveryId: "desc" }],
+      }),
+      prisma.gitHubWebhookDelivery.count(),
+    ]);
+    return {
+      enabled,
+      total,
+      limit,
+      offset,
+      items: deliveries.map((delivery) => ({
+        deliveryId: delivery.deliveryId,
+        event: delivery.event,
+        action: delivery.action,
+        repositoryName: delivery.repositoryName,
+        workflowRunId: delivery.workflowRunId,
+        outcome: delivery.outcome,
+        error: delivery.error,
+        receivedAt: delivery.receivedAt.toISOString(),
+        processedAt: delivery.processedAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  async clearWebhookDeliveries(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    await prisma.gitHubWebhookDelivery.deleteMany();
+    return true;
   }
 
   private async requireAppCredentials(): Promise<GitHubAppCredentials> {
@@ -1830,6 +2042,7 @@ export class GitHubService {
       installationId: string;
       privateKey?: string | null;
       webhookUrl?: string | null;
+      enhancedPipelineWebhooksEnabled?: boolean | null;
     },
     auditContext: GitHubAuditContext,
     requestOrigin: string | null = null,
@@ -1875,6 +2088,24 @@ export class GitHubService {
         ...this.appTransportObservers(GITHUB_GRAPHQL_URL, true),
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
+      const enhancedPipelineWebhooksEnabled =
+        input.enhancedPipelineWebhooksEnabled ??
+        existing?.enhancedPipelineWebhooksEnabled ??
+        false;
+      if (enhancedPipelineWebhooksEnabled) {
+        const permissionOrEventMissing = enhancedPipelineWebhookRequirements({
+          webhookConfigured: true,
+          actionsPermission: verification.actionsPermission,
+          checksPermission: verification.checksPermission,
+          commitStatusesPermission: verification.commitStatusesPermission,
+          webhookEvents: verification.webhookEvents,
+        });
+        if (permissionOrEventMissing.length > 0) {
+          throw new Error(
+            `Enhanced pipeline webhooks are not ready: ${permissionOrEventMissing.join("; ")}`,
+          );
+        }
+      }
       const existingWebhookSecret = await this.credentials.getText(
         CREDENTIALS.githubAppWebhookSecret,
       );
@@ -1896,6 +2127,20 @@ export class GitHubService {
           secret: webhookSecret,
         });
         webhookConfiguredAt = configuration.configured ? new Date() : null;
+      }
+      if (enhancedPipelineWebhooksEnabled) {
+        const missing = enhancedPipelineWebhookRequirements({
+          webhookConfigured: Boolean(webhookConfiguredAt && webhookUrl),
+          actionsPermission: verification.actionsPermission,
+          checksPermission: verification.checksPermission,
+          commitStatusesPermission: verification.commitStatusesPermission,
+          webhookEvents: verification.webhookEvents,
+        });
+        if (missing.length > 0) {
+          throw new Error(
+            `Enhanced pipeline webhooks are not ready: ${missing.join("; ")}`,
+          );
+        }
       }
       const credentialEntries = [
         {
@@ -1919,9 +2164,15 @@ export class GitHubService {
           graphqlUrl: GITHUB_GRAPHQL_URL,
           keyFingerprint: verification.keyFingerprint,
           appSlug: verification.appSlug,
+          appOwnerLogin: verification.appOwnerLogin,
+          appOwnerType: verification.appOwnerType,
           accountLogin: verification.accountLogin,
           repositorySelection: verification.repositorySelection,
           actionsPermission: verification.actionsPermission,
+          checksPermission: verification.checksPermission,
+          commitStatusesPermission: verification.commitStatusesPermission,
+          webhookEventsJson: JSON.stringify(verification.webhookEvents),
+          enhancedPipelineWebhooksEnabled,
           verifiedAt: verification.verifiedAt,
           webhookUrl: storedWebhookUrl,
           webhookConfiguredAt,
@@ -2024,9 +2275,14 @@ export class GitHubService {
         data: {
           keyFingerprint: verification.keyFingerprint,
           appSlug: verification.appSlug,
+          appOwnerLogin: verification.appOwnerLogin,
+          appOwnerType: verification.appOwnerType,
           accountLogin: verification.accountLogin,
           repositorySelection: verification.repositorySelection,
           actionsPermission: verification.actionsPermission,
+          checksPermission: verification.checksPermission,
+          commitStatusesPermission: verification.commitStatusesPermission,
+          webhookEventsJson: JSON.stringify(verification.webhookEvents),
           verifiedAt: verification.verifiedAt,
         },
       });
@@ -2410,6 +2666,24 @@ export class GitHubService {
         };
       },
     );
+    const canonicalRecords = await this.pipelineStatus.observeWorkflowRuns(
+      items,
+      "REST",
+      false,
+    );
+    const canonicalItems = items.map((item) => {
+      const record = canonicalRecords.get(item.id);
+      return record
+        ? {
+            ...item,
+            status: record.status,
+            checkSuiteId: record.checkSuiteId,
+            canRetry: record.canRetry,
+            retryUnavailableReason: record.retryUnavailableReason,
+            runAttempt: record.runAttempt ?? item.runAttempt,
+          }
+        : item;
+    });
     const hasNextPage = streams.some(
       (stream) =>
         !stream.failed &&
@@ -2427,7 +2701,7 @@ export class GitHubService {
         })
       : null;
     return {
-      items,
+      items: canonicalItems,
       repositories: repositories.map(({ id, nameWithOwner, url }) => ({
         id,
         nameWithOwner,
@@ -2472,7 +2746,9 @@ export class GitHubService {
       "latest",
       requestSource,
     );
-    return this.workflowJobViews(jobs, appSettings !== null);
+    const views = this.workflowJobViews(jobs, appSettings !== null);
+    await this.pipelineStatus.observeJobs(null, workflowRunId, views, "REST");
+    return views;
   }
 
   private async actionsTargetByIdentifier(
@@ -2601,10 +2877,42 @@ export class GitHubService {
     const appConfigured =
       Boolean(appSettings) &&
       (await this.credentials.isConfigured(CREDENTIALS.githubAppPrivateKey));
+    const jobViews = this.workflowJobViews(jobs, appConfigured).map((job) => ({
+      ...job,
+      canRetry: false,
+      retryUnavailableReason: "HISTORICAL_ATTEMPT" as const,
+    }));
+    const runAttempt = run.run_attempt ?? attempt;
+    const status = pipelineState(run.status, run.conclusion);
+    await this.pipelineStatus.observeSnapshot({
+      repositoryGithubId: run.repository.node_id,
+      repositoryNameWithOwner: run.repository.full_name,
+      repositoryUrl: run.repository.html_url,
+      headSha: run.head_sha,
+      pipelines: [
+        {
+          id: String(run.id),
+          name: run.name?.trim() || "GitHub Actions",
+          status,
+          url: run.html_url,
+          checkSuiteId: run.check_suite_node_id || null,
+          workflowRunId,
+          workflowId: String(run.workflow_id ?? run.name ?? run.id),
+          runNumber: run.run_number,
+          runAttempt,
+          canRetry: false,
+          retryUnavailableReason: "HISTORICAL_ATTEMPT",
+          jobs: includeJobs ? jobViews : undefined,
+          source: "REST",
+          githubUpdatedAt: new Date(run.updated_at),
+          isCurrent: false,
+        },
+      ],
+    });
     return {
       workflowRunId,
-      runAttempt: run.run_attempt ?? attempt,
-      status: pipelineState(run.status, run.conclusion),
+      runAttempt,
+      status,
       url: run.html_url,
       triggeringActor: run.triggering_actor
         ? {
@@ -2622,11 +2930,7 @@ export class GitHubService {
       startedAt: run.run_started_at ?? run.created_at,
       createdAt: run.created_at,
       updatedAt: run.updated_at,
-      jobs: this.workflowJobViews(jobs, appConfigured).map((job) => ({
-        ...job,
-        canRetry: false,
-        retryUnavailableReason: "HISTORICAL_ATTEMPT",
-      })),
+      jobs: jobViews,
     };
   }
 
@@ -2693,7 +2997,7 @@ export class GitHubService {
           )
         : [];
     }
-    return runs.map((run) => {
+    const views: GitHubActionsWorkflowRunView[] = runs.map((run) => {
       const completed = run.status.toLowerCase() === "completed";
       const checkSuiteId = run.check_suite_node_id || null;
       const unavailable = !completed
@@ -2733,6 +3037,23 @@ export class GitHubService {
         createdAt: run.created_at,
         updatedAt: run.updated_at,
       };
+    });
+    const canonicalRecords = await this.pipelineStatus.observeWorkflowRuns(
+      views,
+      "REST",
+    );
+    return views.map((view) => {
+      const record = canonicalRecords.get(view.id);
+      return record
+        ? {
+            ...view,
+            status: record.status,
+            checkSuiteId: record.checkSuiteId,
+            canRetry: record.canRetry,
+            retryUnavailableReason: record.retryUnavailableReason,
+            runAttempt: record.runAttempt ?? view.runAttempt,
+          }
+        : view;
     });
   }
 
@@ -2819,7 +3140,9 @@ export class GitHubService {
       token,
       "AUTO_RETRY",
     );
-    return result.workflow_runs.map((run) => {
+    const items: Array<
+      GitHubActionsWorkflowRunView & { jobs: GitHubWorkflowJobView[] }
+    > = result.workflow_runs.map((run) => {
       const completed = run.status.toLowerCase() === "completed";
       const checkSuiteId = run.check_suite_node_id || null;
       const unavailable = !completed
@@ -2863,6 +3186,25 @@ export class GitHubService {
         updatedAt: run.updated_at,
         jobs: [],
       };
+    });
+    const canonical = await this.pipelineStatus.observeWorkflowRuns(
+      items,
+      "REST",
+      false,
+    );
+    return items.map((item) => {
+      const record = canonical.get(item.id);
+      return record
+        ? {
+            ...item,
+            status: record.status,
+            checkSuiteId: record.checkSuiteId,
+            canRetry: record.canRetry,
+            retryUnavailableReason: record.retryUnavailableReason,
+            runAttempt: record.runAttempt ?? item.runAttempt,
+            jobs: record.jobs,
+          }
+        : item;
     });
   }
 
@@ -2910,7 +3252,9 @@ export class GitHubService {
         : appConfigured
           ? null
           : "GITHUB_APP_NOT_CONFIGURED";
-    return {
+    const view: GitHubActionsWorkflowRunView & {
+      jobs: GitHubWorkflowJobView[];
+    } = {
       id: String(run.id),
       workflowId: String(run.workflow_id ?? run.name ?? run.id),
       repositoryGithubId: run.repository.node_id,
@@ -2946,6 +3290,31 @@ export class GitHubService {
             items.findIndex((item) => item.name === job.name) === index,
         ),
     };
+    const records = await this.pipelineStatus.observeWorkflowRuns(
+      [view],
+      "REST",
+      false,
+    );
+    const canonical = includeJobs
+      ? await this.pipelineStatus.observeJobs(
+          view.repositoryGithubId,
+          view.id,
+          view.jobs,
+          "REST",
+          new Date(view.updatedAt),
+        )
+      : (records.get(view.id) ?? null);
+    return canonical
+      ? {
+          ...view,
+          status: canonical.status,
+          checkSuiteId: canonical.checkSuiteId,
+          canRetry: canonical.canRetry,
+          retryUnavailableReason: canonical.retryUnavailableReason,
+          runAttempt: canonical.runAttempt ?? view.runAttempt,
+          jobs: canonical.jobs,
+        }
+      : view;
   }
 
   async autoRetryRerun(
@@ -2995,6 +3364,18 @@ export class GitHubService {
         ).githubRequestId;
       }
       await this.cache.clear();
+      if (action === "JOB" && jobId) {
+        await this.pipelineStatus.optimisticJobByWorkflowRun(
+          null,
+          workflowRunId,
+          jobId,
+        );
+      } else {
+        await this.pipelineStatus.optimisticByWorkflowRun(null, workflowRunId, {
+          status: "QUEUED",
+          jobs: [],
+        });
+      }
       await this.audit(auditContext, {
         operation:
           action === "JOB"
@@ -3059,6 +3440,9 @@ export class GitHubService {
         requestSource,
       });
       await this.cache.clear();
+      await this.pipelineStatus.optimisticByWorkflowRun(null, workflowRunId, {
+        status: "CANCELLED",
+      });
       await this.audit(auditContext, {
         operation,
         repositoryId: codebaseRepositoryId,
@@ -3729,10 +4113,33 @@ export class GitHubService {
         )),
       );
     }
+    const normalizedPipelineStatus = pipelineStatus(
+      pullRequest.statusCheckRollup?.state,
+    );
+    const sourceFetchedAt =
+      this.graphqlFetchedAt.get(pullRequest) ??
+      graphqlPipelineFetchedAt(pullRequest, pipelineContexts);
+    const canonical = await this.pipelineStatus.observeSnapshot({
+      repositoryGithubId: pullRequest.repository.id,
+      repositoryNameWithOwner: pullRequest.repository.nameWithOwner,
+      repositoryUrl: pullRequest.repository.url,
+      headSha: pullRequest.headRefOid,
+      graphqlRollupStatus: normalizedPipelineStatus,
+      sourceFetchedAt,
+      completeGraphqlRollup: true,
+      pipelines: pipelineContexts.map((context) =>
+        pipelineObservationFromContext(
+          context,
+          appConfigured,
+          this.graphqlFetchedAt.get(context) ?? sourceFetchedAt,
+        ),
+      ),
+    });
     return {
       id: pullRequest.id,
-      pipelineStatus: pipelineStatus(pullRequest.statusCheckRollup?.state),
-      pipelines: normalizePipelines(pipelineContexts, appConfigured),
+      pipelineStatus: canonical.snapshot.pipelineStatus,
+      pipelines: canonical.snapshot.pipelines,
+      pipelineRevision: canonical.snapshot.revision,
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
       state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
@@ -4152,17 +4559,21 @@ export class GitHubService {
             pipelines: await Promise.all(
               pullRequest.pipelines.map(async (pipeline) => {
                 if (!pipeline.workflowRunId) return pipeline;
-                return {
-                  ...pipeline,
-                  jobs: await this.workflowJobs(
-                    owner,
-                    name,
-                    pipeline.workflowRunId,
-                    token,
-                    appCredentials,
-                    requestSource,
-                  ),
-                };
+                const jobs = await this.workflowJobs(
+                  owner,
+                  name,
+                  pipeline.workflowRunId,
+                  token,
+                  appCredentials,
+                  requestSource,
+                );
+                const canonical = await this.pipelineStatus.observeJobs(
+                  pullRequest.repositoryGithubId,
+                  pipeline.workflowRunId,
+                  jobs,
+                  "REST",
+                );
+                return canonical ?? { ...pipeline, jobs };
               }),
             ),
           };
@@ -4501,24 +4912,52 @@ export class GitHubService {
           // Attempt metadata is additive; preserve the existing PR pipeline when
           // GitHub does not expose the REST run to this token.
         }
-        return {
+        const jobs = await this.workflowJobs(
+          owner,
+          name,
+          workflowRunId,
+          token,
+          appSettings && appConfigured
+            ? await this.appCredentials(appSettings)
+            : null,
+          requestSource,
+        );
+        const enriched = {
           ...pipeline,
           workflowId: run
             ? String(run.workflow_id ?? pipeline.name)
             : pipeline.workflowId,
           runNumber: run?.run_number ?? pipeline.runNumber,
           runAttempt: run ? (run.run_attempt ?? 1) : pipeline.runAttempt,
-          jobs: await this.workflowJobs(
-            owner,
-            name,
-            workflowRunId,
-            token,
-            appSettings && appConfigured
-              ? await this.appCredentials(appSettings)
-              : null,
-            requestSource,
-          ),
+          status: run
+            ? pipelineState(run.status, run.conclusion)
+            : pipeline.status,
+          jobs,
         };
+        if (run) {
+          await this.pipelineStatus.observeSnapshot({
+            repositoryGithubId: summary.repositoryGithubId,
+            repositoryNameWithOwner: summary.repositoryNameWithOwner,
+            repositoryUrl: summary.repositoryUrl,
+            headSha: summary.headRefOid,
+            pipelines: [
+              {
+                ...enriched,
+                source: "REST",
+                githubUpdatedAt: new Date(run.updated_at),
+              },
+            ],
+          });
+        }
+        return (
+          (await this.pipelineStatus.observeJobs(
+            summary.repositoryGithubId,
+            workflowRunId,
+            jobs,
+            "REST",
+            run ? new Date(run.updated_at) : null,
+          )) ?? enriched
+        );
       }),
     );
     const normalizedReviewThreads = await this.completeReviewThreads(
@@ -5439,6 +5878,11 @@ export class GitHubService {
         githubRequestId: result.githubRequestId,
         outcome: "SUCCESS",
       });
+      await this.pipelineStatus.optimisticByCheckSuite(
+        repositoryId,
+        checkSuiteId,
+        { status: "QUEUED", jobs: [] },
+      );
       return {
         ...checkSuitePipeline(checkSuite, true),
         status: "QUEUED",
@@ -5567,6 +6011,11 @@ export class GitHubService {
         githubRequestId: result.githubRequestId,
         outcome: "SUCCESS",
       });
+      await this.pipelineStatus.optimisticJobByCheckSuite(
+        repositoryId,
+        checkSuiteId,
+        jobId,
+      );
       return true;
     } catch (error) {
       await this.audit(auditContext, {

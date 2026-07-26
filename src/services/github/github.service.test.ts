@@ -14,9 +14,21 @@ const state = vi.hoisted(() => ({
     graphqlUrl: "https://api.github.com/graphql",
     keyFingerprint: "SHA256:fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEventsJson: JSON.stringify([
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ]),
+    enhancedPipelineWebhooksEnabled: false,
     verifiedAt: new Date(0),
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -29,9 +41,15 @@ const state = vi.hoisted(() => ({
     graphqlUrl: string;
     keyFingerprint: string;
     appSlug: string;
+    appOwnerLogin: string | null;
+    appOwnerType: string | null;
     accountLogin: string;
     repositorySelection: string;
     actionsPermission: string;
+    checksPermission: string;
+    commitStatusesPermission: string;
+    webhookEventsJson: string;
+    enhancedPipelineWebhooksEnabled: boolean;
     verifiedAt: Date;
     webhookUrl?: string | null;
     webhookConfiguredAt?: Date | null;
@@ -39,6 +57,17 @@ const state = vi.hoisted(() => ({
     updatedAt: Date;
   } | null,
   auditEvents: [] as Array<Record<string, unknown>>,
+  webhookDeliveries: [] as Array<{
+    deliveryId: string;
+    event: string;
+    action: string | null;
+    repositoryName: string | null;
+    workflowRunId: string | null;
+    outcome: string;
+    error: string | null;
+    receivedAt: Date;
+    processedAt: Date | null;
+  }>,
   linkedCodebaseRepository: null as {
     id: string;
     canonicalOrigin: string;
@@ -101,6 +130,7 @@ const appClient = vi.hoisted(() => ({
   clearTokenCache: vi.fn(),
   graphql: vi.fn(),
   listJobs: vi.fn(),
+  registration: vi.fn(),
   rerun: vi.fn(),
   rerunJob: vi.fn(),
   verify: vi.fn(),
@@ -112,6 +142,83 @@ const cacheClient = vi.hoisted(() => ({
   clearForCredentialChange: vi.fn(),
   recordGraphqlTransportCall: vi.fn(),
   recordRestCall: vi.fn(),
+}));
+
+vi.mock("./github-pipeline-status.service", () => ({
+  GitHubPipelineStatusService: class {
+    async observeSnapshot(input: {
+      repositoryGithubId?: string;
+      repositoryNameWithOwner?: string;
+      repositoryUrl?: string;
+      headSha?: string;
+      graphqlRollupStatus?: string | null;
+      pipelines: Array<Record<string, unknown>>;
+    }) {
+      return {
+        snapshot: {
+          repositoryGithubId: input.repositoryGithubId ?? "repository-1",
+          repositoryNameWithOwner:
+            input.repositoryNameWithOwner ?? "acme/widgets",
+          repositoryUrl:
+            input.repositoryUrl ?? "https://github.com/acme/widgets",
+          headSha: input.headSha ?? "head-sha",
+          pipelineStatus: input.graphqlRollupStatus ?? "NONE",
+          pipelines: input.pipelines.map((pipeline) => ({
+            id: pipeline.id,
+            name: pipeline.name,
+            status: pipeline.status,
+            url: pipeline.url ?? null,
+            checkSuiteId: pipeline.checkSuiteId ?? null,
+            canRetry: pipeline.canRetry ?? false,
+            retryUnavailableReason: pipeline.retryUnavailableReason ?? null,
+            jobs: pipeline.jobs ?? [],
+            workflowRunId: pipeline.workflowRunId ?? null,
+            workflowId: pipeline.workflowId ?? null,
+            runNumber: pipeline.runNumber ?? null,
+            runAttempt: pipeline.runAttempt ?? null,
+          })),
+          revision: 1,
+          updatedAt: new Date(0).toISOString(),
+        },
+        changedPipeline: null,
+      };
+    }
+
+    async observeWorkflowRuns(runs: Array<Record<string, unknown>>) {
+      return new Map(
+        runs.map((run) => [
+          run.id,
+          {
+            ...run,
+            workflowRunId: run.id,
+            jobs: [],
+            revision: 1,
+            isCurrent: true,
+          },
+        ]),
+      );
+    }
+
+    async observeJobs() {
+      return null;
+    }
+
+    async optimisticByCheckSuite() {
+      return null;
+    }
+
+    async optimisticByWorkflowRun() {
+      return null;
+    }
+
+    async optimisticJobByCheckSuite() {
+      return null;
+    }
+
+    async optimisticJobByWorkflowRun() {
+      return null;
+    }
+  },
 }));
 
 vi.mock("@/services/github/github-cache", () => ({
@@ -153,6 +260,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     clearGitHubAppTokenCache: appClient.clearTokenCache,
     githubAppGraphql: appClient.graphql,
     listGitHubActionsWorkflowJobs: appClient.listJobs,
+    getGitHubAppRegistration: appClient.registration,
     rerunGitHubActionsJob: appClient.rerunJob,
     rerunGitHubActionsWorkflow: appClient.rerun,
     verifyGitHubAppConfiguration: appClient.verify,
@@ -367,6 +475,14 @@ vi.mock("@/data/prisma-client", () => ({
     },
     gitHubWebhookDelivery: {
       findFirst: async () => null,
+      findMany: async ({ take, skip }: { take: number; skip: number }) =>
+        state.webhookDeliveries.slice(skip, skip + take),
+      count: async () => state.webhookDeliveries.length,
+      deleteMany: async () => {
+        const count = state.webhookDeliveries.length;
+        state.webhookDeliveries = [];
+        return { count };
+      },
     },
   }),
 }));
@@ -619,14 +735,27 @@ beforeEach(() => {
     graphqlUrl: "https://api.github.com/graphql",
     keyFingerprint: "SHA256:fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEventsJson: JSON.stringify([
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ]),
+    enhancedPipelineWebhooksEnabled: false,
     verifiedAt: new Date(0),
     createdAt: new Date(0),
     updatedAt: new Date(0),
   };
   state.auditEvents = [];
+  state.webhookDeliveries = [];
   state.linkedCodebaseRepository = null;
   state.linkedWorktree = null;
   state.worktreeDetail = null;
@@ -682,12 +811,30 @@ beforeEach(() => {
     installationId: credentials.installationId.trim(),
     keyFingerprint: "SHA256:new-fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEvents: [
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ],
     viewerLogin: "workflow-rerunner[bot]",
     verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
   }));
+  appClient.registration.mockReset();
+  appClient.registration.mockResolvedValue({
+    appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
+    githubRequestId: "APP-1",
+  });
   appClient.configureWebhook.mockReset();
   appClient.configureWebhook.mockResolvedValue({
     configured: true,
@@ -697,6 +844,81 @@ beforeEach(() => {
 });
 
 describe("GitHub service", () => {
+  test("lists webhook deliveries only when GitHub webhooks are configured", async () => {
+    const service = new GitHubService();
+
+    await expect(service.webhookDeliveries(25, 0)).resolves.toEqual({
+      enabled: false,
+      items: [],
+      total: 0,
+      limit: 25,
+      offset: 0,
+    });
+
+    if (!state.appSettings) throw new Error("Missing settings");
+    state.appSettings.webhookUrl =
+      "https://control.example/api/public/github/webhook";
+    state.appSettings.webhookConfiguredAt = new Date(
+      "2026-07-26T15:00:00.000Z",
+    );
+    state.webhookSecret = "webhook-secret";
+    state.webhookDeliveries = [
+      {
+        deliveryId: "delivery-1",
+        event: "workflow_run",
+        action: "completed",
+        repositoryName: "acme/widgets",
+        workflowRunId: "42",
+        outcome: "PROCESSED",
+        error: null,
+        receivedAt: new Date("2026-07-26T16:00:00.000Z"),
+        processedAt: new Date("2026-07-26T16:00:01.000Z"),
+      },
+    ];
+
+    await expect(service.webhookDeliveries(25, 0)).resolves.toEqual({
+      enabled: true,
+      total: 1,
+      limit: 25,
+      offset: 0,
+      items: [
+        {
+          deliveryId: "delivery-1",
+          event: "workflow_run",
+          action: "completed",
+          repositoryName: "acme/widgets",
+          workflowRunId: "42",
+          outcome: "PROCESSED",
+          error: null,
+          receivedAt: "2026-07-26T16:00:00.000Z",
+          processedAt: "2026-07-26T16:00:01.000Z",
+        },
+      ],
+    });
+
+    await expect(service.clearWebhookDeliveries()).resolves.toBe(true);
+    await expect(service.webhookDeliveries(25, 0)).resolves.toMatchObject({
+      enabled: true,
+      items: [],
+      total: 0,
+    });
+  });
+
+  test("backfills GitHub App registration ownership for existing settings", async () => {
+    if (!state.appSettings) throw new Error("Missing settings");
+    state.appSettings.appOwnerLogin = null;
+    state.appSettings.appOwnerType = null;
+
+    await expect(new GitHubService().getAppSettings()).resolves.toMatchObject({
+      appSlug: "workflow-rerunner",
+      appOwnerLogin: "bludesign",
+      appOwnerType: "Organization",
+    });
+    expect(appClient.registration).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123", installationId: "456" }),
+    );
+  });
+
   test("validates repository names and Jira regex extraction", () => {
     expect(normalizeGitHubRepositoryName(" acme/widgets ")).toEqual({
       owner: "acme",
@@ -2348,6 +2570,64 @@ describe("GitHub service", () => {
       service.saveSettings({ actionsNotificationPollIntervalSeconds: 120 }),
     ).resolves.toMatchObject({ tokenConfigured: true });
     expect(cacheClient.clearForCredentialChange).not.toHaveBeenCalled();
+  });
+
+  test("enables enhanced pipeline webhooks only after permissions and events verify", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          enhancedPipelineWebhooksEnabled: true,
+        },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).resolves.toMatchObject({
+      enhancedPipelineWebhooksEnabled: true,
+      enhancedPipelineWebhooksReady: true,
+      enhancedPipelineWebhooksMissing: [],
+    });
+    expect(state.appSettings?.enhancedPipelineWebhooksEnabled).toBe(true);
+  });
+
+  test("reports precise enhanced webhook remediation before changing the webhook", async () => {
+    appClient.verify.mockResolvedValueOnce({
+      appId: "123",
+      installationId: "456",
+      keyFingerprint: "SHA256:new-fingerprint",
+      appSlug: "workflow-rerunner",
+      appOwnerLogin: "bludesign",
+      appOwnerType: "Organization",
+      accountLogin: "acme",
+      repositorySelection: "selected",
+      actionsPermission: "read",
+      checksPermission: "none",
+      commitStatusesPermission: "none",
+      webhookEvents: ["workflow_run"],
+      viewerLogin: "workflow-rerunner[bot]",
+      verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
+    });
+
+    await expect(
+      new GitHubService().saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          enhancedPipelineWebhooksEnabled: true,
+        },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).rejects.toThrow(
+      /Checks read permission.*Commit statuses read permission.*workflow_job/,
+    );
+    expect(appClient.configureWebhook).not.toHaveBeenCalled();
+    expect(state.appSettings?.enhancedPipelineWebhooksEnabled).toBe(false);
   });
 
   test("configures and preserves a signed webhook only for a public HTTPS origin", async () => {

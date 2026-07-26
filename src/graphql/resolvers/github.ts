@@ -8,6 +8,8 @@ import type {
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
   GitHubRequestSource,
+  GitHubPipelineRecordKeyInput,
+  GitHubPipelineStatusKeyInput,
   SaveGitHubAutoRetryRuleInput,
   GitHubService,
 } from "@/services/github";
@@ -172,6 +174,28 @@ export const createGitHubResolvers = (
     ) => {
       requireControlPlane(context);
       return gitHubService.getAppSettings();
+    },
+    githubWebhooksEnabled: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.webhooksEnabled();
+    },
+    githubWebhookDeliveries: (
+      _root: unknown,
+      {
+        limit,
+        offset,
+      }: {
+        limit?: number | null;
+        offset?: number | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.webhookDeliveries(limit ?? 50, offset ?? 0);
     },
     githubRepositories: (
       _root: unknown,
@@ -362,6 +386,22 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.reviewThreads();
     },
+    githubPipelineStatuses: (
+      _root: unknown,
+      { keys }: { keys: GitHubPipelineStatusKeyInput[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.pipelineStatus.snapshots(keys);
+    },
+    githubPipelineRecords: (
+      _root: unknown,
+      { keys }: { keys: GitHubPipelineRecordKeyInput[] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.pipelineStatus.records(keys);
+    },
   },
   Mutation: {
     saveGitHubSettings: (
@@ -423,6 +463,14 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.clearApiCalls();
     },
+    clearGitHubWebhookDeliveries: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearWebhookDeliveries();
+    },
     refreshGitHubCachedEntry: (
       _root: unknown,
       { id }: { id: string },
@@ -449,6 +497,7 @@ export const createGitHubResolvers = (
           installationId: string;
           privateKey?: string | null;
           webhookUrl?: string | null;
+          enhancedPipelineWebhooksEnabled?: boolean | null;
         };
       },
       context: GraphQLContext,
@@ -678,6 +727,14 @@ export const createGitHubResolvers = (
     ) => {
       requireControlPlane(context);
       return gitHubService.setReviewThreadResolved(threadId, resolved);
+    },
+  },
+  Subscription: {
+    githubPipelineStatusChanged: {
+      subscribe: (_root: unknown, _args: unknown, context: GraphQLContext) => {
+        requireControlPlane(context);
+        return gitHubService.pipelineStatus.subscribe();
+      },
     },
   },
 });

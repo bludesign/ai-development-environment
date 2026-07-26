@@ -86,9 +86,14 @@ export type GitHubAppVerification = {
   installationId: string;
   keyFingerprint: string;
   appSlug: string;
+  appOwnerLogin: string;
+  appOwnerType: string;
   accountLogin: string;
   repositorySelection: "all" | "selected";
   actionsPermission: string;
+  checksPermission: string;
+  commitStatusesPermission: string;
+  webhookEvents: string[];
   viewerLogin: string;
   verifiedAt: Date;
   githubRequestId: string | null;
@@ -127,6 +132,17 @@ type InstallationDetails = {
   app_slug: string;
   account: { login: string };
   repository_selection: "all" | "selected";
+  permissions?: Record<string, string>;
+  events?: string[];
+};
+
+type AuthenticatedAppDetails = {
+  id: number;
+  slug: string;
+  owner: {
+    login: string;
+    type: string;
+  };
 };
 
 type InstallationTokenResponse = {
@@ -380,6 +396,75 @@ async function installationDetails(
   return details;
 }
 
+async function authenticatedAppDetails(
+  prepared: PreparedCredentials,
+  appJwt: string,
+): Promise<{
+  details: AuthenticatedAppDetails;
+  githubRequestId: string | null;
+}> {
+  const response = await githubFetch(
+    `${prepared.apiBaseUrl}/app`,
+    { headers: githubHeaders(`Bearer ${appJwt}`) },
+    GITHUB_REST_OPERATIONS.apps.getAuthenticated,
+    prepared,
+    "GITHUB_SETTINGS",
+  );
+  const body = await responseBody(response);
+  const githubRequestId = requestId(response);
+  if (response.status === 401) {
+    throw new GitHubAppError(
+      "GITHUB_APP_UNAUTHORIZED",
+      "GitHub rejected the App ID or private key",
+      githubRequestId,
+    );
+  }
+  if (!response.ok || !body || typeof body !== "object") {
+    throw new GitHubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      responseMessage(body, response.status, [
+        appJwt,
+        prepared.privateKey,
+        prepared.privateKeyPkcs8,
+      ]),
+      githubRequestId,
+    );
+  }
+  const details = body as AuthenticatedAppDetails;
+  if (
+    String(details.id) !== prepared.appId ||
+    !details.slug ||
+    !details.owner?.login ||
+    !details.owner.type
+  ) {
+    throw new GitHubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "GitHub returned incomplete GitHub App registration details",
+      githubRequestId,
+    );
+  }
+  return { details, githubRequestId };
+}
+
+export async function getGitHubAppRegistration(
+  credentials: GitHubAppCredentials,
+): Promise<{
+  appSlug: string;
+  appOwnerLogin: string;
+  appOwnerType: string;
+  githubRequestId: string | null;
+}> {
+  const prepared = prepareGitHubAppCredentials(credentials);
+  const appJwt = await createAppJwt(prepared);
+  const registration = await authenticatedAppDetails(prepared, appJwt);
+  return {
+    appSlug: registration.details.slug,
+    appOwnerLogin: registration.details.owner.login,
+    appOwnerType: registration.details.owner.type,
+    githubRequestId: registration.githubRequestId,
+  };
+}
+
 async function mintInstallationToken(
   prepared: PreparedCredentials,
   requestSource: GitHubRequestSource,
@@ -570,7 +655,10 @@ export async function verifyGitHubAppConfiguration(
 ): Promise<GitHubAppVerification> {
   const prepared = prepareGitHubAppCredentials(credentials);
   const appJwt = await createAppJwt(prepared);
-  const details = await installationDetails(prepared, appJwt);
+  const [details, registration] = await Promise.all([
+    installationDetails(prepared, appJwt),
+    authenticatedAppDetails(prepared, appJwt),
+  ]);
   const token = await mintInstallationToken(
     prepared,
     "GITHUB_SETTINGS",
@@ -588,10 +676,15 @@ export async function verifyGitHubAppConfiguration(
     appId: prepared.appId,
     installationId: prepared.installationId,
     keyFingerprint: prepared.keyFingerprint,
-    appSlug: details.app_slug,
+    appSlug: registration.details.slug,
+    appOwnerLogin: registration.details.owner.login,
+    appOwnerType: registration.details.owner.type,
     accountLogin: details.account.login,
     repositorySelection: token.repositorySelection,
     actionsPermission: token.permissions.actions ?? "none",
+    checksPermission: token.permissions.checks ?? "none",
+    commitStatusesPermission: token.permissions.statuses ?? "none",
+    webhookEvents: Array.isArray(details.events) ? details.events : [],
     viewerLogin: result.data.viewer.login,
     verifiedAt: new Date(),
     githubRequestId: result.githubRequestId,

@@ -31,7 +31,11 @@ function workflowPayload(
   return {
     action: "completed",
     installation: { id: 456 },
-    repository: { full_name: "acme/widgets" },
+    repository: {
+      node_id: "repository-node-1",
+      full_name: "acme/widgets",
+      html_url: "https://github.com/acme/widgets",
+    },
     workflow_run: {
       id: 101,
       workflow_id: 202,
@@ -62,6 +66,8 @@ function githubResponse(runs: Array<Record<string, unknown>>): Response {
 function setup(
   workflowEvents?: { record: ReturnType<typeof vi.fn> },
   jiraBranchRegex: string | null = "([A-Z]+-\\d+)",
+  enhancedPipelineWebhooksEnabled = false,
+  appConfigured = true,
 ) {
   const deliveries = new Map<string, Record<string, unknown>>();
   const observations = new Map<string, Observation>();
@@ -84,6 +90,16 @@ function setup(
     getText: vi.fn(async (descriptor: { id: string }) =>
       descriptor.id.endsWith("webhook-secret") ? SECRET : "personal-token",
     ),
+    isConfigured: vi.fn(async (descriptor: { id: string }) =>
+      descriptor.id.endsWith("private-key") ? appConfigured : true,
+    ),
+  };
+  const pipelineStatus = {
+    observeSnapshot: vi.fn(async () => ({
+      snapshot: {},
+      changedPipeline: null,
+    })),
+    observeJobs: vi.fn(async () => null),
   };
   const observationKey = (where: {
     codebaseRepositoryId_workflowRunId_runAttempt: {
@@ -167,7 +183,15 @@ function setup(
       })),
     },
     gitHubAppSettings: {
-      findUnique: vi.fn(async () => ({ installationId: "456" })),
+      findUnique: vi.fn(async () =>
+        appConfigured
+          ? {
+              id: "default",
+              installationId: "456",
+              enhancedPipelineWebhooksEnabled,
+            }
+          : null,
+      ),
     },
     gitHubWebhookDelivery: {
       create: vi.fn(async ({ data }) => {
@@ -237,6 +261,7 @@ function setup(
     false,
     workflowEvents as never,
     { recordRestCall: mocks.recordRestCall } as never,
+    pipelineStatus as never,
   );
   return {
     service,
@@ -246,6 +271,7 @@ function setup(
     observations,
     pollingStates,
     deliveries,
+    pipelineStatus,
   };
 }
 
@@ -270,6 +296,124 @@ beforeEach(() => {
 });
 
 describe("GitHub Actions webhook notifications", () => {
+  test("always ingests signed completed workflow runs", async () => {
+    const { service, pipelineStatus } = setup();
+
+    await service.handleWebhook(webhookInput(workflowPayload("success")));
+
+    expect(pipelineStatus.observeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryGithubId: "repository-node-1",
+        headSha: "abc123",
+        pipelines: [
+          expect.objectContaining({
+            workflowRunId: "101",
+            status: "SUCCESS",
+            source: "WEBHOOK",
+          }),
+        ],
+      }),
+    );
+  });
+
+  test("gates enhanced status webhooks and performs no outbound request", async () => {
+    const disabled = setup();
+    const payload = {
+      installation: { id: 456 },
+      repository: {
+        node_id: "repository-node-1",
+        full_name: "acme/widgets",
+        html_url: "https://github.com/acme/widgets",
+      },
+      sha: "abc123",
+      context: "deploy/production",
+      state: "success",
+      target_url: "https://ci.example/deploy/1",
+      updated_at: "2026-07-22T12:00:00.000Z",
+    };
+    const disabledInput = webhookInput(payload, "status-disabled");
+    await expect(
+      disabled.service.handleWebhook({ ...disabledInput, event: "status" }),
+    ).resolves.toMatchObject({ outcome: "IGNORED" });
+    expect(disabled.pipelineStatus.observeSnapshot).not.toHaveBeenCalled();
+
+    const enabled = setup(undefined, undefined, true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const enabledInput = webhookInput(payload, "status-enabled");
+    await expect(
+      enabled.service.handleWebhook({ ...enabledInput, event: "status" }),
+    ).resolves.toMatchObject({ outcome: "PROCESSED" });
+    expect(enabled.pipelineStatus.observeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryGithubId: "repository-node-1",
+        headSha: "abc123",
+        pipelines: [
+          expect.objectContaining({
+            statusContext: "deploy/production",
+            status: "SUCCESS",
+            source: "WEBHOOK",
+          }),
+        ],
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("persists enhanced workflow job steps on their run", async () => {
+    const { service, pipelineStatus } = setup(undefined, undefined, true);
+    const input = webhookInput(
+      {
+        action: "completed",
+        installation: { id: 456 },
+        repository: {
+          node_id: "repository-node-1",
+          full_name: "acme/widgets",
+          html_url: "https://github.com/acme/widgets",
+        },
+        workflow_job: {
+          id: 501,
+          run_id: 101,
+          run_attempt: 2,
+          workflow_name: "CI",
+          name: "test",
+          head_sha: "abc123",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://github.com/acme/widgets/actions/runs/101/job/501",
+          completed_at: "2026-07-22T12:00:00.000Z",
+          steps: [
+            {
+              number: 1,
+              name: "Run tests",
+              status: "completed",
+              conclusion: "failure",
+            },
+          ],
+        },
+      },
+      "workflow-job-completed",
+    );
+
+    await expect(
+      service.handleWebhook({ ...input, event: "workflow_job" }),
+    ).resolves.toMatchObject({ outcome: "PROCESSED" });
+    expect(pipelineStatus.observeJobs).toHaveBeenCalledWith(
+      "repository-node-1",
+      "101",
+      [
+        expect.objectContaining({
+          id: "501",
+          status: "FAILURE",
+          runAttempt: 2,
+          steps: [expect.objectContaining({ name: "Run tests" })],
+        }),
+      ],
+      "WEBHOOK",
+      new Date("2026-07-22T12:00:00.000Z"),
+    );
+  });
+
   test("correlates pull-request webhook triggers to the worktree and agent", async () => {
     const workflowEvents = { record: vi.fn(async () => ({})) };
     const { service } = setup(workflowEvents);
@@ -509,7 +653,11 @@ describe("GitHub Actions webhook notifications", () => {
     ).resolves.toEqual({ outcome: "IGNORED", notificationCreated: false });
 
     const repository = workflowPayload("success");
-    repository.repository = { full_name: "other/project" };
+    repository.repository = {
+      node_id: "other-repository",
+      full_name: "other/project",
+      html_url: "https://github.com/other/project",
+    };
     await expect(
       service.handleWebhook(webhookInput(repository, "wrong-repository")),
     ).resolves.toEqual({ outcome: "IGNORED", notificationCreated: false });
@@ -526,6 +674,55 @@ describe("GitHub Actions webhook notifications", () => {
 });
 
 describe("GitHub Actions fallback polling", () => {
+  test("keeps completed PAT-polled runs non-retryable without a GitHub App", async () => {
+    const { service, pipelineStatus } = setup(
+      undefined,
+      undefined,
+      false,
+      false,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        githubResponse([
+          {
+            id: 101,
+            workflow_id: 202,
+            run_attempt: 1,
+            name: "CI",
+            status: "completed",
+            conclusion: "success",
+            head_sha: "abc123",
+            updated_at: "2026-07-22T13:00:00.000Z",
+            check_suite_node_id: "suite-node-1",
+            repository: {
+              node_id: "repository-node-1",
+              full_name: "acme/widgets",
+              html_url: "https://github.com/acme/widgets",
+            },
+          },
+        ]),
+      ),
+    );
+
+    await (
+      service as unknown as {
+        pollRepositories(): Promise<Record<string, unknown>>;
+      }
+    ).pollRepositories();
+
+    expect(pipelineStatus.observeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipelines: [
+          expect.objectContaining({
+            canRetry: false,
+            retryUnavailableReason: "GITHUB_APP_NOT_CONFIGURED",
+          }),
+        ],
+      }),
+    );
+  });
+
   test("paginates until it reaches runs older than the previous successful poll", async () => {
     const { service, notifications, pollingStates } = setup();
     const previousPoll = new Date("2026-07-22T12:00:00.000Z");

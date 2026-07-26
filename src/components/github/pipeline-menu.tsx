@@ -2,7 +2,7 @@
 
 import { ChevronDown, ExternalLink, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { MouseEvent, useState } from "react";
+import { MouseEvent, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { useGitHubPipelineSnapshot } from "./pipeline-status-provider";
 import type {
   GitHubPipelineState,
   GitHubPipelineStatus,
@@ -144,18 +145,57 @@ export function pipelineStateClass(
 export function PipelineMenu({
   pipelineStatus,
   pipelines,
+  pipelineRevision = 0,
+  headSha,
   repositoryId,
+  repositoryNameWithOwner,
+  repositoryUrl,
   requestSource,
   onPipelineRetried,
 }: {
   pipelineStatus: GitHubPipelineStatus;
   pipelines: GitHubPipelineView[];
+  pipelineRevision?: number;
+  headSha?: string | null;
   repositoryId: string;
+  repositoryNameWithOwner?: string;
+  repositoryUrl?: string;
   requestSource: GitHubRequestSource;
   onPipelineRetried?: (pipeline: GitHubPipelineView) => void;
 }) {
   const t = useTranslations("pullRequests");
   const [error, setError] = useState<string | null>(null);
+  const snapshotKey = useMemo(
+    () => (headSha ? { repositoryGithubId: repositoryId, headSha } : null),
+    [headSha, repositoryId],
+  );
+  const seed = useMemo(
+    () =>
+      headSha
+        ? {
+            repositoryGithubId: repositoryId,
+            repositoryNameWithOwner: repositoryNameWithOwner ?? "",
+            repositoryUrl: repositoryUrl ?? "",
+            headSha,
+            pipelineStatus,
+            pipelines,
+            revision: pipelineRevision,
+            updatedAt: "",
+          }
+        : null,
+    [
+      headSha,
+      pipelineRevision,
+      pipelineStatus,
+      pipelines,
+      repositoryId,
+      repositoryNameWithOwner,
+      repositoryUrl,
+    ],
+  );
+  const snapshot = useGitHubPipelineSnapshot(snapshotKey, seed);
+  const displayedStatus = snapshot?.pipelineStatus ?? pipelineStatus;
+  const displayedPipelines = snapshot?.pipelines ?? pipelines;
 
   const stopPropagation = (event: MouseEvent) => event.stopPropagation();
 
@@ -163,11 +203,11 @@ export function PipelineMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          className={`h-5 rounded-full px-2 py-0.5 text-xs ${pipelineStateClass(pipelineStatus)}`}
+          className={`h-5 rounded-full px-2 py-0.5 text-xs ${pipelineStateClass(displayedStatus)}`}
           onClick={stopPropagation}
           variant="outline"
         >
-          {t(`pipelineStates.${pipelineStatus}`)}
+          {t(`pipelineStates.${displayedStatus}`)}
           <ChevronDown className="size-3" />
         </Button>
       </DropdownMenuTrigger>
@@ -181,13 +221,13 @@ export function PipelineMenu({
         {error && (
           <p className="px-2 py-1.5 text-xs text-destructive">{error}</p>
         )}
-        {pipelines.length === 0 ? (
+        {displayedPipelines.length === 0 ? (
           <p className="px-2 py-3 text-sm text-muted-foreground">
             {t("noPipelines")}
           </p>
         ) : (
           <div className="space-y-1 p-1">
-            {pipelines.map((pipeline) => (
+            {displayedPipelines.map((pipeline) => (
               <div
                 key={pipeline.id}
                 className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-muted"

@@ -53,8 +53,11 @@ describe("GitHub resolvers", () => {
       saveCacheTtlOverride: vi.fn(),
       clearCache: vi.fn(),
       clearApiCalls: vi.fn(),
+      clearWebhookDeliveries: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
+      webhooksEnabled: vi.fn(),
+      webhookDeliveries: vi.fn(),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
 
@@ -85,10 +88,27 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubCacheTtlOverrides({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
+      resolvers.Query.githubWebhooksEnabled({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubWebhookDeliveries(
+        {},
+        { limit: 50, offset: 0 },
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
       resolvers.Mutation.clearGitHubCache({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Mutation.clearGitHubApiCalls({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearGitHubWebhookDeliveries(
+        {},
+        {},
+        context("agent-1"),
+      ),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Mutation.saveGitHubCacheTtlOverride(
@@ -102,9 +122,44 @@ describe("GitHub resolvers", () => {
     expect(service.pullRequests).not.toHaveBeenCalled();
     expect(service.cacheMetrics).not.toHaveBeenCalled();
     expect(service.cacheTtlOverrides).not.toHaveBeenCalled();
+    expect(service.webhooksEnabled).not.toHaveBeenCalled();
+    expect(service.webhookDeliveries).not.toHaveBeenCalled();
     expect(service.saveCacheTtlOverride).not.toHaveBeenCalled();
     expect(service.clearCache).not.toHaveBeenCalled();
     expect(service.clearApiCalls).not.toHaveBeenCalled();
+    expect(service.clearWebhookDeliveries).not.toHaveBeenCalled();
+  });
+
+  test("delegates webhook availability and delivery pagination", async () => {
+    const page = {
+      enabled: true,
+      items: [],
+      total: 0,
+      limit: 25,
+      offset: 50,
+    };
+    const service = {
+      webhooksEnabled: vi.fn().mockResolvedValue(true),
+      webhookDeliveries: vi.fn().mockResolvedValue(page),
+      clearWebhookDeliveries: vi.fn().mockResolvedValue(true),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+
+    await expect(
+      resolvers.Query.githubWebhooksEnabled({}, {}, context(null)),
+    ).resolves.toBe(true);
+    await expect(
+      resolvers.Query.githubWebhookDeliveries(
+        {},
+        { limit: 25, offset: 50 },
+        context(null),
+      ),
+    ).resolves.toBe(page);
+    expect(service.webhookDeliveries).toHaveBeenCalledWith(25, 50);
+    await expect(
+      resolvers.Mutation.clearGitHubWebhookDeliveries({}, {}, context(null)),
+    ).resolves.toBe(true);
+    expect(service.clearWebhookDeliveries).toHaveBeenCalledOnce();
   });
 
   test("delegates GraphQL cache TTL override management", async () => {
@@ -491,5 +546,58 @@ describe("GitHub resolvers", () => {
       true,
       "ACTIONS_PAGE",
     );
+  });
+
+  test("serves canonical pipeline state locally and protects its subscription", async () => {
+    const iterator = {
+      next: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+    const pipelineStatus = {
+      snapshots: vi.fn().mockResolvedValue([{ headSha: "sha-1" }]),
+      records: vi.fn().mockResolvedValue([{ workflowRunId: "run-1" }]),
+      subscribe: vi.fn().mockReturnValue(iterator),
+    };
+    const service = { pipelineStatus } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+    const snapshotKeys = [
+      { repositoryGithubId: "repository-1", headSha: "sha-1" },
+    ];
+    const recordKeys = [
+      { repositoryGithubId: "repository-1", workflowRunId: "run-1" },
+    ];
+
+    await expect(
+      resolvers.Query.githubPipelineStatuses(
+        {},
+        { keys: snapshotKeys },
+        context(null),
+      ),
+    ).resolves.toEqual([{ headSha: "sha-1" }]);
+    await expect(
+      resolvers.Query.githubPipelineRecords(
+        {},
+        { keys: recordKeys },
+        context(null),
+      ),
+    ).resolves.toEqual([{ workflowRunId: "run-1" }]);
+    expect(pipelineStatus.snapshots).toHaveBeenCalledWith(snapshotKeys);
+    expect(pipelineStatus.records).toHaveBeenCalledWith(recordKeys);
+    expect(
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        {},
+        context(null),
+      ),
+    ).toBe(iterator);
+    expect(() =>
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        {},
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
   });
 });

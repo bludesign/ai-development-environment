@@ -96,8 +96,8 @@ export function WorkflowRunActionsMenu({
   jobs?: GitHubWorkflowJobView[];
   includeAutoRetry?: boolean;
   includeWorktree?: boolean;
-  onCancelled: () => void;
-  onRetried: () => void;
+  onCancelled?: () => void;
+  onRetried?: () => void;
   onError: (error: string | null) => void;
   viewAllHref?: string | null;
   workflowResource?: WorkflowMenuResource | null;
@@ -139,7 +139,7 @@ export function WorkflowRunActionsMenu({
           source: requestSource,
         },
       );
-      onRetried();
+      onRetried?.();
       onError(null);
     } catch (value) {
       onError(value instanceof Error ? value.message : String(value));
@@ -181,7 +181,7 @@ export function WorkflowRunActionsMenu({
           source: requestSource,
         },
       );
-      onCancelled();
+      onCancelled?.();
       onError(null);
     } catch (value) {
       onError(value instanceof Error ? value.message : String(value));

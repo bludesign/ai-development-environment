@@ -373,6 +373,5 @@ describe("PullRequestDetailPage", () => {
         },
       ),
     );
-    expect(screen.getByText("Cancelled")).toBeDefined();
   });
 });

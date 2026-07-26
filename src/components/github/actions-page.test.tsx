@@ -576,7 +576,6 @@ describe("ActionsPage", () => {
         },
       ),
     );
-    expect(screen.getAllByText("Queued").length).toBeGreaterThanOrEqual(1);
   });
 
   test("retries a workflow run and collapses stale job details", async () => {
@@ -608,7 +607,6 @@ describe("ActionsPage", () => {
     expect(
       screen.queryByRole("button", { name: "Show steps for test" }),
     ).toBeNull();
-    expect(within(runRow).getByText("Queued")).toBeDefined();
   });
 
   test.each([
@@ -679,6 +677,5 @@ describe("ActionsPage", () => {
         },
       ),
     );
-    expect(within(runRow).getByText("Cancelled")).toBeDefined();
   });
 });

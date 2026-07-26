@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AppShell } from "@/components/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
 const navigation = vi.hoisted(() => ({ pathname: "/" }));
@@ -27,11 +28,14 @@ vi.mock("@/i18n/navigation", async () => {
 });
 
 vi.mock("@/lib/control-plane-client", () => ({
-  controlPlaneRequest: vi.fn().mockResolvedValue({ sidebarNotifications: [] }),
+  controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(() => ({
     subscribe: vi.fn(() => vi.fn()),
   })),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
+
+const requestMock = vi.mocked(controlPlaneRequest);
 
 function setViewportWidth(width: number) {
   Object.defineProperty(window, "innerWidth", {
@@ -83,6 +87,16 @@ describe("AppShell", () => {
     setViewportWidth(1280);
     navigation.pathname = "/";
     clearCookies();
+    requestMock.mockReset();
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query NavigationFeatures")) {
+        return {
+          cacheServerSettings: { configured: false },
+          githubWebhooksEnabled: false,
+        } as never;
+      }
+      return { sidebarNotifications: [] } as never;
+    });
   });
 
   afterEach(() => {
@@ -133,6 +147,34 @@ describe("AppShell", () => {
       screen.getByRole("button", { name: "Show notifications" }),
     ).toBeDefined();
     expect(document.cookie).toContain(`${RIGHT_SIDEBAR_COOKIE}=false`);
+  });
+
+  test("shows the GitHub webhooks page only while webhooks are enabled", async () => {
+    const disabled = renderShell();
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenCalledWith(
+        expect.stringContaining("githubWebhooksEnabled"),
+      );
+    });
+    expect(screen.queryByRole("link", { name: "Webhooks" })).toBeNull();
+    disabled.unmount();
+
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query NavigationFeatures")) {
+        return {
+          cacheServerSettings: { configured: false },
+          githubWebhooksEnabled: true,
+        } as never;
+      }
+      return { sidebarNotifications: [] } as never;
+    });
+    renderShell();
+
+    expect(
+      (await screen.findByRole("link", { name: "Webhooks" })).getAttribute(
+        "href",
+      ),
+    ).toBe("/webhooks");
   });
 
   test("uses independently restored desktop defaults", () => {

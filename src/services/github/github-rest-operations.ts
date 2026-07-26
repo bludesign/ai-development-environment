@@ -16,6 +16,7 @@ export const GITHUB_REST_OPERATIONS = {
   },
   apps: {
     createInstallationAccessToken: "apps.createInstallationAccessToken",
+    getAuthenticated: "apps.getAuthenticated",
     getInstallation: "apps.getInstallation",
     updateWebhookConfigForApp: "apps.updateWebhookConfigForApp",
   },

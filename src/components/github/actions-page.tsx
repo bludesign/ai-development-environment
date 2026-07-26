@@ -23,6 +23,10 @@ import {
 } from "react";
 
 import { pipelineStateClass } from "@/components/github/pipeline-menu";
+import {
+  gitHubPipelineRecordKey,
+  useGitHubPipelineRecords,
+} from "@/components/github/pipeline-status-provider";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowRunActionsMenu } from "@/components/github/workflow-run-actions-menu";
 import { WorkflowJob as WorkflowJobMenu } from "@/components/github/workflow-job";
@@ -73,6 +77,7 @@ import type {
   GitHubActionsWorkflowRunPage,
   GitHubActionsWorkflowRunView,
   GitHubSettingsView,
+  GitHubPipelineRecordView,
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
 } from "@/services/github/types";
@@ -488,18 +493,6 @@ export function ActionsPage() {
 
   const runRetried = (run: GitHubActionsWorkflowRunView) => {
     const key = runKey(run);
-    setRuns((current) =>
-      current.map((item) =>
-        runKey(item) === key
-          ? {
-              ...item,
-              status: "QUEUED",
-              canRetry: false,
-              retryUnavailableReason: "NOT_COMPLETED",
-            }
-          : item,
-      ),
-    );
     setJobStates((current) => {
       const next = { ...current };
       delete next[key];
@@ -512,62 +505,10 @@ export function ActionsPage() {
     });
   };
 
-  const jobRetried = (run: GitHubActionsWorkflowRunView, jobId: string) => {
-    const key = runKey(run);
-    setRuns((current) =>
-      current.map((item) =>
-        runKey(item) === key
-          ? {
-              ...item,
-              status: "QUEUED",
-              canRetry: false,
-              retryUnavailableReason: "NOT_COMPLETED",
-            }
-          : item,
-      ),
-    );
-    setJobStates((current) => {
-      const state = current[key];
-      if (!state?.jobs) return current;
-      return {
-        ...current,
-        [key]: {
-          ...state,
-          jobs: state.jobs.map((job) =>
-            job.id === jobId
-              ? {
-                  ...job,
-                  status: "QUEUED",
-                  canRetry: false,
-                  retryUnavailableReason: "NOT_COMPLETED",
-                  steps: [],
-                }
-              : {
-                  ...job,
-                  canRetry: false,
-                  retryUnavailableReason: "NOT_COMPLETED",
-                },
-          ),
-        },
-      };
-    });
-  };
+  const jobRetried = () => undefined;
 
   const runCancelled = (run: GitHubActionsWorkflowRunView) => {
     const key = runKey(run);
-    setRuns((current) =>
-      current.map((item) =>
-        runKey(item) === key
-          ? {
-              ...item,
-              status: "CANCELLED",
-              canRetry: false,
-              retryUnavailableReason: "NOT_COMPLETED",
-              updatedAt: new Date().toISOString(),
-            }
-          : item,
-      ),
-    );
     setJobStates((current) => {
       const next = { ...current };
       delete next[key];
@@ -839,12 +780,64 @@ function ActionsTable({
   const [historicalAttempts, setHistoricalAttempts] = useState<
     Record<string, GitHubWorkflowRunAttemptView | null>
   >({});
+  const pipelineRecordKeys = useMemo(
+    () =>
+      runs.map((run) => ({
+        repositoryGithubId: run.repositoryGithubId,
+        workflowRunId: run.id,
+      })),
+    [runs],
+  );
+  const pipelineRecordSeeds = useMemo(
+    () =>
+      runs.map((run): GitHubPipelineRecordView => ({
+        id: run.id,
+        name: run.name,
+        status: run.status,
+        url: run.url,
+        checkSuiteId: run.checkSuiteId,
+        canRetry: run.canRetry,
+        retryUnavailableReason: run.retryUnavailableReason,
+        jobs: jobStates[runKey(run)]?.jobs ?? [],
+        workflowRunId: run.id,
+        workflowId: run.workflowId,
+        runNumber: run.runNumber,
+        runAttempt: run.runAttempt,
+        repositoryGithubId: run.repositoryGithubId,
+        headSha: run.headSha,
+        revision: 0,
+        isCurrent: true,
+      })),
+    [jobStates, runs],
+  );
+  const pipelineRecords = useGitHubPipelineRecords(
+    pipelineRecordKeys,
+    pipelineRecordSeeds,
+  );
+  const synchronizedRuns = runs.map((run) => {
+    const record = pipelineRecords.get(
+      gitHubPipelineRecordKey({
+        repositoryGithubId: run.repositoryGithubId,
+        workflowRunId: run.id,
+      }),
+    );
+    return record
+      ? {
+          ...run,
+          status: record.status,
+          checkSuiteId: record.checkSuiteId,
+          canRetry: record.canRetry,
+          retryUnavailableReason: record.retryUnavailableReason,
+          runAttempt: record.runAttempt ?? run.runAttempt,
+        }
+      : run;
+  });
   const groupedRuns = useMemo(() => {
     const groups = new Map<
       string,
       { label: string; items: GitHubActionsWorkflowRunView[] }
     >();
-    for (const run of runs) {
+    for (const run of synchronizedRuns) {
       // Keyed on creation, not start: a rerun of an old workflow belongs to the
       // day it was created, which is also the order the paginated API returns.
       const date = new Date(run.createdAt);
@@ -857,7 +850,7 @@ function ActionsTable({
       groups.set(key, group);
     }
     return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
-  }, [locale, runs]);
+  }, [locale, synchronizedRuns]);
 
   return (
     <Card className="gap-0 py-0">
@@ -893,6 +886,19 @@ function ActionsTable({
                 const key = runKey(run);
                 const expanded = expandedRuns.has(key);
                 const jobState = jobStates[key];
+                const pipelineRecord = pipelineRecords.get(
+                  gitHubPipelineRecordKey({
+                    repositoryGithubId: run.repositoryGithubId,
+                    workflowRunId: run.id,
+                  }),
+                );
+                const synchronizedJobState = pipelineRecord
+                  ? {
+                      loading: false,
+                      error: null,
+                      jobs: pipelineRecord.jobs,
+                    }
+                  : jobState;
                 const historicalAttempt = historicalAttempts[key] ?? null;
                 const displayedRun = historicalAttempt
                   ? {
@@ -1052,7 +1058,7 @@ function ActionsTable({
                             onRetried={() => onRunRetried(run)}
                             requestSource="ACTIONS_PAGE"
                             run={run}
-                            jobs={jobState?.jobs ?? []}
+                            jobs={synchronizedJobState?.jobs ?? []}
                             workflowResource={githubPipelineWorkflowResource({
                               ...run,
                               workflowRunId: run.id,
@@ -1076,7 +1082,7 @@ function ActionsTable({
                                     error: null,
                                     jobs: historicalAttempt.jobs,
                                   }
-                                : jobState
+                                : synchronizedJobState
                             }
                           />
                         </TableCell>

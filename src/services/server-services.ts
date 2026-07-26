@@ -7,6 +7,7 @@ import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import {
   GitHubActionsNotificationsService,
+  GitHubPipelineStatusService,
   GitHubService,
 } from "@/services/github";
 import { CacheServerService } from "@/services/cache-server";
@@ -50,6 +51,7 @@ export type ServerServices = {
   jiraService: JiraService;
   iosDevicesService: IosDevicesService;
   gitHubService: GitHubService;
+  gitHubPipelineStatusService: GitHubPipelineStatusService;
   gitHubActionsNotificationsService: GitHubActionsNotificationsService;
   cacheServerService: CacheServerService;
   toolsService: ToolsService;
@@ -118,6 +120,7 @@ function createServerServices(): ServerServices {
   const codebaseToolsService = new CodebaseToolsService(codebasesService);
   const jiraService = new JiraService(credentialService, workflowEventsService);
   const iosDevicesService = new IosDevicesService(undefined, credentialService);
+  const gitHubPipelineStatusService = new GitHubPipelineStatusService();
   const gitHubActionsNotificationsService =
     new GitHubActionsNotificationsService(
       credentialService,
@@ -125,12 +128,15 @@ function createServerServices(): ServerServices {
       pollingService,
       true,
       workflowEventsService,
+      undefined,
+      gitHubPipelineStatusService,
     );
   const gitHubService = new GitHubService(
     true,
     credentialService,
     pollingService,
     () => gitHubActionsNotificationsService.configurationChanged(),
+    gitHubPipelineStatusService,
   );
   const cacheServerService = new CacheServerService(credentialService);
   const worktreesService = new WorktreesService(
@@ -139,6 +145,7 @@ function createServerServices(): ServerServices {
     gitHubService,
     skillsService,
     workflowEventsService,
+    gitHubPipelineStatusService,
   );
   const toolsService = new ToolsService(
     codebaseToolsService,
@@ -220,6 +227,7 @@ function createServerServices(): ServerServices {
     jiraService,
     iosDevicesService,
     gitHubService,
+    gitHubPipelineStatusService,
     gitHubActionsNotificationsService,
     cacheServerService,
     worktreesService,
