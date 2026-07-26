@@ -98,6 +98,27 @@ const TOP_LEVEL_ALIASES: Record<
   runs: { href: "/drafts", labelKey: "drafts" },
 };
 
+const STATIC_NESTED_PATHS = new Set([
+  "/codebases/repositories",
+  "/commands/new",
+  "/commands/runs",
+  "/devices/enroll",
+  "/jira/cache",
+  "/jira/cache/tickets",
+  "/jira/tickets",
+  "/runs/new",
+  "/skills/groups",
+  "/skills/sync",
+  "/workflows/new",
+  "/workflows/runs",
+]);
+
+const STATIC_NESTED_PATH_PATTERNS = [
+  /^\/builds\/[^/]+\/coverage$/,
+  /^\/commands\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
+  /^\/workflows\/(?!new(?:\/|$)|runs(?:\/|$))[^/]+\/edit$/,
+];
+
 const ROUTABLE_STATIC_PATHS = new Set([
   "/actions",
   "/actions-cache",
@@ -166,6 +187,19 @@ function isRoutablePath(path: string): boolean {
   );
 }
 
+function staticLabelKey(
+  segment: string,
+  index: number,
+  prefix: string,
+): BreadcrumbLabelKey | undefined {
+  const labelKey = STATIC_SEGMENTS[segment];
+  if (!labelKey) return undefined;
+  if (index === 0 || STATIC_NESTED_PATHS.has(prefix)) return labelKey;
+  return STATIC_NESTED_PATH_PATTERNS.some((pattern) => pattern.test(prefix))
+    ? labelKey
+    : undefined;
+}
+
 export function buildAppBreadcrumbs(
   pathname: string,
   translate: BreadcrumbTranslator,
@@ -180,8 +214,8 @@ export function buildAppBreadcrumbs(
   return segments.map((segment, index) => {
     const isCurrent = index === segments.length - 1;
     const alias = index === 0 ? TOP_LEVEL_ALIASES[segment] : undefined;
-    const labelKey = alias?.labelKey ?? STATIC_SEGMENTS[segment];
     const prefix = `/${segments.slice(0, index + 1).join("/")}`;
+    const labelKey = alias?.labelKey ?? staticLabelKey(segment, index, prefix);
 
     return {
       href: isCurrent

@@ -4,62 +4,74 @@ import { Buffer } from "node:buffer";
 
 import { getServerServices } from "@/services/server-services";
 
-const PAGE_SIZE = 5_000;
+const PAGE_SIZE = 100;
 
-function concatenateBase64(chunks: Array<{ dataBase64: string }>): Uint8Array {
-  const output = Buffer.concat(
-    chunks.map((chunk) => Buffer.from(chunk.dataBase64, "base64")),
-  );
-  return new Uint8Array(output);
+function streamBase64Pages(
+  loadPage: () => Promise<Array<{ dataBase64: string }>>,
+): ReadableStream<Uint8Array> {
+  const iterator = (async function* () {
+    while (true) {
+      const page = await loadPage();
+      for (const chunk of page) {
+        yield Buffer.from(chunk.dataBase64, "base64");
+      }
+      if (page.length < PAGE_SIZE) return;
+    }
+  })();
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await iterator.next();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    async cancel() {
+      await iterator.return(undefined);
+    },
+  });
 }
 
 export async function commandRunRawOutput(
   runId: string,
-): Promise<Uint8Array | null> {
+): Promise<ReadableStream<Uint8Array> | null> {
   const { commandsService } = getServerServices();
   if (!(await commandsService.getRun(runId))) return null;
 
-  const chunks: Array<{ dataBase64: string }> = [];
   let afterAttempt = 0;
   let afterSequence = -1;
-  while (true) {
+  return streamBase64Pages(async () => {
     const page = await commandsService.listOutput(
       runId,
       afterAttempt,
       afterSequence,
       PAGE_SIZE,
     );
-    chunks.push(...page);
-    if (page.length < PAGE_SIZE) break;
     const last = page.at(-1);
-    if (!last) break;
-    afterAttempt = last.attempt.attempt;
-    afterSequence = last.sequence;
-  }
-  return concatenateBase64(chunks);
+    if (last) {
+      afterAttempt = last.attempt.attempt;
+      afterSequence = last.sequence;
+    }
+    return page;
+  });
 }
 
 export async function buildRawOutput(
   buildId: string,
-): Promise<Uint8Array | null> {
+): Promise<ReadableStream<Uint8Array> | null> {
   const { buildsService } = getServerServices();
   if (!(await buildsService.getBuild(buildId))) return null;
 
-  const chunks: Array<{ dataBase64: string }> = [];
   let after: string | null = null;
-  while (true) {
+  return streamBase64Pages(async () => {
     const page = await buildsService.logChunks(buildId, after, PAGE_SIZE);
-    chunks.push(...page);
-    if (page.length < PAGE_SIZE) break;
     const last = page.at(-1);
-    if (!last) break;
-    after = last.id;
-  }
-  return concatenateBase64(chunks);
+    if (last) after = last.id;
+    return page;
+  });
 }
 
 export function rawOutputResponse(
-  output: Uint8Array | null,
+  output: ReadableStream<Uint8Array> | null,
   filename: string,
 ): Response {
   if (output === null) {
@@ -69,13 +81,10 @@ export function rawOutputResponse(
     });
   }
   const safeFilename = filename.replace(/["\r\n]/g, "_");
-  const body = new ArrayBuffer(output.byteLength);
-  new Uint8Array(body).set(output);
-  return new Response(body, {
+  return new Response(output, {
     headers: {
       "cache-control": "private, no-store",
       "content-disposition": `inline; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      "content-length": String(output.byteLength),
       "content-type": "text/plain; charset=utf-8",
       "x-content-type-options": "nosniff",
     },

@@ -80,6 +80,29 @@ describe("buildAppBreadcrumbs", () => {
     ]);
   });
 
+  test("does not translate dynamic identifiers that match static segments", () => {
+    expect(
+      buildAppBreadcrumbs(
+        "/pull-requests/actions/settings/42",
+        translate,
+      ),
+    ).toEqual([
+      {
+        href: "/pull-requests",
+        isCurrent: false,
+        label: "Pull Requests",
+      },
+      { href: undefined, isCurrent: false, label: "actions" },
+      { href: undefined, isCurrent: false, label: "settings" },
+      { href: undefined, isCurrent: true, label: "42" },
+    ]);
+    expect(buildAppBreadcrumbs("/skills/groups/settings", translate)).toEqual([
+      { href: "/skills", isCurrent: false, label: "Skills" },
+      { href: "/skills/groups", isCurrent: false, label: "Groups" },
+      { href: undefined, isCurrent: true, label: "settings" },
+    ]);
+  });
+
   test("decodes dynamic identifiers and links real detail ancestors", () => {
     expect(
       buildAppBreadcrumbs("/workflows/release%20workflow/edit", translate),
