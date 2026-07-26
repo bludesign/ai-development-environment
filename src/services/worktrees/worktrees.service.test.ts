@@ -27,8 +27,20 @@ function service(control?: AgentControlService) {
   } as unknown as AgentControlService;
   const jira = {} as JiraService;
   const github = {} as GitHubService;
-  return new WorktreesService(control, jira, github);
+  return new WorktreesService(
+    control,
+    jira,
+    github,
+    undefined,
+    undefined,
+    pipelineStatus,
+  );
 }
+
+const pipelineStatus = {
+  snapshot: vi.fn().mockResolvedValue(null),
+  snapshots: vi.fn().mockResolvedValue([]),
+} as never;
 
 function report(complete = true) {
   return {
@@ -76,6 +88,7 @@ function githubPullRequest(
     labels: ["ready"],
     jiraKey: "AIDE-24",
     pipelineStatus: "SUCCESS",
+    pipelineRevision: 1,
     pipelines: [],
     reviewDecision: "APPROVED",
     unresolvedReviewThreadCount: 0,
@@ -367,6 +380,9 @@ describe("WorktreesService", () => {
       } as unknown as AgentControlService,
       jira,
       github,
+      undefined,
+      undefined,
+      pipelineStatus,
     );
 
     const initial = await worktrees.overview();
@@ -762,6 +778,9 @@ describe("WorktreesService", () => {
       { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
       {} as JiraService,
       {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
     );
 
     const session =

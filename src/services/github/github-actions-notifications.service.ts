@@ -18,6 +18,9 @@ import {
   type GitHubRateLimitMetadata,
 } from "./github-rate-limit";
 import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+import { GitHubPipelineStatusService } from "./github-pipeline-status.service";
+import { normalizePipelineState } from "./pipeline-status";
+import type { GitHubPipelineState, GitHubWorkflowJobView } from "./types";
 
 const OPERATION_ID = "server:github-actions-notifications";
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -53,6 +56,10 @@ type WorkflowRun = {
   pullRequests: Array<{ number: number; url: string | null }>;
   url: string;
   updatedAt: Date;
+  repositoryGithubId: string | null;
+  repositoryNameWithOwner: string;
+  repositoryUrl: string;
+  checkSuiteId: string | null;
 };
 
 type WebhookResult = {
@@ -98,6 +105,59 @@ function workflowPullRequests(
   });
 }
 
+function webhookWorkflowRun(
+  target: RepositoryTarget,
+  repository: Record<string, unknown> | undefined,
+  workflow: Record<string, unknown> | undefined,
+): WorkflowRun | null {
+  const runId = positiveInteger(workflow?.id);
+  const workflowId = positiveInteger(workflow?.workflow_id);
+  const updatedAtValue = text(workflow?.updated_at);
+  const updatedAt = updatedAtValue ? new Date(updatedAtValue) : null;
+  if (
+    !runId ||
+    !workflowId ||
+    !updatedAt ||
+    !Number.isFinite(updatedAt.getTime())
+  ) {
+    return null;
+  }
+  return {
+    id: String(runId),
+    workflowId: String(workflowId),
+    runAttempt: positiveInteger(workflow?.run_attempt) ?? 1,
+    name: text(workflow?.name) ?? "GitHub Actions",
+    displayTitle:
+      text(workflow?.display_title) ?? text(workflow?.name) ?? "Workflow run",
+    status: text(workflow?.status)?.toLowerCase() ?? "unknown",
+    conclusion: text(workflow?.conclusion)?.toLowerCase() ?? null,
+    headBranch: text(workflow?.head_branch),
+    headSha: text(workflow?.head_sha),
+    pullRequests: workflowPullRequests(workflow?.pull_requests),
+    url: text(workflow?.html_url) ?? "",
+    updatedAt,
+    repositoryGithubId: text(repository?.node_id),
+    repositoryNameWithOwner:
+      text(repository?.full_name) ?? `${target.owner}/${target.repository}`,
+    repositoryUrl:
+      text(repository?.html_url) ??
+      `https://github.com/${target.owner}/${target.repository}`,
+    checkSuiteId: text(workflow?.check_suite_node_id),
+  };
+}
+
+function childPipelineState(
+  status: string | null,
+  conclusion: string | null,
+): GitHubPipelineState {
+  const normalized = normalizePipelineState(status, conclusion);
+  return normalized === "SUCCESS" ||
+    normalized === "NEUTRAL" ||
+    normalized === "SKIPPED"
+    ? "IN_PROGRESS"
+    : normalized;
+}
+
 function jiraKeyFromBranch(
   branch: string | null,
   pattern: string,
@@ -133,6 +193,7 @@ export class GitHubActionsNotificationsService {
     startPolling = true,
     private readonly workflowEvents?: WorkflowEventsService,
     private readonly cache = new GitHubCache(),
+    private readonly pipelineStatus = new GitHubPipelineStatusService(),
   ) {
     this.polling.register({
       id: OPERATION_ID,
@@ -253,6 +314,244 @@ export class GitHubActionsNotificationsService {
         payload: { ...sessionData, ...extras, sessionData },
       });
     }
+  }
+
+  private async observePipelineRun(
+    target: RepositoryTarget,
+    run: WorkflowRun,
+    source: "REST" | "WEBHOOK",
+  ): Promise<boolean> {
+    if (!run.repositoryGithubId || !run.headSha) return false;
+    await this.pipelineStatus.observeSnapshot({
+      repositoryGithubId: run.repositoryGithubId,
+      repositoryNameWithOwner: run.repositoryNameWithOwner,
+      repositoryUrl: run.repositoryUrl,
+      headSha: run.headSha,
+      pipelines: [
+        {
+          id: run.id,
+          name: run.name,
+          status: normalizePipelineState(run.status, run.conclusion),
+          url: run.url,
+          checkSuiteId: run.checkSuiteId,
+          workflowRunId: run.id,
+          workflowId: run.workflowId,
+          runAttempt: run.runAttempt,
+          canRetry: run.status === "completed" && Boolean(run.checkSuiteId),
+          retryUnavailableReason:
+            run.status !== "completed"
+              ? "NOT_COMPLETED"
+              : run.checkSuiteId
+                ? null
+                : "WORKFLOW_RUN_UNAVAILABLE",
+          source,
+          githubUpdatedAt: run.updatedAt,
+        },
+      ],
+    });
+    return true;
+  }
+
+  private async observeEnhancedWebhook(
+    target: RepositoryTarget,
+    event: string,
+    action: string | null,
+    payload: Record<string, unknown>,
+  ): Promise<boolean> {
+    const allowedActions: Partial<Record<string, Set<string | null>>> = {
+      workflow_run: new Set(["requested", "in_progress", "completed"]),
+      workflow_job: new Set(["queued", "in_progress", "completed"]),
+      check_run: new Set(["created", "rerequested", "completed"]),
+      check_suite: new Set([
+        "requested",
+        "rerequested",
+        "in_progress",
+        "completed",
+      ]),
+      status: new Set([null]),
+    };
+    if (!allowedActions[event]?.has(action)) return false;
+    const repository = payload.repository as
+      Record<string, unknown> | undefined;
+    const repositoryGithubId = text(repository?.node_id);
+    const headSha =
+      event === "status"
+        ? text(payload.sha)
+        : text(((payload[event] ?? {}) as Record<string, unknown>).head_sha);
+    if (!repositoryGithubId || !headSha) return false;
+    const repositoryNameWithOwner =
+      text(repository?.full_name) ?? `${target.owner}/${target.repository}`;
+    const repositoryUrl =
+      text(repository?.html_url) ??
+      `https://github.com/${target.owner}/${target.repository}`;
+
+    if (event === "workflow_run") {
+      const run = webhookWorkflowRun(
+        target,
+        repository,
+        payload.workflow_run as Record<string, unknown> | undefined,
+      );
+      return run ? this.observePipelineRun(target, run, "WEBHOOK") : false;
+    }
+
+    if (event === "status") {
+      const context = text(payload.context);
+      if (!context) return false;
+      await this.pipelineStatus.observeSnapshot({
+        repositoryGithubId,
+        repositoryNameWithOwner,
+        repositoryUrl,
+        headSha,
+        pipelines: [
+          {
+            id: context,
+            name: context,
+            status: normalizePipelineState(text(payload.state)),
+            url: text(payload.target_url),
+            statusContext: context,
+            source: "WEBHOOK",
+            githubUpdatedAt: (() => {
+              const value =
+                text(payload.updated_at) ?? text(payload.created_at);
+              return value ? new Date(value) : null;
+            })(),
+          },
+        ],
+      });
+      return true;
+    }
+
+    if (event === "check_suite") {
+      const suite = payload.check_suite as Record<string, unknown> | undefined;
+      const checkSuiteId = text(suite?.node_id);
+      if (!suite || !checkSuiteId) return false;
+      const app = suite.app as Record<string, unknown> | undefined;
+      const updatedAtValue =
+        text(suite.updated_at) ??
+        text(suite.completed_at) ??
+        text(suite.started_at);
+      await this.pipelineStatus.observeSnapshot({
+        repositoryGithubId,
+        repositoryNameWithOwner,
+        repositoryUrl,
+        headSha,
+        pipelines: [
+          {
+            id: checkSuiteId,
+            name: text(app?.name) ?? "GitHub checks",
+            status: normalizePipelineState(
+              text(suite.status),
+              text(suite.conclusion),
+            ),
+            url: text(suite.url),
+            checkSuiteId,
+            source: "WEBHOOK",
+            githubUpdatedAt: updatedAtValue ? new Date(updatedAtValue) : null,
+          },
+        ],
+      });
+      return true;
+    }
+
+    if (event === "check_run") {
+      const checkRun = payload.check_run as Record<string, unknown> | undefined;
+      const suite = checkRun?.check_suite as
+        Record<string, unknown> | undefined;
+      const checkSuiteId = text(suite?.node_id);
+      const checkRunId = text(checkRun?.node_id);
+      if (!checkRun || !checkSuiteId || !checkRunId) return false;
+      const updatedAtValue =
+        text(checkRun.completed_at) ??
+        text(checkRun.started_at) ??
+        text(checkRun.updated_at);
+      await this.pipelineStatus.observeSnapshot({
+        repositoryGithubId,
+        repositoryNameWithOwner,
+        repositoryUrl,
+        headSha,
+        pipelines: [
+          {
+            id: checkRunId,
+            name: text(checkRun.name) ?? "GitHub check",
+            status: childPipelineState(
+              text(checkRun.status),
+              text(checkRun.conclusion),
+            ),
+            url: text(checkRun.details_url) ?? text(checkRun.html_url),
+            checkSuiteId,
+            source: "WEBHOOK",
+            githubUpdatedAt: updatedAtValue ? new Date(updatedAtValue) : null,
+          },
+        ],
+      });
+      return true;
+    }
+
+    const job = payload.workflow_job as Record<string, unknown> | undefined;
+    const workflowRunId = positiveInteger(job?.run_id)?.toString() ?? null;
+    if (!job || !workflowRunId) return false;
+    const updatedAtValue =
+      text(job.completed_at) ?? text(job.started_at) ?? text(job.created_at);
+    const githubUpdatedAt = updatedAtValue ? new Date(updatedAtValue) : null;
+    const steps: GitHubWorkflowJobView["steps"] = Array.isArray(job.steps)
+      ? job.steps.flatMap((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            return [];
+          }
+          const step = entry as Record<string, unknown>;
+          const number = positiveInteger(step.number);
+          if (!number) return [];
+          return [
+            {
+              number,
+              name: text(step.name) ?? `Step ${number}`,
+              status: normalizePipelineState(
+                text(step.status),
+                text(step.conclusion),
+              ),
+            },
+          ];
+        })
+      : [];
+    const jobView: GitHubWorkflowJobView = {
+      id: positiveInteger(job.id)?.toString() ?? text(job.node_id) ?? "unknown",
+      name: text(job.name) ?? "Workflow job",
+      status: normalizePipelineState(text(job.status), text(job.conclusion)),
+      url: text(job.html_url),
+      canRetry: text(job.status)?.toLowerCase() === "completed",
+      retryUnavailableReason:
+        text(job.status)?.toLowerCase() === "completed"
+          ? null
+          : "NOT_COMPLETED",
+      steps,
+      runAttempt: positiveInteger(job.run_attempt),
+    };
+    await this.pipelineStatus.observeSnapshot({
+      repositoryGithubId,
+      repositoryNameWithOwner,
+      repositoryUrl,
+      headSha,
+      pipelines: [
+        {
+          id: workflowRunId,
+          name: text(job.workflow_name) ?? "GitHub Actions",
+          status: childPipelineState(text(job.status), text(job.conclusion)),
+          url: text(job.html_url),
+          workflowRunId,
+          runAttempt: positiveInteger(job.run_attempt),
+          source: "WEBHOOK",
+          githubUpdatedAt,
+        },
+      ],
+    });
+    await this.pipelineStatus.observeJobs(
+      repositoryGithubId,
+      workflowRunId,
+      [jobView],
+      "WEBHOOK",
+      githubUpdatedAt,
+    );
+    return true;
   }
 
   private async recordWebhookTrigger(
@@ -622,6 +921,8 @@ export class GitHubActionsNotificationsService {
         const workflowId = positiveInteger(run.workflow_id);
         const updatedAtValue = text(run.updated_at);
         const updatedAt = updatedAtValue ? new Date(updatedAtValue) : null;
+        const repository = run.repository as
+          Record<string, unknown> | undefined;
         if (
           !id ||
           !workflowId ||
@@ -645,6 +946,14 @@ export class GitHubActionsNotificationsService {
             pullRequests: workflowPullRequests(run.pull_requests),
             url: text(run.html_url) ?? "",
             updatedAt,
+            repositoryGithubId: text(repository?.node_id),
+            repositoryNameWithOwner:
+              text(repository?.full_name) ??
+              `${target.owner}/${target.repository}`,
+            repositoryUrl:
+              text(repository?.html_url) ??
+              `https://github.com/${target.owner}/${target.repository}`,
+            checkSuiteId: text(run.check_suite_node_id),
           },
         ];
       });
@@ -829,7 +1138,10 @@ export class GitHubActionsNotificationsService {
         this.notifications.created(notification),
       );
       await Promise.allSettled(
-        runs.map((run) => this.recordWorkflowRunEvent(target, run)),
+        runs.flatMap((run) => [
+          this.observePipelineRun(target, run, "REST"),
+          this.recordWorkflowRunEvent(target, run),
+        ]),
       );
       return notifications.length;
     } catch (error) {
@@ -997,13 +1309,14 @@ export class GitHubActionsNotificationsService {
           await finish("IGNORED", "Repository is not registered");
           return { outcome: "IGNORED", notificationCreated: false };
         }
-        const recorded = await this.recordWebhookTrigger(
-          target,
-          input.event ?? "unknown",
-          action,
-          deliveryId,
-          payload,
-        );
+        const event = input.event ?? "unknown";
+        const [pipelineRecorded, triggerRecorded] = await Promise.all([
+          app.enhancedPipelineWebhooksEnabled
+            ? this.observeEnhancedWebhook(target, event, action, payload)
+            : false,
+          this.recordWebhookTrigger(target, event, action, deliveryId, payload),
+        ]);
+        const recorded = pipelineRecorded || triggerRecorded;
         await finish(recorded ? "PROCESSED" : "IGNORED");
         return {
           outcome: recorded ? "PROCESSED" : "IGNORED",
@@ -1038,26 +1351,8 @@ export class GitHubActionsNotificationsService {
         await finish("IGNORED", "Repository is not registered");
         return { outcome: "IGNORED", notificationCreated: false };
       }
-      const run: WorkflowRun = {
-        id: String(runId),
-        workflowId: String(workflowId),
-        runAttempt: positiveInteger(workflow?.run_attempt) ?? 1,
-        name: text(workflow?.name) ?? "GitHub Actions",
-        displayTitle:
-          text(workflow?.display_title) ??
-          text(workflow?.name) ??
-          "Workflow run",
-        status: text(workflow?.status)?.toLowerCase() ?? "completed",
-        conclusion: text(workflow?.conclusion)?.toLowerCase() ?? null,
-        headBranch: text(workflow?.head_branch),
-        headSha: text(workflow?.head_sha),
-        pullRequests: workflowPullRequests(workflow?.pull_requests),
-        url: text(workflow?.html_url) ?? "",
-        updatedAt: new Date(updatedAtText),
-      };
-      if (!Number.isFinite(run.updatedAt.getTime())) {
-        throw new Error("GitHub workflow_run timestamp is invalid");
-      }
+      const run = webhookWorkflowRun(target, repository, workflow);
+      if (!run) throw new Error("GitHub workflow_run payload is incomplete");
       let notification: NotificationRecord | null = null;
       await prisma.$transaction(async (transaction) => {
         notification = await this.observeRun(
@@ -1069,6 +1364,7 @@ export class GitHubActionsNotificationsService {
         );
       });
       this.notifications.created(notification);
+      await this.observePipelineRun(target, run, "WEBHOOK");
       await this.recordWorkflowRunEvent(target, run);
       await finish("PROCESSED");
       this.polling.configure(OPERATION_ID, {

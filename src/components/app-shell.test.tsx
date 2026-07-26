@@ -31,6 +31,7 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: vi.fn(() => ({
     subscribe: vi.fn(() => vi.fn()),
   })),
+  onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
 function setViewportWidth(width: number) {

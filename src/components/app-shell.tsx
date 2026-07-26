@@ -50,6 +50,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
+import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
 import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
 import {
   Sidebar,
@@ -89,16 +90,18 @@ export function AppShell({
   rightDefaultOpen,
 }: AppShellProps) {
   return (
-    <SidebarProvider
-      cookieName={LEFT_SIDEBAR_COOKIE}
-      defaultOpen={leftDefaultOpen}
-      className="h-dvh min-h-0 overflow-hidden"
-    >
-      <NavigationSidebar />
-      <RightSidebarLayout rightDefaultOpen={rightDefaultOpen}>
-        {children}
-      </RightSidebarLayout>
-    </SidebarProvider>
+    <GitHubPipelineStatusProvider>
+      <SidebarProvider
+        cookieName={LEFT_SIDEBAR_COOKIE}
+        defaultOpen={leftDefaultOpen}
+        className="h-dvh min-h-0 overflow-hidden"
+      >
+        <NavigationSidebar />
+        <RightSidebarLayout rightDefaultOpen={rightDefaultOpen}>
+          {children}
+        </RightSidebarLayout>
+      </SidebarProvider>
+    </GitHubPipelineStatusProvider>
   );
 }
 

@@ -403,35 +403,8 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       key={entry.worktree.id}
       loadError={error}
       onLoadMoreBuilds={loadMoreBuilds}
-      onPipelineCancelled={(runId) =>
-        setPipelines((current) =>
-          current.map((run) =>
-            run.id === runId
-              ? {
-                  ...run,
-                  status: "CANCELLED",
-                  canRetry: false,
-                  retryUnavailableReason: "NOT_COMPLETED",
-                  updatedAt: new Date().toISOString(),
-                }
-              : run,
-          ),
-        )
-      }
-      onPipelineRetried={(runId) =>
-        setPipelines((current) =>
-          current.map((run) =>
-            run.id === runId
-              ? {
-                  ...run,
-                  status: "QUEUED",
-                  canRetry: false,
-                  retryUnavailableReason: "NOT_COMPLETED",
-                }
-              : run,
-          ),
-        )
-      }
+      onPipelineCancelled={() => undefined}
+      onPipelineRetried={() => undefined}
       onReload={load}
       onUpdate={updateWorktree}
       overview={overview}

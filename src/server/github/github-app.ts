@@ -89,6 +89,9 @@ export type GitHubAppVerification = {
   accountLogin: string;
   repositorySelection: "all" | "selected";
   actionsPermission: string;
+  checksPermission: string;
+  commitStatusesPermission: string;
+  webhookEvents: string[];
   viewerLogin: string;
   verifiedAt: Date;
   githubRequestId: string | null;
@@ -127,6 +130,8 @@ type InstallationDetails = {
   app_slug: string;
   account: { login: string };
   repository_selection: "all" | "selected";
+  permissions?: Record<string, string>;
+  events?: string[];
 };
 
 type InstallationTokenResponse = {
@@ -592,6 +597,9 @@ export async function verifyGitHubAppConfiguration(
     accountLogin: details.account.login,
     repositorySelection: token.repositorySelection,
     actionsPermission: token.permissions.actions ?? "none",
+    checksPermission: token.permissions.checks ?? "none",
+    commitStatusesPermission: token.permissions.statuses ?? "none",
+    webhookEvents: Array.isArray(details.events) ? details.events : [],
     viewerLogin: result.data.viewer.login,
     verifiedAt: new Date(),
     githubRequestId: result.githubRequestId,

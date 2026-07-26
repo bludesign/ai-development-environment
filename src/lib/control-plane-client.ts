@@ -24,6 +24,12 @@ export async function controlPlaneRequest<T>(
 }
 
 let subscriptionClient: Client | null = null;
+const connectionListeners = new Set<() => void>();
+
+export function onControlPlaneConnected(listener: () => void): () => void {
+  connectionListeners.add(listener);
+  return () => connectionListeners.delete(listener);
+}
 
 export function resolveControlPlaneWebSocketUrl(
   configured: string | undefined,
@@ -57,6 +63,11 @@ export function controlPlaneSubscriptions(): Client {
     lazy: true,
     retryAttempts: Infinity,
     shouldRetry: () => true,
+    on: {
+      connected: () => {
+        for (const listener of connectionListeners) listener();
+      },
+    },
   });
   return subscriptionClient;
 }

@@ -10,12 +10,13 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   PipelineMenu,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
+import { useGitHubPipelineSnapshot } from "@/components/github/pipeline-status-provider";
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
@@ -62,7 +63,6 @@ import {
 } from "@/lib/worktree-highlight";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
 import type {
-  GitHubPipelineView,
   GitHubPullRequestDetail,
   GitHubReviewComment,
   GitHubReviewDecision,
@@ -71,7 +71,7 @@ import type {
 } from "@/services/github/types";
 
 const DETAIL_FIELDS =
-  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner worktreeId worktreeHighlightColor } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId worktreeHighlightColor";
+  "id codebaseRepositoryId number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt jobs { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } } } reviewDecision unresolvedReviewThreadCount headRefOid headRefName createdAt body bodyHtml author { login avatarUrl url } assignees { login avatarUrl url } reviewThreads { id isResolved isOutdated subjectType path line startLine originalLine originalStartLine viewerCanReply viewerCanResolve viewerCanUnresolve resolvedBy { login avatarUrl url } pullRequest { id number title url repositoryNameWithOwner worktreeId worktreeHighlightColor } rootComment { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } replies { id body bodyText bodyHtml url author { login avatarUrl url } createdAt updatedAt } } baseRefName state isDraft mergeable additions deletions changedFiles commitCount updatedAt mergedAt worktreeId worktreeHighlightColor";
 
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
@@ -146,100 +146,42 @@ export function PullRequestDetailPage({
     const timeout = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timeout);
   }, [load]);
-
-  const pipelineRetried = (pipeline: GitHubPipelineView) => {
-    setPullRequest((current) =>
-      current
+  const pipelineSnapshotKey = useMemo(
+    () =>
+      pullRequest
         ? {
-            ...current,
-            pipelineStatus: "PENDING",
-            pipelines: current.pipelines.map((item) =>
-              item.id === pipeline.id
-                ? { ...pipeline, jobs: pipeline.jobs ?? item.jobs }
-                : item,
-            ),
+            repositoryGithubId: pullRequest.repositoryGithubId,
+            headSha: pullRequest.headRefOid,
           }
-        : current,
-    );
-  };
-
-  const pipelineRunRetried = (pipelineId: string) => {
-    setPullRequest((current) =>
-      current
+        : null,
+    [pullRequest],
+  );
+  const pipelineSnapshotSeed = useMemo(
+    () =>
+      pullRequest
         ? {
-            ...current,
-            pipelineStatus: "PENDING",
-            pipelines: current.pipelines.map((pipeline) =>
-              pipeline.id === pipelineId
-                ? {
-                    ...pipeline,
-                    status: "QUEUED",
-                    canRetry: false,
-                    retryUnavailableReason: "NOT_COMPLETED",
-                  }
-                : pipeline,
-            ),
+            repositoryGithubId: pullRequest.repositoryGithubId,
+            repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+            repositoryUrl: pullRequest.repositoryUrl,
+            headSha: pullRequest.headRefOid,
+            pipelineStatus: pullRequest.pipelineStatus,
+            pipelines: pullRequest.pipelines,
+            revision: pullRequest.pipelineRevision ?? 0,
+            updatedAt: pullRequest.updatedAt,
           }
-        : current,
-    );
-  };
-
-  const pipelineRunCancelled = (pipelineId: string) => {
-    setPullRequest((current) =>
-      current
-        ? {
-            ...current,
-            pipelineStatus: "FAILURE",
-            pipelines: current.pipelines.map((pipeline) =>
-              pipeline.id === pipelineId
-                ? {
-                    ...pipeline,
-                    status: "CANCELLED",
-                    canRetry: false,
-                    retryUnavailableReason: "NOT_COMPLETED",
-                  }
-                : pipeline,
-            ),
-          }
-        : current,
-    );
-  };
-
-  const jobRetried = (pipelineId: string, jobId: string) => {
-    setPullRequest((current) =>
-      current
-        ? {
-            ...current,
-            pipelineStatus: "PENDING",
-            pipelines: current.pipelines.map((pipeline) =>
-              pipeline.id === pipelineId
-                ? {
-                    ...pipeline,
-                    status: "QUEUED",
-                    canRetry: false,
-                    retryUnavailableReason: "NOT_COMPLETED",
-                    jobs: pipeline.jobs.map((job) =>
-                      job.id === jobId
-                        ? {
-                            ...job,
-                            status: "QUEUED",
-                            canRetry: false,
-                            retryUnavailableReason: "NOT_COMPLETED",
-                            steps: [],
-                          }
-                        : {
-                            ...job,
-                            canRetry: false,
-                            retryUnavailableReason: "NOT_COMPLETED",
-                          },
-                    ),
-                  }
-                : pipeline,
-            ),
-          }
-        : current,
-    );
-  };
+        : null,
+    [pullRequest],
+  );
+  const pipelineSnapshot = useGitHubPipelineSnapshot(
+    pipelineSnapshotKey,
+    pipelineSnapshotSeed,
+  );
+  const displayedPipelineStatus =
+    pipelineSnapshot?.pipelineStatus ?? pullRequest?.pipelineStatus ?? "NONE";
+  const displayedPipelines =
+    pipelineSnapshot?.pipelines ?? pullRequest?.pipelines ?? [];
+  const displayedPipelineRevision =
+    pipelineSnapshot?.revision ?? pullRequest?.pipelineRevision ?? 0;
 
   const replyAdded = (threadId: string, comment: GitHubReviewComment) => {
     setPullRequest((current) =>
@@ -446,7 +388,7 @@ export function PullRequestDetailPage({
               <div>
                 <CardTitle>{t("pipelines")}</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  {t("pipelineCount", { count: pullRequest.pipelines.length })}
+                  {t("pipelineCount", { count: displayedPipelines.length })}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -467,7 +409,7 @@ export function PullRequestDetailPage({
                     allowFuture
                     branch={pullRequest.headRefName}
                     codebaseRepositoryId={pullRequest.codebaseRepositoryId}
-                    currentRuns={pullRequest.pipelines
+                    currentRuns={displayedPipelines
                       .filter(
                         (pipeline) =>
                           pipeline.workflowRunId && pipeline.workflowId,
@@ -484,16 +426,19 @@ export function PullRequestDetailPage({
                   />
                 ) : null}
                 <PipelineMenu
-                  onPipelineRetried={pipelineRetried}
-                  pipelineStatus={pullRequest.pipelineStatus}
-                  pipelines={pullRequest.pipelines}
+                  pipelineStatus={displayedPipelineStatus}
+                  pipelines={displayedPipelines}
+                  pipelineRevision={displayedPipelineRevision}
+                  headSha={pullRequest.headRefOid}
                   repositoryId={pullRequest.repositoryGithubId}
+                  repositoryNameWithOwner={pullRequest.repositoryNameWithOwner}
+                  repositoryUrl={pullRequest.repositoryUrl}
                   requestSource="PULL_REQUEST_DETAILS"
                 />
               </div>
             </CardHeader>
             <CardContent className="px-0">
-              {pullRequest.pipelines.length === 0 ? (
+              {displayedPipelines.length === 0 ? (
                 <p className="p-4 text-sm text-muted-foreground">
                   {tp("noPipelines")}
                 </p>
@@ -509,7 +454,7 @@ export function PullRequestDetailPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pullRequest.pipelines.map((pipeline) => {
+                    {displayedPipelines.map((pipeline) => {
                       const historicalAttempt =
                         historicalAttempts[pipeline.id] ?? null;
                       const displayedStatus =
@@ -584,13 +529,7 @@ export function PullRequestDetailPage({
                             <TableCell>
                               <div className="flex justify-end">
                                 <WorkflowRunActionsMenu
-                                  onCancelled={() =>
-                                    pipelineRunCancelled(pipeline.id)
-                                  }
                                   onError={setError}
-                                  onRetried={() =>
-                                    pipelineRunRetried(pipeline.id)
-                                  }
                                   requestSource="PULL_REQUEST_DETAILS"
                                   run={{
                                     id: pipeline.workflowRunId ?? pipeline.id,
@@ -651,9 +590,6 @@ export function PullRequestDetailPage({
                                         job={job}
                                         key={job.id}
                                         onError={setError}
-                                        onRetried={() =>
-                                          jobRetried(pipeline.id, job.id)
-                                        }
                                         repositoryId={
                                           pullRequest.repositoryGithubId
                                         }

@@ -7,6 +7,10 @@ import {
   PipelineMenu,
   pipelineStateClass,
 } from "@/components/github/pipeline-menu";
+import {
+  gitHubPipelineRecordKey,
+  useGitHubPipelineRecords,
+} from "@/components/github/pipeline-status-provider";
 import { WorkflowAttemptSelect } from "@/components/github/workflow-attempt-select";
 import { WorkflowJob } from "@/components/github/workflow-job";
 import {
@@ -34,6 +38,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubActionsWorkflowRunView,
   GitHubPipelineStatus,
+  GitHubPipelineRecordView,
   GitHubPipelineView,
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
@@ -143,31 +148,60 @@ export function WorktreePipelinesCard({
     };
   }, [runs]);
 
-  const pipelines = useMemo(
-    () => runs.map((run) => pipelineView(run, jobs[run.id] ?? [])),
+  const pipelineRecordKeys = useMemo(
+    () =>
+      runs.map((run) => ({
+        repositoryGithubId: run.repositoryGithubId,
+        workflowRunId: run.id,
+      })),
+    [runs],
+  );
+  const pipelineRecordSeeds = useMemo(
+    () =>
+      runs.map((run): GitHubPipelineRecordView => ({
+        ...pipelineView(run, jobs[run.id] ?? []),
+        repositoryGithubId: run.repositoryGithubId,
+        headSha: run.headSha,
+        revision: 0,
+        isCurrent: true,
+      })),
     [jobs, runs],
   );
+  const pipelineRecords = useGitHubPipelineRecords(
+    pipelineRecordKeys,
+    pipelineRecordSeeds,
+  );
+  const synchronizedRuns = runs.map((run) => {
+    const record = pipelineRecords.get(
+      gitHubPipelineRecordKey({
+        repositoryGithubId: run.repositoryGithubId,
+        workflowRunId: run.id,
+      }),
+    );
+    return record
+      ? {
+          ...run,
+          status: record.status,
+          checkSuiteId: record.checkSuiteId,
+          canRetry: record.canRetry,
+          retryUnavailableReason: record.retryUnavailableReason,
+          runAttempt: record.runAttempt ?? run.runAttempt,
+        }
+      : run;
+  });
+  const displayedJobsForRun = (run: GitHubActionsWorkflowRunView) =>
+    pipelineRecords.get(
+      gitHubPipelineRecordKey({
+        repositoryGithubId: run.repositoryGithubId,
+        workflowRunId: run.id,
+      }),
+    )?.jobs ??
+    jobs[run.id] ??
+    [];
 
-  const jobRetried = (runId: string, jobId: string) => {
-    setJobs((current) => ({
-      ...current,
-      [runId]: (current[runId] ?? []).map((job) =>
-        job.id === jobId
-          ? {
-              ...job,
-              status: "QUEUED",
-              canRetry: false,
-              retryUnavailableReason: "NOT_COMPLETED",
-              steps: [],
-            }
-          : {
-              ...job,
-              canRetry: false,
-              retryUnavailableReason: "NOT_COMPLETED",
-            },
-      ),
-    }));
-  };
+  const pipelines = synchronizedRuns.map((run) =>
+    pipelineView(run, displayedJobsForRun(run)),
+  );
 
   if (!runs.length && !error) return null;
 
@@ -183,9 +217,12 @@ export function WorktreePipelinesCard({
         {runs.length ? (
           <div className="flex flex-wrap items-center gap-2">
             <PipelineMenu
-              pipelineStatus={aggregateStatus(runs)}
+              pipelineStatus={aggregateStatus(synchronizedRuns)}
               pipelines={pipelines}
+              headSha={runs[0].headSha}
               repositoryId={runs[0].repositoryGithubId}
+              repositoryNameWithOwner={runs[0].repositoryNameWithOwner}
+              repositoryUrl={runs[0].repositoryUrl}
               requestSource="WORKTREE_PIPELINES"
             />
             {branch ? (
@@ -221,9 +258,10 @@ export function WorktreePipelinesCard({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {runs.map((run) => {
+              {synchronizedRuns.map((run) => {
                 const historical = attempts[run.id] ?? null;
-                const displayedJobs = historical?.jobs ?? jobs[run.id] ?? [];
+                const displayedJobs =
+                  historical?.jobs ?? displayedJobsForRun(run);
                 const workflowResource = githubPipelineWorkflowResource(
                   { ...run, workflowRunId: run.id },
                   { worktree: { id: worktreeId, branch } },
@@ -266,11 +304,11 @@ export function WorktreePipelinesCard({
                               allowFuture: Boolean(branch),
                               branch,
                               worktreeId,
-                              currentRuns: runs.map((item) => ({
+                              currentRuns: synchronizedRuns.map((item) => ({
                                 id: item.id,
                                 workflowId: item.workflowId,
                                 name: item.name,
-                                jobs: jobs[item.id],
+                                jobs: displayedJobsForRun(item),
                               })),
                             }}
                             includeAutoRetry
@@ -322,7 +360,6 @@ export function WorktreePipelinesCard({
                                   job={job}
                                   key={job.id}
                                   onError={onError}
-                                  onRetried={() => jobRetried(run.id, job.id)}
                                   repositoryId={run.repositoryGithubId}
                                   requestSource="WORKTREE_PIPELINES"
                                   workflowResource={githubJobWorkflowResource(

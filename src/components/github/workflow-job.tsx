@@ -45,7 +45,7 @@ export function WorkflowJob({
   repositoryId: string;
   checkSuiteId: string | null;
   requestSource: GitHubRequestSource;
-  onRetried: () => void;
+  onRetried?: () => void;
   onError: (error: string | null) => void;
   workflowResource?: WorkflowMenuResource | null;
 }) {
@@ -131,7 +131,7 @@ function WorkflowJobActionsMenu({
   repositoryId: string;
   checkSuiteId: string | null;
   requestSource: GitHubRequestSource;
-  onRetried: () => void;
+  onRetried?: () => void;
   onError: (error: string | null) => void;
   workflowResource?: WorkflowMenuResource | null;
 }) {
@@ -160,7 +160,7 @@ function WorkflowJobActionsMenu({
         }`,
         { repositoryId, checkSuiteId, jobId: job.id, source: requestSource },
       );
-      onRetried();
+      onRetried?.();
       onError(null);
     } catch (value) {
       onError(value instanceof Error ? value.message : String(value));

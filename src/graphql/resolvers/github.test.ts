@@ -492,4 +492,57 @@ describe("GitHub resolvers", () => {
       "ACTIONS_PAGE",
     );
   });
+
+  test("serves canonical pipeline state locally and protects its subscription", async () => {
+    const iterator = {
+      next: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+    const pipelineStatus = {
+      snapshots: vi.fn().mockResolvedValue([{ headSha: "sha-1" }]),
+      records: vi.fn().mockResolvedValue([{ workflowRunId: "run-1" }]),
+      subscribe: vi.fn().mockReturnValue(iterator),
+    };
+    const service = { pipelineStatus } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+    const snapshotKeys = [
+      { repositoryGithubId: "repository-1", headSha: "sha-1" },
+    ];
+    const recordKeys = [
+      { repositoryGithubId: "repository-1", workflowRunId: "run-1" },
+    ];
+
+    await expect(
+      resolvers.Query.githubPipelineStatuses(
+        {},
+        { keys: snapshotKeys },
+        context(null),
+      ),
+    ).resolves.toEqual([{ headSha: "sha-1" }]);
+    await expect(
+      resolvers.Query.githubPipelineRecords(
+        {},
+        { keys: recordKeys },
+        context(null),
+      ),
+    ).resolves.toEqual([{ workflowRunId: "run-1" }]);
+    expect(pipelineStatus.snapshots).toHaveBeenCalledWith(snapshotKeys);
+    expect(pipelineStatus.records).toHaveBeenCalledWith(recordKeys);
+    expect(
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        {},
+        context(null),
+      ),
+    ).toBe(iterator);
+    expect(() =>
+      resolvers.Subscription.githubPipelineStatusChanged.subscribe(
+        {},
+        {},
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
+  });
 });

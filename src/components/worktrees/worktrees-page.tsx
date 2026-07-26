@@ -1699,7 +1699,13 @@ export function PullRequestBadges({
           <PipelineMenu
             pipelineStatus={worktree.pullRequest.pipelineStatus}
             pipelines={worktree.pullRequest.pipelines}
+            pipelineRevision={worktree.pullRequest.pipelineRevision}
+            headSha={worktree.pullRequest.headRefOid}
             repositoryId={worktree.pullRequest.repositoryGithubId}
+            repositoryNameWithOwner={
+              worktree.pullRequest.repositoryNameWithOwner
+            }
+            repositoryUrl={worktree.pullRequest.repositoryUrl}
             requestSource="WORKTREES"
           />
           <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>

@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
@@ -18,9 +18,21 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+
 afterEach(() => {
   cleanup();
   requestMock.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe("SettingsPage", () => {
@@ -150,6 +162,12 @@ describe("SettingsPage", () => {
             accountLogin: null,
             repositorySelection: null,
             actionsPermission: null,
+            checksPermission: null,
+            commitStatusesPermission: null,
+            webhookEvents: [],
+            enhancedPipelineWebhooksEnabled: false,
+            enhancedPipelineWebhooksReady: false,
+            enhancedPipelineWebhooksMissing: [],
             verifiedAt: null,
             updatedAt: null,
           },
@@ -167,6 +185,18 @@ describe("SettingsPage", () => {
             accountLogin: "acme",
             repositorySelection: "selected",
             actionsPermission: "write",
+            checksPermission: "read",
+            commitStatusesPermission: "read",
+            webhookEvents: [
+              "workflow_run",
+              "workflow_job",
+              "check_run",
+              "check_suite",
+              "status",
+            ],
+            enhancedPipelineWebhooksEnabled: false,
+            enhancedPipelineWebhooksReady: true,
+            enhancedPipelineWebhooksMissing: [],
             verifiedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           },
@@ -255,6 +285,7 @@ describe("SettingsPage", () => {
             installationId: "456",
             privateKey: pem,
             webhookUrl: "https://hooks.example/github-actions",
+            enhancedPipelineWebhooksEnabled: false,
           },
         },
       ),

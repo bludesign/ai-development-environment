@@ -95,7 +95,6 @@ import {
   worktreeHighlightInsetAccentClasses,
 } from "@/lib/worktree-highlight";
 import type {
-  GitHubPipelineView,
   GitHubPullRequestPage,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
@@ -110,7 +109,7 @@ import type {
 const REPOSITORY_FIELDS =
   "id githubId owner name nameWithOwner url jiraKeyRegex";
 const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount state headRefName worktreeId worktreeHighlightColor createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason } reviewDecision unresolvedReviewThreadCount state headRefOid headRefName worktreeId worktreeHighlightColor createdAt";
 
 type TabKey = "mine" | "review" | "repositories";
 
@@ -438,33 +437,6 @@ export function PullRequestsPage() {
     setPages({});
   };
 
-  const pipelineRetried = (
-    pullRequestId: string,
-    pipeline: GitHubPipelineView,
-  ) => {
-    setPages((current) => {
-      const currentPage = current[pageKey];
-      if (!currentPage) return current;
-      return {
-        ...current,
-        [pageKey]: {
-          ...currentPage,
-          items: currentPage.items.map((pullRequest) =>
-            pullRequest.id === pullRequestId
-              ? {
-                  ...pullRequest,
-                  pipelineStatus: "PENDING",
-                  pipelines: pullRequest.pipelines.map((item) =>
-                    item.id === pipeline.id ? pipeline : item,
-                  ),
-                }
-              : pullRequest,
-          ),
-        },
-      };
-    });
-  };
-
   return (
     <section className="mx-auto flex w-full max-w-[1800px] flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -613,7 +585,6 @@ export function PullRequestsPage() {
               onMerged={() =>
                 loadTab(activeTab, selectedRepositoryId, pullRequestState)
               }
-              onPipelineRetried={pipelineRetried}
             />
           ) : null}
 
@@ -676,15 +647,10 @@ function PullRequestTable({
   items,
   locale,
   onMerged,
-  onPipelineRetried,
 }: {
   items: GitHubPullRequestView[];
   locale: string;
   onMerged: () => void | Promise<void>;
-  onPipelineRetried: (
-    pullRequestId: string,
-    pipeline: GitHubPipelineView,
-  ) => void;
 }) {
   const t = useTranslations("pullRequests");
   const router = useRouter();
@@ -830,12 +796,15 @@ function PullRequestTable({
                     </TableCell>
                     <TableCell>
                       <PipelineMenu
-                        onPipelineRetried={(pipeline) =>
-                          onPipelineRetried(pullRequest.id, pipeline)
-                        }
                         pipelineStatus={pullRequest.pipelineStatus}
                         pipelines={pullRequest.pipelines}
+                        pipelineRevision={pullRequest.pipelineRevision}
+                        headSha={pullRequest.headRefOid}
                         repositoryId={pullRequest.repositoryGithubId}
+                        repositoryNameWithOwner={
+                          pullRequest.repositoryNameWithOwner
+                        }
+                        repositoryUrl={pullRequest.repositoryUrl}
                         requestSource="PULL_REQUESTS_PAGE"
                       />
                     </TableCell>

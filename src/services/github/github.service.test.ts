@@ -17,6 +17,16 @@ const state = vi.hoisted(() => ({
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEventsJson: JSON.stringify([
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ]),
+    enhancedPipelineWebhooksEnabled: false,
     verifiedAt: new Date(0),
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -32,6 +42,10 @@ const state = vi.hoisted(() => ({
     accountLogin: string;
     repositorySelection: string;
     actionsPermission: string;
+    checksPermission: string;
+    commitStatusesPermission: string;
+    webhookEventsJson: string;
+    enhancedPipelineWebhooksEnabled: boolean;
     verifiedAt: Date;
     webhookUrl?: string | null;
     webhookConfiguredAt?: Date | null;
@@ -112,6 +126,83 @@ const cacheClient = vi.hoisted(() => ({
   clearForCredentialChange: vi.fn(),
   recordGraphqlTransportCall: vi.fn(),
   recordRestCall: vi.fn(),
+}));
+
+vi.mock("./github-pipeline-status.service", () => ({
+  GitHubPipelineStatusService: class {
+    async observeSnapshot(input: {
+      repositoryGithubId?: string;
+      repositoryNameWithOwner?: string;
+      repositoryUrl?: string;
+      headSha?: string;
+      graphqlRollupStatus?: string | null;
+      pipelines: Array<Record<string, unknown>>;
+    }) {
+      return {
+        snapshot: {
+          repositoryGithubId: input.repositoryGithubId ?? "repository-1",
+          repositoryNameWithOwner:
+            input.repositoryNameWithOwner ?? "acme/widgets",
+          repositoryUrl:
+            input.repositoryUrl ?? "https://github.com/acme/widgets",
+          headSha: input.headSha ?? "head-sha",
+          pipelineStatus: input.graphqlRollupStatus ?? "NONE",
+          pipelines: input.pipelines.map((pipeline) => ({
+            id: pipeline.id,
+            name: pipeline.name,
+            status: pipeline.status,
+            url: pipeline.url ?? null,
+            checkSuiteId: pipeline.checkSuiteId ?? null,
+            canRetry: pipeline.canRetry ?? false,
+            retryUnavailableReason: pipeline.retryUnavailableReason ?? null,
+            jobs: pipeline.jobs ?? [],
+            workflowRunId: pipeline.workflowRunId ?? null,
+            workflowId: pipeline.workflowId ?? null,
+            runNumber: pipeline.runNumber ?? null,
+            runAttempt: pipeline.runAttempt ?? null,
+          })),
+          revision: 1,
+          updatedAt: new Date(0).toISOString(),
+        },
+        changedPipeline: null,
+      };
+    }
+
+    async observeWorkflowRuns(runs: Array<Record<string, unknown>>) {
+      return new Map(
+        runs.map((run) => [
+          run.id,
+          {
+            ...run,
+            workflowRunId: run.id,
+            jobs: [],
+            revision: 1,
+            isCurrent: true,
+          },
+        ]),
+      );
+    }
+
+    async observeJobs() {
+      return null;
+    }
+
+    async optimisticByCheckSuite() {
+      return null;
+    }
+
+    async optimisticByWorkflowRun() {
+      return null;
+    }
+
+    async optimisticJobByCheckSuite() {
+      return null;
+    }
+
+    async optimisticJobByWorkflowRun() {
+      return null;
+    }
+  },
 }));
 
 vi.mock("@/services/github/github-cache", () => ({
@@ -622,6 +713,16 @@ beforeEach(() => {
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEventsJson: JSON.stringify([
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ]),
+    enhancedPipelineWebhooksEnabled: false,
     verifiedAt: new Date(0),
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -685,6 +786,15 @@ beforeEach(() => {
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
+    checksPermission: "read",
+    commitStatusesPermission: "read",
+    webhookEvents: [
+      "workflow_run",
+      "workflow_job",
+      "check_run",
+      "check_suite",
+      "status",
+    ],
     viewerLogin: "workflow-rerunner[bot]",
     verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
   }));
@@ -2348,6 +2458,62 @@ describe("GitHub service", () => {
       service.saveSettings({ actionsNotificationPollIntervalSeconds: 120 }),
     ).resolves.toMatchObject({ tokenConfigured: true });
     expect(cacheClient.clearForCredentialChange).not.toHaveBeenCalled();
+  });
+
+  test("enables enhanced pipeline webhooks only after permissions and events verify", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          enhancedPipelineWebhooksEnabled: true,
+        },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).resolves.toMatchObject({
+      enhancedPipelineWebhooksEnabled: true,
+      enhancedPipelineWebhooksReady: true,
+      enhancedPipelineWebhooksMissing: [],
+    });
+    expect(state.appSettings?.enhancedPipelineWebhooksEnabled).toBe(true);
+  });
+
+  test("reports precise enhanced webhook remediation before changing the webhook", async () => {
+    appClient.verify.mockResolvedValueOnce({
+      appId: "123",
+      installationId: "456",
+      keyFingerprint: "SHA256:new-fingerprint",
+      appSlug: "workflow-rerunner",
+      accountLogin: "acme",
+      repositorySelection: "selected",
+      actionsPermission: "read",
+      checksPermission: "none",
+      commitStatusesPermission: "none",
+      webhookEvents: ["workflow_run"],
+      viewerLogin: "workflow-rerunner[bot]",
+      verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
+    });
+
+    await expect(
+      new GitHubService().saveAppSettings(
+        {
+          appId: "123",
+          installationId: "456",
+          privateKey: null,
+          enhancedPipelineWebhooksEnabled: true,
+        },
+        { actor: "control-plane", ipAddress: null },
+        "https://control.example",
+      ),
+    ).rejects.toThrow(
+      /Checks read permission.*Commit statuses read permission.*workflow_job/,
+    );
+    expect(appClient.configureWebhook).not.toHaveBeenCalled();
+    expect(state.appSettings?.enhancedPipelineWebhooksEnabled).toBe(false);
   });
 
   test("configures and preserves a signed webhook only for a public HTTPS origin", async () => {

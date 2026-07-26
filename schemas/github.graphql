@@ -229,6 +229,12 @@ type GitHubAppSettings {
   accountLogin: String
   repositorySelection: String
   actionsPermission: String
+  checksPermission: String
+  commitStatusesPermission: String
+  webhookEvents: [String!]!
+  enhancedPipelineWebhooksEnabled: Boolean!
+  enhancedPipelineWebhooksReady: Boolean!
+  enhancedPipelineWebhooksMissing: [String!]!
   verifiedAt: String
   webhookConfigured: Boolean!
   webhookUrl: String
@@ -282,6 +288,7 @@ type GitHubPullRequest {
   jiraKey: String
   pipelineStatus: GitHubPipelineStatus!
   pipelines: [GitHubPipeline!]!
+  pipelineRevision: Int!
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
   state: GitHubPullRequestState!
@@ -311,6 +318,51 @@ type GitHubPipeline {
   workflowId: ID
   runNumber: Int
   runAttempt: Int
+}
+
+input GitHubPipelineStatusKeyInput {
+  repositoryGithubId: ID!
+  headSha: String!
+}
+
+input GitHubPipelineRecordKeyInput {
+  repositoryGithubId: ID!
+  workflowRunId: ID!
+}
+
+type GitHubPipelineStatusSnapshot {
+  repositoryGithubId: ID!
+  repositoryNameWithOwner: String!
+  repositoryUrl: String!
+  headSha: String!
+  pipelineStatus: GitHubPipelineStatus!
+  pipelines: [GitHubPipeline!]!
+  revision: Int!
+  updatedAt: String!
+}
+
+type GitHubPipelineRecord {
+  id: ID!
+  name: String!
+  status: GitHubPipelineState!
+  url: String
+  checkSuiteId: ID
+  canRetry: Boolean!
+  retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  jobs: [GitHubWorkflowJob!]!
+  workflowRunId: ID
+  workflowId: ID
+  runNumber: Int
+  runAttempt: Int
+  repositoryGithubId: ID!
+  headSha: String!
+  revision: Int!
+  isCurrent: Boolean!
+}
+
+type GitHubPipelineStatusChanged {
+  snapshot: GitHubPipelineStatusSnapshot!
+  changedPipeline: GitHubPipelineRecord
 }
 
 type GitHubWorkflowJobStep {
@@ -571,6 +623,7 @@ type GitHubPullRequestDetail {
   jiraKey: String
   pipelineStatus: GitHubPipelineStatus!
   pipelines: [GitHubPipeline!]!
+  pipelineRevision: Int!
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
   createdAt: String!
@@ -639,6 +692,7 @@ input SaveGitHubAppSettingsInput {
   installationId: String!
   privateKey: String
   webhookUrl: String
+  enhancedPipelineWebhooksEnabled: Boolean
 }
 
 input AddGitHubRepositoryInput {
@@ -744,6 +798,16 @@ extend type Query {
     number: Int!
   ): GitHubPullRequestMergeOptions!
   githubReviewThreads: GitHubReviewThreadPage!
+  githubPipelineStatuses(
+    keys: [GitHubPipelineStatusKeyInput!]!
+  ): [GitHubPipelineStatusSnapshot!]!
+  githubPipelineRecords(
+    keys: [GitHubPipelineRecordKeyInput!]!
+  ): [GitHubPipelineRecord!]!
+}
+
+extend type Subscription {
+  githubPipelineStatusChanged: GitHubPipelineStatusChanged!
 }
 
 extend type Mutation {

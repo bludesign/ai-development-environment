@@ -36,6 +36,9 @@ export type GitHubPipelineRetryUnavailableReason =
   | "WORKFLOW_RUN_UNAVAILABLE"
   | "HISTORICAL_ATTEMPT";
 
+export type GitHubPipelineObservationSource =
+  "LEGACY" | "GRAPHQL" | "REST" | "WEBHOOK" | "MUTATION";
+
 export type GitHubSettingsView = {
   tokenConfigured: boolean;
   defaultJiraKeyRegex: string;
@@ -178,6 +181,12 @@ export type GitHubAppSettingsView = {
   accountLogin: string | null;
   repositorySelection: string | null;
   actionsPermission: string | null;
+  checksPermission: string | null;
+  commitStatusesPermission: string | null;
+  webhookEvents: string[];
+  enhancedPipelineWebhooksEnabled: boolean;
+  enhancedPipelineWebhooksReady: boolean;
+  enhancedPipelineWebhooksMissing: string[];
   verifiedAt: string | null;
   webhookConfigured: boolean;
   webhookUrl: string | null;
@@ -239,6 +248,39 @@ export type GitHubPipelineView = {
   workflowId?: string | null;
   runNumber?: number | null;
   runAttempt?: number | null;
+};
+
+export type GitHubPipelineStatusKeyInput = {
+  repositoryGithubId: string;
+  headSha: string;
+};
+
+export type GitHubPipelineRecordKeyInput = {
+  repositoryGithubId: string;
+  workflowRunId: string;
+};
+
+export type GitHubPipelineStatusSnapshotView = {
+  repositoryGithubId: string;
+  repositoryNameWithOwner: string;
+  repositoryUrl: string;
+  headSha: string;
+  pipelineStatus: GitHubPipelineStatus;
+  pipelines: GitHubPipelineView[];
+  revision: number;
+  updatedAt: string;
+};
+
+export type GitHubPipelineRecordView = GitHubPipelineView & {
+  repositoryGithubId: string;
+  headSha: string;
+  revision: number;
+  isCurrent: boolean;
+};
+
+export type GitHubPipelineStatusChangeView = {
+  snapshot: GitHubPipelineStatusSnapshotView;
+  changedPipeline: GitHubPipelineRecordView | null;
 };
 
 export type GitHubWorkflowJobStepView = {
@@ -418,6 +460,7 @@ export type GitHubPullRequestView = {
   jiraKey: string | null;
   pipelineStatus: GitHubPipelineStatus;
   pipelines: GitHubPipelineView[];
+  pipelineRevision?: number;
   reviewDecision: GitHubReviewDecision;
   unresolvedReviewThreadCount: number;
   state: GitHubPullRequestState;
@@ -439,6 +482,7 @@ export type GitHubPullRequestLiveStatus = Pick<
   | "id"
   | "pipelineStatus"
   | "pipelines"
+  | "pipelineRevision"
   | "reviewDecision"
   | "unresolvedReviewThreadCount"
   | "state"

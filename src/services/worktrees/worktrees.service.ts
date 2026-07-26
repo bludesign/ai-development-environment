@@ -46,8 +46,12 @@ import {
   WORKTREE_CHANGED_TOPIC,
   worktreeInspectionTopic,
 } from "@/services/agent-control";
-import type { GitHubService } from "@/services/github";
+import {
+  GitHubPipelineStatusService,
+  type GitHubService,
+} from "@/services/github";
 import type {
+  GitHubPipelineStatusSnapshotView,
   GitHubPullRequestLiveStatus,
   GitHubPullRequestView,
 } from "@/services/github/types";
@@ -245,6 +249,7 @@ function jsonArray<T>(value: string): T[] {
 
 function storedPullRequestView(
   value: StoredPullRequest,
+  pipelineSnapshot?: GitHubPipelineStatusSnapshotView | null,
 ): GitHubPullRequestView {
   return {
     id: value.githubId,
@@ -256,11 +261,9 @@ function storedPullRequestView(
     repositoryUrl: value.repositoryUrl,
     labels: jsonArray<string>(value.labelsJson),
     jiraKey: value.jiraKey,
-    pipelineStatus:
-      value.pipelineStatus as GitHubPullRequestView["pipelineStatus"],
-    pipelines: jsonArray<GitHubPullRequestView["pipelines"][number]>(
-      value.pipelinesJson,
-    ),
+    pipelineStatus: pipelineSnapshot?.pipelineStatus ?? "NONE",
+    pipelines: pipelineSnapshot?.pipelines ?? [],
+    pipelineRevision: pipelineSnapshot?.revision ?? 0,
     reviewDecision:
       value.reviewDecision as GitHubPullRequestView["reviewDecision"],
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
@@ -290,8 +293,6 @@ function pullRequestData(value: GitHubPullRequestView) {
     repositoryUrl: value.repositoryUrl,
     labelsJson: JSON.stringify(value.labels),
     jiraKey: value.jiraKey,
-    pipelineStatus: value.pipelineStatus,
-    pipelinesJson: JSON.stringify(value.pipelines),
     reviewDecision: value.reviewDecision,
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
     state: value.state,
@@ -309,8 +310,6 @@ function pullRequestData(value: GitHubPullRequestView) {
 
 function pullRequestLiveData(value: GitHubPullRequestLiveStatus) {
   return {
-    pipelineStatus: value.pipelineStatus,
-    pipelinesJson: JSON.stringify(value.pipelines),
     reviewDecision: value.reviewDecision,
     unresolvedReviewThreadCount: value.unresolvedReviewThreadCount,
     state: value.state,
@@ -393,6 +392,7 @@ export class WorktreesService {
     private readonly gitHubService: GitHubService,
     private readonly skillsService?: SkillsService,
     private readonly workflowEvents?: WorkflowEventsService,
+    private readonly pipelineStatus = new GitHubPipelineStatusService(),
   ) {
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
@@ -687,6 +687,43 @@ export class WorktreesService {
     );
   }
 
+  private async hydratePullRequestPipelines(
+    worktrees: PullRequestTarget[],
+  ): Promise<void> {
+    const snapshots = await this.pipelineStatus.snapshots(
+      worktrees.flatMap((worktree) =>
+        worktree.pullRequest
+          ? [
+              {
+                repositoryGithubId: worktree.pullRequest.repositoryGithubId,
+                headSha: worktree.pullRequest.headRefOid,
+              },
+            ]
+          : [],
+      ),
+    );
+    const byKey = new Map(
+      snapshots.map((snapshot) => [
+        `${snapshot.repositoryGithubId}\u0000${snapshot.headSha}`,
+        snapshot,
+      ]),
+    );
+    for (const worktree of worktrees) {
+      if (!worktree.pullRequest) continue;
+      const snapshot = byKey.get(
+        `${worktree.pullRequest.repositoryGithubId}\u0000${worktree.pullRequest.headRefOid}`,
+      );
+      worktree.pullRequest = {
+        ...worktree.pullRequest,
+        pipelineStatus:
+          snapshot?.pipelineStatus ?? worktree.pullRequest.pipelineStatus,
+        pipelines: snapshot?.pipelines ?? worktree.pullRequest.pipelines,
+        pipelineRevision:
+          snapshot?.revision ?? worktree.pullRequest.pipelineRevision ?? 0,
+      };
+    }
+  }
+
   async refreshPullRequest(id: string) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
@@ -831,6 +868,7 @@ export class WorktreesService {
     );
 
     await this.synchronizePullRequests(views);
+    await this.hydratePullRequestPipelines(views);
     const keys = [
       ...new Set(views.map((item) => item.ticketKey).filter(Boolean)),
     ] as string[];
@@ -1537,6 +1575,12 @@ export class WorktreesService {
         // Ticket metadata is optional; the branch-derived key remains useful.
       }
     }
+    const pullRequestPipelineSnapshot = worktree.pullRequest
+      ? await this.pipelineStatus.snapshot({
+          repositoryGithubId: worktree.pullRequest.repositoryGithubId,
+          headSha: worktree.pullRequest.headRefOid,
+        })
+      : null;
     return {
       worktree: {
         id: worktree.id,
@@ -1576,7 +1620,10 @@ export class WorktreesService {
       ...(worktree.pullRequest
         ? {
             pr: workflowPullRequestData(
-              storedPullRequestView(worktree.pullRequest),
+              storedPullRequestView(
+                worktree.pullRequest,
+                pullRequestPipelineSnapshot,
+              ),
             ),
           }
         : {}),

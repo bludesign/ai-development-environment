@@ -325,8 +325,6 @@ model WorktreePullRequest {
   repositoryUrl               String
   labelsJson                  String
   jiraKey                     String?
-  pipelineStatus              String
-  pipelinesJson               String
   reviewDecision              String
   unresolvedReviewThreadCount Int
   state                       String
@@ -344,6 +342,58 @@ model WorktreePullRequest {
   worktree                    Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
 
   @@index([githubId])
+}
+
+model GitHubPipelineSnapshot {
+  id                      String                 @id
+  repositoryGithubId      String
+  repositoryNameWithOwner String
+  repositoryUrl           String
+  headSha                 String
+  pipelineStatus          String
+  graphqlRollupStatus     String?
+  revision                Int                    @default(0)
+  lastGraphqlSyncAt       DateTime?
+  lastObservedAt          DateTime
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  records                 GitHubPipelineRecord[]
+
+  @@unique([repositoryGithubId, headSha])
+  @@index([lastObservedAt])
+}
+
+model GitHubPipelineRecord {
+  id                     String                 @id
+  snapshotId             String
+  identityKey            String
+  githubPipelineId       String
+  name                   String
+  status                 String
+  url                    String?
+  checkSuiteId           String?
+  workflowRunId          String?
+  workflowId             String?
+  runNumber              Int?
+  runAttempt             Int?
+  canRetry               Boolean                @default(false)
+  retryUnavailableReason String?
+  jobsJson               String                 @default("[]")
+  source                 String
+  githubUpdatedAt        DateTime?
+  sourceFetchedAt        DateTime
+  lastObservedAt         DateTime
+  optimisticUntil        DateTime?
+  isCurrent              Boolean                @default(true)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  snapshot               GitHubPipelineSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, identityKey])
+  @@index([snapshotId, isCurrent])
+  @@index([workflowRunId])
+  @@index([checkSuiteId])
+  @@index([lastObservedAt])
 }
 
 model WorktreeAutoSync {
@@ -2035,21 +2085,25 @@ model GitHubRateLimitSnapshot {
 }
 
 model GitHubAppSettings {
-  id                  String    @id
-  appId               String
-  installationId      String
-  apiBaseUrl          String    @default("https://api.github.com")
-  graphqlUrl          String    @default("https://api.github.com/graphql")
-  keyFingerprint      String
-  appSlug             String
-  accountLogin        String
-  repositorySelection String
-  actionsPermission   String
-  verifiedAt          DateTime
-  webhookUrl          String?
-  webhookConfiguredAt DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                              String    @id
+  appId                           String
+  installationId                  String
+  apiBaseUrl                      String    @default("https://api.github.com")
+  graphqlUrl                      String    @default("https://api.github.com/graphql")
+  keyFingerprint                  String
+  appSlug                         String
+  accountLogin                    String
+  repositorySelection             String
+  actionsPermission               String
+  checksPermission                String?
+  commitStatusesPermission        String?
+  webhookEventsJson               String    @default("[]")
+  enhancedPipelineWebhooksEnabled Boolean   @default(false)
+  verifiedAt                      DateTime
+  webhookUrl                      String?
+  webhookConfiguredAt             DateTime?
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
 }
 
 model GitHubWebhookDelivery {

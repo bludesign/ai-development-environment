@@ -33,6 +33,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -55,7 +56,7 @@ import type {
 const SETTINGS_FIELDS =
   "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt";
 const APP_SETTINGS_FIELDS =
-  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
+  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission checksPermission commitStatusesPermission webhookEvents enhancedPipelineWebhooksEnabled enhancedPipelineWebhooksReady enhancedPipelineWebhooksMissing verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
 
 export function SettingsPage() {
   const t = useTranslations("settings");
@@ -246,6 +247,8 @@ function GitHubAppSettingsCard() {
   const [deploymentUrl, setDeploymentUrl] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookUrlIsExplicit, setWebhookUrlIsExplicit] = useState(false);
+  const [enhancedPipelineWebhooksEnabled, setEnhancedPipelineWebhooksEnabled] =
+    useState(false);
   const [draggingPem, setDraggingPem] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -259,6 +262,9 @@ function GitHubAppSettingsCard() {
     setPrivateKey("");
     setWebhookUrl((current) => next.webhookUrl ?? current);
     setWebhookUrlIsExplicit(Boolean(next.webhookUrl));
+    setEnhancedPipelineWebhooksEnabled(
+      next.enhancedPipelineWebhooksEnabled ?? false,
+    );
   }, []);
 
   const load = useCallback(async () => {
@@ -303,6 +309,7 @@ function GitHubAppSettingsCard() {
             installationId: installationId.trim(),
             privateKey: privateKey || null,
             ...(webhookUrlIsExplicit ? { webhookUrl: webhookUrl.trim() } : {}),
+            enhancedPipelineWebhooksEnabled,
           },
         },
       );
@@ -531,6 +538,50 @@ function GitHubAppSettingsCard() {
                 </p>
               </div>
 
+              <div className="rounded-lg border p-4">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    checked={enhancedPipelineWebhooksEnabled}
+                    id="github-enhanced-pipeline-webhooks"
+                    onCheckedChange={(checked) =>
+                      setEnhancedPipelineWebhooksEnabled(checked === true)
+                    }
+                  />
+                  <div className="min-w-0">
+                    <Label
+                      className="font-medium"
+                      htmlFor="github-enhanced-pipeline-webhooks"
+                    >
+                      {t("enhancedWebhooks")}
+                    </Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("enhancedWebhooksHelp")}
+                    </p>
+                    {settings?.appSlug && (
+                      <p className="mt-2 text-xs">
+                        <SettingsHelpLink
+                          href={`https://github.com/settings/apps/${settings.appSlug}`}
+                        >
+                          {t("openAppSettings")}
+                        </SettingsHelpLink>
+                      </p>
+                    )}
+                    {settings &&
+                      !settings.enhancedPipelineWebhooksReady &&
+                      (settings.enhancedPipelineWebhooksMissing?.length ?? 0) >
+                        0 && (
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-700 dark:text-amber-300">
+                          {(settings.enhancedPipelineWebhooksMissing ?? []).map(
+                            (requirement) => (
+                              <li key={requirement}>{requirement}</li>
+                            ),
+                          )}
+                        </ul>
+                      )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <Label
                   className="mb-1.5 block text-sm font-medium"
@@ -595,6 +646,12 @@ function GitHubAppSettingsCard() {
                       {t("connectionDetails", {
                         permission: settings.actionsPermission ?? "—",
                         selection: settings.repositorySelection ?? "—",
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs">
+                      {t("pipelinePermissions", {
+                        checks: settings.checksPermission ?? "none",
+                        statuses: settings.commitStatusesPermission ?? "none",
                       })}
                     </p>
                     {settings.verifiedAt && (
