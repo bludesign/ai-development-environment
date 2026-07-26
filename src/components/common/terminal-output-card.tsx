@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Download,
   RefreshCw,
   Search,
 } from "lucide-react";
@@ -51,6 +52,8 @@ export function TerminalOutputCard({
   searchLabel,
   previousMatchLabel,
   nextMatchLabel,
+  rawOutputHref,
+  rawOutputLabel,
   ariaLabel,
   open = true,
   onOpenChange,
@@ -67,6 +70,8 @@ export function TerminalOutputCard({
   searchLabel: string;
   previousMatchLabel: string;
   nextMatchLabel: string;
+  rawOutputHref?: string;
+  rawOutputLabel?: string;
   ariaLabel: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -148,6 +153,11 @@ export function TerminalOutputCard({
     let observer: ResizeObserver | null = null;
     let scrollDisposable: { dispose(): void } | null = null;
     let searchDisposable: { dispose(): void } | null = null;
+    let lastTouchY: number | null = null;
+    let touchRemainder = 0;
+    let resetTouch: (() => void) | null = null;
+    let handleTouchStart: ((event: TouchEvent) => void) | null = null;
+    let handleTouchMove: ((event: TouchEvent) => void) | null = null;
     writtenRef.current.clear();
     dividerRef.current = null;
     followRef.current = true;
@@ -194,6 +204,65 @@ export function TerminalOutputCard({
       });
       observer = new ResizeObserver(() => fit.fit());
       observer.observe(terminalElement);
+
+      resetTouch = () => {
+        lastTouchY = null;
+        touchRemainder = 0;
+      };
+      handleTouchStart = (event: TouchEvent) => {
+        if (event.touches.length !== 1) {
+          resetTouch?.();
+          return;
+        }
+        lastTouchY = event.touches[0].clientY;
+        touchRemainder = 0;
+      };
+      handleTouchMove = (event: TouchEvent) => {
+        if (lastTouchY === null || event.touches.length !== 1) return;
+        const currentY = event.touches[0].clientY;
+        const delta = lastTouchY - currentY;
+        lastTouchY = currentY;
+        const buffer = terminal.buffer.active;
+        const canScroll =
+          (delta > 0 && buffer.viewportY < buffer.baseY) ||
+          (delta < 0 && buffer.viewportY > 0);
+        if (!canScroll) {
+          touchRemainder = 0;
+          return;
+        }
+
+        touchRemainder += delta;
+        const screenHeight =
+          terminal.element
+            ?.querySelector<HTMLElement>(".xterm-screen")
+            ?.getBoundingClientRect().height ?? 0;
+        const lineHeight =
+          screenHeight > 0 && terminal.rows > 0
+            ? screenHeight / terminal.rows
+            : 16;
+        const lines =
+          touchRemainder > 0
+            ? Math.floor(touchRemainder / lineHeight)
+            : Math.ceil(touchRemainder / lineHeight);
+        if (lines) {
+          terminal.scrollLines(lines);
+          touchRemainder -= lines * lineHeight;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      terminalElement.addEventListener("touchstart", handleTouchStart, {
+        passive: true,
+      });
+      terminalElement.addEventListener("touchmove", handleTouchMove, {
+        passive: false,
+      });
+      terminalElement.addEventListener("touchend", resetTouch, {
+        passive: true,
+      });
+      terminalElement.addEventListener("touchcancel", resetTouch, {
+        passive: true,
+      });
       writeEntries(entriesRef.current);
       if (searchTermRef.current) {
         searchAddon.findNext(searchTermRef.current, SEARCH_OPTIONS);
@@ -204,6 +273,14 @@ export function TerminalOutputCard({
       observer?.disconnect();
       scrollDisposable?.dispose();
       searchDisposable?.dispose();
+      if (handleTouchStart)
+        terminalElement.removeEventListener("touchstart", handleTouchStart);
+      if (handleTouchMove)
+        terminalElement.removeEventListener("touchmove", handleTouchMove);
+      if (resetTouch) {
+        terminalElement.removeEventListener("touchend", resetTouch);
+        terminalElement.removeEventListener("touchcancel", resetTouch);
+      }
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitRef.current = null;
@@ -217,7 +294,7 @@ export function TerminalOutputCard({
 
   return (
     <Card className={cn("gap-0 py-0", className)}>
-      <CardHeader>
+      <CardHeader className="grid-cols-1 has-data-[slot=card-action]:grid-cols-1 @md/card-header:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
         <CardTitle className="min-w-0">
           {onOpenChange ? (
             <Button
@@ -233,14 +310,14 @@ export function TerminalOutputCard({
             title
           )}
         </CardTitle>
-        <CardAction className="flex items-center gap-2">
+        <CardAction className="col-start-1 row-span-1 row-start-2 flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           {open && (
             <div className="flex items-center gap-1">
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   aria-label={searchLabel}
-                  className="h-7 w-36 pr-10 pl-7 text-xs sm:w-52"
+                  className="h-7 w-28 pr-10 pl-7 text-xs sm:w-52"
                   onChange={(event) => search(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -282,6 +359,17 @@ export function TerminalOutputCard({
               </Button>
             </div>
           )}
+          {open && rawOutputHref && rawOutputLabel && (
+            <Button asChild size="icon-sm" variant="outline">
+              <a
+                aria-label={rawOutputLabel}
+                href={rawOutputHref}
+                title={rawOutputLabel}
+              >
+                <Download />
+              </a>
+            </Button>
+          )}
           {open && (
             <Button
               aria-label={fitLabel}
@@ -317,7 +405,7 @@ export function TerminalOutputCard({
         <div className="relative bg-[#09090b]">
           <div
             aria-label={ariaLabel}
-            className="h-[min(60vh,42rem)] px-2 pb-2"
+            className="h-[min(60dvh,42rem)] px-2 pb-2"
             ref={setTerminalElement}
             role="log"
           />

@@ -9,7 +9,7 @@ import {
   FilePenLine,
   RotateCcw,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DateTime } from "@/components/common/date-time";
@@ -120,6 +120,7 @@ function mergeOutputChunks(
 
 export function CommandRunPage({ runId }: { runId: string }) {
   const t = useTranslations("commands");
+  const locale = useLocale();
   const router = useRouter();
   const [run, setRun] = useState<CommandRun | null>(null);
   const [outputState, setOutputState] = useState<{
@@ -456,6 +457,8 @@ export function CommandRunPage({ runId }: { runId: string }) {
         key={runId}
         nextMatchLabel={t("nextTerminalMatch")}
         previousMatchLabel={t("previousTerminalMatch")}
+        rawOutputHref={`/${locale}/commands/runs/${encodeURIComponent(runId)}/output`}
+        rawOutputLabel={t("viewRawOutput")}
         searchLabel={t("searchTerminal")}
         sourceKey={runId}
         title={t("terminalOutput")}

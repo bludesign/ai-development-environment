@@ -226,6 +226,13 @@ afterEach(() => {
 });
 
 describe("CommandRunPage", () => {
+  test("links to the localized raw command output", async () => {
+    render(<CommandRunPage runId="run-1" />);
+
+    const link = await screen.findByRole("link", { name: "View raw output" });
+    expect(link.getAttribute("href")).toBe("/en/commands/runs/run-1/output");
+  });
+
   test("does not offer definition editing for a custom command run", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("CommandRunDetail")) {
