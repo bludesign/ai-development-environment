@@ -332,12 +332,14 @@ export function CommandRunPage({ runId }: { runId: string }) {
             {t(commandOriginKey(run.origin))}
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href={`/commands/${run.commandId}/edit`}>
-            <FilePenLine />
-            {t("editCommand")}
-          </Link>
-        </Button>
+        {run.commandId && (
+          <Button asChild variant="outline">
+            <Link href={`/commands/${run.commandId}/edit`}>
+              <FilePenLine />
+              {t("editCommand")}
+            </Link>
+          </Button>
+        )}
         <Button
           disabled={mutating}
           variant="outline"

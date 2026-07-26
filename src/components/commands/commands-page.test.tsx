@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -229,5 +230,51 @@ describe("CommandsPage", () => {
     await act(async () => publishRun?.());
 
     expect(await screen.findByRole("link", { name: "#44" })).toBeDefined();
+  });
+
+  test("runs a custom command on a selected target", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("StartCustomCommand")) {
+        return { startCustomCommandRun: { id: "custom-run" } } as never;
+      }
+      return {
+        commandDefinitions: [],
+        agents: [
+          {
+            id: "agent-1",
+            name: "Studio",
+            hostname: "studio.local",
+            connectionStatus: "ONLINE",
+            capabilities: ["command.run"],
+          },
+        ],
+        worktreeOverview: { agents: [] },
+        commandRuns: { nodes: [] },
+      } as never;
+    });
+
+    render(<CommandsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run custom" }));
+    fireEvent.change(screen.getByLabelText("Shell script"), {
+      target: { value: "printf custom" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Studio · studio\.local/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("startCustomCommandRun"),
+        {
+          input: {
+            script: "printf custom",
+            origin: "MANUAL",
+            agentId: "agent-1",
+          },
+        },
+      ),
+    );
+    expect(push).toHaveBeenCalledWith("/commands/runs/custom-run");
   });
 });

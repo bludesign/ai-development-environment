@@ -4,6 +4,7 @@ import { hasConfigDescriptor } from "./config-descriptors";
 import {
   computeWorkflowPathAvailability,
   emptyWorkflowDefinition,
+  resourceManualSeedPaths,
   sanitizeWorkflowExportDefinition,
   validateWorkflowDefinition,
   workflowTriggerChoices,
@@ -231,7 +232,7 @@ describe("workflow definition validation", () => {
     expect(rightAvailable).toContain("workflow.*");
   });
 
-  test("resource-manual triggers seed only their configured resource kind", () => {
+  test("resource-manual triggers seed their configured resource context", () => {
     const value = definition([node("notify", "NOTIFICATION_SEND")]);
     value.nodes[0]!.config = { body: "PR {{pr.number}}" };
     value.triggers[0] = {
@@ -244,10 +245,13 @@ describe("workflow definition validation", () => {
 
     const { availableBefore } = computeWorkflowPathAvailability(value);
     const before = availableBefore.get("notify") ?? [];
-    // PULL_REQUEST seeds pr.* and repo.* — but not another kind's paths.
+    // Pull requests bring their repository and correlated local resources, but
+    // not an unrelated resource such as a build.
     expect(before).toContain("pr.*");
     expect(before).toContain("repo.*");
-    expect(before).not.toContain("ticket.*");
+    expect(before).toContain("ticket.*");
+    expect(before).toContain("worktree.*");
+    expect(before).not.toContain("build.*");
   });
 
   test("a loader step may optionally read the namespace it provides", () => {
@@ -481,6 +485,131 @@ describe("workflow catalog", () => {
       ).toBe(true);
       expect(entry.configSchema.properties, entry.kind).toBeDefined();
     }
+  });
+
+  test("worktree triggers advertise their full resource context", () => {
+    for (const entry of WORKFLOW_TRIGGER_CATALOG.filter(({ kind }) =>
+      kind.startsWith("WORKTREE_"),
+    )) {
+      expect(entry.seedPaths, entry.kind).toEqual(
+        expect.arrayContaining([
+          "worktree.*",
+          "codebase.*",
+          "agent.*",
+          "repo.*",
+          "pr.*",
+          "ticket.*",
+        ]),
+      );
+    }
+  });
+
+  test("pull request triggers advertise correlated worktree context", () => {
+    for (const kind of [
+      "GITHUB_PR_STATE",
+      "GITHUB_REVIEW_CHANGES_REQUESTED",
+      "GITHUB_REVIEW_COMMENT",
+      "GITHUB_PR_CLOSED",
+      "GITHUB_PR_LABEL",
+    ]) {
+      const entry = WORKFLOW_TRIGGER_CATALOG.find((item) => item.kind === kind);
+      expect(entry?.seedPaths, kind).toEqual(
+        expect.arrayContaining([
+          "repo.*",
+          "pr.*",
+          "ticket.*",
+          "worktree.*",
+          "codebase.*",
+          "agent.*",
+        ]),
+      );
+    }
+  });
+
+  test("worktree-producing steps advertise their refreshed resource context", () => {
+    for (const kind of [
+      "WORKTREE_CREATE",
+      "WORKTREE_CHANGE_BRANCH",
+      "WORKTREE_OPERATION",
+      "WORKTREE_MOVE",
+      "WORKTREE_GIT_OPERATION",
+      "WORKTREE_WAIT_PUSH_READY",
+    ]) {
+      const entry = WORKFLOW_STEP_CATALOG.find((item) => item.kind === kind);
+      expect(entry?.providedPaths, kind).toEqual(
+        expect.arrayContaining([
+          "worktree.*",
+          "codebase.*",
+          "agent.*",
+          "repo.*",
+          "pr.*",
+          "ticket.*",
+        ]),
+      );
+    }
+  });
+
+  test("disk-space triggers advertise canonical monitor context", () => {
+    for (const kind of [
+      "AGENT_DISK_REPORT",
+      "AGENT_DISK_THRESHOLD",
+      "AGENT_DISK_STATE_CHANGED",
+    ]) {
+      expect(
+        WORKFLOW_TRIGGER_CATALOG.find((entry) => entry.kind === kind)
+          ?.seedPaths,
+        kind,
+      ).toEqual(expect.arrayContaining(["agent.*", "disk.*"]));
+    }
+    expect(
+      WORKFLOW_TRIGGER_CATALOG.find(
+        (entry) => entry.kind === "AGENT_DISK_CLEANUP_RESULT",
+      )?.seedPaths,
+    ).toEqual(expect.arrayContaining(["agent.*", "disk.*", "cleanup.*"]));
+  });
+
+  test("resource triggers advertise related context hydrated by the server", () => {
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", { resourceKind: "CODEBASE" }),
+    ).toEqual(expect.arrayContaining(["codebase.*", "agent.*", "repo.*"]));
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", { resourceKind: "BUILD" }),
+    ).toEqual(
+      expect.arrayContaining([
+        "build.*",
+        "worktree.*",
+        "codebase.*",
+        "agent.*",
+        "repo.*",
+        "pr.*",
+        "ticket.*",
+      ]),
+    );
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", {
+        resourceKind: "AGENT_RUN",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        "run.*",
+        "worktree.*",
+        "codebase.*",
+        "agent.*",
+        "repo.*",
+        "pr.*",
+        "ticket.*",
+      ]),
+    );
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", {
+        resourceKind: "PULL_REQUEST",
+      }),
+    ).toEqual(expect.arrayContaining(["pr.*", "repo.*", "ticket.*"]));
+    expect(
+      resourceManualSeedPaths("RESOURCE_MANUAL", {
+        resourceKind: "JIRA_TICKET",
+      }),
+    ).toEqual(expect.arrayContaining(["ticket.*", "comment.*"]));
   });
 
   test("control-flow steps advertise their branch handles", () => {

@@ -19,7 +19,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import {
@@ -29,7 +28,7 @@ import {
 
 import {
   DISK_SPACE_FIELDS,
-  mostConstrainedVolume,
+  monitoredVolume,
   type DiskSpaceOverview,
   type DiskSpaceStatus,
 } from "./types";
@@ -205,38 +204,41 @@ export function SidebarStatusFooter() {
             <div className="min-w-0 flex-1 text-left">
               <p className="text-xs font-medium">{t("freeDiskSpace")}</p>
               {enabledAgents.length === 1 &&
-              mostConstrainedVolume(enabledAgents[0]!) ? (
+              monitoredVolume(enabledAgents[0]!) ? (
                 <div className="mt-1">
                   <VolumeBar
                     compact
                     hideLabel
-                    volume={mostConstrainedVolume(enabledAgents[0]!)!}
+                    volume={monitoredVolume(enabledAgents[0]!)!}
                   />
                 </div>
               ) : enabledAgents.length > 1 ? (
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {enabledAgents.map((agent) => {
-                    const volume = mostConstrainedVolume(agent);
+                    const volume = monitoredVolume(agent);
                     if (!volume) return null;
-                    const freePercent =
+                    const usedPercent =
                       volume.totalBytes > 0
                         ? Math.max(
                             0,
                             Math.min(
                               100,
-                              (volume.freeBytes / volume.totalBytes) * 100,
+                              ((volume.totalBytes - volume.freeBytes) /
+                                volume.totalBytes) *
+                                100,
                             ),
                           )
                         : 0;
+                    const unfilledPercent = 100 - usedPercent;
                     return (
                       <span
-                        aria-label={`${agent.agent.name}: ${formatDiskBytes(volume.freeBytes, locale)} ${t("free")}`}
+                        aria-label={`${agent.agent.name} · ${t("role.DERIVED_DATA")}: ${formatDiskBytes(volume.freeBytes, locale)} ${t("free")}`}
                         className="grid size-5 place-items-center rounded-full"
                         key={agent.agent.id}
                         style={{
-                          background: `conic-gradient(${ringColor(agent.status)} ${freePercent}%, var(--muted) ${freePercent}% 100%)`,
+                          background: `conic-gradient(var(--muted) 0% ${unfilledPercent}%, ${ringColor(agent.status)} ${unfilledPercent}% 100%)`,
                         }}
-                        title={agent.agent.name}
+                        title={`${agent.agent.name} · ${t("role.DERIVED_DATA")}`}
                       >
                         <span className="size-3 rounded-full bg-sidebar" />
                       </span>
@@ -283,7 +285,6 @@ export function SidebarStatusFooter() {
               </p>
             )}
           </PopoverHeader>
-          <Separator />
           {!status ? (
             <Spinner />
           ) : (
@@ -334,12 +335,7 @@ export function SidebarStatusFooter() {
                   </div>
                 </div>
                 {agent.volumes.map((volume) => (
-                  <VolumeBar
-                    compact
-                    hideLabel
-                    key={volume.id}
-                    volume={volume}
-                  />
+                  <VolumeBar compact key={volume.id} volume={volume} />
                 ))}
                 {(agent.lastError || agent.warnings.length > 0) && (
                   <p className="text-xs text-destructive">
@@ -351,7 +347,6 @@ export function SidebarStatusFooter() {
               </div>
             ))
           )}
-          <Separator />
           <div className="space-y-1.5">
             <p className="text-xs font-medium">{t("recentDeletions")}</p>
             {history.length === 0 ? (

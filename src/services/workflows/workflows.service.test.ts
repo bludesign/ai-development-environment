@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { CodebaseBusyError } from "@/lib/codebase-busy";
 import {
   emptyWorkflowDefinition,
   type WorkflowDefinition,
@@ -11,7 +12,10 @@ const prisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
   workflow: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   codebaseRepository: { count: vi.fn() },
-  worktree: { findUnique: vi.fn() },
+  worktree: { findUnique: vi.fn(), findFirst: vi.fn() },
+  codebase: { findUnique: vi.fn() },
+  build: { findUnique: vi.fn() },
+  agentRun: { findUnique: vi.fn() },
   workflowQuickActionRepository: {
     deleteMany: vi.fn(),
     createMany: vi.fn(),
@@ -32,7 +36,8 @@ const prisma = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   workflowStepAttempt: { update: vi.fn(), updateMany: vi.fn() },
-  workflowWait: { create: vi.fn(), findMany: vi.fn() },
+  workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
+  workflowTriggerState: { findUnique: vi.fn(), upsert: vi.fn() },
   workflowResourceLease: { deleteMany: vi.fn() },
   workflowRunEvent: { findFirst: vi.fn(), create: vi.fn() },
 }));
@@ -305,6 +310,426 @@ describe("workflow resource session hydration", () => {
       ),
     ).resolves.toMatchObject({ pr: { number: 12 } });
   });
+
+  test("hydrates a codebase launch with its repository and owning agent", async () => {
+    prisma.codebase.findUnique.mockResolvedValue({
+      id: "codebase-1",
+      folder: "/repo",
+      agentId: "agent-1",
+      branch: "main",
+      headSha: "abc123",
+      defaultBranch: "main",
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        hostname: "studio.local",
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
+        diskFreeBytes: 1_000,
+        memoryFreeBytes: 2_000,
+      },
+      repository: {
+        id: "repository-1",
+        name: "Widgets",
+        canonicalOrigin: "github.com/acme/widgets",
+        displayOrigin: "github.com/acme/widgets",
+      },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("CODEBASE", "codebase-1", {
+        codebase: { id: "codebase-1" },
+      }),
+    ).resolves.toMatchObject({
+      codebase: {
+        id: "codebase-1",
+        folder: "/repo",
+        branch: "main",
+        headSha: "abc123",
+      },
+      agent: { id: "agent-1", name: "Studio Mac", connected: true },
+      repo: { id: "repository-1", defaultBranch: "main" },
+    });
+  });
+
+  test("marks stale codebase agents disconnected using the heartbeat window", async () => {
+    prisma.codebase.findUnique.mockResolvedValue({
+      id: "codebase-1",
+      folder: "/repo",
+      agentId: "agent-1",
+      branch: "main",
+      headSha: "abc123",
+      defaultBranch: "main",
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        hostname: "studio.local",
+        lastSeenAt: new Date(Date.now() - 46_000),
+        disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
+        diskFreeBytes: 1_000,
+        memoryFreeBytes: 2_000,
+      },
+      repository: {
+        id: "repository-1",
+        name: "Widgets",
+        canonicalOrigin: "github.com/acme/widgets",
+        displayOrigin: "github.com/acme/widgets",
+      },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("CODEBASE", "codebase-1", {}),
+    ).resolves.toMatchObject({ agent: { connected: false } });
+  });
+
+  test("marks stale build agents disconnected using the heartbeat window", async () => {
+    prisma.build.findUnique.mockResolvedValue({
+      id: "build-1",
+      status: "QUEUED",
+      action: "BUILD",
+      error: null,
+      artifactDirectory: null,
+      worktreeId: null,
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        hostname: "studio.local",
+        lastSeenAt: new Date(Date.now() - 46_000),
+        disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
+        diskFreeBytes: 1_000,
+        memoryFreeBytes: 2_000,
+      },
+      codebase: null,
+      artifacts: [],
+      reports: [],
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("BUILD", "build-1", {}),
+    ).resolves.toMatchObject({ agent: { connected: false } });
+  });
+
+  test("hydrates a build launch with reports and linked worktree context", async () => {
+    prisma.build.findUnique.mockResolvedValue({
+      id: "build-1",
+      status: "SUCCEEDED",
+      action: "TEST",
+      error: null,
+      artifactDirectory: "/tmp/build-1",
+      worktreeId: "worktree-1",
+      agent: null,
+      codebase: null,
+      artifacts: [
+        {
+          id: "artifact-1",
+          kind: "RESULT_BUNDLE",
+          relativePath: "Tests.xcresult",
+          sizeBytes: 42,
+          checksum: "sha256",
+        },
+      ],
+      reports: [
+        {
+          kind: "TEST_RESULTS",
+          summaryJson: JSON.stringify({ passed: 10, failed: 0 }),
+        },
+      ],
+    });
+    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+      worktree: { id: "worktree-1", branch: "feature/APP-42" },
+      codebase: { id: "codebase-1", agentId: "agent-1" },
+      agent: { id: "agent-1", name: "Studio Mac" },
+      repo: { id: "repository-1", name: "Widgets" },
+      ticket: { key: "APP-42" },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree,
+      },
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("BUILD", "build-1", {
+        build: { id: "build-1" },
+      }),
+    ).resolves.toMatchObject({
+      build: {
+        id: "build-1",
+        status: "SUCCEEDED",
+        testSummary: { passed: 10, failed: 0 },
+        artifacts: [{ id: "artifact-1" }],
+      },
+      worktree: { id: "worktree-1", branch: "feature/APP-42" },
+      agent: { id: "agent-1" },
+      repo: { id: "repository-1" },
+      ticket: { key: "APP-42" },
+    });
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
+  });
+
+  test("hydrates a pull-request launch with PR, worktree, and ticket context", async () => {
+    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+      worktree: { id: "worktree-1", branch: "feature/APP-42" },
+      codebase: { id: "codebase-1", agentId: "agent-1" },
+      agent: { id: "agent-1" },
+      repo: { id: "repository-1" },
+      ticket: { key: "APP-42" },
+    });
+    const github = {
+      pullRequest: vi.fn().mockResolvedValue({
+        id: "pull-request-1",
+        number: 42,
+        title: "Ship widgets",
+        url: "https://github.com/acme/widgets/pull/42",
+        codebaseRepositoryId: "repository-1",
+        repositoryGithubId: "github-repository-1",
+        repositoryNameWithOwner: "acme/widgets",
+        repositoryUrl: "https://github.com/acme/widgets",
+        headRefName: "feature/APP-42",
+        baseRefName: "main",
+        worktreeId: "worktree-1",
+        jiraKey: "APP-42",
+        reviewThreads: [
+          { id: "thread-1", isResolved: false },
+          { id: "thread-2", isResolved: true },
+        ],
+      }),
+    };
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree,
+      },
+      undefined,
+      github as never,
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("PULL_REQUEST", "acme/widgets#42", {
+        pr: { number: 42 },
+      }),
+    ).resolves.toMatchObject({
+      pr: {
+        id: "pull-request-1",
+        number: 42,
+        headBranch: "feature/APP-42",
+        baseBranch: "main",
+        unresolvedThreads: [{ id: "thread-1" }],
+      },
+      worktree: { id: "worktree-1" },
+      agent: { id: "agent-1" },
+      repo: { id: "repository-1" },
+      ticket: { key: "APP-42" },
+    });
+  });
+
+  test("hydrates a Jira launch with ticket details and the latest comment", async () => {
+    const jira = {
+      ticket: vi.fn().mockResolvedValue({
+        key: "APP-42",
+        summary: "Ship widgets",
+        issueType: "Task",
+        status: "In Progress",
+        jiraUrl: "https://jira.example/browse/APP-42",
+        comments: [
+          {
+            id: "comment-1",
+            content: { rawText: "Please ship it" },
+            author: { displayName: "Chandler" },
+          },
+        ],
+      }),
+    };
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      jira as never,
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("JIRA_TICKET", "APP-42", {
+        ticket: { key: "APP-42" },
+      }),
+    ).resolves.toMatchObject({
+      ticket: {
+        key: "APP-42",
+        title: "Ship widgets",
+        type: "Task",
+        status: "In Progress",
+      },
+      comment: {
+        id: "comment-1",
+        body: "Please ship it",
+      },
+    });
+  });
+});
+
+describe("workflow agent-job session hydration", () => {
+  test("refreshes rich context after creating a worktree", async () => {
+    let completionObserver:
+      | ((job: {
+          id: string;
+          kind: string;
+          status: string;
+          resultJson: string | null;
+          error: string | null;
+          codebaseId?: string | null;
+          worktreeId?: string | null;
+        }) => Promise<void>)
+      | undefined;
+    const agentControl = {
+      registerCompletionHandler: vi.fn(),
+      registerCompletionObserver: vi.fn((handler) => {
+        completionObserver = handler;
+      }),
+    };
+    const richContext = {
+      worktree: {
+        id: "worktree-1",
+        path: "/repo/.worktrees/feature",
+        branch: "feature/APP-42",
+      },
+      codebase: { id: "codebase-1", agentId: "agent-1" },
+      agent: { id: "agent-1", name: "Studio Mac" },
+      repo: { id: "repository-1", name: "Widgets" },
+      ticket: { key: "APP-42" },
+    };
+    const workflowSessionDataForWorktree = vi
+      .fn()
+      .mockResolvedValue(richContext);
+    prisma.worktree.findFirst.mockResolvedValue({
+      id: "worktree-1",
+      codebase: {
+        id: "codebase-1",
+        folder: "/repo",
+        agentId: "agent-1",
+        branch: "main",
+        headSha: "base-sha",
+        defaultBranch: "main",
+        agent: {
+          id: "agent-1",
+          name: "Studio Mac",
+          hostname: "studio.local",
+        },
+        repository: {
+          id: "repository-1",
+          name: "Widgets",
+          displayOrigin: "github.com/acme/widgets",
+          canonicalOrigin: "github.com/acme/widgets",
+        },
+      },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      agentControl as never,
+      undefined,
+      undefined,
+      {
+        ticketKeyForWorktree: vi.fn(),
+        workflowSessionDataForWorktree,
+      },
+    );
+    const resolveExternalWait = vi
+      .spyOn(service, "resolveExternalWait")
+      .mockResolvedValue(1);
+
+    await completionObserver?.({
+      id: "job-1",
+      kind: "worktree.branch",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        worktree: { gitDirectory: "/repo/.git/worktrees/feature" },
+      }),
+      error: null,
+      codebaseId: "codebase-1",
+      worktreeId: null,
+    });
+
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1", {
+      includeMissing: true,
+    });
+    expect(resolveExternalWait).toHaveBeenCalledWith(
+      "AGENT_JOB",
+      "job-1",
+      expect.objectContaining({ sessionPatch: richContext }),
+      null,
+    );
+  });
 });
 
 describe("workflow sub-workflow validation", () => {
@@ -509,6 +934,94 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
+  test("holds a step in the queue while the codebase is busy", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const workerId = (service as unknown as { workerId: string }).workerId;
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "RUNNING",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(held).toBe(true);
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: "attempt-1", status: "RUNNING", claimOwner: workerId },
+      data: expect.objectContaining({
+        status: "READY",
+        phase: "WAITING_FOR_RESOURCE",
+        claimOwner: null,
+        claimExpiresAt: null,
+      }),
+    });
+    expect(prisma.workflowResourceLease.deleteMany).toHaveBeenCalledWith({
+      where: { attemptId: "attempt-1" },
+    });
+    expect(prisma.workflowRunEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "STEP_WAITING_FOR_RESOURCE" }),
+    });
+  });
+
+  test("stops holding a busy step once its hold budget runs out", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "WAITING_FOR_RESOURCE",
+        startedAt: new Date(Date.now() - 11 * 60_000),
+        createdAt: new Date(Date.now() - 11 * 60_000),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(held).toBe(false);
+    expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("does not hold a step for an unrelated failure", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "RUNNING",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new Error("Worktree is unavailable"),
+    );
+
+    expect(held).toBe(false);
+    expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("only logs the wait once while a step keeps holding", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+    prisma.workflowRunEvent.findFirst.mockResolvedValue({ id: "wait-event" });
+
+    await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "RUNNING",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalled();
+    expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
+  });
+
   test("only resolves due waits for scheduling runs", async () => {
     prisma.workflowWait.findMany.mockResolvedValue([]);
     const service = new WorkflowsService(new WorkflowEventsService());
@@ -522,6 +1035,78 @@ describe("workflow runtime lifecycle guards", () => {
         }),
       }),
     );
+  });
+
+  function pendingCommandWait(config: Record<string, unknown>) {
+    const definition = emptyWorkflowDefinition("Wait timing");
+    definition.nodes = [
+      {
+        id: "step-1",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 0, y: 0 },
+        config,
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    return {
+      id: "wait-1",
+      runId: "run-1",
+      attemptId: "attempt-1",
+      kind: "COMMAND_RUN",
+      externalKey: "command-run-1",
+      status: "PENDING",
+      timeoutAt: null,
+      predicateJson: null,
+      attempt: {
+        id: "attempt-1",
+        runId: "run-1",
+        nodeId: "step-1",
+        run: {
+          id: "run-1",
+          sessionDataJson: "{}",
+          version: { definitionJson: JSON.stringify(definition) },
+        },
+      },
+    };
+  }
+
+  test("polls a pending wait on the step's configured cadence", async () => {
+    prisma.workflowWait.findMany.mockResolvedValue([
+      pendingCommandWait({ cadenceSeconds: 45 }),
+    ]);
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    const service = new WorkflowsService(new WorkflowEventsService());
+    service.registerWaitPoller("COMMAND_RUN", async () => ({
+      pending: true,
+      pollAfterSeconds: 1,
+    }));
+
+    await internals(service).resolveDueWaits();
+
+    const update = prisma.workflowWait.updateMany.mock.calls[0]?.[0];
+    expect(
+      Math.round((update.data.resumeAfter.getTime() - Date.now()) / 1_000),
+    ).toBe(45);
+  });
+
+  test("keeps the poller's own cadence when the step configures none", async () => {
+    prisma.workflowWait.findMany.mockResolvedValue([pendingCommandWait({})]);
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    const service = new WorkflowsService(new WorkflowEventsService());
+    service.registerWaitPoller("COMMAND_RUN", async () => ({
+      pending: true,
+      pollAfterSeconds: 7,
+    }));
+
+    await internals(service).resolveDueWaits();
+
+    const update = prisma.workflowWait.updateMany.mock.calls[0]?.[0];
+    expect(
+      Math.round((update.data.resumeAfter.getTime() - Date.now()) / 1_000),
+    ).toBe(7);
   });
 
   test("parks ready attempts as part of requesting a pause", async () => {
@@ -709,6 +1294,47 @@ describe("workflow trigger interpolation", () => {
         },
         payload,
       ),
+    ).resolves.toBe(true);
+  });
+
+  test("fires disk thresholds only on false-to-true crossings", async () => {
+    prisma.workflowTriggerState.findUnique
+      .mockResolvedValueOnce({ lastMatched: false })
+      .mockResolvedValueOnce({ lastMatched: true })
+      .mockResolvedValueOnce({ lastMatched: true })
+      .mockResolvedValueOnce({ lastMatched: false });
+    const config = {
+      thresholdPath: "disk.freeGiB",
+      thresholdOperator: "LT",
+      thresholdValue: 10,
+    };
+
+    await expect(
+      matches("AGENT_DISK_THRESHOLD", config, { disk: { freeGiB: 8 } }),
+    ).resolves.toBe(true);
+    await expect(
+      matches("AGENT_DISK_THRESHOLD", config, { disk: { freeGiB: 7 } }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("AGENT_DISK_THRESHOLD", config, { disk: { freeGiB: 15 } }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("AGENT_DISK_THRESHOLD", config, { disk: { freeGiB: 9 } }),
+    ).resolves.toBe(true);
+  });
+
+  test("does not cursor-suppress repeated cleanup result events", async () => {
+    const config = { filters: { "cleanup.status": "SUCCEEDED" } };
+
+    await expect(
+      matches("AGENT_DISK_CLEANUP_RESULT", config, {
+        cleanup: { jobId: "job-1", status: "SUCCEEDED" },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      matches("AGENT_DISK_CLEANUP_RESULT", config, {
+        cleanup: { jobId: "job-2", status: "SUCCEEDED" },
+      }),
     ).resolves.toBe(true);
   });
 });

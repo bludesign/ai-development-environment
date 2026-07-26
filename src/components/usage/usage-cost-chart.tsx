@@ -90,6 +90,20 @@ export function totalUsageCostForChartRow(
   return series.reduce((sum, model) => sum + Number(values[model.key] ?? 0), 0);
 }
 
+export function sortUsageCostTooltipPayload<
+  T extends { name?: number | string; value?: unknown },
+>(payload: ReadonlyArray<T>): T[] {
+  return [...payload].sort(
+    (first, second) =>
+      Number(second.value ?? 0) - Number(first.value ?? 0) ||
+      String(first.name ?? "").localeCompare(String(second.name ?? "")),
+  );
+}
+
+export function usageCostChartHeight(seriesCount: number): number {
+  return Math.max(320, seriesCount * 26 + 64);
+}
+
 export function UsageCostChart({
   days,
   onSelectModel,
@@ -153,7 +167,11 @@ export function UsageCostChart({
         </CardDescription>
       </CardHeader>
       <CardContent className="px-2 pt-4 sm:px-6">
-        <ChartContainer className="h-80 w-full aspect-auto" config={config}>
+        <ChartContainer
+          className="w-full aspect-auto"
+          config={config}
+          style={{ height: usageCostChartHeight(series.length) }}
+        >
           <BarChart
             accessibilityLayer
             data={data}
@@ -177,8 +195,9 @@ export function UsageCostChart({
             />
             <ChartTooltip
               wrapperStyle={{ pointerEvents: "none", zIndex: 50 }}
-              content={
+              content={(props) => (
                 <ChartTooltipContent
+                  active={props.active}
                   formatter={(value, name, item, index, row) => {
                     const total = totalUsageCostForChartRow(row, visibleSeries);
                     return (
@@ -208,9 +227,11 @@ export function UsageCostChart({
                       </div>
                     );
                   }}
+                  label={props.label}
                   labelFormatter={(value) => formatPeriod(String(value))}
+                  payload={sortUsageCostTooltipPayload(props.payload)}
                 />
-              }
+              )}
             />
             <ChartLegend
               content={

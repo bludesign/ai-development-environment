@@ -19,6 +19,26 @@ export const DISK_SPACE_VOLUME_ROLES = [
 
 export type DiskSpaceVolumeRole = (typeof DISK_SPACE_VOLUME_ROLES)[number];
 
+/**
+ * Free space is only actionable on the volume holding Derived Data, because
+ * Derived Data is the only thing cleanup can reclaim. Other volumes are
+ * reported for visibility and never drive status, admission control, or
+ * automatic cleanup.
+ */
+export const DISK_SPACE_MONITORED_ROLE: DiskSpaceVolumeRole = "DERIVED_DATA";
+
+export function isMonitoredDiskSpaceVolume(volume: {
+  roles: DiskSpaceVolumeRole[];
+}): boolean {
+  return volume.roles.includes(DISK_SPACE_MONITORED_ROLE);
+}
+
+export function monitoredDiskSpaceVolumes<
+  T extends { roles: DiskSpaceVolumeRole[] },
+>(volumes: readonly T[]): T[] {
+  return volumes.filter((volume) => isMonitoredDiskSpaceVolume(volume));
+}
+
 export type AgentDiskSpaceConfiguration = {
   enabled: boolean;
   pollIntervalSeconds: number;

@@ -2283,6 +2283,14 @@ const mockTranslations = {
     description:
       "Create reusable shell commands and inspect their durable runs.",
     newCommand: "New command",
+    runCustom: "Run custom",
+    customCommandDescription:
+      "Run a one-off shell command without saving a reusable command definition.",
+    customCommandPlaceholder: "Enter a shell command or script",
+    customCommandWarning:
+      "The command runs with the full permissions of the selected agent account and is retained in this run's immutable history.",
+    runIn: "Run in",
+    running: "Running…",
     editCommand: "Edit command",
     editorDescription:
       "Saved commands run with the full permissions of the selected agent account.",

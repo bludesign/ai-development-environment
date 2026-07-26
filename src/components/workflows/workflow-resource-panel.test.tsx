@@ -15,6 +15,8 @@ import {
 
 import { WorkflowResourcePanel } from "./workflow-resource-panel";
 
+const routerPush = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock("@/i18n/navigation", () => ({
       {children}
     </a>
   ),
+  useRouter: () => ({ push: routerPush }),
 }));
 
 vi.mock("./workflow-labels", () => ({
@@ -45,9 +48,31 @@ vi.mock("./workflow-labels", () => ({
 vi.mock("./workflow-graph", () => ({
   WorkflowGraph: ({
     currentPageNodeIds,
+    destinations,
+    onNodeClick,
   }: {
     currentPageNodeIds: Set<string>;
-  }) => <div>Highlighted: {[...currentPageNodeIds].sort().join(",")}</div>,
+    destinations?: ReadonlyMap<string, { href: string; external: boolean }>;
+    onNodeClick?: (nodeId: string, details: Record<string, unknown>) => void;
+  }) => (
+    <div>
+      Highlighted: {[...currentPageNodeIds].sort().join(",")}
+      {[...(destinations ?? new Map())].map(([nodeId, destination]) => (
+        <button
+          key={nodeId}
+          onClick={() =>
+            onNodeClick?.(nodeId, {
+              destination,
+              locked: true,
+              trigger: false,
+            })
+          }
+        >
+          Step {nodeId}
+        </button>
+      ))}
+    </div>
+  ),
   workflowStatusVariant: () => "outline",
 }));
 
@@ -129,6 +154,26 @@ describe("linked workflow resource highlighting", () => {
     expect(
       await screen.findByText("Highlighted: resource-trigger"),
     ).toBeTruthy();
+  });
+
+  test("opens the resource behind a step from the compact graph", async () => {
+    render(
+      <WorkflowResourcePanel
+        resourceId="worktree-1"
+        resourceKind="WORKTREE"
+        sessionData={{}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Step load-ticket" }),
+    );
+    expect(routerPush).toHaveBeenCalledWith("/jira/tickets/AIDE-1");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Step resource-trigger" }),
+    );
+    expect(routerPush).toHaveBeenCalledWith("/worktrees/worktree-1");
   });
 });
 

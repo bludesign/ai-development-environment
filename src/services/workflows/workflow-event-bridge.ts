@@ -1,5 +1,9 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
+import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
+
 import {
   AGENT_CHANGED_TOPIC,
   BUILDS_CHANGED_TOPIC,
@@ -10,6 +14,16 @@ import {
   type AgentControlService,
 } from "@/services/agent-control";
 import { getPrismaClient } from "@/data/prisma-client";
+import { mergeSessionData } from "@/lib/workflows/session";
+import {
+  diskSpaceSessionData,
+  diskSpaceStateCursor,
+  type DiskSpaceChangedPayload,
+  type DiskSpaceCleanupChange,
+  type DiskSpaceService,
+  type DiskSpaceSessionData,
+} from "@/services/disk-space";
+import type { WorktreesService } from "@/services/worktrees";
 
 import type { WorkflowEventsService } from "./workflow-events.service";
 
@@ -29,6 +43,7 @@ function parsed(value: string): Record<string, unknown> {
 function repositoryData(
   repository: {
     id: string;
+    name: string;
     canonicalOrigin: string;
     displayOrigin: string;
   },
@@ -36,19 +51,46 @@ function repositoryData(
 ) {
   return {
     id: repository.id,
+    name: repository.name,
+    url: repository.displayOrigin,
     canonicalOrigin: repository.canonicalOrigin,
     displayOrigin: repository.displayOrigin,
     defaultBranch: defaultBranch ?? null,
   };
 }
 
+function agentData(agent: {
+  id: string;
+  name: string;
+  hostname: string;
+  disconnectedAt: Date | null;
+  diskFreeBytes: number | null;
+  memoryFreeBytes: number | null;
+}) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    hostname: agent.hostname,
+    connected: agent.disconnectedAt === null,
+    diskFreeBytes: agent.diskFreeBytes,
+    memoryFreeBytes: agent.memoryFreeBytes,
+  };
+}
+
 export class WorkflowEventBridge {
   private started = false;
   private running = false;
+  private diskAuditTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly diskStateFingerprints = new Map<string, string>();
 
   constructor(
     private readonly events: WorkflowEventsService,
     private readonly agentControl: AgentControlService,
+    private readonly worktrees?: Pick<
+      WorktreesService,
+      "workflowSessionDataForWorktree"
+    >,
+    private readonly diskSpace?: DiskSpaceService,
   ) {}
 
   start(): void {
@@ -63,10 +105,16 @@ export class WorkflowEventBridge {
     void this.consumeWorktrees();
     void this.consumeCodebases();
     void this.consumeAgents();
+    if (this.diskSpace) {
+      void this.consumeDiskSpace();
+      void this.auditDiskSpace(true);
+    }
   }
 
   stop(): void {
     this.running = false;
+    if (this.diskAuditTimer) clearTimeout(this.diskAuditTimer);
+    this.diskAuditTimer = undefined;
   }
 
   private async record(
@@ -81,6 +129,16 @@ export class WorkflowEventBridge {
       subjectKey,
       dedupeKey,
       payload: { ...sessionData, ...extras, sessionData },
+    });
+  }
+
+  private async worktreeSessionData(
+    worktreeId: string | null,
+    includeMissing = false,
+  ): Promise<SessionData> {
+    if (!worktreeId || !this.worktrees) return {};
+    return this.worktrees.workflowSessionDataForWorktree(worktreeId, {
+      includeMissing,
     });
   }
 
@@ -123,13 +181,18 @@ export class WorkflowEventBridge {
       return;
     }
     if (!new Set(["FAILED", "TIMED_OUT"]).has(job.status)) return;
+    const targetSessionData = await this.worktreeSessionData(
+      job.worktreeId,
+      true,
+    );
     await this.record(
       "AGENT_JOB_FAILED",
       job.agentId,
       `agent-job:${job.id}:${job.status}`,
-      {
+      mergeSessionData(targetSessionData, {
+        agent: { id: job.agentId },
         codebase: { id: job.codebaseId, agentId: job.agentId },
-        worktree: { id: job.worktreeId },
+        ...(job.worktreeId ? { worktree: { id: job.worktreeId } } : {}),
         steps: {
           trigger: {
             id: job.id,
@@ -138,7 +201,7 @@ export class WorkflowEventBridge {
             error: job.error,
           },
         },
-      },
+      }),
       { cursorValue: `${job.id}:${job.status}` },
     );
   }
@@ -167,6 +230,16 @@ export class WorkflowEventBridge {
       where: { id: runId },
       include: {
         worktree: { include: { codebase: { include: { repository: true } } } },
+        agent: {
+          select: {
+            id: true,
+            name: true,
+            hostname: true,
+            disconnectedAt: true,
+            diskFreeBytes: true,
+            memoryFreeBytes: true,
+          },
+        },
         questionBatches: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -182,7 +255,10 @@ export class WorkflowEventBridge {
       include: { run: true },
       orderBy: { createdAt: "desc" },
     });
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(
+      run.worktree?.id ?? null,
+    );
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       run: {
         id: run.id,
         kind: run.kind,
@@ -225,8 +301,9 @@ export class WorkflowEventBridge {
             ),
           }
         : {}),
+      ...(run.agent ? { agent: agentData(run.agent) } : {}),
       ...(run.jiraIssueKey ? { ticket: { key: run.jiraIssueKey } } : {}),
-    };
+    });
     const correlation = owner
       ? {
           workflowId: owner.run.workflowId,
@@ -383,14 +460,31 @@ export class WorkflowEventBridge {
     const build = await prisma.build.findUnique({
       where: { id: buildId },
       include: {
-        codebase: { include: { repository: true } },
+        codebase: {
+          include: {
+            repository: true,
+            agent: {
+              select: {
+                id: true,
+                name: true,
+                hostname: true,
+                disconnectedAt: true,
+                diskFreeBytes: true,
+                memoryFreeBytes: true,
+              },
+            },
+          },
+        },
         worktree: true,
         reports: true,
         scriptExecutions: true,
       },
     });
     if (!build) return;
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(
+      build.worktree?.id ?? null,
+    );
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       build: {
         id: build.id,
         status: build.status,
@@ -408,6 +502,7 @@ export class WorkflowEventBridge {
               build.codebase.repository,
               build.codebase.defaultBranch,
             ),
+            agent: agentData(build.codebase.agent),
           }
         : {}),
       ...(build.worktree
@@ -420,7 +515,7 @@ export class WorkflowEventBridge {
             },
           }
         : {}),
-    };
+    });
     if (new Set(["SUCCEEDED", "FAILED", "CANCELLED"]).has(build.status)) {
       await this.record(
         "BUILD_RESULT",
@@ -524,6 +619,7 @@ export class WorkflowEventBridge {
       defaultBranch: string | null;
       repository: {
         id: string;
+        name: string;
         canonicalOrigin: string;
         displayOrigin: string;
       };
@@ -531,7 +627,8 @@ export class WorkflowEventBridge {
   }): Promise<void> {
     const observedAt = worktree.lastCheckedAt ?? worktree.updatedAt;
     const dirty = worktree.hasStagedChanges || worktree.hasUnstagedChanges;
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(worktree.id, true);
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       repo: repositoryData(
         worktree.codebase.repository,
         worktree.codebase.defaultBranch,
@@ -552,7 +649,7 @@ export class WorkflowEventBridge {
         missingAt: worktree.missingAt?.toISOString() ?? null,
         dirtySince: dirty ? worktree.updatedAt.toISOString() : null,
       },
-    };
+    });
     const common = { cursorValue: observedAt.toISOString() };
     if ((worktree.baseBehind ?? 0) > 0) {
       await this.record(
@@ -613,12 +710,25 @@ export class WorkflowEventBridge {
             : change.repositoryId
               ? { repositoryId: change.repositoryId }
               : {},
-          include: { repository: true },
+          include: {
+            repository: true,
+            agent: {
+              select: {
+                id: true,
+                name: true,
+                hostname: true,
+                disconnectedAt: true,
+                diskFreeBytes: true,
+                memoryFreeBytes: true,
+              },
+            },
+          },
           take: change.codebaseId ? 1 : 500,
         });
         for (const codebase of codebases) {
           const sessionData = {
             repo: repositoryData(codebase.repository, codebase.defaultBranch),
+            agent: agentData(codebase.agent),
             codebase: {
               id: codebase.id,
               folder: codebase.folder,
@@ -647,6 +757,136 @@ export class WorkflowEventBridge {
       }
     } finally {
       await stream.return?.();
+    }
+  }
+
+  private async emitDiskSnapshot(
+    sessionData: DiskSpaceSessionData,
+    input: {
+      changeId: string;
+      report: boolean;
+      threshold: boolean;
+      cleanup?: DiskSpaceCleanupChange | null;
+    },
+  ): Promise<void> {
+    const agentId = sessionData.agent.id;
+    const session = sessionData as unknown as SessionData;
+    if (input.report) {
+      await this.record(
+        "AGENT_DISK_REPORT",
+        agentId,
+        `agent-disk-report:${agentId}:${sessionData.disk.lastReportedAt ?? input.changeId}`,
+        session,
+        { cursorValue: sessionData.disk.lastReportedAt },
+      );
+    }
+    if (input.threshold) {
+      await this.record(
+        "AGENT_DISK_THRESHOLD",
+        agentId,
+        `agent-disk-threshold:${agentId}:${input.changeId}`,
+        session,
+      );
+    }
+    const cursor = diskSpaceStateCursor(sessionData);
+    await this.record(
+      "AGENT_DISK_STATE_CHANGED",
+      agentId,
+      `agent-disk-state:${agentId}:${input.changeId}`,
+      session,
+      { cursorValue: cursor },
+    );
+    this.diskStateFingerprints.set(agentId, JSON.stringify(cursor));
+
+    if (input.cleanup) {
+      const cleanupSession = {
+        ...session,
+        cleanup: input.cleanup,
+      };
+      await this.record(
+        "AGENT_DISK_CLEANUP_RESULT",
+        agentId,
+        `agent-disk-cleanup:${input.cleanup.jobId}:${input.cleanup.status}`,
+        cleanupSession,
+        { cleanup: input.cleanup },
+      );
+    }
+  }
+
+  private async observeDiskChange(
+    payload: DiskSpaceChangedPayload,
+  ): Promise<void> {
+    if (!this.diskSpace) return;
+    const { id: changeId, reason, cleanup } = payload.diskSpaceChange;
+    if (payload.diskSpaceChanged === "settings") {
+      const overview = await this.diskSpace.overview();
+      for (const view of overview.agents) {
+        await this.emitDiskSnapshot(
+          diskSpaceSessionData(overview.settings, view, reason),
+          { changeId, report: false, threshold: true },
+        );
+      }
+      return;
+    }
+    const snapshot = await this.diskSpace.snapshot(
+      payload.diskSpaceChanged,
+      reason,
+    );
+    await this.emitDiskSnapshot(snapshot, {
+      changeId,
+      report: reason === "REPORT_RECEIVED",
+      threshold: true,
+      cleanup,
+    });
+  }
+
+  private async consumeDiskSpace(): Promise<void> {
+    if (!this.diskSpace) return;
+    const stream = this.diskSpace.subscribe();
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        await this.observeDiskChange(payload).catch((error) =>
+          console.error("Could not record disk-space workflow trigger:", error),
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async auditDiskSpace(reconcile: boolean): Promise<void> {
+    if (!this.diskSpace || !this.running) return;
+    try {
+      const overview = await this.diskSpace.overview();
+      for (const view of overview.agents) {
+        const snapshot = diskSpaceSessionData(
+          overview.settings,
+          view,
+          reconcile ? "STARTUP_RECONCILE" : "STATE_AUDIT",
+        );
+        const fingerprint = JSON.stringify(diskSpaceStateCursor(snapshot));
+        if (
+          reconcile ||
+          this.diskStateFingerprints.get(view.agent.id) !== fingerprint
+        ) {
+          await this.emitDiskSnapshot(snapshot, {
+            changeId: randomUUID(),
+            report: false,
+            threshold: reconcile,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Could not audit disk-space workflow state:", error);
+    } finally {
+      if (this.running) {
+        this.diskAuditTimer = setTimeout(
+          () => void this.auditDiskSpace(false),
+          DISK_SPACE_POLL_INTERVAL_SECONDS * 1_000,
+        );
+        this.diskAuditTimer.unref?.();
+      }
     }
   }
 
@@ -679,13 +919,6 @@ export class WorkflowEventBridge {
           `agent-connection:${agent.id}:${agent.updatedAt.toISOString()}`,
           sessionData,
           { cursorValue: connected },
-        );
-        await this.record(
-          "AGENT_DISK_THRESHOLD",
-          agent.id,
-          `agent-disk:${agent.id}:${agent.updatedAt.toISOString()}`,
-          sessionData,
-          { cursorValue: agent.updatedAt.toISOString() },
         );
       }
     } finally {

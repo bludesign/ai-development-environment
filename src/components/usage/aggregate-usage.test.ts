@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 import {
   aggregateUsage,
   emptyUsageMetrics,
+  filterUsageByAgent,
   filterUsageByDays,
   totalsForModel,
   type UsageDayRow,
@@ -301,5 +302,73 @@ describe("totalsForModel", () => {
       emptyUsageMetrics(),
     );
     expect(totalsForModel(days, "missing-model")).toEqual(emptyUsageMetrics());
+  });
+});
+
+describe("filterUsageByAgent", () => {
+  test("keeps one agent's models, days, sources, and recalculated totals", () => {
+    const usage = aggregateUsage([
+      {
+        agent: { id: "agent-a", name: "Alpha", hostname: "alpha.local" },
+        report: report([
+          daily("2026-07-16", "gpt-5", {
+            input: 10,
+            output: 20,
+            creation: 30,
+            read: 40,
+            cost: 1,
+          }),
+          daily("2026-07-15", "small-model", {
+            input: 1,
+            output: 2,
+            creation: 3,
+            read: 4,
+            cost: 0.1,
+          }),
+        ]),
+      },
+      {
+        agent: { id: "agent-b", name: "Beta", hostname: "beta.local" },
+        report: report([
+          daily(
+            "2026-07-16",
+            "claude",
+            { input: 5, output: 10, creation: 15, read: 20, cost: 0.5 },
+            "claude-code",
+          ),
+        ]),
+      },
+    ]);
+
+    const filtered = filterUsageByAgent(usage, "agent-b");
+
+    expect(filtered.totals).toEqual({
+      inputTokens: 5,
+      outputTokens: 10,
+      cacheCreationTokens: 15,
+      cacheReadTokens: 20,
+      totalTokens: 50,
+      totalCost: 0.5,
+    });
+    expect(filtered.days).toHaveLength(1);
+    expect(filtered.days[0]).toMatchObject({
+      period: "2026-07-16",
+      sources: ["claude-code"],
+      models: [
+        {
+          modelName: "claude",
+          agents: [
+            expect.objectContaining({
+              agentId: "agent-b",
+              agentName: "Beta",
+            }),
+          ],
+        },
+      ],
+    });
+    expect(filterUsageByAgent(usage, "missing-agent")).toEqual({
+      days: [],
+      totals: emptyUsageMetrics(),
+    });
   });
 });

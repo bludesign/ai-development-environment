@@ -1312,7 +1312,9 @@ export function ConfigFieldsEditor({
         {t("configuration")}
       </FieldTitle>
       {descriptor.fields.map((field) =>
-        field.control === "model" ? (
+        field.visibleWhen &&
+        config[field.visibleWhen.key] !==
+          field.visibleWhen.equals ? null : field.control === "model" ? (
           <ModelField
             config={config}
             field={field}

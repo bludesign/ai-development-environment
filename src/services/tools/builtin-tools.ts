@@ -6,6 +6,7 @@ import type {
   CodebasesService,
   CodebaseToolsService,
 } from "@/services/codebases";
+import type { DiskSpaceService } from "@/services/disk-space";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 import type { WorkflowsService } from "@/services/workflows";
@@ -14,6 +15,7 @@ import { createAgentToolGroup } from "./builtin-tools/agents";
 import { createBuildToolGroup } from "./builtin-tools/builds";
 import { createCodebaseToolGroup } from "./builtin-tools/codebases";
 import { createDebuggingToolGroup } from "./builtin-tools/debugging";
+import { createDiskSpaceToolGroup } from "./builtin-tools/disk-space";
 import { createWorkflowToolGroup } from "./builtin-tools/workflows";
 import type { ToolCatalogGroup } from "./types";
 
@@ -69,6 +71,7 @@ export type BuiltInToolServices = {
   telemetry?: TelemetryService;
   pushNotifications?: PushNotificationsService;
   agents?: AgentControlService;
+  diskSpace?: DiskSpaceService;
   /**
    * Supplied as a thunk rather than an instance: `WorkflowsService` is
    * constructed after `ToolsService` and takes it as a dependency, so the two
@@ -218,6 +221,8 @@ export function createBuiltInToolRegistry(
     );
   }
   if (services.agents) groups.push(createAgentToolGroup(services.agents));
+  if (services.diskSpace)
+    groups.push(createDiskSpaceToolGroup(services.diskSpace));
   if (services.workflows)
     groups.push(createWorkflowToolGroup(services.workflows));
   return new BuiltInToolRegistry(groups);

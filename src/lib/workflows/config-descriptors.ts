@@ -61,6 +61,7 @@ function listOptions(
 }
 
 const RESOURCE_SESSION_PATHS: Partial<Record<ResourceKind, string>> = {
+  agent: "agent.id",
   codebase: "codebase.id",
   worktree: "worktree.id",
   githubRepository: "repo.id",
@@ -467,7 +468,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [
       text("repositoryId", "Repository ID"),
       text("workflowRunId", "Workflow run ID"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Worktrees -------------------------------------------------------------
@@ -540,10 +540,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     ],
   },
   WORKTREE_WAIT_PUSH_READY: {
-    fields: [
-      resource("worktreeId", "Worktree", "worktree"),
-      num("timeoutSeconds", "Timeout (seconds)"),
-    ],
+    fields: [resource("worktreeId", "Worktree", "worktree")],
   },
   WORKTREE_SNAPSHOT: {
     fields: [text("kind", "Checkpoint kind", { placeholder: "STEP" })],
@@ -602,6 +599,38 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   BUILD_CANCEL: {
     fields: [text("buildId", "Build ID")],
+  },
+  // -- Disk space -----------------------------------------------------------
+  DISK_SPACE_LOAD: {
+    fields: [resource("agentId", "Agent", "agent")],
+  },
+  DISK_SPACE_REFRESH: {
+    fields: [resource("agentId", "Agent", "agent")],
+  },
+  DISK_SPACE_UPDATE_THRESHOLDS: {
+    fields: [
+      num("normalThresholdGiB", "Normal threshold (GiB)", {
+        required: true,
+      }),
+      num("pressureThresholdGiB", "Pressure threshold (GiB)", {
+        required: true,
+      }),
+    ],
+  },
+  DISK_SPACE_SET_MONITORING: {
+    fields: [
+      resource("agentId", "Agent", "agent"),
+      bool("enabled", "Monitoring enabled", { required: true, default: true }),
+    ],
+  },
+  DISK_SPACE_SET_PRESSURE_MODE: {
+    fields: [
+      resource("agentId", "Agent", "agent"),
+      bool("enabled", "Manual pressure mode", {
+        required: true,
+        default: true,
+      }),
+    ],
   },
   // -- Skills / notifications / tools ---------------------------------------
   SKILL_APPLY: {
@@ -711,10 +740,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   // -- Human loop ------------------------------------------------------------
   HUMAN_CONFIRM: {
-    fields: [
-      multiline("prompt", "Prompt"),
-      num("timeoutSeconds", "Timeout (seconds)"),
-    ],
+    fields: [multiline("prompt", "Prompt")],
   },
   HUMAN_CHOICE: {
     fields: [
@@ -722,7 +748,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       bool("multiSelect", "Allow multiple selections"),
       bool("allowCustom", "Allow a custom answer"),
       choiceOptions("options", "Buttons"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Control flow ----------------------------------------------------------
@@ -752,11 +777,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [num("seconds", "Delay (seconds)", { required: true })],
   },
   CONTROL_WAIT_UNTIL: {
-    fields: [
-      json("condition", "Condition", { required: true }),
-      num("cadenceSeconds", "Poll cadence (seconds)"),
-      num("timeoutSeconds", "Timeout (seconds)"),
-    ],
+    fields: [json("condition", "Condition", { required: true })],
   },
   CONTROL_FOR_EACH: {
     fields: [
@@ -808,8 +829,33 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
         "Target",
         staticOptions(["CONTEXT", "FIXED_AGENT", "FIXED_WORKTREE"]),
       ),
-      text("agentId", "Fixed agent ID"),
-      text("worktreeId", "Fixed worktree ID"),
+      text("agentId", "Fixed agent ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_AGENT" },
+      }),
+      text("worktreeId", "Fixed worktree ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
+      }),
+    ],
+  },
+  CUSTOM_COMMAND: {
+    fields: [
+      multiline("script", "Script", { required: true }),
+      enumField(
+        "completionMode",
+        "Completion",
+        staticOptions(["WAIT_FOR_EXIT", "FIRE_AND_FORGET"]),
+      ),
+      enumField(
+        "targetMode",
+        "Target",
+        staticOptions(["CONTEXT", "FIXED_AGENT", "FIXED_WORKTREE"]),
+      ),
+      text("agentId", "Fixed agent ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_AGENT" },
+      }),
+      text("worktreeId", "Fixed worktree ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
+      }),
     ],
   },
   TERMINAL_RUN: {
@@ -820,10 +866,100 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       json("credentials", "Credential environment", {
         help: "JSON array of { name, credential: { id, kind, ownerId } } entries.",
       }),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
 };
+
+// ---------------------------------------------------------------------------
+// Wait timing. Every step that parks on external work accepts the same two
+// keys, so they are declared once here rather than repeated per kind.
+// ---------------------------------------------------------------------------
+
+/**
+ * The steps that park on polled work — an agent job, an agent run, a build, a
+ * command, a sub-workflow, a checks run. Each honours both `timeoutSeconds` and
+ * `cadenceSeconds`; see `lib/workflows/wait-timing.ts` for what the runtime does
+ * with them.
+ *
+ * A step listed here but not waiting would advertise knobs that do nothing, and
+ * one that waits but is missing would keep its timing locked in code — the
+ * adapter's `wait:` result is the thing to check when adding a step.
+ */
+const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
+  // Agent jobs
+  "WORKTREE_CREATE",
+  "WORKTREE_CHANGE_BRANCH",
+  "WORKTREE_OPERATION",
+  "WORKTREE_DELETE",
+  "WORKTREE_GIT_OPERATION",
+  "WORKTREE_MOVE",
+  "WORKTREE_WAIT_PUSH_READY",
+  "WORKTREE_SNAPSHOT",
+  "CODEBASE_FETCH_REFRESH",
+  "CODEBASE_GIT_OPERATION",
+  "BUILD_START",
+  "BUILD_EXPORT",
+  "BUILD_DEPLOY",
+  "DISK_SPACE_REFRESH",
+  "TERMINAL_RUN",
+  // Agent runs
+  "RUN_CREATE_PLAN",
+  "RUN_CREATE_SESSION",
+  "RUN_PLAY_PLAN",
+  "RUN_FOLLOW_UP",
+  "RUN_REVISE_ANSWER",
+  // Commands, skills, checks
+  "SAVED_COMMAND",
+  "CUSTOM_COMMAND",
+  "SKILL_APPLY",
+  "GITHUB_WAIT_CHECKS",
+  // Control flow
+  "CONTROL_SUBWORKFLOW",
+  "CONTROL_WAIT_UNTIL",
+];
+
+/**
+ * Steps whose wait ends when a person answers rather than when a poll finds the
+ * work done. A cadence would be meaningless — nothing is being checked — so
+ * these take the timeout alone.
+ */
+const ANSWERED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
+  "HUMAN_CONFIRM",
+  "HUMAN_CHOICE",
+];
+
+const cadenceField = (): ConfigFieldDescriptor =>
+  num("cadenceSeconds", "Poll cadence (seconds)", {
+    help: "How often to check whether the work has finished. Leave empty for this step's default.",
+  });
+
+const waitTimeoutField = (): ConfigFieldDescriptor =>
+  num("timeoutSeconds", "Timeout (seconds)", {
+    help: "How long to keep waiting before the step fails. Leave empty to wait for as long as the work takes.",
+  });
+
+function addWaitFields(
+  kinds: readonly WorkflowStepKind[],
+  fields: () => ConfigFieldDescriptor[],
+): void {
+  for (const kind of kinds) {
+    const descriptor = STEP_CONFIG_DESCRIPTORS[kind];
+    if (!descriptor) continue;
+    const described = new Set(descriptor.fields.map(({ key }) => key));
+    descriptor.fields = [
+      // Timing lands after the step's own config, and never displaces a key a
+      // kind already describes itself.
+      ...descriptor.fields,
+      ...fields().filter(({ key }) => !described.has(key)),
+    ];
+  }
+}
+
+addWaitFields(POLLED_WAIT_STEP_KINDS, () => [
+  cadenceField(),
+  waitTimeoutField(),
+]);
+addWaitFields(ANSWERED_WAIT_STEP_KINDS, () => [waitTimeoutField()]);
 
 // ---------------------------------------------------------------------------
 // Trigger descriptors. Every trigger supports `filters` (path → expected value);
@@ -881,8 +1017,12 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "BUILD_HOOK_FAILED",
   "AGENT_CONNECTION",
   "AGENT_JOB_FAILED",
+  "AGENT_DISK_REPORT",
   "AGENT_DISK_THRESHOLD",
+  "AGENT_DISK_STATE_CHANGED",
+  "AGENT_DISK_CLEANUP_RESULT",
   "CCUSAGE_THRESHOLD",
+  "WORKTREE_CREATED",
   "WORKTREE_BEHIND",
   "WORKTREE_CONFLICT",
   "WORKTREE_MISSING",

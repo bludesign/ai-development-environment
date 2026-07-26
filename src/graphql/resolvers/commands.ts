@@ -9,6 +9,7 @@ import {
 import type {
   CommandDefinitionInput,
   CommandsService,
+  StartCustomCommandRunInput,
   StartCommandRunInput,
 } from "@/services/commands";
 
@@ -156,6 +157,14 @@ export const createCommandResolvers = (service: CommandsService) => ({
     ) => {
       requireControlPlane(context);
       return service.startRun(input);
+    },
+    startCustomCommandRun: (
+      _root: unknown,
+      { input }: { input: StartCustomCommandRunInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.startCustomRun(input);
     },
     terminateCommandRun: (
       _root: unknown,

@@ -126,6 +126,7 @@ const buildTriggerKinds = new Set([
   "BUILD_HOOK_FAILED",
 ]);
 const worktreeTriggerKinds = new Set([
+  "WORKTREE_CREATED",
   "WORKTREE_BEHIND",
   "WORKTREE_CONFLICT",
   "WORKTREE_MISSING",
@@ -199,7 +200,10 @@ export function workflowTriggerResourceLink(
   }
   if (
     kind === "AGENT_CONNECTION" ||
+    kind === "AGENT_DISK_REPORT" ||
     kind === "AGENT_DISK_THRESHOLD" ||
+    kind === "AGENT_DISK_STATE_CHANGED" ||
+    kind === "AGENT_DISK_CLEANUP_RESULT" ||
     kind === "CCUSAGE_THRESHOLD"
   ) {
     return resourceLink(

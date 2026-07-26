@@ -7,6 +7,7 @@ import {
   claudeAnswers,
   claudeEnvironment,
   claudeModelUsages,
+  findClaudeCodeExecutable,
   questionsFromInput,
 } from "./claude-adapter.js";
 import { codexQuestions, codexTokenUsage } from "./codex-adapter.js";
@@ -192,5 +193,43 @@ describe("claudeModelUsages", () => {
         pricingSource: "claude-agent-sdk",
       },
     ]);
+  });
+});
+
+describe("findClaudeCodeExecutable", () => {
+  test("finds a Homebrew Claude installation outside the service PATH", () => {
+    expect(
+      findClaudeCodeExecutable({
+        env: { PATH: "/usr/bin:/bin" },
+        home: "/Users/test",
+        platform: "darwin",
+        isExecutable: (path) => path === "/opt/homebrew/bin/claude",
+      }),
+    ).toBe("/opt/homebrew/bin/claude");
+  });
+
+  test("honors an explicitly configured Claude executable", () => {
+    expect(
+      findClaudeCodeExecutable({
+        env: {
+          CONTROL_AGENT_CLAUDE_EXECUTABLE: "/custom/claude",
+          PATH: "/usr/bin:/bin",
+        },
+        home: "/Users/test",
+        platform: "darwin",
+        isExecutable: (path) => path === "/custom/claude",
+      }),
+    ).toBe("/custom/claude");
+  });
+
+  test("does not select an executable when Claude is not installed", () => {
+    expect(
+      findClaudeCodeExecutable({
+        env: { PATH: "/usr/bin:/bin" },
+        home: "/Users/test",
+        platform: "darwin",
+        isExecutable: () => false,
+      }),
+    ).toBeUndefined();
   });
 });

@@ -2141,7 +2141,7 @@ model CommandDefinition {
 model CommandRun {
   id                 String              @id
   displayNumber      Int                 @unique
-  commandId          String
+  commandId          String?
   idempotencyKey     String              @unique
   origin             String              @default("MANUAL")
   status             String              @default("QUEUED")
@@ -2172,7 +2172,7 @@ model CommandRun {
   archivedAt         DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
-  command            CommandDefinition   @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  command            CommandDefinition?  @relation(fields: [commandId], references: [id], onDelete: Restrict)
   agent              Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
   worktree           Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
   predecessor        CommandRun?         @relation("CommandRunReruns", fields: [predecessorRunId], references: [id], onDelete: SetNull)

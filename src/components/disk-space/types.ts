@@ -18,6 +18,7 @@ export type DiskSpaceVolume = {
   paths: string[];
   status: DiskSpaceStatus;
   effectiveThresholdBytes: number;
+  monitored: boolean;
 };
 
 export type AgentDiskSpace = {
@@ -49,7 +50,7 @@ export const DISK_SPACE_FIELDS = `
     agent { id name hostname connectionStatus }
     enabled status pressureMode manualPressureMode automaticPressureMode
     lastReportedAt lastError warnings
-    volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes }
+    volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored }
   }
 `;
 
@@ -57,17 +58,18 @@ export const AGENT_DISK_SPACE_FIELDS = `
   agent { id name hostname connectionStatus }
   enabled status pressureMode manualPressureMode automaticPressureMode
   lastReportedAt lastError warnings
-  volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes }
+  volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored }
 `;
 
-export function mostConstrainedVolume(
-  agent: AgentDiskSpace,
-): DiskSpaceVolume | null {
+/**
+ * The volume the free-space indicators represent: the Derived Data volume,
+ * which is the only one monitoring acts on. Agents reporting Derived Data
+ * across several volumes fall back to the one with the least free space.
+ */
+export function monitoredVolume(agent: AgentDiskSpace): DiskSpaceVolume | null {
   return (
-    [...agent.volumes].sort(
-      (first, second) =>
-        first.freeBytes / Math.max(first.effectiveThresholdBytes, 1) -
-        second.freeBytes / Math.max(second.effectiveThresholdBytes, 1),
-    )[0] ?? null
+    agent.volumes
+      .filter((volume) => volume.monitored)
+      .sort((first, second) => first.freeBytes - second.freeBytes)[0] ?? null
   );
 }

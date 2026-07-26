@@ -1044,9 +1044,7 @@ function CreateWorktreeCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Plus /> {t("createWorktree")}
-        </CardTitle>
+        <CardTitle>{t("createWorktree")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
@@ -1378,6 +1376,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             repo: {
               id: props.group.repository.id,
               name: props.group.repository.name,
+              url: props.group.repository.displayOrigin,
               displayOrigin: props.group.repository.displayOrigin,
             },
           }}

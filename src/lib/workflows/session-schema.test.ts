@@ -15,6 +15,42 @@ describe("expandSessionPaths", () => {
     ).toBeTruthy();
   });
 
+  test("expands owning agent context exposed by resource triggers", () => {
+    const paths = expandSessionPaths(["agent.*"]).map((info) => info.path);
+    expect(paths).toEqual(
+      expect.arrayContaining(["agent.id", "agent.name", "agent.hostname"]),
+    );
+  });
+
+  test("describes normalized monitor and cleanup event data", () => {
+    const diskPaths = expandSessionPaths(["disk.*"]).map((info) => info.path);
+    const cleanupPaths = expandSessionPaths(["cleanup.*"]).map(
+      (info) => info.path,
+    );
+
+    expect(diskPaths).toEqual(
+      expect.arrayContaining([
+        "disk.status",
+        "disk.pressureMode",
+        "disk.monitoredVolumeId",
+        "disk.freeBytes",
+        "disk.freeGiB",
+        "disk.freePercent",
+        "disk.volumes",
+      ]),
+    );
+    expect(cleanupPaths).toEqual(
+      expect.arrayContaining([
+        "cleanup.jobId",
+        "cleanup.status",
+        "cleanup.source",
+        "cleanup.error",
+        "cleanup.targets",
+        "cleanup.deleted",
+      ]),
+    );
+  });
+
   test("expands an id-qualified wildcard prefix", () => {
     const paths = expandSessionPaths(["steps.load.*"]).map((info) => info.path);
     expect(paths).toContain("steps.load.output");

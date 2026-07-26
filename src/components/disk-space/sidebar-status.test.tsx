@@ -77,6 +77,7 @@ const sidebarStatus = {
             ],
             status: "PRESSURE",
             effectiveThresholdBytes: 10 * 1024 ** 3,
+            monitored: true,
           },
         ],
       },
@@ -132,8 +133,8 @@ describe("SidebarStatusFooter", () => {
     expect(pressureMode.className).toContain("bg-amber-500/10");
     expect(pressureMode.nextElementSibling?.textContent).toBe("Pressure");
     expect(
-      screen.queryByText("Main disk, Base repository, Derived Data"),
-    ).toBeNull();
+      screen.getByText("Main disk, Base repository, Derived Data"),
+    ).toBeTruthy();
 
     fireEvent.click(pressureMode);
     await waitFor(() =>
@@ -146,5 +147,41 @@ describe("SidebarStatusFooter", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("fills multi-agent circles with used disk space", async () => {
+    request.mockImplementation(async (query) => {
+      if (!String(query).includes("query SidebarStatus")) {
+        throw new Error(`Unexpected operation: ${String(query)}`);
+      }
+      return {
+        sidebarStatus: {
+          ...sidebarStatus,
+          diskSpace: {
+            ...sidebarStatus.diskSpace,
+            agents: [
+              sidebarStatus.diskSpace.agents[0],
+              {
+                ...sidebarStatus.diskSpace.agents[0],
+                agent: {
+                  ...sidebarStatus.diskSpace.agents[0].agent,
+                  id: "agent-2",
+                  name: "Builder 2",
+                },
+              },
+            ],
+          },
+        },
+        derivedDataDeletionHistory: { items: [] },
+      } as never;
+    });
+
+    render(<SidebarStatusFooter />);
+
+    const circle = await screen.findByLabelText(
+      "Builder · Derived Data: 100 GiB free",
+    );
+    expect(circle.style.background).toContain("var(--muted) 0% 20%");
+    expect(circle.style.background).toContain("#f59e0b 20% 100%");
   });
 });

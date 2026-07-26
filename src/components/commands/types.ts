@@ -56,8 +56,8 @@ export type CommandRunAttempt = {
 export type CommandRun = {
   id: string;
   displayNumber: number;
-  commandId: string;
-  command: Pick<CommandDefinition, "id" | "name">;
+  commandId: string | null;
+  command: Pick<CommandDefinition, "id" | "name"> | null;
   origin: string;
   status: string;
   snapshotName: string;

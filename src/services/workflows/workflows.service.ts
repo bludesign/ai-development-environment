@@ -42,13 +42,20 @@ import {
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
+import {
+  waitCadenceSeconds,
+  waitResumeAfter,
+  waitTimeoutAt,
+} from "@/lib/workflows/wait-timing";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
   WORKFLOW_QUICK_ACTION_KINDS,
   type WorkflowQuickActionKind,
 } from "@/lib/workflows/kinds";
 import {
+  agentOnlineWindowMs,
   agentEventBus,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   type AgentControlService,
@@ -57,6 +64,8 @@ import type { CredentialService } from "@/services/credentials";
 import type { NotificationsService } from "@/services/notifications";
 import type { RunsService } from "@/services/runs";
 import type { CommandsService } from "@/services/commands";
+import type { GitHubService } from "@/services/github";
+import type { JiraService } from "@/services/jira";
 import {
   CREDENTIAL_KINDS,
   type CredentialDescriptor,
@@ -103,6 +112,7 @@ const MAX_DEFINITION_BYTES = 2 * 1024 * 1024;
 const MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const GLOBAL_CONCURRENCY = 4;
 const CLAIM_TTL_MS = 5 * 60_000;
+const RESOURCE_HOLD_TIMEOUT_MS = 10 * 60_000;
 
 type WorkflowWithActiveVersion = Workflow & {
   activeVersion: WorkflowVersion | null;
@@ -162,6 +172,78 @@ export type WorkflowWaitPollResult = {
 };
 
 const json = <T>(value: string): T => JSON.parse(value) as T;
+
+type SessionAgentSource = {
+  id: string;
+  name: string;
+  hostname: string;
+  lastSeenAt?: Date | null;
+  disconnectedAt?: Date | null;
+  heartbeatIntervalSeconds?: number | null;
+  diskFreeBytes?: number | null;
+  memoryFreeBytes?: number | null;
+};
+
+type SessionCodebaseSource = {
+  id: string;
+  folder: string;
+  agentId: string;
+  branch: string | null;
+  headSha: string | null;
+  defaultBranch: string | null;
+  agent: SessionAgentSource;
+  repository: {
+    id: string;
+    name: string;
+    canonicalOrigin: string;
+    displayOrigin: string;
+  };
+};
+
+function agentSessionData(agent: SessionAgentSource): SessionData {
+  return {
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      hostname: agent.hostname,
+      ...(agent.lastSeenAt !== undefined && agent.disconnectedAt !== undefined
+        ? {
+            connected:
+              agent.lastSeenAt !== null &&
+              agent.disconnectedAt === null &&
+              Date.now() - agent.lastSeenAt.getTime() <=
+                agentOnlineWindowMs(agent),
+          }
+        : {}),
+      ...(agent.diskFreeBytes !== undefined
+        ? { diskFreeBytes: agent.diskFreeBytes }
+        : {}),
+      ...(agent.memoryFreeBytes !== undefined
+        ? { memoryFreeBytes: agent.memoryFreeBytes }
+        : {}),
+    },
+  };
+}
+
+function codebaseSessionData(codebase: SessionCodebaseSource): SessionData {
+  return mergeSessionData(agentSessionData(codebase.agent), {
+    codebase: {
+      id: codebase.id,
+      folder: codebase.folder,
+      agentId: codebase.agentId,
+      branch: codebase.branch,
+      headSha: codebase.headSha,
+    },
+    repo: {
+      id: codebase.repository.id,
+      name: codebase.repository.name,
+      url: codebase.repository.displayOrigin,
+      canonicalOrigin: codebase.repository.canonicalOrigin,
+      displayOrigin: codebase.repository.displayOrigin,
+      defaultBranch: codebase.defaultBranch,
+    },
+  });
+}
 
 function boundedText(value: string, label: string, maximum: number): string {
   const result = value.trim();
@@ -300,9 +382,12 @@ export class WorkflowsService {
       ticketKeyForWorktree(id: string): Promise<string | null>;
       workflowSessionDataForWorktree?(
         id: string,
+        options?: { includeMissing?: boolean },
       ): Promise<Record<string, unknown>>;
     },
     private readonly commandsService?: CommandsService,
+    private readonly githubService?: GitHubService,
+    private readonly jiraService?: JiraService,
   ) {
     if (this.agentControl) {
       this.executor.register("TERMINAL_RUN", (context) =>
@@ -1242,11 +1327,8 @@ export class WorkflowsService {
       wait: {
         kind: "AGENT_JOB",
         externalKey: job.id,
-        timeoutAt: new Date(
-          Date.now() +
-            Math.max(10, Number(context.node.config.timeoutSeconds ?? 900)) *
-              1_000,
-        ),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config, 900),
       },
     };
   }
@@ -1289,7 +1371,12 @@ export class WorkflowsService {
           url: `/jobs/${job.id}`,
         },
       ],
-      wait: { kind: "AGENT_JOB", externalKey: job.id },
+      wait: {
+        kind: "AGENT_JOB",
+        externalKey: job.id,
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
+      },
     };
   }
 
@@ -1450,7 +1537,9 @@ export class WorkflowsService {
                   ? { gitDirectory }
                   : { id: "__missing__" }),
             },
-            include: { codebase: { include: { repository: true } } },
+            include: {
+              codebase: { include: { repository: true, agent: true } },
+            },
           })
         : null;
       const codebase =
@@ -1458,13 +1547,28 @@ export class WorkflowsService {
         (job.codebaseId
           ? await prisma.codebase.findUnique({
               where: { id: job.codebaseId },
-              include: { repository: true },
+              include: { repository: true, agent: true },
             })
           : null);
-      const sessionPatch: SessionData = {};
-      if (codebase) {
+      let sessionPatch: SessionData = {};
+      if (worktree && this.worktrees?.workflowSessionDataForWorktree) {
+        try {
+          sessionPatch = (await this.worktrees.workflowSessionDataForWorktree(
+            worktree.id,
+            {
+              includeMissing: true,
+            },
+          )) as SessionData;
+        } catch {
+          // The local projection below still gives the waiting workflow enough
+          // context to continue when an optional external lookup fails.
+        }
+      }
+      if (codebase && !sessionPatch.codebase) {
         sessionPatch.repo = {
           id: codebase.repository.id,
+          name: codebase.repository.name,
+          url: codebase.repository.displayOrigin,
           canonicalOrigin: codebase.repository.canonicalOrigin,
           displayOrigin: codebase.repository.displayOrigin,
           defaultBranch: codebase.defaultBranch,
@@ -1476,8 +1580,13 @@ export class WorkflowsService {
           branch: codebase.defaultBranch,
           headSha: codebase.headSha,
         };
+        sessionPatch.agent = {
+          id: codebase.agent.id,
+          name: codebase.agent.name,
+          hostname: codebase.agent.hostname,
+        };
       }
-      if (worktree) {
+      if (worktree && !sessionPatch.worktree) {
         sessionPatch.worktree = {
           id: worktree.id,
           path: worktree.folder,
@@ -1493,7 +1602,16 @@ export class WorkflowsService {
         };
       }
       if (Object.keys(sessionPatch).length) {
-        result = { ...result, sessionPatch };
+        const currentPatch =
+          result.sessionPatch &&
+          typeof result.sessionPatch === "object" &&
+          !Array.isArray(result.sessionPatch)
+            ? (result.sessionPatch as SessionData)
+            : {};
+        result = {
+          ...result,
+          sessionPatch: mergeSessionData(currentPatch, sessionPatch),
+        };
       }
     }
     await this.resolveExternalWait(
@@ -1746,19 +1864,291 @@ export class WorkflowsService {
   }
 
   /**
-   * Enriches a resource-launched run's seed with data derived from the resource
-   * itself. A worktree may carry a Jira ticket resolved from its branch, so a
-   * WORKTREE trigger seeds `ticket.key` when one exists — letting worktree
-   * workflows drive Jira steps without an explicit ticket resource. Any
-   * caller-provided ticket data wins over the derived link.
+   * Enriches a resource-launched run with authoritative metadata and related
+   * resources. For example, a worktree brings its codebase, owning agent,
+   * repository, pull request, and ticket; builds and AI runs follow their
+   * linked worktree; and PR/Jira launches load their provider detail. Any
+   * caller-provided value wins over the derived context.
    */
   private async hydrateResourceSessionData(
     resourceKind: string | null | undefined,
     resourceId: string | null | undefined,
     sessionData: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (!this.worktrees) return sessionData;
     const normalized = resourceKind?.toUpperCase() ?? null;
+    const prisma = await getPrismaClient();
+    let derived: SessionData = {};
+    let relatedWorktreeId: string | null = null;
+
+    if (normalized === "CODEBASE" && resourceId) {
+      const codebase = await prisma.codebase.findUnique({
+        where: { id: resourceId },
+        select: {
+          id: true,
+          folder: true,
+          agentId: true,
+          branch: true,
+          headSha: true,
+          defaultBranch: true,
+          agent: {
+            select: {
+              id: true,
+              name: true,
+              hostname: true,
+              lastSeenAt: true,
+              disconnectedAt: true,
+              heartbeatIntervalSeconds: true,
+              diskFreeBytes: true,
+              memoryFreeBytes: true,
+            },
+          },
+          repository: {
+            select: {
+              id: true,
+              name: true,
+              canonicalOrigin: true,
+              displayOrigin: true,
+            },
+          },
+        },
+      });
+      if (codebase) derived = codebaseSessionData(codebase);
+    }
+
+    if (normalized === "BUILD" && resourceId) {
+      const build = await prisma.build.findUnique({
+        where: { id: resourceId },
+        select: {
+          id: true,
+          status: true,
+          action: true,
+          error: true,
+          artifactDirectory: true,
+          worktreeId: true,
+          agent: {
+            select: {
+              id: true,
+              name: true,
+              hostname: true,
+              lastSeenAt: true,
+              disconnectedAt: true,
+              heartbeatIntervalSeconds: true,
+              diskFreeBytes: true,
+              memoryFreeBytes: true,
+            },
+          },
+          codebase: {
+            select: {
+              id: true,
+              folder: true,
+              agentId: true,
+              branch: true,
+              headSha: true,
+              defaultBranch: true,
+              agent: {
+                select: {
+                  id: true,
+                  name: true,
+                  hostname: true,
+                  lastSeenAt: true,
+                  disconnectedAt: true,
+                  heartbeatIntervalSeconds: true,
+                  diskFreeBytes: true,
+                  memoryFreeBytes: true,
+                },
+              },
+              repository: {
+                select: {
+                  id: true,
+                  name: true,
+                  canonicalOrigin: true,
+                  displayOrigin: true,
+                },
+              },
+            },
+          },
+          artifacts: {
+            select: {
+              id: true,
+              kind: true,
+              relativePath: true,
+              sizeBytes: true,
+              checksum: true,
+            },
+          },
+          reports: {
+            where: { status: "READY" },
+            select: { kind: true, summaryJson: true },
+          },
+        },
+      });
+      if (build) {
+        relatedWorktreeId = build.worktreeId;
+        const reportSummary = (kind: string) => {
+          const report = build.reports.find((entry) => entry.kind === kind);
+          if (!report) return undefined;
+          try {
+            return workflowSessionData(report.summaryJson);
+          } catch {
+            return undefined;
+          }
+        };
+        const testSummary = reportSummary("TEST_RESULTS");
+        const coverageSummary = reportSummary("CODE_COVERAGE");
+        derived = mergeSessionData(
+          build.codebase
+            ? codebaseSessionData(build.codebase)
+            : build.agent
+              ? agentSessionData(build.agent)
+              : {},
+          {
+            build: {
+              id: build.id,
+              status: build.status,
+              action: build.action,
+              error: build.error,
+              artifactDirectory: build.artifactDirectory,
+              artifacts: build.artifacts,
+              ...(testSummary ? { testSummary } : {}),
+              ...(coverageSummary ? { coverageSummary } : {}),
+            },
+          },
+        );
+      }
+    }
+
+    if (normalized === "AGENT_RUN" && resourceId) {
+      const run = await prisma.agentRun.findUnique({
+        where: { id: resourceId },
+        select: {
+          id: true,
+          kind: true,
+          status: true,
+          phase: true,
+          origin: true,
+          provider: true,
+          model: true,
+          branch: true,
+          finalOutput: true,
+          error: true,
+          jiraIssueKey: true,
+          worktreeId: true,
+          agent: {
+            select: {
+              id: true,
+              name: true,
+              hostname: true,
+              disconnectedAt: true,
+              diskFreeBytes: true,
+              memoryFreeBytes: true,
+            },
+          },
+          inputTokens: true,
+          outputTokens: true,
+          reasoningTokens: true,
+          cacheReadTokens: true,
+          cacheWriteTokens: true,
+          toolCallCount: true,
+          estimatedCost: true,
+        },
+      });
+      if (run) {
+        relatedWorktreeId = run.worktreeId;
+        derived = mergeSessionData(
+          run.agent ? agentSessionData(run.agent) : {},
+          {
+            run: {
+              id: run.id,
+              kind: run.kind,
+              status: run.status,
+              phase: run.phase,
+              origin: run.origin,
+              provider: run.provider,
+              model: run.model,
+              branch: run.branch,
+              finalOutput: run.finalOutput,
+              error: run.error,
+              usage: {
+                inputTokens: run.inputTokens,
+                outputTokens: run.outputTokens,
+                reasoningTokens: run.reasoningTokens,
+                cacheReadTokens: run.cacheReadTokens,
+                cacheWriteTokens: run.cacheWriteTokens,
+                toolCallCount: run.toolCallCount,
+                estimatedCost: run.estimatedCost,
+              },
+            },
+            ...(run.jiraIssueKey ? { ticket: { key: run.jiraIssueKey } } : {}),
+          },
+        );
+      }
+    }
+
+    if (normalized === "PULL_REQUEST" && resourceId && this.githubService) {
+      const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(resourceId);
+      if (match) {
+        try {
+          const pullRequest = await this.githubService.pullRequest(
+            match[1]!,
+            match[2]!,
+            Number(match[3]),
+          );
+          if (pullRequest) {
+            relatedWorktreeId = pullRequest.worktreeId;
+            derived = mergeSessionData(derived, {
+              repo: {
+                id: pullRequest.codebaseRepositoryId,
+                githubId: pullRequest.repositoryGithubId,
+                name: pullRequest.repositoryNameWithOwner.split("/").at(-1),
+                displayOrigin: pullRequest.repositoryNameWithOwner,
+                url: pullRequest.repositoryUrl,
+              },
+              pr: {
+                ...pullRequest,
+                headBranch: pullRequest.headRefName,
+                baseBranch: pullRequest.baseRefName,
+                unresolvedThreads: pullRequest.reviewThreads.filter(
+                  ({ isResolved }) => !isResolved,
+                ),
+              },
+              ...(pullRequest.jiraKey
+                ? { ticket: { key: pullRequest.jiraKey } }
+                : {}),
+            });
+          }
+        } catch {
+          // Resource actions remain runnable with the caller-provided PR id
+          // when GitHub is temporarily unavailable.
+        }
+      }
+    }
+
+    if (normalized === "JIRA_TICKET" && resourceId && this.jiraService) {
+      try {
+        const ticket = await this.jiraService.ticket(resourceId);
+        const latestComment = ticket.comments.at(-1) ?? null;
+        derived = mergeSessionData(derived, {
+          ticket: {
+            ...ticket,
+            title: ticket.summary,
+            type: ticket.issueType,
+            url: ticket.jiraUrl,
+          },
+          ...(latestComment
+            ? {
+                comment: {
+                  id: latestComment.id,
+                  body: latestComment.content?.rawText ?? "",
+                  author: latestComment.author,
+                },
+              }
+            : {}),
+        });
+      } catch {
+        // Keep the key supplied by the Jira page when metadata cannot load.
+      }
+    }
+
     const sessionWorktreeId = getSessionValue(sessionData, "worktree.id");
     const worktreeId =
       normalized === "WORKTREE"
@@ -1767,15 +2157,18 @@ export class WorkflowsService {
           ? typeof sessionWorktreeId === "string"
             ? sessionWorktreeId
             : null
-          : null;
-    let derived: Record<string, unknown> = {};
-    if (worktreeId) {
+          : relatedWorktreeId;
+    if (worktreeId && this.worktrees) {
       if (this.worktrees.workflowSessionDataForWorktree) {
-        derived =
-          await this.worktrees.workflowSessionDataForWorktree(worktreeId);
+        derived = mergeSessionData(
+          (await this.worktrees.workflowSessionDataForWorktree(
+            worktreeId,
+          )) as SessionData,
+          derived,
+        );
       } else {
         const key = await this.worktrees.ticketKeyForWorktree(worktreeId);
-        if (key) derived = { ticket: { key } };
+        if (key) derived = mergeSessionData({ ticket: { key } }, derived);
       }
     }
     const associatedPullRequests = getSessionValue(
@@ -3175,12 +3568,66 @@ export class WorkflowsService {
         await this.completeAttempt(attempt, node, result);
       }
     } catch (error) {
-      await this.failAttempt(
-        attempt,
-        node,
-        error instanceof Error ? error : new Error(String(error)),
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (await this.holdForBusyCodebase(attempt, failure)) return;
+      await this.failAttempt(attempt, node, failure);
+    }
+  }
+
+  /**
+   * Puts a step back in the queue when the codebase it needs is momentarily
+   * occupied, instead of failing the run.
+   *
+   * The codebase allows one active agent job at a time, so a step can lose the
+   * race to unrelated work — a diff the UI happens to be refreshing, a sync
+   * someone started by hand. That contention says nothing about the step, and
+   * the error is raised before any agent job exists, so re-running it is safe.
+   * The step holds in `WAITING_FOR_RESOURCE` and the runtime re-dispatches it
+   * every tick until the codebase frees up or {@link RESOURCE_HOLD_TIMEOUT_MS}
+   * passes, at which point the failure is real and the run fails as before.
+   */
+  private async holdForBusyCodebase(
+    attempt: WorkflowStepAttempt,
+    error: Error,
+  ): Promise<boolean> {
+    if (!isCodebaseBusyError(error)) return false;
+    const holdingSince = attempt.startedAt ?? attempt.createdAt;
+    if (Date.now() - holdingSince.getTime() > RESOURCE_HOLD_TIMEOUT_MS) {
+      return false;
+    }
+    const prisma = await getPrismaClient();
+    const held = await prisma.workflowStepAttempt.updateMany({
+      where: { id: attempt.id, status: "RUNNING", claimOwner: this.workerId },
+      data: {
+        status: "READY",
+        phase: "WAITING_FOR_RESOURCE",
+        error: error.message,
+        claimOwner: null,
+        claimExpiresAt: null,
+      },
+    });
+    if (!held.count) return false;
+    await prisma.workflowResourceLease.deleteMany({
+      where: { attemptId: attempt.id },
+    });
+    const existingWaitEvent = await prisma.workflowRunEvent.findFirst({
+      where: {
+        attemptId: attempt.id,
+        type: "STEP_WAITING_FOR_RESOURCE",
+      },
+      select: { id: true },
+    });
+    if (!existingWaitEvent) {
+      await this.appendEvent(
+        attempt.runId,
+        attempt.id,
+        "STEP_WAITING_FOR_RESOURCE",
+        "Step is waiting for the codebase to become available",
+        { error: error.message },
       );
     }
+    publishRunChanged(attempt.runId);
+    return true;
   }
 
   private async iterationSessionData(
@@ -3297,15 +3744,7 @@ export class WorkflowsService {
         if (evaluateWorkflowCondition(condition, sessionData)) {
           return { output: { matched: true } };
         }
-        const cadenceSeconds = Math.max(
-          1,
-          Number(node.config.cadenceSeconds ?? 15),
-        );
-        const timeoutSeconds =
-          node.config.timeoutSeconds === null ||
-          node.config.timeoutSeconds === undefined
-            ? null
-            : Number(node.config.timeoutSeconds);
+        const cadenceSeconds = waitCadenceSeconds(node.config, 15);
         return {
           wait: {
             kind: "PREDICATE",
@@ -3314,10 +3753,7 @@ export class WorkflowsService {
               cadenceSeconds,
             },
             resumeAfter: new Date(Date.now() + cadenceSeconds * 1_000),
-            timeoutAt:
-              timeoutSeconds === null
-                ? null
-                : new Date(Date.now() + timeoutSeconds * 1_000),
+            timeoutAt: waitTimeoutAt(node.config),
           },
         };
       }
@@ -3580,7 +4016,12 @@ export class WorkflowsService {
           url: `/workflows/runs/${child.id}`,
         },
       ],
-      wait: { kind: "WORKFLOW_RUN", externalKey: child.id },
+      wait: {
+        kind: "WORKFLOW_RUN",
+        externalKey: child.id,
+        resumeAfter: waitResumeAfter(node.config),
+        timeoutAt: waitTimeoutAt(node.config),
+      },
     };
   }
 
@@ -3672,20 +4113,12 @@ export class WorkflowsService {
     agentEventBus.publish(runQuestionTopic(run.id), {
       workflowQuestionChanged: { id: batchId, runId: run.id },
     });
-    const timeoutSeconds =
-      node.config.timeoutSeconds === null ||
-      node.config.timeoutSeconds === undefined
-        ? null
-        : Number(node.config.timeoutSeconds);
     return {
       output: { questionBatchId: batchId },
       wait: {
         kind: "HUMAN",
         externalKey: batchId,
-        timeoutAt:
-          timeoutSeconds === null
-            ? null
-            : new Date(Date.now() + timeoutSeconds * 1_000),
+        timeoutAt: waitTimeoutAt(node.config),
       },
     };
   }
@@ -4097,9 +4530,17 @@ export class WorkflowsService {
       } else if (wait.externalKey && this.waitPollers.has(wait.kind)) {
         const polled = await this.waitPollers.get(wait.kind)!(wait.externalKey);
         if (polled.pending) {
+          // The poller proposes a cadence for its resource; an author who set
+          // one on the step overrides it.
+          const config =
+            parseWorkflowDefinition(
+              json(wait.attempt.run.version.definitionJson),
+            ).nodes.find(({ id }) => id === wait.attempt.nodeId)?.config ?? {};
           await updatePendingWait(wait.id, {
             resumeAfter: new Date(
-              Date.now() + Math.max(1, polled.pollAfterSeconds ?? 15) * 1_000,
+              Date.now() +
+                waitCadenceSeconds(config, polled.pollAfterSeconds ?? 15) *
+                  1_000,
             ),
           });
         } else {
@@ -4212,7 +4653,21 @@ export class WorkflowsService {
     ) {
       sessionPatch = mergeSessionData(
         sessionPatch ?? {},
-        setSessionValue({}, "worktree", output),
+        setSessionValue({}, "worktree", {
+          id: (output as Record<string, unknown>).id,
+          pushStatus: (output as Record<string, unknown>).pushStatus,
+        }),
+      );
+    }
+    if (
+      node.kind === "SKILL_APPLY" &&
+      output &&
+      typeof output === "object" &&
+      !Array.isArray(output)
+    ) {
+      sessionPatch = mergeSessionData(
+        sessionPatch ?? {},
+        setSessionValue({}, `steps.${node.id}`, output),
       );
     }
     if (node.kind === "HUMAN_CONFIRM" || node.kind === "HUMAN_CHOICE") {

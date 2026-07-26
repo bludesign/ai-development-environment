@@ -30,10 +30,12 @@ import {
 
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
+import { CodebaseBusyError } from "@/lib/codebase-busy";
 import {
   isResourceTriggerKind,
   workflowResourceKind,
 } from "@/lib/workflows/definition";
+import { mergeSessionData } from "@/lib/workflows/session";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -60,10 +62,6 @@ const ACTIVE_MOVE_STATUSES = [
 ];
 const MISSING_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const INTERACTIVE_TIMEOUT_MS = 30_000;
-const SERIALIZED_DIFF_JOB_KINDS = new Set<string>([
-  WORKTREE_DIFF_JOB_KIND,
-  WORKTREE_DIFF_ASSET_JOB_KIND,
-]);
 export const WORKTREE_COLORS = [
   "gray",
   "stone",
@@ -1103,24 +1101,48 @@ export class WorktreesService {
 
   async workflowSessionDataForWorktree(
     worktreeId: string,
+    options: { includeMissing?: boolean } = {},
   ): Promise<Record<string, unknown>> {
     const prisma = await getPrismaClient();
     const [worktree, settings] = await Promise.all([
       prisma.worktree.findFirst({
-        where: { id: worktreeId, missingAt: null },
+        where: {
+          id: worktreeId,
+          ...(options.includeMissing ? {} : { missingAt: null }),
+        },
         select: {
           id: true,
           folder: true,
           branch: true,
           baseBranchOverride: true,
           headSha: true,
+          upstream: true,
+          ahead: true,
+          behind: true,
+          syncState: true,
+          baseAhead: true,
+          baseBehind: true,
           rebaseInProgress: true,
           hasConflicts: true,
+          pushStatus: true,
+          hasStagedChanges: true,
+          hasUnstagedChanges: true,
+          missingAt: true,
           codebase: {
             select: {
               id: true,
               folder: true,
+              agentId: true,
+              branch: true,
+              headSha: true,
               defaultBranch: true,
+              agent: {
+                select: {
+                  id: true,
+                  name: true,
+                  hostname: true,
+                },
+              },
               repository: {
                 select: {
                   id: true,
@@ -1157,6 +1179,14 @@ export class WorktreesService {
       }
     }
     const resolvedIssueKey = pullRequest?.jiraKey ?? issueKey;
+    let ticket: Awaited<ReturnType<JiraService["cachedTicket"]>> = null;
+    if (resolvedIssueKey) {
+      try {
+        ticket = await this.jiraService.cachedTicket(resolvedIssueKey);
+      } catch {
+        // Ticket metadata is optional; the branch-derived key remains useful.
+      }
+    }
     return {
       worktree: {
         id: worktree.id,
@@ -1165,17 +1195,33 @@ export class WorktreesService {
         baseBranch:
           worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
         headSha: worktree.headSha,
+        upstream: worktree.upstream,
+        ahead: worktree.ahead,
+        behind: worktree.behind,
+        syncState: worktree.syncState,
+        baseAhead: worktree.baseAhead,
+        baseBehind: worktree.baseBehind,
         rebaseInProgress: worktree.rebaseInProgress,
         hasConflicts: worktree.hasConflicts,
+        pushStatus: worktree.pushStatus,
+        dirty: worktree.hasStagedChanges || worktree.hasUnstagedChanges,
+        missingAt: worktree.missingAt?.toISOString() ?? null,
       },
       codebase: {
         id: worktree.codebase.id,
         folder: worktree.codebase.folder,
+        agentId: worktree.codebase.agentId,
+        branch: worktree.codebase.branch,
+        headSha: worktree.codebase.headSha,
       },
+      agent: worktree.codebase.agent,
       repo: {
         id: repository.id,
         name: repository.name,
+        url: repository.displayOrigin,
+        canonicalOrigin: repository.canonicalOrigin,
         displayOrigin: repository.displayOrigin,
+        defaultBranch: worktree.codebase.defaultBranch,
       },
       ...(pullRequest
         ? {
@@ -1193,7 +1239,16 @@ export class WorktreesService {
             },
           }
         : {}),
-      ...(resolvedIssueKey ? { ticket: { key: resolvedIssueKey } } : {}),
+      ...(resolvedIssueKey
+        ? {
+            ticket: {
+              key: resolvedIssueKey,
+              title: ticket?.summary ?? null,
+              status: ticket?.status ?? null,
+              projectKey: ticket?.projectKey ?? null,
+            },
+          }
+        : {}),
     };
   }
 
@@ -1561,8 +1616,12 @@ export class WorktreesService {
   }
 
   async inspect(id: string, requestId: string) {
-    const worktree = await this.requireRunnable(id, WORKTREE_INSPECT_JOB_KIND);
-    const job = await this.createSerializedDiffJob({
+    const worktree = await this.requireRunnable(
+      id,
+      WORKTREE_INSPECT_JOB_KIND,
+      true,
+    );
+    const job = await this.createSerializedCodebaseJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1609,27 +1668,32 @@ export class WorktreesService {
             !Array.isArray(change) &&
             (change as Record<string, unknown>).conflicted === true,
         );
-        const sessionData = {
-          repo: {
-            id: worktree.codebase.repository.id,
-            canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
-            displayOrigin: worktree.codebase.repository.displayOrigin,
-            defaultBranch: worktree.codebase.defaultBranch,
+        const sessionData = mergeSessionData(
+          await this.workflowSessionDataForWorktree(worktree.id),
+          {
+            repo: {
+              id: worktree.codebase.repository.id,
+              name: worktree.codebase.repository.name,
+              url: worktree.codebase.repository.displayOrigin,
+              canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+              displayOrigin: worktree.codebase.repository.displayOrigin,
+              defaultBranch: worktree.codebase.defaultBranch,
+            },
+            codebase: {
+              id: worktree.codebase.id,
+              folder: worktree.codebase.folder,
+              agentId: worktree.codebase.agentId,
+            },
+            worktree: {
+              id: worktree.id,
+              path: worktree.folder,
+              branch: worktree.branch,
+              headSha: worktree.headSha,
+              conflicted: conflicts.length > 0,
+              conflicts,
+            },
           },
-          codebase: {
-            id: worktree.codebase.id,
-            folder: worktree.codebase.folder,
-            agentId: worktree.codebase.agentId,
-          },
-          worktree: {
-            id: worktree.id,
-            path: worktree.folder,
-            branch: worktree.branch,
-            headSha: worktree.headSha,
-            conflicted: conflicts.length > 0,
-            conflicts,
-          },
-        };
+        );
         await this.workflowEvents.record({
           kind: "WORKTREE_CONFLICT",
           subjectKey: worktree.id,
@@ -1671,7 +1735,7 @@ export class WorktreesService {
     );
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
-    const job = await this.createSerializedDiffJob({
+    const job = await this.createSerializedCodebaseJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1723,7 +1787,7 @@ export class WorktreesService {
     );
     const identity = this.payload(worktree);
     if (!identity.baseBranch) throw new Error("A base branch is required");
-    const job = await this.createSerializedDiffJob({
+    const job = await this.createSerializedCodebaseJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1795,8 +1859,9 @@ export class WorktreesService {
     const worktree = await this.requireRunnable(
       id,
       WORKTREE_GIT_INSPECT_JOB_KIND,
+      true,
     );
-    const job = await this.agentControl.createJob({
+    const job = await this.createSerializedCodebaseJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
       worktreeId: worktree.id,
@@ -1877,7 +1942,17 @@ export class WorktreesService {
     };
   }
 
-  private async createSerializedDiffJob(
+  /**
+   * Creates a job that only reads the codebase, holding until the single active
+   * job slot frees up rather than failing the moment someone else holds it.
+   *
+   * Read-only work — diffs and inspections — used to collide with whatever the
+   * UI happened to be polling at that instant, so a sub-second status refresh
+   * could fail a whole workflow run. Waiting for the current job to finish costs
+   * nothing and removes the race; callers still get {@link CodebaseBusyError}
+   * once the budget runs out, and can hold longer if they are able to.
+   */
+  private async createSerializedCodebaseJob(
     input: Parameters<AgentControlService["createJob"]>[0] & {
       codebaseId: string;
     },
@@ -1896,10 +1971,7 @@ export class WorktreesService {
         if (active.idempotencyKey === input.idempotencyKey) {
           return this.agentControl.createJob(input);
         }
-        if (!SERIALIZED_DIFF_JOB_KINDS.has(active.kind)) {
-          throw new Error("Another operation is active for this codebase");
-        }
-        await this.waitForSerializedDiffJob(active.id, deadline);
+        await this.waitForCodebaseJob(active.id, deadline);
         continue;
       }
       try {
@@ -1908,10 +1980,10 @@ export class WorktreesService {
         if (!activeCodebaseJobConflict(error)) throw error;
       }
     }
-    throw new Error("Another diff request is still active for this codebase");
+    throw new CodebaseBusyError();
   }
 
-  private async waitForSerializedDiffJob(jobId: string, deadline: number) {
+  private async waitForCodebaseJob(jobId: string, deadline: number) {
     const events = agentEventBus.iterate(agentJobChangedTopic(jobId));
     try {
       while (Date.now() < deadline) {
@@ -1924,7 +1996,7 @@ export class WorktreesService {
           ),
         ]);
       }
-      throw new Error("Another diff request is still active for this codebase");
+      throw new CodebaseBusyError();
     } finally {
       await events.return?.();
     }
@@ -1971,8 +2043,7 @@ export class WorktreesService {
           },
         }),
       ]);
-      if (active || activeMove)
-        throw new Error("Another operation is active for this codebase");
+      if (active || activeMove) throw new CodebaseBusyError();
     }
     return worktree;
   }
@@ -2004,8 +2075,7 @@ export class WorktreesService {
         },
       }),
     ]);
-    if (active || activeMove)
-      throw new Error("Another operation is active for this codebase");
+    if (active || activeMove) throw new CodebaseBusyError();
     return codebase;
   }
 
@@ -2683,8 +2753,23 @@ export class WorktreesService {
       worktreeId = projected.id;
     });
     this.publish(worktreeId ?? null, job.codebaseId);
+    if (!job.worktreeId && worktreeId) {
+      await this.recordWorktreeCreated(worktreeId);
+    }
     await this.skillsService?.requestAutoReconcile();
     if (job.worktreeId) await this.restartWatch(job.worktreeId);
+  }
+
+  private async recordWorktreeCreated(worktreeId: string): Promise<void> {
+    if (!this.workflowEvents) return;
+    const sessionData = await this.workflowSessionDataForWorktree(worktreeId);
+    if (!Object.keys(sessionData).length) return;
+    await this.workflowEvents.record({
+      kind: "WORKTREE_CREATED",
+      subjectKey: worktreeId,
+      dedupeKey: `worktree-created:${worktreeId}`,
+      payload: { ...sessionData, sessionData },
+    });
   }
 
   private async waitForJob(jobId: string) {

@@ -25,6 +25,7 @@ export type ConfigControlType =
  * rendered as dropdown options. Each maps to a query in use-resource-options.
  */
 export type ResourceKind =
+  | "agent"
   | "codebase"
   | "worktree"
   | "githubRepository"
@@ -69,6 +70,11 @@ export type ConfigFieldDescriptor = {
   key: string;
   label: string;
   control: ConfigControlType;
+  /** Only render this field when a sibling config value matches. */
+  visibleWhen?: {
+    key: string;
+    equals: unknown;
+  };
   options?: ConfigOptionSource;
   required?: boolean;
   default?: unknown;

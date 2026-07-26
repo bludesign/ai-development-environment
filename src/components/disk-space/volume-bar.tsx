@@ -72,7 +72,11 @@ export function VolumeBar({
         <div
           className={cn(
             "h-full rounded-full transition-[width]",
-            diskStatusColor(volume.status),
+            // Unmonitored volumes are context only, so they never borrow the
+            // status palette that signals cleanup pressure.
+            volume.monitored
+              ? diskStatusColor(volume.status)
+              : "bg-muted-foreground/40",
           )}
           style={{ width: `${usedPercent}%` }}
         />
@@ -80,7 +84,11 @@ export function VolumeBar({
       {!compact && (!hideStatus || volume.paths.length > 0) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {!hideStatus && (
-            <Badge variant="secondary">{t(`status.${volume.status}`)}</Badge>
+            <Badge variant={volume.monitored ? "secondary" : "outline"}>
+              {volume.monitored
+                ? t(`status.${volume.status}`)
+                : t("notMonitored")}
+            </Badge>
           )}
           {volume.paths.map((path) => (
             <span

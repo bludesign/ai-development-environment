@@ -64,6 +64,7 @@ import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { CommandTargetDialog } from "./command-target-dialog";
+import { CustomCommandDialog } from "./custom-command-dialog";
 import {
   COMMAND_DEFINITION_FIELDS,
   COMMAND_RUN_FIELDS,
@@ -101,6 +102,8 @@ export function CommandsPage() {
   const [targetCommand, setTargetCommand] = useState<CommandDefinition | null>(
     null,
   );
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customLaunching, setCustomLaunching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -259,6 +262,26 @@ export function CommandsPage() {
       setError(value instanceof Error ? value.message : String(value));
     }
   };
+  const launchCustom = async (
+    script: string,
+    target: { agentId?: string; worktreeId?: string },
+  ) => {
+    setCustomLaunching(true);
+    try {
+      const data = await controlPlaneRequest<{
+        startCustomCommandRun: { id: string };
+      }>(
+        "mutation StartCustomCommand($input: StartCustomCommandRunInput!) { startCustomCommandRun(input: $input) { id } }",
+        { input: { script, origin: "MANUAL", ...target } },
+      );
+      setCustomOpen(false);
+      router.push(`/commands/runs/${data.startCustomCommandRun.id}`);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setCustomLaunching(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -269,12 +292,18 @@ export function CommandsPage() {
           </h1>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
-        <Button asChild>
-          <Link href="/commands/new">
-            <Plus />
-            {t("newCommand")}
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => setCustomOpen(true)} variant="outline">
+            <TerminalSquare />
+            {t("runCustom")}
+          </Button>
+          <Button asChild>
+            <Link href="/commands/new">
+              <Plus />
+              {t("newCommand")}
+            </Link>
+          </Button>
+        </div>
       </div>
       {error && (
         <Alert variant="destructive">
@@ -690,6 +719,16 @@ export function CommandsPage() {
           if (targetCommand) void launch(targetCommand, target);
         }}
       />
+      {customOpen && (
+        <CustomCommandDialog
+          agents={agents}
+          onOpenChange={setCustomOpen}
+          onSubmit={(script, target) => void launchCustom(script, target)}
+          open
+          submitting={customLaunching}
+          worktrees={worktrees}
+        />
+      )}
       <ConfirmationDialog
         open={deleteIds.length > 0}
         onOpenChange={(open) => {

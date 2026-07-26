@@ -36,6 +36,7 @@ type DiskSpaceVolume {
   paths: [String!]!
   status: DiskSpaceAgentStatus!
   effectiveThresholdBytes: Float!
+  monitored: Boolean!
 }
 
 type AgentDiskSpace {
@@ -72,6 +73,7 @@ type AgentDiskSpaceConfiguration {
 
 input AgentDiskSpaceVolumeInput {
   id: ID!
+  capacityId: ID
   totalBytes: Float!
   freeBytes: Float!
   roles: [DiskSpaceVolumeRole!]!
