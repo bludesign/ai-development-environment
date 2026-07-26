@@ -1953,6 +1953,7 @@ model GitHubApiCallLog {
   method             String    @default("POST")
   endpoint           String    @default("https://api.github.com/graphql")
   operation          String
+  requestSource      String    @default("GITHUB_API")
   requestSummary     String    @default("")
   variablesJson      String    @default("{}")
   source             String

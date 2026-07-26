@@ -22,6 +22,7 @@ type CallLog = {
   method: string;
   endpoint: string;
   operation: string;
+  requestSource: string;
   requestSummary: string;
   variablesJson: string;
   source: string;
@@ -382,6 +383,7 @@ describe("GitHubCache", () => {
       apiType: "REST",
       method: "GET",
       operation: "GET /repos/acme/widgets/actions/runs/44/jobs",
+      requestSource: "GITHUB_ACTIONS",
     });
     expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({
       path: "/repos/acme/widgets/actions/runs/44/jobs",
@@ -390,6 +392,7 @@ describe("GitHubCache", () => {
     expect(state.calls[1]).toMatchObject({
       apiType: "GRAPHQL",
       operation: "VerifyGitHubApp",
+      requestSource: "GITHUB_SETTINGS",
     });
     expect(JSON.parse(state.calls[1]!.variablesJson)).toEqual({
       apiToken: "[REDACTED]",

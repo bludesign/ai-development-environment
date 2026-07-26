@@ -64,6 +64,7 @@ describe("GitHubCachePage", () => {
                 method: "POST",
                 endpoint: "https://api.github.com/graphql",
                 operation: "Viewer",
+                requestSource: "PULL_REQUESTS",
                 requestSummary: "pullRequestId=PR_kwDO123",
                 variables: { pullRequestId: "PR_kwDO123" },
                 source: "LIVE",
@@ -94,13 +95,23 @@ describe("GitHubCachePage", () => {
       throw new Error(`Unexpected query: ${query}`);
     });
 
-    render(<GitHubCachePage />);
+    const { container } = render(<GitHubCachePage />);
     expect(await screen.findByText("PAT · graphql")).toBeDefined();
     expect(screen.getByText("APP · core")).toBeDefined();
     expect(screen.getByText("4993 / 5000")).toBeDefined();
-    expect(screen.getByText("Point cost")).toBeDefined();
+    expect(screen.getByText("Points and rate")).toBeDefined();
+    expect(screen.getByText("Source")).toBeDefined();
+    expect(screen.getByText("Status")).toBeDefined();
+    expect(screen.getByText("Pull requests")).toBeDefined();
+    expect(screen.getByText("Live")).toBeDefined();
     expect(screen.getByText("pullRequestId=PR_kwDO123")).toBeDefined();
     expect(screen.getAllByText(/PR_kwDO123/)).toHaveLength(2);
+    expect(container.querySelector('td[colspan="7"]')).not.toBeNull();
+    const callRow = screen.getByText("pullRequestId=PR_kwDO123").closest("tr");
+    const callTime = callRow?.querySelector(
+      'time[datetime="2026-07-26T05:00:00.000Z"]',
+    );
+    expect(callTime?.textContent).not.toContain("2026");
 
     fireEvent.click(screen.getByRole("button", { name: "Clear cache" }));
     expect(await screen.findByRole("alertdialog")).toBeDefined();

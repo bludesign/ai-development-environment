@@ -1,8 +1,15 @@
 "use client";
 
 import { Database, ExternalLink, RefreshCw, Save, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import {
+  Fragment,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { DateTime } from "@/components/common/date-time";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -30,6 +37,7 @@ import {
 } from "@/components/ui/table";
 import { Link } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import { dayKey, formatDateValue } from "@/lib/date-format";
 import type {
   GitHubApiCallView,
   GitHubCachedEntryView,
@@ -52,7 +60,7 @@ type CachePageData = {
   githubCachedEntries: GitHubPaginatedResult<GitHubCachedEntryView>;
 };
 
-function sourceClass(source: string) {
+function statusClass(source: string) {
   if (source === "LIVE")
     return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
   if (source === "ERROR")
@@ -63,6 +71,7 @@ function sourceClass(source: string) {
 export function GitHubCachePage() {
   const t = useTranslations("githubCache");
   const tc = useTranslations("common");
+  const locale = useLocale();
   const [data, setData] = useState<CachePageData | null>(null);
   const [ttlMinutes, setTtlMinutes] = useState("5");
   const [callOffset, setCallOffset] = useState(0);
@@ -80,7 +89,7 @@ export function GitHubCachePage() {
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
           githubCacheMetrics { windows { ${WINDOW_FIELDS} } operations { operation windows { ${WINDOW_FIELDS} } } }
           githubApiCalls(limit: $limit, offset: $callOffset) {
-            items { id authentication apiType method endpoint operation requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
+            items { id authentication apiType method endpoint operation requestSource requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
             total limit offset
           }
           githubCachedEntries(limit: $limit, offset: $entryOffset) {
@@ -106,6 +115,34 @@ export function GitHubCachePage() {
     const timeout = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timeout);
   }, [load]);
+
+  const callGroups = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      dateKey: string;
+      label: string;
+      items: GitHubApiCallView[];
+    }> = [];
+    for (const call of data?.githubApiCalls.items ?? []) {
+      const date = new Date(call.createdAt);
+      const dateKey = dayKey(date) ?? call.createdAt;
+      const group = groups.at(-1);
+      if (group?.dateKey === dateKey) {
+        group.items.push(call);
+      } else {
+        groups.push({
+          key: `${dateKey}-${call.id}`,
+          dateKey,
+          label: formatDateValue(date, "long", {
+            locale,
+            showTime: false,
+          }),
+          items: [call],
+        });
+      }
+    }
+    return groups;
+  }, [data?.githubApiCalls.items, locale]);
 
   const updateTtl = async (event: FormEvent) => {
     event.preventDefault();
@@ -293,71 +330,88 @@ export function GitHubCachePage() {
                         <TableHead>{t("operation")}</TableHead>
                         <TableHead>{t("callInfo")}</TableHead>
                         <TableHead>{t("source")}</TableHead>
-                        <TableHead>{t("authentication")}</TableHead>
-                        <TableHead>{t("cost")}</TableHead>
-                        <TableHead>{t("rate")}</TableHead>
-                        <TableHead>{t("duration")}</TableHead>
+                        <TableHead>{t("status")}</TableHead>
+                        <TableHead>{t("pointRate")}</TableHead>
                         <TableHead>{t("error")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.githubApiCalls.items.map((call) => (
-                        <TableRow key={call.id}>
-                          <TableCell>
-                            <DateTime value={call.createdAt} />
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">{call.apiType}</Badge>
-                              <span>{call.operation.replaceAll("_", " ")}</span>
-                            </div>
-                            <p className="mt-1 max-w-sm truncate font-mono text-xs font-normal text-muted-foreground">
-                              {call.method} {call.endpoint}
-                            </p>
-                          </TableCell>
-                          <TableCell className="max-w-md whitespace-normal">
-                            <p className="text-sm">{call.requestSummary}</p>
-                            <pre className="mt-1 max-h-24 max-w-md overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs leading-4">
-                              {JSON.stringify(call.variables, null, 2)}
-                            </pre>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={sourceClass(call.source)}>
-                              {t(`sources.${call.source}`)}
-                              {call.servedStale ? ` · ${t("stale")}` : ""}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{call.authentication}</TableCell>
-                          <TableCell>
-                            {call.pointCost ?? "—"}
-                            <span className="block text-xs text-muted-foreground">
-                              {t("avoided", { count: call.pointsAvoided })}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {call.rateLimitResource ?? "—"}
-                            <span className="block text-xs text-muted-foreground">
-                              {t("used")} {call.rateLimitUsed ?? "—"} ·{" "}
-                              {t("remaining")} {call.rateLimitRemaining ?? "—"}/
-                              {call.rateLimitLimit ?? "—"}
-                            </span>
-                            {call.rateLimitResetAt && (
-                              <span className="block text-xs text-muted-foreground">
-                                {t("reset")}{" "}
-                                <DateTime value={call.rateLimitResetAt} />
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {call.durationMs} ms
-                            <span className="block text-xs text-muted-foreground">
-                              HTTP {call.statusCode ?? "—"}
-                            </span>
-                          </TableCell>
-                          <TableCell className="max-w-xs whitespace-normal text-destructive">
-                            {call.error ?? "—"}
-                          </TableCell>
-                        </TableRow>
+                      {callGroups.map((group) => (
+                        <Fragment key={group.key}>
+                          <TableRow className="bg-muted/20 hover:bg-muted/20">
+                            <TableCell
+                              className="py-1.5 text-xs font-normal text-muted-foreground"
+                              colSpan={7}
+                            >
+                              {group.label}
+                            </TableCell>
+                          </TableRow>
+                          {group.items.map((call) => (
+                            <TableRow key={call.id}>
+                              <TableCell>
+                                <DateTime kind="time" value={call.createdAt} />
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline">
+                                    {call.apiType}
+                                  </Badge>
+                                  <Badge variant="secondary">
+                                    {call.authentication}
+                                  </Badge>
+                                  <span>
+                                    {call.operation.replaceAll("_", " ")}
+                                  </span>
+                                </div>
+                                <p className="mt-1 max-w-sm truncate font-mono text-xs font-normal text-muted-foreground">
+                                  {call.method} {call.endpoint}
+                                </p>
+                                <p className="mt-1 text-xs font-normal text-muted-foreground">
+                                  {call.durationMs} ms · HTTP{" "}
+                                  {call.statusCode ?? "—"}
+                                </p>
+                              </TableCell>
+                              <TableCell className="max-w-md whitespace-normal">
+                                <p className="text-sm">{call.requestSummary}</p>
+                                <pre className="mt-1 max-h-24 max-w-md overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs leading-4">
+                                  {JSON.stringify(call.variables, null, 2)}
+                                </pre>
+                              </TableCell>
+                              <TableCell>
+                                {t(`requestSources.${call.requestSource}`)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={statusClass(call.source)}>
+                                  {t(`statuses.${call.source}`)}
+                                  {call.servedStale ? ` · ${t("stale")}` : ""}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="whitespace-normal">
+                                <span className="font-medium">
+                                  {call.pointCost ?? "—"}
+                                </span>
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  {t("avoided", { count: call.pointsAvoided })}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {call.rateLimitResource ?? "—"} · {t("used")}{" "}
+                                  {call.rateLimitUsed ?? "—"} · {t("remaining")}{" "}
+                                  {call.rateLimitRemaining ?? "—"}/
+                                  {call.rateLimitLimit ?? "—"}
+                                </span>
+                                {call.rateLimitResetAt && (
+                                  <span className="block text-xs text-muted-foreground">
+                                    {t("reset")}{" "}
+                                    <DateTime value={call.rateLimitResetAt} />
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell className="max-w-xs whitespace-normal text-destructive">
+                                {call.error ?? "—"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </Fragment>
                       ))}
                     </TableBody>
                   </Table>
@@ -407,7 +461,7 @@ export function GitHubCachePage() {
                               className={
                                 entry.stale
                                   ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                                  : sourceClass("CACHE")
+                                  : statusClass("CACHE")
                               }
                             >
                               {entry.stale ? t("stale") : t("fresh")}

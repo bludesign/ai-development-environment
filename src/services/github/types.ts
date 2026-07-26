@@ -47,6 +47,14 @@ export type GitHubSettingsView = {
 export type GitHubAuthentication = "PAT" | "APP";
 export type GitHubCallSource = "LIVE" | "CACHE" | "ERROR";
 export type GitHubApiType = "GRAPHQL" | "REST";
+export type GitHubRequestSource =
+  | "GITHUB_API"
+  | "GITHUB_SETTINGS"
+  | "GITHUB_APP_AUTHENTICATION"
+  | "PULL_REQUESTS"
+  | "GITHUB_ACTIONS"
+  | "WORKFLOW_AUTOMATION"
+  | "ACTIONS_NOTIFICATIONS";
 
 export type GitHubRateLimitSnapshotView = {
   authentication: GitHubAuthentication;
@@ -86,6 +94,7 @@ export type GitHubApiCallView = {
   method: string;
   endpoint: string;
   operation: string;
+  requestSource: GitHubRequestSource;
   requestSummary: string;
   variables: unknown;
   source: GitHubCallSource;

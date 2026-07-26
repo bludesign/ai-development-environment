@@ -81,6 +81,16 @@ enum GitHubApiType {
   REST
 }
 
+enum GitHubRequestSource {
+  GITHUB_API
+  GITHUB_SETTINGS
+  GITHUB_APP_AUTHENTICATION
+  PULL_REQUESTS
+  GITHUB_ACTIONS
+  WORKFLOW_AUTOMATION
+  ACTIONS_NOTIFICATIONS
+}
+
 type GitHubSettings {
   tokenConfigured: Boolean!
   defaultJiraKeyRegex: String!
@@ -127,6 +137,7 @@ type GitHubApiCall {
   method: String!
   endpoint: String!
   operation: String!
+  requestSource: GitHubRequestSource!
   requestSummary: String!
   variables: JSON
   source: GitHubCallSource!

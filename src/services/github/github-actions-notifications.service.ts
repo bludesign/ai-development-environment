@@ -581,6 +581,7 @@ export class GitHubActionsNotificationsService {
             authentication: "PAT",
             method: "GET",
             endpoint: url,
+            requestSource: "ACTIONS_NOTIFICATIONS",
             durationMs: Date.now() - startedAt,
             ...input,
           })

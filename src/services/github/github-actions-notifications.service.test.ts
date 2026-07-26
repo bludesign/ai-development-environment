@@ -583,6 +583,7 @@ describe("GitHub Actions fallback polling", () => {
         authentication: "PAT",
         method: "GET",
         endpoint: expect.stringContaining("page=2"),
+        requestSource: "ACTIONS_NOTIFICATIONS",
         statusCode: 200,
       }),
     );
