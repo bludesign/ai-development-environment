@@ -737,6 +737,22 @@ function NavigationSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/github/cache")}
+                >
+                  <Link
+                    href="/github/cache"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <Database />
+                    <span>{t("cache")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               {cacheServerConfigured && (
                 <SidebarMenuItem>
                   <SidebarMenuButton

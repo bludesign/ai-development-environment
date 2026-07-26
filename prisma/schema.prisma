@@ -1923,8 +1923,66 @@ model GitHubSettings {
   id                                     String   @id
   defaultJiraKeyRegex                    String   @default("\\b([A-Z][A-Z0-9_]*-\\d+)\\b")
   actionsNotificationPollIntervalSeconds Int      @default(60)
+  cacheTtlSeconds                        Int      @default(300)
   createdAt                              DateTime @default(now())
   updatedAt                              DateTime @updatedAt
+}
+
+model GitHubGraphqlCacheEntry {
+  id             String   @id
+  cacheKey       String   @unique
+  authentication String
+  endpoint       String
+  operation      String
+  query          String
+  variablesJson  String
+  responseJson   String
+  fetchedAt      DateTime
+  pointCost      Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([authentication, operation, fetchedAt])
+  @@index([fetchedAt])
+}
+
+model GitHubApiCallLog {
+  id                 String   @id
+  authentication     String
+  operation          String
+  source             String
+  durationMs         Int
+  statusCode         Int?
+  error              String?
+  servedStale        Boolean  @default(false)
+  pointCost          Int?
+  pointsAvoided      Int      @default(0)
+  rateLimitLimit     Int?
+  rateLimitRemaining Int?
+  rateLimitUsed      Int?
+  rateLimitResetAt   DateTime?
+  rateLimitResource  String?
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([operation, source, createdAt])
+  @@index([authentication, createdAt])
+}
+
+model GitHubRateLimitSnapshot {
+  id             String   @id
+  authentication String
+  resource       String
+  limit          Int
+  remaining      Int
+  used           Int
+  resetAt        DateTime
+  observedAt     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([authentication, resource])
+  @@index([resource, observedAt])
 }
 
 model GitHubAppSettings {

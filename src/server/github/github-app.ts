@@ -9,6 +9,11 @@ import {
 
 import { importPKCS8, SignJWT } from "jose";
 
+import {
+  parseGitHubRateLimitHeaders,
+  type GitHubRateLimitMetadata,
+} from "@/services/github/github-rate-limit";
+
 const GITHUB_API_VERSION = "2022-11-28";
 const USER_AGENT = "ai-development-environment";
 const TOKEN_REFRESH_CUSHION_MS = 5 * 60 * 1000;
@@ -38,6 +43,8 @@ export class GitHubAppError extends Error {
     public readonly code: GitHubAppErrorCode,
     message: string,
     public readonly githubRequestId: string | null = null,
+    public readonly statusCode: number | null = null,
+    public readonly rateLimit: GitHubRateLimitMetadata | null = null,
   ) {
     super(message);
     this.name = "GitHubAppError";
@@ -51,6 +58,7 @@ export type GitHubAppCredentials = {
   apiBaseUrl: string;
   graphqlUrl: string;
   keyFingerprint?: string;
+  responseObserver?: (response: Response) => Promise<void> | void;
 };
 
 export type GitHubAppVerification = {
@@ -208,9 +216,17 @@ function githubHeaders(authorization: string): Record<string, string> {
   };
 }
 
-async function githubFetch(url: string, init: RequestInit): Promise<Response> {
+async function githubFetch(
+  url: string,
+  init: RequestInit,
+  observer?: GitHubAppCredentials["responseObserver"],
+): Promise<Response> {
   try {
-    return await fetch(url, { ...init, cache: "no-store" });
+    const response = await fetch(url, { ...init, cache: "no-store" });
+    if (observer) {
+      await Promise.resolve(observer(response)).catch(() => undefined);
+    }
+    return response;
   } catch {
     throw new GitHubAppError(
       "GITHUB_APP_REQUEST_FAILED",
@@ -258,6 +274,7 @@ async function installationDetails(
   const response = await githubFetch(
     `${prepared.apiBaseUrl}/app/installations/${prepared.installationId}`,
     { headers: githubHeaders(`Bearer ${appJwt}`) },
+    prepared.responseObserver,
   );
   const body = await responseBody(response);
   const githubRequestId = requestId(response);
@@ -308,6 +325,7 @@ async function mintInstallationToken(
       method: "POST",
       headers: githubHeaders(`Bearer ${jwt}`),
     },
+    prepared.responseObserver,
   );
   const body = await responseBody(response);
   const githubRequestId = requestId(response);
@@ -412,25 +430,37 @@ export async function githubAppGraphql<T>(
   credentials: GitHubAppCredentials,
   query: string,
   variables: Record<string, unknown>,
-): Promise<{ data: T; githubRequestId: string | null }> {
+): Promise<{
+  data: T;
+  githubRequestId: string | null;
+  statusCode: number;
+  rateLimit: GitHubRateLimitMetadata | null;
+}> {
   const requestResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(credentials.graphqlUrl, {
-      method: "POST",
-      headers: {
-        ...githubHeaders(`Bearer ${token}`),
-        "content-type": "application/json",
+    githubFetch(
+      credentials.graphqlUrl,
+      {
+        method: "POST",
+        headers: {
+          ...githubHeaders(`Bearer ${token}`),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
       },
-      body: JSON.stringify({ query, variables }),
-    }),
+      credentials.responseObserver,
+    ),
   );
   const { response, token } = requestResult;
   const body = (await responseBody(response)) as GraphQLResponse<T> | null;
   const githubRequestId = requestId(response);
+  const rateLimit = parseGitHubRateLimitHeaders(response.headers);
   if (response.status === 401) {
     throw new GitHubAppError(
       "GITHUB_APP_UNAUTHORIZED",
       "GitHub rejected the installation access token",
       githubRequestId,
+      response.status,
+      rateLimit,
     );
   }
   if (!response.ok || body?.errors?.length || !body?.data) {
@@ -446,9 +476,16 @@ export async function githubAppGraphql<T>(
         credentials.privateKey,
       ]),
       githubRequestId,
+      response.status,
+      rateLimit,
     );
   }
-  return { data: body.data, githubRequestId };
+  return {
+    data: body.data,
+    githubRequestId,
+    statusCode: response.status,
+    rateLimit,
+  };
 }
 
 export async function verifyGitHubAppConfiguration(
@@ -485,19 +522,23 @@ export async function configureGitHubAppWebhook(
 ): Promise<{ configured: boolean; githubRequestId: string | null }> {
   const prepared = prepareGitHubAppCredentials(credentials);
   const appJwt = await createAppJwt(prepared);
-  const response = await githubFetch(`${prepared.apiBaseUrl}/app/hook/config`, {
-    method: "PATCH",
-    headers: {
-      ...githubHeaders(`Bearer ${appJwt}`),
-      "content-type": "application/json",
+  const response = await githubFetch(
+    `${prepared.apiBaseUrl}/app/hook/config`,
+    {
+      method: "PATCH",
+      headers: {
+        ...githubHeaders(`Bearer ${appJwt}`),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        url: input.url,
+        content_type: "json",
+        secret: input.secret,
+        insecure_ssl: "0",
+      }),
     },
-    body: JSON.stringify({
-      url: input.url,
-      content_type: "json",
-      secret: input.secret,
-      insecure_ssl: "0",
-    }),
-  });
+    prepared.responseObserver,
+  );
   const githubRequestId = requestId(response);
   if (response.status === 404) {
     return { configured: false, githubRequestId };
@@ -527,10 +568,14 @@ export async function rerunGitHubActionsWorkflow(
     input.workflowRunId,
   )}/rerun`;
   const requestResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(url, {
-      method: "POST",
-      headers: githubHeaders(`Bearer ${token}`),
-    }),
+    githubFetch(
+      url,
+      {
+        method: "POST",
+        headers: githubHeaders(`Bearer ${token}`),
+      },
+      credentials.responseObserver,
+    ),
   );
   const { response, token } = requestResult;
   const githubRequestId = requestId(response);
@@ -569,10 +614,14 @@ export async function rerunGitHubActionsFailedJobs(
     input.workflowRunId,
   )}/rerun-failed-jobs`;
   const requestResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(url, {
-      method: "POST",
-      headers: githubHeaders(`Bearer ${token}`),
-    }),
+    githubFetch(
+      url,
+      {
+        method: "POST",
+        headers: githubHeaders(`Bearer ${token}`),
+      },
+      credentials.responseObserver,
+    ),
   );
   const { response, token } = requestResult;
   const githubRequestId = requestId(response);
@@ -610,10 +659,14 @@ export async function cancelGitHubActionsWorkflow(
     input.workflowRunId,
   )}/${operation}`;
   const requestResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(url, {
-      method: "POST",
-      headers: githubHeaders(`Bearer ${token}`),
-    }),
+    githubFetch(
+      url,
+      {
+        method: "POST",
+        headers: githubHeaders(`Bearer ${token}`),
+      },
+      credentials.responseObserver,
+    ),
   );
   const { response, token } = requestResult;
   const githubRequestId = requestId(response);
@@ -656,9 +709,11 @@ export async function listGitHubActionsWorkflowJobs(
       input.workflowRunId,
     )}/jobs?filter=latest&per_page=100&page=${page}`;
     const requestResult = await withInstallationToken(credentials, (token) =>
-      githubFetch(url, {
-        headers: githubHeaders(`Bearer ${token}`),
-      }),
+      githubFetch(
+        url,
+        { headers: githubHeaders(`Bearer ${token}`) },
+        credentials.responseObserver,
+      ),
     );
     const { response, token } = requestResult;
     const githubRequestId = requestId(response);
@@ -709,9 +764,11 @@ export async function rerunGitHubActionsJob(
   )}/${encodeURIComponent(input.repository)}`;
   const jobUrl = `${repositoryUrl}/actions/jobs/${encodeURIComponent(input.jobId)}`;
   const jobResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(jobUrl, {
-      headers: githubHeaders(`Bearer ${token}`),
-    }),
+    githubFetch(
+      jobUrl,
+      { headers: githubHeaders(`Bearer ${token}`) },
+      credentials.responseObserver,
+    ),
   );
   const jobRequestId = requestId(jobResult.response);
   if (jobResult.response.status === 401) {
@@ -753,10 +810,14 @@ export async function rerunGitHubActionsJob(
   }
 
   const rerunResult = await withInstallationToken(credentials, (token) =>
-    githubFetch(`${jobUrl}/rerun`, {
-      method: "POST",
-      headers: githubHeaders(`Bearer ${token}`),
-    }),
+    githubFetch(
+      `${jobUrl}/rerun`,
+      {
+        method: "POST",
+        headers: githubHeaders(`Bearer ${token}`),
+      },
+      credentials.responseObserver,
+    ),
   );
   const githubRequestId = requestId(rerunResult.response);
   if (rerunResult.response.status === 401) {

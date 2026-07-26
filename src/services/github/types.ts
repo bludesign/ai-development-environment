@@ -40,7 +40,84 @@ export type GitHubSettingsView = {
   tokenConfigured: boolean;
   defaultJiraKeyRegex: string;
   actionsNotificationPollIntervalSeconds: number;
+  cacheTtlSeconds: number;
   updatedAt: string;
+};
+
+export type GitHubAuthentication = "PAT" | "APP";
+export type GitHubCallSource = "LIVE" | "CACHE" | "ERROR";
+
+export type GitHubRateLimitSnapshotView = {
+  authentication: GitHubAuthentication;
+  resource: string;
+  limit: number;
+  remaining: number;
+  used: number;
+  resetAt: string;
+  observedAt: string;
+};
+
+export type GitHubMetricWindow = {
+  window: string;
+  total: number;
+  live: number;
+  cache: number;
+  errors: number;
+  averageMs: number;
+  pointsUsed: number;
+  pointsAvoided: number;
+};
+
+export type GitHubOperationMetric = {
+  operation: string;
+  windows: GitHubMetricWindow[];
+};
+
+export type GitHubCacheMetrics = {
+  windows: GitHubMetricWindow[];
+  operations: GitHubOperationMetric[];
+};
+
+export type GitHubApiCallView = {
+  id: string;
+  authentication: GitHubAuthentication;
+  operation: string;
+  source: GitHubCallSource;
+  durationMs: number;
+  statusCode: number | null;
+  error: string | null;
+  servedStale: boolean;
+  pointCost: number | null;
+  pointsAvoided: number;
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitUsed: number | null;
+  rateLimitResetAt: string | null;
+  rateLimitResource: string | null;
+  createdAt: string;
+};
+
+export type GitHubCachedEntryView = {
+  id: string;
+  authentication: GitHubAuthentication;
+  operation: string;
+  endpoint: string;
+  fetchedAt: string;
+  pointCost: number | null;
+  stale: boolean;
+};
+
+export type GitHubCachedEntryDetail = GitHubCachedEntryView & {
+  query: string;
+  variables: unknown;
+  response: unknown;
+};
+
+export type GitHubPaginatedResult<T> = {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 export type GitHubAppSettingsView = {

@@ -65,11 +65,110 @@ enum GitHubPipelineRetryUnavailableReason {
   HISTORICAL_ATTEMPT
 }
 
+enum GitHubAuthentication {
+  PAT
+  APP
+}
+
+enum GitHubCallSource {
+  LIVE
+  CACHE
+  ERROR
+}
+
 type GitHubSettings {
   tokenConfigured: Boolean!
   defaultJiraKeyRegex: String!
   actionsNotificationPollIntervalSeconds: Int!
+  cacheTtlSeconds: Int!
   updatedAt: String!
+}
+
+type GitHubRateLimitSnapshot {
+  authentication: GitHubAuthentication!
+  resource: String!
+  limit: Int!
+  remaining: Int!
+  used: Int!
+  resetAt: String!
+  observedAt: String!
+}
+
+type GitHubMetricWindow {
+  window: String!
+  total: Int!
+  live: Int!
+  cache: Int!
+  errors: Int!
+  averageMs: Int!
+  pointsUsed: Int!
+  pointsAvoided: Int!
+}
+
+type GitHubOperationMetric {
+  operation: String!
+  windows: [GitHubMetricWindow!]!
+}
+
+type GitHubCacheMetrics {
+  windows: [GitHubMetricWindow!]!
+  operations: [GitHubOperationMetric!]!
+}
+
+type GitHubApiCall {
+  id: ID!
+  authentication: GitHubAuthentication!
+  operation: String!
+  source: GitHubCallSource!
+  durationMs: Int!
+  statusCode: Int
+  error: String
+  servedStale: Boolean!
+  pointCost: Int
+  pointsAvoided: Int!
+  rateLimitLimit: Int
+  rateLimitRemaining: Int
+  rateLimitUsed: Int
+  rateLimitResetAt: String
+  rateLimitResource: String
+  createdAt: String!
+}
+
+type GitHubApiCallPage {
+  items: [GitHubApiCall!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type GitHubCachedEntry {
+  id: ID!
+  authentication: GitHubAuthentication!
+  operation: String!
+  endpoint: String!
+  fetchedAt: String!
+  pointCost: Int
+  stale: Boolean!
+}
+
+type GitHubCachedEntryPage {
+  items: [GitHubCachedEntry!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
+type GitHubCachedEntryDetail {
+  id: ID!
+  authentication: GitHubAuthentication!
+  operation: String!
+  endpoint: String!
+  fetchedAt: String!
+  pointCost: Int
+  stale: Boolean!
+  query: String!
+  variables: JSON
+  response: JSON
 }
 
 type GitHubAppSettings {
@@ -528,6 +627,11 @@ input SetGitHubPullRequestLabelsInput {
 
 extend type Query {
   githubSettings: GitHubSettings!
+  githubRateLimitSnapshots: [GitHubRateLimitSnapshot!]!
+  githubCacheMetrics: GitHubCacheMetrics!
+  githubApiCalls(limit: Int = 50, offset: Int = 0): GitHubApiCallPage!
+  githubCachedEntries(limit: Int = 50, offset: Int = 0): GitHubCachedEntryPage!
+  githubCachedEntry(id: ID!): GitHubCachedEntryDetail
   githubAppSettings: GitHubAppSettings!
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
@@ -577,6 +681,10 @@ extend type Query {
 
 extend type Mutation {
   saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
+  updateGitHubCacheTtl(ttlMinutes: Int!): GitHubSettings!
+  clearGitHubCache: Boolean!
+  refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!
+  deleteGitHubCachedEntry(id: ID!): Boolean!
   saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!
   testGitHubConnection: GitHubViewer!
   testGitHubAppConnection: GitHubAppSettings!

@@ -105,6 +105,29 @@ const appClient = vi.hoisted(() => ({
   configureWebhook: vi.fn(),
 }));
 
+vi.mock("@/services/github/github-cache", () => ({
+  GitHubCache: class {
+    async query<T>(input: { fetcher: () => Promise<{ data: T }> }) {
+      const result = await input.fetcher();
+      return {
+        data: result.data,
+        source: "LIVE",
+        stale: false,
+        fetchedAt: new Date(),
+        entryId: "test-entry",
+      };
+    }
+
+    async mutation<T>(input: { fetcher: () => Promise<{ data: T }> }) {
+      return (await input.fetcher()).data;
+    }
+
+    async clear() {
+      return true;
+    }
+  },
+}));
+
 vi.mock("@/server/github/github-app", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("@/server/github/github-app")>();
@@ -328,6 +351,20 @@ function response(data: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function aliasedSearchData<T>(
+  variables: Record<string, unknown>,
+  connection: (query: string) => T,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(variables)
+      .filter(([key]) => /^query\d*$/.test(key))
+      .map(([key, query]) => [
+        key === "query" ? "search" : `search${key.slice("query".length)}`,
+        connection(String(query)),
+      ]),
+  );
 }
 
 function rawPullRequest(
@@ -1133,12 +1170,12 @@ describe("GitHub service", () => {
         });
       }
       if (body.query.includes("GitHubPullRequestSearch")) {
-        const searchQuery = String(body.variables.query);
-        const authored =
-          searchQuery.includes("author:") && !searchQuery.includes("-author:");
         return response({
-          data: {
-            search: {
+          data: aliasedSearchData(body.variables, (searchQuery) => {
+            const authored =
+              searchQuery.includes("author:") &&
+              !searchQuery.includes("-author:");
+            return {
               nodes: authored
                 ? [
                     rawPullRequest("pull-request-1", "APP-42 Add API", {
@@ -1156,8 +1193,8 @@ describe("GitHub service", () => {
                     rawPullRequest("pull-request-2", "Maintenance"),
                   ],
               pageInfo: { hasNextPage: false, endCursor: null },
-            },
-          },
+            };
+          }),
         });
       }
       throw new Error(`Unexpected query: ${body.query}`);
@@ -1296,9 +1333,9 @@ describe("GitHub service", () => {
     );
 
     expect(searchQueries).toEqual([
-      "is:pr is:closed is:unmerged review-requested:octocat sort:updated-desc",
-      "is:pr is:merged review-requested:octocat sort:updated-desc",
-      "is:pr review-requested:octocat sort:updated-desc",
+      "is:pr is:closed is:unmerged review-requested:@me sort:updated-desc",
+      "is:pr is:merged review-requested:@me sort:updated-desc",
+      "is:pr review-requested:@me sort:updated-desc",
     ]);
     expect(repositoryStates).toEqual([
       ["CLOSED"],
@@ -1401,12 +1438,11 @@ describe("GitHub service", () => {
           });
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
-          const query = String(body.variables.query);
-          searchQueries.push(query);
-          const authored = !query.includes("-author:");
           return response({
-            data: {
-              search: {
+            data: aliasedSearchData(body.variables, (query) => {
+              searchQueries.push(query);
+              const authored = !query.includes("-author:");
+              return {
                 nodes: [
                   rawPullRequest(
                     authored ? "pull-request-1" : "pull-request-2",
@@ -1414,8 +1450,8 @@ describe("GitHub service", () => {
                   ),
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+              };
+            }),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -1434,9 +1470,9 @@ describe("GitHub service", () => {
     expect(secondPage.items.map((item) => item.id)).toEqual(["pull-request-2"]);
     expect(secondPage.hasNextPage).toBe(false);
     expect(searchQueries).toEqual([
-      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
-      "is:pr is:open author:octocat sort:updated-desc",
-      "is:pr is:open assignee:octocat -author:octocat sort:updated-desc",
+      "is:pr is:open assignee:@me -author:@me sort:updated-desc",
+      "is:pr is:open author:@me sort:updated-desc",
+      "is:pr is:open assignee:@me -author:@me sort:updated-desc",
     ]);
   });
 
@@ -1488,15 +1524,25 @@ describe("GitHub service", () => {
         });
       }
       if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
-        const authored = String(body.variables.query).includes("author:");
         return response({
           data: {
-            search: {
-              nodes: authored
+            viewer: { login: "octocat" },
+            ...aliasedSearchData(body.variables, (query) => ({
+              nodes: query.includes("author:")
                 ? [reviewPullRequest]
                 : [reviewPullRequest, emptyPullRequest],
               pageInfo: { hasNextPage: false, endCursor: null },
-            },
+            })),
+          },
+        });
+      }
+      if (body.query.includes("GitHubReviewThreadDetails")) {
+        return response({
+          data: {
+            nodes: [reviewPullRequest, emptyPullRequest].map((pullRequest) => ({
+              id: pullRequest.id,
+              reviewThreads: pullRequest.reviewThreads,
+            })),
           },
         });
       }
@@ -1571,15 +1617,17 @@ describe("GitHub service", () => {
         variables: Record<string, unknown>;
       };
       return body.query.includes("GitHubReviewThreadPullRequestSearch")
-        ? [String(body.variables.query)]
+        ? Object.entries(body.variables)
+            .filter(([key]) => /^query\d+$/.test(key))
+            .map(([, query]) => String(query))
         : [];
     });
     expect(searchQueries).toHaveLength(4);
     expect(searchQueries).toEqual(
       expect.arrayContaining([
-        "is:pr is:open author:octocat sort:updated-desc",
-        "is:pr is:open assignee:octocat sort:updated-desc",
-        "is:pr is:open review-requested:octocat sort:updated-desc",
+        "is:pr is:open author:@me sort:updated-desc",
+        "is:pr is:open assignee:@me sort:updated-desc",
+        "is:pr is:open review-requested:@me sort:updated-desc",
         "is:pr is:open repo:acme/widgets sort:updated-desc",
       ]),
     );
@@ -1810,7 +1858,7 @@ describe("GitHub service", () => {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
-                reviewThreadsFull: {
+                reviewThreads: {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -2013,7 +2061,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (!body.query.includes("query GitHubPullRequestDetail")) {
           throw new Error(`Unexpected query: ${body.query}`);
         }
@@ -2030,7 +2081,7 @@ describe("GitHub service", () => {
                   nodes: [],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
-                reviewThreadsFull: {
+                reviewThreads: {
                   nodes: [rawReviewThread("detail-thread", { headRepository })],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -2533,7 +2584,10 @@ describe("GitHub service", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.includes("/user/emails")) return response([]);
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubPullRequestMergeOptions")) {
           return response({
             data: {
@@ -2819,12 +2873,10 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2854,7 +2906,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2869,17 +2924,15 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [
-                  {
-                    ...rawPullRequest("pull-request-1", "APP-42 Add API"),
-                    headRepository: null,
-                  },
-                ],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [
+                {
+                  ...rawPullRequest("pull-request-1", "APP-42 Add API"),
+                  headRepository: null,
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2909,7 +2962,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2924,12 +2980,10 @@ describe("GitHub service", () => {
         }
         if (body.query.includes("GitHubPullRequestSearch")) {
           return response({
-            data: {
-              search: {
-                nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            },
+            data: aliasedSearchData(body.variables, () => ({
+              nodes: [rawPullRequest("pull-request-1", "APP-42 Add API")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            })),
           });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2974,7 +3028,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -2990,10 +3047,23 @@ describe("GitHub service", () => {
         if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
           return response({
             data: {
-              search: {
+              viewer: { login: "octocat" },
+              ...aliasedSearchData(body.variables, () => ({
                 nodes: [reviewPullRequest],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
+              })),
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadDetails")) {
+          return response({
+            data: {
+              nodes: [
+                {
+                  id: reviewPullRequest.id,
+                  reviewThreads: reviewPullRequest.reviewThreads,
+                },
+              ],
             },
           });
         }
@@ -3044,7 +3114,10 @@ describe("GitHub service", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { query: string };
+        const body = JSON.parse(String(init?.body)) as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
         if (body.query.includes("query GitHubViewer")) {
           return response({
             data: {
@@ -3060,10 +3133,23 @@ describe("GitHub service", () => {
         if (body.query.includes("GitHubReviewThreadPullRequestSearch")) {
           return response({
             data: {
-              search: {
+              viewer: { login: "octocat" },
+              ...aliasedSearchData(body.variables, () => ({
                 nodes: [reviewPullRequest],
                 pageInfo: { hasNextPage: false, endCursor: null },
-              },
+              })),
+            },
+          });
+        }
+        if (body.query.includes("GitHubReviewThreadDetails")) {
+          return response({
+            data: {
+              nodes: [
+                {
+                  id: reviewPullRequest.id,
+                  reviewThreads: reviewPullRequest.reviewThreads,
+                },
+              ],
             },
           });
         }

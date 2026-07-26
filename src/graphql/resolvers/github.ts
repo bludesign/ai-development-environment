@@ -97,6 +97,46 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.getSettings();
     },
+    githubRateLimitSnapshots: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.rateLimitSnapshots();
+    },
+    githubCacheMetrics: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cacheMetrics();
+    },
+    githubApiCalls: (
+      _root: unknown,
+      { limit, offset }: { limit?: number; offset?: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.apiCalls(limit, offset);
+    },
+    githubCachedEntries: (
+      _root: unknown,
+      { limit, offset }: { limit?: number; offset?: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cachedEntries(limit, offset);
+    },
+    githubCachedEntry: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cachedEntry(id);
+    },
     githubAppSettings: (
       _root: unknown,
       _args: unknown,
@@ -279,6 +319,38 @@ export const createGitHubResolvers = (
     ) => {
       requireControlPlane(context);
       return gitHubService.saveSettings(input);
+    },
+    updateGitHubCacheTtl: (
+      _root: unknown,
+      { ttlMinutes }: { ttlMinutes: number },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.updateCacheTtl(ttlMinutes);
+    },
+    clearGitHubCache: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearCache();
+    },
+    refreshGitHubCachedEntry: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.refreshCachedEntry(id);
+    },
+    deleteGitHubCachedEntry: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.deleteCachedEntry(id);
     },
     saveGitHubAppSettings: (
       _root: unknown,
