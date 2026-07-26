@@ -13,7 +13,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
-const navigation = vi.hoisted(() => ({ pathname: "/" }));
+const navigation = vi.hoisted(() => ({ pathname: "/", push: vi.fn() }));
 
 vi.mock("@/i18n/navigation", async () => {
   const React = await import("react");
@@ -24,6 +24,7 @@ vi.mock("@/i18n/navigation", async () => {
     }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
       React.createElement("a", { href, ...props }),
     usePathname: () => navigation.pathname,
+    useRouter: () => ({ push: navigation.push }),
   };
 });
 
@@ -86,6 +87,7 @@ describe("AppShell", () => {
   beforeEach(() => {
     setViewportWidth(1280);
     navigation.pathname = "/";
+    navigation.push.mockReset();
     clearCookies();
     requestMock.mockReset();
     requestMock.mockImplementation(async (query) => {

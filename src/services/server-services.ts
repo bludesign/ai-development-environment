@@ -32,6 +32,7 @@ import { CommandsService } from "@/services/commands";
 import { DiskSpaceService } from "@/services/disk-space";
 import { SystemStatusService } from "@/services/system-status";
 import { ActionCenterService } from "@/services/action-center";
+import { GlobalSearchService } from "@/services/global-search";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -70,6 +71,7 @@ export type ServerServices = {
   diskSpaceService: DiskSpaceService;
   systemStatusService: SystemStatusService;
   actionCenterService: ActionCenterService;
+  globalSearchService: GlobalSearchService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -155,6 +157,7 @@ function createServerServices(): ServerServices {
     pollingService,
   );
   const actionCenterService = new ActionCenterService();
+  const globalSearchService = new GlobalSearchService();
   const toolsService = new ToolsService(
     codebaseToolsService,
     buildsService,
@@ -281,6 +284,7 @@ function createServerServices(): ServerServices {
     diskSpaceService,
     systemStatusService,
     actionCenterService,
+    globalSearchService,
     toolsService,
     workflowEventsService,
     workflowsService,
