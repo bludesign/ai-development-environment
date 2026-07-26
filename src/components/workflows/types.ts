@@ -7,6 +7,9 @@ export type WorkflowPosition = { x: number; y: number };
  */
 export type WorkflowHandleLayout = "SIDES" | "TOP_BOTTOM";
 
+/** How read-only workflow graphs should position their steps. */
+export type WorkflowDisplayLayout = "REGULAR" | "BASIC";
+
 export type WorkflowTriggerDefinition = {
   id: string;
   kind: string;
@@ -50,6 +53,7 @@ export type WorkflowDefinition = {
   editor: {
     viewport?: { x: number; y: number; zoom: number };
     handleLayout?: WorkflowHandleLayout;
+    displayLayout?: WorkflowDisplayLayout;
   };
 };
 
@@ -79,6 +83,13 @@ export type WorkflowTriggerCatalogEntry = {
   capabilityFlags: string[];
   seedPaths: string[];
   sourceHandles: string[];
+};
+
+export type WorkflowCatalog = {
+  schemaVersion: number;
+  globalConcurrency: number;
+  steps: WorkflowCatalogEntry[];
+  triggers: WorkflowTriggerCatalogEntry[];
 };
 
 export type WorkflowDiagnostic = {

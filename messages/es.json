@@ -126,6 +126,17 @@
       "SIDES": "En los lados",
       "TOP_BOTTOM": "Arriba y abajo"
     },
+    "displayLayout": "Diseño del visor",
+    "displayLayouts": {
+      "REGULAR": "Normal",
+      "BASIC": "Básico"
+    },
+    "displayLayoutHelp": {
+      "REGULAR": "Las vistas de solo lectura usan las posiciones creadas en el lienzo.",
+      "BASIC": "Las vistas de solo lectura alinean los pasos automáticamente según el ancho disponible. Las posiciones creadas no cambian."
+    },
+    "previewBasicLayout": "Vista previa del diseño básico",
+    "exitBasicPreview": "Salir de la vista previa",
     "validate": "Validar",
     "steps": "Pasos",
     "outline": "Esquema",
@@ -149,6 +160,16 @@
     "deleteNode": "Eliminar nodo",
     "deleteConnection": "Eliminar conexión",
     "configuration": "Configuración",
+    "notSet": "Sin definir",
+    "noConfiguration": "Sin configuración",
+    "noRequiredPaths": "Este paso no requiere rutas de sesión.",
+    "retryStrategy": "Estrategia de reintento",
+    "retryStrategies": {
+      "FIXED": "Espera fija",
+      "EXPONENTIAL": "Espera exponencial"
+    },
+    "retryDelay": "Espera de reintento",
+    "seconds": "{count, plural, one {# segundo} other {# segundos}}",
     "advancedJson": "Avanzado (JSON sin formato)",
     "advancedJsonHelp": "Edita como JSON los campos sin control de formulario.",
     "extraKeys": "{count, plural, one {# clave adicional} other {# claves adicionales}}",

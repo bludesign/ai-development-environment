@@ -73,7 +73,7 @@ export function GitHubCacheEntryDetailPage({ id }: { id: string }) {
         "mutation DeleteGitHubCachedEntry($id: ID!) { deleteGitHubCachedEntry(id: $id) }",
         { id },
       );
-      router.replace("/github/cache");
+      router.replace("/github-cache");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -84,7 +84,7 @@ export function GitHubCacheEntryDetailPage({ id }: { id: string }) {
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div>
         <Button asChild size="sm" variant="ghost">
-          <Link href="/github/cache">
+          <Link href="/github-cache">
             <ArrowLeft />
             {t("back")}
           </Link>

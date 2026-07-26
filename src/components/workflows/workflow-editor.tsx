@@ -109,7 +109,6 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   computeWorkflowPathAvailability,
   resourceManualSeedPaths,
-  type WorkflowPathLookup,
 } from "@/lib/workflows/definition";
 import {
   expandSessionPaths,
@@ -128,6 +127,7 @@ import {
 } from "./workflow-fit-lock";
 import {
   MINIMAP_NODE_RADIUS,
+  WorkflowGraph,
   workflowFlowElements,
   WorkflowNodeActionsContext,
   workflowNodeTypes,
@@ -137,22 +137,23 @@ import {
 import { useWorkflowLabels } from "./workflow-labels";
 import {
   emptyDefinition,
+  type WorkflowCatalog,
   type WorkflowCatalogEntry,
   type WorkflowDefinition,
   type WorkflowDiagnostic,
+  type WorkflowDisplayLayout,
   type WorkflowHandleLayout,
   type WorkflowNodeDefinition,
   type WorkflowSummary,
   type WorkflowTriggerCatalogEntry,
   type WorkflowTriggerDefinition,
 } from "./types";
-
-type Catalog = {
-  schemaVersion: number;
-  globalConcurrency: number;
-  steps: WorkflowCatalogEntry[];
-  triggers: WorkflowTriggerCatalogEntry[];
-};
+import {
+  buildPathLookup,
+  displayProvidedPaths,
+  providesByNodeMap,
+} from "./workflow-inspector-data";
+import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
 
 const CATALOG_QUERY = `
   query WorkflowEditorCatalog($id: ID!) {
@@ -240,55 +241,6 @@ function defaultNode(
   };
 }
 
-/** Path lookup backed by the GraphQL catalog, for the reachability walk. */
-function buildPathLookup(catalog: Catalog | null): WorkflowPathLookup {
-  const steps = new Map(
-    catalog?.steps.map((entry) => [entry.kind, entry]) ?? [],
-  );
-  const triggers = new Map(
-    catalog?.triggers.map((entry) => [entry.kind, entry]) ?? [],
-  );
-  return {
-    stepPaths: (kind) => {
-      const entry = steps.get(kind as WorkflowCatalogEntry["kind"]);
-      return {
-        requiredPaths: entry?.requiredPaths ?? [],
-        providedPaths: entry?.providedPaths ?? [],
-      };
-    },
-    triggerSeedPaths: (kind) =>
-      triggers.get(kind as WorkflowTriggerCatalogEntry["kind"])?.seedPaths ??
-      [],
-  };
-}
-
-/**
- * Concrete paths a node adds, for the "Adds to session data" display. Drops the
- * generic `steps.<id>.*` bookkeeping wildcard unless it is the node's only
- * output (e.g. TERMINAL_RUN), where its expansion is the meaningful result.
- */
-function displayProvidedPaths(
-  nodeId: string,
-  provides: Map<string, string[]>,
-): SessionFieldInfo[] {
-  const all = provides.get(nodeId) ?? [];
-  const domain = all.filter((path) => path !== `steps.${nodeId}.*`);
-  return expandSessionPaths(domain.length ? domain : all);
-}
-
-function providesByNodeMap(
-  availability: ReturnType<typeof computeWorkflowPathAvailability>,
-): Map<string, string[]> {
-  return new Map(
-    [...availability.provides.keys()].map((nodeId) => [
-      nodeId,
-      displayProvidedPaths(nodeId, availability.provides).map(
-        (info) => info.path,
-      ),
-    ]),
-  );
-}
-
 /**
  * Whether a click came from a finger or a pen rather than a mouse. Clicks are
  * PointerEvents in every browser React Flow supports; anything else — an older
@@ -370,7 +322,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [definition, setDefinition] = useState<WorkflowDefinition>(() =>
     emptyDefinition(),
   );
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [instance, setInstance] = useState<ReactFlowInstance<
@@ -395,6 +347,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   // canvas bigger than the pane, which a fit lock would fight.
   const [locked, setLocked] = useState(false);
   const [showSessionData, setShowSessionData] = useState(false);
+  const [basicPreview, setBasicPreview] = useState(false);
+  const [previewSelectedId, setPreviewSelectedId] = useState<string | null>(
+    null,
+  );
 
   const categories = useMemo(
     () =>
@@ -430,7 +386,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   useEffect(() => {
     let cancelled = false;
     void controlPlaneRequest<{
-      workflowCatalog: Catalog;
+      workflowCatalog: WorkflowCatalog;
       workflow: WorkflowSummary | null;
     }>(CATALOG_QUERY, { id: workflowId ?? "__new__" })
       .then((data) => {
@@ -954,6 +910,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     () => [...groupByCategory(filteredTriggers)],
     [filteredTriggers],
   );
+  const displayLayout = definition.editor.displayLayout ?? "REGULAR";
+  const toggleBasicPreview = () => {
+    setBasicPreview((current) => !current);
+    setSelectedId(null);
+    setSelectedEdgeId(null);
+    setPreviewSelectedId(null);
+  };
 
   if (loading) {
     return (
@@ -1017,6 +980,16 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           <Button onClick={() => setSettingsOpen(true)} variant="outline">
             <Settings /> {t("settings")}
           </Button>
+          {displayLayout === "BASIC" && (
+            <Button
+              aria-pressed={basicPreview}
+              onClick={toggleBasicPreview}
+              variant={basicPreview ? "secondary" : "outline"}
+            >
+              {basicPreview ? <EyeOff /> : <Eye />}
+              {basicPreview ? t("exitBasicPreview") : t("previewBasicLayout")}
+            </Button>
+          )}
           <Button onClick={() => fileRef.current?.click()} variant="outline">
             <Upload /> {t("import")}
           </Button>
@@ -1054,7 +1027,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
         <Card
-          className="flex h-[min(78vh,860px)] min-h-[520px] flex-col gap-0 py-0"
+          aria-disabled={basicPreview}
+          className={`flex h-[min(78vh,860px)] min-h-[520px] flex-col gap-0 py-0 ${
+            basicPreview ? "pointer-events-none opacity-60" : ""
+          }`}
           size="sm"
         >
           <Tabs
@@ -1229,132 +1205,144 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         </Card>
 
         <div className="min-w-0 space-y-3">
-          <div
-            className="relative h-[min(78vh,860px)] min-h-[520px] overflow-hidden rounded-xl border bg-muted/20"
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              const kind = event.dataTransfer.getData(
-                "application/aide-workflow-step",
-              );
-              const entry = catalog.steps.find(
-                (candidate) => candidate.kind === kind,
-              );
-              if (!entry || !instance) return;
-              addStep(
-                entry,
-                instance.screenToFlowPosition({
-                  x: event.clientX,
-                  y: event.clientY,
-                }),
-              );
-            }}
-            ref={wrapperRef}
-          >
-            {selectedEdgeId && (
-              <Button
-                className="absolute top-3 right-3 z-10 shadow-md"
-                onClick={() => removeEdges([selectedEdgeId])}
-                size="sm"
-                variant="destructive"
-              >
-                <Trash2 /> {t("deleteConnection")}
-              </Button>
-            )}
-            <WorkflowNodeActionsContext value={nodeActions}>
-              <ReactFlow
-                className={locked ? workflowFitLockPaneClass : undefined}
-                colorMode="system"
-                deleteKeyCode={["Backspace", "Delete"]}
-                edges={edges}
-                fitView
-                nodeTypes={workflowNodeTypes}
-                nodes={canvasNodes}
-                onConnect={onConnect}
-                onEdgeClick={(_event, edge) => {
-                  setSelectedId(null);
-                  setSelectedEdgeId(edge.id);
-                }}
-                onEdgesChange={handleEdgesChange}
-                onInit={(value) =>
-                  setInstance(value as unknown as ReactFlowInstance<Node, Edge>)
-                }
-                onNodeClick={(event, node) => {
-                  setSelectedEdgeId(null);
-                  // A single click only picks the card up for dragging; opening
-                  // the inspector takes a double click, so laying out a workflow
-                  // does not keep throwing the panel over the canvas. Touch has
-                  // no such distinction — a double tap is a poor target and the
-                  // panel covers the canvas anyway — so a tap opens it there.
-                  if (touchLike(event)) setSelectedId(node.id);
-                }}
-                onNodeDoubleClick={(_event, node) => {
-                  setSelectedEdgeId(null);
-                  setSelectedId(node.id);
-                }}
-                onNodeDragStop={(_event, node) => {
-                  setDefinition((current) => ({
-                    ...current,
-                    nodes: current.nodes.map((entry) =>
-                      entry.id === node.id
-                        ? { ...entry, position: node.position }
-                        : entry,
-                    ),
-                    triggers: current.triggers.map((entry) =>
-                      entry.id === node.id
-                        ? { ...entry, position: node.position }
-                        : entry,
-                    ),
-                  }));
-                }}
-                onNodesChange={onNodesChange}
-                onNodesDelete={(removed) =>
-                  removeItems(removed.map(({ id }) => id))
-                }
-                onPaneClick={() => setSelectedEdgeId(null)}
-                panOnDrag={!locked}
-                preventScrolling={!locked}
-                proOptions={{ hideAttribution: true }}
-                /* Double click belongs to the step inspector here. React Flow's
+          {basicPreview ? (
+            <WorkflowGraph
+              categories={categories}
+              definition={definition}
+              diagnostics={diagnostics}
+              onNodeClick={(nodeId) => setPreviewSelectedId(nodeId)}
+              selectedNodeId={previewSelectedId}
+            />
+          ) : (
+            <div
+              className="relative h-[min(78vh,860px)] min-h-[520px] overflow-hidden rounded-xl border bg-muted/20"
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const kind = event.dataTransfer.getData(
+                  "application/aide-workflow-step",
+                );
+                const entry = catalog.steps.find(
+                  (candidate) => candidate.kind === kind,
+                );
+                if (!entry || !instance) return;
+                addStep(
+                  entry,
+                  instance.screenToFlowPosition({
+                    x: event.clientX,
+                    y: event.clientY,
+                  }),
+                );
+              }}
+              ref={wrapperRef}
+            >
+              {selectedEdgeId && (
+                <Button
+                  className="absolute top-3 right-3 z-10 shadow-md"
+                  onClick={() => removeEdges([selectedEdgeId])}
+                  size="sm"
+                  variant="destructive"
+                >
+                  <Trash2 /> {t("deleteConnection")}
+                </Button>
+              )}
+              <WorkflowNodeActionsContext value={nodeActions}>
+                <ReactFlow
+                  className={locked ? workflowFitLockPaneClass : undefined}
+                  colorMode="system"
+                  deleteKeyCode={["Backspace", "Delete"]}
+                  edges={edges}
+                  fitView
+                  nodeTypes={workflowNodeTypes}
+                  nodes={canvasNodes}
+                  onConnect={onConnect}
+                  onEdgeClick={(_event, edge) => {
+                    setSelectedId(null);
+                    setSelectedEdgeId(edge.id);
+                  }}
+                  onEdgesChange={handleEdgesChange}
+                  onInit={(value) =>
+                    setInstance(
+                      value as unknown as ReactFlowInstance<Node, Edge>,
+                    )
+                  }
+                  onNodeClick={(event, node) => {
+                    setSelectedEdgeId(null);
+                    // A single click only picks the card up for dragging; opening
+                    // the inspector takes a double click, so laying out a workflow
+                    // does not keep throwing the panel over the canvas. Touch has
+                    // no such distinction — a double tap is a poor target and the
+                    // panel covers the canvas anyway — so a tap opens it there.
+                    if (touchLike(event)) setSelectedId(node.id);
+                  }}
+                  onNodeDoubleClick={(_event, node) => {
+                    setSelectedEdgeId(null);
+                    setSelectedId(node.id);
+                  }}
+                  onNodeDragStop={(_event, node) => {
+                    setDefinition((current) => ({
+                      ...current,
+                      nodes: current.nodes.map((entry) =>
+                        entry.id === node.id
+                          ? { ...entry, position: node.position }
+                          : entry,
+                      ),
+                      triggers: current.triggers.map((entry) =>
+                        entry.id === node.id
+                          ? { ...entry, position: node.position }
+                          : entry,
+                      ),
+                    }));
+                  }}
+                  onNodesChange={onNodesChange}
+                  onNodesDelete={(removed) =>
+                    removeItems(removed.map(({ id }) => id))
+                  }
+                  onPaneClick={() => setSelectedEdgeId(null)}
+                  panOnDrag={!locked}
+                  preventScrolling={!locked}
+                  proOptions={{ hideAttribution: true }}
+                  /* Double click belongs to the step inspector here. React Flow's
                  own double-click zoom sits on the pane and fires for clicks
                  that bubble up from a card, so it would zoom on every open. */
-                zoomOnDoubleClick={false}
-                zoomOnPinch={!locked}
-                zoomOnScroll={!locked}
-              >
-                <Background gap={20} size={1} />
-                <Controls
-                  className="overflow-hidden rounded-lg"
-                  showFitView={!locked}
-                  showInteractive={false}
-                  showZoom={!locked}
+                  zoomOnDoubleClick={false}
+                  zoomOnPinch={!locked}
+                  zoomOnScroll={!locked}
                 >
-                  <WorkflowFitLockButton
-                    locked={locked}
-                    onToggle={() => setLocked((current) => !current)}
-                  />
-                  <WorkflowInteractivityButton />
-                  <WorkflowSessionDataButton
-                    onToggle={() => setShowSessionData((current) => !current)}
-                    shown={showSessionData}
-                  />
-                </Controls>
-                <WorkflowFitLock locked={locked} signature={fitSignature} />
-                {!locked && (
-                  <MiniMap
-                    className="overflow-hidden rounded-xl border"
-                    maskColor="transparent"
-                    nodeBorderRadius={MINIMAP_NODE_RADIUS}
-                    pannable
-                    zoomable
-                  />
-                )}
-              </ReactFlow>
-            </WorkflowNodeActionsContext>
-          </div>
+                  <Background gap={20} size={1} />
+                  <Controls
+                    className="overflow-hidden rounded-lg"
+                    showFitView={!locked}
+                    showInteractive={false}
+                    showZoom={!locked}
+                  >
+                    <WorkflowFitLockButton
+                      locked={locked}
+                      onToggle={() => setLocked((current) => !current)}
+                    />
+                    <WorkflowInteractivityButton />
+                    <WorkflowSessionDataButton
+                      onToggle={() => setShowSessionData((current) => !current)}
+                      shown={showSessionData}
+                    />
+                  </Controls>
+                  <WorkflowFitLock locked={locked} signature={fitSignature} />
+                  {!locked && (
+                    <MiniMap
+                      className="overflow-hidden rounded-xl border"
+                      maskColor="transparent"
+                      nodeBorderRadius={MINIMAP_NODE_RADIUS}
+                      pannable
+                      zoomable
+                    />
+                  )}
+                </ReactFlow>
+              </WorkflowNodeActionsContext>
+            </div>
+          )}
           {diagnostics.length > 0 && (
             <Card>
               <CardHeader>
@@ -1372,7 +1360,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                       <button
                         className="text-left"
                         onClick={() =>
-                          setSelectedId(
+                          (basicPreview ? setPreviewSelectedId : setSelectedId)(
                             diagnostic.nodeId ?? diagnostic.triggerId,
                           )
                         }
@@ -1455,6 +1443,40 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="workflow-display-layout">
+                {t("displayLayout")}
+              </FieldLabel>
+              <Select
+                onValueChange={(value) => {
+                  const displayLayout = value as WorkflowDisplayLayout;
+                  commitDefinition({
+                    ...definition,
+                    editor: { ...definition.editor, displayLayout },
+                  });
+                  if (displayLayout === "REGULAR") {
+                    setBasicPreview(false);
+                    setPreviewSelectedId(null);
+                  }
+                }}
+                value={displayLayout}
+              >
+                <SelectTrigger className="w-full" id="workflow-display-layout">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="REGULAR">
+                    {t("displayLayouts.REGULAR")}
+                  </SelectItem>
+                  <SelectItem value="BASIC">
+                    {t("displayLayouts.BASIC")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {t(`displayLayoutHelp.${displayLayout}`)}
+              </p>
             </Field>
             <Field>
               <FieldLabel htmlFor="workflow-handle-layout">
@@ -1707,6 +1729,14 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
           )}
         </SheetContent>
       </Sheet>
+      <WorkflowReadonlyInspector
+        catalog={catalog}
+        definition={definition}
+        onOpenChange={(open) => {
+          if (!open) setPreviewSelectedId(null);
+        }}
+        selectedId={basicPreview ? previewSelectedId : null}
+      />
     </div>
   );
 }

@@ -12,6 +12,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { WorkflowEditor } from "./workflow-editor";
 import { emptyDefinition } from "./types";
 
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  configurable: true,
+  value: () => undefined,
+});
+
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
 }));
@@ -130,6 +135,21 @@ vi.mock("./workflow-graph", async () => {
   const React = await import("react");
   return {
     MINIMAP_NODE_RADIUS: 12,
+    WorkflowGraph: ({
+      definition,
+      onNodeClick,
+    }: {
+      definition: { nodes: { id: string; name?: string }[] };
+      onNodeClick?: (nodeId: string) => void;
+    }) =>
+      React.createElement(
+        "button",
+        {
+          onClick: () => onNodeClick?.(definition.nodes[0]?.id ?? "manual"),
+          type: "button",
+        },
+        "Basic preview graph",
+      ),
     WorkflowNodeActionsContext: React.createContext(null),
     workflowFlowElements: (
       definition: {
@@ -390,5 +410,104 @@ describe("workflow editor node duplication", () => {
       ),
     );
     expect(canvas.nodes.some(({ name }) => name === "First copy")).toBe(false);
+  });
+});
+
+describe("workflow editor basic layout preview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.ResizeObserver = ResizeObserverMock;
+    canvas.nodes = [];
+    canvas.selectedId = null;
+  });
+
+  test("saves the display choice while preserving authored positions and previews read-only", async () => {
+    const definition = emptyDefinition("Basic preview");
+    definition.nodes.push({
+      id: "notify",
+      kind: "NOTIFICATION_SEND",
+      name: "Notify reviewer",
+      position: { x: 444, y: 222 },
+      config: { message: "Ready for review" },
+      requiredPaths: [],
+      providedPaths: [],
+      retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+      failurePolicy: "FAIL",
+    });
+    const workflow = {
+      id: "workflow-1",
+      name: definition.name,
+      description: definition.description,
+      draftDefinition: definition,
+      activeVersionId: null,
+      enabled: false,
+      overlapPolicy: "QUEUE",
+      maxConcurrentRuns: 1,
+      archivedAt: null,
+      versionCount: 0,
+      runCount: 0,
+      createdAt: "2026-07-24T00:00:00.000Z",
+      updatedAt: "2026-07-24T00:00:00.000Z",
+    };
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("workflowCatalog"))
+        return {
+          workflowCatalog: {
+            schemaVersion: 1,
+            globalConcurrency: 1,
+            steps: [],
+            triggers: [],
+          },
+          workflow,
+        } as never;
+      const input = (variables as { input: { definition: typeof definition } })
+        .input;
+      return {
+        saveWorkflowDraft: { ...workflow, draftDefinition: input.definition },
+      } as never;
+    });
+
+    render(
+      <TooltipProvider>
+        <WorkflowEditor workflowId="workflow-1" />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Viewer layout" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Basic" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Preview basic layout" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Basic preview graph" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Notify reviewer" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Duplicate step" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenLastCalledWith(
+        expect.stringContaining("mutation SaveWorkflow"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            definition: expect.objectContaining({
+              editor: expect.objectContaining({ displayLayout: "BASIC" }),
+              nodes: [
+                expect.objectContaining({
+                  id: "notify",
+                  position: { x: 444, y: 222 },
+                }),
+              ],
+            }),
+          }),
+        }),
+      ),
+    );
   });
 });

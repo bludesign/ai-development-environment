@@ -38,6 +38,10 @@ const prisma = vi.hoisted(() => ({
   workflowStepAttempt: { update: vi.fn(), updateMany: vi.fn() },
   workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   workflowTriggerState: { findUnique: vi.fn(), upsert: vi.fn() },
+  workflowTriggerEvent: {
+    findMany: vi.fn(),
+    update: vi.fn(),
+  },
   workflowResourceLease: { deleteMany: vi.fn() },
   workflowRunEvent: { findFirst: vi.fn(), create: vi.fn() },
 }));
@@ -798,6 +802,138 @@ describe("workflow sub-workflow validation", () => {
         nodeId: "subworkflow",
       }),
     );
+  });
+});
+
+describe("workflow trigger event processing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      async (
+        operation: unknown[] | ((transaction: typeof prisma) => unknown),
+      ) =>
+        typeof operation === "function"
+          ? operation(prisma)
+          : Promise.all(operation),
+    );
+    prisma.workflowTriggerEvent.update.mockResolvedValue({});
+  });
+
+  function internals(service: WorkflowsService) {
+    return service as unknown as {
+      processTriggerEvents(): Promise<void>;
+    };
+  }
+
+  test("loads active workflows once for a batch and compacts every success", async () => {
+    prisma.workflowTriggerEvent.findMany.mockResolvedValue([
+      {
+        id: "event-1",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-1",
+        dedupeKey: "run-status:run-1:COMPLETED",
+        payloadJson: "{}",
+        receivedAt: new Date(),
+      },
+      {
+        id: "event-2",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-2",
+        dedupeKey: "run-status:run-2:COMPLETED",
+        payloadJson: "{}",
+        receivedAt: new Date(),
+      },
+    ]);
+    prisma.workflow.findMany.mockResolvedValue([]);
+
+    await internals(
+      new WorkflowsService(new WorkflowEventsService()),
+    ).processTriggerEvents();
+
+    expect(prisma.workflow.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenCalledTimes(2);
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: { id: "event-1" },
+        data: expect.objectContaining({
+          status: "PROCESSED",
+          payloadJson: "{}",
+        }),
+      }),
+    );
+  });
+
+  test("uses the producer dedupe key for run idempotency", async () => {
+    prisma.workflowTriggerEvent.findMany.mockResolvedValue([
+      {
+        id: "temporary-event-id",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-1",
+        dedupeKey: "run-status:run-1:COMPLETED",
+        payloadJson: JSON.stringify({ sessionData: {} }),
+        receivedAt: new Date(),
+      },
+    ]);
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow-1",
+        overlapPolicy: "CONCURRENT",
+        activeVersion: {
+          id: "version-1",
+          name: "Run completion",
+          triggers: [
+            {
+              id: "trigger-1",
+              nodeId: "completed",
+              kind: "RUN_COMPLETED",
+              configJson: "{}",
+            },
+          ],
+        },
+      },
+    ]);
+    prisma.workflowRun.findUnique.mockResolvedValue({ id: "existing-run" });
+
+    await internals(
+      new WorkflowsService(new WorkflowEventsService()),
+    ).processTriggerEvents();
+
+    expect(prisma.workflowRun.findUnique).toHaveBeenCalledWith({
+      where: {
+        idempotencyKey:
+          "workflow-event:run-status:run-1:COMPLETED:workflow-1:trigger-1",
+      },
+    });
+  });
+
+  test("retains the payload when processing fails", async () => {
+    prisma.workflowTriggerEvent.findMany.mockResolvedValue([
+      {
+        id: "event-1",
+        kind: "RUN_COMPLETED",
+        subjectKey: "run-1",
+        dedupeKey: "run-status:run-1:COMPLETED",
+        payloadJson: "not-json",
+        receivedAt: new Date(),
+      },
+    ]);
+    prisma.workflow.findMany.mockResolvedValue([]);
+
+    await internals(
+      new WorkflowsService(new WorkflowEventsService()),
+    ).processTriggerEvents();
+
+    expect(prisma.workflowTriggerEvent.update).toHaveBeenCalledWith({
+      where: { id: "event-1" },
+      data: expect.objectContaining({
+        status: "FAILED",
+        error: expect.any(String),
+      }),
+    });
+    expect(
+      prisma.workflowTriggerEvent.update.mock.calls[0]?.[0].data,
+    ).not.toHaveProperty("payloadJson");
   });
 });
 

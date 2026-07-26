@@ -105,6 +105,11 @@ describe("AppShell", () => {
     expect(
       screen.getByRole("link", { name: "Devices" }).getAttribute("href"),
     ).toBe("/devices");
+    expect(
+      screen
+        .getAllByRole("link", { name: "Cache" })
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/github-cache", "/jira-cache"]);
 
     const leftToggle = screen.getByRole("button", {
       name: "Hide navigation",

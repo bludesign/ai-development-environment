@@ -70,6 +70,7 @@ import {
 
 import { WorkflowChoiceMenu } from "./workflow-choice-menu";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
+import { WorkflowReadonlyInspector } from "./workflow-readonly-inspector";
 import {
   BUILD_CONFIGURATION_ICON_KEYS,
   ConfigurationIcon,
@@ -77,6 +78,7 @@ import {
 import { useWorkflowLabels } from "./workflow-labels";
 import type {
   WorkflowDefinition,
+  WorkflowCatalog,
   WorkflowRun,
   WorkflowSummary,
   WorkflowVersion,
@@ -122,6 +124,8 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
   const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<
@@ -144,6 +148,7 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
       const data = await controlPlaneRequest<{
         workflow: WorkflowDetail | null;
         workflowRuns: { items: WorkflowRun[] };
+        workflowCatalog: WorkflowCatalog;
         codebaseOverview?: {
           repositories: Array<{
             id: string;
@@ -155,12 +160,18 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
         `query WorkflowOverview($id: ID!) {
         workflow(id: $id) { ${DETAIL_FIELDS} }
         workflowRuns(workflowId: $id, first: 100) { items { ${RUN_FIELDS} } }
+        workflowCatalog {
+          schemaVersion globalConcurrency
+          steps { kind category label description details execution configSchema capabilityFlags requiredPaths providedPaths sourceHandles mutatesExternal mutatesWorktree }
+          triggers { kind category label description details configSchema capabilityFlags seedPaths sourceHandles }
+        }
         codebaseOverview { repositories { id name displayOrigin } }
       }`,
         { id: workflowId },
       );
       setWorkflow(data.workflow);
       setRuns(data.workflowRuns.items);
+      setCatalog(data.workflowCatalog);
       setRepositories(data.codebaseOverview?.repositories ?? []);
       if (data.workflow) {
         setQuickActionKind(data.workflow.quickActionKind ?? "NONE");
@@ -423,7 +434,11 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           <CardTitle>{t("graph")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <WorkflowGraph definition={shownDefinition} />
+          <WorkflowGraph
+            definition={shownDefinition}
+            onNodeClick={(nodeId) => setSelectedNodeId(nodeId)}
+            selectedNodeId={selectedNodeId}
+          />
         </CardContent>
       </Card>
 
@@ -709,6 +724,14 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
           </CardContent>
         </Card>
       </div>
+      <WorkflowReadonlyInspector
+        catalog={catalog}
+        definition={shownDefinition}
+        onOpenChange={(open) => {
+          if (!open) setSelectedNodeId(null);
+        }}
+        selectedId={selectedNodeId}
+      />
     </div>
   );
 }

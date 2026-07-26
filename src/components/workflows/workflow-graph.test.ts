@@ -151,4 +151,15 @@ describe("workflow run graph projection", () => {
       }),
     );
   });
+
+  test("supports responsive connector overrides and controlled selection", () => {
+    const definition = emptyDefinition("Responsive graph");
+    const result = workflowFlowElements(definition, {
+      handleLayout: "TOP_BOTTOM",
+      selectedNodeId: "manual",
+    });
+
+    expect(result.nodes[0]?.selected).toBe(true);
+    expect(result.nodes[0]?.data.handleLayout).toBe("TOP_BOTTOM");
+  });
 });

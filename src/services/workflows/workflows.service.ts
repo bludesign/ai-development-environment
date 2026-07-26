@@ -2386,19 +2386,20 @@ export class WorkflowsService {
       orderBy: { receivedAt: "asc" },
       take: 50,
     });
+    if (!pending.length) return;
+    const workflows = await prisma.workflow.findMany({
+      where: {
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+      },
+      include: {
+        activeVersion: { include: { triggers: true } },
+      },
+    });
     for (const event of pending) {
       try {
         const payload = parseObject(json(event.payloadJson), "Trigger payload");
-        const workflows = await prisma.workflow.findMany({
-          where: {
-            enabled: true,
-            archivedAt: null,
-            activeVersionId: { not: null },
-          },
-          include: {
-            activeVersion: { include: { triggers: true } },
-          },
-        });
         for (const workflow of workflows) {
           if (!workflow.activeVersion) continue;
           const matching = workflow.activeVersion.triggers.filter(
@@ -2426,14 +2427,19 @@ export class WorkflowsService {
               event.kind,
               event.subjectKey,
               payload,
-              `${event.id}:${workflow.id}:${trigger.id}`,
+              `workflow-event:${event.dedupeKey}:${workflow.id}:${trigger.id}`,
             );
             publishRunChanged(run.id);
           }
         }
         await prisma.workflowTriggerEvent.update({
           where: { id: event.id },
-          data: { status: "PROCESSED", processedAt: new Date(), error: null },
+          data: {
+            status: "PROCESSED",
+            processedAt: new Date(),
+            error: null,
+            payloadJson: "{}",
+          },
         });
       } catch (error) {
         await prisma.workflowTriggerEvent.update({
@@ -2852,6 +2858,7 @@ export class WorkflowsService {
       await this.recoverExpiredClaims();
       await this.processSchedules();
       await this.processTriggerEvents();
+      await this.events.maintain();
       await this.resolveDueWaits();
       await this.startQueuedRuns();
       const prisma = await getPrismaClient();

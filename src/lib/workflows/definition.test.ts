@@ -56,7 +56,17 @@ describe("workflow definition validation", () => {
   test("accepts a connected versioned DAG", () => {
     const result = validateWorkflowDefinition(definition([node("load")]));
     expect(result.definition?.format).toBe("aide.workflow");
+    expect(result.definition?.editor.displayLayout).toBe("REGULAR");
     expect(result.diagnostics).toEqual([]);
+  });
+
+  test("preserves the basic read-only display layout", () => {
+    const value = definition([node("load")]);
+    value.editor = { ...value.editor, displayLayout: "BASIC" };
+
+    expect(
+      validateWorkflowDefinition(value).definition?.editor.displayLayout,
+    ).toBe("BASIC");
   });
 
   test("rejects schema versions the runtime does not understand", () => {

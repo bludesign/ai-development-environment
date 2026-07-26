@@ -126,6 +126,17 @@
       "SIDES": "On the sides",
       "TOP_BOTTOM": "On top and bottom"
     },
+    "displayLayout": "Viewer layout",
+    "displayLayouts": {
+      "REGULAR": "Regular",
+      "BASIC": "Basic"
+    },
+    "displayLayoutHelp": {
+      "REGULAR": "Read-only views use the positions authored on the canvas.",
+      "BASIC": "Read-only views line up steps automatically for the available width. Authored positions stay unchanged."
+    },
+    "previewBasicLayout": "Preview basic layout",
+    "exitBasicPreview": "Exit basic preview",
     "validate": "Validate",
     "steps": "Steps",
     "outline": "Outline",
@@ -149,6 +160,16 @@
     "deleteNode": "Delete node",
     "deleteConnection": "Delete connection",
     "configuration": "Configuration",
+    "notSet": "Not set",
+    "noConfiguration": "No configuration",
+    "noRequiredPaths": "This step has no required session paths.",
+    "retryStrategy": "Retry strategy",
+    "retryStrategies": {
+      "FIXED": "Fixed delay",
+      "EXPONENTIAL": "Exponential backoff"
+    },
+    "retryDelay": "Retry delay",
+    "seconds": "{count, plural, one {# second} other {# seconds}}",
     "advancedJson": "Advanced (raw JSON)",
     "advancedJsonHelp": "Edit fields without a form control as raw JSON.",
     "extraKeys": "{count, plural, one {# extra key} other {# extra keys}}",
