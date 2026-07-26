@@ -1120,7 +1120,7 @@
     "agent": "Agent",
     "modified": "Modified",
     "locked": "Locked",
-    "lock": "Lock from automatic cleanup",
+    "lock": "Lock from cleanup",
     "unlock": "Allow automatic cleanup",
     "protectedDeleteWarning": "High-risk deletion: the following folders are locked or have executing work. Deleting them may disrupt active resources.\n\n{details}\n\nDelete anyway?",
     "actions": "Actions",

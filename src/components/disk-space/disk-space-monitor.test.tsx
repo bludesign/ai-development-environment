@@ -8,6 +8,7 @@ import {
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -38,6 +39,20 @@ vi.mock("@/i18n/navigation", () => ({
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const reportedAt = "2026-07-25T23:42:12.000Z";
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+function renderMonitor() {
+  return render(
+    <TooltipProvider>
+      <DiskSpaceMonitor />
+    </TooltipProvider>,
+  );
+}
 
 const overview = {
   settings: {
@@ -79,6 +94,7 @@ const overview = {
 
 describe("DiskSpaceMonitor", () => {
   beforeEach(() => {
+    global.ResizeObserver = ResizeObserverMock;
     Object.defineProperties(HTMLElement.prototype, {
       hasPointerCapture: { configurable: true, value: () => false },
       releasePointerCapture: { configurable: true, value: () => undefined },
@@ -114,7 +130,7 @@ describe("DiskSpaceMonitor", () => {
   });
 
   test("puts threshold settings in a header dialog and uses the shared date renderer", async () => {
-    render(<DiskSpaceMonitor />);
+    renderMonitor();
 
     await screen.findByText("Builder");
     expect(screen.queryByLabelText("Cleanup threshold (GiB)")).toBeNull();
@@ -157,7 +173,7 @@ describe("DiskSpaceMonitor", () => {
   });
 
   test("renders the active monitor green and pressure controls yellow", async () => {
-    render(<DiskSpaceMonitor />);
+    renderMonitor();
 
     const monitor = await screen.findByRole("button", {
       name: "Monitor agent",
@@ -173,6 +189,15 @@ describe("DiskSpaceMonitor", () => {
     expect(screen.getAllByText("Pressure")).toHaveLength(1);
     expect(screen.getByText("Manual pressure").className).toContain(
       "bg-amber-500/10",
+    );
+
+    const volume = screen
+      .getByRole("progressbar")
+      .closest<HTMLElement>('[data-slot="tooltip-trigger"]');
+    expect(volume).not.toBeNull();
+    fireEvent.focus(volume!);
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "Pressure",
     );
 
     fireEvent.click(monitor);

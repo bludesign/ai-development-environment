@@ -28,6 +28,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -225,7 +230,9 @@ export function DiskSpaceMonitor() {
                               : undefined
                           }
                           variant={
-                            agent.status === "PRESSURE" ? "outline" : "secondary"
+                            agent.status === "PRESSURE"
+                              ? "outline"
+                              : "secondary"
                           }
                         >
                           {t(`status.${agent.status}`)}
@@ -296,11 +303,19 @@ export function DiskSpaceMonitor() {
                   {agent.volumes.length ? (
                     <div className="space-y-3">
                       {agent.volumes.map((volume) => (
-                        <VolumeBar
-                          hideStatus
-                          key={volume.id}
-                          volume={volume}
-                        />
+                        <Tooltip key={volume.id}>
+                          <TooltipTrigger asChild>
+                            <div
+                              className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              tabIndex={0}
+                            >
+                              <VolumeBar hideStatus volume={volume} />
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t(`status.${volume.status}`)}
+                          </TooltipContent>
+                        </Tooltip>
                       ))}
                     </div>
                   ) : (

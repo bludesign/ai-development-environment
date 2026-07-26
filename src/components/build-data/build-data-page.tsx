@@ -63,6 +63,8 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { dayKey, formatDateValue } from "@/lib/date-format";
+import { cn } from "@/lib/utils";
+import { rowLinkClass } from "@/lib/row-activation";
 
 type AgentProgress = {
   agent: Agent;
@@ -595,7 +597,7 @@ export function BuildDataPage() {
                           )}
                           {entry.operation !== "IDLE" && <Spinner />}
                           {entry.locked && (
-                            <Badge variant="outline">
+                            <Badge variant="success">
                               <Lock /> {t("locked")}
                             </Badge>
                           )}
@@ -646,70 +648,74 @@ export function BuildDataPage() {
                       </TableCell>
                       <TableCell>
                         <Link
-                          className="underline-offset-4 hover:underline"
+                          className={cn(rowLinkClass, "inline-block")}
                           href={`/agents/${entry.agent.id}`}
                         >
                           {entry.agent.name}
                         </Link>
                       </TableCell>
                       <TableCell className="w-12 text-right">
-                        <DropdownMenu
-                          onOpenChange={(open) => {
-                            if (!open && armedDeleteKey === `row:${entry.id}`) {
-                              if (armedDeleteTimer.current) {
-                                window.clearTimeout(armedDeleteTimer.current);
-                                armedDeleteTimer.current = null;
-                              }
-                              setArmedDeleteKey(null);
-                            }
-                          }}
-                        >
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              aria-label={t("entryActions", {
-                                name: entry.name,
-                              })}
-                              className="ml-auto"
-                              disabled={activeOperation || operationBusy}
-                              size="icon-sm"
-                              variant="ghost"
-                            >
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                void setLocked(entry, !entry.locked)
-                              }
-                            >
-                              {entry.locked ? <Unlock /> : <Lock />}
-                              {entry.locked ? t("unlock") : t("lock")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={(event) => {
-                                if (armedDeleteKey !== `row:${entry.id}`) {
-                                  event.preventDefault();
-                                }
-                                inlineDelete(`row:${entry.id}`, [entry.id]);
-                              }}
-                              variant={
+                        <div className="flex items-center justify-end gap-1.5">
+                          <DropdownMenu
+                            onOpenChange={(open) => {
+                              if (
+                                !open &&
                                 armedDeleteKey === `row:${entry.id}`
-                                  ? "destructive"
-                                  : "default"
+                              ) {
+                                if (armedDeleteTimer.current) {
+                                  window.clearTimeout(armedDeleteTimer.current);
+                                  armedDeleteTimer.current = null;
+                                }
+                                setArmedDeleteKey(null);
                               }
-                            >
-                              {armedDeleteKey === `row:${entry.id}` ? (
-                                <Check />
-                              ) : (
-                                <Trash2 />
-                              )}
-                              {armedDeleteKey === `row:${entry.id}`
-                                ? t("confirmDelete")
-                                : t("delete")}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                            }}
+                          >
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                aria-label={t("entryActions", {
+                                  name: entry.name,
+                                })}
+                                disabled={activeOperation || operationBusy}
+                                size="icon-sm"
+                                variant="ghost"
+                              >
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  void setLocked(entry, !entry.locked)
+                                }
+                              >
+                                {entry.locked ? <Unlock /> : <Lock />}
+                                {entry.locked ? t("unlock") : t("lock")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  if (armedDeleteKey !== `row:${entry.id}`) {
+                                    event.preventDefault();
+                                  }
+                                  inlineDelete(`row:${entry.id}`, [entry.id]);
+                                }}
+                                variant={
+                                  armedDeleteKey === `row:${entry.id}`
+                                    ? "destructive"
+                                    : "default"
+                                }
+                              >
+                                {armedDeleteKey === `row:${entry.id}` ? (
+                                  <Check />
+                                ) : (
+                                  <Trash2 />
+                                )}
+                                {armedDeleteKey === `row:${entry.id}`
+                                  ? t("confirmDelete")
+                                  : t("delete")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -955,7 +961,10 @@ function DeviceSupportCard({
                     : formatBytes(entry.sizeBytes, locale)}
                 </TableCell>
                 <TableCell>
-                  <Link href={`/agents/${entry.agent.id}`}>
+                  <Link
+                    className={cn(rowLinkClass, "inline-block")}
+                    href={`/agents/${entry.agent.id}`}
+                  >
                     {entry.agent.name}
                   </Link>
                 </TableCell>

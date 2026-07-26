@@ -81,6 +81,7 @@ function collection(operation: "IDLE" | "SIZING" | "DELETING" = "IDLE") {
       {
         id: "entry-1",
         name: "App-hash",
+        kind: "PROJECT",
         status: "READY",
         workspacePath: "/Repos/App/App.xcodeproj",
         worktreeId: "worktree-1",
@@ -88,11 +89,13 @@ function collection(operation: "IDLE" | "SIZING" | "DELETING" = "IDLE") {
         sizeBytes: null,
         operation,
         error: null,
+        locked: false,
         agent,
       },
       {
         id: "entry-2",
         name: "Starting-hash",
+        kind: "PENDING",
         status: "PENDING",
         workspacePath: null,
         worktreeId: null,
@@ -100,6 +103,21 @@ function collection(operation: "IDLE" | "SIZING" | "DELETING" = "IDLE") {
         sizeBytes: null,
         operation: "IDLE",
         error: null,
+        locked: true,
+        agent,
+      },
+      {
+        id: "entry-3",
+        name: "iOS 26.0",
+        kind: "DEVICE_SUPPORT",
+        status: "READY",
+        workspacePath: null,
+        worktreeId: null,
+        worktreePath: null,
+        sizeBytes: null,
+        operation: "IDLE",
+        error: null,
+        locked: false,
         agent,
       },
     ],
@@ -151,6 +169,12 @@ describe("BuildDataPage", () => {
       "/worktrees/worktree-1",
     );
     expect(screen.getByText("Build starting")).toBeDefined();
+    for (const agentLink of screen.getAllByRole("link", { name: "Builder" })) {
+      expect(agentLink.className).toContain("hover:bg-muted");
+    }
+    expect(screen.getByText("Locked").getAttribute("data-variant")).toBe(
+      "success",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Calculate sizes" }));
     await waitFor(() =>
@@ -174,6 +198,10 @@ describe("BuildDataPage", () => {
         pointerType: "mouse",
       },
     );
+    expect(screen.getByRole("menu").className).toContain("w-48");
+    expect(
+      screen.getByRole("menuitem", { name: "Lock from cleanup" }),
+    ).toBeDefined();
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     const confirm = screen.getByRole("menuitem", { name: "Confirm" });
     expect(confirm.getAttribute("data-variant")).toBe("destructive");
