@@ -2,6 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+
 import type { GitHubMergeMethod } from "@/services/github";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
@@ -107,6 +109,9 @@ export class WorktreeAutomationService {
     private readonly agentControl: AgentControlService,
     private readonly polling?: PollingService,
   ) {
+    this.agentControl.registerCompletionObserver(async (job) => {
+      if (job.kind === WORKTREE_AUTO_SYNC_JOB_KIND) this.changed();
+    });
     this.polling?.register({
       id: POLLING_OPERATION_ID,
       kind: "WORKTREE_AUTOMATION",
