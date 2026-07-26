@@ -1593,6 +1593,35 @@ export class WorktreesService {
     };
   }
 
+  async workflowSessionDataForPullRequest(
+    owner: string,
+    repository: string,
+    number: number,
+  ): Promise<Record<string, unknown>> {
+    const normalizedOwner = owner.trim().toLowerCase();
+    const normalizedRepository = repository.trim().toLowerCase();
+    if (!normalizedOwner || !normalizedRepository) return {};
+    if (!Number.isInteger(number) || number < 1) return {};
+
+    const prisma = await getPrismaClient();
+    const pullRequests = await prisma.worktreePullRequest.findMany({
+      where: {
+        number,
+        worktree: { missingAt: null },
+      },
+      select: { worktreeId: true, repositoryNameWithOwner: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    const expectedRepository = `${normalizedOwner}/${normalizedRepository}`;
+    const pullRequest = pullRequests.find(
+      ({ repositoryNameWithOwner }) =>
+        repositoryNameWithOwner.toLowerCase() === expectedRepository,
+    );
+    return pullRequest
+      ? this.workflowSessionDataForWorktree(pullRequest.worktreeId)
+      : {};
+  }
+
   private async resolveBranchSelection(
     codebase: RunnableCodebase,
     selection: WorktreeBranchSelection,

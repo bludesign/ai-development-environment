@@ -726,6 +726,49 @@ describe("WorktreesService", () => {
     });
   });
 
+  test("resolves pull-request workflow data from its persisted worktree", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        worktreeId: "worktree-1",
+        repositoryNameWithOwner: "Acme/Widgets",
+      },
+    ]);
+    getPrismaClient.mockResolvedValue({
+      worktreePullRequest: { findMany },
+    });
+    const worktrees = service();
+    const snapshot = {
+      worktree: { id: "worktree-1" },
+      pr: { number: 42, title: "Stored pull request" },
+    };
+    const workflowSessionDataForWorktree = vi
+      .spyOn(worktrees, "workflowSessionDataForWorktree")
+      .mockResolvedValue(snapshot);
+
+    await expect(
+      worktrees.workflowSessionDataForPullRequest("ACME", "Widgets", 42),
+    ).resolves.toEqual(snapshot);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        number: 42,
+        worktree: { missingAt: null },
+      },
+      select: { worktreeId: true, repositoryNameWithOwner: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    expect(workflowSessionDataForWorktree).toHaveBeenCalledWith("worktree-1");
+  });
+
+  test("returns no pull-request workflow data without a persisted snapshot", async () => {
+    getPrismaClient.mockResolvedValue({
+      worktreePullRequest: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+
+    await expect(
+      service().workflowSessionDataForPullRequest("acme", "widgets", 42),
+    ).resolves.toEqual({});
+  });
+
   test("records a deduplicated workflow event after creating a worktree", async () => {
     let completeBranch:
       ((job: Record<string, unknown>) => Promise<void>) | undefined;

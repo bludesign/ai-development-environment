@@ -64,7 +64,6 @@ import type { CredentialService } from "@/services/credentials";
 import type { NotificationsService } from "@/services/notifications";
 import type { RunsService } from "@/services/runs";
 import type { CommandsService } from "@/services/commands";
-import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import {
   CREDENTIAL_KINDS,
@@ -384,9 +383,13 @@ export class WorkflowsService {
         id: string,
         options?: { includeMissing?: boolean },
       ): Promise<Record<string, unknown>>;
+      workflowSessionDataForPullRequest?(
+        owner: string,
+        repository: string,
+        number: number,
+      ): Promise<Record<string, unknown>>;
     },
     private readonly commandsService?: CommandsService,
-    private readonly githubService?: GitHubService,
     private readonly jiraService?: JiraService,
   ) {
     if (this.agentControl) {
@@ -1864,11 +1867,10 @@ export class WorkflowsService {
   }
 
   /**
-   * Enriches a resource-launched run with authoritative metadata and related
-   * resources. For example, a worktree brings its codebase, owning agent,
-   * repository, pull request, and ticket; builds and AI runs follow their
-   * linked worktree; and PR/Jira launches load their provider detail. Any
-   * caller-provided value wins over the derived context.
+   * Enriches a resource-launched run with locally persisted metadata and
+   * related resources. GitHub reads are deliberately excluded: a workflow must
+   * use an explicit GitHub step to add live provider data. Any caller-provided
+   * value wins over the derived context.
    */
   private async hydrateResourceSessionData(
     resourceKind: string | null | undefined,
@@ -2084,42 +2086,21 @@ export class WorkflowsService {
       }
     }
 
-    if (normalized === "PULL_REQUEST" && resourceId && this.githubService) {
+    if (
+      normalized === "PULL_REQUEST" &&
+      resourceId &&
+      this.worktrees?.workflowSessionDataForPullRequest
+    ) {
       const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(resourceId);
       if (match) {
-        try {
-          const pullRequest = await this.githubService.pullRequest(
+        derived = mergeSessionData(
+          derived,
+          (await this.worktrees.workflowSessionDataForPullRequest(
             match[1]!,
             match[2]!,
             Number(match[3]),
-          );
-          if (pullRequest) {
-            relatedWorktreeId = pullRequest.worktreeId;
-            derived = mergeSessionData(derived, {
-              repo: {
-                id: pullRequest.codebaseRepositoryId,
-                githubId: pullRequest.repositoryGithubId,
-                name: pullRequest.repositoryNameWithOwner.split("/").at(-1),
-                displayOrigin: pullRequest.repositoryNameWithOwner,
-                url: pullRequest.repositoryUrl,
-              },
-              pr: {
-                ...pullRequest,
-                headBranch: pullRequest.headRefName,
-                baseBranch: pullRequest.baseRefName,
-                unresolvedThreads: pullRequest.reviewThreads.filter(
-                  ({ isResolved }) => !isResolved,
-                ),
-              },
-              ...(pullRequest.jiraKey
-                ? { ticket: { key: pullRequest.jiraKey } }
-                : {}),
-            });
-          }
-        } catch {
-          // Resource actions remain runnable with the caller-provided PR id
-          // when GitHub is temporarily unavailable.
-        }
+          )) as SessionData,
+        );
       }
     }
 

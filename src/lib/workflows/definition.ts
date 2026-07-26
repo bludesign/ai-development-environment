@@ -125,14 +125,7 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "agent.*",
     "ticket.*",
   ],
-  PULL_REQUEST: [
-    "pr.*",
-    "repo.*",
-    "ticket.*",
-    "worktree.*",
-    "codebase.*",
-    "agent.*",
-  ],
+  PULL_REQUEST: ["pr.number", "repo.displayOrigin"],
   WORKTREE: [
     "worktree.*",
     "codebase.*",

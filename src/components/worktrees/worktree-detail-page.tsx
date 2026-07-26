@@ -162,18 +162,19 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     [],
   );
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
-  const latestLoad = useRef(0);
+  const latestOverviewLoad = useRef(0);
+  const latestPipelinesLoad = useRef(0);
   const displayedCodebaseId = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    const requestId = ++latestLoad.current;
+  const loadOverview = useCallback(async () => {
+    const requestId = ++latestOverviewLoad.current;
     try {
       const data = await controlPlaneRequest<{
         worktreeOverview: WorktreeOverview;
         builds?: { items: BuildRecord[]; nextCursor: string | null };
         worktreeCoverageReports?: CoverageHistoryReport[];
       }>(OVERVIEW_QUERY, { worktreeId });
-      if (requestId !== latestLoad.current) return;
+      if (requestId !== latestOverviewLoad.current) return;
       displayedCodebaseId.current =
         findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
           .codebase.id ?? null;
@@ -182,40 +183,43 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       setBuildsNextCursor(data.builds?.nextCursor ?? null);
       setCoverageReports(data.worktreeCoverageReports ?? []);
       setError(null);
-      try {
-        const pipelineData = await controlPlaneRequest<{
-          githubWorktreeWorkflowRuns: GitHubActionsWorkflowRunView[];
-        }>(
-          `query GitHubWorktreeWorkflowRuns($worktreeId: ID!) {
-            githubWorktreeWorkflowRuns(worktreeId: $worktreeId) {
-              id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl
-              name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId
-              canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt
-            }
-          }`,
-          { worktreeId },
-        );
-        if (requestId === latestLoad.current) {
-          setPipelines(pipelineData.githubWorktreeWorkflowRuns ?? []);
-          setPipelinesError(null);
-        }
-      } catch (pipelineError) {
-        if (requestId === latestLoad.current) {
-          setPipelinesError(
-            pipelineError instanceof Error
-              ? pipelineError.message
-              : String(pipelineError),
-          );
-        }
-      }
     } catch (value) {
-      if (requestId === latestLoad.current) {
+      if (requestId === latestOverviewLoad.current) {
         setError(value instanceof Error ? value.message : String(value));
       }
     } finally {
-      if (requestId === latestLoad.current) setLoading(false);
+      if (requestId === latestOverviewLoad.current) setLoading(false);
     }
   }, [worktreeId]);
+
+  const loadPipelines = useCallback(async () => {
+    const requestId = ++latestPipelinesLoad.current;
+    try {
+      const data = await controlPlaneRequest<{
+        githubWorktreeWorkflowRuns: GitHubActionsWorkflowRunView[];
+      }>(
+        `query GitHubWorktreeWorkflowRuns($worktreeId: ID!) {
+          githubWorktreeWorkflowRuns(worktreeId: $worktreeId) {
+            id workflowId repositoryGithubId codebaseRepositoryId repositoryNameWithOwner repositoryUrl
+            name displayTitle runNumber runAttempt event status url headBranch headSha checkSuiteId
+            canRetry retryUnavailableReason pullRequests { number url } jiraKey worktreeId startedAt createdAt updatedAt
+          }
+        }`,
+        { worktreeId },
+      );
+      if (requestId !== latestPipelinesLoad.current) return;
+      setPipelines(data.githubWorktreeWorkflowRuns ?? []);
+      setPipelinesError(null);
+    } catch (value) {
+      if (requestId === latestPipelinesLoad.current) {
+        setPipelinesError(value instanceof Error ? value.message : String(value));
+      }
+    }
+  }, [worktreeId]);
+
+  const load = useCallback(async () => {
+    await Promise.all([loadOverview(), loadPipelines()]);
+  }, [loadOverview, loadPipelines]);
 
   const loadMoreBuilds = useCallback(async () => {
     if (!buildsNextCursor) return;
@@ -273,7 +277,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             (changed.codebaseId !== null &&
               changed.codebaseId === displayedCodebaseId.current)
           ) {
-            void load();
+            void loadOverview();
           }
         },
         error: () => undefined,
@@ -288,7 +292,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           "subscription WorktreeDetailBuildsChanged { buildsChanged { id } }",
       },
       {
-        next: () => void load(),
+        next: () => void loadOverview(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -301,7 +305,9 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           "subscription WorktreeDetailQuickActionsChanged { workflowsChanged { id } }",
       },
       {
-        next: () => void load(),
+        next: (value) => {
+          if (value.data?.workflowsChanged) void loadOverview();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
@@ -309,12 +315,13 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(poll);
-      latestLoad.current += 1;
+      latestOverviewLoad.current += 1;
+      latestPipelinesLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
       unsubscribeWorkflows();
     };
-  }, [load, worktreeId]);
+  }, [load, loadOverview, worktreeId]);
 
   const entry = useMemo(
     () => (overview ? findWorktreeOverviewEntry(overview, worktreeId) : null),

@@ -245,13 +245,47 @@ describe("workflow definition validation", () => {
 
     const { availableBefore } = computeWorkflowPathAvailability(value);
     const before = availableBefore.get("notify") ?? [];
-    // Pull requests bring their repository and correlated local resources, but
-    // not an unrelated resource such as a build.
-    expect(before).toContain("pr.*");
-    expect(before).toContain("repo.*");
-    expect(before).toContain("ticket.*");
-    expect(before).toContain("worktree.*");
+    expect(before).toContain("pr.number");
+    expect(before).toContain("repo.displayOrigin");
+    expect(before).not.toContain("pr.*");
+    expect(before).not.toContain("worktree.*");
     expect(before).not.toContain("build.*");
+  });
+
+  test("requires an explicit loader before consuming live pull-request fields", () => {
+    const consume = node("consume", "NOTIFICATION_SEND");
+    consume.requiredPaths = ["pr.state"];
+    consume.config = { body: "PR state: {{pr.state}}" };
+    const direct = definition([consume]);
+    direct.triggers[0] = {
+      ...direct.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "PULL_REQUEST" },
+    };
+    expect(validateWorkflowDefinition(direct).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "REQUIREMENT_UNSATISFIED",
+          nodeId: "consume",
+        }),
+      ]),
+    );
+
+    const load = node("load", "GITHUB_LOAD_PR");
+    const explicit = definition([load, consume]);
+    explicit.triggers[0] = {
+      ...explicit.triggers[0]!,
+      kind: "RESOURCE_MANUAL",
+      config: { resourceKind: "PULL_REQUEST" },
+    };
+    explicit.edges.push({
+      id: "load-consume",
+      source: "load",
+      target: "consume",
+      sourceHandle: "success",
+      targetHandle: "input",
+    });
+    expect(validateWorkflowDefinition(explicit).diagnostics).toEqual([]);
   });
 
   test("a loader step may optionally read the namespace it provides", () => {
@@ -423,7 +457,7 @@ describe("workflow definition validation", () => {
     expect(
       computeWorkflowPathAvailability(value).availableBefore.get("notify") ??
         [],
-    ).toContain("pr.*");
+    ).toContain("pr.number");
   });
 
   test("strips secret literals and machine paths from exports", () => {
@@ -568,7 +602,7 @@ describe("workflow catalog", () => {
     ).toEqual(expect.arrayContaining(["agent.*", "disk.*", "cleanup.*"]));
   });
 
-  test("resource triggers advertise related context hydrated by the server", () => {
+  test("resource triggers advertise their guaranteed local context", () => {
     expect(
       resourceManualSeedPaths("RESOURCE_MANUAL", { resourceKind: "CODEBASE" }),
     ).toEqual(expect.arrayContaining(["codebase.*", "agent.*", "repo.*"]));
@@ -613,7 +647,7 @@ describe("workflow catalog", () => {
       resourceManualSeedPaths("RESOURCE_MANUAL", {
         resourceKind: "PULL_REQUEST",
       }),
-    ).toEqual(expect.arrayContaining(["pr.*", "repo.*", "ticket.*"]));
+    ).toEqual(["pr.number", "repo.displayOrigin"]);
     expect(
       resourceManualSeedPaths("RESOURCE_MANUAL", {
         resourceKind: "JIRA_TICKET",
