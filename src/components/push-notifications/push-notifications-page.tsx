@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1635,6 +1636,13 @@ function ExpandableHistory({
                       ))}
                     </div>
                   )}
+                  <div className="mt-4">
+                    <WorkflowResourcePanel
+                      resourceId={batch.id}
+                      resourceKind="PUSH_NOTIFICATION_BATCH"
+                      sessionData={{ pushBatch: { id: batch.id } }}
+                    />
+                  </div>
                   <div className="mt-4 flex flex-wrap justify-end gap-2">
                     <Button
                       onClick={() => onLoad(batch.editor)}

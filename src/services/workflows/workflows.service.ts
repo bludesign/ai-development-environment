@@ -2549,6 +2549,16 @@ export class WorkflowsService {
         return false;
       }
     }
+    if (trigger.kind === "COMMAND_OUTPUT_MATCH") {
+      const output = getSessionValue(payload, "output.data");
+      if (
+        typeof output !== "string" ||
+        typeof config.outputPattern !== "string" ||
+        !new RegExp(config.outputPattern).test(output)
+      ) {
+        return false;
+      }
+    }
     if (
       trigger.kind === "WORKTREE_CONFLICT" &&
       getSessionValue(payload, "worktree.conflicted") !== true

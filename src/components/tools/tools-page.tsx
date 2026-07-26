@@ -19,7 +19,9 @@ import { useTranslations } from "next-intl";
 import {
   FormEvent,
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -81,6 +83,7 @@ const SERVER_FIELDS =
 
 /** Suggested key for the client's own MCP config file; purely a local alias. */
 const BUILT_IN_SERVER_NAME = "ai-development-environment";
+const ToolApiTokenContext = createContext("");
 
 type JsonSchema = Record<string, unknown>;
 
@@ -137,6 +140,7 @@ export function ToolsPage() {
   const [draft, setDraft] = useState<ExternalMcpServerDraft>(emptyDraft);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [toolApiToken, setToolApiToken] = useState("");
 
   const loadServers = useCallback(async () => {
     const data = await controlPlaneRequest<{
@@ -262,7 +266,10 @@ export function ToolsPage() {
         </Button>
       </div>
 
-      <ConnectClientsCard />
+      <ConnectClientsCard
+        onTokenChange={setToolApiToken}
+        token={toolApiToken}
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -382,15 +389,21 @@ export function ToolsPage() {
         </div>
       </div>
 
-      {catalogLoading && groups.length === 0 ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> {t("loadingTools")}
-        </div>
-      ) : visibleGroups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noMatchingTools")}</p>
-      ) : (
-        visibleGroups.map((group) => <ToolGroup group={group} key={group.id} />)
-      )}
+      <ToolApiTokenContext.Provider value={toolApiToken}>
+        {catalogLoading && groups.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner /> {t("loadingTools")}
+          </div>
+        ) : visibleGroups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("noMatchingTools")}
+          </p>
+        ) : (
+          visibleGroups.map((group) => (
+            <ToolGroup group={group} key={group.id} />
+          ))
+        )}
+      </ToolApiTokenContext.Provider>
 
       <ServerDialog
         draft={draft}
@@ -413,7 +426,13 @@ const readOrigin = () => window.location.origin;
  * Shows external MCP clients how to reach this app's own built-in tool server,
  * which is mounted at /api/mcp on the same origin.
  */
-function ConnectClientsCard() {
+function ConnectClientsCard({
+  onTokenChange,
+  token,
+}: {
+  onTokenChange: (value: string) => void;
+  token: string;
+}) {
   const t = useTranslations("tools");
   // The server cannot know the browsing origin — the port comes from however
   // the process was started — so the client fills it in on hydration.
@@ -425,7 +444,11 @@ function ConnectClientsCard() {
   const config = JSON.stringify(
     {
       mcpServers: {
-        [BUILT_IN_SERVER_NAME]: { type: "http", url },
+        [BUILT_IN_SERVER_NAME]: {
+          type: "http",
+          url,
+          headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" },
+        },
       },
     },
     null,
@@ -450,6 +473,20 @@ function ConnectClientsCard() {
         <CardDescription>{t("connectDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="tools-api-token">{t("toolApiToken")}</Label>
+          <Input
+            autoComplete="off"
+            id="tools-api-token"
+            onChange={(event) => onTokenChange(event.target.value)}
+            placeholder={t("toolApiTokenPlaceholder")}
+            type="password"
+            value={token}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("toolApiTokenHelp")}
+          </p>
+        </div>
         <div className="space-y-1.5">
           <h3 className="text-sm font-medium">{t("serverUrl")}</h3>
           <div className="flex items-start gap-2 rounded-lg bg-muted p-3">
@@ -865,7 +902,10 @@ function ToolRow({
           )}
         </TableCell>
         <TableCell>
-          <p className="font-mono text-xs font-medium">{tool.name}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="font-mono text-xs font-medium">{tool.name}</p>
+            <ToolRiskBadges annotations={tool.annotations} />
+          </div>
           {tool.title && tool.title !== tool.name && (
             <p className="text-xs text-muted-foreground">{tool.title}</p>
           )}
@@ -880,12 +920,39 @@ function ToolRow({
         <TableCell colSpan={3} className="whitespace-normal p-4">
           <ToolRunner
             groupId={groupId}
+            annotations={tool.annotations}
             schema={tool.inputSchema}
             toolName={tool.name}
           />
         </TableCell>
       </TableRow>
     </Fragment>
+  );
+}
+
+function ToolRiskBadges({
+  annotations,
+}: {
+  annotations: ToolCatalogGroup["tools"][number]["annotations"];
+}) {
+  const t = useTranslations("tools");
+  const readOnly =
+    annotations === undefined || annotations?.readOnlyHint === true;
+  const destructive = annotations?.destructiveHint === true;
+  const externalEffect = annotations?.openWorldHint ?? annotations === null;
+  return (
+    <>
+      <Badge variant={destructive ? "destructive" : "outline"}>
+        {destructive
+          ? t("destructiveBadge")
+          : readOnly
+            ? t("readOnlyBadge")
+            : t("writeBadge")}
+      </Badge>
+      {externalEffect && (
+        <Badge variant="secondary">{t("externalEffectBadge")}</Badge>
+      )}
+    </>
   );
 }
 
@@ -966,15 +1033,18 @@ function getAtPath(source: Record<string, unknown>, path: string[]): unknown {
 }
 
 function ToolRunner({
+  annotations,
   groupId,
   schema,
   toolName,
 }: {
+  annotations: ToolCatalogGroup["tools"][number]["annotations"];
   groupId: string;
   schema: JsonSchema;
   toolName: string;
 }) {
   const t = useTranslations("tools");
+  const toolApiToken = useContext(ToolApiTokenContext);
   const [argumentsValue, setArgumentsValue] = useState<Record<string, unknown>>(
     () => (defaultsForSchema(schema) as Record<string, unknown>) ?? {},
   );
@@ -984,13 +1054,13 @@ function ToolRunner({
   const [copyState, setCopyState] = useState<"IDLE" | "COPIED" | "FAILED">(
     "IDLE",
   );
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const properties = asProperties(schema.properties);
   const dynamicRootArguments = acceptsDynamicRootArguments(schema);
   const required = new Set(asStringArray(schema.required));
   const rootArgumentsId = `${groupId}-${toolName}-arguments`;
 
-  const run = async (event: FormEvent) => {
-    event.preventDefault();
+  const run = async () => {
     setBusy(true);
     setError(null);
     setCopyState("IDLE");
@@ -998,7 +1068,10 @@ function ToolRunner({
       const body = (await responseJson(
         await fetch("/api/tools/call", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            authorization: `Bearer ${toolApiToken}`,
+            "content-type": "application/json",
+          },
           body: JSON.stringify({
             groupId,
             name: toolName,
@@ -1015,6 +1088,10 @@ function ToolRunner({
     }
   };
 
+  const requiresConfirmation =
+    annotations === null || annotations?.readOnlyHint === false;
+  const destructive = annotations?.destructiveHint === true;
+
   const responseText =
     result === undefined ? "" : JSON.stringify(result, null, 2);
   const copyResponse = async () => {
@@ -1027,7 +1104,14 @@ function ToolRunner({
   };
 
   return (
-    <form className="grid gap-4 lg:grid-cols-2" onSubmit={run}>
+    <form
+      className="grid gap-4 lg:grid-cols-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (requiresConfirmation) setConfirmationOpen(true);
+        else void run();
+      }}
+    >
       <div className="space-y-4">
         <h4 className="text-sm font-medium">{t("parameters")}</h4>
         {dynamicRootArguments ? (
@@ -1066,6 +1150,30 @@ function ToolRunner({
           {busy ? <Spinner /> : <Wrench />}
           {busy ? t("running") : t("run")}
         </Button>
+        {requiresConfirmation && (
+          <ConfirmationDialog
+            actionLabel={
+              destructive ? t("confirmDestructiveAction") : t("confirmRun")
+            }
+            cancelLabel={t("cancelRun")}
+            description={
+              destructive
+                ? t("confirmDestructiveDescription", { name: toolName })
+                : t("confirmWriteDescription", { name: toolName })
+            }
+            onConfirm={async () => {
+              setConfirmationOpen(false);
+              await run();
+            }}
+            onOpenChange={setConfirmationOpen}
+            open={confirmationOpen}
+            title={
+              destructive
+                ? t("confirmDestructiveTitle")
+                : t("confirmWriteTitle")
+            }
+          />
+        )}
       </div>
       <div className="min-w-0 space-y-2">
         <div className="flex min-h-7 items-center justify-between gap-2">

@@ -7,6 +7,7 @@ import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract
 import { getPrismaClient } from "@/data/prisma-client";
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
+  COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
   agentEventBus,
   commandRunChangedTopic,
@@ -934,8 +935,16 @@ export class CommandsService {
       orderBy: { sequence: "asc" },
     });
     for (const chunk of persisted) {
+      const output = {
+        ...chunk,
+        runId: attempt.runId,
+        attemptNumber: attempt.attempt,
+      };
       agentEventBus.publish(commandRunOutputTopic(attempt.runId), {
-        commandRunOutputAdded: { ...chunk, attemptNumber: attempt.attempt },
+        commandRunOutputAdded: output,
+      });
+      agentEventBus.publish(COMMAND_RUN_OUTPUT_CHANGED_TOPIC, {
+        commandRunOutputAdded: output,
       });
     }
     return persisted;

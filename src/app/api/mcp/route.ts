@@ -1,19 +1,24 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
 import { getServerServices } from "@/services/server-services";
-import { createBuiltInMcpServer } from "@/services/tools";
+import { authorizeToolRequest, createBuiltInMcpServer } from "@/services/tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
 
 async function handle(request: Request): Promise<Response> {
+  const authorization = authorizeToolRequest(request, "MCP");
+  if ("response" in authorization) return authorization.response;
   try {
     const transport = new WebStandardStreamableHTTPServerTransport();
-    const server = createBuiltInMcpServer(
-      getServerServices().toolsService.builtInTools,
+    const tools = getServerServices().toolsService;
+    const server = createBuiltInMcpServer(tools.builtInTools, (name, input) =>
+      tools.callBuiltInTool(name, input, authorization.context),
     );
     await server.connect(transport);
-    return await transport.handleRequest(request);
+    const response = await transport.handleRequest(request);
+    response.headers.set("x-request-id", authorization.context.correlationId);
+    return response;
   } catch (error) {
     console.error("MCP request failed:", error);
     return Response.json(

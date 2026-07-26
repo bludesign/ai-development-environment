@@ -1849,6 +1849,25 @@ model ExternalMcpServerHeader {
   @@index([serverId])
 }
 
+model ToolCallAudit {
+  id              String    @id
+  correlationId   String
+  caller          String
+  source          String
+  groupId         String
+  toolName        String
+  argumentsSha256 String
+  resultStatus    String
+  durationMs      Int?
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+
+  @@index([startedAt])
+  @@index([toolName, startedAt])
+  @@index([correlationId])
+  @@index([resultStatus, startedAt])
+}
+
 model CcusageCollection {
   id         String                   @id
   deadlineAt DateTime

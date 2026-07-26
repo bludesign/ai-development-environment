@@ -465,6 +465,9 @@ export class JiraService {
       ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
       ["JIRA_MENTION", latestComment?.id ?? "none"],
       ["JIRA_SPRINT_STARTED", JSON.stringify([...ticket.sprintNames].sort())],
+      ["JIRA_TICKET_UPDATED", ticket.updatedAt ?? "unknown"],
+      ["JIRA_COMMENT_ADDED", latestComment?.id ?? "none"],
+      ["JIRA_SPRINT_ENDED", JSON.stringify([...ticket.sprintNames].sort())],
     ];
     if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
       observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
@@ -1283,6 +1286,30 @@ export class JiraService {
         createdAt: asString(worklog.created),
         updatedAt: asString(worklog.updated),
       }));
+    const latest = items[0];
+    if (this.workflowEvents && latest) {
+      const sessionData = {
+        ticket: { key },
+        worklog: {
+          id: latest.id,
+          author: latest.author,
+          timeSpent: latest.timeSpent,
+          timeSpentSeconds: latest.timeSpentSeconds,
+          startedAt: latest.startedAt,
+          updatedAt: latest.updatedAt,
+        },
+      };
+      await this.workflowEvents.record({
+        kind: "JIRA_WORKLOG_ADDED",
+        subjectKey: key,
+        dedupeKey: `jira-worklog:${key}:${latest.id}:${page.fetchedAt}`,
+        payload: {
+          ...sessionData,
+          sessionData,
+          cursorValue: latest.id,
+        },
+      });
+    }
     return {
       ...pagination,
       total,
@@ -1464,6 +1491,77 @@ export class JiraService {
         fields,
       });
     });
+  }
+
+  async createTicket(input: {
+    projectKey: string;
+    issueTypeId: string;
+    summary: string;
+    description?: JiraTextInput | null;
+    fields?: Record<string, unknown> | null;
+  }): Promise<JiraTicketDetail> {
+    const projectKey = input.projectKey.trim().toUpperCase();
+    const issueTypeId = input.issueTypeId.trim();
+    const summary = input.summary.trim();
+    if (!projectKey || !issueTypeId || !summary) {
+      throw new Error("Project, issue type, and summary are required");
+    }
+    const { version3 } = await this.getClients();
+    const created = await version3.issues.createIssue({
+      fields: {
+        ...(input.fields ?? {}),
+        project: { key: projectKey },
+        issuetype: { id: issueTypeId },
+        summary,
+        ...(input.description
+          ? { description: jiraTextInputToAdf(input.description) }
+          : {}),
+      },
+    });
+    if (!created.key)
+      throw new Error("Jira did not return the created issue key");
+    return this.ticket(created.key, true);
+  }
+
+  async addWorklog(input: {
+    issueKey: string;
+    timeSpentSeconds: number;
+    startedAt?: string | null;
+    comment?: JiraTextInput | null;
+  }): Promise<JiraTicketDetail> {
+    const key = normalizeIssueKey(input.issueKey);
+    if (
+      !Number.isInteger(input.timeSpentSeconds) ||
+      input.timeSpentSeconds < 1
+    ) {
+      throw new Error("Time spent must be a positive number of seconds");
+    }
+    const { version3 } = await this.getClients();
+    await version3.issueWorklogs.addWorklog({
+      issueIdOrKey: key,
+      timeSpentSeconds: input.timeSpentSeconds,
+      started: input.startedAt ?? new Date().toISOString(),
+      ...(input.comment ? { comment: jiraTextInputToAdf(input.comment) } : {}),
+    });
+    return this.ticket(key, true);
+  }
+
+  async linkTickets(input: {
+    inwardIssueKey: string;
+    outwardIssueKey: string;
+    linkType: string;
+  }): Promise<JiraTicketDetail> {
+    const inwardIssueKey = normalizeIssueKey(input.inwardIssueKey);
+    const outwardIssueKey = normalizeIssueKey(input.outwardIssueKey);
+    const linkType = input.linkType.trim();
+    if (!linkType) throw new Error("Jira issue link type is required");
+    const { version3 } = await this.getClients();
+    await version3.issueLinks.linkIssues({
+      type: { name: linkType },
+      inwardIssue: { key: inwardIssueKey },
+      outwardIssue: { key: outwardIssueKey },
+    });
+    return this.ticket(inwardIssueKey, true);
   }
 
   async branchTicket(issueKey: string): Promise<JiraBranchTicket> {

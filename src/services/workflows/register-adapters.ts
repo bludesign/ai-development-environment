@@ -20,15 +20,20 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { AgentControlService } from "@/services/agent-control";
 import type { BuildsService } from "@/services/builds";
+import type { BuildDataService } from "@/services/build-data";
+import type { CcusageService } from "@/services/ccusage";
 import type { CodebasesService } from "@/services/codebases";
 import type { CommandsService } from "@/services/commands";
 import type { DiskSpaceService } from "@/services/disk-space";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
+import type { IosDevicesService } from "@/services/ios-devices";
+import type { ModelCostsService } from "@/services/model-costs";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { RunsService } from "@/services/runs";
 import type { SkillsService } from "@/services/skills";
+import type { SigningAssetsService } from "@/services/signing-assets";
 import type { ToolsService } from "@/services/tools";
 import type {
   WorktreeAutomationService,
@@ -61,6 +66,11 @@ export type WorkflowAdapterServices = {
   tools: ToolsService;
   commands: CommandsService;
   diskSpace: DiskSpaceService;
+  buildData: BuildDataService;
+  ccusage: CcusageService;
+  iosDevices: IosDevicesService;
+  modelCosts: ModelCostsService;
+  signingAssets: SigningAssetsService;
 };
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -334,6 +344,373 @@ export function registerWorkflowAdapters(
   registerDiskSpaceAdapters(executor, services);
   registerRunAdapters(executor, services);
   registerMiscellaneousAdapters(executor, services);
+  registerExpansionAdapters(executor, services);
+}
+
+function registerExpansionAdapters(
+  executor: WorkflowStepExecutor,
+  services: WorkflowAdapterServices,
+): void {
+  const workflowContext = (context: WorkflowExecutionContext) => ({
+    caller: `workflow:${context.run.id}`,
+    correlationId: context.attempt.id,
+    source: "WORKFLOW" as const,
+  });
+  const call = async (
+    context: WorkflowExecutionContext,
+    groupId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const output = await services.tools.callTool(
+      { groupId, name, arguments: args },
+      workflowContext(context),
+    );
+    return {
+      output,
+      sessionPatch: { steps: { [context.node.id]: { output } } },
+    };
+  };
+  const contextual = (
+    context: WorkflowExecutionContext,
+    configKey: string,
+    sessionPath: string,
+    label: string,
+  ) => configuredId(context, configKey, sessionPath, label);
+
+  executor.register("COMMAND_RERUN", (context) =>
+    call(context, "builtin:commands", "rerun_command", {
+      id: contextual(context, "commandRunId", "command.id", "Command run ID"),
+    }),
+  );
+  executor.register("COMMAND_TERMINATE", (context) =>
+    call(context, "builtin:commands", "terminate_command_run", {
+      id: contextual(context, "commandRunId", "command.id", "Command run ID"),
+    }),
+  );
+  executor.register("COMMAND_READ_OUTPUT", (context) =>
+    call(context, "builtin:commands", "get_command_run_output", {
+      runId: contextual(
+        context,
+        "commandRunId",
+        "command.id",
+        "Command run ID",
+      ),
+      first: Number(context.node.config.first ?? 1000),
+    }),
+  );
+  executor.register("WORKTREE_INSPECT_DIFF", (context) =>
+    call(context, "builtin:worktrees", "inspect_worktree_diff", {
+      worktreeId: contextual(
+        context,
+        "worktreeId",
+        "worktree.id",
+        "Worktree ID",
+      ),
+      scope: text(context.node.config.scope, "Diff scope", 100),
+      path: context.node.config.path,
+      previousPath: context.node.config.previousPath,
+      commitSha: context.node.config.commitSha,
+      requestId: requestId(context, "diff"),
+    }),
+  );
+  executor.register("WORKTREE_UPDATE_METADATA", (context) =>
+    call(context, "builtin:worktrees", "update_worktree_metadata", {
+      id: contextual(context, "worktreeId", "worktree.id", "Worktree ID"),
+      baseBranch: context.node.config.baseBranch,
+      highlightColor: context.node.config.highlightColor,
+    }),
+  );
+  executor.register("WORKTREE_MOVE_CONTROL", (context) =>
+    call(
+      context,
+      "builtin:worktrees",
+      context.node.config.operation === "CANCEL"
+        ? "cancel_worktree_move"
+        : "retry_worktree_move_with_stash",
+      { id: text(context.node.config.moveId, "Move ID", 500) },
+    ),
+  );
+  executor.register("BUILD_REBUILD", (context) =>
+    call(context, "builtin:builds", "rebuild_build", {
+      buildId: contextual(context, "buildId", "build.id", "Build ID"),
+      requestId: requestId(context, "rebuild"),
+    }),
+  );
+  executor.register("BUILD_GENERATE_REPORT", (context) =>
+    call(context, "builtin:builds", "generate_build_report", {
+      buildId: contextual(context, "buildId", "build.id", "Build ID"),
+      kind:
+        context.node.config.reportKind === "TEST_RESULTS"
+          ? "TEST_RESULTS"
+          : "CODE_COVERAGE",
+      requestId: requestId(context, "report"),
+    }),
+  );
+  executor.register("BUILD_DELETE", (context) =>
+    call(context, "builtin:builds", "delete_builds", {
+      ids: Array.isArray(context.node.config.buildIds)
+        ? context.node.config.buildIds.map(String)
+        : [contextual(context, "buildId", "build.id", "Build ID")],
+    }),
+  );
+  executor.register("SKILL_PREPARE_SYNC", (context) =>
+    call(context, "builtin:skills", "prepare_skill_sync", {
+      kind: String(context.node.config.syncKind ?? "ALL"),
+      groupId: context.node.config.groupId,
+    }),
+  );
+  executor.register("SKILL_RESOLVE_SYNC", (context) =>
+    call(context, "builtin:skills", "resolve_skill_sync_conflict", {
+      input: {
+        runId: contextual(
+          context,
+          "runId",
+          "skillSync.id",
+          "Skill sync run ID",
+        ),
+        itemId: text(context.node.config.itemId, "Conflict item ID", 500),
+        resolution: String(context.node.config.resolution ?? "SKIP"),
+      },
+    }),
+  );
+  executor.register("SKILL_SKIP_SYNC", (context) =>
+    call(context, "builtin:skills", "skip_skill_sync", {
+      runId: contextual(context, "runId", "skillSync.id", "Skill sync run ID"),
+    }),
+  );
+  executor.register("BUILD_DATA_REFRESH", (context) =>
+    call(context, "builtin:build-data", "refresh_build_data", {
+      requestId: requestId(context, "build-data"),
+    }),
+  );
+  executor.register("BUILD_DATA_DELETE", (context) =>
+    call(context, "builtin:build-data", "delete_build_data_entries", {
+      collectionId: contextual(
+        context,
+        "collectionId",
+        "buildData.id",
+        "Build-data collection ID",
+      ),
+      entryIds: Array.isArray(context.node.config.entryIds)
+        ? context.node.config.entryIds.map(String)
+        : [],
+      requestId: requestId(context, "build-data-delete"),
+      overrideProtection: context.node.config.overrideProtection === true,
+    }),
+  );
+  executor.register("BUILD_DATA_SET_LOCK", (context) =>
+    call(context, "builtin:build-data", "set_build_data_lock", {
+      collectionId: contextual(
+        context,
+        "collectionId",
+        "buildData.id",
+        "Build-data collection ID",
+      ),
+      entryId: text(context.node.config.entryId, "Entry ID", 500),
+      locked: context.node.config.locked === true,
+    }),
+  );
+  executor.register("SIGNING_REFRESH", (context) =>
+    call(context, "builtin:signing-assets", "refresh_signing_assets", {
+      agentIds: Array.isArray(context.node.config.agentIds)
+        ? context.node.config.agentIds.map(String)
+        : undefined,
+    }),
+  );
+  executor.register("SIGNING_SYNC_PROFILE", (context) =>
+    call(context, "builtin:signing-assets", "sync_signing_profile", {
+      uuid: contextual(context, "uuid", "signingProfile.id", "Profile UUID"),
+      sourceAgentId: text(
+        context.node.config.sourceAgentId,
+        "Source agent ID",
+        500,
+      ),
+      targetAgentIds: Array.isArray(context.node.config.targetAgentIds)
+        ? context.node.config.targetAgentIds.map(String)
+        : [],
+    }),
+  );
+  executor.register("SIGNING_DELETE_EXPIRED", (context) =>
+    call(context, "builtin:signing-assets", "delete_expired_signing_profiles", {
+      agentIds: Array.isArray(context.node.config.agentIds)
+        ? context.node.config.agentIds.map(String)
+        : undefined,
+    }),
+  );
+  executor.register("IOS_DEVICE_REGISTER", (context) =>
+    call(context, "builtin:ios-devices", "register_ios_device", {
+      id: contextual(context, "deviceId", "device.id", "Device ID"),
+    }),
+  );
+  executor.register("IOS_DEVICE_REJECT", (context) =>
+    call(context, "builtin:ios-devices", "reject_ios_device", {
+      id: contextual(context, "deviceId", "device.id", "Device ID"),
+    }),
+  );
+  executor.register("AGENT_RECONCILE", async (context) => {
+    const agentIds = Array.isArray(context.node.config.agentIds)
+      ? context.node.config.agentIds.map(String)
+      : (await services.agentControl.listAgents()).map(({ id }) => id);
+    return {
+      output: {
+        requested:
+          await services.agentControl.requestCodebaseReconcile(agentIds),
+      },
+    };
+  });
+  executor.register("AGENT_UPDATE_CADENCE", async (context) => ({
+    output: await services.agentControl.updateCadenceSettings(
+      contextual(context, "agentId", "agent.id", "Agent ID"),
+      object(context.node.config.settings, "Cadence settings") as never,
+    ),
+  }));
+  executor.register("CCUSAGE_COLLECT", async (context) => ({
+    output: await services.ccusage.collect(requestId(context, "ccusage")),
+  }));
+  executor.register("MODEL_COST_REFRESH", async () => ({
+    output: await services.modelCosts.refresh(),
+  }));
+  const githubPullRequestAction = async (
+    context: WorkflowExecutionContext,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await call(context, "builtin:github", name, args);
+    const output = object(result.output, "GitHub tool output");
+    return {
+      ...result,
+      sessionPatch: {
+        ...result.sessionPatch,
+        pr: object(output.pullRequest, "Pull request output"),
+      },
+    };
+  };
+  const repositoryPullRequestConfig = (context: WorkflowExecutionContext) => ({
+    owner: text(
+      context.node.config.owner ??
+        getSessionValue(context.sessionData, "repo.owner"),
+      "Repository owner",
+      200,
+    ),
+    name: text(
+      context.node.config.name ??
+        getSessionValue(context.sessionData, "repo.name"),
+      "Repository name",
+      200,
+    ),
+    number: Number(
+      context.node.config.number ??
+        getSessionValue(context.sessionData, "pr.number"),
+    ),
+  });
+  executor.register("GITHUB_UPDATE_PR", (context) =>
+    githubPullRequestAction(context, "update_pull_request", {
+      ...repositoryPullRequestConfig(context),
+      title: optionalText(context.node.config.title),
+      body:
+        typeof context.node.config.body === "string"
+          ? context.node.config.body
+          : undefined,
+      draft:
+        typeof context.node.config.draft === "boolean"
+          ? context.node.config.draft
+          : undefined,
+    }),
+  );
+  executor.register("GITHUB_SUBMIT_REVIEW", (context) =>
+    githubPullRequestAction(context, "submit_pull_request_review", {
+      ...repositoryPullRequestConfig(context),
+      event: String(context.node.config.event ?? "COMMENT"),
+      body:
+        typeof context.node.config.body === "string"
+          ? context.node.config.body
+          : undefined,
+    }),
+  );
+  executor.register("GITHUB_REQUEST_REVIEWERS", (context) =>
+    githubPullRequestAction(context, "request_pull_request_reviewers", {
+      ...repositoryPullRequestConfig(context),
+      reviewers: Array.isArray(context.node.config.reviewers)
+        ? context.node.config.reviewers.map(String)
+        : [],
+      teamReviewers: Array.isArray(context.node.config.teamReviewers)
+        ? context.node.config.teamReviewers.map(String)
+        : [],
+    }),
+  );
+  executor.register("GITHUB_DISPATCH_WORKFLOW", (context) =>
+    call(context, "builtin:github", "dispatch_github_workflow", {
+      repositoryId: contextual(
+        context,
+        "repositoryId",
+        "repo.id",
+        "Repository ID",
+      ),
+      workflowId: text(context.node.config.workflowId, "Workflow ID", 500),
+      ref: text(context.node.config.ref, "Git ref", 500),
+      inputs: context.node.config.inputs
+        ? object(context.node.config.inputs, "Workflow inputs")
+        : undefined,
+    }),
+  );
+
+  const jiraTicketAction = async (
+    context: WorkflowExecutionContext,
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    const result = await call(context, "builtin:jira", name, args);
+    const output = object(result.output, "Jira tool output");
+    return {
+      ...result,
+      sessionPatch: {
+        ...result.sessionPatch,
+        ticket: object(output.ticket, "Jira ticket output"),
+      },
+    };
+  };
+  executor.register("JIRA_CREATE_TICKET", (context) =>
+    jiraTicketAction(context, "create_jira_ticket", {
+      projectKey: text(context.node.config.projectKey, "Project key", 100),
+      issueTypeId: text(context.node.config.issueTypeId, "Issue type ID", 100),
+      summary: text(context.node.config.summary, "Summary"),
+      description:
+        typeof context.node.config.description === "string"
+          ? { format: "MARKDOWN", value: context.node.config.description }
+          : undefined,
+      fields: context.node.config.fields
+        ? object(context.node.config.fields, "Additional Jira fields")
+        : undefined,
+    }),
+  );
+  executor.register("JIRA_ADD_WORKLOG", (context) =>
+    jiraTicketAction(context, "add_jira_worklog", {
+      issueKey: contextual(context, "issueKey", "ticket.key", "Issue key"),
+      timeSpentSeconds: Number(context.node.config.timeSpentSeconds),
+      startedAt: optionalText(context.node.config.startedAt, 100),
+      comment:
+        typeof context.node.config.comment === "string"
+          ? { format: "MARKDOWN", value: context.node.config.comment }
+          : undefined,
+    }),
+  );
+  executor.register("JIRA_LINK_TICKETS", (context) =>
+    jiraTicketAction(context, "link_jira_tickets", {
+      inwardIssueKey: contextual(
+        context,
+        "inwardIssueKey",
+        "ticket.key",
+        "Inward issue key",
+      ),
+      outwardIssueKey: text(
+        context.node.config.outwardIssueKey,
+        "Outward issue key",
+        100,
+      ),
+      linkType: text(context.node.config.linkType, "Link type", 100),
+    }),
+  );
 }
 
 function registerWaitPollers(
@@ -2075,11 +2452,18 @@ function registerMiscellaneousAdapters(
     }),
   }));
   executor.register("MCP_CALL", async (context) => {
-    const result = await services.tools.callTool({
-      groupId: text(context.node.config.groupId, "MCP tool group", 500),
-      name: text(context.node.config.name, "MCP tool name", 500),
-      arguments: object(context.node.config.arguments ?? {}, "MCP arguments"),
-    });
+    const result = await services.tools.callTool(
+      {
+        groupId: text(context.node.config.groupId, "MCP tool group", 500),
+        name: text(context.node.config.name, "MCP tool name", 500),
+        arguments: object(context.node.config.arguments ?? {}, "MCP arguments"),
+      },
+      {
+        caller: `workflow:${context.run.id}`,
+        correlationId: context.attempt.id,
+        source: "WORKFLOW",
+      },
+    );
     return {
       output: result,
       sessionPatch: { steps: { [context.node.id]: { output: result } } },

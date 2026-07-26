@@ -22,6 +22,7 @@ import {
 } from "@/services/codebases";
 
 import {
+  DESTRUCTIVE_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
   WRITE_ANNOTATIONS,
   defineTool,
@@ -29,6 +30,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { agentJobView, jsonSafe } from "../builtin-views";
+import { serviceTool } from "./service-tool";
 
 const EmptyInputSchema = z.object({});
 const CodebaseSettingsOutputSchema = z.object({
@@ -116,6 +118,91 @@ export function createCodebaseToolGroup(
         outputSchema: SearchCodebasesOutputSchema,
         annotations: READ_ONLY_ANNOTATIONS,
         handler: (input) => codebaseTools.search(input),
+      }),
+      serviceTool({
+        name: "register_codebase",
+        title: "Register codebase",
+        description: "Register a previously inspected agent repository folder.",
+        inputSchema: z.object({
+          inspectionJobId: z.string().min(1),
+          name: z.string().nullable().optional(),
+          description: z.string().nullable().optional(),
+        }),
+        service: codebases,
+        method: "confirm",
+        resultKey: "codebase",
+        annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
+      }),
+      serviceTool({
+        name: "update_codebase_repository",
+        title: "Update codebase repository",
+        description:
+          "Update canonical repository metadata and linked skill groups.",
+        inputSchema: z.object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          description: z.string(),
+          jiraBranchRegex: z.string().nullable().optional(),
+          keepBaseBranchUpToDate: z.boolean(),
+          skillGroupIds: z.array(z.string()).nullable().optional(),
+        }),
+        service: codebases,
+        method: "updateRepository",
+        arguments: (value) => [
+          value.id,
+          value.name,
+          value.description,
+          value.jiraBranchRegex,
+          value.keepBaseBranchUpToDate,
+          value.skillGroupIds,
+        ],
+        resultKey: "repository",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "update_codebase_settings",
+        title: "Update codebase settings",
+        description:
+          "Update global refresh, fetch, and Jira branch parsing settings.",
+        inputSchema: z.object({
+          refreshIntervalSeconds: z.number().int().positive(),
+          fetchIntervalSeconds: z.number().int().positive(),
+          defaultJiraBranchRegex: z.string(),
+        }),
+        service: codebases,
+        method: "updateSettings",
+        resultKey: "settings",
+        annotations: WRITE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "remove_codebase",
+        title: "Remove codebase",
+        description:
+          "Remove a registered codebase from the control plane without deleting its repository folder.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        service: codebases,
+        method: "removeCodebase",
+        arguments: ({ id }) => [id],
+        resultKey: "removed",
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+      }),
+      serviceTool({
+        name: "run_codebase_git_operation",
+        title: "Run codebase Git operation",
+        description:
+          "Run a supported Git operation against a registered codebase.",
+        inputSchema: z.object({
+          codebaseId: z.string().min(1),
+          operation: z.string().min(1),
+          branch: z.string().nullable().optional(),
+          stashOid: z.string().nullable().optional(),
+          stashChanges: z.boolean().nullable().optional(),
+          requestId: z.string().min(1),
+        }),
+        service: codebases,
+        method: "runGitOperation",
+        resultKey: "job",
+        annotations: WRITE_ANNOTATIONS,
       }),
     );
     tools.push(

@@ -10,6 +10,11 @@ import {
 
 export function createBuiltInMcpServer(
   registry: BuiltInToolRegistry,
+  invoke: (
+    name: string,
+    input: unknown,
+  ) => ReturnType<BuiltInToolRegistry["callByName"]> = (name, input) =>
+    registry.callByName(name, input),
 ): McpServer {
   const server = new McpServer({
     name: "ai-development-environment",
@@ -38,7 +43,7 @@ export function createBuiltInMcpServer(
         outputSchema: tool.outputSchema,
         annotations: tool.annotations,
       },
-      async (input) => registry.callByName(tool.name, input),
+      async (input) => invoke(tool.name, input),
     );
   }
 

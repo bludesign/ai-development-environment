@@ -1,5 +1,14 @@
 import { describe, expect, test, vi } from "vitest";
 
+import {
+  agentEventBus,
+  COMMAND_RUNS_CHANGED_TOPIC,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+  IOS_DEVICES_CHANGED_TOPIC,
+  POLLING_CHANGED_TOPIC,
+  SIGNING_ASSETS_CHANGED_TOPIC,
+  SKILLS_CHANGED_TOPIC,
+} from "@/services/agent-control";
 import type { DiskSpaceChangedPayload } from "@/services/disk-space";
 
 import { WorkflowEventBridge } from "./workflow-event-bridge";
@@ -10,7 +19,9 @@ function worktree(baseBehind: number | null) {
     folder: "/tmp/worktree-1",
     branch: "feature/test",
     headSha: null,
+    syncState: "SYNCED",
     pushStatus: "READY",
+    statusError: null,
     baseBehind,
     hasStagedChanges: false,
     hasUnstagedChanges: false,
@@ -31,6 +42,138 @@ function worktree(baseBehind: number | null) {
     },
   };
 }
+
+describe("expanded workflow event producers", () => {
+  test("records command, skill conflict, device, signing, and polling results", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const timestamp = new Date("2026-07-26T12:00:00.000Z");
+    const bridge = new WorkflowEventBridge(
+      { record } as never,
+      { registerCompletionObserver: vi.fn() } as never,
+      undefined,
+      undefined,
+      {
+        commands: {
+          getRun: vi.fn().mockResolvedValue({
+            id: "command-run-1",
+            commandId: "command-1",
+            snapshotName: "Verify",
+            status: "FAILED",
+            exitCode: 1,
+            signal: null,
+            error: "failed",
+            agentId: "agent-1",
+            agentName: "Studio Mac",
+            worktreeId: null,
+            finishedAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        } as never,
+        skills: {
+          getRun: vi.fn().mockResolvedValue({
+            id: "skill-sync-1",
+            kind: "ALL",
+            groupId: null,
+            status: "NEEDS_RESOLUTION",
+            error: null,
+            updatedAt: timestamp,
+            finishedAt: null,
+            items: [
+              {
+                id: "item-1",
+                skillId: "skill-1",
+                skill: { name: "Release" },
+                direction: "PUSH",
+                status: "BLOCKED",
+                error: null,
+              },
+            ],
+          }),
+        } as never,
+        iosDevices: {
+          device: vi.fn().mockResolvedValue({
+            id: "device-1",
+            udid: "UDID",
+            displayName: "iPhone",
+            product: "iPhone17,1",
+            osVersion: "20.0",
+            status: "REGISTERED",
+            registrationError: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        } as never,
+        signingAssets: {
+          operations: vi.fn().mockResolvedValue([
+            {
+              id: "signing-1",
+              kind: "SYNC_PROFILE",
+              status: "SUCCEEDED",
+              assetKey: "profile-1",
+              error: null,
+              finishedAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ]),
+          profiles: vi.fn().mockResolvedValue([]),
+        } as never,
+        polling: {
+          list: vi.fn().mockResolvedValue([
+            {
+              id: "server:test",
+              status: "ERROR",
+              lastCompletedAt: timestamp.toISOString(),
+              lastStartedAt: timestamp.toISOString(),
+              nextScheduledAt: null,
+              lastError: "poll failed",
+            },
+          ]),
+        } as never,
+      },
+    );
+    bridge.start();
+
+    agentEventBus.publish(COMMAND_RUNS_CHANGED_TOPIC, {
+      commandRunsChanged: { id: "command-run-1" },
+    });
+    agentEventBus.publish(SKILLS_CHANGED_TOPIC, { id: "skill-sync-1" });
+    agentEventBus.publish(IOS_DEVICES_CHANGED_TOPIC, { id: "device-1" });
+    agentEventBus.publish(SIGNING_ASSETS_CHANGED_TOPIC, { changed: true });
+    agentEventBus.publish(POLLING_CHANGED_TOPIC, {
+      pollingOperationChanged: "server:test",
+    });
+    agentEventBus.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {
+      githubPipelineStatusChanged: {
+        snapshot: {
+          repositoryGithubId: "repo-node-1",
+          repositoryNameWithOwner: "acme/widgets",
+          repositoryUrl: "https://github.com/acme/widgets",
+          headSha: "abc123",
+          pipelineStatus: "FAILED",
+          pipelines: [],
+          revision: 2,
+          updatedAt: timestamp.toISOString(),
+        },
+        changedPipeline: null,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(record.mock.calls.map(([input]) => input.kind)).toEqual(
+        expect.arrayContaining([
+          "COMMAND_RUN_RESULT",
+          "SKILL_SYNC_CONFLICT",
+          "IOS_DEVICE_ENROLLED",
+          "IOS_DEVICE_REGISTRATION_RESULT",
+          "SIGNING_OPERATION_RESULT",
+          "POLLING_OPERATION_STATE",
+          "GITHUB_PIPELINE_STATUS_CHANGED",
+        ]),
+      );
+    });
+    bridge.stop();
+  });
+});
 
 const diskSnapshot = {
   agent: {

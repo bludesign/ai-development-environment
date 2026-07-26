@@ -273,6 +273,48 @@ export function createAgentToolGroup(
           ),
         }),
       }),
+      defineTool({
+        name: "get_agent_cadence_settings",
+        title: "Get agent cadence settings",
+        description:
+          "Get effective scan, reconciliation, fetch, and heartbeat intervals for an agent.",
+        inputSchema: AgentIdInputSchema,
+        outputSchema: z.object({ settings: z.unknown() }),
+        handler: async ({ agentId }) => ({
+          settings: await agents.cadenceSettings(agentId),
+        }),
+      }),
+      defineTool({
+        name: "update_agent_cadence_settings",
+        title: "Update agent cadence settings",
+        description:
+          "Update scan, reconciliation, fetch, and heartbeat intervals for an agent.",
+        inputSchema: AgentIdInputSchema.extend({
+          settings: z.object({
+            codebaseScanIntervalSeconds: z.number().int().positive(),
+            jobReconciliationIntervalSeconds: z.number().int().positive(),
+            gitFetchIntervalSeconds: z.number().int().positive(),
+            heartbeatIntervalSeconds: z.number().int().positive(),
+          }),
+        }),
+        outputSchema: z.object({ settings: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ agentId, settings }) => ({
+          settings: await agents.updateCadenceSettings(agentId, settings),
+        }),
+      }),
+      defineTool({
+        name: "delete_agent",
+        title: "Delete agent",
+        description:
+          "Permanently delete an enrolled agent and its control-plane records.",
+        inputSchema: AgentIdInputSchema,
+        outputSchema: z.object({ deleted: z.boolean() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ agentId }) => ({
+          deleted: await agents.deleteAgent(agentId),
+        }),
+      }),
     ],
   };
 }

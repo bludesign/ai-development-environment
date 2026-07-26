@@ -709,6 +709,179 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       ),
     ],
   },
+  COMMAND_RERUN: {
+    fields: [text("commandRunId", "Command run ID", { required: true })],
+  },
+  COMMAND_TERMINATE: {
+    fields: [text("commandRunId", "Command run ID", { required: true })],
+  },
+  COMMAND_READ_OUTPUT: {
+    fields: [
+      text("commandRunId", "Command run ID", { required: true }),
+      num("first", "Maximum chunks"),
+    ],
+  },
+  WORKTREE_INSPECT_DIFF: {
+    fields: [
+      text("worktreeId", "Worktree ID"),
+      text("scope", "Diff scope", { required: true }),
+      text("path", "Path"),
+      text("previousPath", "Previous path"),
+      text("commitSha", "Commit SHA"),
+    ],
+  },
+  WORKTREE_UPDATE_METADATA: {
+    fields: [
+      text("worktreeId", "Worktree ID"),
+      text("baseBranch", "Base branch"),
+      text("highlightColor", "Highlight color"),
+    ],
+  },
+  WORKTREE_MOVE_CONTROL: {
+    fields: [
+      text("moveId", "Move ID", { required: true }),
+      enumField(
+        "operation",
+        "Operation",
+        staticOptions(["RETRY_WITH_STASH", "CANCEL"]),
+      ),
+    ],
+  },
+  BUILD_REBUILD: { fields: [text("buildId", "Build ID")] },
+  BUILD_GENERATE_REPORT: {
+    fields: [
+      text("buildId", "Build ID"),
+      enumField(
+        "reportKind",
+        "Report kind",
+        staticOptions(["TEST_RESULTS", "CODE_COVERAGE"]),
+      ),
+    ],
+  },
+  BUILD_DELETE: { fields: [stringList("buildIds", "Build IDs")] },
+  SKILL_PREPARE_SYNC: {
+    fields: [
+      enumField("syncKind", "Sync kind", staticOptions(["ALL", "GROUP"])),
+      text("groupId", "Skill group ID"),
+    ],
+  },
+  SKILL_RESOLVE_SYNC: {
+    fields: [
+      text("runId", "Sync run ID", { required: true }),
+      text("itemId", "Conflict item ID", { required: true }),
+      enumField(
+        "resolution",
+        "Resolution",
+        staticOptions(["LOCAL", "REMOTE", "SKIP"]),
+      ),
+    ],
+  },
+  SKILL_SKIP_SYNC: {
+    fields: [text("runId", "Sync run ID", { required: true })],
+  },
+  BUILD_DATA_REFRESH: { fields: [] },
+  BUILD_DATA_DELETE: {
+    fields: [
+      text("collectionId", "Collection ID", { required: true }),
+      stringList("entryIds", "Entry IDs"),
+      bool("overrideProtection", "Override protection"),
+    ],
+  },
+  BUILD_DATA_SET_LOCK: {
+    fields: [
+      text("collectionId", "Collection ID", { required: true }),
+      text("entryId", "Entry ID", { required: true }),
+      bool("locked", "Locked"),
+    ],
+  },
+  SIGNING_REFRESH: { fields: [stringList("agentIds", "Agent IDs")] },
+  SIGNING_SYNC_PROFILE: {
+    fields: [
+      text("uuid", "Profile UUID", { required: true }),
+      text("sourceAgentId", "Source agent ID", { required: true }),
+      stringList("targetAgentIds", "Target agent IDs"),
+    ],
+  },
+  SIGNING_DELETE_EXPIRED: { fields: [stringList("agentIds", "Agent IDs")] },
+  IOS_DEVICE_REGISTER: {
+    fields: [text("deviceId", "Device ID", { required: true })],
+  },
+  IOS_DEVICE_REJECT: {
+    fields: [text("deviceId", "Device ID", { required: true })],
+  },
+  AGENT_RECONCILE: { fields: [stringList("agentIds", "Agent IDs")] },
+  AGENT_UPDATE_CADENCE: {
+    fields: [
+      text("agentId", "Agent ID", { required: true }),
+      json("settings", "Cadence settings"),
+    ],
+  },
+  CCUSAGE_COLLECT: { fields: [] },
+  MODEL_COST_REFRESH: { fields: [] },
+  GITHUB_UPDATE_PR: {
+    fields: [
+      text("owner", "Owner", { required: true }),
+      text("name", "Repository", { required: true }),
+      num("number", "Pull request number", { required: true }),
+      text("title", "Title"),
+      multiline("body", "Body"),
+      bool("draft", "Draft"),
+    ],
+  },
+  GITHUB_SUBMIT_REVIEW: {
+    fields: [
+      text("owner", "Owner", { required: true }),
+      text("name", "Repository", { required: true }),
+      num("number", "Pull request number", { required: true }),
+      enumField(
+        "event",
+        "Review event",
+        staticOptions(["APPROVE", "REQUEST_CHANGES", "COMMENT"]),
+      ),
+      multiline("body", "Body"),
+    ],
+  },
+  GITHUB_REQUEST_REVIEWERS: {
+    fields: [
+      text("owner", "Owner", { required: true }),
+      text("name", "Repository", { required: true }),
+      num("number", "Pull request number", { required: true }),
+      stringList("reviewers", "Reviewers"),
+      stringList("teamReviewers", "Team reviewers"),
+    ],
+  },
+  GITHUB_DISPATCH_WORKFLOW: {
+    fields: [
+      text("repositoryId", "Repository ID", { required: true }),
+      text("workflowId", "Workflow ID", { required: true }),
+      text("ref", "Git ref", { required: true }),
+      record("inputs", "Workflow inputs"),
+    ],
+  },
+  JIRA_CREATE_TICKET: {
+    fields: [
+      text("projectKey", "Project key", { required: true }),
+      text("issueTypeId", "Issue type ID", { required: true }),
+      text("summary", "Summary", { required: true }),
+      multiline("description", "Description"),
+      json("fields", "Additional fields"),
+    ],
+  },
+  JIRA_ADD_WORKLOG: {
+    fields: [
+      text("issueKey", "Issue key"),
+      num("timeSpentSeconds", "Time spent (seconds)", { required: true }),
+      text("startedAt", "Started at"),
+      multiline("comment", "Comment"),
+    ],
+  },
+  JIRA_LINK_TICKETS: {
+    fields: [
+      text("inwardIssueKey", "Inward issue key", { required: true }),
+      text("outwardIssueKey", "Outward issue key", { required: true }),
+      text("linkType", "Link type", { required: true }),
+    ],
+  },
   MCP_CALL: {
     fields: [
       resource("groupId", "MCP server", "mcpServer", { required: true }),
@@ -950,6 +1123,14 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   // Commands, skills, checks
   "SAVED_COMMAND",
   "CUSTOM_COMMAND",
+  "COMMAND_RERUN",
+  "BUILD_DATA_REFRESH",
+  "SIGNING_REFRESH",
+  "SIGNING_SYNC_PROFILE",
+  "SIGNING_DELETE_EXPIRED",
+  "CCUSAGE_COLLECT",
+  "MODEL_COST_REFRESH",
+  "GITHUB_DISPATCH_WORKFLOW",
   "SKILL_APPLY",
   "GITHUB_WAIT_CHECKS",
   // Control flow
@@ -1031,6 +1212,9 @@ const THRESHOLD_TRIGGERS: WorkflowTriggerKind[] = [
   "AGENT_DISK_THRESHOLD",
   "CCUSAGE_THRESHOLD",
   "RUN_USAGE_THRESHOLD",
+  "BUILD_DATA_THRESHOLD",
+  "AGENT_RESOURCE_THRESHOLD",
+  "SIGNING_ASSET_EXPIRING",
 ];
 
 const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
@@ -1088,6 +1272,35 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "RUN_IMPORTED",
   "RUN_USAGE_THRESHOLD",
   "RUN_EVENT_MATCH",
+  "COMMAND_RUN_RESULT",
+  "COMMAND_OUTPUT_MATCH",
+  "SKILL_SYNC_RESULT",
+  "SKILL_SYNC_CONFLICT",
+  "GITHUB_PIPELINE_STATUS_CHANGED",
+  "GITHUB_PR_SYNCHRONIZED",
+  "GITHUB_REVIEW_APPROVED",
+  "JIRA_TICKET_UPDATED",
+  "JIRA_COMMENT_ADDED",
+  "JIRA_WORKLOG_ADDED",
+  "JIRA_SPRINT_ENDED",
+  "CODEBASE_SYNC_STATE_CHANGED",
+  "CODEBASE_OPERATION_FAILED",
+  "WORKTREE_SYNC_STATE_CHANGED",
+  "WORKTREE_AUTOMATION_RESULT",
+  "WORKTREE_CLEAN",
+  "PUSH_NOTIFICATION_RESULT",
+  "IOS_DEVICE_ENROLLED",
+  "IOS_DEVICE_REGISTRATION_RESULT",
+  "SIGNING_OPERATION_RESULT",
+  "SIGNING_ASSET_EXPIRING",
+  "BUILD_DATA_THRESHOLD",
+  "BUILD_DATA_CLEANUP_RESULT",
+  "POLLING_OPERATION_STATE",
+  "MODEL_COST_CATALOG_CHANGED",
+  "CREDENTIAL_STORE_DEGRADED",
+  "AGENT_RESOURCE_THRESHOLD",
+  "AGENT_VERSION_CHANGED",
+  "TOOL_CALL_RESULT",
 ];
 
 const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
@@ -1138,6 +1351,18 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             // The matcher compiles this itself, so it has to stay a string: a
             // session binding would arrive as an object. Interpolation keeps it
             // a string, so tokens are still allowed.
+            valueModes: ["literal", "interpolation"],
+          }),
+        ]),
+      ];
+    }
+    if (kind === "COMMAND_OUTPUT_MATCH") {
+      return [
+        kind,
+        triggerWithFilters([
+          text("outputPattern", "Output pattern (regex)", {
+            placeholder: "error|failed",
+            required: true,
             valueModes: ["literal", "interpolation"],
           }),
         ]),

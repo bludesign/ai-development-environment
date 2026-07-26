@@ -134,6 +134,13 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "ticket.*",
     "pr.*",
   ],
+  COMMAND_RUN: ["command.*", "agent.*", "worktree.*", "codebase.*", "repo.*"],
+  SKILL: ["skill.*", "repo.*", "codebase.*"],
+  SKILL_SYNC: ["skillSync.*", "skill.*", "repo.*", "codebase.*", "worktree.*"],
+  IOS_DEVICE: ["device.*"],
+  SIGNING_PROFILE: ["signingProfile.*", "device.*", "agent.*"],
+  PUSH_NOTIFICATION_BATCH: ["pushBatch.*"],
+  BUILD_DATA_COLLECTION: ["buildData.*", "agent.*", "worktree.*", "codebase.*"],
 };
 
 /** The resource kind a resource trigger config targets, if valid. */
@@ -234,6 +241,245 @@ const WORKTREE_CONTEXT_PATHS = [
 
 /** Related resources refreshed after a successful codebase-backed agent job. */
 const CODEBASE_CONTEXT_PATHS = ["codebase.*", "agent.*", "repo.*"];
+
+const expansionStep = (
+  kind: WorkflowStepKind,
+  category: string,
+  label: string,
+  requiredPaths: string[] = [],
+  providedPaths: string[] = ["steps.<stepId>.*"],
+  facts: Pick<StepFacts, "mutatesExternal" | "mutatesWorktree"> = {},
+) =>
+  step(kind, category, label, "SERVER", requiredPaths, providedPaths, {
+    description: `${label} using the control plane's typed service API.`,
+    details: `${label} is a first-class action with validated configuration, audit-friendly output, resource links where available, and normal workflow failure routing.`,
+    ...facts,
+  });
+
+const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
+  expansionStep(
+    "COMMAND_RERUN",
+    "Commands",
+    "Rerun command",
+    ["command.id"],
+    ["command.*"],
+  ),
+  expansionStep(
+    "COMMAND_TERMINATE",
+    "Commands",
+    "Terminate command",
+    ["command.id"],
+    ["command.*"],
+  ),
+  expansionStep(
+    "COMMAND_READ_OUTPUT",
+    "Commands",
+    "Read command output",
+    ["command.id"],
+    ["command.*"],
+  ),
+  expansionStep(
+    "WORKTREE_INSPECT_DIFF",
+    "Worktrees",
+    "Inspect worktree diff",
+    ["worktree.id"],
+    ["worktree.diff.*"],
+  ),
+  expansionStep(
+    "WORKTREE_UPDATE_METADATA",
+    "Worktrees",
+    "Update worktree metadata",
+    ["worktree.id"],
+    WORKTREE_CONTEXT_PATHS,
+  ),
+  expansionStep(
+    "WORKTREE_MOVE_CONTROL",
+    "Worktrees",
+    "Control worktree move",
+    [],
+    WORKTREE_CONTEXT_PATHS,
+    { mutatesWorktree: true },
+  ),
+  expansionStep(
+    "BUILD_REBUILD",
+    "Builds",
+    "Rebuild build",
+    ["build.id"],
+    ["build.*"],
+  ),
+  expansionStep(
+    "BUILD_GENERATE_REPORT",
+    "Builds",
+    "Generate build report",
+    ["build.id"],
+    ["build.*"],
+  ),
+  expansionStep("BUILD_DELETE", "Builds", "Delete builds", [], ["build.*"]),
+  expansionStep(
+    "SKILL_PREPARE_SYNC",
+    "Skills",
+    "Prepare skill sync",
+    [],
+    ["skillSync.*"],
+  ),
+  expansionStep(
+    "SKILL_RESOLVE_SYNC",
+    "Skills",
+    "Resolve skill sync conflict",
+    ["skillSync.id"],
+    ["skillSync.*"],
+  ),
+  expansionStep(
+    "SKILL_SKIP_SYNC",
+    "Skills",
+    "Skip skill sync",
+    ["skillSync.id"],
+    ["skillSync.*"],
+  ),
+  expansionStep(
+    "BUILD_DATA_REFRESH",
+    "Build Data",
+    "Refresh build data",
+    [],
+    ["buildData.*"],
+  ),
+  expansionStep(
+    "BUILD_DATA_DELETE",
+    "Build Data",
+    "Delete build data",
+    ["buildData.id"],
+    ["buildData.*"],
+  ),
+  expansionStep(
+    "BUILD_DATA_SET_LOCK",
+    "Build Data",
+    "Set build-data lock",
+    ["buildData.id"],
+    ["buildData.*"],
+  ),
+  expansionStep(
+    "SIGNING_REFRESH",
+    "Signing",
+    "Refresh signing assets",
+    [],
+    ["signing.*"],
+  ),
+  expansionStep(
+    "SIGNING_SYNC_PROFILE",
+    "Signing",
+    "Sync signing profile",
+    ["signingProfile.id"],
+    ["signing.*"],
+  ),
+  expansionStep(
+    "SIGNING_DELETE_EXPIRED",
+    "Signing",
+    "Delete expired profiles",
+    [],
+    ["signing.*"],
+  ),
+  expansionStep(
+    "IOS_DEVICE_REGISTER",
+    "Devices",
+    "Register iOS device",
+    ["device.id"],
+    ["device.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "IOS_DEVICE_REJECT",
+    "Devices",
+    "Reject iOS device",
+    ["device.id"],
+    ["device.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "AGENT_RECONCILE",
+    "Agents",
+    "Reconcile agents",
+    [],
+    ["agent.*"],
+  ),
+  expansionStep(
+    "AGENT_UPDATE_CADENCE",
+    "Agents",
+    "Update agent cadence",
+    ["agent.id"],
+    ["agent.*"],
+  ),
+  expansionStep(
+    "CCUSAGE_COLLECT",
+    "Operations",
+    "Collect usage",
+    [],
+    ["usage.*"],
+  ),
+  expansionStep(
+    "MODEL_COST_REFRESH",
+    "Operations",
+    "Refresh model costs",
+    [],
+    ["modelCosts.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITHUB_UPDATE_PR",
+    "GitHub",
+    "Update pull request",
+    ["pr.number", "repo.*"],
+    ["pr.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITHUB_SUBMIT_REVIEW",
+    "GitHub",
+    "Submit pull request review",
+    ["pr.number", "repo.*"],
+    ["pr.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITHUB_REQUEST_REVIEWERS",
+    "GitHub",
+    "Request pull request reviewers",
+    ["pr.number", "repo.*"],
+    ["pr.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "GITHUB_DISPATCH_WORKFLOW",
+    "GitHub",
+    "Dispatch GitHub workflow",
+    ["repo.*"],
+    ["pipeline.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "JIRA_CREATE_TICKET",
+    "Jira",
+    "Create Jira ticket",
+    [],
+    ["ticket.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "JIRA_ADD_WORKLOG",
+    "Jira",
+    "Add Jira worklog",
+    ["ticket.key"],
+    ["ticket.*"],
+    { mutatesExternal: true },
+  ),
+  expansionStep(
+    "JIRA_LINK_TICKETS",
+    "Jira",
+    "Link Jira tickets",
+    ["ticket.key"],
+    ["ticket.*"],
+    { mutatesExternal: true },
+  ),
+];
 
 export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
   step(
@@ -1246,6 +1492,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       mutatesWorktree: true,
     },
   ),
+  ...EXPANSION_STEP_CATALOG,
   step(
     "TERMINAL_RUN",
     "Extensibility",
@@ -1386,6 +1633,188 @@ const trigger = (
   seedPaths,
   sourceHandles: workflowStaticSourceHandles(kind),
 });
+
+const expansionTrigger = (
+  kind: WorkflowTriggerKind,
+  category: string,
+  label: string,
+  seedPaths: string[],
+): WorkflowTriggerCatalogEntry =>
+  trigger(kind, category, label, seedPaths, {
+    description: `${label} emits a normalized, filterable workflow event.`,
+    details: `${label} uses the canonical domain event and deduplicates deliveries by subject and revision. ${FILTERS_NOTE}`,
+  });
+
+const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
+  expansionTrigger("COMMAND_RUN_RESULT", "Commands", "Command run result", [
+    "command.*",
+    "agent.*",
+    "worktree.*",
+  ]),
+  expansionTrigger("COMMAND_OUTPUT_MATCH", "Commands", "Command output match", [
+    "command.*",
+    "output.*",
+  ]),
+  expansionTrigger("SKILL_SYNC_RESULT", "Skills", "Skill sync result", [
+    "skillSync.*",
+    "skill.*",
+    "repo.*",
+  ]),
+  expansionTrigger("SKILL_SYNC_CONFLICT", "Skills", "Skill sync conflict", [
+    "skillSync.*",
+    "skill.*",
+    "repo.*",
+  ]),
+  expansionTrigger(
+    "GITHUB_PIPELINE_STATUS_CHANGED",
+    "GitHub",
+    "Pipeline status changed",
+    [
+      "pipeline.*",
+      "repo.*",
+      "pr.*",
+      "worktree.*",
+      "codebase.*",
+      "agent.*",
+      "ticket.*",
+    ],
+  ),
+  expansionTrigger(
+    "GITHUB_PR_SYNCHRONIZED",
+    "GitHub",
+    "Pull request synchronized",
+    GITHUB_PULL_REQUEST_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "GITHUB_REVIEW_APPROVED",
+    "GitHub",
+    "Pull request review approved",
+    GITHUB_PULL_REQUEST_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "JIRA_TICKET_UPDATED",
+    "Jira",
+    "Jira ticket updated",
+    JIRA_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "JIRA_COMMENT_ADDED",
+    "Jira",
+    "Jira comment added",
+    JIRA_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "JIRA_WORKLOG_ADDED",
+    "Jira",
+    "Jira worklog added",
+    JIRA_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "JIRA_SPRINT_ENDED",
+    "Jira",
+    "Jira sprint ended",
+    JIRA_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "CODEBASE_SYNC_STATE_CHANGED",
+    "Codebases",
+    "Codebase sync state changed",
+    ["codebase.*", "agent.*", "repo.*"],
+  ),
+  expansionTrigger(
+    "CODEBASE_OPERATION_FAILED",
+    "Codebases",
+    "Codebase operation failed",
+    ["codebase.*", "agent.*", "repo.*", "operation.*"],
+  ),
+  expansionTrigger(
+    "WORKTREE_SYNC_STATE_CHANGED",
+    "Worktrees",
+    "Worktree sync state changed",
+    WORKTREE_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "WORKTREE_AUTOMATION_RESULT",
+    "Worktrees",
+    "Worktree automation result",
+    [...WORKTREE_SEED_PATHS, "automation.*"],
+  ),
+  expansionTrigger(
+    "WORKTREE_CLEAN",
+    "Worktrees",
+    "Worktree became clean",
+    WORKTREE_SEED_PATHS,
+  ),
+  expansionTrigger(
+    "PUSH_NOTIFICATION_RESULT",
+    "Notifications",
+    "Push notification result",
+    ["pushBatch.*"],
+  ),
+  expansionTrigger("IOS_DEVICE_ENROLLED", "Devices", "iOS device enrolled", [
+    "device.*",
+  ]),
+  expansionTrigger(
+    "IOS_DEVICE_REGISTRATION_RESULT",
+    "Devices",
+    "iOS device registration result",
+    ["device.*"],
+  ),
+  expansionTrigger(
+    "SIGNING_OPERATION_RESULT",
+    "Signing",
+    "Signing operation result",
+    ["signing.*", "signingProfile.*", "agent.*"],
+  ),
+  expansionTrigger(
+    "SIGNING_ASSET_EXPIRING",
+    "Signing",
+    "Signing asset expiring",
+    ["signing.*", "signingProfile.*", "agent.*"],
+  ),
+  expansionTrigger(
+    "BUILD_DATA_THRESHOLD",
+    "Build Data",
+    "Build-data threshold",
+    ["buildData.*", "agent.*", "worktree.*"],
+  ),
+  expansionTrigger(
+    "BUILD_DATA_CLEANUP_RESULT",
+    "Build Data",
+    "Build-data cleanup result",
+    ["buildData.*", "cleanup.*", "agent.*"],
+  ),
+  expansionTrigger(
+    "POLLING_OPERATION_STATE",
+    "Operations",
+    "Polling operation state",
+    ["polling.*"],
+  ),
+  expansionTrigger(
+    "MODEL_COST_CATALOG_CHANGED",
+    "Operations",
+    "Model-cost catalog changed",
+    ["modelCosts.*"],
+  ),
+  expansionTrigger(
+    "CREDENTIAL_STORE_DEGRADED",
+    "Operations",
+    "Credential store degraded",
+    ["credentials.*"],
+  ),
+  expansionTrigger(
+    "AGENT_RESOURCE_THRESHOLD",
+    "Agents",
+    "Agent resource threshold",
+    ["agent.*"],
+  ),
+  expansionTrigger("AGENT_VERSION_CHANGED", "Agents", "Agent version changed", [
+    "agent.*",
+  ]),
+  expansionTrigger("TOOL_CALL_RESULT", "Tools", "Tool call result", [
+    "toolCall.*",
+  ]),
+];
 
 export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
   [
@@ -1938,6 +2367,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
         details: `The finest-grained run trigger, and by far the most talkative — a single run produces hundreds of events, and every one is a candidate. Always filter, on the event type or the tool name. Useful for reacting to a specific tool being used; a poor choice for anything expensive. ${FILTERS_NOTE}`,
       },
     ),
+    ...EXPANSION_TRIGGER_CATALOG,
   ];
 
 export const WORKFLOW_TRIGGER_BY_KIND = new Map(

@@ -33,6 +33,7 @@ describe("external MCP configuration", () => {
     expect(catalog.groups.map(({ id }) => id)).toEqual([
       "builtin:codebases",
       "builtin:builds",
+      "builtin:tool-administration",
     ]);
     expect(catalog.groups[1]?.tools.map(({ name }) => name)).toEqual([
       "get_builds",
@@ -43,6 +44,21 @@ describe("external MCP configuration", () => {
       "cancel_build",
       "run_build",
       "export_build_archive",
+      "get_build_project",
+      "create_build_project",
+      "save_build_configuration",
+      "delete_build_configuration",
+      "discover_build_sources",
+      "inspect_build_source",
+      "get_build_scripts",
+      "save_build_script",
+      "delete_build_script",
+      "rebuild_build",
+      "delete_builds",
+      "get_build_reports",
+      "generate_build_report",
+      "start_worktree_coverage",
+      "get_worktree_coverage",
     ]);
     await expect(
       service.callTool({

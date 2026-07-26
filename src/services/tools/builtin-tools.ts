@@ -2,31 +2,59 @@ import * as z from "zod/v4";
 
 import type { AgentControlService } from "@/services/agent-control";
 import type { BuildsService } from "@/services/builds";
+import type { BuildDataService } from "@/services/build-data";
+import type { CacheServerService } from "@/services/cache-server";
+import type { CcusageService } from "@/services/ccusage";
 import type {
   CodebasesService,
   CodebaseToolsService,
 } from "@/services/codebases";
 import type { DiskSpaceService } from "@/services/disk-space";
+import type { CredentialService } from "@/services/credentials";
+import type { CommandsService } from "@/services/commands";
+import type { GitHubService } from "@/services/github";
+import type { JiraService } from "@/services/jira";
+import type { IosDevicesService } from "@/services/ios-devices";
+import type { ModelCostsService } from "@/services/model-costs";
+import type { NotificationsService } from "@/services/notifications";
+import type { PollingService } from "@/services/polling";
+import type { SigningAssetsService } from "@/services/signing-assets";
+import type { SkillsService } from "@/services/skills";
+import type { SystemStatusService } from "@/services/system-status";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
+import type { RunsService } from "@/services/runs";
 import type { WorkflowsService } from "@/services/workflows";
-import type { WorktreeAutomationService } from "@/services/worktrees";
+import type {
+  WorktreeAutomationService,
+  WorktreesService,
+} from "@/services/worktrees";
 
 import { createAgentToolGroup } from "./builtin-tools/agents";
 import { createBuildToolGroup } from "./builtin-tools/builds";
+import { createBuildDataToolGroup } from "./builtin-tools/build-data";
+import { createCacheAdministrationGroup } from "./builtin-tools/cache-administration";
 import { createCodebaseToolGroup } from "./builtin-tools/codebases";
 import { createDebuggingToolGroup } from "./builtin-tools/debugging";
 import { createDiskSpaceToolGroup } from "./builtin-tools/disk-space";
+import { createCommandToolGroup } from "./builtin-tools/commands";
+import { createGitHubToolGroup } from "./builtin-tools/github";
+import { createJiraToolGroup } from "./builtin-tools/jira";
+import { createIosDeviceToolGroup } from "./builtin-tools/ios-devices";
+import { createNotificationToolGroup } from "./builtin-tools/notifications";
+import { createRunToolGroup } from "./builtin-tools/runs";
+import { createSigningAssetToolGroup } from "./builtin-tools/signing-assets";
+import { createSkillToolGroup } from "./builtin-tools/skills";
+import { createSystemToolGroup } from "./builtin-tools/system";
+import { createUsageCostToolGroup } from "./builtin-tools/usage-costs";
 import { createWorkflowToolGroup } from "./builtin-tools/workflows";
+import { createWorktreeToolGroup } from "./builtin-tools/worktrees";
+import { createToolAdministrationGroup } from "./builtin-tools/tool-administration";
+import type { ToolCallAuditService } from "./tool-call-audit.service";
 import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
-import type { ToolCatalogGroup } from "./types";
+import type { ToolAnnotations, ToolCatalogGroup } from "./types";
 
-export type ToolAnnotations = {
-  readOnlyHint: boolean;
-  destructiveHint: boolean;
-  idempotentHint: boolean;
-  openWorldHint: boolean;
-};
+export type { ToolAnnotations } from "./types";
 
 export const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: true,
@@ -47,6 +75,21 @@ export const DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
   destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,
+};
+
+export const READ_ONLY_EXTERNAL_ANNOTATIONS: ToolAnnotations = {
+  ...READ_ONLY_ANNOTATIONS,
+  openWorldHint: true,
+};
+
+export const WRITE_EXTERNAL_ANNOTATIONS: ToolAnnotations = {
+  ...WRITE_ANNOTATIONS,
+  openWorldHint: true,
+};
+
+export const DESTRUCTIVE_EXTERNAL_ANNOTATIONS: ToolAnnotations = {
+  ...DESTRUCTIVE_ANNOTATIONS,
+  openWorldHint: true,
 };
 
 export type BuiltInToolDefinition = {
@@ -74,6 +117,24 @@ export type BuiltInToolServices = {
   pushNotifications?: PushNotificationsService;
   agents?: AgentControlService;
   diskSpace?: DiskSpaceService;
+  worktrees?: WorktreesService;
+  runs?: RunsService;
+  commands?: CommandsService;
+  jira?: JiraService;
+  github?: GitHubService;
+  buildData?: BuildDataService;
+  cacheServer?: CacheServerService;
+  ccusage?: CcusageService;
+  credentials?: CredentialService;
+  iosDevices?: IosDevicesService;
+  modelCosts?: ModelCostsService;
+  notifications?: NotificationsService;
+  polling?: PollingService;
+  signingAssets?: SigningAssetsService;
+  skills?: SkillsService;
+  systemStatus?: SystemStatusService;
+  toolAudit?: ToolCallAuditService;
+  testExternalMcpServer?: (id: string) => Promise<unknown>;
   /**
    * Supplied as a thunk rather than an instance: `WorkflowsService` is
    * constructed after `ToolsService` and takes it as a dependency, so the two
@@ -133,6 +194,7 @@ function catalogGroup(group: BuiltInToolGroup): ToolCatalogGroup {
         string,
         unknown
       >,
+      annotations: tool.annotations,
     })),
     children: group.children.map(catalogGroup),
   };
@@ -196,6 +258,10 @@ export class BuiltInToolRegistry {
     return this.groupIds.has(groupId);
   }
 
+  groupIdForName(name: string): string | null {
+    return this.byName.get(name)?.groupId ?? null;
+  }
+
   async call(groupId: string, name: string, args: unknown) {
     const indexed = this.byName.get(name);
     if (!indexed || indexed.groupId !== groupId) {
@@ -226,6 +292,49 @@ export function createBuiltInToolRegistry(
   if (services.agents) groups.push(createAgentToolGroup(services.agents));
   if (services.diskSpace)
     groups.push(createDiskSpaceToolGroup(services.diskSpace));
+  if (services.worktrees)
+    groups.push(createWorktreeToolGroup(services.worktrees));
+  if (services.runs) groups.push(createRunToolGroup(services.runs));
+  if (services.commands) groups.push(createCommandToolGroup(services.commands));
+  if (services.jira) groups.push(createJiraToolGroup(services.jira));
+  if (services.github) groups.push(createGitHubToolGroup(services.github));
+  if (services.skills) groups.push(createSkillToolGroup(services.skills));
+  if (services.buildData)
+    groups.push(createBuildDataToolGroup(services.buildData));
+  if (services.signingAssets)
+    groups.push(createSigningAssetToolGroup(services.signingAssets));
+  if (services.iosDevices)
+    groups.push(createIosDeviceToolGroup(services.iosDevices));
+  if (services.notifications)
+    groups.push(createNotificationToolGroup(services.notifications));
+  if (services.ccusage && services.modelCosts)
+    groups.push(
+      createUsageCostToolGroup(services.ccusage, services.modelCosts),
+    );
+  if (services.systemStatus && services.polling && services.credentials)
+    groups.push(
+      createSystemToolGroup(
+        services.systemStatus,
+        services.polling,
+        services.credentials,
+      ),
+    );
+  if (services.cacheServer && services.jira && services.github)
+    groups.push(
+      createCacheAdministrationGroup(
+        services.cacheServer,
+        services.jira,
+        services.github,
+      ),
+    );
+  if (services.toolAudit && services.testExternalMcpServer) {
+    groups.push(
+      createToolAdministrationGroup(
+        services.toolAudit,
+        services.testExternalMcpServer,
+      ),
+    );
+  }
   if (services.workflows)
     groups.push(createWorkflowToolGroup(services.workflows));
   if (services.worktreeAutomations) {

@@ -18,6 +18,10 @@ import {
   type BuiltInToolRegistry,
   type BuiltInToolServices,
 } from "./builtin-tools";
+import {
+  ToolCallAuditService,
+  type ToolInvocationContext,
+} from "./tool-call-audit.service";
 
 import type {
   ExternalMcpServerInput,
@@ -161,11 +165,14 @@ export class ToolsService {
     builds?: BuildsService,
     additional: Omit<BuiltInToolServices, "codebaseTools" | "builds"> = {},
     private readonly credentials = new CredentialService(),
+    private readonly audit = new ToolCallAuditService(),
   ) {
     this.builtInTools = createBuiltInToolRegistry({
       codebaseTools,
       builds,
       ...additional,
+      toolAudit: this.audit,
+      testExternalMcpServer: (id) => this.testExternalServer(id),
     });
   }
 
@@ -312,6 +319,16 @@ export class ToolsService {
     return { id };
   }
 
+  async testExternalServer(id: string): Promise<{
+    id: string;
+    name: string;
+    toolCount: number;
+  }> {
+    const server = await this.externalServerWithSecrets(id);
+    const tools = await this.listRemoteTools(server);
+    return { id: server.id, name: server.name, toolCount: tools.length };
+  }
+
   async catalog(): Promise<{ groups: ToolCatalogGroup[] }> {
     const prisma = await getPrismaClient();
     const servers = await prisma.externalMcpServer.findMany({
@@ -356,7 +373,45 @@ export class ToolsService {
     };
   }
 
-  async callTool(input: {
+  async callTool(
+    input: {
+      groupId: string;
+      name: string;
+      arguments: Record<string, unknown>;
+    },
+    context?: ToolInvocationContext,
+  ): Promise<unknown> {
+    const operation = () => this.invokeTool(input);
+    return context
+      ? this.audit.execute(
+          {
+            ...context,
+            groupId: input.groupId,
+            toolName: input.name,
+            arguments: input.arguments,
+          },
+          operation,
+        )
+      : operation();
+  }
+
+  async callBuiltInTool(
+    name: string,
+    args: unknown,
+    context?: ToolInvocationContext,
+  ): ReturnType<BuiltInToolRegistry["callByName"]> {
+    const groupId = this.builtInTools.groupIdForName(name);
+    if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
+    const operation = () => this.builtInTools.callByName(name, args);
+    return context
+      ? this.audit.execute(
+          { ...context, groupId, toolName: name, arguments: args },
+          operation,
+        )
+      : operation();
+  }
+
+  private async invokeTool(input: {
     groupId: string;
     name: string;
     arguments: Record<string, unknown>;
@@ -484,6 +539,14 @@ export class ToolsService {
             description: tool.description ?? null,
             inputSchema: tool.inputSchema,
             outputSchema: tool.outputSchema ?? null,
+            annotations: tool.annotations
+              ? {
+                  readOnlyHint: tool.annotations.readOnlyHint ?? false,
+                  destructiveHint: tool.annotations.destructiveHint ?? false,
+                  idempotentHint: tool.annotations.idempotentHint ?? false,
+                  openWorldHint: tool.annotations.openWorldHint ?? true,
+                }
+              : null,
           })),
         );
         const nextCursor = result.nextCursor;

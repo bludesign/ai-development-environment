@@ -75,6 +75,9 @@ describe("ToolsPage", () => {
 
     render(<ToolsPage />);
     await screen.findByText("get_codebase");
+    fireEvent.change(screen.getByLabelText("Tool API token"), {
+      target: { value: "deployment-secret" },
+    });
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
       target: { value: "missing-tool" },
@@ -117,7 +120,12 @@ describe("ToolsPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/tools/call",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            authorization: "Bearer deployment-secret",
+          }),
+        }),
       );
     });
   });
@@ -178,6 +186,57 @@ describe("ToolsPage", () => {
       "/api/tools/call",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  test("requires explicit confirmation before a destructive tool call", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/tools/catalog")) {
+        return Response.json({
+          groups: [
+            {
+              id: "builtin:danger",
+              name: "Danger",
+              source: "BUILTIN",
+              transport: null,
+              url: null,
+              error: null,
+              children: [],
+              tools: [
+                {
+                  name: "delete_everything",
+                  title: "Delete everything",
+                  description: "Deletes data.",
+                  inputSchema: { type: "object", properties: {} },
+                  outputSchema: null,
+                  annotations: {
+                    readOnlyHint: false,
+                    destructiveHint: true,
+                    idempotentHint: true,
+                    openWorldHint: false,
+                  },
+                },
+              ],
+            },
+          ],
+        });
+      }
+      return Response.json({ result: { deleted: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ToolsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand delete_everything" }),
+    );
+    expect(screen.getByText("Destructive")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Run a destructive tool?")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Run destructive tool" }),
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   test("renders, searches, counts, and invokes nested built-in groups", async () => {
@@ -340,7 +399,11 @@ describe("ToolsPage", () => {
         JSON.stringify(
           {
             mcpServers: {
-              "ai-development-environment": { type: "http", url },
+              "ai-development-environment": {
+                type: "http",
+                url,
+                headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" },
+              },
             },
           },
           null,

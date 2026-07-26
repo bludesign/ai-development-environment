@@ -124,6 +124,9 @@ describe("workflow tool group", () => {
       "answer_workflow_question",
       "prepare_workflow_replay",
       "replay_workflow_run",
+      "archive_workflow_runs",
+      "delete_workflow_runs",
+      "repair_workflow_run_data",
     ]);
 
     const names = allTools(group).map(({ name }) => name);
