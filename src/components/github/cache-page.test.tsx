@@ -17,6 +17,14 @@ vi.mock("@/lib/control-plane-client", () => ({
 
 const requestMock = vi.mocked(controlPlaneRequest);
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+global.ResizeObserver = ResizeObserverMock;
+
 Object.defineProperty(Element.prototype, "scrollIntoView", {
   configurable: true,
   value: () => undefined,
@@ -39,6 +47,19 @@ describe("GitHubCachePage", () => {
             cacheTtlSeconds: 300,
             updatedAt: new Date(0).toISOString(),
           },
+          githubCacheTtlOverrides: [
+            {
+              operation: "GitHubWorktreePullRequestStatuses",
+              ttlSeconds: 60,
+              builtIn: true,
+              createdAt: new Date(0).toISOString(),
+              updatedAt: new Date(0).toISOString(),
+            },
+          ],
+          githubCacheableGraphqlOperations: [
+            "GitHubWorktreePullRequestStatuses",
+            "Viewer",
+          ],
           githubRateLimitSnapshots: [
             {
               authentication: "PAT",
@@ -379,6 +400,152 @@ describe("GitHubCachePage", () => {
       expect(requestMock).toHaveBeenCalledWith(
         "mutation { clearGitHubApiCalls }",
       ),
+    );
+  });
+
+  test("adds, edits, and deletes operation TTL overrides while pinning the default", async () => {
+    const now = new Date(0).toISOString();
+    let overrides = [
+      {
+        operation: "GitHubWorktreePullRequestStatuses",
+        ttlSeconds: 60,
+        builtIn: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    requestMock.mockImplementation(async (query, variables) => {
+      if (query.includes("query GitHubCachePage")) {
+        return {
+          githubSettings: {
+            tokenConfigured: true,
+            defaultJiraKeyRegex: "",
+            actionsNotificationPollIntervalSeconds: 60,
+            cacheTtlSeconds: 300,
+            updatedAt: now,
+          },
+          githubCacheTtlOverrides: overrides,
+          githubCacheableGraphqlOperations: [
+            "GitHubWorktreePullRequestStatuses",
+            "Viewer",
+          ],
+          githubRateLimitSnapshots: [],
+          githubCacheMetrics: {
+            windows: [],
+            apiTypes: [],
+            operations: [],
+            requestSources: [],
+          },
+          githubApiCalls: { items: [], total: 0, limit: 50, offset: 0 },
+          githubCachedEntries: {
+            items: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+          },
+        } as never;
+      }
+      if (query.includes("SaveGitHubCacheTtlOverride")) {
+        const input = variables?.input as {
+          operation: string;
+          ttlSeconds: number;
+        };
+        const existing = overrides.find(
+          (override) => override.operation === input.operation,
+        );
+        const saved = {
+          operation: input.operation,
+          ttlSeconds: input.ttlSeconds,
+          builtIn: existing?.builtIn ?? false,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        overrides = [
+          ...overrides.filter(
+            (override) => override.operation !== input.operation,
+          ),
+          saved,
+        ];
+        return { saveGitHubCacheTtlOverride: saved } as never;
+      }
+      if (query.includes("DeleteGitHubCacheTtlOverride")) {
+        overrides = overrides.filter(
+          (override) => override.operation !== variables?.operation,
+        );
+        return { deleteGitHubCacheTtlOverride: true } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<GitHubCachePage />);
+    expect(
+      await screen.findByText("GitHubWorktreePullRequestStatuses"),
+    ).toBeDefined();
+    expect(screen.getByText("Built in")).toBeDefined();
+    expect(
+      screen.queryByRole("button", {
+        name: "Delete TTL override for GitHubWorktreePullRequestStatuses",
+      }),
+    ).toBeNull();
+
+    fireEvent.change(
+      screen.getByRole("spinbutton", {
+        name: "TTL in seconds for GitHubWorktreePullRequestStatuses",
+      }),
+      { target: { value: "45" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save TTL for GitHubWorktreePullRequestStatuses",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(([query, variables]) => {
+          const input = variables?.input as
+            { operation?: string; ttlSeconds?: number } | undefined;
+          return (
+            String(query).includes("SaveGitHubCacheTtlOverride") &&
+            input?.operation === "GitHubWorktreePullRequestStatuses" &&
+            input.ttlSeconds === 45
+          );
+        }),
+      ).toBe(true),
+    );
+
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "GraphQL operation" }),
+    );
+    fireEvent.change(
+      await screen.findByRole("combobox", {
+        name: "Search or enter an operation name",
+      }),
+      { target: { value: "CustomQuery" } },
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "CustomQuery" }));
+    fireEvent.change(screen.getByLabelText("TTL in seconds"), {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add override" }));
+
+    expect(await screen.findByText("CustomQuery")).toBeDefined();
+    expect(screen.getByText("Custom")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Delete TTL override for CustomQuery",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete override" }),
+    );
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.some(
+          ([query, variables]) =>
+            String(query).includes("DeleteGitHubCacheTtlOverride") &&
+            variables?.operation === "CustomQuery",
+        ),
+      ).toBe(true),
     );
   });
 });

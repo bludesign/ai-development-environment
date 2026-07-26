@@ -1982,6 +1982,13 @@ model GitHubGraphqlCacheEntry {
   @@index([fetchedAt])
 }
 
+model GitHubGraphqlCacheTtlOverride {
+  operation  String   @id
+  ttlSeconds Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 model GitHubApiCallLog {
   id                 String    @id
   authentication     String

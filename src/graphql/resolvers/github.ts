@@ -149,6 +149,22 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.cachedEntry(id);
     },
+    githubCacheTtlOverrides: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cacheTtlOverrides();
+    },
+    githubCacheableGraphqlOperations: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.cacheableGraphqlOperations();
+    },
     githubAppSettings: (
       _root: unknown,
       _args: unknown,
@@ -371,6 +387,25 @@ export const createGitHubResolvers = (
     ) => {
       requireControlPlane(context);
       return gitHubService.updateCacheTtl(ttlMinutes);
+    },
+    saveGitHubCacheTtlOverride: (
+      _root: unknown,
+      { input }: { input: { operation: string; ttlSeconds: number } },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.saveCacheTtlOverride(
+        input.operation,
+        input.ttlSeconds,
+      );
+    },
+    deleteGitHubCacheTtlOverride: (
+      _root: unknown,
+      { operation }: { operation: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.deleteCacheTtlOverride(operation);
     },
     clearGitHubCache: (
       _root: unknown,

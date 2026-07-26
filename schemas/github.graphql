@@ -106,6 +106,14 @@ type GitHubSettings {
   updatedAt: String!
 }
 
+type GitHubCacheTtlOverride {
+  operation: String!
+  ttlSeconds: Int!
+  builtIn: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
 type GitHubRateLimitSnapshot {
   authentication: GitHubAuthentication!
   resource: String!
@@ -621,6 +629,11 @@ input SaveGitHubSettingsInput {
   actionsNotificationPollIntervalSeconds: Int
 }
 
+input SaveGitHubCacheTtlOverrideInput {
+  operation: String!
+  ttlSeconds: Int!
+}
+
 input SaveGitHubAppSettingsInput {
   appId: String!
   installationId: String!
@@ -667,6 +680,8 @@ input SetGitHubPullRequestLabelsInput {
 
 extend type Query {
   githubSettings: GitHubSettings!
+  githubCacheTtlOverrides: [GitHubCacheTtlOverride!]!
+  githubCacheableGraphqlOperations: [String!]!
   githubRateLimitSnapshots: [GitHubRateLimitSnapshot!]!
   githubCacheMetrics: GitHubCacheMetrics!
   githubApiCalls(
@@ -734,6 +749,10 @@ extend type Query {
 extend type Mutation {
   saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
   updateGitHubCacheTtl(ttlMinutes: Int!): GitHubSettings!
+  saveGitHubCacheTtlOverride(
+    input: SaveGitHubCacheTtlOverrideInput!
+  ): GitHubCacheTtlOverride!
+  deleteGitHubCacheTtlOverride(operation: String!): Boolean!
   clearGitHubCache: Boolean!
   clearGitHubApiCalls: Boolean!
   refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!

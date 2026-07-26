@@ -1,6 +1,13 @@
 "use client";
 
-import { Database, ExternalLink, RefreshCw, Save, Trash2 } from "lucide-react";
+import {
+  Database,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Fragment,
@@ -12,6 +19,7 @@ import {
 } from "react";
 
 import { DateTime } from "@/components/common/date-time";
+import { SearchableSelect } from "@/components/common/searchable-select";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +64,7 @@ import type {
   GitHubApiType,
   GitHubCachedEntryView,
   GitHubCacheMetrics,
+  GitHubCacheTtlOverrideView,
   GitHubCallSource,
   GitHubMetricWindow,
   GitHubPaginatedResult,
@@ -93,6 +102,8 @@ type RequestSourceFilter = GitHubRequestSource | "ALL";
 
 type CachePageData = {
   githubSettings: GitHubSettingsView;
+  githubCacheTtlOverrides: GitHubCacheTtlOverrideView[];
+  githubCacheableGraphqlOperations: string[];
   githubRateLimitSnapshots: GitHubRateLimitSnapshotView[];
   githubCacheMetrics: GitHubCacheMetrics;
   githubApiCalls: GitHubPaginatedResult<GitHubApiCallView>;
@@ -139,6 +150,11 @@ export function GitHubCachePage() {
   const locale = useLocale();
   const [data, setData] = useState<CachePageData | null>(null);
   const [ttlMinutes, setTtlMinutes] = useState("5");
+  const [overrideOperation, setOverrideOperation] = useState("");
+  const [overrideTtlSeconds, setOverrideTtlSeconds] = useState("60");
+  const [overrideDrafts, setOverrideDrafts] = useState<Record<string, string>>(
+    {},
+  );
   const [callOffset, setCallOffset] = useState(0);
   const [entryOffset, setEntryOffset] = useState(0);
   const [apiTypeFilter, setApiTypeFilter] = useState<ApiTypeFilter>("ALL");
@@ -156,6 +172,8 @@ export function GitHubCachePage() {
       const result = await controlPlaneRequest<CachePageData>(
         `query GitHubCachePage($limit: Int!, $callOffset: Int!, $entryOffset: Int!, $apiType: GitHubApiType, $requestSource: GitHubRequestSource, $callSource: GitHubCallSource) {
           githubSettings { tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt }
+          githubCacheTtlOverrides { operation ttlSeconds builtIn createdAt updatedAt }
+          githubCacheableGraphqlOperations
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
           githubCacheMetrics {
             windows { ${WINDOW_FIELDS} }
@@ -185,6 +203,14 @@ export function GitHubCachePage() {
       setData(result);
       setTtlMinutes(
         String(Math.round(result.githubSettings.cacheTtlSeconds / 60)),
+      );
+      setOverrideDrafts(
+        Object.fromEntries(
+          result.githubCacheTtlOverrides.map((override) => [
+            override.operation,
+            String(override.ttlSeconds),
+          ]),
+        ),
       );
       setError(null);
     } catch (value) {
@@ -255,6 +281,61 @@ export function GitHubCachePage() {
       await controlPlaneRequest("mutation { clearGitHubCache }");
       setEntryOffset(0);
       await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const saveTtlOverride = async (
+    operation: string,
+    ttlSeconds: string,
+    busyKeyValue: string,
+  ): Promise<boolean> => {
+    setBusyKey(busyKeyValue);
+    try {
+      await controlPlaneRequest(
+        `mutation SaveGitHubCacheTtlOverride($input: SaveGitHubCacheTtlOverrideInput!) {
+          saveGitHubCacheTtlOverride(input: $input) { operation ttlSeconds builtIn createdAt updatedAt }
+        }`,
+        { input: { operation, ttlSeconds: Number(ttlSeconds) } },
+      );
+      await load();
+      setError(null);
+      return true;
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+      return false;
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const addTtlOverride = async (event: FormEvent) => {
+    event.preventDefault();
+    const saved = await saveTtlOverride(
+      overrideOperation,
+      overrideTtlSeconds,
+      "override:add",
+    );
+    if (saved) {
+      setOverrideOperation("");
+      setOverrideTtlSeconds("60");
+    }
+  };
+
+  const deleteTtlOverride = async (operation: string) => {
+    setBusyKey(`override:delete:${operation}`);
+    try {
+      await controlPlaneRequest(
+        `mutation DeleteGitHubCacheTtlOverride($operation: String!) {
+          deleteGitHubCacheTtlOverride(operation: $operation)
+        }`,
+        { operation },
+      );
+      await load();
+      setError(null);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
@@ -371,6 +452,167 @@ export function GitHubCachePage() {
       ) : (
         data && (
           <>
+            <Panel
+              title={t("overridesTitle")}
+              description={t("overridesDescription")}
+            >
+              <form
+                className="grid gap-3 border-b p-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end"
+                onSubmit={(event) => void addTtlOverride(event)}
+              >
+                <div className="space-y-2">
+                  <Label>{t("overrideOperation")}</Label>
+                  <SearchableSelect
+                    allowCustomValue
+                    ariaLabel={t("overrideOperation")}
+                    emptyMessage={t("noOperationMatches")}
+                    onValueChange={setOverrideOperation}
+                    options={data.githubCacheableGraphqlOperations
+                      .filter(
+                        (operation) =>
+                          !data.githubCacheTtlOverrides.some(
+                            (override) => override.operation === operation,
+                          ),
+                      )
+                      .map((operation) => ({
+                        value: operation,
+                        label: operation,
+                      }))}
+                    placeholder={t("selectOperation")}
+                    searchPlaceholder={t("searchOperations")}
+                    value={overrideOperation}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="github-cache-override-ttl">
+                    {t("overrideTtl")}
+                  </Label>
+                  <Input
+                    id="github-cache-override-ttl"
+                    max={86400}
+                    min={1}
+                    onChange={(event) =>
+                      setOverrideTtlSeconds(event.target.value)
+                    }
+                    required
+                    type="number"
+                    value={overrideTtlSeconds}
+                  />
+                </div>
+                <Button
+                  disabled={
+                    busyKey === "override:add" || !overrideOperation.trim()
+                  }
+                  type="submit"
+                  variant="outline"
+                >
+                  {busyKey === "override:add" ? <Spinner /> : <Plus />}
+                  {t("addOverride")}
+                </Button>
+              </form>
+              <p className="border-b px-4 py-3 text-xs text-muted-foreground">
+                {t("overridesHelp")}
+              </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("operation")}</TableHead>
+                    <TableHead>{t("overrideTtl")}</TableHead>
+                    <TableHead>{t("overrideType")}</TableHead>
+                    <TableHead className="text-right">{t("actions")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.githubCacheTtlOverrides.map((override) => {
+                    const saveKey = `override:save:${override.operation}`;
+                    const deleteKey = `override:delete:${override.operation}`;
+                    return (
+                      <TableRow key={override.operation}>
+                        <TableCell className="font-mono text-sm font-medium">
+                          {override.operation}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            aria-label={t("overrideTtlFor", {
+                              operation: override.operation,
+                            })}
+                            className="w-28"
+                            max={86400}
+                            min={1}
+                            onChange={(event) =>
+                              setOverrideDrafts((current) => ({
+                                ...current,
+                                [override.operation]: event.target.value,
+                              }))
+                            }
+                            required
+                            type="number"
+                            value={
+                              overrideDrafts[override.operation] ??
+                              String(override.ttlSeconds)
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {override.builtIn
+                              ? t("builtInOverride")
+                              : t("customOverride")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              aria-label={t("saveOverride", {
+                                operation: override.operation,
+                              })}
+                              disabled={busyKey === saveKey}
+                              onClick={() =>
+                                void saveTtlOverride(
+                                  override.operation,
+                                  overrideDrafts[override.operation] ??
+                                    String(override.ttlSeconds),
+                                  saveKey,
+                                )
+                              }
+                              size="icon-sm"
+                              variant="ghost"
+                            >
+                              {busyKey === saveKey ? <Spinner /> : <Save />}
+                            </Button>
+                            {!override.builtIn && (
+                              <ConfirmationDialog
+                                actionLabel={t("deleteOverride")}
+                                cancelLabel={tc("cancel")}
+                                description={t("confirmDeleteOverride", {
+                                  operation: override.operation,
+                                })}
+                                onConfirm={() =>
+                                  deleteTtlOverride(override.operation)
+                                }
+                                title={t("deleteOverride")}
+                                trigger={
+                                  <Button
+                                    aria-label={t("deleteOverrideFor", {
+                                      operation: override.operation,
+                                    })}
+                                    disabled={busyKey === deleteKey}
+                                    size="icon-sm"
+                                    variant="ghost"
+                                  >
+                                    <Trash2 />
+                                  </Button>
+                                }
+                              />
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Panel>
             <RateLimitSection
               apiMetrics={data.githubCacheMetrics.apiTypes}
               snapshots={data.githubRateLimitSnapshots}

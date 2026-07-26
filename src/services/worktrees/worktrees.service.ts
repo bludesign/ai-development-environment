@@ -561,10 +561,10 @@ export class WorktreesService {
     worktrees: PullRequestTarget[],
   ): Promise<void> {
     const prisma = await getPrismaClient();
-    const settings = await prisma.gitHubSettings.findUnique({
-      where: { id: SETTINGS_ID },
-    });
-    const retryAfterMs = (settings?.cacheTtlSeconds ?? 300) * 1_000;
+    const retryAfterMs =
+      (await this.gitHubService.effectiveCacheTtlSeconds(
+        "GitHubWorktreePullRequests",
+      )) * 1_000;
     const forceDiscovery = new Set<string>();
     const terminalFallbacks = new Map<string, GitHubPullRequestView>();
 

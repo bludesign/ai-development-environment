@@ -49,11 +49,19 @@ type RateSnapshot = {
   resetAt: Date;
 };
 
+type TtlOverride = {
+  operation: string;
+  ttlSeconds: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 const state = vi.hoisted(() => ({
   ttlSeconds: 300,
   entries: [] as CacheEntry[],
   calls: [] as CallLog[],
   snapshots: [] as RateSnapshot[],
+  overrides: [] as TtlOverride[],
 }));
 
 vi.mock("@/data/prisma-client", () => ({
@@ -120,14 +128,57 @@ vi.mock("@/data/prisma-client", () => ({
           : [];
         return { count: before - state.entries.length };
       },
-      findMany: async ({ take, skip }: { take: number; skip: number }) =>
-        [...state.entries]
-          .sort(
-            (left, right) =>
-              right.fetchedAt.getTime() - left.fetchedAt.getTime(),
-          )
-          .slice(skip, skip + take),
+      findMany: async ({ take, skip }: { take?: number; skip?: number }) => {
+        const entries = [...state.entries].sort(
+          (left, right) => right.fetchedAt.getTime() - left.fetchedAt.getTime(),
+        );
+        return take === undefined
+          ? entries
+          : entries.slice(skip ?? 0, (skip ?? 0) + take);
+      },
       count: async () => state.entries.length,
+    },
+    gitHubGraphqlCacheTtlOverride: {
+      findUnique: async ({ where }: { where: { operation: string } }) =>
+        state.overrides.find(
+          (override) => override.operation === where.operation,
+        ) ?? null,
+      findMany: async () =>
+        [...state.overrides].sort((left, right) =>
+          left.operation.localeCompare(right.operation),
+        ),
+      upsert: async ({
+        where,
+        create,
+        update,
+      }: {
+        where: { operation: string };
+        create: { operation: string; ttlSeconds: number };
+        update: { ttlSeconds: number };
+      }) => {
+        const existing = state.overrides.find(
+          (override) => override.operation === where.operation,
+        );
+        if (existing) {
+          existing.ttlSeconds = update.ttlSeconds;
+          existing.updatedAt = new Date();
+          return existing;
+        }
+        const override = {
+          ...create,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        state.overrides.push(override);
+        return override;
+      },
+      deleteMany: async ({ where }: { where: { operation: string } }) => {
+        const before = state.overrides.length;
+        state.overrides = state.overrides.filter(
+          (override) => override.operation !== where.operation,
+        );
+        return { count: before - state.overrides.length };
+      },
     },
     gitHubRateLimitSnapshot: {
       findUnique: async ({
@@ -242,6 +293,14 @@ beforeEach(() => {
   state.entries = [];
   state.calls = [];
   state.snapshots = [];
+  state.overrides = [
+    {
+      operation: "GitHubWorktreePullRequestStatuses",
+      ttlSeconds: 60,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+  ];
 });
 
 describe("GitHubCache", () => {
@@ -431,6 +490,80 @@ describe("GitHubCache", () => {
       pointsUsed: 4,
       pointsAvoided: 4,
     });
+  });
+
+  test("applies exact operation TTL overrides and recalculates entry freshness", async () => {
+    const cache = new GitHubCache();
+    const fetcher = vi.fn(async () => ({
+      data: { value: 1 },
+      statusCode: 200,
+      pointCost: 4,
+      rateLimit: null,
+    }));
+
+    await cache.query(input("PAT", fetcher));
+    state.entries[0]!.fetchedAt = new Date(Date.now() - 120_000);
+    expect((await cache.entries()).items[0]?.stale).toBe(false);
+
+    await cache.saveTtlOverride("TestQuery", 60);
+    expect(await cache.effectiveTtlSeconds("TestQuery")).toBe(60);
+    expect(await cache.effectiveTtlSeconds("testQuery")).toBe(300);
+    expect((await cache.entries()).items[0]?.stale).toBe(true);
+
+    await cache.saveTtlOverride("TestQuery", 180);
+    expect((await cache.entry(state.entries[0]!.id))?.stale).toBe(false);
+
+    state.entries[0]!.fetchedAt = new Date(Date.now() - 181_000);
+    await cache.query(input("PAT", fetcher));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    await expect(cache.deleteTtlOverride("TestQuery")).resolves.toBe(true);
+    expect(await cache.effectiveTtlSeconds("TestQuery")).toBe(300);
+  });
+
+  test("validates override CRUD and protects the built-in operation", async () => {
+    const cache = new GitHubCache();
+
+    await expect(
+      cache.effectiveTtlSeconds("GitHubWorktreePullRequestStatuses"),
+    ).resolves.toBe(60);
+    await expect(
+      cache.saveTtlOverride("invalid operation", 60),
+    ).rejects.toThrow("valid GraphQL operation name");
+    await expect(cache.saveTtlOverride("ValidOperation", 0)).rejects.toThrow(
+      "1 to 86400 seconds",
+    );
+    await expect(
+      cache.saveTtlOverride("ValidOperation", 86_401),
+    ).rejects.toThrow("1 to 86400 seconds");
+    await expect(
+      cache.deleteTtlOverride("GitHubWorktreePullRequestStatuses"),
+    ).rejects.toThrow("cannot be deleted");
+
+    await cache.saveTtlOverride("FutureQuery", 15);
+    await cache.query({
+      ...input("PAT", vi.fn()),
+      operation: "ObservedQuery",
+      query: "query ObservedQuery { viewer { login } }",
+      normalizedQuery: "query ObservedQuery { viewer { login } }",
+      fetcher: async () => ({
+        data: { value: 1 },
+        statusCode: 200,
+        pointCost: 1,
+        rateLimit: null,
+      }),
+    });
+    await expect(cache.cacheableOperations()).resolves.toEqual([
+      "FutureQuery",
+      "GitHubWorktreePullRequestStatuses",
+      "ObservedQuery",
+    ]);
+    expect((await cache.ttlOverrides())[0]).toMatchObject({
+      operation: "FutureQuery",
+      builtIn: false,
+    });
+    expect(await cache.clear()).toBe(true);
+    expect(await cache.effectiveTtlSeconds("FutureQuery")).toBe(15);
   });
 
   test("records uncached REST and GraphQL transport calls with sanitized request context", async () => {

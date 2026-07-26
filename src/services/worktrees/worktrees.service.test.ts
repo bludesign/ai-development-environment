@@ -255,6 +255,7 @@ describe("WorktreesService", () => {
     const github = {
       pullRequestsForBranches,
       pullRequestLiveStatuses: vi.fn().mockResolvedValue(new Map()),
+      effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
     } as unknown as GitHubService;
     const jira = {
       cachedTicket: vi.fn(),
@@ -439,6 +440,7 @@ describe("WorktreesService", () => {
       {
         pullRequestLiveStatuses,
         pullRequestsForBranches,
+        effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
       } as unknown as GitHubService,
     );
     const target = {
@@ -492,6 +494,7 @@ describe("WorktreesService", () => {
             new Map([["pull-request-1", { ...current, state: "MERGED" }]]),
           ),
         pullRequestsForBranches,
+        effectiveCacheTtlSeconds: vi.fn().mockResolvedValue(300),
       } as unknown as GitHubService,
     );
     const target = {
@@ -565,12 +568,14 @@ describe("WorktreesService", () => {
     });
     const pullRequestsForBranches = vi.fn();
     const pullRequestLiveStatuses = vi.fn();
+    const effectiveCacheTtlSeconds = vi.fn().mockResolvedValue(300);
     const worktrees = new WorktreesService(
       { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
       {} as JiraService,
       {
         pullRequestsForBranches,
         pullRequestLiveStatuses,
+        effectiveCacheTtlSeconds,
       } as unknown as GitHubService,
     );
     const target = {
@@ -593,6 +598,64 @@ describe("WorktreesService", () => {
 
     expect(pullRequestsForBranches).not.toHaveBeenCalled();
     expect(pullRequestLiveStatuses).not.toHaveBeenCalled();
+    expect(effectiveCacheTtlSeconds).toHaveBeenCalledWith(
+      "GitHubWorktreePullRequests",
+    );
+  });
+
+  test("retries negative pull request discovery using the operation TTL", async () => {
+    const worktreeUpdate = vi.fn().mockResolvedValue(undefined);
+    const pullRequestDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    getPrismaClient.mockResolvedValue({
+      worktree: { update: worktreeUpdate },
+      worktreePullRequest: { deleteMany: pullRequestDeleteMany },
+      $transaction: vi.fn(async (operation) => {
+        if (typeof operation !== "function") return Promise.all(operation);
+        return operation({
+          worktree: { update: worktreeUpdate },
+          worktreePullRequest: { deleteMany: pullRequestDeleteMany },
+        });
+      }),
+    });
+    const pullRequestsForBranches = vi
+      .fn()
+      .mockResolvedValue(new Map([["feature/AIDE-24", null]]));
+    const effectiveCacheTtlSeconds = vi.fn().mockResolvedValue(60);
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {} as JiraService,
+      {
+        pullRequestsForBranches,
+        pullRequestLiveStatuses: vi.fn(),
+        effectiveCacheTtlSeconds,
+      } as unknown as GitHubService,
+    );
+    const target = {
+      id: "worktree-1",
+      branch: "feature/AIDE-24",
+      pullRequestLookupOrigin: "github.com/acme/widgets",
+      pullRequestLookupBranch: "feature/AIDE-24",
+      pullRequestLookupAt: new Date(Date.now() - 61_000),
+      pullRequest: null,
+      codebase: {
+        repository: { canonicalOrigin: "github.com/acme/widgets" },
+      },
+    };
+
+    await (
+      worktrees as unknown as {
+        synchronizePullRequests(values: unknown[]): Promise<void>;
+      }
+    ).synchronizePullRequests([target]);
+
+    expect(effectiveCacheTtlSeconds).toHaveBeenCalledWith(
+      "GitHubWorktreePullRequests",
+    );
+    expect(pullRequestsForBranches).toHaveBeenCalledWith(
+      "github.com/acme/widgets",
+      ["feature/AIDE-24"],
+      expect.objectContaining({ requestSource: "WORKTREES" }),
+    );
   });
 
   test("resolves the linked ticket key from a worktree branch", async () => {

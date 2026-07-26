@@ -30,6 +30,7 @@ import type {
   GitHubCachedEntryDetail,
   GitHubCachedEntryView,
   GitHubCacheMetrics,
+  GitHubCacheTtlOverrideView,
   GitHubPipelineState,
   GitHubPipelineStatus,
   GitHubPipelineView,
@@ -1526,6 +1527,29 @@ export class GitHubService {
 
   async cachedEntry(id: string): Promise<GitHubCachedEntryDetail | null> {
     return this.cache.entry(id);
+  }
+
+  async cacheTtlOverrides(): Promise<GitHubCacheTtlOverrideView[]> {
+    return this.cache.ttlOverrides();
+  }
+
+  async cacheableGraphqlOperations(): Promise<string[]> {
+    return this.cache.cacheableOperations();
+  }
+
+  async effectiveCacheTtlSeconds(operation: string): Promise<number> {
+    return this.cache.effectiveTtlSeconds(operation);
+  }
+
+  async saveCacheTtlOverride(
+    operation: string,
+    ttlSeconds: number,
+  ): Promise<GitHubCacheTtlOverrideView> {
+    return this.cache.saveTtlOverride(operation, ttlSeconds);
+  }
+
+  async deleteCacheTtlOverride(operation: string): Promise<boolean> {
+    return this.cache.deleteTtlOverride(operation);
   }
 
   async updateCacheTtl(ttlMinutes: number): Promise<GitHubSettingsView> {

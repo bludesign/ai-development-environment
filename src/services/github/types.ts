@@ -106,6 +106,14 @@ export type GitHubCacheMetrics = {
   requestSources: GitHubRequestSourceMetric[];
 };
 
+export type GitHubCacheTtlOverrideView = {
+  operation: string;
+  ttlSeconds: number;
+  builtIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GitHubApiCallView = {
   id: string;
   authentication: GitHubAuthentication;

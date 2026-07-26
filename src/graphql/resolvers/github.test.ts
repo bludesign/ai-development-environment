@@ -49,6 +49,8 @@ describe("GitHub resolvers", () => {
     const service = {
       getSettings: vi.fn(),
       cacheMetrics: vi.fn(),
+      cacheTtlOverrides: vi.fn(),
+      saveCacheTtlOverride: vi.fn(),
       clearCache: vi.fn(),
       clearApiCalls: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
@@ -80,17 +82,74 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubCacheMetrics({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
+      resolvers.Query.githubCacheTtlOverrides({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
       resolvers.Mutation.clearGitHubCache({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Mutation.clearGitHubApiCalls({}, {}, context("agent-1")),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.saveGitHubCacheTtlOverride(
+        {},
+        { input: { operation: "Viewer", ttlSeconds: 30 } },
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.actionsWorkflowRuns).not.toHaveBeenCalled();
     expect(service.pullRequests).not.toHaveBeenCalled();
     expect(service.cacheMetrics).not.toHaveBeenCalled();
+    expect(service.cacheTtlOverrides).not.toHaveBeenCalled();
+    expect(service.saveCacheTtlOverride).not.toHaveBeenCalled();
     expect(service.clearCache).not.toHaveBeenCalled();
     expect(service.clearApiCalls).not.toHaveBeenCalled();
+  });
+
+  test("delegates GraphQL cache TTL override management", async () => {
+    const override = {
+      operation: "GitHubWorktreePullRequestStatuses",
+      ttlSeconds: 60,
+      builtIn: true,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const service = {
+      cacheTtlOverrides: vi.fn().mockResolvedValue([override]),
+      cacheableGraphqlOperations: vi
+        .fn()
+        .mockResolvedValue([override.operation]),
+      saveCacheTtlOverride: vi.fn().mockResolvedValue(override),
+      deleteCacheTtlOverride: vi.fn().mockResolvedValue(true),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+
+    await expect(
+      resolvers.Query.githubCacheTtlOverrides({}, {}, context(null)),
+    ).resolves.toEqual([override]);
+    await expect(
+      resolvers.Query.githubCacheableGraphqlOperations({}, {}, context(null)),
+    ).resolves.toEqual([override.operation]);
+    await expect(
+      resolvers.Mutation.saveGitHubCacheTtlOverride(
+        {},
+        { input: { operation: override.operation, ttlSeconds: 45 } },
+        context(null),
+      ),
+    ).resolves.toEqual(override);
+    await expect(
+      resolvers.Mutation.deleteGitHubCacheTtlOverride(
+        {},
+        { operation: "Viewer" },
+        context(null),
+      ),
+    ).resolves.toBe(true);
+    expect(service.saveCacheTtlOverride).toHaveBeenCalledWith(
+      override.operation,
+      45,
+    );
+    expect(service.deleteCacheTtlOverride).toHaveBeenCalledWith("Viewer");
   });
 
   test("passes write-only credentials and repository scope to the service", async () => {

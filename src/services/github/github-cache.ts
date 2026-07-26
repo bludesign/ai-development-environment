@@ -14,6 +14,7 @@ import type {
   GitHubCachedEntryDetail,
   GitHubCachedEntryView,
   GitHubCacheMetrics,
+  GitHubCacheTtlOverrideView,
   GitHubCallSource,
   GitHubMetricWindow,
   GitHubOperationMetric,
@@ -55,6 +56,12 @@ type CachedResult<T> = {
 };
 
 const DEFAULT_TTL_SECONDS = 300;
+const MIN_OVERRIDE_TTL_SECONDS = 1;
+const MAX_OVERRIDE_TTL_SECONDS = 24 * 60 * 60;
+const GRAPHQL_OPERATION_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/;
+const BUILT_IN_TTL_OVERRIDES = new Map([
+  ["GitHubWorktreePullRequestStatuses", 60],
+]);
 const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const WINDOW_DEFINITIONS = [
@@ -164,7 +171,7 @@ export class GitHubCache {
       .digest("hex");
   }
 
-  private async ttlSeconds(): Promise<number> {
+  private async defaultTtlSeconds(): Promise<number> {
     const prisma = await getPrismaClient();
     const settings = await prisma.gitHubSettings.upsert({
       where: { id: "default" },
@@ -174,13 +181,24 @@ export class GitHubCache {
     return settings.cacheTtlSeconds;
   }
 
+  async effectiveTtlSeconds(operation: string): Promise<number> {
+    const prisma = await getPrismaClient();
+    const [override, defaultTtlSeconds] = await Promise.all([
+      prisma.gitHubGraphqlCacheTtlOverride.findUnique({
+        where: { operation },
+      }),
+      this.defaultTtlSeconds(),
+    ]);
+    return override?.ttlSeconds ?? defaultTtlSeconds;
+  }
+
   async query<T>(input: QueryInput<T>): Promise<CachedResult<T>> {
     const prisma = await getPrismaClient();
     const key = this.cacheKey(input);
     const startedAt = Date.now();
     const [existing, ttlSeconds, rateLimit] = await Promise.all([
       prisma.gitHubGraphqlCacheEntry.findUnique({ where: { cacheKey: key } }),
-      this.ttlSeconds(),
+      this.effectiveTtlSeconds(input.operation),
       prisma.gitHubRateLimitSnapshot.findUnique({
         where: {
           authentication_resource: {
@@ -396,6 +414,84 @@ export class GitHubCache {
     return settingsView();
   }
 
+  async ttlOverrides(): Promise<GitHubCacheTtlOverrideView[]> {
+    const prisma = await getPrismaClient();
+    const overrides = await prisma.gitHubGraphqlCacheTtlOverride.findMany({
+      orderBy: { operation: "asc" },
+    });
+    return overrides.map((override) => ({
+      operation: override.operation,
+      ttlSeconds: override.ttlSeconds,
+      builtIn: BUILT_IN_TTL_OVERRIDES.has(override.operation),
+      createdAt: override.createdAt.toISOString(),
+      updatedAt: override.updatedAt.toISOString(),
+    }));
+  }
+
+  async cacheableOperations(): Promise<string[]> {
+    const prisma = await getPrismaClient();
+    const [overrides, entries] = await Promise.all([
+      prisma.gitHubGraphqlCacheTtlOverride.findMany({
+        select: { operation: true },
+      }),
+      prisma.gitHubGraphqlCacheEntry.findMany({
+        distinct: ["operation"],
+        select: { operation: true },
+      }),
+    ]);
+    return [
+      ...new Set([
+        ...BUILT_IN_TTL_OVERRIDES.keys(),
+        ...overrides.map(({ operation }) => operation),
+        ...entries.map(({ operation }) => operation),
+      ]),
+    ].sort((left, right) => left.localeCompare(right));
+  }
+
+  async saveTtlOverride(
+    operationValue: string,
+    ttlSeconds: number,
+  ): Promise<GitHubCacheTtlOverrideView> {
+    const operation = operationValue.trim();
+    if (!GRAPHQL_OPERATION_NAME.test(operation)) {
+      throw new Error("Operation must be a valid GraphQL operation name");
+    }
+    if (
+      !Number.isInteger(ttlSeconds) ||
+      ttlSeconds < MIN_OVERRIDE_TTL_SECONDS ||
+      ttlSeconds > MAX_OVERRIDE_TTL_SECONDS
+    ) {
+      throw new Error(
+        `Cache TTL must be an integer from ${MIN_OVERRIDE_TTL_SECONDS} to ${MAX_OVERRIDE_TTL_SECONDS} seconds`,
+      );
+    }
+    const prisma = await getPrismaClient();
+    const override = await prisma.gitHubGraphqlCacheTtlOverride.upsert({
+      where: { operation },
+      create: { operation, ttlSeconds },
+      update: { ttlSeconds },
+    });
+    return {
+      operation: override.operation,
+      ttlSeconds: override.ttlSeconds,
+      builtIn: BUILT_IN_TTL_OVERRIDES.has(override.operation),
+      createdAt: override.createdAt.toISOString(),
+      updatedAt: override.updatedAt.toISOString(),
+    };
+  }
+
+  async deleteTtlOverride(operationValue: string): Promise<boolean> {
+    const operation = operationValue.trim();
+    if (BUILT_IN_TTL_OVERRIDES.has(operation)) {
+      throw new Error("Built-in cache TTL overrides cannot be deleted");
+    }
+    const prisma = await getPrismaClient();
+    const result = await prisma.gitHubGraphqlCacheTtlOverride.deleteMany({
+      where: { operation },
+    });
+    return result.count > 0;
+  }
+
   async recordRestCall(input: {
     authentication: GitHubAuthentication;
     method: string;
@@ -485,29 +581,40 @@ export class GitHubCache {
   ): Promise<GitHubPaginatedResult<GitHubCachedEntryView>> {
     const pagination = this.pagination(limit, offset);
     const prisma = await getPrismaClient();
-    const [entries, total, ttlSeconds] = await Promise.all([
+    const [entries, total, defaultTtlSeconds, overrides] = await Promise.all([
       prisma.gitHubGraphqlCacheEntry.findMany({
         take: pagination.limit,
         skip: pagination.offset,
         orderBy: { fetchedAt: "desc" },
       }),
       prisma.gitHubGraphqlCacheEntry.count(),
-      this.ttlSeconds(),
+      this.defaultTtlSeconds(),
+      prisma.gitHubGraphqlCacheTtlOverride.findMany({
+        select: { operation: true, ttlSeconds: true },
+      }),
     ]);
+    const ttlOverrides = new Map(
+      overrides.map(({ operation, ttlSeconds }) => [operation, ttlSeconds]),
+    );
     return {
       ...pagination,
       total,
-      items: entries.map((entry) => this.entryView(entry, ttlSeconds)),
+      items: entries.map((entry) =>
+        this.entryView(
+          entry,
+          ttlOverrides.get(entry.operation) ?? defaultTtlSeconds,
+        ),
+      ),
     };
   }
 
   async entry(id: string): Promise<GitHubCachedEntryDetail | null> {
     const prisma = await getPrismaClient();
-    const [entry, ttlSeconds] = await Promise.all([
-      prisma.gitHubGraphqlCacheEntry.findUnique({ where: { id } }),
-      this.ttlSeconds(),
-    ]);
+    const entry = await prisma.gitHubGraphqlCacheEntry.findUnique({
+      where: { id },
+    });
     if (!entry) return null;
+    const ttlSeconds = await this.effectiveTtlSeconds(entry.operation);
     return {
       ...this.entryView(entry, ttlSeconds),
       query: entry.query,
