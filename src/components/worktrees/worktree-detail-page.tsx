@@ -212,7 +212,9 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       setPipelinesError(null);
     } catch (value) {
       if (requestId === latestPipelinesLoad.current) {
-        setPipelinesError(value instanceof Error ? value.message : String(value));
+        setPipelinesError(
+          value instanceof Error ? value.message : String(value),
+        );
       }
     }
   }, [worktreeId]);
