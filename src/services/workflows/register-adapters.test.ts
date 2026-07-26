@@ -277,3 +277,84 @@ describe("saved command workflow adapter", () => {
     ).rejects.toThrow("require fire and forget");
   });
 });
+
+describe("custom command workflow adapter", () => {
+  function customExecutor() {
+    const executor = new WorkflowStepExecutor();
+    const startCustomRun = vi.fn().mockResolvedValue({
+      id: "custom-run-1",
+      displayNumber: 8,
+      status: "RUNNING",
+    });
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { commands: { startCustomRun } } as unknown as WorkflowAdapterServices,
+    );
+    return { executor, startCustomRun };
+  }
+
+  test("prefers the workflow worktree context and waits for exit", async () => {
+    const { executor, startCustomRun } = customExecutor();
+    const input = context("actual-worktree");
+    input.attempt = { ...input.attempt, idempotencyKey: "custom-attempt" };
+    input.node = {
+      ...input.node,
+      id: "custom-command",
+      kind: "CUSTOM_COMMAND",
+      config: {
+        script: "printf custom",
+        completionMode: "WAIT_FOR_EXIT",
+        targetMode: "CONTEXT",
+      },
+    };
+
+    const result = await executor.execute(input);
+
+    expect(startCustomRun).toHaveBeenCalledWith({
+      script: "printf custom",
+      agentId: null,
+      worktreeId: "actual-worktree",
+      origin: "WORKFLOW",
+      idempotencyKey: "custom-attempt",
+    });
+    expect(result.wait).toEqual(
+      expect.objectContaining({
+        kind: "COMMAND_RUN",
+        externalKey: "custom-run-1",
+      }),
+    );
+    expect(result.links).toEqual([
+      expect.objectContaining({
+        kind: "COMMAND_RUN",
+        resourceId: "custom-run-1",
+      }),
+    ]);
+  });
+
+  test("supports a fixed agent with fire and forget", async () => {
+    const { executor, startCustomRun } = customExecutor();
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "custom-command",
+      kind: "CUSTOM_COMMAND",
+      config: {
+        script: "printf fixed",
+        completionMode: "FIRE_AND_FORGET",
+        targetMode: "FIXED_AGENT",
+        agentId: "agent-fixed",
+      },
+    };
+
+    const result = await executor.execute(input);
+
+    expect(startCustomRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-fixed",
+        worktreeId: null,
+      }),
+    );
+    expect(result.wait).toBeUndefined();
+  });
+});

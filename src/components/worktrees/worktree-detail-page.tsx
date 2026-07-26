@@ -712,6 +712,7 @@ function LoadedWorktreeDetail({
               repo: {
                 id: entry.group.repository.id,
                 name: entry.group.repository.name,
+                url: entry.group.repository.displayOrigin,
                 displayOrigin: entry.group.repository.displayOrigin,
               },
             }}

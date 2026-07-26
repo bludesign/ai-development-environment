@@ -112,6 +112,7 @@ export function WorktreeRebaseConflictItem({
               repo: {
                 id: group.repository.id,
                 name: group.repository.name,
+                url: group.repository.displayOrigin,
                 displayOrigin: group.repository.displayOrigin,
               },
             }}

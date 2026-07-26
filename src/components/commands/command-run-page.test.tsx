@@ -226,6 +226,30 @@ afterEach(() => {
 });
 
 describe("CommandRunPage", () => {
+  test("does not offer definition editing for a custom command run", async () => {
+    request.mockImplementation(async (query) => {
+      if (query.includes("CommandRunDetail")) {
+        return {
+          commandRun: {
+            ...run,
+            commandId: null,
+            command: null,
+            snapshotName: "Custom command",
+          },
+        } as never;
+      }
+      if (query.includes("CommandOutput")) {
+        return { commandRunOutput: [] } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText("Custom command")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Edit command" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Rerun" })).toBeDefined();
+  });
+
   test("initializes output after a delayed run load mounts the terminal", async () => {
     let resolveRun: (value: { commandRun: typeof run }) => void = () =>
       undefined;

@@ -29,6 +29,7 @@ function parsed(value: string): Record<string, unknown> {
 function repositoryData(
   repository: {
     id: string;
+    name: string;
     canonicalOrigin: string;
     displayOrigin: string;
   },
@@ -36,6 +37,8 @@ function repositoryData(
 ) {
   return {
     id: repository.id,
+    name: repository.name,
+    url: repository.displayOrigin,
     canonicalOrigin: repository.canonicalOrigin,
     displayOrigin: repository.displayOrigin,
     defaultBranch: defaultBranch ?? null,
@@ -524,6 +527,7 @@ export class WorkflowEventBridge {
       defaultBranch: string | null;
       repository: {
         id: string;
+        name: string;
         canonicalOrigin: string;
         displayOrigin: string;
       };

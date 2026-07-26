@@ -156,6 +156,152 @@ describe("command target and output authorization", () => {
     });
   });
 
+  test("stores a custom command only as an immutable run snapshot", async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      ...data,
+      id: "run-custom",
+      status: "QUEUED",
+    }));
+    const transaction = {
+      commandRunNumberSequence: {
+        upsert: vi.fn().mockResolvedValue({ nextValue: 2 }),
+      },
+      commandRun: { create },
+    };
+    const commandRunFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "run-custom" });
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findUnique: commandRunFindUnique },
+      agent: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "agent-1",
+          name: "Builder",
+          hostname: "builder.local",
+          capabilitiesJson: '["command.run"]',
+        }),
+      },
+      $transaction: vi
+        .fn()
+        .mockImplementation(
+          (callback: (value: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+    });
+    const service = new CommandsService(agentControl());
+    (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch = vi.fn().mockResolvedValue(undefined);
+
+    await service.startCustomRun({
+      script: "  printf custom  ",
+      agentId: "agent-1",
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        commandId: null,
+        snapshotName: "Custom command",
+        snapshotScript: "printf custom",
+        snapshotTargetKind: "ANY_AGENT_HOME",
+        snapshotRestartPolicy: "NEVER",
+        snapshotRestartLimit: null,
+        snapshotNotificationsEnabled: true,
+      }),
+    });
+    expect(JSON.parse(create.mock.calls[0][0].data.snapshotJson)).toEqual(
+      expect.objectContaining({
+        name: "Custom command",
+        script: "printf custom",
+        targetKind: "ANY_AGENT_HOME",
+      }),
+    );
+  });
+
+  test("requires exactly one custom command target", async () => {
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findUnique: vi.fn().mockResolvedValue(null) },
+    });
+    const service = new CommandsService(agentControl());
+    await expect(
+      service.startCustomRun({
+        script: "printf invalid",
+        agentId: "agent-1",
+        worktreeId: "worktree-1",
+      }),
+    ).rejects.toThrow("exactly one");
+  });
+
+  test("runs a custom command in a concrete worktree", async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      ...data,
+      id: "run-worktree",
+      status: "QUEUED",
+    }));
+    const transaction = {
+      commandRunNumberSequence: {
+        upsert: vi.fn().mockResolvedValue({ nextValue: 3 }),
+      },
+      commandRun: { create },
+    };
+    const worktree = {
+      id: "worktree-1",
+      folder: "/code/project",
+      branch: "feature/custom",
+      missingAt: null,
+      codebase: {
+        repositoryId: "repository-1",
+        repository: { id: "repository-1" },
+        agent: {
+          id: "agent-1",
+          name: "Builder",
+          hostname: "builder.local",
+          capabilitiesJson: '["command.run"]',
+        },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: "run-worktree" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree) },
+      $transaction: vi
+        .fn()
+        .mockImplementation(
+          (callback: (value: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+    });
+    const service = new CommandsService(agentControl());
+    (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch = vi.fn().mockResolvedValue(undefined);
+
+    await service.startCustomRun({
+      script: "pwd",
+      worktreeId: "worktree-1",
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        commandId: null,
+        snapshotTargetKind: "ANY_WORKTREE",
+        agentId: "agent-1",
+        worktreeId: "worktree-1",
+        worktreePath: "/code/project",
+        worktreeBranch: "feature/custom",
+      }),
+    });
+  });
+
   test("reruns the exact original snapshot and concrete target", async () => {
     const original = {
       id: "run-1",

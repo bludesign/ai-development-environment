@@ -1004,6 +1004,21 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "CUSTOM_COMMAND",
+    "Extensibility",
+    "Run custom command",
+    "AGENT",
+    [],
+    ["steps.<stepId>.*"],
+    {
+      description:
+        "Runs a one-off shell command on an agent home or worktree and records it in Commands run history.",
+      details:
+        "The script is retained only in the immutable command-run snapshot, not as a reusable saved command. Context targeting prefers the current worktree, then the current agent. Wait for exit fails the workflow when the command fails or is cancelled; fire and forget succeeds after durable dispatch.",
+      mutatesWorktree: true,
+    },
+  ),
+  step(
     "TERMINAL_RUN",
     "Extensibility",
     "Run terminal script",
@@ -1328,10 +1343,20 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       details: `Watches usage across runs rather than one run's spend — Run usage threshold does that. The cost guardrail: notify, or pause workflows that start AI runs. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
     }),
     trigger(
+      "WORKTREE_CREATED",
+      "Worktrees",
+      "Worktree created",
+      ["worktree.*", "repo.*"],
+      {
+        description: "Fires after a new worktree is successfully created.",
+        details: `Fires once after the created worktree is projected into the control plane. Seeds \`worktree.*\` and \`repo.*\`, including the repository name and normalized origin URL. ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
       "WORKTREE_BEHIND",
       "Worktrees",
       "Worktree behind base",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description:
           "Fires when a worktree's branch falls behind the branch it was cut from.",
@@ -1342,7 +1367,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_CONFLICT",
       "Worktrees",
       "Worktree has conflicts",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description:
           "Fires when a worktree is left with Git conflicts after a merge or rebase.",
@@ -1353,7 +1378,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_MISSING",
       "Worktrees",
       "Worktree missing",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description:
           "Fires when a worktree the control plane knows about is no longer on disk.",
@@ -1364,7 +1389,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_DIVERGED",
       "Worktrees",
       "Worktree diverged",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description:
           "Fires when a worktree's branch and its remote have both moved on independently.",
@@ -1375,7 +1400,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_DIRTY_DURATION",
       "Worktrees",
       "Worktree dirty too long",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description:
           "Fires when a worktree has had uncommitted changes for longer than expected.",
@@ -1386,7 +1411,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_NEW_COMMIT",
       "Worktrees",
       "New worktree commit",
-      ["worktree.*"],
+      ["worktree.*", "repo.*"],
       {
         description: "Fires when a new commit lands in a worktree.",
         details: `Fires per commit, so a rebase or a batch of commits fires it repeatedly — keep the reaction cheap, or filter to one branch. Useful for kicking off a build or lint pass as work lands. ${FILTERS_NOTE}`,

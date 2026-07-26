@@ -1465,6 +1465,8 @@ export class WorkflowsService {
       if (codebase) {
         sessionPatch.repo = {
           id: codebase.repository.id,
+          name: codebase.repository.name,
+          url: codebase.repository.displayOrigin,
           canonicalOrigin: codebase.repository.canonicalOrigin,
           displayOrigin: codebase.repository.displayOrigin,
           defaultBranch: codebase.defaultBranch,

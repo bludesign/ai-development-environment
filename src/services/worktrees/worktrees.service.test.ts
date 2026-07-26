@@ -5,6 +5,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
 import {
+  WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
@@ -310,10 +311,107 @@ describe("WorktreesService", () => {
       worktrees.workflowSessionDataForWorktree("worktree-1"),
     ).resolves.toMatchObject({
       worktree: { id: "worktree-1", baseBranch: "release" },
-      repo: { id: "repository-1" },
+      repo: {
+        id: "repository-1",
+        name: "Widgets",
+        url: "github.com/acme/widgets",
+      },
       pr: { id: "pull-request-1", number: 42, jiraKey: "APP-99" },
       ticket: { key: "APP-99" },
     });
+  });
+
+  test("records a deduplicated workflow event after creating a worktree", async () => {
+    let completeBranch:
+      ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === WORKTREE_BRANCH_JOB_KIND) completeBranch = handler;
+      }),
+    } as unknown as AgentControlService;
+    const item = report().worktrees[0]!;
+    const projected = {
+      id: "worktree-created",
+      codebaseId: "codebase-1",
+      folder: item.folder,
+      branch: item.branch,
+      headSha: item.headSha,
+      baseBranchOverride: "main",
+      pushStatus: "READY",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      codebase: {
+        id: "codebase-1",
+        folder: "/repo",
+        agentId: "agent-1",
+        defaultBranch: "main",
+        repository: {
+          id: "repository-1",
+          name: "Widgets",
+          canonicalOrigin: "github.com/acme/widgets",
+          displayOrigin: "github.com/acme/widgets",
+        },
+      },
+    };
+    const transaction = {
+      codebase: { update: vi.fn() },
+      worktree: {
+        upsert: vi.fn().mockResolvedValue({ id: projected.id }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(projected) },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const record = vi.fn().mockResolvedValue({ id: "event-1" });
+    new WorktreesService(
+      control,
+      {} as JiraService,
+      {} as GitHubService,
+      undefined,
+      { record } as never,
+    );
+
+    await completeBranch?.({
+      codebaseId: "codebase-1",
+      worktreeId: null,
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({ worktree: item, baseBranch: "main" }),
+    });
+
+    expect(record).toHaveBeenCalledWith({
+      kind: "WORKTREE_CREATED",
+      subjectKey: "worktree-created",
+      dedupeKey: "worktree-created:worktree-created",
+      payload: expect.objectContaining({
+        sessionData: expect.objectContaining({
+          repo: expect.objectContaining({
+            name: "Widgets",
+            url: "github.com/acme/widgets",
+          }),
+          worktree: expect.objectContaining({ id: "worktree-created" }),
+        }),
+      }),
+    });
+
+    record.mockClear();
+    await completeBranch?.({
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-created",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({ worktree: item, baseBranch: "main" }),
+    });
+    await completeBranch?.({
+      codebaseId: "codebase-1",
+      worktreeId: null,
+      status: "FAILED",
+      resultJson: null,
+    });
+    expect(record).not.toHaveBeenCalled();
   });
 
   test("returns null when the worktree is missing or has no ticket", async () => {

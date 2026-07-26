@@ -79,8 +79,8 @@ type CommandRunOutputChunk {
 type CommandRun {
   id: ID!
   displayNumber: Int!
-  commandId: ID!
-  command: CommandDefinition!
+  commandId: ID
+  command: CommandDefinition
   origin: CommandRunOrigin!
   status: CommandRunStatus!
   snapshotName: String!
@@ -151,6 +151,14 @@ input StartCommandRunInput {
   idempotencyKey: String
 }
 
+input StartCustomCommandRunInput {
+  script: String!
+  agentId: ID
+  worktreeId: ID
+  origin: CommandRunOrigin = MANUAL
+  idempotencyKey: String
+}
+
 input CommandRunOutputInput {
   sequence: Int!
   stream: AgentLogStream!
@@ -189,6 +197,7 @@ extend type Mutation {
   ): CommandDefinition!
   archiveCommandDefinition(id: ID!, archived: Boolean!): CommandDefinition!
   startCommandRun(input: StartCommandRunInput!): CommandRun!
+  startCustomCommandRun(input: StartCustomCommandRunInput!): CommandRun!
   terminateCommandRun(id: ID!): CommandRun!
   rerunCommandRun(id: ID!): CommandRun!
   archiveCommandRuns(ids: [ID!]!, archived: Boolean!): Boolean!

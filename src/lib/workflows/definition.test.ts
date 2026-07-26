@@ -483,6 +483,15 @@ describe("workflow catalog", () => {
     }
   });
 
+  test("worktree triggers advertise repository context", () => {
+    for (const entry of WORKFLOW_TRIGGER_CATALOG.filter(({ kind }) =>
+      kind.startsWith("WORKTREE_"),
+    )) {
+      expect(entry.seedPaths, entry.kind).toContain("worktree.*");
+      expect(entry.seedPaths, entry.kind).toContain("repo.*");
+    }
+  });
+
   test("control-flow steps advertise their branch handles", () => {
     const handles = (kind: string) =>
       WORKFLOW_STEP_CATALOG.find((entry) => entry.kind === kind)?.sourceHandles;

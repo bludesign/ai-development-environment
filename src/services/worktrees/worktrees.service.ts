@@ -1175,6 +1175,8 @@ export class WorktreesService {
       repo: {
         id: repository.id,
         name: repository.name,
+        url: repository.displayOrigin,
+        canonicalOrigin: repository.canonicalOrigin,
         displayOrigin: repository.displayOrigin,
       },
       ...(pullRequest
@@ -1612,6 +1614,8 @@ export class WorktreesService {
         const sessionData = {
           repo: {
             id: worktree.codebase.repository.id,
+            name: worktree.codebase.repository.name,
+            url: worktree.codebase.repository.displayOrigin,
             canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
             displayOrigin: worktree.codebase.repository.displayOrigin,
             defaultBranch: worktree.codebase.defaultBranch,
@@ -2683,8 +2687,52 @@ export class WorktreesService {
       worktreeId = projected.id;
     });
     this.publish(worktreeId ?? null, job.codebaseId);
+    if (!job.worktreeId && worktreeId) {
+      await this.recordWorktreeCreated(worktreeId);
+    }
     await this.skillsService?.requestAutoReconcile();
     if (job.worktreeId) await this.restartWatch(job.worktreeId);
+  }
+
+  private async recordWorktreeCreated(worktreeId: string): Promise<void> {
+    if (!this.workflowEvents) return;
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: worktreeId },
+      include: { codebase: { include: { repository: true } } },
+    });
+    if (!worktree) return;
+    const sessionData = {
+      repo: {
+        id: worktree.codebase.repository.id,
+        name: worktree.codebase.repository.name,
+        url: worktree.codebase.repository.displayOrigin,
+        canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+        displayOrigin: worktree.codebase.repository.displayOrigin,
+        defaultBranch: worktree.codebase.defaultBranch,
+      },
+      codebase: {
+        id: worktree.codebase.id,
+        folder: worktree.codebase.folder,
+        agentId: worktree.codebase.agentId,
+      },
+      worktree: {
+        id: worktree.id,
+        path: worktree.folder,
+        branch: worktree.branch,
+        baseBranch:
+          worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
+        headSha: worktree.headSha,
+        pushStatus: worktree.pushStatus,
+        dirty: worktree.hasStagedChanges || worktree.hasUnstagedChanges,
+      },
+    };
+    await this.workflowEvents.record({
+      kind: "WORKTREE_CREATED",
+      subjectKey: worktree.id,
+      dedupeKey: `worktree-created:${worktree.id}`,
+      payload: { ...sessionData, sessionData },
+    });
   }
 
   private async waitForJob(jobId: string) {

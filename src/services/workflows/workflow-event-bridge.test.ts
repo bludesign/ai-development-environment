@@ -22,6 +22,7 @@ function worktree(baseBehind: number | null) {
       defaultBranch: "main",
       repository: {
         id: "repository-1",
+        name: "Widgets",
         canonicalOrigin: "github.com/acme/widgets",
         displayOrigin: "github.com/acme/widgets",
       },
@@ -46,6 +47,19 @@ describe("workflow worktree event bridge", () => {
     await bridge.observeWorktree(worktree(2));
     expect(record.mock.calls.map(([input]) => input.kind)).toContain(
       "WORKTREE_BEHIND",
+    );
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "WORKTREE_BEHIND",
+        payload: expect.objectContaining({
+          sessionData: expect.objectContaining({
+            repo: expect.objectContaining({
+              name: "Widgets",
+              url: "github.com/acme/widgets",
+            }),
+          }),
+        }),
+      }),
     );
   });
 });

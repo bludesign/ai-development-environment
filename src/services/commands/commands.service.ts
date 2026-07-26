@@ -55,6 +55,14 @@ export type StartCommandRunInput = {
   idempotencyKey?: string | null;
 };
 
+export type StartCustomCommandRunInput = {
+  script: string;
+  agentId?: string | null;
+  worktreeId?: string | null;
+  origin?: string | null;
+  idempotencyKey?: string | null;
+};
+
 type RunResult = {
   exitCode?: number | null;
   signal?: string | null;
@@ -434,7 +442,7 @@ export class CommandsService {
       targetAgentId: string | null;
       targetRepositoryId: string | null;
     },
-    input: StartCommandRunInput,
+    input: Pick<StartCommandRunInput, "agentId" | "worktreeId">,
   ) {
     const prisma = await getPrismaClient();
     const home =
@@ -483,7 +491,7 @@ export class CommandsService {
   private requireCapability(capabilitiesJson: string): void {
     if (!capabilities(capabilitiesJson).includes(COMMAND_RUN_JOB_KIND)) {
       throw new Error(
-        "The selected agent must be upgraded before it can run saved commands",
+        "The selected agent must be upgraded before it can run commands",
       );
     }
   }
@@ -524,6 +532,87 @@ export class CommandsService {
             snapshotRestartLimit: definition.restartLimit,
             snapshotNotificationsEnabled: definition.notificationsEnabled,
             snapshotJson: JSON.stringify(definition),
+            agentId: agent.id,
+            worktreeId: worktree?.id ?? null,
+            agentName: agent.name,
+            agentHostname: agent.hostname,
+            worktreePath: worktree?.folder ?? null,
+            worktreeBranch: worktree?.branch ?? null,
+          },
+        });
+      });
+    } catch (error) {
+      const concurrent = await prisma.commandRun.findUnique({
+        where: { idempotencyKey },
+      });
+      if (!concurrent) throw error;
+      return this.getRun(concurrent.id);
+    }
+    publishRun(run);
+    await this.dispatch(run.id);
+    return this.getRun(run.id);
+  }
+
+  async startCustomRun(input: StartCustomCommandRunInput) {
+    const prisma = await getPrismaClient();
+    const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
+    const existing = await prisma.commandRun.findUnique({
+      where: { idempotencyKey },
+    });
+    if (existing) return this.getRun(existing.id);
+    const script = text(input.script, "Script", 1_000_000);
+    const targetKind =
+      input.agentId && !input.worktreeId
+        ? "ANY_AGENT_HOME"
+        : input.worktreeId && !input.agentId
+          ? "ANY_WORKTREE"
+          : null;
+    if (!targetKind) {
+      throw new Error(
+        "A custom command requires exactly one agent-home or worktree target",
+      );
+    }
+    const { agent, worktree } = await this.resolveTarget(
+      {
+        targetKind,
+        targetAgentId: null,
+        targetRepositoryId: null,
+      },
+      input,
+    );
+    const snapshot = {
+      name: "Custom command",
+      description: "",
+      script,
+      targetKind,
+      restartPolicy: "NEVER",
+      restartLimit: null,
+      notificationsEnabled: true,
+    };
+    let run: Awaited<ReturnType<typeof prisma.commandRun.create>>;
+    try {
+      run = await prisma.$transaction(async (transaction) => {
+        const sequence = await transaction.commandRunNumberSequence.upsert({
+          where: { id: "default" },
+          create: { id: "default", nextValue: 1 },
+          update: { nextValue: { increment: 1 } },
+        });
+        return transaction.commandRun.create({
+          data: {
+            id: randomUUID(),
+            displayNumber: sequence.nextValue,
+            commandId: null,
+            idempotencyKey,
+            origin: (input.origin ?? "MANUAL").trim().toUpperCase(),
+            status: "QUEUED",
+            snapshotName: snapshot.name,
+            snapshotDescription: snapshot.description,
+            snapshotScript: snapshot.script,
+            snapshotTargetKind: snapshot.targetKind,
+            snapshotRestartPolicy: snapshot.restartPolicy,
+            snapshotRestartLimit: snapshot.restartLimit,
+            snapshotNotificationsEnabled: snapshot.notificationsEnabled,
+            snapshotJson: JSON.stringify(snapshot),
             agentId: agent.id,
             worktreeId: worktree?.id ?? null,
             agentName: agent.name,

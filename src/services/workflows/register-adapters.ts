@@ -1655,6 +1655,80 @@ function registerMiscellaneousAdapters(
           : undefined,
     };
   });
+  executor.register("CUSTOM_COMMAND", async (context) => {
+    const script = text(
+      context.node.config.script,
+      "Custom command",
+      1_000_000,
+    );
+    const completionMode =
+      context.node.config.completionMode === "FIRE_AND_FORGET"
+        ? "FIRE_AND_FORGET"
+        : "WAIT_FOR_EXIT";
+    const targetMode = String(context.node.config.targetMode ?? "CONTEXT");
+    let agentId: string | null = null;
+    let worktreeId: string | null = null;
+    if (targetMode === "FIXED_AGENT") {
+      agentId = text(context.node.config.agentId, "Fixed agent", 500);
+    } else if (targetMode === "FIXED_WORKTREE") {
+      worktreeId = text(context.node.config.worktreeId, "Fixed worktree", 500);
+    } else {
+      const contextualWorktree = getSessionValue(
+        context.sessionData,
+        "worktree.id",
+      );
+      if (typeof contextualWorktree === "string") {
+        worktreeId = contextualWorktree;
+      } else {
+        const contextualAgent =
+          getSessionValue(context.sessionData, "agent.id") ??
+          getSessionValue(context.sessionData, "codebase.agentId");
+        if (typeof contextualAgent === "string") agentId = contextualAgent;
+      }
+    }
+    if (!agentId && !worktreeId) {
+      throw new Error("Custom command context has no agent or worktree target");
+    }
+    const run = await services.commands.startCustomRun({
+      script,
+      agentId,
+      worktreeId,
+      origin: "WORKFLOW",
+      idempotencyKey: context.attempt.idempotencyKey,
+    });
+    if (!run) throw new Error("Custom command run could not be created");
+    return {
+      output: {
+        id: run.id,
+        displayNumber: run.displayNumber,
+        status: run.status,
+      },
+      sessionPatch: {
+        steps: {
+          [context.node.id]: {
+            commandRunId: run.id,
+            displayNumber: run.displayNumber,
+          },
+        },
+      },
+      links: [
+        {
+          kind: "COMMAND_RUN",
+          resourceId: run.id,
+          label: `Command #${run.displayNumber}`,
+          url: `/commands/runs/${run.id}`,
+        },
+      ],
+      wait:
+        completionMode === "WAIT_FOR_EXIT"
+          ? {
+              kind: "COMMAND_RUN",
+              externalKey: run.id,
+              resumeAfter: new Date(Date.now() + 1_000),
+            }
+          : undefined,
+    };
+  });
   executor.register("SKILL_APPLY", async (context) => {
     const run = await services.skills.prepareSync(
       context.node.config.groupId ? "GROUP" : "ALL",

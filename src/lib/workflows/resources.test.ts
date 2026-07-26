@@ -92,5 +92,10 @@ describe("workflow resource navigation", () => {
     expect(
       workflowTriggerResourceLink("SCHEDULE", { sessionData: {} }),
     ).toBeNull();
+    expect(
+      workflowTriggerResourceLink("WORKTREE_CREATED", {
+        sessionData: { worktree: { id: "worktree-1" } },
+      }),
+    ).toEqual({ kind: "WORKTREE", resourceId: "worktree-1" });
   });
 });

@@ -1378,6 +1378,7 @@ function WorktreeCard(props: WorktreeItemProps) {
             repo: {
               id: props.group.repository.id,
               name: props.group.repository.name,
+              url: props.group.repository.displayOrigin,
               displayOrigin: props.group.repository.displayOrigin,
             },
           }}
