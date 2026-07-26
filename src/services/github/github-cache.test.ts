@@ -384,23 +384,49 @@ describe("GitHubCache", () => {
       })),
     );
     await cache.query(input("PAT", vi.fn()));
+    await cache.recordRestCall({
+      authentication: "APP",
+      method: "GET",
+      endpoint: "https://api.github.com/repos/acme/widgets",
+      requestSource: "CODEBASE_REPOSITORY",
+      durationMs: 12,
+      statusCode: 200,
+    });
     const metrics = await cache.metrics();
     expect(metrics.windows[0]).toMatchObject({
       pointsUsed: 4,
       pointsAvoided: 4,
-      total: 2,
+      total: 3,
     });
-    expect(metrics.operations[0]?.operation).toBe("TestQuery");
-    expect(metrics.operations[0]?.windows[0]).toMatchObject({
+    expect(metrics.apiTypes).toHaveLength(2);
+    expect(metrics.apiTypes[0]).toMatchObject({ apiType: "GRAPHQL" });
+    expect(metrics.apiTypes[0]?.windows[0]).toMatchObject({
       total: 2,
       pointsUsed: 4,
       pointsAvoided: 4,
     });
-    expect(metrics.requestSources).toHaveLength(1);
-    expect(metrics.requestSources[0]).toMatchObject({
+    expect(metrics.apiTypes[1]).toMatchObject({ apiType: "REST" });
+    expect(metrics.apiTypes[1]?.windows[0]).toMatchObject({
+      total: 1,
+      pointsUsed: 0,
+      pointsAvoided: 0,
+    });
+    const graphqlOperation = metrics.operations.find(
+      (operation) => operation.operation === "TestQuery",
+    );
+    expect(graphqlOperation?.windows[0]).toMatchObject({
+      total: 2,
+      pointsUsed: 4,
+      pointsAvoided: 4,
+    });
+    expect(metrics.requestSources).toHaveLength(2);
+    const pullRequestSource = metrics.requestSources.find(
+      (source) => source.requestSource === "PULL_REQUESTS_PAGE",
+    );
+    expect(pullRequestSource).toMatchObject({
       requestSource: "PULL_REQUESTS_PAGE",
     });
-    expect(metrics.requestSources[0]?.windows[0]).toMatchObject({
+    expect(pullRequestSource?.windows[0]).toMatchObject({
       total: 2,
       pointsUsed: 4,
       pointsAvoided: 4,

@@ -72,6 +72,98 @@ describe("GitHubCachePage", () => {
                 pointsAvoided: 0,
               },
             ],
+            apiTypes: [
+              {
+                apiType: "GRAPHQL",
+                windows: [
+                  {
+                    window: "5m",
+                    total: 18,
+                    live: 7,
+                    cache: 11,
+                    errors: 0,
+                    averageMs: 220,
+                    pointsUsed: 3,
+                    pointsAvoided: 11,
+                  },
+                  {
+                    window: "10m",
+                    total: 139,
+                    live: 24,
+                    cache: 115,
+                    errors: 0,
+                    averageMs: 63,
+                    pointsUsed: 4,
+                    pointsAvoided: 115,
+                  },
+                  {
+                    window: "1h",
+                    total: 139,
+                    live: 24,
+                    cache: 115,
+                    errors: 0,
+                    averageMs: 63,
+                    pointsUsed: 4,
+                    pointsAvoided: 115,
+                  },
+                  {
+                    window: "24h",
+                    total: 139,
+                    live: 24,
+                    cache: 115,
+                    errors: 0,
+                    averageMs: 63,
+                    pointsUsed: 4,
+                    pointsAvoided: 115,
+                  },
+                ],
+              },
+              {
+                apiType: "REST",
+                windows: [
+                  {
+                    window: "5m",
+                    total: 4,
+                    live: 4,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 90,
+                    pointsUsed: 0,
+                    pointsAvoided: 0,
+                  },
+                  {
+                    window: "10m",
+                    total: 12,
+                    live: 12,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 82,
+                    pointsUsed: 0,
+                    pointsAvoided: 0,
+                  },
+                  {
+                    window: "1h",
+                    total: 48,
+                    live: 48,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 75,
+                    pointsUsed: 0,
+                    pointsAvoided: 0,
+                  },
+                  {
+                    window: "24h",
+                    total: 60,
+                    live: 60,
+                    cache: 0,
+                    errors: 0,
+                    averageMs: 73,
+                    pointsUsed: 0,
+                    pointsAvoided: 0,
+                  },
+                ],
+              },
+            ],
             operations: [
               {
                 operation: "Viewer",
@@ -167,7 +259,21 @@ describe("GitHubCachePage", () => {
     );
     expect(screen.getByText("Calls by source")).toBeDefined();
     expect(screen.getAllByText(/L 1 · C 0 · E 0 · P 7\/0/)).toHaveLength(2);
-    expect(screen.getByText("7 points used · 0 avoided")).toBeDefined();
+    expect(screen.getByText("3 points used · 11 avoided")).toBeDefined();
+    const graphqlRatePanel = screen
+      .getByText("GraphQL rate limits")
+      .closest('[data-slot="card"]');
+    const restRatePanel = screen
+      .getByText("REST rate limits")
+      .closest('[data-slot="card"]');
+    const graphqlMetrics = graphqlRatePanel?.querySelector(".border-t");
+    const restMetrics = restRatePanel?.querySelector(".border-t");
+    expect(graphqlMetrics?.className).toContain("grid-cols-2");
+    expect(graphqlMetrics?.children).toHaveLength(4);
+    expect(graphqlMetrics?.textContent).toContain("18");
+    expect(restMetrics?.className).toContain("grid-cols-2");
+    expect(restMetrics?.children).toHaveLength(4);
+    expect(restMetrics?.textContent).toContain("60");
     expect(screen.getAllByText("Source")).toHaveLength(2);
     expect(screen.getAllByText("Pull request details")).toHaveLength(2);
     expect(

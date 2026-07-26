@@ -89,6 +89,11 @@ export type GitHubOperationMetric = {
   windows: GitHubMetricWindow[];
 };
 
+export type GitHubApiTypeMetric = {
+  apiType: GitHubApiType;
+  windows: GitHubMetricWindow[];
+};
+
 export type GitHubRequestSourceMetric = {
   requestSource: GitHubRequestSource;
   windows: GitHubMetricWindow[];
@@ -96,6 +101,7 @@ export type GitHubRequestSourceMetric = {
 
 export type GitHubCacheMetrics = {
   windows: GitHubMetricWindow[];
+  apiTypes: GitHubApiTypeMetric[];
   operations: GitHubOperationMetric[];
   requestSources: GitHubRequestSourceMetric[];
 };

@@ -132,6 +132,11 @@ type GitHubOperationMetric {
   windows: [GitHubMetricWindow!]!
 }
 
+type GitHubApiTypeMetric {
+  apiType: GitHubApiType!
+  windows: [GitHubMetricWindow!]!
+}
+
 type GitHubRequestSourceMetric {
   requestSource: GitHubRequestSource!
   windows: [GitHubMetricWindow!]!
@@ -139,6 +144,7 @@ type GitHubRequestSourceMetric {
 
 type GitHubCacheMetrics {
   windows: [GitHubMetricWindow!]!
+  apiTypes: [GitHubApiTypeMetric!]!
   operations: [GitHubOperationMetric!]!
   requestSources: [GitHubRequestSourceMetric!]!
 }

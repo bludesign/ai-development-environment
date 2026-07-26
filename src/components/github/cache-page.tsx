@@ -159,6 +159,7 @@ export function GitHubCachePage() {
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
           githubCacheMetrics {
             windows { ${WINDOW_FIELDS} }
+            apiTypes { apiType windows { ${WINDOW_FIELDS} } }
             operations { operation windows { ${WINDOW_FIELDS} } }
             requestSources { requestSource windows { ${WINDOW_FIELDS} } }
           }
@@ -370,12 +371,10 @@ export function GitHubCachePage() {
       ) : (
         data && (
           <>
-            <RateLimitSection snapshots={data.githubRateLimitSnapshots} />
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {data.githubCacheMetrics.windows.map((window) => (
-                <MetricCard key={window.window} metric={window} />
-              ))}
-            </div>
+            <RateLimitSection
+              apiMetrics={data.githubCacheMetrics.apiTypes}
+              snapshots={data.githubRateLimitSnapshots}
+            />
             <Panel
               title={t("operationsTitle")}
               description={t("operationsDescription")}
@@ -779,8 +778,10 @@ export function GitHubCachePage() {
 }
 
 function RateLimitSection({
+  apiMetrics,
   snapshots,
 }: {
+  apiMetrics: GitHubCacheMetrics["apiTypes"];
   snapshots: GitHubRateLimitSnapshotView[];
 }) {
   const t = useTranslations("githubCache");
@@ -793,11 +794,19 @@ function RateLimitSection({
       <RateLimitPanel
         title={t("graphqlRateTitle")}
         description={t("graphqlRateDescription")}
+        metrics={
+          apiMetrics.find((metrics) => metrics.apiType === "GRAPHQL")
+            ?.windows ?? []
+        }
         snapshots={graphql}
       />
       <RateLimitPanel
         title={t("restRateTitle")}
         description={t("restRateDescription")}
+        metrics={
+          apiMetrics.find((metrics) => metrics.apiType === "REST")?.windows ??
+          []
+        }
         snapshots={rest}
       />
     </div>
@@ -807,55 +816,64 @@ function RateLimitSection({
 function RateLimitPanel({
   title,
   description,
+  metrics,
   snapshots,
 }: {
   title: string;
   description: string;
+  metrics: GitHubMetricWindow[];
   snapshots: GitHubRateLimitSnapshotView[];
 }) {
   const t = useTranslations("githubCache");
   return (
     <Panel title={title} description={description}>
-      {snapshots.length === 0 ? (
-        <EmptyState>{t("noRateData")}</EmptyState>
-      ) : (
-        <div
-          className={`grid gap-3 p-4 ${snapshots.length > 1 ? "sm:grid-cols-2" : ""}`}
-        >
-          {snapshots.map((snapshot) => (
-            <Card key={`${snapshot.authentication}-${snapshot.resource}`}>
-              <CardContent>
-                <div className="flex justify-between">
-                  <span className="font-medium">
-                    {snapshot.authentication} · {snapshot.resource}
-                  </span>
-                  <Badge variant="outline">
-                    {snapshot.remaining} / {snapshot.limit}
-                  </Badge>
-                </div>
-                <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <dt className="text-muted-foreground">{t("limit")}</dt>
-                  <dd>{snapshot.limit}</dd>
-                  <dt className="text-muted-foreground">{t("remaining")}</dt>
-                  <dd>{snapshot.remaining}</dd>
-                  <dt className="text-muted-foreground">{t("used")}</dt>
-                  <dd>{snapshot.used}</dd>
-                  <dt className="text-muted-foreground">{t("reset")}</dt>
-                  <dd>
-                    <DateTime value={snapshot.resetAt} />
-                  </dd>
-                  <dt className="text-muted-foreground">{t("resource")}</dt>
-                  <dd>{snapshot.resource}</dd>
-                  <dt className="text-muted-foreground">{t("observed")}</dt>
-                  <dd>
-                    <DateTime value={snapshot.observedAt} />
-                  </dd>
-                </dl>
-              </CardContent>
-            </Card>
+      <div>
+        {snapshots.length === 0 ? (
+          <EmptyState>{t("noRateData")}</EmptyState>
+        ) : (
+          <div
+            className={`grid gap-3 p-4 ${snapshots.length > 1 ? "sm:grid-cols-2" : ""}`}
+          >
+            {snapshots.map((snapshot) => (
+              <Card key={`${snapshot.authentication}-${snapshot.resource}`}>
+                <CardContent>
+                  <div className="flex justify-between">
+                    <span className="font-medium">
+                      {snapshot.authentication} · {snapshot.resource}
+                    </span>
+                    <Badge variant="outline">
+                      {snapshot.remaining} / {snapshot.limit}
+                    </Badge>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <dt className="text-muted-foreground">{t("limit")}</dt>
+                    <dd>{snapshot.limit}</dd>
+                    <dt className="text-muted-foreground">{t("remaining")}</dt>
+                    <dd>{snapshot.remaining}</dd>
+                    <dt className="text-muted-foreground">{t("used")}</dt>
+                    <dd>{snapshot.used}</dd>
+                    <dt className="text-muted-foreground">{t("reset")}</dt>
+                    <dd>
+                      <DateTime value={snapshot.resetAt} />
+                    </dd>
+                    <dt className="text-muted-foreground">{t("resource")}</dt>
+                    <dd>{snapshot.resource}</dd>
+                    <dt className="text-muted-foreground">{t("observed")}</dt>
+                    <dd>
+                      <DateTime value={snapshot.observedAt} />
+                    </dd>
+                  </dl>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3 border-t p-4">
+          {metrics.map((metric) => (
+            <MetricCard key={metric.window} metric={metric} />
           ))}
         </div>
-      )}
+      </div>
     </Panel>
   );
 }

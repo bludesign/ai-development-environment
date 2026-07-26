@@ -9,6 +9,7 @@ import type {
   GitHubApiCallView,
   GitHubApiCallFilters,
   GitHubApiType,
+  GitHubApiTypeMetric,
   GitHubAuthentication,
   GitHubCachedEntryDetail,
   GitHubCachedEntryView,
@@ -589,6 +590,21 @@ export class GitHubCache {
         ),
       ),
     );
+    const apiTypes: GitHubApiTypeMetric[] = (["GRAPHQL", "REST"] as const).map(
+      (apiType) => ({
+        apiType,
+        windows: WINDOW_DEFINITIONS.map((definition) =>
+          this.metricWindow(
+            definition.window,
+            calls.filter(
+              (call) =>
+                call.apiType === apiType &&
+                call.createdAt.getTime() >= now - definition.milliseconds,
+            ),
+          ),
+        ),
+      }),
+    );
     const operations = [...new Set(calls.map((call) => call.operation))].sort();
     const operationRows: GitHubOperationMetric[] = operations.map(
       (operation) => ({
@@ -625,6 +641,7 @@ export class GitHubCache {
     );
     return {
       windows,
+      apiTypes,
       operations: operationRows,
       requestSources: requestSourceRows,
     };
