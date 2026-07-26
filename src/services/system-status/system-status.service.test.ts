@@ -137,4 +137,34 @@ describe("SystemStatusService", () => {
       },
     });
   });
+
+  test("starts polling when interrupted-collection cleanup fails", async () => {
+    const cleanupError = new Error("CcusageCollection table does not exist");
+    getPrismaClient.mockResolvedValue({
+      ccusageCollection: {
+        findMany: vi.fn().mockRejectedValue(cleanupError),
+      },
+    });
+    const polling = {
+      register: vi.fn(),
+      schedule: vi.fn(),
+      run: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PollingService;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { ccusage, diskSpace } = dependencies();
+    const service = new SystemStatusService(ccusage, diskSpace, polling);
+
+    service.startRuntime();
+
+    await vi.waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "Sidebar usage cleanup failed:",
+        cleanupError.message,
+      );
+      expect(polling.run).toHaveBeenCalledOnce();
+    });
+    service.stopRuntime();
+  });
 });

@@ -350,6 +350,13 @@ afterEach(() => {
 });
 
 describe("BuildDetailPage", () => {
+  test("links to the localized raw build output", async () => {
+    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+
+    const link = await screen.findByRole("link", { name: "View raw output" });
+    expect(link.getAttribute("href")).toBe("/en/builds/build-1/output");
+  });
+
   test("shows the build ID, downloads artifacts, and deletes the build", async () => {
     render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
 

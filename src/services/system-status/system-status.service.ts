@@ -59,7 +59,14 @@ export class SystemStatusService {
       cadenceSeconds: USAGE_POLL_SECONDS,
       details: {},
     });
-    void this.pruneInterruptedCollections().finally(() => this.runUsagePoll());
+    void this.pruneInterruptedCollections()
+      .catch((error) => {
+        console.error(
+          "Sidebar usage cleanup failed:",
+          error instanceof Error ? error.message : error,
+        );
+      })
+      .finally(() => void this.runUsagePoll());
   }
 
   stopRuntime(): void {

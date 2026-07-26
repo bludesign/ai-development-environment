@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   Blocks,
   BellRing,
@@ -40,6 +40,15 @@ import {
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import {
+  Breadcrumb,
+  BreadcrumbEllipsis,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
 import {
@@ -57,6 +66,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Link, usePathname } from "@/i18n/navigation";
+import { buildAppBreadcrumbs, type AppBreadcrumb } from "@/lib/breadcrumbs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
 
@@ -161,7 +171,7 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 shrink-0 border-b bg-background/90 backdrop-blur-xl backdrop-saturate-150 supports-backdrop-filter:bg-background/70">
       <div aria-hidden="true" className="h-[env(safe-area-inset-top)]" />
-      <div className="flex h-14 items-center justify-between pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
+      <div className="flex h-14 items-center gap-2 pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
         <SidebarToggle
           expanded={leftOpen}
           hideLabel={t("hideNavigation")}
@@ -169,6 +179,7 @@ function AppHeader({
           showLabel={t("showNavigation")}
           side="left"
         />
+        <AppBreadcrumbs />
         <SidebarToggle
           expanded={rightOpen}
           hideLabel={t("hideNotifications")}
@@ -178,6 +189,88 @@ function AppHeader({
         />
       </div>
     </header>
+  );
+}
+
+function HeaderBreadcrumbItem({
+  breadcrumb,
+  className,
+}: {
+  breadcrumb: AppBreadcrumb;
+  className?: string;
+}) {
+  const labelClassName = "block max-w-48 truncate lg:max-w-64";
+
+  return (
+    <BreadcrumbItem className={`min-w-0 ${className ?? ""}`}>
+      {breadcrumb.isCurrent ? (
+        <BreadcrumbPage className={labelClassName}>
+          {breadcrumb.label}
+        </BreadcrumbPage>
+      ) : breadcrumb.href ? (
+        <BreadcrumbLink asChild className={labelClassName}>
+          <Link href={breadcrumb.href}>{breadcrumb.label}</Link>
+        </BreadcrumbLink>
+      ) : (
+        <span className={`${labelClassName} text-muted-foreground`}>
+          {breadcrumb.label}
+        </span>
+      )}
+    </BreadcrumbItem>
+  );
+}
+
+function AppBreadcrumbs() {
+  const pathname = usePathname();
+  const t = useTranslations("shell");
+  const breadcrumbs = buildAppBreadcrumbs(pathname, (key) => t(key));
+  const lastIndex = breadcrumbs.length - 1;
+
+  return (
+    <Breadcrumb
+      aria-label={t("breadcrumbLabel")}
+      className="min-w-0 flex-1 overflow-hidden pl-1"
+    >
+      <BreadcrumbList className="flex-nowrap overflow-hidden">
+        {breadcrumbs.length <= 2 ? (
+          breadcrumbs.map((breadcrumb, index) => (
+            <Fragment key={`${breadcrumb.label}:${index}`}>
+              {index > 0 && <BreadcrumbSeparator />}
+              <HeaderBreadcrumbItem
+                breadcrumb={breadcrumb}
+                className={index === lastIndex ? "flex-1" : "shrink-0"}
+              />
+            </Fragment>
+          ))
+        ) : (
+          <>
+            <HeaderBreadcrumbItem
+              breadcrumb={breadcrumbs[0]}
+              className="shrink-0"
+            />
+            <BreadcrumbSeparator className="sm:hidden" />
+            <BreadcrumbItem className="sm:hidden">
+              <BreadcrumbEllipsis />
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="sm:hidden" />
+            {breadcrumbs.slice(1, lastIndex).map((breadcrumb, index) => (
+              <Fragment key={`${breadcrumb.label}:${index + 1}`}>
+                <BreadcrumbSeparator className="hidden sm:inline-flex" />
+                <HeaderBreadcrumbItem
+                  breadcrumb={breadcrumb}
+                  className="hidden shrink-0 sm:inline-flex"
+                />
+              </Fragment>
+            ))}
+            <BreadcrumbSeparator className="hidden sm:inline-flex" />
+            <HeaderBreadcrumbItem
+              breadcrumb={breadcrumbs[lastIndex]}
+              className="flex-1"
+            />
+          </>
+        )}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 }
 

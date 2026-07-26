@@ -4,12 +4,27 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AppShell } from "@/components/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
+
+const navigation = vi.hoisted(() => ({ pathname: "/" }));
+
+vi.mock("@/i18n/navigation", async () => {
+  const React = await import("react");
+  return {
+    Link: ({
+      href,
+      ...props
+    }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
+      React.createElement("a", { href, ...props }),
+    usePathname: () => navigation.pathname,
+  };
+});
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn().mockResolvedValue({ sidebarNotifications: [] }),
@@ -66,6 +81,7 @@ function clearCookies() {
 describe("AppShell", () => {
   beforeEach(() => {
     setViewportWidth(1280);
+    navigation.pathname = "/";
     clearCookies();
   });
 
@@ -132,6 +148,62 @@ describe("AppShell", () => {
     expect(main.className).toContain("overflow-y-auto");
     expect(main.querySelector("header")).toBeNull();
     expect(main.previousElementSibling?.tagName).toBe("HEADER");
+  });
+
+  test("left-aligns the accessible breadcrumb between the edge toggles", () => {
+    renderShell();
+
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    const header = breadcrumb.closest("header");
+    const navigationToggle = screen.getByRole("button", {
+      name: "Hide navigation",
+    });
+    const notificationsToggle = screen.getByRole("button", {
+      name: "Hide notifications",
+    });
+
+    expect(
+      within(breadcrumb).getByText("Welcome").getAttribute("aria-current"),
+    ).toBe("page");
+    expect(breadcrumb.className).toContain("flex-1");
+    expect(
+      navigationToggle.compareDocumentPosition(breadcrumb) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      breadcrumb.compareDocumentPosition(notificationsToggle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(header).not.toBeNull();
+  });
+
+  test("compacts deep breadcrumbs on small screens without invalid links", () => {
+    navigation.pathname = "/pull-requests/acme/widgets/42";
+    setViewportWidth(375);
+    renderShell();
+
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    expect(
+      within(breadcrumb)
+        .getByRole("link", { name: "Pull Requests" })
+        .getAttribute("href"),
+    ).toBe("/pull-requests");
+    expect(within(breadcrumb).queryByRole("link", { name: "acme" })).toBeNull();
+    expect(
+      within(breadcrumb).getByText("acme").parentElement?.className,
+    ).toContain("hidden");
+    expect(
+      within(breadcrumb)
+        .getByText("More")
+        .closest('[data-slot="breadcrumb-item"]')?.className,
+    ).toContain("sm:hidden");
+    expect(
+      within(breadcrumb).getByText("42").getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   test("owns consistent page gutters and removes page-level width caps", () => {

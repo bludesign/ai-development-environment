@@ -198,6 +198,7 @@ export function BuildDetailPage({
   publicOrigin: PublicOrigin | null;
 }) {
   const t = useTranslations("builds");
+  const locale = useLocale();
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
   const [logState, setLogState] = useState<{
@@ -687,6 +688,8 @@ export function BuildDetailPage({
             onOpenChange={setLogsOpen}
             open={logsOpen}
             previousMatchLabel={t("previousTerminalMatch")}
+            rawOutputHref={`/${locale}/builds/${encodeURIComponent(buildId)}/output`}
+            rawOutputLabel={t("viewRawOutput")}
             searchLabel={t("searchTerminal")}
             sourceKey={buildId}
             title={t("logs")}
