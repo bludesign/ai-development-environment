@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+
 const state = vi.hoisted(() => ({
   apiToken: "secret-token" as string | null,
   webhookSecret: null as string | null,
@@ -1144,6 +1146,7 @@ describe("GitHub service", () => {
         authentication: "PAT",
         method: "GET",
         endpoint: expect.stringContaining("/actions/runs/44/jobs"),
+        operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
         statusCode: 200,
       }),
     );

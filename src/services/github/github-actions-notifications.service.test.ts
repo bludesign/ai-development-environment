@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+
 const mocks = vi.hoisted(() => ({
   getPrismaClient: vi.fn(),
   recordRestCall: vi.fn(async () => undefined),
@@ -583,6 +585,7 @@ describe("GitHub Actions fallback polling", () => {
         authentication: "PAT",
         method: "GET",
         endpoint: expect.stringContaining("page=2"),
+        operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
         requestSource: "ACTIONS_NOTIFICATIONS",
         statusCode: 200,
       }),

@@ -70,6 +70,10 @@ import {
   prepareGitHubGraphql,
 } from "./github-graphql";
 import {
+  GITHUB_REST_OPERATIONS,
+  type GitHubRestOperation,
+} from "./github-rest-operations";
+import {
   listGitHubRateLimitSnapshots,
   observeGitHubRateLimit,
   type GitHubRateLimitMetadata,
@@ -1161,6 +1165,7 @@ export class GitHubService {
 
   private async restRequest<T>(
     url: string,
+    operation: GitHubRestOperation,
     token: string,
     requestSource: GitHubRequestSource,
   ): Promise<T> {
@@ -1175,6 +1180,7 @@ export class GitHubService {
           authentication: "PAT",
           method: "GET",
           endpoint: url,
+          operation,
           requestSource,
           durationMs: Date.now() - startedAt,
           ...input,
@@ -1345,6 +1351,7 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
           repository,
         )}/actions/runs/${encodeURIComponent(workflowRunId)}/jobs?filter=${filter}&per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
         token,
         requestSource,
       );
@@ -1376,6 +1383,7 @@ export class GitHubService {
         )}/${encodeURIComponent(target.name)}/commits/${encodeURIComponent(
           run.head_sha,
         )}/pulls?per_page=100`,
+        GITHUB_REST_OPERATIONS.repos.listPullRequestsAssociatedWithCommit,
         token,
         requestSource,
       );
@@ -1758,6 +1766,7 @@ export class GitHubService {
       requestObserver: (observation: {
         url: string;
         method: string;
+        operation: GitHubRestOperation | null;
         requestSource: GitHubRequestSource;
         body: string | null;
         durationMs: number;
@@ -1799,10 +1808,12 @@ export class GitHubService {
             rateLimit: observation.rateLimit,
           });
         }
+        if (!observation.operation) return;
         return this.cache.recordRestCall({
           authentication: "APP",
           method: observation.method,
           endpoint: observation.url,
+          operation: observation.operation,
           requestSource: observation.requestSource,
           durationMs: observation.durationMs,
           statusCode: observation.statusCode,
@@ -2222,6 +2233,9 @@ export class GitHubService {
           const workflowPath = selectedWorkflowId
             ? `/actions/workflows/${encodeURIComponent(selectedWorkflowId)}/runs`
             : "/actions/runs";
+          const operation = selectedWorkflowId
+            ? GITHUB_REST_OPERATIONS.actions.listWorkflowRuns
+            : GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo;
           const result = await this.restRequest<{
             total_count: number;
             workflow_runs: RawActionsWorkflowRun[];
@@ -2235,6 +2249,7 @@ export class GitHubService {
                 ? `&branch=${encodeURIComponent(selectedBranch)}`
                 : ""
             }`,
+            operation,
             token,
             requestSource,
           );
@@ -2533,6 +2548,7 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}/jobs?per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRunAttempt,
         token,
         requestSource,
       );
@@ -2569,6 +2585,7 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs/${encodeURIComponent(workflowRunId)}/attempts/${attempt}`,
+      GITHUB_REST_OPERATIONS.actions.getWorkflowRunAttempt,
       token,
       requestSource,
     );
@@ -2653,6 +2670,7 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs?head_sha=${encodeURIComponent(worktree.headSha)}&per_page=100`,
+      GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       token,
       "WORKTREE_PIPELINES",
     );
@@ -2664,6 +2682,7 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/runs?branch=${encodeURIComponent(worktree.branch)}&per_page=100`,
+        GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
         token,
         "WORKTREE_PIPELINES",
       );
@@ -2734,6 +2753,7 @@ export class GitHubService {
         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
           target.name,
         )}/actions/workflows?per_page=100&page=${page}`,
+        GITHUB_REST_OPERATIONS.actions.listRepoWorkflows,
         token,
         requestSource,
       );
@@ -2750,6 +2770,7 @@ export class GitHubService {
           `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
             target.name,
           )}/actions/workflows/${encodeURIComponent(String(workflow.id))}/runs?per_page=1`,
+          GITHUB_REST_OPERATIONS.actions.listWorkflowRuns,
           token,
           requestSource,
         );
@@ -2794,6 +2815,7 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs?per_page=100`,
+      GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       token,
       "AUTO_RETRY",
     );
@@ -2861,6 +2883,7 @@ export class GitHubService {
       `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
         target.name,
       )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+      GITHUB_REST_OPERATIONS.actions.getWorkflowRun,
       token,
       requestSource,
     );
@@ -4470,6 +4493,7 @@ export class GitHubService {
             `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
               name,
             )}/actions/runs/${encodeURIComponent(workflowRunId)}`,
+            GITHUB_REST_OPERATIONS.actions.getWorkflowRun,
             token,
             requestSource,
           );
@@ -4666,6 +4690,7 @@ export class GitHubService {
         Array<{ email: string; verified: boolean; primary: boolean }>
       >(
         `${GITHUB_API_BASE_URL}/user/emails?per_page=100`,
+        GITHUB_REST_OPERATIONS.users.listEmailsForAuthenticatedUser,
         token,
         requestSource,
       );

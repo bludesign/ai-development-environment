@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
+
 type CacheEntry = {
   id: string;
   cacheKey: string;
@@ -446,7 +448,8 @@ describe("GitHubCache", () => {
     await cache.recordRestCall({
       authentication: "APP",
       method: "GET",
-      endpoint: "https://api.github.com/repos/acme/widgets",
+      endpoint: "https://api.github.com/repos/acme/widgets/actions/runs",
+      operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       requestSource: "CODEBASE_REPOSITORY",
       durationMs: 12,
       statusCode: 200,
@@ -573,6 +576,7 @@ describe("GitHubCache", () => {
       method: "GET",
       endpoint:
         "https://api.github.com/repos/acme/widgets/actions/runs/44/jobs?page=2",
+      operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
       requestSource: "ACTIONS_PAGE",
       durationMs: 12,
       statusCode: 200,
@@ -591,7 +595,7 @@ describe("GitHubCache", () => {
       authentication: "APP",
       apiType: "REST",
       method: "GET",
-      operation: "GET /repos/acme/widgets/actions/runs/44/jobs",
+      operation: "actions.listJobsForWorkflowRun",
       requestSource: "ACTIONS_PAGE",
     });
     expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({
@@ -609,6 +613,54 @@ describe("GitHubCache", () => {
     });
   });
 
+  test("aggregates REST metrics by canonical operation across concrete endpoints", async () => {
+    const cache = new GitHubCache();
+    for (const endpoint of [
+      "https://api.github.com/repos/acme/widgets/actions/runs/44/jobs?page=1",
+      "https://api.github.com/repos/octo/platform/actions/runs/99/jobs?page=2",
+    ]) {
+      await cache.recordRestCall({
+        authentication: "PAT",
+        method: "GET",
+        endpoint,
+        operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
+        requestSource: "ACTIONS_PAGE",
+        durationMs: 10,
+        statusCode: 200,
+      });
+    }
+
+    const calls = await cache.calls();
+    expect(calls.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          endpoint:
+            "https://api.github.com/repos/octo/platform/actions/runs/99/jobs?page=2",
+          operation: "actions.listJobsForWorkflowRun",
+          variables: {
+            path: "/repos/octo/platform/actions/runs/99/jobs",
+            query: { page: "2" },
+          },
+        }),
+        expect.objectContaining({
+          endpoint:
+            "https://api.github.com/repos/acme/widgets/actions/runs/44/jobs?page=1",
+          operation: "actions.listJobsForWorkflowRun",
+          variables: {
+            path: "/repos/acme/widgets/actions/runs/44/jobs",
+            query: { page: "1" },
+          },
+        }),
+      ]),
+    );
+    const metrics = await cache.metrics();
+    expect(
+      metrics.operations.find(
+        ({ operation }) => operation === "actions.listJobsForWorkflowRun",
+      )?.windows[0],
+    ).toMatchObject({ total: 2, live: 2 });
+  });
+
   test("filters paginated API calls by API type, request source, and live/cache source", async () => {
     const cache = new GitHubCache();
     const fetcher = vi.fn(async () => ({
@@ -622,7 +674,8 @@ describe("GitHubCache", () => {
     await cache.recordRestCall({
       authentication: "APP",
       method: "GET",
-      endpoint: "https://api.github.com/repos/acme/widgets",
+      endpoint: "https://api.github.com/repos/acme/widgets/actions/runs",
+      operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
       requestSource: "CODEBASE_REPOSITORY",
       durationMs: 12,
       statusCode: 200,

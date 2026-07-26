@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { getPrismaClient } from "@/data/prisma-client";
 
 import type { GitHubRateLimitMetadata } from "./github-rate-limit";
+import type { GitHubRestOperation } from "./github-rest-operations";
 import type {
   GitHubApiCallView,
   GitHubApiCallFilters,
@@ -496,6 +497,7 @@ export class GitHubCache {
     authentication: GitHubAuthentication;
     method: string;
     endpoint: string;
+    operation: GitHubRestOperation;
     requestSource: GitHubRequestSource;
     durationMs: number;
     statusCode?: number | null;
@@ -519,7 +521,7 @@ export class GitHubCache {
       apiType: "REST",
       method: input.method.toUpperCase(),
       endpoint: input.endpoint,
-      operation: `${input.method.toUpperCase()} ${path}`,
+      operation: input.operation,
       requestSource: input.requestSource,
       requestSummary: `${input.method.toUpperCase()} ${path}`,
       variables,

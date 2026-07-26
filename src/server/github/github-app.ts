@@ -13,6 +13,10 @@ import {
   parseGitHubRateLimitHeaders,
   type GitHubRateLimitMetadata,
 } from "@/services/github/github-rate-limit";
+import {
+  GITHUB_REST_OPERATIONS,
+  type GitHubRestOperation,
+} from "@/services/github/github-rest-operations";
 import type { GitHubRequestSource } from "@/services/github/types";
 
 const GITHUB_API_VERSION = "2022-11-28";
@@ -68,6 +72,7 @@ export type GitHubAppCredentials = {
 export type GitHubAppRequestObservation = {
   url: string;
   method: string;
+  operation: GitHubRestOperation | null;
   requestSource: GitHubRequestSource;
   body: string | null;
   durationMs: number;
@@ -234,6 +239,7 @@ function githubHeaders(authorization: string): Record<string, string> {
 async function githubFetch(
   url: string,
   init: RequestInit,
+  operation: GitHubRestOperation | null,
   observers: Pick<
     GitHubAppCredentials,
     "graphqlUrl" | "responseObserver" | "requestObserver"
@@ -255,6 +261,7 @@ async function githubFetch(
         observers.requestObserver({
           url,
           method,
+          operation,
           requestSource,
           body: requestBody,
           durationMs: Date.now() - startedAt,
@@ -279,6 +286,7 @@ async function githubFetch(
       observers.requestObserver({
         url,
         method,
+        operation,
         requestSource,
         body: requestBody,
         durationMs: Date.now() - startedAt,
@@ -330,6 +338,7 @@ async function installationDetails(
   const response = await githubFetch(
     `${prepared.apiBaseUrl}/app/installations/${prepared.installationId}`,
     { headers: githubHeaders(`Bearer ${appJwt}`) },
+    GITHUB_REST_OPERATIONS.apps.getInstallation,
     prepared,
     "GITHUB_SETTINGS",
   );
@@ -383,6 +392,7 @@ async function mintInstallationToken(
       method: "POST",
       headers: githubHeaders(`Bearer ${jwt}`),
     },
+    GITHUB_REST_OPERATIONS.apps.createInstallationAccessToken,
     prepared,
     requestSource,
   );
@@ -511,6 +521,7 @@ export async function githubAppGraphql<T>(
           },
           body: JSON.stringify({ query, variables }),
         },
+        null,
         credentials,
         requestSource,
       ),
@@ -608,6 +619,7 @@ export async function configureGitHubAppWebhook(
         insecure_ssl: "0",
       }),
     },
+    GITHUB_REST_OPERATIONS.apps.updateWebhookConfigForApp,
     prepared,
     "GITHUB_SETTINGS",
   );
@@ -653,6 +665,7 @@ export async function rerunGitHubActionsWorkflow(
           method: "POST",
           headers: githubHeaders(`Bearer ${token}`),
         },
+        GITHUB_REST_OPERATIONS.actions.reRunWorkflow,
         credentials,
         input.requestSource,
       ),
@@ -708,6 +721,7 @@ export async function rerunGitHubActionsFailedJobs(
           method: "POST",
           headers: githubHeaders(`Bearer ${token}`),
         },
+        GITHUB_REST_OPERATIONS.actions.reRunWorkflowFailedJobs,
         credentials,
         input.requestSource,
       ),
@@ -744,6 +758,9 @@ export async function cancelGitHubActionsWorkflow(
   },
 ): Promise<{ githubRequestId: string | null }> {
   const operation = input.force ? "force-cancel" : "cancel";
+  const restOperation = input.force
+    ? GITHUB_REST_OPERATIONS.actions.forceCancelWorkflowRun
+    : GITHUB_REST_OPERATIONS.actions.cancelWorkflowRun;
   const url = `${credentials.apiBaseUrl}/repos/${encodeURIComponent(
     input.owner,
   )}/${encodeURIComponent(input.repository)}/actions/runs/${encodeURIComponent(
@@ -758,6 +775,7 @@ export async function cancelGitHubActionsWorkflow(
           method: "POST",
           headers: githubHeaders(`Bearer ${token}`),
         },
+        restOperation,
         credentials,
         input.requestSource,
       ),
@@ -814,6 +832,7 @@ export async function listGitHubActionsWorkflowJobs(
         githubFetch(
           url,
           { headers: githubHeaders(`Bearer ${token}`) },
+          GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
           credentials,
           input.requestSource,
         ),
@@ -874,6 +893,7 @@ export async function rerunGitHubActionsJob(
       githubFetch(
         jobUrl,
         { headers: githubHeaders(`Bearer ${token}`) },
+        GITHUB_REST_OPERATIONS.actions.getJobForWorkflowRun,
         credentials,
         input.requestSource,
       ),
@@ -927,6 +947,7 @@ export async function rerunGitHubActionsJob(
           method: "POST",
           headers: githubHeaders(`Bearer ${token}`),
         },
+        GITHUB_REST_OPERATIONS.actions.reRunJobForWorkflowRun,
         credentials,
         input.requestSource,
       ),

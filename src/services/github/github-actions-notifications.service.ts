@@ -17,6 +17,7 @@ import {
   observeGitHubRateLimit,
   type GitHubRateLimitMetadata,
 } from "./github-rate-limit";
+import { GITHUB_REST_OPERATIONS } from "./github-rest-operations";
 
 const OPERATION_ID = "server:github-actions-notifications";
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -581,6 +582,7 @@ export class GitHubActionsNotificationsService {
             authentication: "PAT",
             method: "GET",
             endpoint: url,
+            operation: GITHUB_REST_OPERATIONS.actions.listWorkflowRunsForRepo,
             requestSource: "ACTIONS_NOTIFICATIONS",
             durationMs: Date.now() - startedAt,
             ...input,

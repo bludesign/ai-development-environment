@@ -5,6 +5,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { GITHUB_REST_OPERATIONS } from "@/services/github/github-rest-operations";
+
 import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
@@ -83,6 +85,7 @@ describe("GitHub App authentication", () => {
       expect.objectContaining({
         url: "https://api.github.com/app/hook/config",
         method: "PATCH",
+        operation: GITHUB_REST_OPERATIONS.apps.updateWebhookConfigForApp,
         body: null,
         statusCode: 404,
         error: "GitHub returned HTTP 404",
@@ -209,6 +212,7 @@ describe("GitHub App authentication", () => {
       expect.objectContaining({
         url: "https://api.github.com/app/installations/456/access_tokens",
         method: "POST",
+        operation: GITHUB_REST_OPERATIONS.apps.createInstallationAccessToken,
         requestSource: "PULL_REQUEST_DETAILS",
         body: null,
         statusCode: 200,
@@ -218,6 +222,7 @@ describe("GitHub App authentication", () => {
       expect.objectContaining({
         url: "https://api.github.com/graphql",
         method: "POST",
+        operation: null,
         requestSource: "PULL_REQUEST_DETAILS",
         body: expect.stringContaining('"id":"PR_kwDO123"'),
         statusCode: 200,
@@ -369,6 +374,7 @@ describe("GitHub App authentication", () => {
   );
 
   test("lists workflow jobs with the installation token", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/access_tokens")) return tokenResponse();
       if (url.includes("/actions/runs/987/jobs")) {
@@ -394,16 +400,26 @@ describe("GitHub App authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      listGitHubActionsWorkflowJobs(credentials, {
-        owner: "acme",
-        repository: "widgets",
-        workflowRunId: "987",
-        requestSource: "ACTIONS_PAGE",
-      }),
+      listGitHubActionsWorkflowJobs(
+        { ...credentials, requestObserver },
+        {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          requestSource: "ACTIONS_PAGE",
+        },
+      ),
     ).resolves.toEqual([expect.objectContaining({ id: 11, name: "test" })]);
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.listJobsForWorkflowRun,
+        url: expect.stringContaining("/actions/runs/987/jobs"),
+      }),
+    );
   });
 
   test("verifies a job belongs to the workflow run before rerunning it", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/access_tokens")) return tokenResponse();
       if (url.endsWith("/actions/jobs/11")) {
@@ -418,14 +434,27 @@ describe("GitHub App authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      rerunGitHubActionsJob(credentials, {
-        owner: "acme",
-        repository: "widgets",
-        workflowRunId: "987",
-        jobId: "11",
-        requestSource: "ACTIONS_PAGE",
-      }),
+      rerunGitHubActionsJob(
+        { ...credentials, requestObserver },
+        {
+          owner: "acme",
+          repository: "widgets",
+          workflowRunId: "987",
+          jobId: "11",
+          requestSource: "ACTIONS_PAGE",
+        },
+      ),
     ).resolves.toEqual({ githubRequestId: "JOB-RERUN-1" });
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.getJobForWorkflowRun,
+      }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: GITHUB_REST_OPERATIONS.actions.reRunJobForWorkflowRun,
+      }),
+    );
   });
 
   test("rejects a job from another workflow run", async () => {
