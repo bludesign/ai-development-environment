@@ -55,7 +55,7 @@ const overview = {
         connectionStatus: "ONLINE",
       },
       enabled: true,
-      status: "IDLE",
+      status: "PRESSURE",
       pressureMode: "MANUAL",
       manualPressureMode: true,
       automaticPressureMode: false,
@@ -146,7 +146,7 @@ describe("DiskSpaceMonitor", () => {
     );
   });
 
-  test("renders agent controls as green toggle buttons", async () => {
+  test("renders the active monitor green and pressure controls yellow", async () => {
     render(<DiskSpaceMonitor />);
 
     const monitor = await screen.findByRole("button", {
@@ -157,7 +157,12 @@ describe("DiskSpaceMonitor", () => {
     expect(monitor.getAttribute("aria-pressed")).toBe("true");
     expect(pressure.getAttribute("aria-pressed")).toBe("true");
     expect(monitor.className).toContain("bg-emerald-500/10");
-    expect(pressure.className).toContain("bg-emerald-500/10");
+    expect(pressure.className).toContain("bg-amber-500/10");
+
+    expect(screen.getByText("Pressure").className).toContain("bg-amber-500/10");
+    expect(screen.getByText("Manual pressure").className).toContain(
+      "bg-amber-500/10",
+    );
 
     fireEvent.click(monitor);
     await waitFor(() =>

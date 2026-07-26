@@ -39,6 +39,8 @@ import { VolumeBar } from "./volume-bar";
 
 const ACTIVE_CONTROL_CLASS =
   "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300";
+const ACTIVE_PRESSURE_CLASS =
+  "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 hover:text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20 dark:hover:text-amber-300";
 
 export function DiskSpaceMonitor() {
   const t = useTranslations("diskSpace");
@@ -216,11 +218,23 @@ export function DiskSpaceMonitor() {
                         {agent.agent.name}
                       </Link>
                       <div className="mt-1 flex flex-wrap gap-1.5">
-                        <Badge variant="secondary">
+                        <Badge
+                          className={
+                            agent.status === "PRESSURE"
+                              ? ACTIVE_PRESSURE_CLASS
+                              : undefined
+                          }
+                          variant={
+                            agent.status === "PRESSURE" ? "outline" : "secondary"
+                          }
+                        >
                           {t(`status.${agent.status}`)}
                         </Badge>
                         {agent.pressureMode !== "NORMAL" && (
-                          <Badge variant="outline">
+                          <Badge
+                            className={ACTIVE_PRESSURE_CLASS}
+                            variant="outline"
+                          >
                             {t(`pressureMode.${agent.pressureMode}`)}
                           </Badge>
                         )}
@@ -255,7 +269,7 @@ export function DiskSpaceMonitor() {
                         aria-pressed={agent.manualPressureMode}
                         className={
                           agent.manualPressureMode
-                            ? ACTIVE_CONTROL_CLASS
+                            ? ACTIVE_PRESSURE_CLASS
                             : undefined
                         }
                         disabled={!agent.enabled || busy !== null}

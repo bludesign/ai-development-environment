@@ -12,8 +12,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -66,6 +64,9 @@ const STATUS_PRIORITY: Record<DiskSpaceStatus, number> = {
   DISABLED: 2,
   IDLE: 1,
 };
+
+const ACTIVE_PRESSURE_CLASS =
+  "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 hover:text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20 dark:hover:text-amber-300";
 
 function ringColor(status: DiskSpaceStatus): string {
   if (status === "CRITICAL" || status === "ERROR") return "var(--destructive)";
@@ -257,8 +258,19 @@ export function SidebarStatusFooter() {
         >
           <PopoverHeader>
             <div className="flex items-center justify-between gap-2">
-              <PopoverTitle>{t("freeDiskSpace")}</PopoverTitle>
-              <Badge variant="secondary" className={diskStatusColor(overall)}>
+              <PopoverTitle>
+                <Link className="hover:underline" href="/build-data">
+                  {t("freeDiskSpace")}
+                </Link>
+              </PopoverTitle>
+              <Badge
+                className={
+                  overall === "PRESSURE"
+                    ? ACTIVE_PRESSURE_CLASS
+                    : diskStatusColor(overall)
+                }
+                variant={overall === "PRESSURE" ? "outline" : "secondary"}
+              >
                 {t(`status.${overall}`)}
               </Badge>
             </div>
@@ -287,19 +299,40 @@ export function SidebarStatusFooter() {
                   >
                     {agent.agent.name}
                   </Link>
-                  <Badge variant="outline">{t(`status.${agent.status}`)}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      aria-pressed={agent.manualPressureMode}
+                      className={
+                        agent.manualPressureMode
+                          ? ACTIVE_PRESSURE_CLASS
+                          : undefined
+                      }
+                      disabled={!agent.enabled || busy !== null}
+                      onClick={() =>
+                        void setPressure(
+                          agent.agent.id,
+                          !agent.manualPressureMode,
+                        )
+                      }
+                      size="xs"
+                      type="button"
+                      variant="outline"
+                    >
+                      {t("pressureModeControl")}
+                      {busy === agent.agent.id && <Spinner />}
+                    </Button>
+                    <Badge
+                      className={
+                        agent.status === "PRESSURE"
+                          ? ACTIVE_PRESSURE_CLASS
+                          : undefined
+                      }
+                      variant="outline"
+                    >
+                      {t(`status.${agent.status}`)}
+                    </Badge>
+                  </div>
                 </div>
-                <Label className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={agent.manualPressureMode}
-                    disabled={!agent.enabled || busy !== null}
-                    onCheckedChange={(checked) =>
-                      void setPressure(agent.agent.id, checked === true)
-                    }
-                  />
-                  {t("pressureModeControl")}
-                  {busy === agent.agent.id && <Spinner />}
-                </Label>
                 {agent.volumes.map((volume) => (
                   <VolumeBar compact key={volume.id} volume={volume} />
                 ))}
