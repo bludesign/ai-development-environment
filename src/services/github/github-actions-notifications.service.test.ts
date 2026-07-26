@@ -54,7 +54,10 @@ function githubResponse(runs: Array<Record<string, unknown>>): Response {
   return Response.json({ workflow_runs: runs });
 }
 
-function setup(workflowEvents?: { record: ReturnType<typeof vi.fn> }) {
+function setup(
+  workflowEvents?: { record: ReturnType<typeof vi.fn> },
+  jiraBranchRegex: string | null = "([A-Z]+-\\d+)",
+) {
   const deliveries = new Map<string, Record<string, unknown>>();
   const observations = new Map<string, Observation>();
   const pollingStates = new Map<string, Record<string, unknown>>();
@@ -148,7 +151,7 @@ function setup(workflowEvents?: { record: ReturnType<typeof vi.fn> }) {
           name: "Widgets",
           canonicalOrigin: "github.com/acme/widgets",
           displayOrigin: "github.com/acme/widgets",
-          jiraBranchRegex: "([A-Z]+-\\d+)",
+          jiraBranchRegex,
         },
       ]),
     },
@@ -302,6 +305,45 @@ describe("GitHub Actions webhook notifications", () => {
               headBranch: "feature/APP-42",
             }),
             ticket: expect.objectContaining({ key: "APP-42" }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  test("uses the global Jira branch regex for webhook triggers", async () => {
+    const workflowEvents = { record: vi.fn(async () => ({})) };
+    const { service } = setup(workflowEvents, null);
+    const input = webhookInput(
+      {
+        action: "opened",
+        installation: { id: 456 },
+        repository: {
+          full_name: "acme/widgets",
+          html_url: "https://github.com/acme/widgets",
+          default_branch: "main",
+        },
+        pull_request: {
+          number: 42,
+          title: "Ship widgets",
+          html_url: "https://github.com/acme/widgets/pull/42",
+          state: "open",
+          draft: false,
+          labels: [],
+          head: { ref: "feature/APP-42", sha: "abc123" },
+          base: { ref: "main" },
+        },
+      },
+      "pull-request-global-jira-regex",
+    );
+
+    await service.handleWebhook({ ...input, event: "pull_request" });
+
+    expect(workflowEvents.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          sessionData: expect.objectContaining({
+            ticket: { key: "APP-42" },
           }),
         }),
       }),

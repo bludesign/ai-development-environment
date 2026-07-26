@@ -55,6 +55,7 @@ import {
   type WorkflowQuickActionKind,
 } from "@/lib/workflows/kinds";
 import {
+  agentOnlineWindowMs,
   agentEventBus,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   type AgentControlService,
@@ -176,7 +177,9 @@ type SessionAgentSource = {
   id: string;
   name: string;
   hostname: string;
+  lastSeenAt?: Date | null;
   disconnectedAt?: Date | null;
+  heartbeatIntervalSeconds?: number | null;
   diskFreeBytes?: number | null;
   memoryFreeBytes?: number | null;
 };
@@ -203,8 +206,14 @@ function agentSessionData(agent: SessionAgentSource): SessionData {
       id: agent.id,
       name: agent.name,
       hostname: agent.hostname,
-      ...(agent.disconnectedAt !== undefined
-        ? { connected: agent.disconnectedAt === null }
+      ...(agent.lastSeenAt !== undefined && agent.disconnectedAt !== undefined
+        ? {
+            connected:
+              agent.lastSeenAt !== null &&
+              agent.disconnectedAt === null &&
+              Date.now() - agent.lastSeenAt.getTime() <=
+                agentOnlineWindowMs(agent),
+          }
         : {}),
       ...(agent.diskFreeBytes !== undefined
         ? { diskFreeBytes: agent.diskFreeBytes }
@@ -1886,7 +1895,9 @@ export class WorkflowsService {
               id: true,
               name: true,
               hostname: true,
+              lastSeenAt: true,
               disconnectedAt: true,
+              heartbeatIntervalSeconds: true,
               diskFreeBytes: true,
               memoryFreeBytes: true,
             },
@@ -1919,7 +1930,9 @@ export class WorkflowsService {
               id: true,
               name: true,
               hostname: true,
+              lastSeenAt: true,
               disconnectedAt: true,
+              heartbeatIntervalSeconds: true,
               diskFreeBytes: true,
               memoryFreeBytes: true,
             },
@@ -1937,7 +1950,9 @@ export class WorkflowsService {
                   id: true,
                   name: true,
                   hostname: true,
+                  lastSeenAt: true,
                   disconnectedAt: true,
+                  heartbeatIntervalSeconds: true,
                   diskFreeBytes: true,
                   memoryFreeBytes: true,
                 },
@@ -3595,7 +3610,14 @@ export class WorkflowsService {
     await prisma.workflowResourceLease.deleteMany({
       where: { attemptId: attempt.id },
     });
-    if (attempt.phase !== "WAITING_FOR_RESOURCE") {
+    const existingWaitEvent = await prisma.workflowRunEvent.findFirst({
+      where: {
+        attemptId: attempt.id,
+        type: "STEP_WAITING_FOR_RESOURCE",
+      },
+      select: { id: true },
+    });
+    if (!existingWaitEvent) {
       await this.appendEvent(
         attempt.runId,
         attempt.id,

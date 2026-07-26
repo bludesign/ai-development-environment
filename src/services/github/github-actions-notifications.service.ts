@@ -321,11 +321,14 @@ export class GitHubActionsNotificationsService {
     const checkedBranch =
       text(check.head_branch) ?? text(checkSuite.head_branch);
     const linkedBranch = headBranch ?? pushedBranch ?? checkedBranch;
+    const prisma = await getPrismaClient();
+    const codebaseSettings = await prisma.codebaseSettings.findUnique({
+      where: { id: "default" },
+    });
     const ticketKey = jiraKeyFromBranch(
       linkedBranch,
-      target.jiraBranchRegex ?? "",
+      target.jiraBranchRegex ?? codebaseSettings?.defaultJiraBranchRegex ?? "",
     );
-    const prisma = await getPrismaClient();
     const worktree = linkedBranch
       ? await prisma.worktree.findFirst({
           where: {

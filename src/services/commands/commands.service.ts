@@ -630,7 +630,15 @@ export class CommandsService {
       return this.getRun(concurrent.id);
     }
     publishRun(run);
-    await this.dispatch(run.id);
+    try {
+      await this.dispatch(run.id);
+    } catch (error) {
+      await this.failDispatch(
+        run.id,
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
     return this.getRun(run.id);
   }
 

@@ -221,6 +221,87 @@ describe("command target and output authorization", () => {
     );
   });
 
+  test("fails a custom run when its initial dispatch is rejected", async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      ...data,
+      id: "run-rejected",
+      status: "QUEUED",
+    }));
+    const update = vi.fn().mockImplementation(({ data }) => ({
+      ...data,
+      id: "run-rejected",
+      snapshotName: "Custom command",
+      snapshotNotificationsEnabled: true,
+      agentName: "Builder",
+      agentHostname: "builder.local",
+      worktreeId: "worktree-1",
+      worktreePath: "/code/project",
+      worktreeBranch: "feature/custom",
+      worktree: null,
+    }));
+    const transaction = {
+      commandRunNumberSequence: {
+        upsert: vi.fn().mockResolvedValue({ nextValue: 3 }),
+      },
+      commandRun: { create },
+    };
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        update,
+      },
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "worktree-1",
+          folder: "/code/project",
+          branch: "feature/custom",
+          missingAt: null,
+          codebase: {
+            repositoryId: "repository-1",
+            repository: { id: "repository-1" },
+            agent: {
+              id: "agent-1",
+              name: "Builder",
+              hostname: "builder.local",
+              capabilitiesJson: '["command.run"]',
+            },
+          },
+        }),
+      },
+      $transaction: vi
+        .fn()
+        .mockImplementation(
+          (callback: (value: typeof transaction) => unknown) =>
+            callback(transaction),
+        ),
+    });
+    const service = new CommandsService(agentControl());
+    (
+      service as unknown as {
+        dispatch: (runId: string) => Promise<void>;
+      }
+    ).dispatch = vi
+      .fn()
+      .mockRejectedValue(new Error("Another operation is active"));
+
+    await expect(
+      service.startCustomRun({
+        script: "pwd",
+        worktreeId: "worktree-1",
+      }),
+    ).rejects.toThrow("Another operation is active");
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "run-rejected" },
+      data: expect.objectContaining({
+        status: "FAILED",
+        error: "Another operation is active",
+        nextRestartAt: null,
+      }),
+      include: { worktree: { select: { highlightColor: true } } },
+    });
+  });
+
   test("requires exactly one custom command target", async () => {
     getPrismaClient.mockResolvedValue({
       commandRun: { findUnique: vi.fn().mockResolvedValue(null) },

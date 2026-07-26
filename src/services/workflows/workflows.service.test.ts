@@ -323,7 +323,9 @@ describe("workflow resource session hydration", () => {
         id: "agent-1",
         name: "Studio Mac",
         hostname: "studio.local",
+        lastSeenAt: new Date(),
         disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
         diskFreeBytes: 1_000,
         memoryFreeBytes: 2_000,
       },
@@ -358,6 +360,83 @@ describe("workflow resource session hydration", () => {
       agent: { id: "agent-1", name: "Studio Mac", connected: true },
       repo: { id: "repository-1", defaultBranch: "main" },
     });
+  });
+
+  test("marks stale codebase agents disconnected using the heartbeat window", async () => {
+    prisma.codebase.findUnique.mockResolvedValue({
+      id: "codebase-1",
+      folder: "/repo",
+      agentId: "agent-1",
+      branch: "main",
+      headSha: "abc123",
+      defaultBranch: "main",
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        hostname: "studio.local",
+        lastSeenAt: new Date(Date.now() - 46_000),
+        disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
+        diskFreeBytes: 1_000,
+        memoryFreeBytes: 2_000,
+      },
+      repository: {
+        id: "repository-1",
+        name: "Widgets",
+        canonicalOrigin: "github.com/acme/widgets",
+        displayOrigin: "github.com/acme/widgets",
+      },
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("CODEBASE", "codebase-1", {}),
+    ).resolves.toMatchObject({ agent: { connected: false } });
+  });
+
+  test("marks stale build agents disconnected using the heartbeat window", async () => {
+    prisma.build.findUnique.mockResolvedValue({
+      id: "build-1",
+      status: "QUEUED",
+      action: "BUILD",
+      error: null,
+      artifactDirectory: null,
+      worktreeId: null,
+      agent: {
+        id: "agent-1",
+        name: "Studio Mac",
+        hostname: "studio.local",
+        lastSeenAt: new Date(Date.now() - 46_000),
+        disconnectedAt: null,
+        heartbeatIntervalSeconds: 10,
+        diskFreeBytes: 1_000,
+        memoryFreeBytes: 2_000,
+      },
+      codebase: null,
+      artifacts: [],
+      reports: [],
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+    ) as unknown as {
+      hydrateResourceSessionData(
+        resourceKind: string,
+        resourceId: string,
+        sessionData: Record<string, unknown>,
+      ): Promise<Record<string, unknown>>;
+    };
+
+    await expect(
+      service.hydrateResourceSessionData("BUILD", "build-1", {}),
+    ).resolves.toMatchObject({ agent: { connected: false } });
   });
 
   test("hydrates a build launch with reports and linked worktree context", async () => {
@@ -926,12 +1005,13 @@ describe("workflow runtime lifecycle guards", () => {
 
   test("only logs the wait once while a step keeps holding", async () => {
     const service = new WorkflowsService(new WorkflowEventsService());
+    prisma.workflowRunEvent.findFirst.mockResolvedValue({ id: "wait-event" });
 
     await internals(service).holdForBusyCodebase(
       {
         id: "attempt-1",
         runId: "run-1",
-        phase: "WAITING_FOR_RESOURCE",
+        phase: "RUNNING",
         startedAt: new Date(),
         createdAt: new Date(),
       },
