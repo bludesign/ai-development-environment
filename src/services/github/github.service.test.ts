@@ -478,6 +478,11 @@ vi.mock("@/data/prisma-client", () => ({
       findMany: async ({ take, skip }: { take: number; skip: number }) =>
         state.webhookDeliveries.slice(skip, skip + take),
       count: async () => state.webhookDeliveries.length,
+      deleteMany: async () => {
+        const count = state.webhookDeliveries.length;
+        state.webhookDeliveries = [];
+        return { count };
+      },
     },
   }),
 }));
@@ -889,6 +894,13 @@ describe("GitHub service", () => {
           processedAt: "2026-07-26T16:00:01.000Z",
         },
       ],
+    });
+
+    await expect(service.clearWebhookDeliveries()).resolves.toBe(true);
+    await expect(service.webhookDeliveries(25, 0)).resolves.toMatchObject({
+      enabled: true,
+      items: [],
+      total: 0,
     });
   });
 

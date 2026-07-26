@@ -1872,6 +1872,8 @@
     "description": "Prüfe von GitHub empfangene Webhook-Zustellungen und ihre Verarbeitung.",
     "deliveryCount": "{count, plural, one {# Zustellung} other {# Zustellungen}}",
     "refresh": "Aktualisieren",
+    "clearHistory": "Verlauf löschen",
+    "confirmClearHistory": "Den gesamten Webhook-Zustellungsverlauf löschen? Neue Zustellungen werden weiterhin hier angezeigt.",
     "received": "Empfangen",
     "event": "Ereignis",
     "repository": "Repository",

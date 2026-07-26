@@ -1921,6 +1921,12 @@ export class GitHubService {
     };
   }
 
+  async clearWebhookDeliveries(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    await prisma.gitHubWebhookDelivery.deleteMany();
+    return true;
+  }
+
   private async requireAppCredentials(): Promise<GitHubAppCredentials> {
     const prisma = await getPrismaClient();
     const settings = await prisma.gitHubAppSettings.findUnique({

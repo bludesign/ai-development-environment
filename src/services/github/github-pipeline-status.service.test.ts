@@ -389,6 +389,104 @@ describe("GitHubPipelineStatusService", () => {
     });
   });
 
+  test("merges job progress independently from the parent timestamp and prevents regression", async () => {
+    await service.observeWorkflowRuns(
+      [
+        run({
+          id: "job-progress-run",
+          checkSuiteId: "job-progress-suite",
+          headSha: "sha-job-progress",
+          status: "IN_PROGRESS",
+          updatedAt: "2026-07-26T10:10:00.000Z",
+        }),
+      ],
+      "WEBHOOK",
+      true,
+    );
+    await service.observeJobs(
+      "repository-1",
+      "job-progress-run",
+      [
+        {
+          id: "job-progress",
+          name: "test",
+          status: "QUEUED",
+          url: null,
+          canRetry: false,
+          retryUnavailableReason: "NOT_COMPLETED",
+          runAttempt: 1,
+          steps: [],
+        },
+      ],
+      "REST",
+      new Date("2026-07-26T10:00:00.000Z"),
+    );
+    await service.observeJobs(
+      "repository-1",
+      "job-progress-run",
+      [
+        {
+          id: "job-progress",
+          name: "test",
+          status: "IN_PROGRESS",
+          url: null,
+          canRetry: false,
+          retryUnavailableReason: "NOT_COMPLETED",
+          runAttempt: 1,
+          steps: [{ number: 1, name: "Run tests", status: "IN_PROGRESS" }],
+        },
+      ],
+      "WEBHOOK",
+      new Date("2026-07-26T10:05:00.000Z"),
+    );
+
+    let [record] = await service.records([
+      {
+        repositoryGithubId: "repository-1",
+        workflowRunId: "job-progress-run",
+      },
+    ]);
+    expect(record?.jobs).toEqual([
+      expect.objectContaining({
+        id: "job-progress",
+        status: "IN_PROGRESS",
+        steps: [expect.objectContaining({ name: "Run tests" })],
+      }),
+    ]);
+
+    await service.observeJobs(
+      "repository-1",
+      "job-progress-run",
+      [
+        {
+          id: "job-progress",
+          name: "test",
+          status: "QUEUED",
+          url: null,
+          canRetry: false,
+          retryUnavailableReason: "NOT_COMPLETED",
+          runAttempt: 1,
+          steps: [],
+        },
+      ],
+      "REST",
+      null,
+    );
+    [record] = await service.records([
+      {
+        repositoryGithubId: "repository-1",
+        workflowRunId: "job-progress-run",
+      },
+    ]);
+    expect(record?.jobs).toEqual([
+      expect.objectContaining({
+        id: "job-progress",
+        status: "IN_PROGRESS",
+        steps: [expect.objectContaining({ name: "Run tests" })],
+      }),
+    ]);
+  });
+
   test("increments revisions only for user-visible changes", async () => {
     const input = {
       repositoryGithubId: "repository-1",

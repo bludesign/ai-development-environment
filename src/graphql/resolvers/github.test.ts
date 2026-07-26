@@ -53,6 +53,7 @@ describe("GitHub resolvers", () => {
       saveCacheTtlOverride: vi.fn(),
       clearCache: vi.fn(),
       clearApiCalls: vi.fn(),
+      clearWebhookDeliveries: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
       webhooksEnabled: vi.fn(),
@@ -103,6 +104,13 @@ describe("GitHub resolvers", () => {
       resolvers.Mutation.clearGitHubApiCalls({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
+      resolvers.Mutation.clearGitHubWebhookDeliveries(
+        {},
+        {},
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
       resolvers.Mutation.saveGitHubCacheTtlOverride(
         {},
         { input: { operation: "Viewer", ttlSeconds: 30 } },
@@ -119,6 +127,7 @@ describe("GitHub resolvers", () => {
     expect(service.saveCacheTtlOverride).not.toHaveBeenCalled();
     expect(service.clearCache).not.toHaveBeenCalled();
     expect(service.clearApiCalls).not.toHaveBeenCalled();
+    expect(service.clearWebhookDeliveries).not.toHaveBeenCalled();
   });
 
   test("delegates webhook availability and delivery pagination", async () => {
@@ -132,6 +141,7 @@ describe("GitHub resolvers", () => {
     const service = {
       webhooksEnabled: vi.fn().mockResolvedValue(true),
       webhookDeliveries: vi.fn().mockResolvedValue(page),
+      clearWebhookDeliveries: vi.fn().mockResolvedValue(true),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
 
@@ -146,6 +156,10 @@ describe("GitHub resolvers", () => {
       ),
     ).resolves.toBe(page);
     expect(service.webhookDeliveries).toHaveBeenCalledWith(25, 50);
+    await expect(
+      resolvers.Mutation.clearGitHubWebhookDeliveries({}, {}, context(null)),
+    ).resolves.toBe(true);
+    expect(service.clearWebhookDeliveries).toHaveBeenCalledOnce();
   });
 
   test("delegates GraphQL cache TTL override management", async () => {

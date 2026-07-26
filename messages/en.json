@@ -1872,6 +1872,8 @@
     "description": "Review webhook deliveries received from GitHub and how each event was handled.",
     "deliveryCount": "{count, plural, one {# delivery} other {# deliveries}}",
     "refresh": "Refresh",
+    "clearHistory": "Clear history",
+    "confirmClearHistory": "Clear all webhook delivery history? New deliveries will continue to appear here.",
     "received": "Received",
     "event": "Event",
     "repository": "Repository",

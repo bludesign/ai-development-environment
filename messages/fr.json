@@ -1872,6 +1872,8 @@
     "description": "Consultez les livraisons de webhooks reçues de GitHub et leur traitement.",
     "deliveryCount": "{count, plural, one {# livraison} other {# livraisons}}",
     "refresh": "Actualiser",
+    "clearHistory": "Effacer l’historique",
+    "confirmClearHistory": "Effacer tout l’historique des livraisons de webhooks ? Les nouvelles livraisons continueront d’apparaître ici.",
     "received": "Reçu",
     "event": "Événement",
     "repository": "Dépôt",

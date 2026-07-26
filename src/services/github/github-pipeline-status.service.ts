@@ -111,6 +111,41 @@ function parseJobs(value: string): GitHubWorkflowJobView[] {
   }
 }
 
+function jobProgress(status: GitHubPipelineState): number {
+  if (status === "NONE" || status === "EXPECTED") return 0;
+  if (
+    status === "ACTION_REQUIRED" ||
+    status === "PENDING" ||
+    status === "QUEUED"
+  ) {
+    return 1;
+  }
+  if (status === "IN_PROGRESS") return 2;
+  return 3;
+}
+
+function mergeJob(
+  current: GitHubWorkflowJobView | undefined,
+  incoming: GitHubWorkflowJobView,
+): GitHubWorkflowJobView {
+  if (!current) return incoming;
+  const currentAttempt = current.runAttempt ?? 0;
+  const incomingAttempt = incoming.runAttempt ?? 0;
+  if (incomingAttempt !== currentAttempt) {
+    return incomingAttempt > currentAttempt ? incoming : current;
+  }
+  const currentProgress = jobProgress(current.status);
+  const incomingProgress = jobProgress(incoming.status);
+  if (incomingProgress < currentProgress) return current;
+  if (
+    incomingProgress === currentProgress &&
+    incoming.steps.length < current.steps.length
+  ) {
+    return { ...incoming, steps: current.steps };
+  }
+  return incoming;
+}
+
 function source(value: string): GitHubPipelineObservationSource {
   return value === "GRAPHQL" ||
     value === "REST" ||
@@ -368,17 +403,22 @@ export class GitHubPipelineStatusService {
         existing as unknown as PipelineRecordRow,
       );
     }
+    const currentJobs = parseJobs(existing.jobsJson);
+    const currentJobsById = new Map(currentJobs.map((job) => [job.id, job]));
+    const mergedIncomingJobs = matchingJobs.map((job) =>
+      mergeJob(currentJobsById.get(job.id), job),
+    );
     const observedJobs =
       sourceValue === "WEBHOOK"
         ? [
             ...new Map(
-              [...parseJobs(existing.jobsJson), ...matchingJobs].map((job) => [
+              [...currentJobs, ...mergedIncomingJobs].map((job) => [
                 job.id,
                 job,
               ]),
             ).values(),
           ]
-        : matchingJobs;
+        : mergedIncomingJobs;
     const currentStatus = isPipelineState(existing.status)
       ? existing.status
       : "NONE";
@@ -709,6 +749,13 @@ export class GitHubPipelineStatusService {
             },
             now,
           );
+          const optimisticJobsProtected = Boolean(
+            !replace &&
+            existing.source === "MUTATION" &&
+            existing.optimisticUntil &&
+            existing.optimisticUntil.getTime() > now.getTime() &&
+            observation.source !== "MUTATION",
+          );
           existing = await transaction.gitHubPipelineRecord.update({
             where: { id: existing.id },
             data: replace
@@ -736,6 +783,9 @@ export class GitHubPipelineStatusService {
                 }
               : {
                   lastObservedAt: now,
+                  ...(observation.jobs !== undefined && !optimisticJobsProtected
+                    ? { jobsJson: nextJobs }
+                    : {}),
                   ...(membershipAccepted ? { isCurrent: true } : {}),
                 },
           });

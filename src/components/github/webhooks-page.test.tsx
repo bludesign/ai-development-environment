@@ -100,4 +100,46 @@ describe("GitHubWebhooksPage", () => {
       screen.queryByRole("heading", { name: "GitHub Webhooks" }),
     ).toBeNull();
   });
+
+  test("clears webhook delivery history after confirmation", async () => {
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("clearGitHubWebhookDeliveries")) {
+        return { clearGitHubWebhookDeliveries: true } as never;
+      }
+      return {
+        githubWebhookDeliveries: {
+          enabled: true,
+          items: [delivery],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+      } as never;
+    });
+
+    render(<GitHubWebhooksPage />);
+
+    const clearButton = await screen.findByRole("button", {
+      name: "Clear history",
+    });
+    fireEvent.click(clearButton);
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(
+      requestMock.mock.calls.some(([query]) =>
+        String(query).includes("clearGitHubWebhookDeliveries"),
+      ),
+    ).toBe(false);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear history" }),
+    );
+
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenCalledWith(
+        "mutation { clearGitHubWebhookDeliveries }",
+      );
+      expect(screen.getByText("No webhook deliveries yet.")).toBeDefined();
+    });
+  });
 });

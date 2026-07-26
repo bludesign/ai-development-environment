@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { DateTime } from "@/components/common/date-time";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,11 +71,13 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
 
 export function GitHubWebhooksPage() {
   const t = useTranslations("githubWebhooks");
+  const tc = useTranslations("common");
   const locale = useLocale();
   const router = useRouter();
   const [page, setPage] = useState<GitHubWebhookDeliveryPage | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -102,6 +105,24 @@ export function GitHubWebhooksPage() {
       setLoading(false);
     }
   }, [offset]);
+
+  const clearHistory = async () => {
+    setClearing(true);
+    try {
+      await controlPlaneRequest("mutation { clearGitHubWebhookDeliveries }");
+      setOffset(0);
+      setPage((current) =>
+        current
+          ? { ...current, items: [], total: 0, limit: PAGE_SIZE, offset: 0 }
+          : current,
+      );
+      setError(null);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setClearing(false);
+    }
+  };
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void load(), 0);
@@ -170,15 +191,36 @@ export function GitHubWebhooksPage() {
         <Badge variant="outline">
           {t("deliveryCount", { count: page?.total ?? 0 })}
         </Badge>
-        <Button
-          aria-label={t("refresh")}
-          onClick={() => void load()}
-          size="icon"
-          type="button"
-          variant="outline"
-        >
-          <RefreshCw />
-        </Button>
+        <div className="flex items-center gap-2">
+          <ConfirmationDialog
+            actionLabel={t("clearHistory")}
+            cancelLabel={tc("cancel")}
+            description={tc("cannotBeUndone")}
+            onConfirm={clearHistory}
+            title={t("confirmClearHistory")}
+            trigger={
+              <Button
+                disabled={clearing || loading || (page?.total ?? 0) === 0}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Trash2 />
+                {t("clearHistory")}
+              </Button>
+            }
+          />
+          <Button
+            aria-label={t("refresh")}
+            disabled={clearing}
+            onClick={() => void load()}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <RefreshCw />
+          </Button>
+        </div>
       </div>
 
       {loading ? (

@@ -846,6 +846,7 @@ extend type Mutation {
   deleteGitHubCacheTtlOverride(operation: String!): Boolean!
   clearGitHubCache: Boolean!
   clearGitHubApiCalls: Boolean!
+  clearGitHubWebhookDeliveries: Boolean!
   refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!
   deleteGitHubCachedEntry(id: ID!): Boolean!
   saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!

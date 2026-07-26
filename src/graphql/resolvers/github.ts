@@ -463,6 +463,14 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.clearApiCalls();
     },
+    clearGitHubWebhookDeliveries: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearWebhookDeliveries();
+    },
     refreshGitHubCachedEntry: (
       _root: unknown,
       { id }: { id: string },
