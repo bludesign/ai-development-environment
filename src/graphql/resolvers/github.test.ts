@@ -55,6 +55,8 @@ describe("GitHub resolvers", () => {
       clearApiCalls: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
+      webhooksEnabled: vi.fn(),
+      webhookDeliveries: vi.fn(),
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
 
@@ -85,6 +87,16 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubCacheTtlOverrides({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
+      resolvers.Query.githubWebhooksEnabled({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.githubWebhookDeliveries(
+        {},
+        { limit: 50, offset: 0 },
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
       resolvers.Mutation.clearGitHubCache({}, {}, context("agent-1")),
     ).toThrow("control-plane");
     expect(() =>
@@ -102,9 +114,38 @@ describe("GitHub resolvers", () => {
     expect(service.pullRequests).not.toHaveBeenCalled();
     expect(service.cacheMetrics).not.toHaveBeenCalled();
     expect(service.cacheTtlOverrides).not.toHaveBeenCalled();
+    expect(service.webhooksEnabled).not.toHaveBeenCalled();
+    expect(service.webhookDeliveries).not.toHaveBeenCalled();
     expect(service.saveCacheTtlOverride).not.toHaveBeenCalled();
     expect(service.clearCache).not.toHaveBeenCalled();
     expect(service.clearApiCalls).not.toHaveBeenCalled();
+  });
+
+  test("delegates webhook availability and delivery pagination", async () => {
+    const page = {
+      enabled: true,
+      items: [],
+      total: 0,
+      limit: 25,
+      offset: 50,
+    };
+    const service = {
+      webhooksEnabled: vi.fn().mockResolvedValue(true),
+      webhookDeliveries: vi.fn().mockResolvedValue(page),
+    } as unknown as GitHubService;
+    const resolvers = createGitHubResolvers(service, worktreesService());
+
+    await expect(
+      resolvers.Query.githubWebhooksEnabled({}, {}, context(null)),
+    ).resolves.toBe(true);
+    await expect(
+      resolvers.Query.githubWebhookDeliveries(
+        {},
+        { limit: 25, offset: 50 },
+        context(null),
+      ),
+    ).resolves.toBe(page);
+    expect(service.webhookDeliveries).toHaveBeenCalledWith(25, 50);
   });
 
   test("delegates GraphQL cache TTL override management", async () => {

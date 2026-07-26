@@ -59,6 +59,7 @@ import type {
   GitHubRequestSource,
   GitHubSettingsView,
   GitHubViewer,
+  GitHubWebhookDeliveryPage,
   GitHubWorkflowJobView,
   GitHubWorkflowRunAttemptView,
   SaveGitHubAutoRetryRuleInput,
@@ -1863,6 +1864,61 @@ export class GitHubService {
       webhookSecretConfigured,
       lastDelivery,
     );
+  }
+
+  async webhooksEnabled(): Promise<boolean> {
+    const [settings, secretConfigured] = await Promise.all([
+      (await getPrismaClient()).gitHubAppSettings.findUnique({
+        where: { id: GITHUB_APP_SETTINGS_ID },
+        select: { webhookUrl: true, webhookConfiguredAt: true },
+      }),
+      this.credentials.isConfigured(CREDENTIALS.githubAppWebhookSecret),
+    ]);
+    return Boolean(
+      settings?.webhookUrl && settings.webhookConfiguredAt && secretConfigured,
+    );
+  }
+
+  async webhookDeliveries(
+    limit = 50,
+    offset = 0,
+  ): Promise<GitHubWebhookDeliveryPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("limit must be an integer from 1 to 100");
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative integer");
+    }
+    const enabled = await this.webhooksEnabled();
+    if (!enabled) {
+      return { enabled, items: [], total: 0, limit, offset };
+    }
+    const prisma = await getPrismaClient();
+    const [deliveries, total] = await Promise.all([
+      prisma.gitHubWebhookDelivery.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: [{ receivedAt: "desc" }, { deliveryId: "desc" }],
+      }),
+      prisma.gitHubWebhookDelivery.count(),
+    ]);
+    return {
+      enabled,
+      total,
+      limit,
+      offset,
+      items: deliveries.map((delivery) => ({
+        deliveryId: delivery.deliveryId,
+        event: delivery.event,
+        action: delivery.action,
+        repositoryName: delivery.repositoryName,
+        workflowRunId: delivery.workflowRunId,
+        outcome: delivery.outcome,
+        error: delivery.error,
+        receivedAt: delivery.receivedAt.toISOString(),
+        processedAt: delivery.processedAt?.toISOString() ?? null,
+      })),
+    };
   }
 
   private async requireAppCredentials(): Promise<GitHubAppCredentials> {

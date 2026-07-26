@@ -141,4 +141,63 @@ describe("GitHub pipeline status rules", () => {
       ),
     ).toBe(true);
   });
+
+  test("does not regress a terminal webhook result with an equal-timestamp child update", () => {
+    const githubUpdatedAt = new Date("2026-07-26T11:00:00.000Z");
+    const now = new Date("2026-07-26T12:00:00.000Z");
+    const terminal = {
+      runAttempt: 1,
+      githubUpdatedAt,
+      source: "WEBHOOK" as const,
+      optimisticUntil: null,
+      status: "SUCCESS" as const,
+    };
+
+    expect(
+      shouldReplacePipelineRecord(
+        terminal,
+        {
+          runAttempt: 1,
+          githubUpdatedAt,
+          source: "WEBHOOK",
+          status: "IN_PROGRESS",
+        },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      shouldReplacePipelineRecord(
+        { ...terminal, status: "IN_PROGRESS" },
+        {
+          runAttempt: 1,
+          githubUpdatedAt,
+          source: "WEBHOOK",
+          status: "SUCCESS",
+        },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  test("allows a terminal REST observation to heal an equal-timestamp pending webhook", () => {
+    const githubUpdatedAt = new Date("2026-07-26T11:00:00.000Z");
+    expect(
+      shouldReplacePipelineRecord(
+        {
+          runAttempt: 1,
+          githubUpdatedAt,
+          source: "WEBHOOK",
+          optimisticUntil: null,
+          status: "IN_PROGRESS",
+        },
+        {
+          runAttempt: 1,
+          githubUpdatedAt,
+          source: "REST",
+          status: "SUCCESS",
+        },
+        new Date("2026-07-26T12:00:00.000Z"),
+      ),
+    ).toBe(true);
+  });
 });

@@ -58,6 +58,7 @@ const ALLOWED_IDENTICAL_TRANSLATIONS = new Map([
   ["shell.productName", "AI Development Environment"],
   ["shell.jira", "Jira"],
   ["shell.github", "GitHub"],
+  ["shell.webhooks", "Webhooks"],
   ["notifications.categories.GITHUB", "GitHub"],
   ["pullRequests.jira", "Jira"],
   ["polling.duration", "{milliseconds} ms"],

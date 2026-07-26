@@ -38,6 +38,7 @@
     "github": "GitHub",
     "pullRequests": "Pull Requests",
     "actions": "Actions",
+    "webhooks": "Webhooks",
     "comments": "Kommentare",
     "actionsCache": "Actions-Cache",
     "jira": "Jira",
@@ -1864,6 +1865,30 @@
       "RUNNING": "Läuft",
       "STALE": "Veraltet",
       "ERROR": "Fehler"
+    }
+  },
+  "githubWebhooks": {
+    "title": "GitHub-Webhooks",
+    "description": "Prüfe von GitHub empfangene Webhook-Zustellungen und ihre Verarbeitung.",
+    "deliveryCount": "{count, plural, one {# Zustellung} other {# Zustellungen}}",
+    "refresh": "Aktualisieren",
+    "received": "Empfangen",
+    "event": "Ereignis",
+    "repository": "Repository",
+    "outcome": "Ergebnis",
+    "details": "Details",
+    "workflowRun": "Workflow-Lauf {id}",
+    "processed": "Verarbeitet",
+    "showing": "{start}–{end} von {total}",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "empty": "Noch keine Webhook-Zustellungen.",
+    "emptyDescription": "Ereignisse erscheinen hier, nachdem GitHub sie an den konfigurierten Webhook gesendet hat.",
+    "outcomes": {
+      "received": "Empfangen",
+      "processed": "Verarbeitet",
+      "ignored": "Ignoriert",
+      "error": "Fehler"
     }
   },
   "pullRequests": {

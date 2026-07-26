@@ -34,6 +34,7 @@ import {
   Terminal,
   TimerReset,
   Waypoints,
+  Webhook,
   Wrench,
   X,
 } from "lucide-react";
@@ -334,19 +335,28 @@ function NavigationSidebar() {
   const { isMobile, setOpenMobile } = useSidebar();
   const pathname = usePathname();
   const [cacheServerConfigured, setCacheServerConfigured] = useState(false);
+  const [webhooksEnabled, setWebhooksEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void controlPlaneRequest<{ cacheServerSettings: { configured: boolean } }>(
-      "query CacheServerConfigured { cacheServerSettings { configured } }",
-    )
+    void controlPlaneRequest<{
+      cacheServerSettings: { configured: boolean };
+      githubWebhooksEnabled: boolean;
+    }>(`query NavigationFeatures {
+      cacheServerSettings { configured }
+      githubWebhooksEnabled
+    }`)
       .then((data) => {
         if (!cancelled) {
           setCacheServerConfigured(data.cacheServerSettings.configured);
+          setWebhooksEnabled(data.githubWebhooksEnabled);
         }
       })
       .catch(() => {
-        if (!cancelled) setCacheServerConfigured(false);
+        if (!cancelled) {
+          setCacheServerConfigured(false);
+          setWebhooksEnabled(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -724,6 +734,24 @@ function NavigationSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {webhooksEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith("/webhooks")}
+                  >
+                    <Link
+                      href="/webhooks"
+                      onClick={() => {
+                        if (isMobile) setOpenMobile(false);
+                      }}
+                    >
+                      <Webhook />
+                      <span>{t("webhooks")}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild

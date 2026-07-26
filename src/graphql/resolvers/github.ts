@@ -175,6 +175,28 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.getAppSettings();
     },
+    githubWebhooksEnabled: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.webhooksEnabled();
+    },
+    githubWebhookDeliveries: (
+      _root: unknown,
+      {
+        limit,
+        offset,
+      }: {
+        limit?: number | null;
+        offset?: number | null;
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.webhookDeliveries(limit ?? 50, offset ?? 0);
+    },
     githubRepositories: (
       _root: unknown,
       _args: unknown,

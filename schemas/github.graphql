@@ -247,6 +247,26 @@ type GitHubAppSettings {
   updatedAt: String
 }
 
+type GitHubWebhookDelivery {
+  deliveryId: ID!
+  event: String!
+  action: String
+  repositoryName: String
+  workflowRunId: ID
+  outcome: String!
+  error: String
+  receivedAt: String!
+  processedAt: String
+}
+
+type GitHubWebhookDeliveryPage {
+  enabled: Boolean!
+  items: [GitHubWebhookDelivery!]!
+  total: Int!
+  limit: Int!
+  offset: Int!
+}
+
 type GitHubViewer {
   login: String!
   name: String
@@ -750,6 +770,11 @@ extend type Query {
   githubCachedEntries(limit: Int = 50, offset: Int = 0): GitHubCachedEntryPage!
   githubCachedEntry(id: ID!): GitHubCachedEntryDetail
   githubAppSettings: GitHubAppSettings!
+  githubWebhooksEnabled: Boolean!
+  githubWebhookDeliveries(
+    limit: Int = 50
+    offset: Int = 0
+  ): GitHubWebhookDeliveryPage!
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubActionsWorkflowRuns(

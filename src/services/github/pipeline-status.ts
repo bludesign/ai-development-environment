@@ -82,7 +82,14 @@ export type MergeComparable = {
   githubUpdatedAt: Date | null;
   source: GitHubPipelineObservationSource;
   optimisticUntil: Date | null;
+  status?: GitHubPipelineState;
 };
+
+function statusProgress(status: GitHubPipelineState): number {
+  if (PENDING_STATES.has(status)) return 1;
+  if (status === "NONE" || status === "EXPECTED") return 0;
+  return 2;
+}
 
 export function shouldReplacePipelineRecord(
   current: MergeComparable,
@@ -111,7 +118,23 @@ export function shouldReplacePipelineRecord(
     current.source === "MUTATION"
       ? SOURCE_PRIORITY.LEGACY
       : SOURCE_PRIORITY[current.source];
-  return SOURCE_PRIORITY[incoming.source] >= currentPriority;
+  const incomingPriority = SOURCE_PRIORITY[incoming.source];
+  if (
+    current.source !== "MUTATION" &&
+    incoming.source !== "MUTATION" &&
+    current.status &&
+    incoming.status
+  ) {
+    const currentProgress = statusProgress(current.status);
+    const incomingProgress = statusProgress(incoming.status);
+    if (incomingProgress !== currentProgress) {
+      return incomingProgress > currentProgress;
+    }
+  }
+  if (incomingPriority !== currentPriority) {
+    return incomingPriority > currentPriority;
+  }
+  return true;
 }
 
 export function isPipelineState(value: string): value is GitHubPipelineState {

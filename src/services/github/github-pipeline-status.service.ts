@@ -379,6 +379,23 @@ export class GitHubPipelineStatusService {
             ).values(),
           ]
         : matchingJobs;
+    const currentStatus = isPipelineState(existing.status)
+      ? existing.status
+      : "NONE";
+    const jobsStatus =
+      sourceValue === "REST" && matchingJobs.length > 0
+        ? aggregatePipelineStatus(
+            matchingJobs.map((job) => job.status),
+            null,
+          )
+        : "NONE";
+    const reconciledStatus =
+      (jobsStatus === "ERROR" ||
+        jobsStatus === "FAILURE" ||
+        jobsStatus === "SUCCESS") &&
+      existing.snapshot.graphqlRollupStatus === jobsStatus
+        ? jobsStatus
+        : currentStatus;
     const change = await this.observeSnapshot({
       repositoryGithubId: existing.snapshot.repositoryGithubId,
       repositoryNameWithOwner: existing.snapshot.repositoryNameWithOwner,
@@ -387,6 +404,7 @@ export class GitHubPipelineStatusService {
       pipelines: [
         {
           ...pipelineView(existing as unknown as PipelineRecordRow),
+          status: reconciledStatus,
           source: sourceValue,
           jobs: observedJobs,
           githubUpdatedAt: githubUpdatedAt ?? existing.githubUpdatedAt,
@@ -588,11 +606,17 @@ export class GitHubPipelineStatusService {
                 githubUpdatedAt: existing.githubUpdatedAt,
                 source: source(existing.source),
                 optimisticUntil: existing.optimisticUntil,
+                status: isPipelineState(existing.status)
+                  ? existing.status
+                  : "NONE",
               },
               {
                 runAttempt: candidate.runAttempt,
                 githubUpdatedAt: candidate.githubUpdatedAt,
                 source: source(candidate.source),
+                status: isPipelineState(candidate.status)
+                  ? candidate.status
+                  : "NONE",
               },
               now,
             )
@@ -673,11 +697,15 @@ export class GitHubPipelineStatusService {
               githubUpdatedAt: existing.githubUpdatedAt,
               source: source(existing.source),
               optimisticUntil: existing.optimisticUntil,
+              status: isPipelineState(existing.status)
+                ? existing.status
+                : "NONE",
             },
             {
               runAttempt: incomingAttempt,
               githubUpdatedAt: incomingUpdatedAt,
               source: observation.source,
+              status: observation.status,
             },
             now,
           );

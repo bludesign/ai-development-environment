@@ -293,6 +293,102 @@ describe("GitHubPipelineStatusService", () => {
     expect(record?.jobs.map(({ id }) => id).sort()).toEqual(["job-a", "job-b"]);
   });
 
+  test("keeps a completed run terminal when a child webhook has the same timestamp", async () => {
+    const updatedAt = "2026-07-26T10:04:00.000Z";
+    await service.observeWorkflowRuns(
+      [
+        run({
+          id: "terminal-run",
+          checkSuiteId: "terminal-suite",
+          headSha: "sha-terminal",
+          status: "SUCCESS",
+          updatedAt,
+        }),
+      ],
+      "WEBHOOK",
+      true,
+    );
+    await service.observeSnapshot({
+      repositoryGithubId: "repository-1",
+      repositoryNameWithOwner: "acme/widgets",
+      repositoryUrl: "https://github.com/acme/widgets",
+      headSha: "sha-terminal",
+      pipelines: [
+        {
+          id: "terminal-run",
+          name: "test job",
+          status: "IN_PROGRESS",
+          workflowRunId: "terminal-run",
+          runAttempt: 1,
+          source: "WEBHOOK",
+          githubUpdatedAt: new Date(updatedAt),
+        },
+      ],
+    });
+
+    expect(
+      await service.snapshot({
+        repositoryGithubId: "repository-1",
+        headSha: "sha-terminal",
+      }),
+    ).toMatchObject({
+      pipelineStatus: "SUCCESS",
+      pipelines: [{ id: "terminal-run", status: "SUCCESS" }],
+    });
+  });
+
+  test("reconciles a stale pending webhook from complete REST jobs and the GraphQL rollup", async () => {
+    const updatedAt = new Date("2026-07-26T10:05:00.000Z");
+    await service.observeSnapshot({
+      repositoryGithubId: "repository-1",
+      repositoryNameWithOwner: "acme/widgets",
+      repositoryUrl: "https://github.com/acme/widgets",
+      headSha: "sha-reconcile",
+      graphqlRollupStatus: "SUCCESS",
+      completeGraphqlRollup: true,
+      sourceFetchedAt: updatedAt,
+      pipelines: [
+        {
+          id: "reconcile-run",
+          name: "CI",
+          status: "IN_PROGRESS",
+          workflowRunId: "reconcile-run",
+          runAttempt: 1,
+          source: "WEBHOOK",
+          githubUpdatedAt: updatedAt,
+        },
+      ],
+    });
+    await service.observeJobs(
+      "repository-1",
+      "reconcile-run",
+      [
+        {
+          id: "reconcile-job",
+          name: "test",
+          status: "SUCCESS",
+          url: null,
+          canRetry: true,
+          retryUnavailableReason: null,
+          runAttempt: 1,
+          steps: [],
+        },
+      ],
+      "REST",
+      updatedAt,
+    );
+
+    expect(
+      await service.snapshot({
+        repositoryGithubId: "repository-1",
+        headSha: "sha-reconcile",
+      }),
+    ).toMatchObject({
+      pipelineStatus: "SUCCESS",
+      pipelines: [{ id: "reconcile-run", status: "SUCCESS" }],
+    });
+  });
+
   test("increments revisions only for user-visible changes", async () => {
     const input = {
       repositoryGithubId: "repository-1",

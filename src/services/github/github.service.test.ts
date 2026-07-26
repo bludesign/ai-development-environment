@@ -57,6 +57,17 @@ const state = vi.hoisted(() => ({
     updatedAt: Date;
   } | null,
   auditEvents: [] as Array<Record<string, unknown>>,
+  webhookDeliveries: [] as Array<{
+    deliveryId: string;
+    event: string;
+    action: string | null;
+    repositoryName: string | null;
+    workflowRunId: string | null;
+    outcome: string;
+    error: string | null;
+    receivedAt: Date;
+    processedAt: Date | null;
+  }>,
   linkedCodebaseRepository: null as {
     id: string;
     canonicalOrigin: string;
@@ -464,6 +475,9 @@ vi.mock("@/data/prisma-client", () => ({
     },
     gitHubWebhookDelivery: {
       findFirst: async () => null,
+      findMany: async ({ take, skip }: { take: number; skip: number }) =>
+        state.webhookDeliveries.slice(skip, skip + take),
+      count: async () => state.webhookDeliveries.length,
     },
   }),
 }));
@@ -736,6 +750,7 @@ beforeEach(() => {
     updatedAt: new Date(0),
   };
   state.auditEvents = [];
+  state.webhookDeliveries = [];
   state.linkedCodebaseRepository = null;
   state.linkedWorktree = null;
   state.worktreeDetail = null;
@@ -824,6 +839,59 @@ beforeEach(() => {
 });
 
 describe("GitHub service", () => {
+  test("lists webhook deliveries only when GitHub webhooks are configured", async () => {
+    const service = new GitHubService();
+
+    await expect(service.webhookDeliveries(25, 0)).resolves.toEqual({
+      enabled: false,
+      items: [],
+      total: 0,
+      limit: 25,
+      offset: 0,
+    });
+
+    if (!state.appSettings) throw new Error("Missing settings");
+    state.appSettings.webhookUrl =
+      "https://control.example/api/public/github/webhook";
+    state.appSettings.webhookConfiguredAt = new Date(
+      "2026-07-26T15:00:00.000Z",
+    );
+    state.webhookSecret = "webhook-secret";
+    state.webhookDeliveries = [
+      {
+        deliveryId: "delivery-1",
+        event: "workflow_run",
+        action: "completed",
+        repositoryName: "acme/widgets",
+        workflowRunId: "42",
+        outcome: "PROCESSED",
+        error: null,
+        receivedAt: new Date("2026-07-26T16:00:00.000Z"),
+        processedAt: new Date("2026-07-26T16:00:01.000Z"),
+      },
+    ];
+
+    await expect(service.webhookDeliveries(25, 0)).resolves.toEqual({
+      enabled: true,
+      total: 1,
+      limit: 25,
+      offset: 0,
+      items: [
+        {
+          deliveryId: "delivery-1",
+          event: "workflow_run",
+          action: "completed",
+          repositoryName: "acme/widgets",
+          workflowRunId: "42",
+          outcome: "PROCESSED",
+          error: null,
+          receivedAt: "2026-07-26T16:00:00.000Z",
+          processedAt: "2026-07-26T16:00:01.000Z",
+        },
+      ],
+    });
+  });
+
   test("backfills GitHub App registration ownership for existing settings", async () => {
     if (!state.appSettings) throw new Error("Missing settings");
     state.appSettings.appOwnerLogin = null;

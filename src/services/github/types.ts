@@ -199,6 +199,23 @@ export type GitHubAppSettingsView = {
   updatedAt: string | null;
 };
 
+export type GitHubWebhookDeliveryView = {
+  deliveryId: string;
+  event: string;
+  action: string | null;
+  repositoryName: string | null;
+  workflowRunId: string | null;
+  outcome: string;
+  error: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+};
+
+export type GitHubWebhookDeliveryPage =
+  GitHubPaginatedResult<GitHubWebhookDeliveryView> & {
+    enabled: boolean;
+  };
+
 export type GitHubAuditContext = {
   actor: "control-plane" | "auto-retry" | "workflow";
   ipAddress: string | null;

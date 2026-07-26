@@ -45,6 +45,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   tools: "Tools",
   unifiedEvents: "Unified View",
   usage: "Usage",
+  webhooks: "Webhooks",
   welcome: "Welcome",
   workflows: "Workflows",
   worktrees: "Worktrees",
