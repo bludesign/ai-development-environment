@@ -1704,7 +1704,8 @@
       "AGENT_DISK_SPACE": "Espacio en disco del agente",
       "SIDEBAR_USAGE": "Uso de la barra lateral",
       "CODEBASE_SCAN": "Exploración del código",
-      "GIT_FETCH": "Git fetch"
+      "GIT_FETCH": "Git fetch",
+      "WORKTREE_AUTOMATION": "Automatización de worktrees"
     },
     "statuses": {
       "DISABLED": "Desactivado",

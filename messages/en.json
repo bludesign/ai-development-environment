@@ -1704,7 +1704,8 @@
       "AGENT_DISK_SPACE": "Agent disk space",
       "SIDEBAR_USAGE": "Sidebar usage",
       "CODEBASE_SCAN": "Codebase scan",
-      "GIT_FETCH": "Git fetch"
+      "GIT_FETCH": "Git fetch",
+      "WORKTREE_AUTOMATION": "Worktree automation"
     },
     "statuses": {
       "DISABLED": "Disabled",

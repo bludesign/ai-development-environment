@@ -1704,7 +1704,8 @@
       "AGENT_DISK_SPACE": "Agent-Speicherplatz",
       "SIDEBAR_USAGE": "Seitenleisten-Nutzung",
       "CODEBASE_SCAN": "Codebase-Scan",
-      "GIT_FETCH": "Git Fetch"
+      "GIT_FETCH": "Git Fetch",
+      "WORKTREE_AUTOMATION": "Worktree-Automatisierung"
     },
     "statuses": {
       "DISABLED": "Deaktiviert",
