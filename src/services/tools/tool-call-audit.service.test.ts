@@ -71,6 +71,37 @@ describe("tool-call auditing", () => {
     );
   });
 
+  test("preserves a successful result when completion persistence fails", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const update = vi.fn().mockRejectedValue(new Error("database is locked"));
+    getPrismaClient.mockResolvedValue({ toolCallAudit: { create, update } });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const service = new ToolCallAuditService();
+
+    await expect(
+      service.execute(
+        {
+          caller: "workflow:run-1",
+          correlationId: "attempt-1",
+          source: "WORKFLOW",
+          groupId: "builtin:github",
+          toolName: "update_pull_request",
+          arguments: {},
+        },
+        async () => ({ pullRequest: { id: "pr-1" } }),
+      ),
+    ).resolves.toEqual({ pullRequest: { id: "pr-1" } });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ resultStatus: "SUCCEEDED" }),
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
   test("clears completed records while preserving running calls", async () => {
     const deleteMany = vi.fn().mockResolvedValue({ count: 3 });
     getPrismaClient.mockResolvedValue({ toolCallAudit: { deleteMany } });

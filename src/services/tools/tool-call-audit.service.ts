@@ -99,21 +99,9 @@ export class ToolCallAuditService {
         startedAt,
       },
     });
+    let result: T;
     try {
-      const result = await operation();
-      const finishedAt = new Date();
-      await prisma.toolCallAudit.update({
-        where: { id },
-        data: {
-          resultStatus: "SUCCEEDED",
-          durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
-          finishedAt,
-        },
-      });
-      agentEventBus.publish(TOOL_CALL_AUDIT_CHANGED_TOPIC, {
-        toolCallAuditChanged: { id },
-      });
-      return result;
+      result = await operation();
     } catch (error) {
       const finishedAt = new Date();
       await prisma.toolCallAudit
@@ -131,6 +119,31 @@ export class ToolCallAuditService {
       });
       throw error;
     }
+
+    const finishedAt = new Date();
+    let auditCompleted = false;
+    try {
+      await prisma.toolCallAudit.update({
+        where: { id },
+        data: {
+          resultStatus: "SUCCEEDED",
+          durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+          finishedAt,
+        },
+      });
+      auditCompleted = true;
+    } catch (error) {
+      console.error(
+        "Could not persist successful tool-call audit completion:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    if (auditCompleted) {
+      agentEventBus.publish(TOOL_CALL_AUDIT_CHANGED_TOPIC, {
+        toolCallAuditChanged: { id },
+      });
+    }
+    return result;
   }
 
   async list(

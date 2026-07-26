@@ -281,6 +281,137 @@ describe("workflow run adapters", () => {
   });
 });
 
+describe("workflow expansion adapters", () => {
+  function expansionExecutor(callTool: ReturnType<typeof vi.fn>) {
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      { tools: { callTool } } as unknown as WorkflowAdapterServices,
+    );
+    return executor;
+  }
+
+  test("unwraps GitHub action payloads and refreshes pull request context", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "provider result" }],
+      structuredContent: {
+        pullRequest: {
+          id: "pr-1",
+          number: 42,
+          title: "Expansion actions",
+          state: "OPEN",
+          headRefName: "feature/expansion-actions",
+          headRefOid: "abc123",
+          reviewThreads: [],
+        },
+      },
+    });
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "update-pr",
+      kind: "GITHUB_UPDATE_PR",
+      config: { owner: "acme", name: "widgets", number: 42, title: "Updated" },
+    };
+
+    const result = await expansionExecutor(callTool).execute(input);
+
+    expect(result.output).toEqual({
+      pullRequest: expect.objectContaining({ id: "pr-1", number: 42 }),
+    });
+    expect(result.sessionPatch).toMatchObject({
+      steps: { "update-pr": { output: { pullRequest: { id: "pr-1" } } } },
+      pr: {
+        id: "pr-1",
+        headBranch: "feature/expansion-actions",
+        headSha: "abc123",
+      },
+    });
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: "builtin:github",
+        name: "update_pull_request",
+      }),
+      {
+        caller: "workflow:workflow-run",
+        correlationId: "attempt",
+        source: "WORKFLOW",
+      },
+    );
+  });
+
+  test("unwraps Jira action payloads and refreshes ticket context", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      structuredContent: {
+        ticket: {
+          key: "AIDE-42",
+          summary: "Expansion actions",
+          issueType: { name: "Task" },
+          status: { name: "In Progress" },
+        },
+      },
+    });
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "create-ticket",
+      kind: "JIRA_CREATE_TICKET",
+      config: {
+        projectKey: "AIDE",
+        issueTypeId: "10001",
+        summary: "Expansion actions",
+      },
+    };
+
+    const result = await expansionExecutor(callTool).execute(input);
+
+    expect(result.output).toEqual({
+      ticket: expect.objectContaining({ key: "AIDE-42" }),
+    });
+    expect(result.sessionPatch).toMatchObject({
+      ticket: {
+        key: "AIDE-42",
+        title: "Expansion actions",
+        type: "Task",
+        status: "In Progress",
+      },
+    });
+  });
+
+  test("parks a rerun and seeds the canonical command namespace", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      structuredContent: {
+        run: { id: "command-run-2", commandId: "command-1", status: "QUEUED" },
+      },
+    });
+    const input = context("actual-worktree");
+    input.node = {
+      ...input.node,
+      id: "rerun",
+      kind: "COMMAND_RERUN",
+      config: { cadenceSeconds: 7, timeoutSeconds: 90 },
+    };
+    input.sessionData = {
+      ...input.sessionData,
+      command: { id: "command-run-1" },
+    };
+
+    const result = await expansionExecutor(callTool).execute(input);
+
+    expect(result.output).toEqual({
+      run: expect.objectContaining({ id: "command-run-2" }),
+    });
+    expect(result.sessionPatch).toMatchObject({
+      command: { id: "command-run-2", status: "QUEUED" },
+    });
+    expect(result.wait).toMatchObject({
+      kind: "COMMAND_RUN",
+      externalKey: "command-run-2",
+    });
+  });
+});
+
 describe("workflow wait pollers", () => {
   function pollers(services: Partial<WorkflowAdapterServices>) {
     const registered = new Map<
@@ -355,6 +486,64 @@ describe("workflow wait pollers", () => {
           status: "SUCCESS",
           conclusion: "SUCCESS",
           jobs: [{ id: "job-1" }],
+        },
+      },
+    });
+  });
+
+  test("hydrates terminal command context after a queued rerun", async () => {
+    const finishedAt = new Date("2026-07-26T12:00:00.000Z");
+    const registered = pollers({
+      commands: {
+        getRun: vi.fn().mockResolvedValue({
+          id: "command-run-2",
+          commandId: "command-1",
+          snapshotName: "Verify",
+          displayNumber: 2,
+          status: "SUCCEEDED",
+          exitCode: 0,
+          signal: null,
+          error: null,
+          finishedAt,
+        }),
+      } as unknown as WorkflowAdapterServices["commands"],
+    });
+
+    const result = await registered.get("COMMAND_RUN")?.("command-run-2");
+
+    expect(result).toMatchObject({
+      pending: false,
+      result: {
+        sessionPatch: {
+          command: {
+            id: "command-run-2",
+            status: "SUCCEEDED",
+            finishedAt: finishedAt.toISOString(),
+          },
+        },
+      },
+    });
+  });
+
+  test("waits for build-data refresh collections to complete", async () => {
+    const getCollection = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "collection-1", status: "COLLECTING" })
+      .mockResolvedValueOnce({ id: "collection-1", status: "COMPLETED" });
+    const registered = pollers({
+      buildData: { getCollection } as never,
+    });
+
+    await expect(
+      registered.get("BUILD_DATA_COLLECTION")?.("collection-1"),
+    ).resolves.toEqual({ pending: true, pollAfterSeconds: 2 });
+    await expect(
+      registered.get("BUILD_DATA_COLLECTION")?.("collection-1"),
+    ).resolves.toMatchObject({
+      pending: false,
+      result: {
+        sessionPatch: {
+          buildData: { id: "collection-1", status: "COMPLETED" },
         },
       },
     });

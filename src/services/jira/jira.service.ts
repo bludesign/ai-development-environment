@@ -446,6 +446,8 @@ export class JiraService {
         assigneeAccountId: ticket.assigneeAccountId,
         labels: ticket.labels,
         sprintNames: ticket.sprintNames,
+        activeSprintNames: ticket.activeSprintNames,
+        closedSprintNames: ticket.closedSprintNames,
         url: ticket.jiraUrl,
       },
       comment: latestComment
@@ -460,14 +462,14 @@ export class JiraService {
     const currentAccountId = ticket.assigneeAccountId
       ? await this.currentAccountId().catch(() => null)
       : null;
-    const observations: Array<readonly [string, string]> = [
+    const observations: Array<readonly [string, unknown]> = [
       ["JIRA_STATUS", ticket.statusId],
       ["JIRA_LABEL", JSON.stringify([...ticket.labels].sort())],
       ["JIRA_MENTION", latestComment?.id ?? "none"],
-      ["JIRA_SPRINT_STARTED", JSON.stringify([...ticket.sprintNames].sort())],
+      ["JIRA_SPRINT_STARTED", [...ticket.activeSprintNames].sort()],
       ["JIRA_TICKET_UPDATED", ticket.updatedAt ?? "unknown"],
       ["JIRA_COMMENT_ADDED", latestComment?.id ?? "none"],
-      ["JIRA_SPRINT_ENDED", JSON.stringify([...ticket.sprintNames].sort())],
+      ["JIRA_SPRINT_ENDED", [...ticket.closedSprintNames].sort()],
     ];
     if (currentAccountId && currentAccountId === ticket.assigneeAccountId) {
       observations.push(["JIRA_ASSIGNED_SELF", currentAccountId]);
@@ -2478,11 +2480,24 @@ export class JiraService {
     const subtasks = asArray(fields.subtasks)
       .map((subtask) => issueLink(subtask, "subtask"))
       .filter((link): link is JiraIssueLinkView => link !== null);
-    const sprintNames = asArray(fields.sprint)
-      .concat(asArray(fields.closedSprints))
-      .map(asRecord)
+    const sprintValues = asArray(fields.sprint).map(asRecord);
+    const closedSprintValues = asArray(fields.closedSprints).map(asRecord);
+    const activeSprintNames = sprintValues
+      .filter((sprint) => {
+        const state = asString(sprint.state)?.toLowerCase();
+        return !state || state === "active";
+      })
       .map((sprint) => asString(sprint.name))
       .filter((name): name is string => Boolean(name));
+    const closedSprintNames = closedSprintValues
+      .concat(
+        sprintValues.filter(
+          (sprint) => asString(sprint.state)?.toLowerCase() === "closed",
+        ),
+      )
+      .map((sprint) => asString(sprint.name))
+      .filter((name): name is string => Boolean(name));
+    const sprintNames = activeSprintNames.concat(closedSprintNames);
     const comments: JiraCommentView[] = rawComments
       .map(asRecord)
       .map((comment) => ({
@@ -2510,6 +2525,8 @@ export class JiraService {
       fixVersions: namedValues(fields.fixVersions),
       affectedVersions: namedValues(fields.versions),
       sprintNames: [...new Set(sprintNames)],
+      activeSprintNames: [...new Set(activeSprintNames)],
+      closedSprintNames: [...new Set(closedSprintNames)],
       parent,
       subtasks,
       issueLinks: links,

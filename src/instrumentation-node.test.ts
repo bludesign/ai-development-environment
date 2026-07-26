@@ -1,8 +1,11 @@
 // @vitest-environment node
 import { createServer } from "node:net";
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { buildSchema } from "graphql";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { WebSocketServer } from "ws";
+
+import { SharedGraphQLServerService } from "@/services/graphql-server/graphql-server.service";
 
 import {
   parseAgentWebSocketPort,
@@ -13,6 +16,12 @@ const websocketGlobal = globalThis as typeof globalThis & {
   agentWebSocketServer?: WebSocketServer;
   agentWebSocketStartPromise?: Promise<void>;
 };
+
+beforeEach(() => {
+  vi.spyOn(SharedGraphQLServerService, "getSchema").mockResolvedValue(
+    buildSchema("type Query { health: Boolean! }"),
+  );
+});
 
 afterEach(() => {
   delete websocketGlobal.agentWebSocketServer;

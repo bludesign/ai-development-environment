@@ -359,12 +359,13 @@ export class WorkflowEventBridge {
           agent: { id: run.agentId, name: run.agentName },
           ...(run.worktreeId ? { worktree: { id: run.worktreeId } } : {}),
         });
+        const terminalAt = run.finishedAt?.toISOString() ?? "terminal";
         await this.record(
           "COMMAND_RUN_RESULT",
           run.id,
-          `command-result:${run.id}:${run.status}:${run.updatedAt.toISOString()}`,
+          `command-result:${run.id}:${run.status}:${terminalAt}`,
           sessionData,
-          { cursorValue: `${run.status}:${run.updatedAt.toISOString()}` },
+          { cursorValue: `${run.status}:${terminalAt}` },
         ).catch((error) =>
           console.error("Could not record command result trigger:", error),
         );
@@ -750,12 +751,29 @@ export class WorkflowEventBridge {
     try {
       for await (const payload of stream) {
         if (!this.running) break;
-        const audit = await (
-          await getPrismaClient()
-        ).toolCallAudit.findUnique({
+        const prisma = await getPrismaClient();
+        const audit = await prisma.toolCallAudit.findUnique({
           where: { id: payload.toolCallAuditChanged.id },
         });
         if (!audit || audit.resultStatus === "RUNNING") continue;
+        const callerRunId = audit.caller.startsWith("workflow:")
+          ? audit.caller.slice("workflow:".length)
+          : null;
+        const workflowRun = callerRunId
+          ? await prisma.workflowRun.findUnique({
+              where: { id: callerRunId },
+              select: { id: true, workflowId: true },
+            })
+          : null;
+        const correlatedAttempt = workflowRun
+          ? null
+          : await prisma.workflowStepAttempt.findUnique({
+              where: { id: audit.correlationId },
+              select: {
+                run: { select: { id: true, workflowId: true } },
+              },
+            });
+        const owningRun = workflowRun ?? correlatedAttempt?.run ?? null;
         const finishedAt = audit.finishedAt?.toISOString() ?? "unfinished";
         await this.record(
           "TOOL_CALL_RESULT",
@@ -775,7 +793,17 @@ export class WorkflowEventBridge {
               finishedAt: audit.finishedAt?.toISOString() ?? null,
             },
           },
-          { cursorValue: `${audit.resultStatus}:${finishedAt}` },
+          {
+            cursorValue: `${audit.resultStatus}:${finishedAt}`,
+            ...(owningRun
+              ? {
+                  workflowCorrelation: {
+                    workflowId: owningRun.workflowId,
+                    runId: owningRun.id,
+                  },
+                }
+              : {}),
+          },
         );
       }
     } finally {
@@ -1221,15 +1249,13 @@ export class WorkflowEventBridge {
       sessionData,
       { cursorValue: worktree.syncState },
     );
-    if (!dirty) {
-      await this.record(
-        "WORKTREE_CLEAN",
-        worktree.id,
-        `worktree-clean:${worktree.id}:${observedAt.toISOString()}`,
-        sessionData,
-        common,
-      );
-    }
+    await this.record(
+      "WORKTREE_CLEAN",
+      worktree.id,
+      `worktree-clean:${worktree.id}:${observedAt.toISOString()}`,
+      sessionData,
+      { cursorValue: dirty },
+    );
     if ((worktree.baseBehind ?? 0) > 0) {
       await this.record(
         "WORKTREE_BEHIND",

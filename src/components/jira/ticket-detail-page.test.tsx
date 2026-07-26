@@ -57,6 +57,8 @@ const ticket = {
   fixVersions: [],
   affectedVersions: [],
   sprintNames: [],
+  activeSprintNames: [],
+  closedSprintNames: [],
   parent: null,
   subtasks: [],
   issueLinks: [

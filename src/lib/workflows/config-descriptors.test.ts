@@ -170,6 +170,12 @@ describe("workflow config descriptors", () => {
       "WORKTREE_OPERATION",
       "WORKTREE_SNAPSHOT",
       "CUSTOM_COMMAND",
+      "COMMAND_RERUN",
+      "BUILD_REBUILD",
+      "BUILD_DATA_REFRESH",
+      "SIGNING_REFRESH",
+      "SIGNING_SYNC_PROFILE",
+      "SIGNING_DELETE_EXPIRED",
       "SKILL_APPLY",
       "CONTROL_SUBWORKFLOW",
       "TERMINAL_RUN",
@@ -197,6 +203,9 @@ describe("workflow config descriptors", () => {
     expect(timingKeys("WORKTREE_INSPECT_GIT")).toEqual([]);
     expect(timingKeys("WORKTREE_SET_AUTO_SYNC")).toEqual([]);
     expect(timingKeys("WORKTREE_SET_AUTO_MERGE")).toEqual([]);
+    expect(timingKeys("CCUSAGE_COLLECT")).toEqual([]);
+    expect(timingKeys("MODEL_COST_REFRESH")).toEqual([]);
+    expect(timingKeys("GITHUB_DISPATCH_WORKFLOW")).toEqual([]);
     expect(timingKeys("CONTROL_DELAY")).toEqual([]);
   });
 

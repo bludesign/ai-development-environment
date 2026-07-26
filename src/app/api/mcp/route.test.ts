@@ -1,8 +1,22 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  callBuiltInTool: vi.fn(),
+  mcpPresetToolNames: vi.fn().mockResolvedValue(null),
+  builtInTools: { definitions: () => [] },
+}));
+
+vi.mock("@/services/server-services", () => ({
+  getServerServices: () => ({
+    agentControlService: {},
+    toolsService: mocks,
+  }),
+}));
+
 import { DELETE, GET, POST } from "./route";
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.unstubAllEnvs();
 });
 
@@ -36,6 +50,7 @@ describe("MCP endpoint authentication", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "MCP_PRESET_NOT_FOUND" },
     });
+    expect(mocks.mcpPresetToolNames).toHaveBeenCalledWith("preset-1");
   });
 
   test.each([GET, POST, DELETE])(

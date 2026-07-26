@@ -1569,6 +1569,50 @@ describe("workflow trigger interpolation", () => {
     ).resolves.toBe(true);
   });
 
+  test("fires worktree clean only on a dirty-to-clean transition", async () => {
+    prisma.workflowTriggerState.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ cursorJson: JSON.stringify({ value: false }) })
+      .mockResolvedValueOnce({ cursorJson: JSON.stringify({ value: true }) })
+      .mockResolvedValueOnce({ cursorJson: JSON.stringify({ value: false }) });
+
+    await expect(
+      matches("WORKTREE_CLEAN", {}, { cursorValue: false }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("WORKTREE_CLEAN", {}, { cursorValue: true }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("WORKTREE_CLEAN", {}, { cursorValue: false }),
+    ).resolves.toBe(true);
+    await expect(
+      matches("WORKTREE_CLEAN", {}, { cursorValue: false }),
+    ).resolves.toBe(false);
+  });
+
+  test("fires Jira sprint triggers only when the matching sprint set grows", async () => {
+    prisma.workflowTriggerState.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ cursorJson: JSON.stringify({ value: [] }) })
+      .mockResolvedValueOnce({
+        cursorJson: JSON.stringify({ value: ["Sprint 1"] }),
+      })
+      .mockResolvedValueOnce({ cursorJson: JSON.stringify({ value: [] }) });
+
+    await expect(
+      matches("JIRA_SPRINT_ENDED", {}, { cursorValue: [] }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("JIRA_SPRINT_ENDED", {}, { cursorValue: ["Sprint 1"] }),
+    ).resolves.toBe(true);
+    await expect(
+      matches("JIRA_SPRINT_STARTED", {}, { cursorValue: [] }),
+    ).resolves.toBe(false);
+    await expect(
+      matches("JIRA_SPRINT_STARTED", {}, { cursorValue: ["Sprint 2"] }),
+    ).resolves.toBe(true);
+  });
+
   test("does not cursor-suppress repeated cleanup result events", async () => {
     const config = { filters: { "cleanup.status": "SUCCEEDED" } };
 

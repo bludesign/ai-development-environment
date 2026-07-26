@@ -177,6 +177,8 @@ export type JiraTicketDetail = JiraTicketSummary & {
   fixVersions: JiraNamedValue[];
   affectedVersions: JiraNamedValue[];
   sprintNames: string[];
+  activeSprintNames: string[];
+  closedSprintNames: string[];
   parent: JiraIssueLinkView | null;
   subtasks: JiraIssueLinkView[];
   issueLinks: JiraIssueLinkView[];
