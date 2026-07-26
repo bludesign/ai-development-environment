@@ -66,7 +66,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Link, useRouter } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -79,6 +79,7 @@ import {
 import { workflowRunNodeDestinations } from "@/lib/workflows/resource-navigation";
 import { workflowResourceDestination } from "@/lib/workflows/resources";
 
+import { useOpenWorkflowDestination } from "./use-workflow-destination";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowRun } from "./types";
@@ -158,7 +159,7 @@ function jsonText(value: unknown) {
 export function WorkflowRunPage({ runId }: { runId: string }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
-  const router = useRouter();
+  const openDestination = useOpenWorkflowDestination();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -472,16 +473,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
             generation={run.generation}
             onNodeClick={(nodeId, { destination, locked, trigger }) => {
               if (locked) {
-                if (!destination) return;
-                if (destination.external) {
-                  window.open(
-                    destination.href,
-                    "_blank",
-                    "noopener,noreferrer",
-                  );
-                } else {
-                  router.push(destination.href);
-                }
+                openDestination(destination);
                 return;
               }
               if (canReplay && !trigger) setReplayNodeId(nodeId);

@@ -28,12 +28,16 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
-import { currentPageWorkflowNodeIds } from "@/lib/workflows/resource-navigation";
+import {
+  currentPageWorkflowNodeIds,
+  workflowRunNodeDestinations,
+} from "@/lib/workflows/resource-navigation";
 
 import {
   WorkflowChoiceMenu,
   type WorkflowTriggerChoice,
 } from "./workflow-choice-menu";
+import { useOpenWorkflowDestination } from "./use-workflow-destination";
 import { WorkflowGraph, workflowStatusVariant } from "./workflow-graph";
 import { useWorkflowLabels } from "./workflow-labels";
 import { WorkflowQuestionActions } from "./workflow-question-actions";
@@ -76,6 +80,7 @@ export function WorkflowResourcePanel({
 }) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
+  const openDestination = useOpenWorkflowDestination();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [workflows, setWorkflows] = useState<AcceptedWorkflow[]>([]);
   const [triggering, setTriggering] = useState<string | null>(null);
@@ -160,6 +165,10 @@ export function WorkflowResourcePanel({
         : new Set<string>(),
     [current, resourceId, resourceKind],
   );
+  const nodeDestinations = useMemo(
+    () => (current ? workflowRunNodeDestinations(current) : new Map()),
+    [current],
+  );
   if (!runs.length && !workflows.length && !error) return null;
   return (
     <Card>
@@ -234,7 +243,11 @@ export function WorkflowResourcePanel({
               compact
               currentPageNodeIds={currentPageNodeIds}
               definition={current.version.definition}
+              destinations={nodeDestinations}
               generation={current.generation}
+              onNodeClick={(_nodeId, { destination, locked }) => {
+                if (locked) openDestination(destination);
+              }}
             />
             {runs.length > 1 && (
               <div className="flex flex-wrap gap-2">
