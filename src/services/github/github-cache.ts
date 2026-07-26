@@ -52,7 +52,7 @@ type CachedResult<T> = {
   source: GitHubCallSource;
   stale: boolean;
   fetchedAt: Date;
-  entryId: string;
+  entryId: string | null;
   pointCost: number | null;
 };
 
@@ -152,6 +152,8 @@ function errorMetadata(error: unknown): {
 
 export class GitHubCache {
   private readonly inFlight = new Map<string, Promise<CachedResult<unknown>>>();
+  private readonly cacheWrites = new Set<Promise<unknown>>();
+  private cacheGeneration = 0;
   private lastPrunedAt = 0;
 
   private cacheKey(input: {
@@ -170,6 +172,19 @@ export class GitHubCache {
         }),
       )
       .digest("hex");
+  }
+
+  private inFlightKey(
+    cacheKey: string,
+    input: Pick<QueryInput<unknown>, "force" | "allowStaleOnError">,
+    generation: number,
+  ): string {
+    return [
+      generation,
+      cacheKey,
+      input.force === true ? "force" : "normal",
+      input.allowStaleOnError === false ? "strict" : "stale",
+    ].join(":");
   }
 
   private async defaultTtlSeconds(): Promise<number> {
@@ -194,8 +209,10 @@ export class GitHubCache {
   }
 
   async query<T>(input: QueryInput<T>): Promise<CachedResult<T>> {
+    const generation = this.cacheGeneration;
     const prisma = await getPrismaClient();
     const key = this.cacheKey(input);
+    const pendingKey = this.inFlightKey(key, input, generation);
     const startedAt = Date.now();
     const [existing, ttlSeconds, rateLimit] = await Promise.all([
       prisma.gitHubGraphqlCacheEntry.findUnique({ where: { cacheKey: key } }),
@@ -209,6 +226,7 @@ export class GitHubCache {
         },
       }),
     ]);
+    if (generation !== this.cacheGeneration) return this.query(input);
     const fresh =
       existing !== null &&
       Date.now() - existing.fetchedAt.getTime() < ttlSeconds * 1000;
@@ -221,7 +239,8 @@ export class GitHubCache {
         durationMs: Date.now() - startedAt,
         pointCost: 0,
         pointsAvoided: existing.pointCost ?? 0,
-      });
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
       return {
         data: parseJson(existing.responseJson) as T,
         source: "CACHE",
@@ -232,9 +251,10 @@ export class GitHubCache {
       };
     }
 
-    const pending = this.inFlight.get(key);
+    const pending = this.inFlight.get(pendingKey);
     if (pending) {
       const result = (await pending) as CachedResult<T>;
+      if (generation !== this.cacheGeneration) return this.query(input);
       await this.log({
         ...this.graphqlContext(input),
         authentication: input.authentication,
@@ -243,7 +263,8 @@ export class GitHubCache {
         durationMs: Date.now() - startedAt,
         pointCost: 0,
         pointsAvoided: result.pointCost ?? 0,
-      });
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
       return { ...result, source: "CACHE" };
     }
 
@@ -271,7 +292,8 @@ export class GitHubCache {
           resetAt: rateLimit.resetAt,
           resource: rateLimit.resource,
         },
-      });
+      }).catch(() => undefined);
+      if (generation !== this.cacheGeneration) return this.query(input);
       if (canServeStale) {
         return {
           data: parseJson(existing.responseJson) as T,
@@ -289,29 +311,38 @@ export class GitHubCache {
       try {
         const live = await input.fetcher();
         const fetchedAt = new Date();
-        const entry = await prisma.gitHubGraphqlCacheEntry.upsert({
-          where: { cacheKey: key },
-          create: {
-            id: randomUUID(),
-            cacheKey: key,
-            authentication: input.authentication,
-            endpoint: input.endpoint,
-            operation: input.operation,
-            query: input.query,
-            variablesJson: stableStringify(input.variables),
-            responseJson: JSON.stringify(live.data),
-            fetchedAt,
-            pointCost: live.pointCost,
-          },
-          update: {
-            operation: input.operation,
-            query: input.query,
-            variablesJson: stableStringify(input.variables),
-            responseJson: JSON.stringify(live.data),
-            fetchedAt,
-            pointCost: live.pointCost,
-          },
-        });
+        let entry: { id: string } | null = null;
+        if (generation === this.cacheGeneration) {
+          const write = prisma.gitHubGraphqlCacheEntry.upsert({
+            where: { cacheKey: key },
+            create: {
+              id: randomUUID(),
+              cacheKey: key,
+              authentication: input.authentication,
+              endpoint: input.endpoint,
+              operation: input.operation,
+              query: input.query,
+              variablesJson: stableStringify(input.variables),
+              responseJson: JSON.stringify(live.data),
+              fetchedAt,
+              pointCost: live.pointCost,
+            },
+            update: {
+              operation: input.operation,
+              query: input.query,
+              variablesJson: stableStringify(input.variables),
+              responseJson: JSON.stringify(live.data),
+              fetchedAt,
+              pointCost: live.pointCost,
+            },
+          });
+          this.cacheWrites.add(write);
+          try {
+            entry = await write;
+          } finally {
+            this.cacheWrites.delete(write);
+          }
+        }
         await this.log({
           ...this.graphqlContext(input),
           authentication: input.authentication,
@@ -321,19 +352,22 @@ export class GitHubCache {
           statusCode: live.statusCode,
           pointCost: live.pointCost,
           rateLimit: live.rateLimit,
-        });
+        }).catch(() => undefined);
         return {
           data: live.data,
           source: "LIVE",
           stale: false,
           fetchedAt,
-          entryId: entry.id,
+          entryId:
+            generation === this.cacheGeneration ? (entry?.id ?? null) : null,
           pointCost: live.pointCost,
         };
       } catch (error) {
         const metadata = errorMetadata(error);
         const canServeStale =
-          existing !== null && input.allowStaleOnError !== false;
+          generation === this.cacheGeneration &&
+          existing !== null &&
+          input.allowStaleOnError !== false;
         await this.log({
           ...this.graphqlContext(input),
           authentication: input.authentication,
@@ -345,7 +379,8 @@ export class GitHubCache {
           servedStale: canServeStale,
           pointsAvoided: canServeStale ? (existing?.pointCost ?? 0) : 0,
           rateLimit: metadata.rateLimit,
-        });
+        }).catch(() => undefined);
+        if (generation !== this.cacheGeneration) throw error;
         if (canServeStale) {
           return {
             data: parseJson(existing.responseJson) as T,
@@ -359,30 +394,24 @@ export class GitHubCache {
         throw error;
       }
     })();
-    this.inFlight.set(key, livePromise as Promise<CachedResult<unknown>>);
+    this.inFlight.set(
+      pendingKey,
+      livePromise as Promise<CachedResult<unknown>>,
+    );
     try {
       return await livePromise;
     } finally {
-      this.inFlight.delete(key);
+      if (this.inFlight.get(pendingKey) === livePromise) {
+        this.inFlight.delete(pendingKey);
+      }
     }
   }
 
   async mutation<T>(input: MutationInput<T>): Promise<T> {
     const startedAt = Date.now();
+    let live: LiveResult<T>;
     try {
-      const live = await input.fetcher();
-      await this.log({
-        ...this.graphqlContext(input),
-        authentication: input.authentication,
-        operation: input.operation,
-        source: "LIVE",
-        durationMs: Date.now() - startedAt,
-        statusCode: live.statusCode,
-        pointCost: null,
-        rateLimit: live.rateLimit,
-      });
-      await this.clear();
-      return live.data;
+      live = await input.fetcher();
     } catch (error) {
       const metadata = errorMetadata(error);
       await this.log({
@@ -394,9 +423,21 @@ export class GitHubCache {
         statusCode: metadata.statusCode,
         error: error instanceof Error ? error.message : String(error),
         rateLimit: metadata.rateLimit,
-      });
+      }).catch(() => undefined);
       throw error;
     }
+    await this.clear();
+    await this.log({
+      ...this.graphqlContext(input),
+      authentication: input.authentication,
+      operation: input.operation,
+      source: "LIVE",
+      durationMs: Date.now() - startedAt,
+      statusCode: live.statusCode,
+      pointCost: null,
+      rateLimit: live.rateLimit,
+    }).catch(() => undefined);
+    return live.data;
   }
 
   async updateTtl(
@@ -559,8 +600,24 @@ export class GitHubCache {
   }
 
   async clear(): Promise<boolean> {
+    const { cacheWrites } = this.beginInvalidation();
+    await Promise.allSettled(cacheWrites);
     const prisma = await getPrismaClient();
     await prisma.gitHubGraphqlCacheEntry.deleteMany();
+    return true;
+  }
+
+  async clearForCredentialChange(
+    authentication: GitHubAuthentication,
+  ): Promise<boolean> {
+    const { cacheWrites, inFlight } = this.beginInvalidation();
+    await Promise.allSettled(cacheWrites);
+    const prisma = await getPrismaClient();
+    await prisma.gitHubGraphqlCacheEntry.deleteMany();
+    await Promise.allSettled(inFlight);
+    await prisma.gitHubRateLimitSnapshot.deleteMany({
+      where: { authentication },
+    });
     return true;
   }
 
@@ -820,6 +877,17 @@ export class GitHubCache {
       throw new Error("offset must be a non-negative integer");
     }
     return { limit, offset };
+  }
+
+  private beginInvalidation(): {
+    cacheWrites: Promise<unknown>[];
+    inFlight: Promise<CachedResult<unknown>>[];
+  } {
+    const cacheWrites = [...this.cacheWrites];
+    const inFlight = [...new Set(this.inFlight.values())];
+    this.cacheGeneration += 1;
+    this.inFlight.clear();
+    return { cacheWrites, inFlight };
   }
 
   private graphqlContext(input: {

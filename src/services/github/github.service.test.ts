@@ -108,6 +108,8 @@ const appClient = vi.hoisted(() => ({
 }));
 
 const cacheClient = vi.hoisted(() => ({
+  clear: vi.fn(),
+  clearForCredentialChange: vi.fn(),
   recordGraphqlTransportCall: vi.fn(),
   recordRestCall: vi.fn(),
 }));
@@ -130,7 +132,11 @@ vi.mock("@/services/github/github-cache", () => ({
     }
 
     async clear() {
-      return true;
+      return cacheClient.clear();
+    }
+
+    async clearForCredentialChange(authentication: "PAT" | "APP") {
+      return cacheClient.clearForCredentialChange(authentication);
     }
 
     recordGraphqlTransportCall = cacheClient.recordGraphqlTransportCall;
@@ -252,14 +258,30 @@ vi.mock("@/services/credentials", async (importOriginal) => {
 vi.mock("@/data/prisma-client", () => ({
   getPrismaClient: async () => ({
     gitHubSettings: {
-      findUnique: async () =>
-        state.apiToken
-          ? {
-              id: "default",
-              apiToken: state.apiToken,
-              defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
-            }
-          : null,
+      findUnique: async () => ({
+        id: "default",
+        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        actionsNotificationPollIntervalSeconds: 60,
+        cacheTtlSeconds: 300,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      }),
+      upsert: async ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => ({
+        id: "default",
+        defaultJiraKeyRegex: String.raw`\b([A-Z]+-\d+)\b`,
+        actionsNotificationPollIntervalSeconds: 60,
+        cacheTtlSeconds: 300,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+        ...create,
+        ...update,
+      }),
     },
     gitHubRepository: {
       findMany: async () => state.repositories,
@@ -565,6 +587,10 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  cacheClient.clear.mockReset();
+  cacheClient.clear.mockResolvedValue(true);
+  cacheClient.clearForCredentialChange.mockReset();
+  cacheClient.clearForCredentialChange.mockResolvedValue(true);
   cacheClient.recordGraphqlTransportCall.mockReset();
   cacheClient.recordGraphqlTransportCall.mockResolvedValue(undefined);
   cacheClient.recordRestCall.mockReset();
@@ -2297,6 +2323,7 @@ describe("GitHub service", () => {
       }),
     );
     expect(await service.getAppSettings()).not.toHaveProperty("privateKey");
+    expect(cacheClient.clearForCredentialChange).toHaveBeenCalledWith("APP");
 
     await expect(
       service.saveAppSettings(
@@ -2305,6 +2332,22 @@ describe("GitHub service", () => {
       ),
     ).rejects.toThrow("replacement private key");
     expect(state.appSettings?.appId).toBe("123");
+  });
+
+  test("clears PAT cache state only when credentials change in settings", async () => {
+    const service = new GitHubService();
+
+    await expect(
+      service.saveSettings({ apiToken: "replacement-token" }),
+    ).resolves.toMatchObject({ tokenConfigured: true });
+    expect(state.apiToken).toBe("replacement-token");
+    expect(cacheClient.clearForCredentialChange).toHaveBeenCalledWith("PAT");
+
+    cacheClient.clearForCredentialChange.mockClear();
+    await expect(
+      service.saveSettings({ actionsNotificationPollIntervalSeconds: 120 }),
+    ).resolves.toMatchObject({ tokenConfigured: true });
+    expect(cacheClient.clearForCredentialChange).not.toHaveBeenCalled();
   });
 
   test("configures and preserves a signed webhook only for a public HTTPS origin", async () => {

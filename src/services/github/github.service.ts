@@ -1482,7 +1482,7 @@ export class GitHubService {
           });
         },
       );
-      await this.cache.clear();
+      await this.cache.clearForCredentialChange("PAT");
     } else {
       await prisma.gitHubSettings.upsert({
         where: { id: SETTINGS_ID },
@@ -1505,7 +1505,7 @@ export class GitHubService {
         });
       },
     );
-    await this.cache.clear();
+    await this.cache.clearForCredentialChange("PAT");
     this.pollingConfigurationChanged();
     return this.getSettings();
   }
@@ -1937,7 +1937,7 @@ export class GitHubService {
         outcome: "SUCCESS",
         githubRequestId: verification.githubRequestId,
       });
-      await this.cache.clear();
+      await this.cache.clearForCredentialChange("APP");
       this.notificationsConfigurationChanged?.();
       return this.getAppSettings();
     } catch (error) {
@@ -2063,7 +2063,7 @@ export class GitHubService {
       },
     );
     clearGitHubAppTokenCache();
-    await this.cache.clear();
+    await this.cache.clearForCredentialChange("APP");
     await this.audit(auditContext, {
       operation: "GITHUB_APP_SETTINGS_CLEAR",
       outcome: "SUCCESS",

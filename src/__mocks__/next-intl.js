@@ -500,6 +500,7 @@ const mockTranslations = {
     limit: "Limit",
     remaining: "Remaining",
     used: "Used",
+    estimated: "Estimated",
     reset: "Resets",
     resource: "Resource",
     observed: "Observed",

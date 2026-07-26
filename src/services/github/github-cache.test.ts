@@ -64,6 +64,7 @@ const state = vi.hoisted(() => ({
   calls: [] as CallLog[],
   snapshots: [] as RateSnapshot[],
   overrides: [] as TtlOverride[],
+  failLogWrites: false,
 }));
 
 vi.mock("@/data/prisma-client", () => ({
@@ -196,9 +197,17 @@ vi.mock("@/data/prisma-client", () => ({
               where.authentication_resource.authentication &&
             snapshot.resource === where.authentication_resource.resource,
         ) ?? null,
+      deleteMany: async ({ where }: { where: { authentication: string } }) => {
+        const before = state.snapshots.length;
+        state.snapshots = state.snapshots.filter(
+          (snapshot) => snapshot.authentication !== where.authentication,
+        );
+        return { count: before - state.snapshots.length };
+      },
     },
     gitHubApiCallLog: {
       create: async ({ data }: { data: Omit<CallLog, "createdAt"> }) => {
+        if (state.failLogWrites) throw new Error("telemetry unavailable");
         const call = { ...data, createdAt: new Date() };
         state.calls.push(call);
         return call;
@@ -303,6 +312,7 @@ beforeEach(() => {
       updatedAt: new Date(0),
     },
   ];
+  state.failLogWrites = false;
 });
 
 describe("GitHubCache", () => {
@@ -352,6 +362,59 @@ describe("GitHubCache", () => {
     expect(
       state.calls.find((call) => call.source === "CACHE")?.pointsAvoided,
     ).toBe(11);
+  });
+
+  test("does not coalesce callers with different refresh and stale policies", async () => {
+    const cache = new GitHubCache();
+    await cache.query(
+      input("PAT", async () => ({
+        data: { value: 1 },
+        statusCode: 200,
+        pointCost: 3,
+        rateLimit: null,
+      })),
+    );
+    state.entries[0]!.fetchedAt = new Date(Date.now() - 600_000);
+
+    let release: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const permissiveFetcher = vi.fn(async () => {
+      markStarted?.();
+      await gate;
+      throw new Error("background refresh failed");
+    });
+    const permissive = cache.query({
+      ...input("PAT", permissiveFetcher),
+      allowStaleOnError: true,
+    });
+    await started;
+
+    const strictFetcher = vi.fn(async () => {
+      throw new Error("manual refresh failed");
+    });
+    await expect(
+      cache.query({
+        ...input("PAT", strictFetcher),
+        force: true,
+        allowStaleOnError: false,
+      }),
+    ).rejects.toThrow("manual refresh failed");
+    expect(strictFetcher).toHaveBeenCalledOnce();
+
+    release?.();
+    await expect(permissive).resolves.toEqual(
+      expect.objectContaining({
+        data: { value: 1 },
+        source: "ERROR",
+        stale: true,
+      }),
+    );
   });
 
   test("serves stale data on failure and guards an exhausted bucket", async () => {
@@ -429,6 +492,159 @@ describe("GitHubCache", () => {
       source: "LIVE",
       pointCost: null,
     });
+  });
+
+  test("does not repopulate entries from a read that predates invalidation", async () => {
+    const cache = new GitHubCache();
+    let release: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const staleRead = cache.query(
+      input("PAT", async () => {
+        markStarted?.();
+        await gate;
+        return {
+          data: { value: 1 },
+          statusCode: 200,
+          pointCost: 2,
+          rateLimit: null,
+        };
+      }),
+    );
+    await started;
+
+    await cache.mutation({
+      ...input("PAT", async () => ({
+        data: { value: 2 },
+        statusCode: 200,
+        pointCost: 2,
+        rateLimit: null,
+      })),
+      operation: "TestMutation",
+      query: "mutation TestMutation { addComment { id } }",
+    });
+    release?.();
+    await expect(staleRead).resolves.toEqual(
+      expect.objectContaining({ data: { value: 1 }, entryId: null }),
+    );
+    expect(state.entries).toHaveLength(0);
+
+    const latestFetcher = vi.fn(async () => ({
+      data: { value: 3 },
+      statusCode: 200,
+      pointCost: 2,
+      rateLimit: null,
+    }));
+    await expect(cache.query(input("PAT", latestFetcher))).resolves.toEqual(
+      expect.objectContaining({ data: { value: 3 }, source: "LIVE" }),
+    );
+    expect(latestFetcher).toHaveBeenCalledOnce();
+  });
+
+  test("clears rate snapshots for credentials changed through settings", async () => {
+    const cache = new GitHubCache();
+    state.snapshots = [
+      {
+        authentication: "PAT",
+        resource: "core",
+        limit: 5000,
+        remaining: 0,
+        used: 5000,
+        resetAt: new Date(Date.now() + 60_000),
+      },
+      {
+        authentication: "APP",
+        resource: "graphql",
+        limit: 5000,
+        remaining: 10,
+        used: 4990,
+        resetAt: new Date(Date.now() + 60_000),
+      },
+    ];
+
+    let release: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const oldCredentialRequest = cache.query(
+      input("PAT", async () => {
+        markStarted?.();
+        await gate;
+        state.snapshots.push({
+          authentication: "PAT",
+          resource: "graphql",
+          limit: 5000,
+          remaining: 0,
+          used: 5000,
+          resetAt: new Date(Date.now() + 60_000),
+        });
+        return {
+          data: { value: 3 },
+          statusCode: 200,
+          pointCost: 1,
+          rateLimit: null,
+        };
+      }),
+    );
+    await started;
+    const clearing = cache.clearForCredentialChange("PAT");
+    release?.();
+    await expect(clearing).resolves.toBe(true);
+    await expect(oldCredentialRequest).resolves.toEqual(
+      expect.objectContaining({ entryId: null }),
+    );
+    expect(state.snapshots).toEqual([
+      expect.objectContaining({ authentication: "APP" }),
+    ]);
+
+    const fetcher = vi.fn(async () => ({
+      data: { value: 4 },
+      statusCode: 200,
+      pointCost: 1,
+      rateLimit: null,
+    }));
+    await expect(cache.query(input("PAT", fetcher))).resolves.toEqual(
+      expect.objectContaining({ data: { value: 4 }, source: "LIVE" }),
+    );
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  test("does not fail a completed mutation when telemetry is unavailable", async () => {
+    const cache = new GitHubCache();
+    await cache.query(
+      input("PAT", async () => ({
+        data: { value: 1 },
+        statusCode: 200,
+        pointCost: 2,
+        rateLimit: null,
+      })),
+    );
+    state.failLogWrites = true;
+    const fetcher = vi.fn(async () => ({
+      data: { value: 2 },
+      statusCode: 200,
+      pointCost: 2,
+      rateLimit: null,
+    }));
+
+    await expect(
+      cache.mutation({
+        ...input("PAT", fetcher),
+        operation: "TestMutation",
+        query: "mutation TestMutation { addComment { id } }",
+      }),
+    ).resolves.toEqual({ value: 2 });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(state.entries).toHaveLength(0);
   });
 
   test("validates TTL and reports rolling point metrics", async () => {

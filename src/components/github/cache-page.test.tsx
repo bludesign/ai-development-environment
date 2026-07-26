@@ -68,16 +68,16 @@ describe("GitHubCachePage", () => {
               remaining: 4993,
               used: 7,
               resetAt: "2026-07-26T06:00:00.000Z",
-              observedAt: "2026-07-26T05:00:00.000Z",
+              observedAt: "2026-07-26T05:30:00.000Z",
             },
             {
               authentication: "APP",
               resource: "core",
               limit: 15000,
-              remaining: 14990,
-              used: 10,
+              remaining: 6000,
+              used: 9000,
               resetAt: "2026-07-26T06:00:00.000Z",
-              observedAt: "2026-07-26T05:00:00.000Z",
+              observedAt: "2026-07-26T05:30:00.000Z",
             },
           ],
           githubCacheMetrics: {
@@ -275,6 +275,9 @@ describe("GitHubCachePage", () => {
     expect(graphqlRateGrid?.className).not.toContain("sm:grid-cols-2");
     expect(restRateGrid?.className).not.toContain("sm:grid-cols-2");
     expect(screen.getByText("4993 / 5000")).toBeDefined();
+    expect(screen.getAllByText("Estimated")).toHaveLength(2);
+    expect(screen.getByText("14").className).not.toContain("text-destructive");
+    expect(screen.getByText("18000").className).toContain("text-destructive");
     expect(screen.getByText("Status").closest("th")?.className).toContain(
       "min-w-56",
     );

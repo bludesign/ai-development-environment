@@ -74,6 +74,7 @@ import type {
 } from "@/services/github/types";
 
 const PAGE_SIZE = 50;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const WINDOW_FIELDS =
   "window total live cache errors averageMs pointsUsed pointsAvoided";
 const API_TYPE_FILTERS = ["ALL", "GRAPHQL", "REST"] as const;
@@ -116,6 +117,23 @@ function statusClass(source: string) {
   if (source === "ERROR")
     return "border-destructive/30 bg-destructive/10 text-destructive";
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+}
+
+function estimateRateLimitUsage(snapshot: GitHubRateLimitSnapshotView) {
+  const resetAt = Date.parse(snapshot.resetAt);
+  const observedAt = Date.parse(snapshot.observedAt);
+  const elapsed = observedAt - (resetAt - RATE_LIMIT_WINDOW_MS);
+  if (
+    !Number.isFinite(elapsed) ||
+    elapsed <= 0 ||
+    elapsed >= RATE_LIMIT_WINDOW_MS
+  ) {
+    return snapshot.used;
+  }
+  return Math.max(
+    snapshot.used,
+    Math.round((snapshot.used * RATE_LIMIT_WINDOW_MS) / elapsed),
+  );
 }
 
 function visibleRequestSummary(call: GitHubApiCallView) {
@@ -1076,38 +1094,55 @@ function RateLimitPanel({
           <div
             className={`grid gap-3 p-4 ${snapshots.length > 1 ? "sm:grid-cols-2" : ""}`}
           >
-            {snapshots.map((snapshot) => (
-              <Card key={`${snapshot.authentication}-${snapshot.resource}`}>
-                <CardContent>
-                  <div className="flex justify-between">
-                    <span className="font-medium">
-                      {snapshot.authentication} · {snapshot.resource}
-                    </span>
-                    <Badge variant="outline">
-                      {snapshot.remaining} / {snapshot.limit}
-                    </Badge>
-                  </div>
-                  <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                    <dt className="text-muted-foreground">{t("limit")}</dt>
-                    <dd>{snapshot.limit}</dd>
-                    <dt className="text-muted-foreground">{t("remaining")}</dt>
-                    <dd>{snapshot.remaining}</dd>
-                    <dt className="text-muted-foreground">{t("used")}</dt>
-                    <dd>{snapshot.used}</dd>
-                    <dt className="text-muted-foreground">{t("reset")}</dt>
-                    <dd>
-                      <DateTime value={snapshot.resetAt} />
-                    </dd>
-                    <dt className="text-muted-foreground">{t("resource")}</dt>
-                    <dd>{snapshot.resource}</dd>
-                    <dt className="text-muted-foreground">{t("observed")}</dt>
-                    <dd>
-                      <DateTime value={snapshot.observedAt} />
-                    </dd>
-                  </dl>
-                </CardContent>
-              </Card>
-            ))}
+            {snapshots.map((snapshot) => {
+              const estimated = estimateRateLimitUsage(snapshot);
+              return (
+                <Card key={`${snapshot.authentication}-${snapshot.resource}`}>
+                  <CardContent>
+                    <div className="flex justify-between">
+                      <span className="font-medium">
+                        {snapshot.authentication} · {snapshot.resource}
+                      </span>
+                      <Badge variant="outline">
+                        {snapshot.remaining} / {snapshot.limit}
+                      </Badge>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <dt className="text-muted-foreground">{t("limit")}</dt>
+                      <dd>{snapshot.limit}</dd>
+                      <dt className="text-muted-foreground">
+                        {t("remaining")}
+                      </dt>
+                      <dd>{snapshot.remaining}</dd>
+                      <dt className="text-muted-foreground">{t("used")}</dt>
+                      <dd>{snapshot.used}</dd>
+                      <dt className="text-muted-foreground">
+                        {t("estimated")}
+                      </dt>
+                      <dd
+                        className={
+                          estimated > snapshot.limit
+                            ? "font-medium text-destructive"
+                            : undefined
+                        }
+                      >
+                        {estimated}
+                      </dd>
+                      <dt className="text-muted-foreground">{t("reset")}</dt>
+                      <dd>
+                        <DateTime value={snapshot.resetAt} />
+                      </dd>
+                      <dt className="text-muted-foreground">{t("resource")}</dt>
+                      <dd>{snapshot.resource}</dd>
+                      <dt className="text-muted-foreground">{t("observed")}</dt>
+                      <dd>
+                        <DateTime value={snapshot.observedAt} />
+                      </dd>
+                    </dl>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 border-t p-4">
