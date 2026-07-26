@@ -1170,27 +1170,15 @@ export class WorktreesService {
     const repository = worktree.codebase.repository;
     const pattern =
       repository.jiraBranchRegex ?? settings?.defaultJiraBranchRegex ?? "";
+    // The ticket key comes from the branch name alone. Reading it off a linked
+    // pull request instead meant fetching every open pull request in the
+    // repository on every workflow event, which is far too expensive for a
+    // fallback that only helps when the branch name omits the key.
     const issueKey = ticketKey(worktree.branch, pattern);
-    let pullRequest:
-      | Awaited<ReturnType<GitHubService["pullRequestsForOrigin"]>>[number]
-      | null = null;
-    if (worktree.branch) {
-      try {
-        pullRequest =
-          (
-            await this.gitHubService.pullRequestsForOrigin(
-              repository.canonicalOrigin,
-            )
-          ).find((item) => item.headRefName === worktree.branch) ?? null;
-      } catch {
-        // Workflow launch remains available when GitHub cannot be queried.
-      }
-    }
-    const resolvedIssueKey = pullRequest?.jiraKey ?? issueKey;
     let ticket: Awaited<ReturnType<JiraService["cachedTicket"]>> = null;
-    if (resolvedIssueKey) {
+    if (issueKey) {
       try {
-        ticket = await this.jiraService.cachedTicket(resolvedIssueKey);
+        ticket = await this.jiraService.cachedTicket(issueKey);
       } catch {
         // Ticket metadata is optional; the branch-derived key remains useful.
       }
@@ -1231,26 +1219,10 @@ export class WorktreesService {
         displayOrigin: repository.displayOrigin,
         defaultBranch: worktree.codebase.defaultBranch,
       },
-      ...(pullRequest
-        ? {
-            pr: {
-              id: pullRequest.id,
-              number: pullRequest.number,
-              title: pullRequest.title,
-              url: pullRequest.url,
-              repositoryGithubId: pullRequest.repositoryGithubId,
-              repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
-              headRefName: pullRequest.headRefName,
-              state: pullRequest.state,
-              labels: pullRequest.labels,
-              jiraKey: pullRequest.jiraKey,
-            },
-          }
-        : {}),
-      ...(resolvedIssueKey
+      ...(issueKey
         ? {
             ticket: {
-              key: resolvedIssueKey,
+              key: issueKey,
               title: ticket?.summary ?? null,
               status: ticket?.status ?? null,
               projectKey: ticket?.projectKey ?? null,

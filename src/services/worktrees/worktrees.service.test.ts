@@ -385,7 +385,7 @@ describe("WorktreesService", () => {
     expect(findUnique).toHaveBeenCalledWith({ where: { id: "default" } });
   });
 
-  test("hydrates workflow sessions with the linked pull request and ticket", async () => {
+  test("hydrates workflow sessions from the branch without reading GitHub", async () => {
     getPrismaClient.mockResolvedValue({
       worktree: {
         findFirst: vi.fn().mockResolvedValue({
@@ -441,9 +441,10 @@ describe("WorktreesService", () => {
       { pullRequestsForOrigin } as unknown as GitHubService,
     );
 
-    await expect(
-      worktrees.workflowSessionDataForWorktree("worktree-1"),
-    ).resolves.toMatchObject({
+    const session =
+      await worktrees.workflowSessionDataForWorktree("worktree-1");
+
+    expect(session).toMatchObject({
       worktree: { id: "worktree-1", baseBranch: "release" },
       codebase: { id: "codebase-1", agentId: "agent-1" },
       agent: { id: "agent-1", name: "Studio Mac" },
@@ -452,9 +453,12 @@ describe("WorktreesService", () => {
         name: "Widgets",
         url: "github.com/acme/widgets",
       },
-      pr: { id: "pull-request-1", number: 42, jiraKey: "APP-99" },
-      ticket: { key: "APP-99" },
+      // The branch regex is the only source of the key, so the pull request's
+      // own APP-99 does not win.
+      ticket: { key: "APP-42" },
     });
+    expect(session).not.toHaveProperty("pr");
+    expect(pullRequestsForOrigin).not.toHaveBeenCalled();
   });
 
   test("records a deduplicated workflow event after creating a worktree", async () => {
