@@ -272,13 +272,15 @@ describe("UsagePage", () => {
     expect(
       await screen.findByRole("option", { name: "Agent B, b.local" }),
     ).toBeDefined();
-    expect(screen.queryByRole("option", { name: "Agent A, a.local" })).toBeNull();
+    expect(
+      screen.queryByRole("option", { name: "Agent A, a.local" }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("option", { name: "Agent B, b.local" }));
 
     await waitFor(() => expect(filter.textContent).toContain("Agent B"));
-    expect(screen.getByText("Grand total").closest("tr")?.textContent).toContain(
-      "$0.50",
-    );
+    expect(
+      screen.getByText("Grand total").closest("tr")?.textContent,
+    ).toContain("$0.50");
 
     fireEvent.click(
       screen.getByRole("button", { name: "Show models for 2026-07-16" }),

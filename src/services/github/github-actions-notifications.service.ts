@@ -312,10 +312,9 @@ export class GitHubActionsNotificationsService {
       Record<string, unknown> | undefined;
     const pullRequestBase = pullRequest.base as
       Record<string, unknown> | undefined;
-    const checkSuite = (check.check_suite ?? payload.check_suite ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const checkSuite = (check.check_suite ??
+      payload.check_suite ??
+      {}) as Record<string, unknown>;
     const headBranch = text(pullRequestHead?.ref);
     const pushedBranch =
       text(payload.ref)?.replace(/^refs\/heads\//, "") ?? null;
@@ -415,8 +414,7 @@ export class GitHubActionsNotificationsService {
                 worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
               headSha: worktree.headSha,
               pushStatus: worktree.pushStatus,
-              dirty:
-                worktree.hasStagedChanges || worktree.hasUnstagedChanges,
+              dirty: worktree.hasStagedChanges || worktree.hasUnstagedChanges,
             },
             codebase: {
               id: worktree.codebase.id,

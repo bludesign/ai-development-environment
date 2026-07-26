@@ -76,10 +76,7 @@ export function waitCadenceSeconds(
  * starting, which stays the default; a configured cadence applies from the
  * first poll rather than only from the second.
  */
-export function waitResumeAfter(
-  config: WaitConfig,
-  fallbackSeconds = 1,
-): Date {
+export function waitResumeAfter(config: WaitConfig, fallbackSeconds = 1): Date {
   return new Date(
     Date.now() + waitCadenceSeconds(config, fallbackSeconds) * 1_000,
   );

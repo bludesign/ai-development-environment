@@ -244,9 +244,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       const instance = query({
         prompt: messages,
         options: {
-          ...(pathToClaudeCodeExecutable
-            ? { pathToClaudeCodeExecutable }
-            : {}),
+          ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
           env: claudeEnvironment(),
           permissionMode: "plan",
         },
@@ -296,9 +294,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     activeQuery = query({
       prompt: messages,
       options: {
-        ...(pathToClaudeCodeExecutable
-          ? { pathToClaudeCodeExecutable }
-          : {}),
+        ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
         cwd: input.run.worktree!.folder,
         ...(input.run.model !== "default" ? { model: input.run.model } : {}),
         ...(effort ? { effort } : {}),

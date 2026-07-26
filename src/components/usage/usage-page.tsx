@@ -234,9 +234,7 @@ export function UsagePage() {
     ? selectedAgentId
     : null;
   const filteredUsage =
-    usage && activeAgentId
-      ? filterUsageByAgent(usage, activeAgentId)
-      : usage;
+    usage && activeAgentId ? filterUsageByAgent(usage, activeAgentId) : usage;
   // A model the current range no longer covers is treated as no filter at all,
   // so changing the range falls back to the totals for everything rather than
   // to a row of zeros.

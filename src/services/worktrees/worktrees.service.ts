@@ -2043,8 +2043,7 @@ export class WorktreesService {
           },
         }),
       ]);
-      if (active || activeMove)
-        throw new CodebaseBusyError();
+      if (active || activeMove) throw new CodebaseBusyError();
     }
     return worktree;
   }
