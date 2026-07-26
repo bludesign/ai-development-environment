@@ -14,6 +14,7 @@ describe("Jira resolvers", () => {
     const service = {
       getSettings: vi.fn(),
       ticketBoard: vi.fn(),
+      clearApiCalls: vi.fn(),
     } as unknown as JiraService;
     const resolvers = createJiraResolvers(service);
 
@@ -27,8 +28,12 @@ describe("Jira resolvers", () => {
         context("agent-1"),
       ),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearJiraApiCalls({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.ticketBoard).not.toHaveBeenCalled();
+    expect(service.clearApiCalls).not.toHaveBeenCalled();
   });
 
   test("passes write-only credential input to the server service", async () => {

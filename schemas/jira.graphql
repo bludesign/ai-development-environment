@@ -434,6 +434,7 @@ extend type Mutation {
   refreshJiraSource(sourceId: ID!): JiraTicketBoard!
   updateJiraCacheTtl(ttlMinutes: Int!): JiraSettings!
   clearJiraCache: Boolean!
+  clearJiraApiCalls: Boolean!
   refreshJiraCachedTicket(issueKey: ID!): JiraTicketDetail!
   deleteJiraCachedTicket(issueKey: ID!): Boolean!
   addJiraComment(issueKey: ID!, content: JiraTextInput!): JiraTicketDetail!

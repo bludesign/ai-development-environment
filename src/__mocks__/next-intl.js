@@ -509,6 +509,9 @@ const mockTranslations = {
     operation: "Operation",
     recentTitle: "Recent GitHub API calls",
     recentDescription: "Newest calls first.",
+    clearCalls: "Clear recent calls",
+    confirmClearCalls:
+      "Clear all recent GitHub API calls? Cached responses and rate-limit snapshots will be kept.",
     noCalls: "No calls recorded.",
     time: "Time",
     source: "Source",
@@ -594,6 +597,9 @@ const mockTranslations = {
     operation: "Operation",
     recentTitle: "Recent API calls",
     recentDescription: "Every cached Jira SDK operation, newest first.",
+    clearCalls: "Clear recent calls",
+    confirmClearCalls:
+      "Clear all recent Jira API calls? Cached responses and tickets will be kept.",
     noCalls: "No Jira API calls have been recorded.",
     time: "Time",
     fetched: "What was fetched",

@@ -369,6 +369,14 @@ export const createGitHubResolvers = (
       requireControlPlane(context);
       return gitHubService.clearCache();
     },
+    clearGitHubApiCalls: (
+      _root: unknown,
+      _args: unknown,
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return gitHubService.clearApiCalls();
+    },
     refreshGitHubCachedEntry: (
       _root: unknown,
       { id }: { id: string },

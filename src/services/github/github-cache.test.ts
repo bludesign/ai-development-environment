@@ -170,11 +170,13 @@ vi.mock("@/data/prisma-client", () => ({
           : calls.slice(skip ?? 0, (skip ?? 0) + take);
       },
       count: async () => state.calls.length,
-      deleteMany: async ({ where }: { where: { createdAt: { lt: Date } } }) => {
+      deleteMany: async ({
+        where,
+      }: { where?: { createdAt: { lt: Date } } } = {}) => {
         const before = state.calls.length;
-        state.calls = state.calls.filter(
-          (call) => call.createdAt >= where.createdAt.lt,
-        );
+        state.calls = where
+          ? state.calls.filter((call) => call.createdAt >= where.createdAt.lt)
+          : [];
         return { count: before - state.calls.length };
       },
     },
@@ -415,5 +417,24 @@ describe("GitHubCache", () => {
       apiToken: "[REDACTED]",
       pullRequestId: "PR_kwDO123",
     });
+  });
+
+  test("clears API call history without clearing cached responses", async () => {
+    const cache = new GitHubCache();
+    await cache.query(
+      input("PAT", async () => ({
+        data: { value: 1 },
+        statusCode: 200,
+        pointCost: 3,
+        rateLimit: null,
+      })),
+    );
+    expect(state.calls).toHaveLength(1);
+    expect(state.entries).toHaveLength(1);
+
+    await expect(cache.clearCalls()).resolves.toBe(true);
+
+    expect(state.calls).toHaveLength(0);
+    expect(state.entries).toHaveLength(1);
   });
 });

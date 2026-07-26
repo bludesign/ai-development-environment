@@ -139,6 +139,9 @@ describe("GitHubCachePage", () => {
       if (query.includes("clearGitHubCache")) {
         return { clearGitHubCache: true } as never;
       }
+      if (query.includes("clearGitHubApiCalls")) {
+        return { clearGitHubApiCalls: true } as never;
+      }
       throw new Error(`Unexpected query: ${query}`);
     });
 
@@ -186,6 +189,22 @@ describe("GitHubCachePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Clear cache" }));
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("mutation { clearGitHubCache }"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear recent calls" }));
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(
+      requestMock.mock.calls.some(([query]) =>
+        String(query).includes("clearGitHubApiCalls"),
+      ),
+    ).toBe(false);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clear recent calls" }),
+    );
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(
+        "mutation { clearGitHubApiCalls }",
+      ),
     );
   });
 });

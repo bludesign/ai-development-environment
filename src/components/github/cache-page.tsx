@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -208,6 +209,19 @@ export function GitHubCachePage() {
     }
   };
 
+  const clearApiCalls = async () => {
+    setBusyKey("clear-calls");
+    try {
+      await controlPlaneRequest("mutation { clearGitHubApiCalls }");
+      setCallOffset(0);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const refreshEntry = async (id: string) => {
     setBusyKey(id);
     try {
@@ -383,6 +397,28 @@ export function GitHubCachePage() {
             <Panel
               title={t("recentTitle")}
               description={t("recentDescription")}
+              action={
+                <ConfirmationDialog
+                  actionLabel={t("clearCalls")}
+                  cancelLabel={tc("cancel")}
+                  description={tc("cannotBeUndone")}
+                  onConfirm={clearApiCalls}
+                  title={t("confirmClearCalls")}
+                  trigger={
+                    <Button
+                      disabled={
+                        busyKey === "clear-calls" ||
+                        data.githubApiCalls.total === 0
+                      }
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Trash2 />
+                      {t("clearCalls")}
+                    </Button>
+                  }
+                />
+              }
             >
               {data.githubApiCalls.items.length === 0 ? (
                 <EmptyState>{t("noCalls")}</EmptyState>
@@ -747,10 +783,12 @@ function MetricWindowDetails({ metric }: { metric: GitHubMetricWindow }) {
 function Panel({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -758,6 +796,7 @@ function Panel({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
+        {action && <CardAction>{action}</CardAction>}
       </CardHeader>
       {children}
     </Card>

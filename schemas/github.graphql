@@ -723,6 +723,7 @@ extend type Mutation {
   saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
   updateGitHubCacheTtl(ttlMinutes: Int!): GitHubSettings!
   clearGitHubCache: Boolean!
+  clearGitHubApiCalls: Boolean!
   refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!
   deleteGitHubCachedEntry(id: ID!): Boolean!
   saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!

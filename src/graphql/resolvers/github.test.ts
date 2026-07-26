@@ -50,6 +50,7 @@ describe("GitHub resolvers", () => {
       getSettings: vi.fn(),
       cacheMetrics: vi.fn(),
       clearCache: vi.fn(),
+      clearApiCalls: vi.fn(),
       actionsWorkflowRuns: vi.fn(),
       pullRequests: vi.fn(),
     } as unknown as GitHubService;
@@ -81,11 +82,15 @@ describe("GitHub resolvers", () => {
     expect(() =>
       resolvers.Mutation.clearGitHubCache({}, {}, context("agent-1")),
     ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Mutation.clearGitHubApiCalls({}, {}, context("agent-1")),
+    ).toThrow("control-plane");
     expect(service.getSettings).not.toHaveBeenCalled();
     expect(service.actionsWorkflowRuns).not.toHaveBeenCalled();
     expect(service.pullRequests).not.toHaveBeenCalled();
     expect(service.cacheMetrics).not.toHaveBeenCalled();
     expect(service.clearCache).not.toHaveBeenCalled();
+    expect(service.clearApiCalls).not.toHaveBeenCalled();
   });
 
   test("passes write-only credentials and repository scope to the service", async () => {

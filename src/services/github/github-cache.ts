@@ -463,6 +463,12 @@ export class GitHubCache {
     return true;
   }
 
+  async clearCalls(): Promise<boolean> {
+    const prisma = await getPrismaClient();
+    await prisma.gitHubApiCallLog.deleteMany();
+    return true;
+  }
+
   async delete(id: string): Promise<boolean> {
     const prisma = await getPrismaClient();
     const result = await prisma.gitHubGraphqlCacheEntry.deleteMany({

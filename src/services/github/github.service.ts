@@ -1534,6 +1534,10 @@ export class GitHubService {
     return this.cache.clear();
   }
 
+  async clearApiCalls(): Promise<boolean> {
+    return this.cache.clearCalls();
+  }
+
   async deleteCachedEntry(id: string): Promise<boolean> {
     return this.cache.delete(id);
   }
