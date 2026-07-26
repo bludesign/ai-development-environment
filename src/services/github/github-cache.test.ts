@@ -194,6 +194,7 @@ function input(
 ) {
   return {
     authentication,
+    requestSource: "PULL_REQUESTS_PAGE" as const,
     endpoint: "https://api.github.com/graphql",
     operation: "TestQuery",
     query: "query TestQuery($a: Int, $b: Int) { viewer { login } }",
@@ -366,6 +367,7 @@ describe("GitHubCache", () => {
       method: "GET",
       endpoint:
         "https://api.github.com/repos/acme/widgets/actions/runs/44/jobs?page=2",
+      requestSource: "ACTIONS_PAGE",
       durationMs: 12,
       statusCode: 200,
     });
@@ -373,6 +375,7 @@ describe("GitHubCache", () => {
       authentication: "APP",
       endpoint: "https://api.github.com/graphql",
       operation: "VerifyGitHubApp",
+      requestSource: "GITHUB_SETTINGS",
       variables: { pullRequestId: "PR_kwDO123", apiToken: "secret" },
       durationMs: 8,
       statusCode: 200,
@@ -383,7 +386,7 @@ describe("GitHubCache", () => {
       apiType: "REST",
       method: "GET",
       operation: "GET /repos/acme/widgets/actions/runs/44/jobs",
-      requestSource: "GITHUB_ACTIONS",
+      requestSource: "ACTIONS_PAGE",
     });
     expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({
       path: "/repos/acme/widgets/actions/runs/44/jobs",

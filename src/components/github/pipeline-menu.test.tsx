@@ -29,6 +29,7 @@ describe("RetryPipelineButton", () => {
           jobs: [],
         }}
         repositoryId="repository-1"
+        requestSource="PULL_REQUEST_DETAILS"
       />,
     );
 

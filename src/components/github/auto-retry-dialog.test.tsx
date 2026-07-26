@@ -59,6 +59,7 @@ describe("AutoRetryDialog", () => {
             ],
           },
         ]}
+        requestSource="ACTIONS_PAGE"
       />,
     );
 
@@ -138,6 +139,7 @@ describe("AutoRetryDialog", () => {
         allowFuture
         branch="feature/APP-42"
         codebaseRepositoryId="repository-1"
+        requestSource="PULL_REQUEST_DETAILS"
         worktreeId="worktree-1"
       />,
     );

@@ -63,6 +63,7 @@ describe("MergePullRequestButton", () => {
             commitBody: "Release notes",
             authorEmail: "octocat@example.com",
           },
+          source: "PULL_REQUEST_DETAILS",
         });
         return {
           mergeGitHubPullRequest: {
@@ -77,7 +78,11 @@ describe("MergePullRequestButton", () => {
     });
 
     render(
-      <MergePullRequestButton onMerged={onMerged} pullRequest={pullRequest} />,
+      <MergePullRequestButton
+        onMerged={onMerged}
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Merge" }));
 
@@ -111,7 +116,12 @@ describe("MergePullRequestButton", () => {
       },
     } as never);
 
-    render(<MergePullRequestButton pullRequest={pullRequest} />);
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Merge" }));
 
     expect(

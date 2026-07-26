@@ -41,6 +41,7 @@ import type {
   GitHubAutoRetryMode,
   GitHubAutoRetryRuleView,
   GitHubRepositoryWorkflowView,
+  GitHubRequestSource,
   GitHubWorkflowJobView,
 } from "@/services/github/types";
 
@@ -67,6 +68,7 @@ export function AutoRetryDialog({
   branch,
   pullRequestNumber,
   repositoryMode = false,
+  requestSource,
   trigger,
 }: {
   codebaseRepositoryId: string;
@@ -77,6 +79,7 @@ export function AutoRetryDialog({
   branch?: string | null;
   pullRequestNumber?: number | null;
   repositoryMode?: boolean;
+  requestSource: GitHubRequestSource;
   trigger?: ReactNode;
 }) {
   const t = useTranslations("githubAutomation");
@@ -135,15 +138,15 @@ export function AutoRetryDialog({
     const workflowData = await controlPlaneRequest<{
       githubRepositoryWorkflows: GitHubRepositoryWorkflowView[];
     }>(
-      `query GitHubRepositoryWorkflows($codebaseRepositoryId: ID!) {
-        githubRepositoryWorkflows(codebaseRepositoryId: $codebaseRepositoryId) {
+      `query GitHubRepositoryWorkflows($codebaseRepositoryId: ID!, $source: GitHubRequestSource!) {
+        githubRepositoryWorkflows(source: $source, codebaseRepositoryId: $codebaseRepositoryId) {
           id name path state url jobNames
         }
       }`,
-      { codebaseRepositoryId },
+      { codebaseRepositoryId, source: requestSource },
     );
     setRepositoryWorkflows(workflowData.githubRepositoryWorkflows);
-  }, [codebaseRepositoryId]);
+  }, [codebaseRepositoryId, requestSource]);
 
   const load = useCallback(async () => {
     if (!loadedOnceRef.current) setLoading(true);
@@ -160,13 +163,18 @@ export function AutoRetryDialog({
             const data = await controlPlaneRequest<{
               githubActionsWorkflowJobs: GitHubWorkflowJobView[];
             }>(
-              `query AutoRetryWorkflowJobs($repositoryId: ID!, $workflowRunId: ID!) {
+              `query AutoRetryWorkflowJobs($repositoryId: ID!, $workflowRunId: ID!, $source: GitHubRequestSource!) {
                 githubActionsWorkflowJobs(
+                  source: $source
                   codebaseRepositoryId: $repositoryId
                   workflowRunId: $workflowRunId
                 ) { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } }
               }`,
-              { repositoryId: codebaseRepositoryId, workflowRunId: run.id },
+              {
+                repositoryId: codebaseRepositoryId,
+                workflowRunId: run.id,
+                source: requestSource,
+              },
             );
             return { ...run, jobs: data.githubActionsWorkflowJobs };
           } catch {
@@ -193,6 +201,7 @@ export function AutoRetryDialog({
     refreshRepositoryWorkflows,
     refreshRules,
     repositoryMode,
+    requestSource,
   ]);
 
   useEffect(() => {

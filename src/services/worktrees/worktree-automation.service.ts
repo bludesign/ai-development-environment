@@ -377,22 +377,28 @@ export class WorktreeAutomationService {
           existing.pullRequestNumber,
         );
         if (previousState.state === "OPEN" && previousState.autoMergeEnabled) {
-          await this.github.disablePullRequestAutoMerge({
-            ...previousRepository,
-            number: existing.pullRequestNumber,
-          });
+          await this.github.disablePullRequestAutoMerge(
+            {
+              ...previousRepository,
+              number: existing.pullRequestNumber,
+            },
+            "WORKTREE_AUTOMATION",
+          );
           previousAutoMergeDisabled = true;
         }
       }
       newAutoMergeAttempted = true;
-      await this.github.enablePullRequestAutoMerge({
-        ...repository,
-        number: input.pullRequestNumber,
-        method: input.method,
-        commitHeadline: input.commitHeadline,
-        commitBody: input.commitBody,
-        authorEmail: input.authorEmail,
-      });
+      await this.github.enablePullRequestAutoMerge(
+        {
+          ...repository,
+          number: input.pullRequestNumber,
+          method: input.method,
+          commitHeadline: input.commitHeadline,
+          commitBody: input.commitBody,
+          authorEmail: input.authorEmail,
+        },
+        "WORKTREE_AUTOMATION",
+      );
       const rule = await prisma.worktreeAutoMerge.upsert({
         where: { worktreeId: worktree.id },
         create: {
@@ -431,10 +437,13 @@ export class WorktreeAutomationService {
     } catch (error) {
       if (newAutoMergeAttempted) {
         await this.github
-          .disablePullRequestAutoMerge({
-            ...repository,
-            number: input.pullRequestNumber,
-          })
+          .disablePullRequestAutoMerge(
+            {
+              ...repository,
+              number: input.pullRequestNumber,
+            },
+            "WORKTREE_AUTOMATION",
+          )
           .catch(() => null);
       }
       if (existing && (previousAutoMergeDisabled || !retargeting)) {
@@ -442,14 +451,17 @@ export class WorktreeAutomationService {
           existing.repositoryNameWithOwner,
         );
         await this.github
-          .enablePullRequestAutoMerge({
-            ...previousRepository,
-            number: existing.pullRequestNumber,
-            method: existing.mergeMethod as GitHubMergeMethod,
-            commitHeadline: existing.commitHeadline,
-            commitBody: existing.commitBody,
-            authorEmail: existing.authorEmail,
-          })
+          .enablePullRequestAutoMerge(
+            {
+              ...previousRepository,
+              number: existing.pullRequestNumber,
+              method: existing.mergeMethod as GitHubMergeMethod,
+              commitHeadline: existing.commitHeadline,
+              commitBody: existing.commitBody,
+              authorEmail: existing.authorEmail,
+            },
+            "WORKTREE_AUTOMATION",
+          )
           .catch(() => null);
       }
       throw error;
@@ -469,10 +481,13 @@ export class WorktreeAutomationService {
       rule.pullRequestNumber,
     );
     if (state.state === "OPEN" && state.autoMergeEnabled) {
-      await this.github.disablePullRequestAutoMerge({
-        ...repository,
-        number: rule.pullRequestNumber,
-      });
+      await this.github.disablePullRequestAutoMerge(
+        {
+          ...repository,
+          number: rule.pullRequestNumber,
+        },
+        "WORKTREE_AUTOMATION",
+      );
     }
     await prisma.worktreeAutoMerge.delete({ where: { worktreeId } });
     this.worktrees.publishAutomationChange(worktreeId);

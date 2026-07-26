@@ -64,9 +64,9 @@ describe("GitHubCachePage", () => {
                 method: "POST",
                 endpoint: "https://api.github.com/graphql",
                 operation: "Viewer",
-                requestSource: "PULL_REQUESTS",
-                requestSummary: "pullRequestId=PR_kwDO123",
-                variables: { pullRequestId: "PR_kwDO123" },
+                requestSource: "PULL_REQUEST_DETAILS",
+                requestSummary: "pullRequestId=PR_kwDO123 · cursor=null",
+                variables: { pullRequestId: "PR_kwDO123", cursor: null },
                 source: "LIVE",
                 durationMs: 20,
                 statusCode: 200,
@@ -102,10 +102,23 @@ describe("GitHubCachePage", () => {
     expect(screen.getByText("Points and rate")).toBeDefined();
     expect(screen.getByText("Source")).toBeDefined();
     expect(screen.getByText("Status")).toBeDefined();
-    expect(screen.getByText("Pull requests")).toBeDefined();
+    expect(screen.getByText("Pull request details")).toBeDefined();
     expect(screen.getByText("Live")).toBeDefined();
     expect(screen.getByText("pullRequestId=PR_kwDO123")).toBeDefined();
-    expect(screen.getAllByText(/PR_kwDO123/)).toHaveLength(2);
+    expect(screen.queryByText(/cursor=null/)).toBeNull();
+    expect(screen.getAllByText(/PR_kwDO123/)).toHaveLength(1);
+    expect(
+      document.querySelector('[data-slot="hover-card-content"]'),
+    ).toBeNull();
+    fireEvent.pointerEnter(screen.getByText("pullRequestId=PR_kwDO123"), {
+      pointerType: "mouse",
+    });
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-slot="hover-card-content"] pre')
+          ?.textContent,
+      ).toContain('"cursor": null'),
+    );
     expect(container.querySelector('td[colspan="7"]')).not.toBeNull();
     const callRow = screen.getByText("pullRequestId=PR_kwDO123").closest("tr");
     const callTime = callRow?.querySelector(

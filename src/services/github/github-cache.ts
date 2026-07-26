@@ -29,6 +29,7 @@ type LiveResult<T> = {
 
 type QueryInput<T> = {
   authentication: GitHubAuthentication;
+  requestSource: GitHubRequestSource;
   endpoint: string;
   operation: string;
   query: string;
@@ -107,55 +108,6 @@ function requestSummary(variables: unknown): string {
       return `${key}=${serialized.length > 120 ? `${serialized.slice(0, 117)}…` : serialized}`;
     })
     .join(" · ");
-}
-
-function inferRequestSource(input: {
-  apiType: GitHubApiType;
-  operation: string;
-  endpoint: string;
-}): GitHubRequestSource {
-  const operation = input.operation.toLowerCase();
-  if (input.apiType === "GRAPHQL") {
-    if (
-      operation.startsWith("verifygithubapp") ||
-      operation === "githubviewer" ||
-      operation === "githubavailablerepositories" ||
-      operation === "githubrepository"
-    ) {
-      return "GITHUB_SETTINGS";
-    }
-    if (operation.startsWith("workflow")) return "WORKFLOW_AUTOMATION";
-    if (
-      operation.includes("pullrequest") ||
-      operation.includes("reviewthread")
-    ) {
-      return "PULL_REQUESTS";
-    }
-    if (operation.includes("pipeline") || operation.includes("workflow")) {
-      return "GITHUB_ACTIONS";
-    }
-    return "GITHUB_API";
-  }
-
-  try {
-    const path = new URL(input.endpoint).pathname.toLowerCase();
-    if (/^\/app\/installations\/[^/]+\/access_tokens$/.test(path)) {
-      return "GITHUB_APP_AUTHENTICATION";
-    }
-    if (path === "/app" || path.startsWith("/app/")) {
-      return "GITHUB_SETTINGS";
-    }
-    if (path.includes("/actions/")) return "GITHUB_ACTIONS";
-    if (
-      (path.includes("/commits/") && path.endsWith("/pulls")) ||
-      path === "/user/emails"
-    ) {
-      return "PULL_REQUESTS";
-    }
-  } catch {
-    // Unknown endpoints retain the generic source.
-  }
-  return "GITHUB_API";
 }
 
 function parseJson(value: string): unknown {
@@ -445,7 +397,7 @@ export class GitHubCache {
     authentication: GitHubAuthentication;
     method: string;
     endpoint: string;
-    requestSource?: GitHubRequestSource;
+    requestSource: GitHubRequestSource;
     durationMs: number;
     statusCode?: number | null;
     error?: string | null;
@@ -484,7 +436,7 @@ export class GitHubCache {
     authentication: GitHubAuthentication;
     endpoint: string;
     operation: string;
-    requestSource?: GitHubRequestSource;
+    requestSource: GitHubRequestSource;
     variables: Record<string, unknown>;
     durationMs: number;
     statusCode?: number | null;
@@ -706,6 +658,7 @@ export class GitHubCache {
 
   private graphqlContext(input: {
     endpoint: string;
+    requestSource: GitHubRequestSource;
     variables: Record<string, unknown>;
   }) {
     const variables = sanitizeRequestValue(input.variables);
@@ -713,6 +666,7 @@ export class GitHubCache {
       apiType: "GRAPHQL" as const,
       method: "POST",
       endpoint: input.endpoint,
+      requestSource: input.requestSource,
       requestSummary: requestSummary(variables),
       variables,
     };
@@ -724,7 +678,7 @@ export class GitHubCache {
     method: string;
     endpoint: string;
     operation: string;
-    requestSource?: GitHubRequestSource;
+    requestSource: GitHubRequestSource;
     requestSummary: string;
     variables: unknown;
     source: GitHubCallSource;
@@ -746,13 +700,7 @@ export class GitHubCache {
         method: input.method,
         endpoint: input.endpoint,
         operation: input.operation,
-        requestSource:
-          input.requestSource ??
-          inferRequestSource({
-            apiType: input.apiType,
-            operation: input.operation,
-            endpoint: input.endpoint,
-          }),
+        requestSource: input.requestSource,
         requestSummary: input.requestSummary,
         variablesJson: stableStringify(sanitizeRequestValue(input.variables)),
         source: input.source,

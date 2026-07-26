@@ -150,7 +150,7 @@ export function resourcePlan(
     case "githubPullRequest":
       return {
         query: `query WorkflowPullRequestOptions($scope: GitHubPullRequestScope!, $repositoryId: ID) {
-          githubPullRequests(scope: $scope, repositoryId: $repositoryId, first: 25) {
+          githubPullRequests(source: WORKFLOW_AUTOMATION, scope: $scope, repositoryId: $repositoryId, first: 25) {
             items { number title }
           }
         }`,
@@ -316,7 +316,7 @@ export function resourcePlan(
       if (!scope) return null;
       return {
         query: `query WorkflowActionsRunOptions($codebaseRepositoryId: ID) {
-          githubActionsWorkflowRuns(codebaseRepositoryId: $codebaseRepositoryId, first: 25) {
+          githubActionsWorkflowRuns(source: WORKFLOW_AUTOMATION, codebaseRepositoryId: $codebaseRepositoryId, first: 25) {
             items { id displayTitle headBranch }
           }
         }`,

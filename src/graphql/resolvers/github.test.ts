@@ -61,14 +61,14 @@ describe("GitHub resolvers", () => {
     expect(() =>
       resolvers.Query.githubActionsWorkflowRuns(
         {},
-        { first: 25 },
+        { first: 25, source: "ACTIONS_PAGE" },
         context("agent-1"),
       ),
     ).toThrow("control-plane");
     expect(() =>
       resolvers.Query.githubPullRequests(
         {},
-        { scope: "MINE" },
+        { scope: "MINE", source: "PULL_REQUESTS_PAGE" },
         context("agent-1"),
       ),
     ).toThrow("control-plane");
@@ -130,6 +130,7 @@ describe("GitHub resolvers", () => {
       resolvers.Query.githubPullRequests(
         {},
         {
+          source: "PULL_REQUESTS_PAGE",
           scope: "REPOSITORY",
           repositoryId: "repository-1",
           state: "ALL",
@@ -143,6 +144,7 @@ describe("GitHub resolvers", () => {
     await resolvers.Query.githubActionsWorkflowRuns(
       {},
       {
+        source: "ACTIONS_PAGE",
         codebaseRepositoryId: "codebase-repository-1",
         branch: "feature/APP-42",
         workflowId: "workflow-1",
@@ -154,6 +156,7 @@ describe("GitHub resolvers", () => {
     await resolvers.Query.githubActionsWorkflowJobs(
       {},
       {
+        source: "ACTIONS_PAGE",
         codebaseRepositoryId: "codebase-repository-1",
         workflowRunId: "44",
       },
@@ -180,6 +183,7 @@ describe("GitHub resolvers", () => {
         state: "ALL",
         first: 10,
         after: "pull-request-cursor-1",
+        requestSource: "PULL_REQUESTS_PAGE",
       },
     );
     await resolvers.Query.githubPullRequest(
@@ -189,7 +193,12 @@ describe("GitHub resolvers", () => {
     );
     await resolvers.Query.githubPullRequestMergeOptions(
       {},
-      { owner: "acme", name: "widgets", number: 17 },
+      {
+        source: "PULL_REQUEST_DETAILS",
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+      },
       context(null),
     );
     const mergeInput = {
@@ -203,12 +212,16 @@ describe("GitHub resolvers", () => {
     };
     await resolvers.Mutation.mergeGitHubPullRequest(
       {},
-      { input: mergeInput },
+      { input: mergeInput, source: "PULL_REQUEST_DETAILS" },
       context(null),
     );
     await resolvers.Mutation.retryGitHubPipeline(
       {},
-      { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+      {
+        repositoryId: "repository-1",
+        checkSuiteId: "check-suite-1",
+        source: "PULL_REQUEST_DETAILS",
+      },
       context(null),
     );
     await resolvers.Mutation.retryGitHubWorkflowJob(
@@ -217,6 +230,7 @@ describe("GitHub resolvers", () => {
         repositoryId: "repository-1",
         checkSuiteId: "check-suite-1",
         jobId: "job-11",
+        source: "ACTIONS_PAGE",
       },
       context(null),
     );
@@ -226,6 +240,7 @@ describe("GitHub resolvers", () => {
         codebaseRepositoryId: "codebase-repository-1",
         workflowRunId: "44",
         force: true,
+        source: "WORKTREE_PIPELINES",
       },
       context(null),
     );
@@ -247,35 +262,44 @@ describe("GitHub resolvers", () => {
       "cursor-1",
       "feature/APP-42",
       "workflow-1",
+      "ACTIONS_PAGE",
     );
     expect(service.actionsWorkflowJobs).toHaveBeenCalledWith(
       "codebase-repository-1",
       "44",
+      "ACTIONS_PAGE",
     );
     expect(service.pullRequestMergeOptions).toHaveBeenCalledWith(
       "acme",
       "widgets",
       17,
+      "PULL_REQUEST_DETAILS",
     );
-    expect(service.mergePullRequest).toHaveBeenCalledWith(mergeInput);
+    expect(service.mergePullRequest).toHaveBeenCalledWith(
+      mergeInput,
+      "PULL_REQUEST_DETAILS",
+    );
     expect(worktrees.invalidatePullRequestsForOrigin).toHaveBeenCalledWith(
       "github.com/acme/widgets",
     );
     expect(service.retryPipeline).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
+      "PULL_REQUEST_DETAILS",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.retryWorkflowJob).toHaveBeenCalledWith(
       "repository-1",
       "check-suite-1",
       "job-11",
+      "ACTIONS_PAGE",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.cancelActionsWorkflowRun).toHaveBeenCalledWith(
       "codebase-repository-1",
       "44",
       true,
+      "WORKTREE_PIPELINES",
       { actor: "control-plane", ipAddress: "127.0.0.1" },
     );
     expect(service.reviewThreads).toHaveBeenCalledOnce();
@@ -312,7 +336,7 @@ describe("GitHub resolvers", () => {
 
     await resolvers.Query.githubPullRequests(
       {},
-      { scope: "MINE" },
+      { scope: "MINE", source: "PULL_REQUESTS_PAGE" },
       context(null),
       info,
     );
@@ -322,6 +346,7 @@ describe("GitHub resolvers", () => {
       state: "OPEN",
       first: 25,
       after: undefined,
+      requestSource: "PULL_REQUESTS_PAGE",
     });
   });
 
@@ -331,6 +356,7 @@ describe("GitHub resolvers", () => {
     } as unknown as GitHubService;
     const resolvers = createGitHubResolvers(service, worktreesService());
     const args = {
+      source: "ACTIONS_PAGE" as const,
       repositoryId: "repository-1",
       workflowRunId: "77",
       attempt: 2,
@@ -371,6 +397,7 @@ describe("GitHub resolvers", () => {
       "77",
       2,
       false,
+      "ACTIONS_PAGE",
     );
     expect(service.actionsWorkflowRunAttempt).toHaveBeenNthCalledWith(
       2,
@@ -378,6 +405,7 @@ describe("GitHub resolvers", () => {
       "77",
       2,
       true,
+      "ACTIONS_PAGE",
     );
   });
 });

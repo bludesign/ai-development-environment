@@ -462,7 +462,11 @@ describe("PullRequestsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubPipeline"),
-        { repositoryId: "repository-1", checkSuiteId: "check-suite-1" },
+        {
+          repositoryId: "repository-1",
+          checkSuiteId: "check-suite-1",
+          source: "PULL_REQUESTS_PAGE",
+        },
       ),
     );
     fireEvent.keyDown(document, { key: "Escape" });

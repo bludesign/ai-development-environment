@@ -572,6 +572,7 @@ describe("ActionsPage", () => {
           repositoryId: "repository-1",
           checkSuiteId: "check-suite-44",
           jobId: "441",
+          source: "ACTIONS_PAGE",
         },
       ),
     );
@@ -597,7 +598,11 @@ describe("ActionsPage", () => {
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith(
         expect.stringContaining("RetryGitHubPipeline"),
-        { repositoryId: "repository-1", checkSuiteId: "check-suite-44" },
+        {
+          repositoryId: "repository-1",
+          checkSuiteId: "check-suite-44",
+          source: "ACTIONS_PAGE",
+        },
       ),
     );
     expect(
@@ -670,6 +675,7 @@ describe("ActionsPage", () => {
           codebaseRepositoryId: "codebase-repository-1",
           workflowRunId: "44",
           force,
+          source: "ACTIONS_PAGE",
         },
       ),
     );

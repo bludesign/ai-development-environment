@@ -28,6 +28,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type {
   GitHubActionsWorkflowRunView,
   GitHubPipelineState,
+  GitHubRequestSource,
   GitHubWorkflowJobView,
 } from "@/services/github/types";
 import { worktreeDetailHref } from "@/components/worktrees/worktree-navigation";
@@ -79,6 +80,7 @@ type WorkflowRunMenuRun = Omit<
 
 export function WorkflowRunActionsMenu({
   run,
+  requestSource,
   jobs = [],
   includeAutoRetry = false,
   includeWorktree = false,
@@ -90,6 +92,7 @@ export function WorkflowRunActionsMenu({
   autoRetryContext,
 }: {
   run: WorkflowRunMenuRun;
+  requestSource: GitHubRequestSource;
   jobs?: GitHubWorkflowJobView[];
   includeAutoRetry?: boolean;
   includeWorktree?: boolean;
@@ -122,15 +125,18 @@ export function WorkflowRunActionsMenu({
         `mutation RetryGitHubPipeline(
           $repositoryId: ID!
           $checkSuiteId: ID!
+          $source: GitHubRequestSource!
         ) {
           retryGitHubPipeline(
             repositoryId: $repositoryId
             checkSuiteId: $checkSuiteId
+            source: $source
           ) { id }
         }`,
         {
           repositoryId: run.repositoryGithubId,
           checkSuiteId: run.checkSuiteId,
+          source: requestSource,
         },
       );
       onRetried();
@@ -159,17 +165,20 @@ export function WorkflowRunActionsMenu({
           $codebaseRepositoryId: ID!
           $workflowRunId: ID!
           $force: Boolean!
+          $source: GitHubRequestSource!
         ) {
           cancelGitHubActionsWorkflowRun(
             codebaseRepositoryId: $codebaseRepositoryId
             workflowRunId: $workflowRunId
             force: $force
+            source: $source
           )
         }`,
         {
           codebaseRepositoryId: run.codebaseRepositoryId,
           workflowRunId: run.id,
           force,
+          source: requestSource,
         },
       );
       onCancelled();
@@ -278,6 +287,7 @@ export function WorkflowRunActionsMenu({
               }
               pullRequestNumber={autoRetryContext?.pullRequestNumber}
               repositoryGithubId={run.repositoryGithubId}
+              requestSource={requestSource}
               worktreeId={autoRetryContext?.worktreeId}
               trigger={
                 <DropdownMenuItem onSelect={(event) => event.preventDefault()}>

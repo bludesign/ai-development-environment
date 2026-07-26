@@ -58,6 +58,7 @@ describe("WorkflowAttemptSelect", () => {
         latestAttempt={3}
         onAttemptChange={onAttemptChange}
         repositoryId="repository-1"
+        requestSource="ACTIONS_PAGE"
         workflowRunId="77"
       />,
     );

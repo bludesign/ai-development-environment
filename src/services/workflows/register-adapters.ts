@@ -538,6 +538,7 @@ function registerWaitPollers(
       text(input.repositoryId, "Repository ID"),
       text(input.workflowRunId, "Workflow run ID"),
       true,
+      "WORKFLOW_AUTOMATION",
     );
     if (
       !new Set([
@@ -767,6 +768,7 @@ function registerGitHubAdapters(
       repository.owner,
       repository.name,
       pullRequestNumber(context),
+      "WORKFLOW_AUTOMATION",
     );
     if (!pullRequest) throw new Error("Pull request was not found");
     const normalized = normalizePullRequest(pullRequest);
@@ -794,30 +796,34 @@ function registerGitHubAdapters(
       repository.owner,
       repository.name,
       prNumber,
+      "WORKFLOW_AUTOMATION",
     );
     if (!options.canMerge)
       throw new Error(options.blockedReason || "Pull request cannot be merged");
-    const result = await services.github.mergePullRequest({
-      ...repository,
-      number: prNumber,
-      method:
-        context.node.config.method === "MERGE" ||
-        context.node.config.method === "REBASE"
-          ? context.node.config.method
-          : "SQUASH",
-      commitHeadline:
-        typeof context.node.config.commitHeadline === "string"
-          ? context.node.config.commitHeadline
-          : options.defaultCommitHeadline,
-      commitBody:
-        typeof context.node.config.commitBody === "string"
-          ? context.node.config.commitBody
-          : options.defaultCommitBody,
-      authorEmail:
-        typeof context.node.config.authorEmail === "string"
-          ? context.node.config.authorEmail
-          : null,
-    });
+    const result = await services.github.mergePullRequest(
+      {
+        ...repository,
+        number: prNumber,
+        method:
+          context.node.config.method === "MERGE" ||
+          context.node.config.method === "REBASE"
+            ? context.node.config.method
+            : "SQUASH",
+        commitHeadline:
+          typeof context.node.config.commitHeadline === "string"
+            ? context.node.config.commitHeadline
+            : options.defaultCommitHeadline,
+        commitBody:
+          typeof context.node.config.commitBody === "string"
+            ? context.node.config.commitBody
+            : options.defaultCommitBody,
+        authorEmail:
+          typeof context.node.config.authorEmail === "string"
+            ? context.node.config.authorEmail
+            : null,
+      },
+      "WORKFLOW_AUTOMATION",
+    );
     return {
       output: result,
       sessionPatch: { pr: { state: result.state } },
@@ -830,6 +836,7 @@ function registerGitHubAdapters(
       repository.owner,
       repository.name,
       pullRequestNumber(context),
+      "WORKFLOW_AUTOMATION",
     );
     if (!pullRequest) throw new Error("Pull request was not found");
     const unresolved = pullRequest.reviewThreads.filter(
@@ -845,6 +852,7 @@ function registerGitHubAdapters(
     const result = await services.github.replyToReviewThread(
       text(context.node.config.threadId, "Review thread ID", 500),
       text(context.node.config.body, "Review reply", 100_000),
+      "WORKFLOW_AUTOMATION",
     );
     const link = contextualPullRequestLink(context);
     return { output: result, links: link ? [link] : undefined };
@@ -853,6 +861,7 @@ function registerGitHubAdapters(
     const output = await services.github.setReviewThreadResolved(
       text(context.node.config.threadId, "Review thread ID", 500),
       context.node.config.resolved !== false,
+      "WORKFLOW_AUTOMATION",
     );
     const link = contextualPullRequestLink(context);
     return { output, links: link ? [link] : undefined };
@@ -933,6 +942,7 @@ function registerGitHubAdapters(
         "Check suite ID",
         500,
       ),
+      "WORKFLOW_AUTOMATION",
       { actor: "workflow", ipAddress: null },
     );
     const link = githubWorkflowRunLink(context);
@@ -947,6 +957,7 @@ function registerGitHubAdapters(
       text(context.node.config.repositoryId, "GitHub repository ID", 500),
       text(context.node.config.checkSuiteId, "Check suite ID", 500),
       text(context.node.config.jobId, "Workflow job ID", 500),
+      "WORKFLOW_AUTOMATION",
       { actor: "workflow", ipAddress: null },
     );
     const link = githubWorkflowRunLink(context);
@@ -967,6 +978,7 @@ function registerGitHubAdapters(
         500,
       ),
       context.node.config.force === true,
+      "WORKFLOW_AUTOMATION",
       { actor: "workflow", ipAddress: null },
     );
     const link = githubWorkflowRunLink(context);

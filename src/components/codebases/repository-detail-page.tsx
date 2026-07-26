@@ -363,6 +363,7 @@ export function RepositoryDetailPage({
                 <AutoRetryDialog
                   codebaseRepositoryId={repository.id}
                   repositoryMode
+                  requestSource="CODEBASE_REPOSITORY"
                 />
               ) : (
                 <Alert>

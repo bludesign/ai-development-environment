@@ -84,11 +84,18 @@ enum GitHubApiType {
 enum GitHubRequestSource {
   GITHUB_API
   GITHUB_SETTINGS
-  GITHUB_APP_AUTHENTICATION
-  PULL_REQUESTS
-  GITHUB_ACTIONS
+  COMMENTS_PAGE
+  CODEBASE_REPOSITORY
+  PULL_REQUESTS_PAGE
+  PULL_REQUEST_DETAILS
+  ACTIONS_PAGE
+  WORKTREES
+  WORKTREE_PIPELINES
+  WORKTREE_AUTOMATION
+  AUTO_RETRY
   WORKFLOW_AUTOMATION
   ACTIONS_NOTIFICATIONS
+  CACHE_MANAGEMENT
 }
 
 type GitHubSettings {
@@ -657,6 +664,7 @@ extend type Query {
   githubRepositories: [GitHubRepository!]!
   githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
   githubActionsWorkflowRuns(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID
     branch: String
     workflowId: ID
@@ -664,16 +672,19 @@ extend type Query {
     after: String
   ): GitHubActionsWorkflowRunPage!
   githubActionsWorkflowJobs(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID!
     workflowRunId: ID!
   ): [GitHubWorkflowJob!]!
   githubActionsWorkflowRunAttempt(
+    source: GitHubRequestSource!
     repositoryId: ID!
     workflowRunId: ID!
     attempt: Int!
   ): GitHubWorkflowRunAttempt!
   githubWorktreeWorkflowRuns(worktreeId: ID!): [GitHubActionsWorkflowRun!]!
   githubRepositoryWorkflows(
+    source: GitHubRequestSource!
     codebaseRepositoryId: ID!
   ): [GitHubRepositoryWorkflow!]!
   githubAutoRetryRules(
@@ -681,6 +692,7 @@ extend type Query {
     workflowRunId: ID
   ): [GitHubAutoRetryRule!]!
   githubPullRequests(
+    source: GitHubRequestSource!
     scope: GitHubPullRequestScope!
     repositoryId: ID
     state: GitHubPullRequestStateFilter = OPEN
@@ -693,6 +705,7 @@ extend type Query {
     number: Int!
   ): GitHubPullRequestDetail
   githubPullRequestMergeOptions(
+    source: GitHubRequestSource!
     owner: String!
     name: String!
     number: Int!
@@ -718,6 +731,7 @@ extend type Mutation {
   removeGitHubRepository(id: ID!): [GitHubRepository!]!
   mergeGitHubPullRequest(
     input: MergeGitHubPullRequestInput!
+    source: GitHubRequestSource!
   ): GitHubPullRequestMergeResult!
   createGitHubPullRequest(
     input: CreateGitHubPullRequestInput!
@@ -725,16 +739,22 @@ extend type Mutation {
   setGitHubPullRequestLabels(
     input: SetGitHubPullRequestLabelsInput!
   ): GitHubPullRequestDetail!
-  retryGitHubPipeline(repositoryId: ID!, checkSuiteId: ID!): GitHubPipeline!
+  retryGitHubPipeline(
+    repositoryId: ID!
+    checkSuiteId: ID!
+    source: GitHubRequestSource!
+  ): GitHubPipeline!
   retryGitHubWorkflowJob(
     repositoryId: ID!
     checkSuiteId: ID!
     jobId: ID!
+    source: GitHubRequestSource!
   ): Boolean!
   cancelGitHubActionsWorkflowRun(
     codebaseRepositoryId: ID!
     workflowRunId: ID!
     force: Boolean! = false
+    source: GitHubRequestSource!
   ): Boolean!
   saveGitHubAutoRetryRule(
     input: SaveGitHubAutoRetryRuleInput!

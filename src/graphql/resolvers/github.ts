@@ -6,6 +6,7 @@ import type {
   GitHubMergeMethod,
   GitHubPullRequestScope,
   GitHubPullRequestStateFilter,
+  GitHubRequestSource,
   SaveGitHubAutoRetryRuleInput,
   GitHubService,
 } from "@/services/github";
@@ -164,12 +165,14 @@ export const createGitHubResolvers = (
     githubActionsWorkflowRuns: (
       _root: unknown,
       {
+        source,
         codebaseRepositoryId,
         branch,
         workflowId,
         first,
         after,
       }: {
+        source: GitHubRequestSource;
         codebaseRepositoryId?: string | null;
         branch?: string | null;
         workflowId?: string | null;
@@ -185,29 +188,42 @@ export const createGitHubResolvers = (
         after,
         branch,
         workflowId,
+        source,
       );
     },
     githubActionsWorkflowJobs: (
       _root: unknown,
       {
+        source,
         codebaseRepositoryId,
         workflowRunId,
-      }: { codebaseRepositoryId: string; workflowRunId: string },
+      }: {
+        source: GitHubRequestSource;
+        codebaseRepositoryId: string;
+        workflowRunId: string;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
       return gitHubService.actionsWorkflowJobs(
         codebaseRepositoryId,
         workflowRunId,
+        source,
       );
     },
     githubActionsWorkflowRunAttempt: (
       _root: unknown,
       {
+        source,
         repositoryId,
         workflowRunId,
         attempt,
-      }: { repositoryId: string; workflowRunId: string; attempt: number },
+      }: {
+        source: GitHubRequestSource;
+        repositoryId: string;
+        workflowRunId: string;
+        attempt: number;
+      },
       context: GraphQLContext,
       info?: GraphQLResolveInfo,
     ) => {
@@ -217,6 +233,7 @@ export const createGitHubResolvers = (
         workflowRunId,
         attempt,
         requestsPipelineJobs(info),
+        source,
       );
     },
     githubWorktreeWorkflowRuns: (
@@ -229,11 +246,14 @@ export const createGitHubResolvers = (
     },
     githubRepositoryWorkflows: (
       _root: unknown,
-      { codebaseRepositoryId }: { codebaseRepositoryId: string },
+      {
+        source,
+        codebaseRepositoryId,
+      }: { source: GitHubRequestSource; codebaseRepositoryId: string },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.repositoryWorkflows(codebaseRepositoryId);
+      return gitHubService.repositoryWorkflows(codebaseRepositoryId, source);
     },
     githubAutoRetryRules: (
       _root: unknown,
@@ -255,12 +275,14 @@ export const createGitHubResolvers = (
     githubPullRequests: (
       _root: unknown,
       {
+        source,
         scope,
         repositoryId,
         state,
         first,
         after,
       }: {
+        source: GitHubRequestSource;
         scope: GitHubPullRequestScope;
         repositoryId?: string | null;
         state?: GitHubPullRequestStateFilter | null;
@@ -276,6 +298,7 @@ export const createGitHubResolvers = (
         state: state ?? "OPEN",
         first: first ?? 25,
         after,
+        requestSource: source,
       });
     },
     githubPullRequest: (
@@ -288,11 +311,21 @@ export const createGitHubResolvers = (
     },
     githubPullRequestMergeOptions: (
       _root: unknown,
-      { owner, name, number }: { owner: string; name: string; number: number },
+      {
+        source,
+        owner,
+        name,
+        number,
+      }: {
+        source: GitHubRequestSource;
+        owner: string;
+        name: string;
+        number: number;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return gitHubService.pullRequestMergeOptions(owner, name, number);
+      return gitHubService.pullRequestMergeOptions(owner, name, number, source);
     },
     githubReviewThreads: (
       _root: unknown,
@@ -437,6 +470,7 @@ export const createGitHubResolvers = (
       _root: unknown,
       {
         input,
+        source,
       }: {
         input: {
           owner: string;
@@ -447,11 +481,12 @@ export const createGitHubResolvers = (
           commitBody: string;
           authorEmail?: string | null;
         };
+        source: GitHubRequestSource;
       },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      const result = await gitHubService.mergePullRequest(input);
+      const result = await gitHubService.mergePullRequest(input, source);
       const { owner, name } = normalizeGitHubRepositoryName(
         `${input.owner}/${input.name}`,
       );
@@ -483,13 +518,19 @@ export const createGitHubResolvers = (
       {
         repositoryId,
         checkSuiteId,
-      }: { repositoryId: string; checkSuiteId: string },
+        source,
+      }: {
+        repositoryId: string;
+        checkSuiteId: string;
+        source: GitHubRequestSource;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
       return gitHubService.retryPipeline(
         repositoryId,
         checkSuiteId,
+        source,
         auditContext(context),
       );
     },
@@ -499,7 +540,13 @@ export const createGitHubResolvers = (
         repositoryId,
         checkSuiteId,
         jobId,
-      }: { repositoryId: string; checkSuiteId: string; jobId: string },
+        source,
+      }: {
+        repositoryId: string;
+        checkSuiteId: string;
+        jobId: string;
+        source: GitHubRequestSource;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
@@ -507,6 +554,7 @@ export const createGitHubResolvers = (
         repositoryId,
         checkSuiteId,
         jobId,
+        source,
         auditContext(context),
       );
     },
@@ -516,10 +564,12 @@ export const createGitHubResolvers = (
         codebaseRepositoryId,
         workflowRunId,
         force,
+        source,
       }: {
         codebaseRepositoryId: string;
         workflowRunId: string;
         force: boolean;
+        source: GitHubRequestSource;
       },
       context: GraphQLContext,
     ) => {
@@ -528,6 +578,7 @@ export const createGitHubResolvers = (
         codebaseRepositoryId,
         workflowRunId,
         force,
+        source,
         auditContext(context),
       );
     },

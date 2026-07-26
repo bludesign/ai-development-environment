@@ -25,6 +25,7 @@ import type {
   GitHubPipelineState,
   GitHubPipelineStatus,
   GitHubPipelineView,
+  GitHubRequestSource,
 } from "@/services/github/types";
 
 const PIPELINE_FIELDS =
@@ -33,11 +34,13 @@ const PIPELINE_FIELDS =
 export function RetryPipelineButton({
   pipeline,
   repositoryId,
+  requestSource,
   onPipelineRetried,
   onError,
 }: {
   pipeline: GitHubPipelineView;
   repositoryId: string;
+  requestSource: GitHubRequestSource;
   onPipelineRetried?: (pipeline: GitHubPipelineView) => void;
   onError?: (error: string | null) => void;
 }) {
@@ -56,13 +59,19 @@ export function RetryPipelineButton({
         `mutation RetryGitHubPipeline(
           $repositoryId: ID!
           $checkSuiteId: ID!
+          $source: GitHubRequestSource!
         ) {
           retryGitHubPipeline(
             repositoryId: $repositoryId
             checkSuiteId: $checkSuiteId
+            source: $source
           ) { ${PIPELINE_FIELDS} }
         }`,
-        { repositoryId, checkSuiteId: pipeline.checkSuiteId },
+        {
+          repositoryId,
+          checkSuiteId: pipeline.checkSuiteId,
+          source: requestSource,
+        },
       );
       onPipelineRetried?.(data.retryGitHubPipeline);
       onError?.(null);
@@ -136,11 +145,13 @@ export function PipelineMenu({
   pipelineStatus,
   pipelines,
   repositoryId,
+  requestSource,
   onPipelineRetried,
 }: {
   pipelineStatus: GitHubPipelineStatus;
   pipelines: GitHubPipelineView[];
   repositoryId: string;
+  requestSource: GitHubRequestSource;
   onPipelineRetried?: (pipeline: GitHubPipelineView) => void;
 }) {
   const t = useTranslations("pullRequests");
@@ -209,6 +220,7 @@ export function PipelineMenu({
                     onPipelineRetried={onPipelineRetried}
                     pipeline={pipeline}
                     repositoryId={repositoryId}
+                    requestSource={requestSource}
                   />
                 )}
               </div>

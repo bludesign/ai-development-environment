@@ -1960,14 +1960,24 @@ describe("GitHub service", () => {
     });
     expect(appClient.listJobs).toHaveBeenCalledWith(
       expect.objectContaining({ appId: "123", installationId: "456" }),
-      { owner: "acme", repository: "widgets", workflowRunId: "1" },
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "1",
+        requestSource: "PULL_REQUEST_DETAILS",
+      },
     );
     state.repositories = [];
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: "127.0.0.1",
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: "127.0.0.1",
+        },
+      ),
     ).resolves.toMatchObject({
       id: "check-suite-1",
       name: "CI",
@@ -1978,10 +1988,16 @@ describe("GitHub service", () => {
       expect.objectContaining({ installationId: "456" }),
       expect.stringContaining("VerifyGitHubAppRepository"),
       { owner: "acme", name: "widgets" },
+      "ACTIONS_PAGE",
     );
     expect(appClient.rerun).toHaveBeenCalledWith(
       expect.objectContaining({ appId: "123" }),
-      { owner: "acme", repository: "widgets", workflowRunId: "987" },
+      {
+        owner: "acme",
+        repository: "widgets",
+        workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
+      },
     );
     expect(state.auditEvents).toContainEqual(
       expect.objectContaining({
@@ -1995,6 +2011,7 @@ describe("GitHub service", () => {
         "repository-1",
         "check-suite-1",
         "11",
+        "ACTIONS_PAGE",
         {
           actor: "control-plane",
           ipAddress: "127.0.0.1",
@@ -2008,6 +2025,7 @@ describe("GitHub service", () => {
         repository: "widgets",
         workflowRunId: "987",
         jobId: "11",
+        requestSource: "ACTIONS_PAGE",
       },
     );
     expect(state.auditEvents).toContainEqual(
@@ -2024,6 +2042,7 @@ describe("GitHub service", () => {
         "repository-1",
         "check-suite-1",
         "12",
+        "ACTIONS_PAGE",
         {
           actor: "control-plane",
           ipAddress: "127.0.0.1",
@@ -2050,6 +2069,7 @@ describe("GitHub service", () => {
           "codebase-repository-1",
           "987",
           force,
+          "ACTIONS_PAGE",
           { actor: "control-plane", ipAddress: "127.0.0.1" },
         ),
       ).resolves.toBe(true);
@@ -2061,6 +2081,7 @@ describe("GitHub service", () => {
           repository: "widgets",
           workflowRunId: "987",
           force,
+          requestSource: "ACTIONS_PAGE",
         },
       );
       expect(state.auditEvents).toContainEqual(
@@ -2363,10 +2384,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toThrow("does not belong");
     expect(appClient.rerun).not.toHaveBeenCalled();
     expect(state.auditEvents).toContainEqual(
@@ -2407,10 +2433,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: errorCode });
     expect(appClient.rerun).not.toHaveBeenCalled();
     expect(state.auditEvents).toContainEqual(
@@ -2452,10 +2483,15 @@ describe("GitHub service", () => {
     });
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: "REPOSITORY_NOT_INSTALLED" });
     expect(appClient.rerun).not.toHaveBeenCalled();
   });
@@ -2491,10 +2527,15 @@ describe("GitHub service", () => {
     );
 
     await expect(
-      new GitHubService().retryPipeline("repository-1", "check-suite-1", {
-        actor: "control-plane",
-        ipAddress: null,
-      }),
+      new GitHubService().retryPipeline(
+        "repository-1",
+        "check-suite-1",
+        "ACTIONS_PAGE",
+        {
+          actor: "control-plane",
+          ipAddress: null,
+        },
+      ),
     ).rejects.toMatchObject({ code: "GITHUB_APP_NOT_CONFIGURED" });
     expect(appClient.rerun).not.toHaveBeenCalled();
   });

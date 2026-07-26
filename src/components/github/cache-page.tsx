@@ -24,6 +24,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -66,6 +71,32 @@ function statusClass(source: string) {
   if (source === "ERROR")
     return "border-destructive/30 bg-destructive/10 text-destructive";
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+}
+
+function visibleRequestSummary(call: GitHubApiCallView) {
+  if (
+    !call.variables ||
+    typeof call.variables !== "object" ||
+    Array.isArray(call.variables)
+  ) {
+    return call.requestSummary;
+  }
+
+  const entries = Object.entries(
+    call.variables as Record<string, unknown>,
+  ).filter(([, value]) => value !== null);
+  if (entries.length === 0) return "No variables";
+  if (entries.length === Object.keys(call.variables).length) {
+    return call.requestSummary;
+  }
+
+  return entries
+    .map(([key, value]) => {
+      const encoded = typeof value === "string" ? value : JSON.stringify(value);
+      const serialized = encoded ?? String(value);
+      return `${key}=${serialized.length > 120 ? `${serialized.slice(0, 117)}…` : serialized}`;
+    })
+    .join(" · ");
 }
 
 export function GitHubCachePage() {
@@ -372,10 +403,24 @@ export function GitHubCachePage() {
                                 </p>
                               </TableCell>
                               <TableCell className="max-w-md whitespace-normal">
-                                <p className="text-sm">{call.requestSummary}</p>
-                                <pre className="mt-1 max-h-24 max-w-md overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs leading-4">
-                                  {JSON.stringify(call.variables, null, 2)}
-                                </pre>
+                                <HoverCard openDelay={0}>
+                                  <HoverCardTrigger asChild>
+                                    <button
+                                      className="cursor-help text-left text-sm"
+                                      type="button"
+                                    >
+                                      {visibleRequestSummary(call)}
+                                    </button>
+                                  </HoverCardTrigger>
+                                  <HoverCardContent
+                                    align="start"
+                                    className="w-auto max-w-[min(32rem,calc(100vw-2rem))] p-0"
+                                  >
+                                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap p-3 text-xs leading-4">
+                                      {JSON.stringify(call.variables, null, 2)}
+                                    </pre>
+                                  </HoverCardContent>
+                                </HoverCard>
                               </TableCell>
                               <TableCell>
                                 {t(`requestSources.${call.requestSource}`)}

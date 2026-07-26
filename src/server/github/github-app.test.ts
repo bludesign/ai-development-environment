@@ -165,11 +165,13 @@ describe("GitHub App authentication", () => {
         credentials,
         "query { viewer { login } }",
         {},
+        "PULL_REQUEST_DETAILS",
       ),
       githubAppGraphql<{ viewer: { login: string } }>(
         credentials,
         "query { viewer { login } }",
         {},
+        "PULL_REQUEST_DETAILS",
       ),
     ]);
     expect(first.data.viewer.login).toBe("rerunner[bot]");
@@ -177,7 +179,12 @@ describe("GitHub App authentication", () => {
     expect(tokenMints).toBe(2);
     expect(graphQlCalls).toBe(4);
 
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
     expect(tokenMints).toBe(2);
   });
 
@@ -195,12 +202,14 @@ describe("GitHub App authentication", () => {
       { ...credentials, requestObserver },
       "query PullRequest($id: ID!) { node(id: $id) { id } }",
       { id: "PR_kwDO123" },
+      "PULL_REQUEST_DETAILS",
     );
 
     expect(requestObserver).toHaveBeenCalledWith(
       expect.objectContaining({
         url: "https://api.github.com/app/installations/456/access_tokens",
         method: "POST",
+        requestSource: "PULL_REQUEST_DETAILS",
         body: null,
         statusCode: 200,
       }),
@@ -209,6 +218,7 @@ describe("GitHub App authentication", () => {
       expect.objectContaining({
         url: "https://api.github.com/graphql",
         method: "POST",
+        requestSource: "PULL_REQUEST_DETAILS",
         body: expect.stringContaining('"id":"PR_kwDO123"'),
         statusCode: 200,
       }),
@@ -233,8 +243,18 @@ describe("GitHub App authentication", () => {
       }),
     );
 
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
-    await githubAppGraphql(credentials, "query { viewer { login } }", {});
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
+    await githubAppGraphql(
+      credentials,
+      "query { viewer { login } }",
+      {},
+      "PULL_REQUEST_DETAILS",
+    );
     expect(tokenMints).toBe(2);
   });
 
@@ -285,6 +305,7 @@ describe("GitHub App authentication", () => {
         owner: "acme",
         repository: "widgets",
         workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
       });
     } catch (error) {
       caught = error;
@@ -311,6 +332,7 @@ describe("GitHub App authentication", () => {
         owner: "acme",
         repository: "widgets",
         workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).resolves.toEqual({ githubRequestId: "FAILED-JOBS-1" });
   });
@@ -340,6 +362,7 @@ describe("GitHub App authentication", () => {
           repository: "widgets",
           workflowRunId: "987",
           force,
+          requestSource: "ACTIONS_PAGE",
         }),
       ).resolves.toEqual({ githubRequestId: "CANCEL-1" });
     },
@@ -375,6 +398,7 @@ describe("GitHub App authentication", () => {
         owner: "acme",
         repository: "widgets",
         workflowRunId: "987",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).resolves.toEqual([expect.objectContaining({ id: 11, name: "test" })]);
   });
@@ -399,6 +423,7 @@ describe("GitHub App authentication", () => {
         repository: "widgets",
         workflowRunId: "987",
         jobId: "11",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).resolves.toEqual({ githubRequestId: "JOB-RERUN-1" });
   });
@@ -418,6 +443,7 @@ describe("GitHub App authentication", () => {
         repository: "widgets",
         workflowRunId: "987",
         jobId: "11",
+        requestSource: "ACTIONS_PAGE",
       }),
     ).rejects.toMatchObject({ code: "ACTIONS_JOB_RUN_MISMATCH" });
   });

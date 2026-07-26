@@ -1700,6 +1700,7 @@ export function PullRequestBadges({
             pipelineStatus={worktree.pullRequest.pipelineStatus}
             pipelines={worktree.pullRequest.pipelines}
             repositoryId={worktree.pullRequest.repositoryGithubId}
+            requestSource="WORKTREES"
           />
           <Badge className={reviewClass(worktree.pullRequest.reviewDecision)}>
             {t(`review.${worktree.pullRequest.reviewDecision}`)}

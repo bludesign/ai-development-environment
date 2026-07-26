@@ -31,6 +31,7 @@ import type {
   GitHubPullRequestMergeOptions,
   GitHubPullRequestMergeResult,
   GitHubPullRequestView,
+  GitHubRequestSource,
 } from "@/services/github/types";
 
 const DEFAULT_EMAIL = "__github_account_default__";
@@ -43,6 +44,7 @@ export function MergePullRequestButton({
   open: controlledOpen,
   onOpenChange,
   showTrigger = true,
+  requestSource,
 }: {
   pullRequest: Pick<
     GitHubPullRequestView,
@@ -55,6 +57,7 @@ export function MergePullRequestButton({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   showTrigger?: boolean;
+  requestSource: GitHubRequestSource;
 }) {
   const t = useTranslations("pullRequests");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -97,8 +100,10 @@ export function MergePullRequestButton({
           $owner: String!
           $name: String!
           $number: Int!
+          $source: GitHubRequestSource!
         ) {
           githubPullRequestMergeOptions(
+            source: $source
             owner: $owner
             name: $name
             number: $number
@@ -112,7 +117,7 @@ export function MergePullRequestButton({
             blockedReason
           }
         }`,
-        { owner, name, number: pullRequest.number },
+        { owner, name, number: pullRequest.number, source: requestSource },
       )
         .then((data) => {
           if (!active) return;
@@ -135,7 +140,7 @@ export function MergePullRequestButton({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [name, open, owner, pullRequest.number]);
+  }, [name, open, owner, pullRequest.number, requestSource]);
 
   const merge = async () => {
     if (!method || !options?.canMerge || !commitHeadline.trim()) return;
@@ -147,8 +152,9 @@ export function MergePullRequestButton({
       }>(
         `mutation MergeGitHubPullRequest(
           $input: MergeGitHubPullRequestInput!
+          $source: GitHubRequestSource!
         ) {
-          mergeGitHubPullRequest(input: $input) {
+          mergeGitHubPullRequest(input: $input, source: $source) {
             id state url mergedAt
           }
         }`,
@@ -162,6 +168,7 @@ export function MergePullRequestButton({
             commitBody,
             authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
           },
+          source: requestSource,
         },
       );
       setOpen(false);

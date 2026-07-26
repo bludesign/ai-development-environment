@@ -178,11 +178,14 @@ describe("WorktreeAutomationService", () => {
       moveTicketToDone: false,
     });
 
-    expect(disablePullRequestAutoMerge).toHaveBeenCalledWith({
-      owner: "acme",
-      name: "widgets",
-      number: 17,
-    });
+    expect(disablePullRequestAutoMerge).toHaveBeenCalledWith(
+      {
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+      },
+      "WORKTREE_AUTOMATION",
+    );
     expect(
       disablePullRequestAutoMerge.mock.invocationCallOrder[0],
     ).toBeLessThan(

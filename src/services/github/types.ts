@@ -50,11 +50,18 @@ export type GitHubApiType = "GRAPHQL" | "REST";
 export type GitHubRequestSource =
   | "GITHUB_API"
   | "GITHUB_SETTINGS"
-  | "GITHUB_APP_AUTHENTICATION"
-  | "PULL_REQUESTS"
-  | "GITHUB_ACTIONS"
+  | "COMMENTS_PAGE"
+  | "CODEBASE_REPOSITORY"
+  | "PULL_REQUESTS_PAGE"
+  | "PULL_REQUEST_DETAILS"
+  | "ACTIONS_PAGE"
+  | "WORKTREES"
+  | "WORKTREE_PIPELINES"
+  | "WORKTREE_AUTOMATION"
+  | "AUTO_RETRY"
   | "WORKFLOW_AUTOMATION"
-  | "ACTIONS_NOTIFICATIONS";
+  | "ACTIONS_NOTIFICATIONS"
+  | "CACHE_MANAGEMENT";
 
 export type GitHubRateLimitSnapshotView = {
   authentication: GitHubAuthentication;
