@@ -37,6 +37,26 @@ function resourcePlan(
   scope: string | null,
 ): ResourcePlan | null {
   switch (resource) {
+    case "agent":
+      return {
+        query: `query WorkflowAgentOptions {
+          agents { id name hostname connectionStatus }
+        }`,
+        variables: {},
+        map: (data) =>
+          pick<{
+            agents?: {
+              id: string;
+              name: string;
+              hostname: string;
+              connectionStatus: string;
+            }[];
+          }>(data).agents?.map((agent) => ({
+            value: agent.id,
+            label: agent.name,
+            description: `${agent.hostname} · ${agent.connectionStatus}`,
+          })) ?? [],
+      };
     case "codebase":
       return {
         query: `query WorkflowCodebaseOptions {

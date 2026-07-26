@@ -260,6 +260,54 @@ beforeEach(() => {
 });
 
 describe("GitHub Actions webhook notifications", () => {
+  test("correlates pull-request webhook triggers to the worktree and agent", async () => {
+    const workflowEvents = { record: vi.fn(async () => ({})) };
+    const { service } = setup(workflowEvents);
+    const input = webhookInput(
+      {
+        action: "opened",
+        installation: { id: 456 },
+        repository: {
+          full_name: "acme/widgets",
+          html_url: "https://github.com/acme/widgets",
+          default_branch: "main",
+        },
+        pull_request: {
+          number: 42,
+          title: "Ship widgets",
+          html_url: "https://github.com/acme/widgets/pull/42",
+          state: "open",
+          draft: false,
+          labels: [],
+          head: { ref: "feature/APP-42", sha: "abc123" },
+          base: { ref: "main" },
+        },
+      },
+      "pull-request-opened",
+    );
+
+    await service.handleWebhook({ ...input, event: "pull_request" });
+
+    expect(workflowEvents.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "GITHUB_PR_STATE",
+        payload: expect.objectContaining({
+          sessionData: expect.objectContaining({
+            worktree: expect.objectContaining({ id: "worktree-1" }),
+            codebase: expect.objectContaining({ id: "codebase-1" }),
+            agent: expect.objectContaining({ id: "agent-1" }),
+            repo: expect.objectContaining({ id: "repository-1" }),
+            pr: expect.objectContaining({
+              number: 42,
+              headBranch: "feature/APP-42",
+            }),
+            ticket: expect.objectContaining({ key: "APP-42" }),
+          }),
+        }),
+      }),
+    );
+  });
+
   test("seeds workflow triggers with correlated repository resources", async () => {
     const workflowEvents = { record: vi.fn(async () => ({})) };
     const { service } = setup(workflowEvents);

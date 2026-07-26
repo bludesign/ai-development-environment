@@ -260,6 +260,49 @@ export function totalsForModel(
   return totals;
 }
 
+export function filterUsageByAgent(
+  usage: AggregatedUsage,
+  agentId: string,
+): AggregatedUsage {
+  const totals = emptyUsageMetrics();
+  const days = usage.days.flatMap((day) => {
+    const sourceSet = new Set<string>();
+    const models = day.models.flatMap((model) => {
+      const agents = model.agents.filter((agent) => agent.agentId === agentId);
+      if (agents.length === 0) return [];
+
+      const metrics = emptyUsageMetrics();
+      agents.forEach((agent) => {
+        addMetrics(metrics, agent);
+        agent.sources.forEach((source) => sourceSet.add(source));
+      });
+      return [
+        {
+          ...metrics,
+          modelName: model.modelName,
+          agents,
+          ...(model.unattributed ? { unattributed: true } : {}),
+        },
+      ];
+    });
+    if (models.length === 0) return [];
+
+    const metrics = emptyUsageMetrics();
+    models.forEach((model) => addMetrics(metrics, model));
+    addMetrics(totals, metrics);
+    return [
+      {
+        ...metrics,
+        period: day.period,
+        sources: [...sourceSet].sort(),
+        models,
+      },
+    ];
+  });
+
+  return { days, totals };
+}
+
 export function filterUsageByDays(
   usage: AggregatedUsage,
   days: UsageRangeDays,

@@ -19,7 +19,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
 import {
@@ -286,7 +285,6 @@ export function SidebarStatusFooter() {
               </p>
             )}
           </PopoverHeader>
-          <Separator />
           {!status ? (
             <Spinner />
           ) : (
@@ -349,7 +347,6 @@ export function SidebarStatusFooter() {
               </div>
             ))
           )}
-          <Separator />
           <div className="space-y-1.5">
             <p className="text-xs font-medium">{t("recentDeletions")}</p>
             {history.length === 0 ? (

@@ -7,6 +7,7 @@ import type { BuildsService } from "@/services/builds";
 import type { TelemetryService } from "@/services/telemetry";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { AgentControlService } from "@/services/agent-control";
+import type { DiskSpaceService } from "@/services/disk-space";
 
 import { createBuiltInToolRegistry } from "./builtin-tools";
 import {
@@ -245,6 +246,14 @@ describe("codebases MCP server", () => {
       telemetry: { timeline } as unknown as TelemetryService,
       pushNotifications: {} as PushNotificationsService,
       agents: {} as AgentControlService,
+      diskSpace: {
+        settings: vi.fn().mockResolvedValue({
+          normalThresholdGiB: 40,
+          pressureThresholdGiB: 10,
+          pollIntervalSeconds: 60,
+          staleAfterSeconds: 120,
+        }),
+      } as unknown as DiskSpaceService,
     });
     const server = createBuiltInMcpServer(registry);
     const client = new Client({ name: "test", version: "1.0.0" });
@@ -266,6 +275,13 @@ describe("codebases MCP server", () => {
         "get_console_logs",
         "get_push_notification_history",
         "get_agents",
+        "get_disk_space_overview",
+        "get_disk_space_settings",
+        "get_agent_disk_space",
+        "update_disk_space_settings",
+        "set_agent_disk_space_monitoring",
+        "set_agent_disk_space_pressure_mode",
+        "request_agent_disk_space_refresh",
       ]),
     );
     await expect(
@@ -274,5 +290,12 @@ describe("codebases MCP server", () => {
     expect(timeline).toHaveBeenCalledWith(
       expect.objectContaining({ view: "CONSOLE" }),
     );
+    await expect(
+      client.callTool({ name: "get_disk_space_settings", arguments: {} }),
+    ).resolves.toMatchObject({
+      structuredContent: {
+        settings: { normalThresholdGiB: 40, pressureThresholdGiB: 10 },
+      },
+    });
   });
 });

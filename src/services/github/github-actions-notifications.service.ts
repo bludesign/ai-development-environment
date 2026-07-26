@@ -312,13 +312,55 @@ export class GitHubActionsNotificationsService {
       Record<string, unknown> | undefined;
     const pullRequestBase = pullRequest.base as
       Record<string, unknown> | undefined;
+    const checkSuite = (check.check_suite ?? payload.check_suite ?? {}) as Record<
+      string,
+      unknown
+    >;
     const headBranch = text(pullRequestHead?.ref);
     const pushedBranch =
       text(payload.ref)?.replace(/^refs\/heads\//, "") ?? null;
+    const checkedBranch =
+      text(check.head_branch) ?? text(checkSuite.head_branch);
+    const linkedBranch = headBranch ?? pushedBranch ?? checkedBranch;
     const ticketKey = jiraKeyFromBranch(
-      headBranch ?? pushedBranch,
+      linkedBranch,
       target.jiraBranchRegex ?? "",
     );
+    const prisma = await getPrismaClient();
+    const worktree = linkedBranch
+      ? await prisma.worktree.findFirst({
+          where: {
+            branch: linkedBranch,
+            primary: false,
+            missingAt: null,
+            codebase: { repositoryId: target.id },
+          },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            folder: true,
+            branch: true,
+            baseBranchOverride: true,
+            headSha: true,
+            pushStatus: true,
+            hasStagedChanges: true,
+            hasUnstagedChanges: true,
+            codebase: {
+              select: {
+                id: true,
+                folder: true,
+                agentId: true,
+                branch: true,
+                headSha: true,
+                defaultBranch: true,
+                agent: {
+                  select: { id: true, name: true, hostname: true },
+                },
+              },
+            },
+          },
+        })
+      : null;
     const sessionData = {
       repo: {
         id: target.id,
@@ -350,6 +392,8 @@ export class GitHubActionsNotificationsService {
         checkSuiteId: positiveInteger(check.id)?.toString() ?? null,
         status: text(check.status),
         conclusion: text(check.conclusion),
+        headBranch: checkedBranch,
+        headSha: text(check.head_sha) ?? text(checkSuite.head_sha),
       },
       comment: {
         id: positiveInteger(comment.id)?.toString() ?? null,
@@ -361,6 +405,29 @@ export class GitHubActionsNotificationsService {
         before: text(payload.before),
         after: text(payload.after),
       },
+      ...(worktree
+        ? {
+            worktree: {
+              id: worktree.id,
+              path: worktree.folder,
+              branch: worktree.branch,
+              baseBranch:
+                worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
+              headSha: worktree.headSha,
+              pushStatus: worktree.pushStatus,
+              dirty:
+                worktree.hasStagedChanges || worktree.hasUnstagedChanges,
+            },
+            codebase: {
+              id: worktree.codebase.id,
+              folder: worktree.codebase.folder,
+              agentId: worktree.codebase.agentId,
+              branch: worktree.codebase.branch,
+              headSha: worktree.codebase.headSha,
+            },
+            agent: worktree.codebase.agent,
+          }
+        : {}),
       ...(ticketKey ? { ticket: { key: ticketKey } } : {}),
     };
     await this.workflowEvents.record({

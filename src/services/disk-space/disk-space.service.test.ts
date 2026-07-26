@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { BUILD_DATA_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/build-data";
+
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -274,6 +276,146 @@ describe("DiskSpaceService overview", () => {
 
     expect(view.status).toBe("IDLE");
     expect(view.warnings).toEqual([NO_MONITORED_VOLUME_WARNING]);
+  });
+});
+
+describe("DiskSpaceService monitor notifications", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  test("keeps the subscription shape compatible while enriching unique changes", async () => {
+    const instance = service();
+    const stream = instance.subscribe();
+    const publish = instance as unknown as {
+      publish(
+        id: string,
+        reason: "REPORT_RECEIVED" | "CLEANUP_COMPLETED",
+        cleanup?: {
+          jobId: string;
+          status: string;
+          source: "AUTOMATIC";
+          error: string | null;
+          targets: never[];
+          deleted: unknown[];
+        },
+      ): void;
+    };
+
+    publish.publish("agent-1", "REPORT_RECEIVED");
+    const first = await stream.next();
+    publish.publish("agent-1", "CLEANUP_COMPLETED", {
+      jobId: "cleanup-1",
+      status: "SUCCEEDED",
+      source: "AUTOMATIC",
+      error: null,
+      targets: [],
+      deleted: [{ path: "/DerivedData/App" }],
+    });
+    const second = await stream.next();
+    await stream.return?.();
+
+    expect(first.value).toMatchObject({
+      diskSpaceChanged: "agent-1",
+      diskSpaceChange: { reason: "REPORT_RECEIVED", cleanup: null },
+    });
+    expect(second.value).toMatchObject({
+      diskSpaceChanged: "agent-1",
+      diskSpaceChange: {
+        reason: "CLEANUP_COMPLETED",
+        cleanup: {
+          jobId: "cleanup-1",
+          deleted: [{ path: "/DerivedData/App" }],
+        },
+      },
+    });
+    expect(first.value.diskSpaceChange.id).not.toBe(
+      second.value.diskSpaceChange.id,
+    );
+  });
+
+  test("requests an immediate poll and records the report cursor", async () => {
+    const requestDiskSpacePoll = vi.fn();
+    const instance = new DiskSpaceService({
+      registerCompletionObserver: vi.fn(),
+      requestDiskSpacePoll,
+    } as unknown as AgentControlService);
+    vi.spyOn(instance, "agentView").mockResolvedValue({
+      enabled: true,
+      lastReportedAt: "2026-07-25T12:00:00.000Z",
+    } as never);
+
+    await expect(instance.requestRefresh("agent-1")).resolves.toMatchObject({
+      agentId: "agent-1",
+      previousReportedAt: "2026-07-25T12:00:00.000Z",
+      requestedAt: expect.any(String),
+    });
+    expect(requestDiskSpacePoll).toHaveBeenCalledWith("agent-1");
+  });
+
+  test("publishes automatic cleanup targets and parsed deletion results", async () => {
+    const requestDiskSpacePoll = vi.fn();
+    const instance = new DiskSpaceService({
+      registerCompletionObserver: vi.fn(),
+      requestDiskSpacePoll,
+    } as unknown as AgentControlService);
+    getPrismaClient.mockResolvedValue({
+      derivedDataCleanupLease: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      agentDiskSpaceState: { updateMany: vi.fn() },
+    });
+    const stream = instance.subscribe();
+
+    await (
+      instance as unknown as {
+        observeCompletion(job: {
+          id: string;
+          agentId: string;
+          kind: string;
+          payloadJson: string;
+          resultJson: string | null;
+          status: string;
+          error: string | null;
+        }): Promise<void>;
+      }
+    ).observeCompletion({
+      id: "cleanup-1",
+      agentId: "agent-1",
+      kind: BUILD_DATA_DELETE_JOB_KIND,
+      payloadJson: JSON.stringify({
+        source: "AUTOMATIC",
+        targets: [{ path: "/DerivedData/App", rootPath: "/DerivedData" }],
+      }),
+      resultJson: JSON.stringify({
+        deleted: [{ path: "/DerivedData/App", deleted: true, error: null }],
+      }),
+      status: "SUCCEEDED",
+      error: null,
+    });
+    const event = await stream.next();
+    await stream.return?.();
+
+    expect(event.value.diskSpaceChange).toMatchObject({
+      reason: "CLEANUP_COMPLETED",
+      cleanup: {
+        jobId: "cleanup-1",
+        status: "SUCCEEDED",
+        source: "AUTOMATIC",
+        targets: [{ path: "/DerivedData/App", rootPath: "/DerivedData" }],
+        deleted: [{ path: "/DerivedData/App", deleted: true, error: null }],
+      },
+    });
+    expect(requestDiskSpacePoll).toHaveBeenCalledWith("agent-1");
+  });
+
+  test("rejects refresh when monitoring is disabled", async () => {
+    const instance = service();
+    vi.spyOn(instance, "agentView").mockResolvedValue({
+      enabled: false,
+    } as never);
+
+    await expect(instance.requestRefresh("agent-1")).rejects.toThrow(
+      "monitoring is disabled",
+    );
   });
 });
 

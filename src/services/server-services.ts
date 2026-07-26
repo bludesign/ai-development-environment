@@ -144,6 +144,7 @@ function createServerServices(): ServerServices {
       telemetry: telemetryService,
       pushNotifications: pushNotificationsService,
       agents: agentControlService,
+      diskSpace: diskSpaceService,
       // A thunk, not the instance: `workflowsService` is constructed below and
       // takes `toolsService` itself. Resolved when a workflow tool is called.
       workflows: () => workflowsService,
@@ -161,6 +162,8 @@ function createServerServices(): ServerServices {
     runsService,
     worktreesService,
     commandsService,
+    gitHubService,
+    jiraService,
   );
   registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
     agentControl: agentControlService,
@@ -175,11 +178,13 @@ function createServerServices(): ServerServices {
     notifications: notificationsService,
     pushNotifications: pushNotificationsService,
     tools: toolsService,
+    diskSpace: diskSpaceService,
   });
   const workflowEventBridge = new WorkflowEventBridge(
     workflowEventsService,
     agentControlService,
     worktreesService,
+    diskSpaceService,
   );
   workflowEventBridge.start();
   workflowsService.startRuntime();

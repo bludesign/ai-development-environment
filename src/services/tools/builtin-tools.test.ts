@@ -6,6 +6,7 @@ import type {
   CodebasesService,
   CodebaseToolsService,
 } from "@/services/codebases";
+import type { DiskSpaceService } from "@/services/disk-space";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 
@@ -60,6 +61,7 @@ function registry() {
   } as unknown as CodebaseToolsService;
   const codebases = {} as CodebasesService;
   const builds = {} as BuildsService;
+  const diskSpace = {} as DiskSpaceService;
   return {
     telemetry,
     push,
@@ -71,6 +73,7 @@ function registry() {
       telemetry,
       pushNotifications: push,
       agents,
+      diskSpace,
     }),
   };
 }
@@ -83,6 +86,7 @@ describe("built-in tool registry", () => {
       "builtin:builds",
       "builtin:debugging",
       "builtin:agents",
+      "builtin:disk-space",
     ]);
     const debugging = catalog[2]!;
     expect(debugging.children.map(({ id }) => id)).toEqual([

@@ -85,10 +85,26 @@ export function workflowTriggerChoices(
  * `undefined` at run time.
  */
 const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
-  BUILD: ["build.*"],
-  CODEBASE: ["codebase.*"],
-  JIRA_TICKET: ["ticket.*"],
-  AGENT_RUN: ["run.*"],
+  BUILD: [
+    "build.*",
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+    "repo.*",
+    "pr.*",
+    "ticket.*",
+  ],
+  CODEBASE: ["codebase.*", "agent.*", "repo.*"],
+  JIRA_TICKET: ["ticket.*", "comment.*"],
+  AGENT_RUN: [
+    "run.*",
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+    "repo.*",
+    "pr.*",
+    "ticket.*",
+  ],
   GITHUB_PIPELINE: [
     "pipeline.*",
     "repo.*",
@@ -108,7 +124,14 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
     "agent.*",
     "ticket.*",
   ],
-  PULL_REQUEST: ["pr.*", "repo.*"],
+  PULL_REQUEST: [
+    "pr.*",
+    "repo.*",
+    "ticket.*",
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+  ],
   WORKTREE: [
     "worktree.*",
     "codebase.*",
@@ -205,6 +228,19 @@ const step = (
 const FALLS_BACK_TO_SESSION =
   "Leave the identifier unset to take it from session data.";
 
+/** Related resources refreshed after a successful worktree-backed agent job. */
+const WORKTREE_CONTEXT_PATHS = [
+  "worktree.*",
+  "codebase.*",
+  "agent.*",
+  "repo.*",
+  "pr.*",
+  "ticket.*",
+];
+
+/** Related resources refreshed after a successful codebase-backed agent job. */
+const CODEBASE_CONTEXT_PATHS = ["codebase.*", "agent.*", "repo.*"];
+
 export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
   step(
     "JIRA_LOAD_TICKET",
@@ -225,7 +261,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Transition Jira ticket",
     "SERVER",
     ["ticket.key"],
-    ["ticket.status"],
+    ["ticket.*"],
     {
       description:
         "Moves a ticket to another status by applying one of its workflow transitions.",
@@ -240,12 +276,12 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Add Jira comment",
     "SERVER",
     ["ticket.key"],
-    [],
+    ["ticket.*"],
     {
       description:
         "Posts a comment on a Jira issue, written in Markdown or Jira wiki markup.",
       details:
-        "The comment body is converted from Markdown by default; choose Jira wiki format to pass markup through untouched. Comments are never deduplicated, so a step that runs twice comments twice — guard it with a condition if the workflow can retry. Does not update `ticket.*`.",
+        "The comment body is converted from Markdown by default; choose Jira wiki format to pass markup through untouched. Comments are never deduplicated, so a step that runs twice comments twice — guard it with a condition if the workflow can retry. Refreshes `ticket.*` from the response.",
       mutatesExternal: true,
     },
   ),
@@ -255,7 +291,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Assign Jira ticket",
     "SERVER",
     ["ticket.key"],
-    ["ticket.assignee"],
+    ["ticket.*"],
     {
       description:
         "Sets the assignee of a Jira issue, or clears it when no account is given.",
@@ -270,7 +306,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Update Jira fields",
     "SERVER",
     ["ticket.key"],
-    ["ticket.labels"],
+    ["ticket.*"],
     {
       description:
         "Patches arbitrary fields on a Jira issue — labels, summary, custom fields — from a JSON object.",
@@ -285,7 +321,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Resolve ticket branch",
     "SERVER",
     ["ticket.key", "ticket.title", "ticket.type"],
-    ["worktree.branch"],
+    ["worktree.branch", "ticket.key", "ticket.title", "ticket.type"],
     {
       description:
         "Works out the branch name a ticket would get under the codebase's naming convention, without creating anything.",
@@ -457,12 +493,12 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Wait for checks",
     "WAIT",
     ["pipeline.runId"],
-    ["pipeline.status", "pipeline.conclusion"],
+    ["pipeline.status", "pipeline.conclusion", "pipeline.jobs"],
     {
       description:
         "Parks the run until a GitHub Actions workflow run finishes, then continues on its conclusion.",
       details:
-        "Polls until the run reaches a terminal status. Anything other than success fails the step, so route the failure handle to the recovery path — or set the step's failure policy to continue and branch on `pipeline.conclusion` yourself. Without a timeout the wait is open-ended; a hung pipeline holds the workflow run indefinitely. Falls back to `repo.id` and `pipeline.runId`.",
+        "Polls until the run reaches a terminal status. Anything other than success fails the step, so route the failure handle to the recovery path — or set the step's failure policy to continue and branch on `pipeline.conclusion` yourself. Also refreshes `pipeline.jobs`. Without a timeout the wait is open-ended; a hung pipeline holds the workflow run indefinitely. Falls back to `repo.id` and `pipeline.runId`.",
     },
   ),
   step(
@@ -471,12 +507,12 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Create worktree",
     "SERVER",
     ["codebase.id"],
-    ["worktree.*"],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Creates a Git worktree on the agent for a new, existing, or ticket-derived branch.",
       details:
-        "Dispatches a job to the agent that owns the codebase and waits for it, so the agent must be online. Branch mode NEW cuts a branch from the base, EXISTING checks one out, and TICKET derives the name from `ticket.key`. Base branch falls back to `worktree.baseBranch` then `repo.defaultBranch`. Writes `worktree.*`, including the path later agent steps need. Creates real directories on disk.",
+        "Dispatches a job to the agent that owns the codebase and waits for it, so the agent must be online. Branch mode NEW cuts a branch from the base, EXISTING checks one out, and TICKET derives the name from `ticket.key`. Base branch falls back to `worktree.baseBranch` then `repo.defaultBranch`. Refreshes the created worktree, codebase, owning agent, repository, and any linked pull request or ticket. Creates real directories on disk.",
       mutatesWorktree: true,
     },
   ),
@@ -486,12 +522,12 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Change worktree branch",
     "SERVER",
     ["worktree.id"],
-    ["worktree.branch"],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Switches an existing worktree to a different branch, creating it if needed.",
       details:
-        'Same branch modes as Create worktree. Uncommitted changes block the switch unless "Stash on failure" is set, which stashes them and retries — the stash is left for a human to deal with. Writes `worktree.branch`.',
+        'Same branch modes as Create worktree. Uncommitted changes block the switch unless "Stash on failure" is set, which stashes them and retries — the stash is left for a human to deal with. Refreshes the worktree and all of its related resource context.',
       mutatesWorktree: true,
     },
   ),
@@ -501,7 +537,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Run worktree operation",
     "SERVER",
     ["worktree.id"],
-    ["worktree.pushStatus"],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Runs one of the built-in worktree maintenance operations, such as syncing with the base branch or pushing.",
@@ -516,7 +552,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Delete worktree",
     "SERVER",
     ["worktree.id"],
-    [],
+    CODEBASE_CONTEXT_PATHS,
     {
       description:
         "Removes a worktree from the agent, optionally deleting its remote branch too.",
@@ -531,7 +567,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Move worktree",
     "SERVER",
     ["worktree.id"],
-    ["worktree.*"],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Moves a worktree's branch and changes into another codebase, optionally deleting the source.",
@@ -546,7 +582,14 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Inspect worktree",
     "SERVER",
     ["worktree.id"],
-    ["worktree.commits", "worktree.changes"],
+    [
+      "worktree.commits",
+      "worktree.changes",
+      "worktree.branchChanges",
+      "worktree.commitsTruncated",
+      "worktree.changesTruncated",
+      "worktree.branchChangesTruncated",
+    ],
     {
       description:
         "Reads the worktree's commits and changed files into `worktree.commits` and `worktree.changes`.",
@@ -560,7 +603,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Inspect worktree Git state",
     "SERVER",
     ["worktree.id"],
-    ["worktree.dirty"],
+    ["worktree.*"],
     {
       description:
         "Reads the worktree's Git status — dirty flag, ahead/behind counts, push status, conflicts — into `worktree.*`.",
@@ -574,7 +617,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Run worktree Git operation",
     "SERVER",
     ["worktree.id"],
-    [],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Runs a specific Git operation in the worktree — pull, push, rebase, stash, and the rest.",
@@ -589,7 +632,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Wait for push-ready",
     "WAIT",
     ["worktree.id"],
-    ["worktree.pushStatus"],
+    WORKTREE_CONTEXT_PATHS,
     {
       description:
         "Parks the run until the worktree's branch is pushed and tracking a remote.",
@@ -617,7 +660,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Fetch or refresh codebase",
     "SERVER",
     ["codebase.id"],
-    ["codebase.headSha", "codebase.branch"],
+    CODEBASE_CONTEXT_PATHS,
     {
       description:
         "Fetches remote refs for a codebase, or fully refreshes its cached metadata.",
@@ -632,7 +675,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Inspect codebase Git state",
     "SERVER",
     ["codebase.id"],
-    ["codebase.dirty"],
+    ["codebase.*"],
     {
       description:
         "Reads the codebase checkout's Git status into `codebase.*`.",
@@ -646,7 +689,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Run codebase Git operation",
     "SERVER",
     ["codebase.id"],
-    [],
+    CODEBASE_CONTEXT_PATHS,
     {
       description:
         "Runs a Git operation against the codebase's primary checkout.",
@@ -676,7 +719,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Read test results",
     "SERVER",
     ["build.id"],
-    ["build.testSummary"],
+    ["build.testSummary", "build.tests"],
     {
       description:
         "Reads a finished build's test report into `build.testSummary` and `build.tests`.",
@@ -690,7 +733,11 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Read code coverage",
     "SERVER",
     ["build.id"],
-    ["build.coverageSummary"],
+    [
+      "build.coverageSummary",
+      "build.coverageFiles",
+      "build.changedCoverageFiles",
+    ],
     {
       description:
         "Reads a finished build's coverage report into `build.coverageSummary` and the per-file breakdowns.",
@@ -704,7 +751,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     "Export archive",
     "SERVER",
     ["build.id"],
-    ["build.artifacts"],
+    ["build.exportId", ...WORKTREE_CONTEXT_PATHS],
     {
       description:
         "Exports a finished archive build into a distributable package on the agent.",
@@ -713,25 +760,107 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
       mutatesExternal: true,
     },
   ),
-  step("BUILD_DEPLOY", "Builds", "Deploy build", "SERVER", ["build.id"], [], {
-    description:
-      "Installs and launches an existing build on its destinations without rebuilding.",
-    details:
-      "Reuses the artifacts from a previous build, so it is much faster than building again. Destinations default to the ones the build already targeted. Waits for the deployment job. This puts the app on real or simulated devices — treat it as an external effect.",
-    mutatesExternal: true,
-  }),
+  step(
+    "BUILD_DEPLOY",
+    "Builds",
+    "Deploy build",
+    "SERVER",
+    ["build.id"],
+    WORKTREE_CONTEXT_PATHS,
+    {
+      description:
+        "Installs and launches an existing build on its destinations without rebuilding.",
+      details:
+        "Reuses the artifacts from a previous build, so it is much faster than building again. Destinations default to the ones the build already targeted. Waits for the deployment job. This puts the app on real or simulated devices — treat it as an external effect.",
+      mutatesExternal: true,
+    },
+  ),
   step(
     "BUILD_CANCEL",
     "Builds",
     "Cancel build",
     "SERVER",
     ["build.id"],
-    ["build.status"],
+    ["build.id", "build.status"],
     {
       description: "Cancels a queued or running build.",
       details:
         "Aimed at a different build from the one this run started — Start build or test already waits for its own. Cancelling an already-finished build is a no-op rather than an error. Writes `build.status`.",
       mutatesExternal: true,
+    },
+  ),
+  step(
+    "DISK_SPACE_LOAD",
+    "Disk space",
+    "Load disk-space monitor",
+    "SERVER",
+    [],
+    ["agent.*", "disk.*"],
+    {
+      description:
+        "Loads the current Derived Data disk-space monitor snapshot for an agent.",
+      details:
+        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. The least-free monitored Derived Data volume supplies `disk.freeBytes`, `disk.freeGiB`, and the percentage fields; root and base-repository volumes remain in `disk.volumes` for context only. Read-only and does not request a new report.",
+    },
+  ),
+  step(
+    "DISK_SPACE_REFRESH",
+    "Disk space",
+    "Refresh disk-space monitor",
+    "WAIT",
+    [],
+    ["agent.*", "disk.*"],
+    {
+      description:
+        "Requests an immediate disk report from an agent and waits for fresh telemetry.",
+      details:
+        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. Monitoring must be enabled. The step waits until `lastReportedAt` advances, then refreshes `agent.*` and `disk.*`; by default it polls every two seconds and times out after 180 seconds.",
+    },
+  ),
+  step(
+    "DISK_SPACE_UPDATE_THRESHOLDS",
+    "Disk space",
+    "Update disk thresholds",
+    "SERVER",
+    [],
+    [
+      "disk.normalThresholdGiB",
+      "disk.pressureThresholdGiB",
+      "disk.pollIntervalSeconds",
+      "disk.staleAfterSeconds",
+    ],
+    {
+      description:
+        "Updates the global normal and pressure free-space thresholds.",
+      details:
+        "Changes the thresholds used for every monitored agent, automatic cleanup, and admission control. The pressure threshold must be positive and lower than the normal threshold. Writes the resulting global settings into `disk.*`.",
+    },
+  ),
+  step(
+    "DISK_SPACE_SET_MONITORING",
+    "Disk space",
+    "Set agent disk monitoring",
+    "SERVER",
+    [],
+    ["agent.*", "disk.*"],
+    {
+      description:
+        "Enables or disables Derived Data disk-space monitoring for an agent.",
+      details:
+        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. Disabling monitoring also clears manual and automatic pressure mode and releases cleanup leases that have not started a job. Refreshes `agent.*` and `disk.*`.",
+    },
+  ),
+  step(
+    "DISK_SPACE_SET_PRESSURE_MODE",
+    "Disk space",
+    "Set disk pressure mode",
+    "SERVER",
+    [],
+    ["agent.*", "disk.*"],
+    {
+      description: "Enables or clears manual disk pressure mode for an agent.",
+      details:
+        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. Manual pressure mode uses the lower pressure threshold; automatic pressure mode remains controlled by cleanup availability. Refreshes `agent.*` and `disk.*`.",
     },
   ),
   step(
@@ -807,33 +936,65 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
         'RESUME keeps the previous conversation, FRESH starts over in the same worktree, and RESEND replays the original prompt. Needs the source run id plus a new prompt. The natural step for "fix the review comments" loops after a first session. Writes `run.<stepId>.*`.',
     },
   ),
-  step("RUN_STEER", "AI runs", "Steer active run", "SERVER", [], [], {
-    description:
-      "Sends extra instructions into a run that is already in progress.",
-    details:
-      "Only affects a run that is still going — it does not restart a finished one, which is what Follow up run is for. Because the steps in this workflow that start runs also wait for them, steering usually targets a run started elsewhere, reached through a run trigger.",
-  }),
-  step("RUN_ANSWER", "AI runs", "Answer run question", "SERVER", [], [], {
-    description:
-      "Answers a question an AI run is blocked on so it can carry on.",
-    details:
-      "Needs the question batch id, typically from `run.questions` seeded by a run-needs-an-answer trigger, and answers keyed by question id. This answers questions asked by an AI run — the Request confirmation and Ask user to choose steps ask questions of a human about the workflow itself.",
-  }),
-  step("RUN_PAUSE", "AI runs", "Pause run", "SERVER", [], [], {
+  step(
+    "RUN_STEER",
+    "AI runs",
+    "Steer active run",
+    "SERVER",
+    [],
+    ["run.<stepId>.*"],
+    {
+      description:
+        "Sends extra instructions into a run that is already in progress.",
+      details:
+        "Only affects a run that is still going — it does not restart a finished one, which is what Follow up run is for. Because the steps in this workflow that start runs also wait for them, steering usually targets a run started elsewhere, reached through a run trigger.",
+    },
+  ),
+  step(
+    "RUN_ANSWER",
+    "AI runs",
+    "Answer run question",
+    "SERVER",
+    [],
+    ["run.<stepId>.*"],
+    {
+      description:
+        "Answers a question an AI run is blocked on so it can carry on.",
+      details:
+        "Needs the question batch id, typically from `run.questions` seeded by a run-needs-an-answer trigger, and answers keyed by question id. This answers questions asked by an AI run — the Request confirmation and Ask user to choose steps ask questions of a human about the workflow itself.",
+    },
+  ),
+  step("RUN_PAUSE", "AI runs", "Pause run", "SERVER", [], ["run.<stepId>.*"], {
     description: "Pauses an in-progress AI run.",
     details:
       "The run stops at its next checkpoint and stays paused until something continues it. Falls back to `run.id`. Pausing an already-finished run fails.",
   }),
-  step("RUN_CONTINUE", "AI runs", "Continue run", "SERVER", [], [], {
-    description: "Resumes a paused AI run.",
-    details:
-      "The counterpart to Pause run. Fails when the run is not paused. Falls back to `run.id`.",
-  }),
-  step("RUN_CANCEL", "AI runs", "Cancel run", "SERVER", [], [], {
-    description: "Cancels an AI run, stopping its work.",
-    details:
-      "Whatever the run already wrote to the worktree stays — cancelling stops further work, it does not roll anything back. Falls back to `run.id`.",
-  }),
+  step(
+    "RUN_CONTINUE",
+    "AI runs",
+    "Continue run",
+    "SERVER",
+    [],
+    ["run.<stepId>.*"],
+    {
+      description: "Resumes a paused AI run.",
+      details:
+        "The counterpart to Pause run. Fails when the run is not paused. Falls back to `run.id`.",
+    },
+  ),
+  step(
+    "RUN_CANCEL",
+    "AI runs",
+    "Cancel run",
+    "SERVER",
+    [],
+    ["run.<stepId>.*"],
+    {
+      description: "Cancels an AI run, stopping its work.",
+      details:
+        "Whatever the run already wrote to the worktree stays — cancelling stops further work, it does not roll anything back. Falls back to `run.id`.",
+    },
+  ),
   step(
     "RUN_REVISE_ANSWER",
     "AI runs",
@@ -965,12 +1126,20 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     details:
       "Evaluates immediately and continues at once if the condition already holds. Session data only changes when a step writes it, so the condition must be able to become true through some other branch — otherwise the wait never resolves. Default cadence is 15 seconds; set a timeout to bound it.",
   }),
-  step("CONTROL_FOR_EACH", "Control flow", "For each", "CONTROL", [], [], {
-    description:
-      "Runs its `body` branch once per item in a list, or takes the `empty` branch when there is nothing to iterate.",
-    details:
-      "Reads the list from a session path or from inline items, and caps at 1,000. Iterations run in parallel and each sees its own item. Fail-fast stops the whole run on the first failing iteration; collect-errors lets them all finish and reports failures at the closing join. Writes the items to `steps.<stepId>.items`.",
-  }),
+  step(
+    "CONTROL_FOR_EACH",
+    "Control flow",
+    "For each",
+    "CONTROL",
+    [],
+    ["steps.<stepId>.items"],
+    {
+      description:
+        "Runs its `body` branch once per item in a list, or takes the `empty` branch when there is nothing to iterate.",
+      details:
+        "Reads the list from a session path or from inline items, and caps at 1,000. Iterations run in parallel and each sees its own item. Fail-fast stops the whole run on the first failing iteration; collect-errors lets them all finish and reports failures at the closing join. Writes the items to `steps.<stepId>.items`.",
+    },
+  ),
   step("CONTROL_TRY", "Control flow", "Try / catch", "CONTROL", [], [], {
     description:
       "Marks the start of a protected region whose failures route out of the `catch` handle.",
@@ -1125,6 +1294,33 @@ const WORKTREE_SEED_PATHS = [
   "ticket.*",
 ];
 
+/** Jira observations include the latest comment when one exists. */
+const JIRA_SEED_PATHS = ["ticket.*", "comment.*"];
+
+/** Shared payload for pull-request webhook triggers. */
+const GITHUB_PULL_REQUEST_SEED_PATHS = [
+  "repo.*",
+  "pr.*",
+  "ticket.*",
+  "worktree.*",
+  "codebase.*",
+  "agent.*",
+];
+
+/** Pull-request comment/review triggers additionally expose the comment. */
+const GITHUB_COMMENT_SEED_PATHS = [
+  ...GITHUB_PULL_REQUEST_SEED_PATHS,
+  "comment.*",
+];
+
+/** Issue comments may target a plain issue, so no worktree is guaranteed. */
+const GITHUB_ISSUE_COMMENT_SEED_PATHS = [
+  "repo.*",
+  "pr.*",
+  "ticket.*",
+  "comment.*",
+];
+
 /** Shared closing note for every trigger that supports the `filters` map. */
 const FILTERS_NOTE =
   "Filters narrow it further: each session path must equal the given value, or be one of a list of values.";
@@ -1205,7 +1401,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PR_STATE",
       "GitHub",
       "Pull request opened or ready",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_PULL_REQUEST_SEED_PATHS,
       {
         description:
           "Fires when a pull request is opened, or when a draft is marked ready for review.",
@@ -1216,7 +1412,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_REVIEW_CHANGES_REQUESTED",
       "GitHub",
       "Changes requested",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_PULL_REQUEST_SEED_PATHS,
       {
         description:
           "Fires when a reviewer submits a review requesting changes.",
@@ -1227,7 +1423,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_REVIEW_COMMENT",
       "GitHub",
       "Review comment created",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_COMMENT_SEED_PATHS,
       {
         description:
           "Fires when a new review comment is posted on a pull request.",
@@ -1238,7 +1434,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PR_CLOSED",
       "GitHub",
       "Pull request merged or closed",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_PULL_REQUEST_SEED_PATHS,
       {
         description:
           "Fires when a pull request is merged or closed without merging.",
@@ -1267,11 +1463,11 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PUSH_DEFAULT",
       "GitHub",
       "Push to default branch",
-      ["repo.*"],
+      ["repo.*", "push.*", "ticket.*"],
       {
         description:
           "Fires when a commit lands on the repository's default branch.",
-        details: `Seeds only \`repo.*\` — there is no pull request or worktree in scope, so a workflow hanging off it usually starts by creating one. Fires on merges too, since a merge is a push. ${FILTERS_NOTE}`,
+        details: `Seeds \`repo.*\` and \`push.*\`, plus a ticket key when the pushed branch contains one. There is no pull request or worktree in scope, so a workflow hanging off it usually starts by creating one. Fires on merges too, since a merge is a push. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
@@ -1297,7 +1493,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_ISSUE_COMMAND",
       "GitHub",
       "Issue comment command",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_ISSUE_COMMENT_SEED_PATHS,
       {
         description:
           "Fires when a comment from an allow-listed GitHub user matches a command pattern, such as `/deploy`.",
@@ -1327,7 +1523,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PR_LABEL",
       "GitHub",
       "Pull request label set",
-      ["repo.*", "pr.*", "ticket.*"],
+      GITHUB_PULL_REQUEST_SEED_PATHS,
       {
         description: "Fires when a label is applied to a pull request.",
         details: `Turns a label into a manual switch — label a pull request \`automerge\` and let a workflow take it from there. Filter on the label name, or every label change in the repository starts the workflow. ${FILTERS_NOTE}`,
@@ -1400,14 +1596,47 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       },
     ),
     trigger(
+      "AGENT_DISK_REPORT",
+      "Agents",
+      "Agent disk report",
+      ["agent.*", "codebase.agentId", "disk.*"],
+      {
+        description:
+          "Fires whenever the Derived Data monitor accepts a new agent disk report.",
+        details: `Seeds the complete monitor snapshot under \`disk.*\`, while \`agent.diskFreeBytes\` remains the legacy root-disk inventory value. This can fire at the agent poll cadence; use filters when every report is not needed. ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
       "AGENT_DISK_THRESHOLD",
       "Agents",
       "Agent disk threshold",
-      ["agent.*", "codebase.agentId"],
+      ["agent.*", "codebase.agentId", "disk.*"],
       {
         description:
-          "Fires when an agent's free disk space crosses a threshold you set.",
-        details: `Worktrees, derived data, and build artifacts fill disks quietly; this is the early warning. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+          "Fires when monitored Derived Data free space crosses a threshold you set.",
+        details: `Use \`disk.freeGiB\`, \`disk.freeBytes\`, or \`disk.freePercent\` to evaluate the least-free monitored Derived Data volume. \`agent.diskFreeBytes\` remains available for older root-disk workflows. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
+      "AGENT_DISK_STATE_CHANGED",
+      "Agents",
+      "Agent disk state changed",
+      ["agent.*", "codebase.agentId", "disk.*"],
+      {
+        description:
+          "Fires when an agent's disk monitor changes status, pressure mode, health, or monitored volume.",
+        details: `Filter on \`disk.status\`, \`disk.pressureMode\`, \`disk.enabled\`, or errors and warnings to react to a specific transition. Cleanup start appears as \`DELETING\`; recovery can be selected with \`IDLE\`. Repeated reports in the same state stay quiet. ${FILTERS_NOTE}`,
+      },
+    ),
+    trigger(
+      "AGENT_DISK_CLEANUP_RESULT",
+      "Agents",
+      "Automatic disk cleanup result",
+      ["agent.*", "codebase.agentId", "disk.*", "cleanup.*"],
+      {
+        description:
+          "Fires whenever a monitor-managed automatic Derived Data cleanup finishes.",
+        details: `Seeds the terminal agent job under \`cleanup.*\`, including status, error, targets, and deleted entries. Every cleanup job is independent, so two successive successes both fire. Manual Build Data deletions remain outside this trigger. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
@@ -1500,18 +1729,18 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "CODEBASE_REMOTE_BRANCH",
       "Codebases",
       "Matching remote branch",
-      ["codebase.*", "repo.*"],
+      ["codebase.*", "agent.*", "repo.*"],
       {
         description:
           "Fires when a remote branch matching the codebase's conventions appears.",
         details: `Lets a branch pushed from elsewhere pull work into this system — creating a worktree for it, or opening a pull request. Needs a fetch to have run for the branch to be visible. ${FILTERS_NOTE}`,
       },
     ),
-    trigger("JIRA_STATUS", "Jira", "Ticket status changed", ["ticket.*"], {
+    trigger("JIRA_STATUS", "Jira", "Ticket status changed", JIRA_SEED_PATHS, {
       description: "Fires when a Jira ticket moves to another status.",
       details: `Needs Jira polling configured. Seeds \`ticket.*\`. Filter on \`ticket.status\` to react to one column only — without a filter, every transition on every polled ticket starts the workflow. ${FILTERS_NOTE}`,
     }),
-    trigger("JIRA_LABEL", "Jira", "Jira label set", ["ticket.*"], {
+    trigger("JIRA_LABEL", "Jira", "Jira label set", JIRA_SEED_PATHS, {
       description: "Fires when a label is applied to a Jira ticket.",
       details: `The Jira counterpart to the pull request label trigger: a label becomes a manual switch for automation. Filter on the label name. ${FILTERS_NOTE}`,
     }),
@@ -1519,7 +1748,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "JIRA_ASSIGNED_SELF",
       "Jira",
       "Ticket assigned to me",
-      ["ticket.*"],
+      JIRA_SEED_PATHS,
       {
         description:
           "Fires when a ticket is assigned to the account behind the configured Jira credential.",
@@ -1530,19 +1759,19 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "JIRA_SOURCE_NEW_TICKET",
       "Jira",
       "New ticket in source",
-      ["ticket.*"],
+      JIRA_SEED_PATHS,
       {
         description:
           "Fires when a ticket appears in a configured Jira source — a saved JQL query or board.",
         details: `Fires on tickets newly matching the source, which includes existing tickets edited into range, not only freshly created ones. The source itself does the filtering, so keep its JQL tight. Seeds \`ticket.*\`. ${FILTERS_NOTE}`,
       },
     ),
-    trigger("JIRA_MENTION", "Jira", "Jira comment mention", ["ticket.*"], {
+    trigger("JIRA_MENTION", "Jira", "Jira comment mention", JIRA_SEED_PATHS, {
       description:
         "Fires when the configured Jira account is mentioned in a ticket comment.",
-      details: `Lets someone pull automation into a conversation by mentioning the bot. The comment is in the seeded ticket data, so an AI step can read what was actually asked — treat that text as untrusted input rather than instructions. ${FILTERS_NOTE}`,
+      details: `Lets someone pull automation into a conversation by mentioning the bot. The comment is seeded under \`comment.*\`, so an AI step can read what was actually asked — treat that text as untrusted input rather than instructions. ${FILTERS_NOTE}`,
     }),
-    trigger("JIRA_SPRINT_STARTED", "Jira", "Sprint started", ["ticket.*"], {
+    trigger("JIRA_SPRINT_STARTED", "Jira", "Sprint started", JIRA_SEED_PATHS, {
       description: "Fires when a Jira sprint is started.",
       details: `Fires per ticket in the sprint, so a sprint of thirty tickets starts thirty runs — mind the workflow's concurrency settings. Good for sprint-opening bookkeeping. ${FILTERS_NOTE}`,
     }),

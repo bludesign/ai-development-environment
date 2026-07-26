@@ -61,6 +61,7 @@ function listOptions(
 }
 
 const RESOURCE_SESSION_PATHS: Partial<Record<ResourceKind, string>> = {
+  agent: "agent.id",
   codebase: "codebase.id",
   worktree: "worktree.id",
   githubRepository: "repo.id",
@@ -539,9 +540,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     ],
   },
   WORKTREE_WAIT_PUSH_READY: {
-    fields: [
-      resource("worktreeId", "Worktree", "worktree"),
-    ],
+    fields: [resource("worktreeId", "Worktree", "worktree")],
   },
   WORKTREE_SNAPSHOT: {
     fields: [text("kind", "Checkpoint kind", { placeholder: "STEP" })],
@@ -600,6 +599,38 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   BUILD_CANCEL: {
     fields: [text("buildId", "Build ID")],
+  },
+  // -- Disk space -----------------------------------------------------------
+  DISK_SPACE_LOAD: {
+    fields: [resource("agentId", "Agent", "agent")],
+  },
+  DISK_SPACE_REFRESH: {
+    fields: [resource("agentId", "Agent", "agent")],
+  },
+  DISK_SPACE_UPDATE_THRESHOLDS: {
+    fields: [
+      num("normalThresholdGiB", "Normal threshold (GiB)", {
+        required: true,
+      }),
+      num("pressureThresholdGiB", "Pressure threshold (GiB)", {
+        required: true,
+      }),
+    ],
+  },
+  DISK_SPACE_SET_MONITORING: {
+    fields: [
+      resource("agentId", "Agent", "agent"),
+      bool("enabled", "Monitoring enabled", { required: true, default: true }),
+    ],
+  },
+  DISK_SPACE_SET_PRESSURE_MODE: {
+    fields: [
+      resource("agentId", "Agent", "agent"),
+      bool("enabled", "Manual pressure mode", {
+        required: true,
+        default: true,
+      }),
+    ],
   },
   // -- Skills / notifications / tools ---------------------------------------
   SKILL_APPLY: {
@@ -709,9 +740,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   },
   // -- Human loop ------------------------------------------------------------
   HUMAN_CONFIRM: {
-    fields: [
-      multiline("prompt", "Prompt"),
-    ],
+    fields: [multiline("prompt", "Prompt")],
   },
   HUMAN_CHOICE: {
     fields: [
@@ -748,9 +777,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [num("seconds", "Delay (seconds)", { required: true })],
   },
   CONTROL_WAIT_UNTIL: {
-    fields: [
-      json("condition", "Condition", { required: true }),
-    ],
+    fields: [json("condition", "Condition", { required: true })],
   },
   CONTROL_FOR_EACH: {
     fields: [
@@ -873,6 +900,7 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "BUILD_START",
   "BUILD_EXPORT",
   "BUILD_DEPLOY",
+  "DISK_SPACE_REFRESH",
   "TERMINAL_RUN",
   // Agent runs
   "RUN_CREATE_PLAN",
@@ -989,7 +1017,10 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "BUILD_HOOK_FAILED",
   "AGENT_CONNECTION",
   "AGENT_JOB_FAILED",
+  "AGENT_DISK_REPORT",
   "AGENT_DISK_THRESHOLD",
+  "AGENT_DISK_STATE_CHANGED",
+  "AGENT_DISK_CLEANUP_RESULT",
   "CCUSAGE_THRESHOLD",
   "WORKTREE_CREATED",
   "WORKTREE_BEHIND",

@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 
 import {
   deleteSession,
@@ -25,6 +28,44 @@ import {
   type ProviderUsage,
   type StagedAttachment,
 } from "./provider.js";
+
+type ClaudeExecutableLookupOptions = {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  platform?: NodeJS.Platform;
+  isExecutable?: (path: string) => boolean;
+};
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function findClaudeCodeExecutable(
+  options: ClaudeExecutableLookupOptions = {},
+): string | undefined {
+  const env = options.env ?? process.env;
+  const home = options.home ?? homedir();
+  const platform = options.platform ?? process.platform;
+  const executable = platform === "win32" ? "claude.exe" : "claude";
+  const candidates = [
+    env.CONTROL_AGENT_CLAUDE_EXECUTABLE?.trim(),
+    ...(env.PATH ?? "")
+      .split(delimiter)
+      .filter(Boolean)
+      .map((directory) => join(directory, executable)),
+    join(home, ".local", "bin", executable),
+    ...(platform === "darwin"
+      ? ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+      : []),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const canExecute = options.isExecutable ?? isExecutable;
+  return [...new Set(candidates)].find(canExecute);
+}
 
 class MessageQueue implements AsyncIterable<SDKUserMessage> {
   private readonly values: SDKUserMessage[] = [];
@@ -199,9 +240,13 @@ export class ClaudeAdapter implements ProviderAdapter {
   catalog(): Promise<ProviderCatalog> {
     this.catalogPromise ??= (async () => {
       const messages = new MessageQueue();
+      const pathToClaudeCodeExecutable = findClaudeCodeExecutable();
       const instance = query({
         prompt: messages,
         options: {
+          ...(pathToClaudeCodeExecutable
+            ? { pathToClaudeCodeExecutable }
+            : {}),
           env: claudeEnvironment(),
           permissionMode: "plan",
         },
@@ -247,9 +292,13 @@ export class ClaudeAdapter implements ProviderAdapter {
     )
       ? (input.run.effort as "low" | "medium" | "high" | "xhigh" | "max")
       : undefined;
+    const pathToClaudeCodeExecutable = findClaudeCodeExecutable();
     activeQuery = query({
       prompt: messages,
       options: {
+        ...(pathToClaudeCodeExecutable
+          ? { pathToClaudeCodeExecutable }
+          : {}),
         cwd: input.run.worktree!.folder,
         ...(input.run.model !== "default" ? { model: input.run.model } : {}),
         ...(effort ? { effort } : {}),

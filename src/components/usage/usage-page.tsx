@@ -7,6 +7,7 @@ import { Fragment, useEffect, useState } from "react";
 
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
+import { SearchableSelect } from "@/components/common/searchable-select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,10 +36,11 @@ import {
 import { formatDateValue } from "@/lib/date-format";
 
 import type { AggregatedUsage, UsageMetrics } from "./aggregate-usage";
-import { totalsForModel } from "./aggregate-usage";
+import { filterUsageByAgent, totalsForModel } from "./aggregate-usage";
 import { UsageCostChart } from "./usage-cost-chart";
 
 const RECONCILE_INTERVAL_MS = 2_000;
+const ALL_AGENTS = "__all_agents__";
 const TERMINAL_STATUSES = new Set<CollectionStatus>([
   "SUCCEEDED",
   "FAILED",
@@ -115,6 +117,7 @@ export function UsagePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [range, setRange] = useState<UsageRange>("ALL");
+  const [selectedAgentId, setSelectedAgentId] = useState(ALL_AGENTS);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
   useEffect(() => {
@@ -213,12 +216,33 @@ export function UsagePage() {
   const failures = records.filter(
     (record) => terminal(record.status) && record.status !== "SUCCEEDED",
   );
+  const agentOptions = [
+    { value: ALL_AGENTS, label: t("allAgents") },
+    ...successful
+      .toSorted((first, second) =>
+        first.agent.name.localeCompare(second.agent.name),
+      )
+      .map(({ agent }) => ({
+        value: agent.id,
+        label: agent.name,
+        description: agent.hostname,
+      })),
+  ];
+  const activeAgentId = successful.some(
+    ({ agent }) => agent.id === selectedAgentId,
+  )
+    ? selectedAgentId
+    : null;
+  const filteredUsage =
+    usage && activeAgentId
+      ? filterUsageByAgent(usage, activeAgentId)
+      : usage;
   // A model the current range no longer covers is treated as no filter at all,
   // so changing the range falls back to the totals for everything rather than
   // to a row of zeros.
   const activeModel =
     selectedModel &&
-    usage?.days.some((day) =>
+    filteredUsage?.days.some((day) =>
       day.models.some(
         (model) => !model.unattributed && model.modelName === selectedModel,
       ),
@@ -226,9 +250,9 @@ export function UsagePage() {
       ? selectedModel
       : null;
   const summaryMetrics =
-    usage && activeModel
-      ? totalsForModel(usage.days, activeModel)
-      : usage?.totals;
+    filteredUsage && activeModel
+      ? totalsForModel(filteredUsage.days, activeModel)
+      : filteredUsage?.totals;
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -242,6 +266,19 @@ export function UsagePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {successful.length > 1 && (
+            <div className="w-full sm:w-64">
+              <SearchableSelect
+                ariaLabel={t("agentFilterLabel")}
+                emptyMessage={t("noAgentsFound")}
+                onValueChange={setSelectedAgentId}
+                options={agentOptions}
+                placeholder={t("allAgents")}
+                searchPlaceholder={t("searchAgents")}
+                value={activeAgentId ?? ALL_AGENTS}
+              />
+            </div>
+          )}
           <Tabs
             onValueChange={(value) => setRange(value as UsageRange)}
             value={range}
@@ -333,20 +370,26 @@ export function UsagePage() {
           title={t("zeroUsage")}
           description={t("zeroUsageDescription")}
         />
-      ) : successful.length > 0 && usage && usage.days.length === 0 ? (
+      ) : successful.length > 0 &&
+        filteredUsage &&
+        filteredUsage.days.length === 0 ? (
         <UsageEmpty
           title={t("noUsageInRange")}
           description={t("noUsageInRangeDescription")}
         />
-      ) : successful.length > 0 && usage && summaryMetrics ? (
+      ) : successful.length > 0 && filteredUsage && summaryMetrics ? (
         <>
           <UsageCostChart
-            days={usage.days}
+            days={filteredUsage.days}
             onSelectModel={setSelectedModel}
             selectedModel={activeModel}
           />
           <SummaryTiles metrics={summaryMetrics} model={activeModel} />
-          <UsageTable days={usage.days} locale={locale} totals={usage.totals} />
+          <UsageTable
+            days={filteredUsage.days}
+            locale={locale}
+            totals={filteredUsage.totals}
+          />
         </>
       ) : null}
     </section>

@@ -25,6 +25,7 @@ export type ConfigControlType =
  * rendered as dropdown options. Each maps to a query in use-resource-options.
  */
 export type ResourceKind =
+  | "agent"
   | "codebase"
   | "worktree"
   | "githubRepository"

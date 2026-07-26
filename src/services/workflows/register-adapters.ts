@@ -22,6 +22,7 @@ import type { AgentControlService } from "@/services/agent-control";
 import type { BuildsService } from "@/services/builds";
 import type { CodebasesService } from "@/services/codebases";
 import type { CommandsService } from "@/services/commands";
+import type { DiskSpaceService } from "@/services/disk-space";
 import type { GitHubService } from "@/services/github";
 import type { JiraService } from "@/services/jira";
 import type { NotificationsService } from "@/services/notifications";
@@ -33,10 +34,7 @@ import type { WorktreesService } from "@/services/worktrees";
 import type { RunConfigurationInput } from "@/services/runs";
 import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue } from "@/lib/workflows/session";
-import {
-  waitResumeAfter,
-  waitTimeoutAt,
-} from "@/lib/workflows/wait-timing";
+import { waitResumeAfter, waitTimeoutAt } from "@/lib/workflows/wait-timing";
 import type {
   WorkflowExecutionContext,
   WorkflowExecutionResult,
@@ -58,6 +56,7 @@ export type WorkflowAdapterServices = {
   pushNotifications: PushNotificationsService;
   tools: ToolsService;
   commands: CommandsService;
+  diskSpace: DiskSpaceService;
 };
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -325,6 +324,7 @@ export function registerWorkflowAdapters(
   registerWorktreeAdapters(executor, services);
   registerCodebaseAdapters(executor, services);
   registerBuildAdapters(executor, services);
+  registerDiskSpaceAdapters(executor, services);
   registerRunAdapters(executor, services);
   registerMiscellaneousAdapters(executor, services);
 }
@@ -441,12 +441,19 @@ function registerWaitPollers(
     ) {
       return { pending: true, pollAfterSeconds: 3 };
     }
+    const sessionPatch = move.targetWorktreeId
+      ? await services.worktrees.workflowSessionDataForWorktree(
+          move.targetWorktreeId,
+          { includeMissing: true },
+        )
+      : {};
     return {
       pending: false,
       result: {
         id: move.id,
         status: move.status,
         targetWorktreeId: move.targetWorktreeId,
+        sessionPatch,
       },
       error:
         move.status === "SUCCEEDED"
@@ -462,9 +469,17 @@ function registerWaitPollers(
     if (!worktree) return { pending: false, error: "Worktree disappeared" };
     if (worktree.pushStatus !== "READY")
       return { pending: true, pollAfterSeconds: 5 };
+    const sessionPatch =
+      await services.worktrees.workflowSessionDataForWorktree(worktree.id, {
+        includeMissing: true,
+      });
     return {
       pending: false,
-      result: { id: worktree.id, pushStatus: worktree.pushStatus },
+      result: {
+        id: worktree.id,
+        pushStatus: worktree.pushStatus,
+        sessionPatch,
+      },
     };
   });
   workflows.registerWaitPoller("WORKFLOW_RUN", async (runId) => {
@@ -538,11 +553,51 @@ function registerWaitPollers(
     }
     return {
       pending: false,
-      result: { runId: run.id, status: run.status, jobs: run.jobs },
+      result: {
+        runId: run.id,
+        status: run.status,
+        jobs: run.jobs,
+        sessionPatch: {
+          pipeline: {
+            runId: run.id,
+            status: run.status,
+            conclusion: run.status,
+            jobs: run.jobs,
+          },
+        },
+      },
       error:
         run.status === "SUCCESS"
           ? null
           : `GitHub checks concluded ${run.status.toLowerCase()}`,
+    };
+  });
+  workflows.registerWaitPoller("DISK_SPACE_REPORT", async (externalKey) => {
+    const input = object(JSON.parse(externalKey), "Disk-space report wait");
+    const agentId = text(input.agentId, "Agent ID", 500);
+    const snapshot = await services.diskSpace.snapshot(agentId);
+    if (!snapshot.disk.enabled) {
+      return {
+        pending: false,
+        error: "Disk-space monitoring was disabled while awaiting a report",
+      };
+    }
+    const lastReportedAt = snapshot.disk.lastReportedAt;
+    const previousReportedAt =
+      typeof input.previousReportedAt === "string"
+        ? input.previousReportedAt
+        : null;
+    text(input.requestedAt, "Requested timestamp", 100);
+    const fresh = Boolean(
+      lastReportedAt &&
+      (previousReportedAt
+        ? Date.parse(lastReportedAt) > Date.parse(previousReportedAt)
+        : true),
+    );
+    if (!fresh) return { pending: true, pollAfterSeconds: 2 };
+    return {
+      pending: false,
+      result: { ...snapshot, sessionPatch: snapshot },
     };
   });
 }
@@ -603,6 +658,7 @@ function registerJiraAdapters(
     const normalized = normalizeTicket(ticket);
     return {
       output: normalized,
+      sessionPatch: { ticket: normalized },
       links: [
         jiraLink(
           String(normalized.key),
@@ -1365,6 +1421,85 @@ function registerBuildAdapters(
       sessionPatch: { build: { id: build?.id, status: build?.status } },
       links: [buildLink(id)],
     };
+  });
+}
+
+function diskSpaceAgentId(context: WorkflowExecutionContext): string {
+  return text(
+    context.node.config.agentId ??
+      getSessionValue(context.sessionData, "agent.id") ??
+      getSessionValue(context.sessionData, "codebase.agentId"),
+    "Agent ID",
+    500,
+  );
+}
+
+function registerDiskSpaceAdapters(
+  executor: WorkflowStepExecutor,
+  services: WorkflowAdapterServices,
+): void {
+  const snapshotResult = async (agentId: string) => {
+    const snapshot = await services.diskSpace.snapshot(agentId);
+    return {
+      output: snapshot,
+      sessionPatch: snapshot,
+      links: [
+        detailLink(
+          "AGENT",
+          agentId,
+          snapshot.agent.name,
+          `/agents/${encodeURIComponent(agentId)}`,
+        ),
+      ],
+    };
+  };
+
+  executor.register("DISK_SPACE_LOAD", async (context) =>
+    snapshotResult(diskSpaceAgentId(context)),
+  );
+  executor.register("DISK_SPACE_REFRESH", async (context) => {
+    const agentId = diskSpaceAgentId(context);
+    const request = await services.diskSpace.requestRefresh(agentId);
+    return {
+      output: request,
+      links: [
+        detailLink(
+          "AGENT",
+          agentId,
+          "Agent",
+          `/agents/${encodeURIComponent(agentId)}`,
+        ),
+      ],
+      wait: {
+        kind: "DISK_SPACE_REPORT",
+        externalKey: JSON.stringify(request),
+        resumeAfter: waitResumeAfter(context.node.config, 2),
+        timeoutAt: waitTimeoutAt(context.node.config, 180),
+      },
+    };
+  });
+  executor.register("DISK_SPACE_UPDATE_THRESHOLDS", async (context) => {
+    const settings = await services.diskSpace.updateSettings({
+      normalThresholdGiB: Number(context.node.config.normalThresholdGiB),
+      pressureThresholdGiB: Number(context.node.config.pressureThresholdGiB),
+    });
+    return { output: settings, sessionPatch: { disk: settings } };
+  });
+  executor.register("DISK_SPACE_SET_MONITORING", async (context) => {
+    const agentId = diskSpaceAgentId(context);
+    await services.diskSpace.setMonitoring(
+      agentId,
+      context.node.config.enabled === true,
+    );
+    return snapshotResult(agentId);
+  });
+  executor.register("DISK_SPACE_SET_PRESSURE_MODE", async (context) => {
+    const agentId = diskSpaceAgentId(context);
+    await services.diskSpace.setManualPressureMode(
+      agentId,
+      context.node.config.enabled === true,
+    );
+    return snapshotResult(agentId);
   });
 }
 

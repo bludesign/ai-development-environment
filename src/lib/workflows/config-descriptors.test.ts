@@ -46,6 +46,28 @@ describe("workflow config descriptors", () => {
     }
   });
 
+  test("uses the agent picker for agent-targeted disk actions", () => {
+    for (const kind of [
+      "DISK_SPACE_LOAD",
+      "DISK_SPACE_REFRESH",
+      "DISK_SPACE_SET_MONITORING",
+      "DISK_SPACE_SET_PRESSURE_MODE",
+    ]) {
+      expect(
+        getConfigDescriptor(kind, "step")?.fields.find(
+          ({ key }) => key === "agentId",
+        ),
+      ).toMatchObject({
+        control: "resource",
+        options: {
+          kind: "resource",
+          resource: "agent",
+          sessionPath: "agent.id",
+        },
+      });
+    }
+  });
+
   test("allows interpolation wherever the runtime resolves strings", () => {
     const interpolates = (
       kind: string,
@@ -151,6 +173,7 @@ describe("workflow config descriptors", () => {
       "SKILL_APPLY",
       "CONTROL_SUBWORKFLOW",
       "TERMINAL_RUN",
+      "DISK_SPACE_REFRESH",
     ]) {
       expect(timingKeys(kind)).toEqual(["cadenceSeconds", "timeoutSeconds"]);
     }

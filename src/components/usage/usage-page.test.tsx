@@ -25,6 +25,12 @@ const requestMock = vi.mocked(controlPlaneRequest);
 const subscriptionsMock = vi.mocked(controlPlaneSubscriptions);
 const subscribe = vi.fn(() => vi.fn());
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 function agent(
   id: string,
   connectionStatus: Agent["connectionStatus"],
@@ -126,8 +132,50 @@ function collection(status: "COLLECTING" | "COMPLETED" = "COMPLETED") {
   };
 }
 
+function collectionWithTwoSuccessfulAgents() {
+  const result = structuredClone(collection());
+  const secondAgent = result.progress.agents[1];
+  if (!secondAgent) throw new Error("Expected a second agent");
+  secondAgent.status = "SUCCEEDED";
+  secondAgent.error = null;
+  result.progress.successfulCount = 2;
+
+  const secondMetrics = {
+    inputTokens: 5,
+    outputTokens: 10,
+    cacheCreationTokens: 15,
+    cacheReadTokens: 20,
+    totalTokens: 50,
+    totalCost: 0.5,
+  };
+  const combinedMetrics = {
+    inputTokens: 15,
+    outputTokens: 30,
+    cacheCreationTokens: 45,
+    cacheReadTokens: 60,
+    totalTokens: 150,
+    totalCost: 1.756,
+  };
+  const day = result.aggregate.days[0];
+  const model = day?.models[0];
+  if (!day || !model) throw new Error("Expected aggregate usage");
+  model.agents.push({
+    ...secondMetrics,
+    agentId: "b",
+    agentName: "Agent B",
+    hostname: "b.local",
+    sources: ["claude"],
+  });
+  Object.assign(day, combinedMetrics);
+  Object.assign(model, combinedMetrics);
+  Object.assign(result.aggregate.totals, combinedMetrics);
+  return result;
+}
+
 describe("UsagePage", () => {
   beforeEach(() => {
+    global.ResizeObserver = ResizeObserverMock;
+    Element.prototype.scrollIntoView = vi.fn();
     subscribe.mockReset();
     subscribe.mockImplementation(() => vi.fn());
     subscriptionsMock.mockReturnValue({ subscribe } as never);
@@ -160,6 +208,9 @@ describe("UsagePage", () => {
     expect(screen.getByText(/Failed: Agent B/)).toBeDefined();
     expect(screen.getByText("Daily cost by model")).toBeDefined();
     expect(screen.getAllByText("$1.26").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("combobox", { name: "Filter usage by agent" }),
+    ).toBeNull();
 
     const dateButton = screen.getByRole("button", {
       name: "Show models for 2026-07-16",
@@ -195,6 +246,49 @@ describe("UsagePage", () => {
         ),
       ).toHaveLength(2);
     });
+  });
+
+  test("searches and filters usage when multiple agents report", async () => {
+    const result = collectionWithTwoSuccessfulAgents();
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("query CcusageCollection")) {
+        return { ccusageCollection: result } as never;
+      }
+      if (query.includes("mutation CollectCcusage")) {
+        return { collectCcusage: { id: "collection-1" } } as never;
+      }
+      throw new Error(`Unexpected query: ${query}`);
+    });
+
+    render(<UsagePage />);
+
+    const filter = await screen.findByRole("combobox", {
+      name: "Filter usage by agent",
+    });
+    expect(filter.textContent).toContain("All agents");
+    fireEvent.click(filter);
+    const search = screen.getByRole("combobox", { name: "Search agents…" });
+    fireEvent.change(search, { target: { value: "b.local" } });
+    expect(
+      await screen.findByRole("option", { name: "Agent B, b.local" }),
+    ).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Agent A, a.local" })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Agent B, b.local" }));
+
+    await waitFor(() => expect(filter.textContent).toContain("Agent B"));
+    expect(screen.getByText("Grand total").closest("tr")?.textContent).toContain(
+      "$0.50",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show models for 2026-07-16" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show agents using gpt-5" }),
+    );
+    expect(screen.queryByText("Agent A")).toBeNull();
+    expect(screen.getAllByText("Agent B").length).toBeGreaterThan(0);
+    expect(screen.getByText("b.local · claude")).toBeDefined();
   });
 
   test("uses query reconciliation when the progress subscription is silent", async () => {

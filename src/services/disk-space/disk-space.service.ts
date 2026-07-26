@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   BUILD_DATA_DELETE_JOB_KIND,
   buildDataDeletePayload,
+  parseBuildDataDeleteResult,
 } from "@ai-development-environment/agent-contract/build-data";
 import {
   DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB,
@@ -31,6 +32,7 @@ import {
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
 
 import { executingResourcesByWorktree } from "./executing-work";
+import { diskSpaceSessionData, type DiskSpaceSessionData } from "./snapshot";
 
 const GIB = 1024 ** 3;
 const CLEANUP_LEASE_MS = 10 * 60_000;
@@ -78,6 +80,35 @@ export type AgentDiskSpaceView = {
   lastError: string | null;
   warnings: string[];
   volumes: DiskSpaceVolumeView[];
+};
+
+export type DiskSpaceChangeReason =
+  | "SETTINGS_UPDATED"
+  | "REPORT_RECEIVED"
+  | "MONITORING_CHANGED"
+  | "MANUAL_PRESSURE_CHANGED"
+  | "AUTOMATIC_PRESSURE_CHANGED"
+  | "CLEANUP_SKIPPED"
+  | "CLEANUP_STARTED"
+  | "CLEANUP_START_FAILED"
+  | "CLEANUP_COMPLETED";
+
+export type DiskSpaceCleanupChange = {
+  jobId: string;
+  status: string;
+  source: "AUTOMATIC";
+  error: string | null;
+  targets: ReturnType<typeof buildDataDeletePayload>["targets"];
+  deleted: unknown[];
+};
+
+export type DiskSpaceChangedPayload = {
+  diskSpaceChanged: string;
+  diskSpaceChange: {
+    id: string;
+    reason: DiskSpaceChangeReason;
+    cleanup: DiskSpaceCleanupChange | null;
+  };
 };
 
 function parseArray<T>(value: string | null | undefined): T[] {
@@ -162,7 +193,7 @@ export class DiskSpaceService {
       },
       update: { normalThresholdGiB, pressureThresholdGiB },
     });
-    this.publish("settings");
+    this.publish("settings", "SETTINGS_UPDATED");
     const agents = await prisma.agentDiskSpaceState.findMany({
       where: { enabled: true },
       select: { agentId: true },
@@ -240,7 +271,7 @@ export class DiskSpaceService {
         lastError: null,
       },
     });
-    this.publish(agentId);
+    this.publish(agentId, "REPORT_RECEIVED");
     void this.reconcileAgent(agentId);
   }
 
@@ -362,6 +393,34 @@ export class DiskSpaceService {
     return view;
   }
 
+  async snapshot(
+    agentId: string,
+    changeReason: string | null = null,
+  ): Promise<DiskSpaceSessionData> {
+    const overview = await this.overview();
+    const view = overview.agents.find((entry) => entry.agent.id === agentId);
+    if (!view) throw new Error("Agent not found");
+    return diskSpaceSessionData(overview.settings, view, changeReason);
+  }
+
+  async requestRefresh(agentId: string): Promise<{
+    agentId: string;
+    requestedAt: string;
+    previousReportedAt: string | null;
+  }> {
+    const view = await this.agentView(agentId);
+    if (!view.enabled) {
+      throw new Error("Disk-space monitoring is disabled for this agent");
+    }
+    const requestedAt = new Date().toISOString();
+    this.agentControl.requestDiskSpacePoll(agentId);
+    return {
+      agentId,
+      requestedAt,
+      previousReportedAt: view.lastReportedAt,
+    };
+  }
+
   async setMonitoring(agentId: string, enabled: boolean) {
     const prisma = await getPrismaClient();
     await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
@@ -380,7 +439,7 @@ export class DiskSpaceService {
         where: { agentId, jobId: null },
       });
     }
-    this.publish(agentId);
+    this.publish(agentId, "MONITORING_CHANGED");
     this.agentControl.requestAgentConfigurationRefresh(agentId);
     return this.agentView(agentId);
   }
@@ -393,7 +452,7 @@ export class DiskSpaceService {
       create: { agentId, manualPressureMode: enabled },
       update: { manualPressureMode: enabled },
     });
-    this.publish(agentId);
+    this.publish(agentId, "MANUAL_PRESSURE_CHANGED");
     void this.reconcileAgent(agentId);
     return this.agentView(agentId);
   }
@@ -446,7 +505,9 @@ export class DiskSpaceService {
   }
 
   subscribe() {
-    return agentEventBus.iterate(DISK_SPACE_CHANGED_TOPIC);
+    return agentEventBus.iterate<DiskSpaceChangedPayload>(
+      DISK_SPACE_CHANGED_TOPIC,
+    );
   }
 
   private async reconcileAgent(agentId: string): Promise<void> {
@@ -484,7 +545,9 @@ export class DiskSpaceService {
       return;
     }
     let entries = parseArray<StoredEntry>(state.entriesJson);
-    const allVolumes = parseArray<AgentDiskSpaceVolumeReport>(state.volumesJson);
+    const allVolumes = parseArray<AgentDiskSpaceVolumeReport>(
+      state.volumesJson,
+    );
     // Only the Derived Data volume drives pressure mode and cleanup; capacity
     // ids below still resolve against every reported volume so entries keep
     // matching volumes that share an APFS container.
@@ -533,7 +596,7 @@ export class DiskSpaceService {
           where: { agentId },
           data: { automaticPressureMode },
         });
-        this.publish(agentId);
+        this.publish(agentId, "AUTOMATIC_PRESSURE_CHANGED");
       }
     }
 
@@ -576,7 +639,7 @@ export class DiskSpaceService {
       await prisma.derivedDataCleanupLease.deleteMany({
         where: { worktreeId: candidate.worktreeId, jobId: null },
       });
-      this.publish(agentId);
+      this.publish(agentId, "CLEANUP_SKIPPED");
       return;
     }
     try {
@@ -604,7 +667,7 @@ export class DiskSpaceService {
         where: { worktreeId: candidate.worktreeId },
         data: { jobId: job.id },
       });
-      this.publish(agentId);
+      this.publish(agentId, "CLEANUP_STARTED");
     } catch (error) {
       await prisma.derivedDataCleanupLease.deleteMany({
         where: { worktreeId: candidate.worktreeId },
@@ -615,7 +678,7 @@ export class DiskSpaceService {
           lastError: error instanceof Error ? error.message : String(error),
         },
       });
-      this.publish(agentId);
+      this.publish(agentId, "CLEANUP_START_FAILED");
     }
   }
 
@@ -624,13 +687,17 @@ export class DiskSpaceService {
     agentId: string;
     kind: string;
     payloadJson: string;
+    resultJson: string | null;
     status: string;
     error: string | null;
   }): Promise<void> {
     if (job.kind !== BUILD_DATA_DELETE_JOB_KIND) return;
-    let source = "USER";
+    let source: "USER" | "AUTOMATIC" = "USER";
+    let targets: ReturnType<typeof buildDataDeletePayload>["targets"] = [];
     try {
-      source = buildDataDeletePayload(JSON.parse(job.payloadJson)).source;
+      const payload = buildDataDeletePayload(JSON.parse(job.payloadJson));
+      source = payload.source;
+      targets = payload.targets;
     } catch {
       // BuildDataService records malformed results; leases still need release.
     }
@@ -647,14 +714,42 @@ export class DiskSpaceService {
       });
     }
     if (released.count || source === "AUTOMATIC") {
-      this.publish(job.agentId);
+      let deleted: unknown[] = [];
+      if (source === "AUTOMATIC" && job.resultJson) {
+        try {
+          deleted = parseBuildDataDeleteResult(
+            JSON.parse(job.resultJson),
+          ).deleted;
+        } catch {
+          // The Build Data service owns malformed-result reporting.
+        }
+      }
+      this.publish(
+        job.agentId,
+        "CLEANUP_COMPLETED",
+        source === "AUTOMATIC"
+          ? {
+              jobId: job.id,
+              status: job.status,
+              source,
+              error: job.error,
+              targets,
+              deleted,
+            }
+          : null,
+      );
       this.agentControl.requestDiskSpacePoll(job.agentId);
     }
   }
 
-  private publish(id: string): void {
+  private publish(
+    id: string,
+    reason: DiskSpaceChangeReason,
+    cleanup: DiskSpaceCleanupChange | null = null,
+  ): void {
     agentEventBus.publish(DISK_SPACE_CHANGED_TOPIC, {
       diskSpaceChanged: id,
+      diskSpaceChange: { id: randomUUID(), reason, cleanup },
     });
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
