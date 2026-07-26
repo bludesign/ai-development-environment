@@ -126,6 +126,17 @@
       "SIDES": "Sur les côtés",
       "TOP_BOTTOM": "En haut et en bas"
     },
+    "displayLayout": "Disposition de l’affichage",
+    "displayLayouts": {
+      "REGULAR": "Normale",
+      "BASIC": "Simple"
+    },
+    "displayLayoutHelp": {
+      "REGULAR": "Les vues en lecture seule utilisent les positions définies sur le canevas.",
+      "BASIC": "Les vues en lecture seule alignent automatiquement les étapes selon la largeur disponible. Les positions définies restent inchangées."
+    },
+    "previewBasicLayout": "Aperçu de la disposition simple",
+    "exitBasicPreview": "Quitter l’aperçu",
     "validate": "Valider",
     "steps": "Étapes",
     "outline": "Plan",
@@ -149,6 +160,16 @@
     "deleteNode": "Supprimer le nœud",
     "deleteConnection": "Supprimer la connexion",
     "configuration": "Configuration",
+    "notSet": "Non défini",
+    "noConfiguration": "Aucune configuration",
+    "noRequiredPaths": "Cette étape ne nécessite aucun chemin de session.",
+    "retryStrategy": "Stratégie de nouvelle tentative",
+    "retryStrategies": {
+      "FIXED": "Délai fixe",
+      "EXPONENTIAL": "Délai exponentiel"
+    },
+    "retryDelay": "Délai avant nouvelle tentative",
+    "seconds": "{count, plural, one {# seconde} other {# secondes}}",
     "advancedJson": "Avancé (JSON brut)",
     "advancedJsonHelp": "Modifiez en JSON brut les champs sans contrôle de formulaire.",
     "extraKeys": "{count, plural, one {# clé supplémentaire} other {# clés supplémentaires}}",

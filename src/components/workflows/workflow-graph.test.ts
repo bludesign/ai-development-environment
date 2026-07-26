@@ -1,9 +1,46 @@
 import { describe, expect, test } from "vitest";
 
-import { workflowFlowElements } from "./workflow-graph";
+import {
+  workflowBasicHorizontalWheelDelta,
+  workflowConstrainViewportAxis,
+  workflowFlowElements,
+} from "./workflow-graph";
 import { emptyDefinition, type WorkflowAttempt } from "./types";
 
 describe("workflow run graph projection", () => {
+  test("leaves vertical wheel gestures to the page in horizontal Basic mode", () => {
+    expect(
+      workflowBasicHorizontalWheelDelta(
+        { deltaMode: 0, deltaX: 2, deltaY: 40, shiftKey: false },
+        800,
+      ),
+    ).toBeNull();
+    expect(
+      workflowBasicHorizontalWheelDelta(
+        { deltaMode: 0, deltaX: 30, deltaY: 2, shiftKey: false },
+        800,
+      ),
+    ).toBe(30);
+    expect(
+      workflowBasicHorizontalWheelDelta(
+        { deltaMode: 0, deltaX: 0, deltaY: 30, shiftKey: true },
+        800,
+      ),
+    ).toBe(30);
+  });
+
+  test("clamps horizontal panning at both padded content edges", () => {
+    expect(
+      workflowConstrainViewportAxis(-1_000, 686, 0.8, [-24, 1_024]),
+    ).toBeCloseTo(-133.2);
+    expect(
+      workflowConstrainViewportAxis(1_000, 686, 0.8, [-24, 1_024]),
+    ).toBeCloseTo(19.2);
+    expect(workflowConstrainViewportAxis(0, 800, 1, [-24, 624])).toBeCloseTo(
+      100,
+    );
+  });
+
   test("shows the latest retry, iteration count, and replay generation", () => {
     const definition = emptyDefinition("Graph");
     definition.nodes.push({
@@ -150,5 +187,16 @@ describe("workflow run graph projection", () => {
         navigationEnabled: true,
       }),
     );
+  });
+
+  test("supports responsive connector overrides and controlled selection", () => {
+    const definition = emptyDefinition("Responsive graph");
+    const result = workflowFlowElements(definition, {
+      handleLayout: "TOP_BOTTOM",
+      selectedNodeId: "manual",
+    });
+
+    expect(result.nodes[0]?.selected).toBe(true);
+    expect(result.nodes[0]?.data.handleLayout).toBe("TOP_BOTTOM");
   });
 });

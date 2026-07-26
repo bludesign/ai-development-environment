@@ -99,6 +99,8 @@ The localized `/en/tools` page discovers and runs these built-in tools. It can a
 
 Data access uses [Prisma 7](https://www.prisma.io/) with the `prisma-client` generator (TypeScript query compiler, no native query-engine binary) and the better-sqlite3 driver adapter. It defaults to a SQLite file at `prisma/dev.db`; set `DATABASE_URL` to another `file:` URL to change its location. Other database URL schemes are rejected. Migrations are versioned in `prisma/migrations/` and applied with `prisma migrate deploy`.
 
+Deleted SQLite pages are reused automatically but do not reduce the database file's size. To return unused pages to the filesystem, stop the application and any database clients, ensure the volume has enough temporary free space to rebuild the database, and run `npm run db:vacuum`. The command uses `DATABASE_URL` when set and otherwise vacuums `prisma/dev.db`.
+
 ## Credential storage
 
 Long-lived Jira, GitHub, cache-server, external MCP, iOS-signing, App Store Connect, and APNs credentials go through a server-only credential service. `/en/credentials` shows the selected backend, protection warnings, and item metadata; it never returns secret values, ciphertext, authentication headers, or secret-derived previews.

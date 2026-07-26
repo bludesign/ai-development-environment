@@ -2008,8 +2008,12 @@ export const workflowDefinitionSchema = z.object({
       // travels with the definition so a published run draws the way its
       // author laid it out.
       handleLayout: z.enum(["SIDES", "TOP_BOTTOM"]).default("SIDES"),
+      // Read-only graphs can either honor the authored coordinates or derive a
+      // compact responsive layout. The editor always keeps authored positions
+      // intact, so switching this never loses a user's canvas work.
+      displayLayout: z.enum(["REGULAR", "BASIC"]).default("REGULAR"),
     })
-    .default({ handleLayout: "SIDES" }),
+    .default({ handleLayout: "SIDES", displayLayout: "REGULAR" }),
 });
 
 export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;

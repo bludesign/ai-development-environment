@@ -355,6 +355,16 @@ async function nextDisplayNumber(
   return sequence.nextValue - 1;
 }
 
+function workflowTriggerDeliveryId(
+  dedupeKey: string,
+  workflowId: string,
+  triggerNodeId: string,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify([dedupeKey, workflowId, triggerNodeId]))
+    .digest("hex");
+}
+
 export class WorkflowsService {
   private runtimeTimer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -2285,13 +2295,29 @@ export class WorkflowsService {
     payload: Record<string, unknown>,
     idempotencyKey: string,
     parentRunId: string | null = null,
+    deliveryId: string | null = null,
   ): Promise<WorkflowRun> {
     const prisma = await getPrismaClient();
     return prisma.$transaction(async (transaction) => {
+      if (deliveryId) {
+        const delivered = await transaction.workflowTriggerDelivery.findUnique({
+          where: { id: deliveryId },
+          include: { run: true },
+        });
+        if (delivered) return delivered.run;
+      }
+      const attachDelivery = async (run: WorkflowRun) => {
+        if (deliveryId) {
+          await transaction.workflowTriggerDelivery.create({
+            data: { id: deliveryId, runId: run.id },
+          });
+        }
+        return run;
+      };
       const existing = await transaction.workflowRun.findUnique({
         where: { idempotencyKey },
       });
-      if (existing) return existing;
+      if (existing) return attachDelivery(existing);
       if (workflow.overlapPolicy === "COALESCE_LATEST") {
         const queued = await transaction.workflowRun.findFirst({
           where: {
@@ -2302,7 +2328,7 @@ export class WorkflowsService {
           orderBy: { queuedAt: "desc" },
         });
         if (queued) {
-          return transaction.workflowRun.update({
+          const updated = await transaction.workflowRun.update({
             where: { id: queued.id },
             data: {
               triggerId: trigger?.id ?? null,
@@ -2312,6 +2338,7 @@ export class WorkflowsService {
               queuedAt: new Date(),
             },
           });
+          return attachDelivery(updated);
         }
       }
       const id = randomUUID();
@@ -2375,7 +2402,7 @@ export class WorkflowsService {
           },
         });
       }
-      return run;
+      return attachDelivery(run);
     });
   }
 
@@ -2386,19 +2413,20 @@ export class WorkflowsService {
       orderBy: { receivedAt: "asc" },
       take: 50,
     });
+    if (!pending.length) return;
+    const workflows = await prisma.workflow.findMany({
+      where: {
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+      },
+      include: {
+        activeVersion: { include: { triggers: true } },
+      },
+    });
     for (const event of pending) {
       try {
         const payload = parseObject(json(event.payloadJson), "Trigger payload");
-        const workflows = await prisma.workflow.findMany({
-          where: {
-            enabled: true,
-            archivedAt: null,
-            activeVersionId: { not: null },
-          },
-          include: {
-            activeVersion: { include: { triggers: true } },
-          },
-        });
         for (const workflow of workflows) {
           if (!workflow.activeVersion) continue;
           const matching = workflow.activeVersion.triggers.filter(
@@ -2406,15 +2434,25 @@ export class WorkflowsService {
           );
           for (const trigger of matching) {
             if (
-              !(await this.triggerMatches(trigger, event.subjectKey, payload))
-            ) {
-              continue;
-            }
-            if (
               payload.workflowCorrelation &&
               typeof payload.workflowCorrelation === "object" &&
               (payload.workflowCorrelation as Record<string, unknown>)
                 .workflowId === workflow.id
+            ) {
+              continue;
+            }
+            const deliveryId = workflowTriggerDeliveryId(
+              event.dedupeKey,
+              workflow.id,
+              trigger.nodeId,
+            );
+            const delivered = await prisma.workflowTriggerDelivery.findUnique({
+              where: { id: deliveryId },
+              select: { id: true },
+            });
+            if (delivered) continue;
+            if (
+              !(await this.triggerMatches(trigger, event.subjectKey, payload))
             ) {
               continue;
             }
@@ -2426,14 +2464,15 @@ export class WorkflowsService {
               event.kind,
               event.subjectKey,
               payload,
-              `${event.id}:${workflow.id}:${trigger.id}`,
+              deliveryId,
+              null,
+              deliveryId,
             );
             publishRunChanged(run.id);
           }
         }
-        await prisma.workflowTriggerEvent.update({
+        await prisma.workflowTriggerEvent.delete({
           where: { id: event.id },
-          data: { status: "PROCESSED", processedAt: new Date(), error: null },
         });
       } catch (error) {
         await prisma.workflowTriggerEvent.update({
@@ -2852,6 +2891,7 @@ export class WorkflowsService {
       await this.recoverExpiredClaims();
       await this.processSchedules();
       await this.processTriggerEvents();
+      await this.events.maintain();
       await this.resolveDueWaits();
       await this.startQueuedRuns();
       const prisma = await getPrismaClient();

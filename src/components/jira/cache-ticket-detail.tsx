@@ -81,7 +81,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
         "mutation DeleteCachedTicket($issueKey: ID!) { deleteJiraCachedTicket(issueKey: $issueKey) }",
         { issueKey },
       );
-      router.replace("/jira/cache");
+      router.replace("/jira-cache");
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
       setBusy(false);
@@ -92,7 +92,7 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div>
         <Button asChild size="sm" variant="ghost">
-          <Link href="/jira/cache">
+          <Link href="/jira-cache">
             <ArrowLeft />
             {t("back")}
           </Link>

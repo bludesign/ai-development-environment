@@ -740,10 +740,10 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/github/cache")}
+                  isActive={pathname.startsWith("/github-cache")}
                 >
                   <Link
-                    href="/github/cache"
+                    href="/github-cache"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}
@@ -797,10 +797,10 @@ function NavigationSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/jira/cache")}
+                  isActive={pathname.startsWith("/jira-cache")}
                 >
                   <Link
-                    href="/jira/cache"
+                    href="/jira-cache"
                     onClick={() => {
                       if (isMobile) setOpenMobile(false);
                     }}

@@ -126,6 +126,17 @@
       "SIDES": "An den Seiten",
       "TOP_BOTTOM": "Oben und unten"
     },
+    "displayLayout": "Ansichtslayout",
+    "displayLayouts": {
+      "REGULAR": "Normal",
+      "BASIC": "Einfach"
+    },
+    "displayLayoutHelp": {
+      "REGULAR": "Schreibgeschützte Ansichten verwenden die auf der Arbeitsfläche festgelegten Positionen.",
+      "BASIC": "Schreibgeschützte Ansichten ordnen Schritte automatisch für die verfügbare Breite an. Die festgelegten Positionen bleiben unverändert."
+    },
+    "previewBasicLayout": "Einfaches Layout anzeigen",
+    "exitBasicPreview": "Vorschau beenden",
     "validate": "Validieren",
     "steps": "Schritte",
     "outline": "Gliederung",
@@ -149,6 +160,16 @@
     "deleteNode": "Knoten löschen",
     "deleteConnection": "Verbindung löschen",
     "configuration": "Konfiguration",
+    "notSet": "Nicht festgelegt",
+    "noConfiguration": "Keine Konfiguration",
+    "noRequiredPaths": "Dieser Schritt benötigt keine Sitzungspfade.",
+    "retryStrategy": "Wiederholungsstrategie",
+    "retryStrategies": {
+      "FIXED": "Feste Verzögerung",
+      "EXPONENTIAL": "Exponentielle Verzögerung"
+    },
+    "retryDelay": "Wiederholungsverzögerung",
+    "seconds": "{count, plural, one {# Sekunde} other {# Sekunden}}",
     "advancedJson": "Erweitert (Roh-JSON)",
     "advancedJsonHelp": "Felder ohne Formularsteuerung als Roh-JSON bearbeiten.",
     "extraKeys": "{count, plural, one {# zusätzlicher Schlüssel} other {# zusätzliche Schlüssel}}",

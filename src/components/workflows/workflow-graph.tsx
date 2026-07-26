@@ -8,6 +8,8 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  useReactFlow,
+  useStore,
   useStoreApi,
   type Dimensions,
   type Edge,
@@ -21,8 +23,11 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
+  type RefObject,
 } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +59,10 @@ import type {
   WorkflowDiagnostic,
   WorkflowHandleLayout,
 } from "./types";
+import {
+  basicLayoutTranslateExtent,
+  basicWorkflowLayout,
+} from "./basic-layout";
 
 /** One source connector on a card, in the order it is laid out along the edge. */
 type WorkflowSourceHandle = { id: string; label: string };
@@ -326,6 +335,127 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
 
 export const workflowNodeTypes = { workflow: WorkflowCard };
 
+export function workflowConstrainViewportAxis(
+  position: number,
+  viewportSize: number,
+  zoom: number,
+  extent: [number, number],
+): number {
+  const lower = viewportSize - extent[1] * zoom;
+  const upper = -extent[0] * zoom;
+  if (lower > upper) return (lower + upper) / 2;
+  return Math.min(upper, Math.max(lower, position));
+}
+
+export function workflowBasicHorizontalWheelDelta(
+  event: Pick<WheelEvent, "deltaMode" | "deltaX" | "deltaY" | "shiftKey">,
+  pageWidth: number,
+): number | null {
+  const horizontalIntent =
+    event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
+  if (!horizontalIntent) return null;
+  const rawDelta =
+    event.shiftKey && Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+  const normalization =
+    event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? pageWidth : 1;
+  return rawDelta * normalization;
+}
+
+function WorkflowBasicHorizontalWheel({
+  containerRef,
+  enabled,
+  extent,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>;
+  enabled: boolean;
+  extent: [[number, number], [number, number]] | undefined;
+}) {
+  const { getViewport, setViewport } = useReactFlow<WorkflowFlowNode, Edge>();
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !enabled) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = workflowBasicHorizontalWheelDelta(
+        event,
+        container.clientWidth,
+      );
+      // A normal vertical wheel gesture belongs to the page. Only a native
+      // horizontal gesture (or Shift+wheel) is captured for the graph.
+      if (delta === null || delta === 0) return;
+      event.preventDefault();
+      const viewport = getViewport();
+      const nextX = extent
+        ? workflowConstrainViewportAxis(
+            viewport.x - delta * 0.5,
+            container.clientWidth,
+            viewport.zoom,
+            [extent[0][0], extent[1][0]],
+          )
+        : viewport.x - delta * 0.5;
+      void setViewport({ ...viewport, x: nextX });
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [containerRef, enabled, extent, getViewport, setViewport]);
+  return null;
+}
+
+/**
+ * Fits a derived layout without centering clipped overflow. Wide workflows
+ * start at their first rank and pan to the right; narrow workflows start at
+ * the top and let the page carry the vertical overflow.
+ */
+function WorkflowBasicViewport({
+  direction,
+  signature,
+}: {
+  direction: "HORIZONTAL" | "VERTICAL";
+  signature: string;
+}) {
+  const { getNodes, getNodesBounds, setViewport } = useReactFlow<
+    WorkflowFlowNode,
+    Edge
+  >();
+  const width = useStore((state) => state.width);
+  const height = useStore((state) => state.height);
+  const initialized = useStore((state) => state.nodesInitialized);
+  useEffect(() => {
+    if (!initialized || !width || !height) return;
+    const bounds = getNodesBounds(getNodes());
+    if (!bounds.width || !bounds.height) return;
+    const padding = 24;
+    const fit = Math.min(
+      1,
+      Math.max(0, width - padding * 2) / bounds.width,
+      direction === "HORIZONTAL"
+        ? Math.max(0, height - padding * 2) / bounds.height
+        : 1,
+    );
+    const zoom = Math.max(0.8, fit);
+    const x =
+      direction === "HORIZONTAL"
+        ? padding - bounds.x * zoom
+        : (width - bounds.width * zoom) / 2 - bounds.x * zoom;
+    const y =
+      direction === "HORIZONTAL"
+        ? (height - bounds.height * zoom) / 2 - bounds.y * zoom
+        : padding - bounds.y * zoom;
+    void setViewport({ x, y, zoom });
+  }, [
+    direction,
+    getNodes,
+    getNodesBounds,
+    height,
+    initialized,
+    setViewport,
+    signature,
+    width,
+  ]);
+  return null;
+}
+
 function latestAttempts(attempts: WorkflowAttempt[], generation?: number) {
   const latest = new Map<string, WorkflowAttempt>();
   for (const attempt of attempts) {
@@ -348,6 +478,8 @@ export function workflowFlowElements(
     currentPageNodeIds?: ReadonlySet<string>;
     destinations?: ReadonlyMap<string, WorkflowResourceDestination>;
     navigationEnabled?: boolean;
+    handleLayout?: WorkflowHandleLayout;
+    selectedNodeId?: string | null;
   } = {},
 ): { nodes: WorkflowFlowNode[]; edges: Edge[] } {
   const attempts = latestAttempts(options.attempts ?? [], options.generation);
@@ -358,10 +490,12 @@ export function workflowFlowElements(
     iterations.set(attempt.nodeId, values);
   }
   const diagnostics = options.diagnostics ?? [];
-  const handleLayout = definition.editor.handleLayout ?? "SIDES";
+  const handleLayout =
+    options.handleLayout ?? definition.editor.handleLayout ?? "SIDES";
   const nodes: WorkflowFlowNode[] = [
     ...definition.triggers.map((trigger) => ({
       id: trigger.id,
+      selected: trigger.id === options.selectedNodeId,
       type: "workflow" as const,
       position: trigger.position,
       data: {
@@ -402,6 +536,7 @@ export function workflowFlowElements(
       ].filter(Boolean);
       return {
         id: node.id,
+        selected: node.id === options.selectedNodeId,
         type: "workflow" as const,
         position: node.position,
         data: {
@@ -454,6 +589,7 @@ export function WorkflowGraph({
   currentPageNodeIds,
   destinations,
   onNodeClick,
+  selectedNodeId,
 }: {
   definition: WorkflowDefinition;
   attempts?: WorkflowAttempt[];
@@ -463,6 +599,7 @@ export function WorkflowGraph({
   compact?: boolean;
   currentPageNodeIds?: ReadonlySet<string>;
   destinations?: ReadonlyMap<string, WorkflowResourceDestination>;
+  selectedNodeId?: string | null;
   onNodeClick?: (
     nodeId: string,
     details: {
@@ -475,6 +612,23 @@ export function WorkflowGraph({
   // Locked graphs use their nodes as detail links. Once unlocked, node clicks
   // are handed back to the page for interactions such as replay selection.
   const [locked, setLocked] = useState(true);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element) return;
+    const measure = () => setPaneWidth(element.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const basic = (definition.editor.displayLayout ?? "REGULAR") === "BASIC";
+  const basicDirection =
+    paneWidth > 0 && paneWidth < 640 ? "VERTICAL" : "HORIZONTAL";
+  const projectedHandleLayout: WorkflowHandleLayout =
+    basic && basicDirection === "VERTICAL" ? "TOP_BOTTOM" : "SIDES";
   const elements = useMemo(
     () =>
       workflowFlowElements(definition, {
@@ -485,6 +639,8 @@ export function WorkflowGraph({
         currentPageNodeIds,
         destinations,
         navigationEnabled: locked,
+        handleLayout: basic ? projectedHandleLayout : undefined,
+        selectedNodeId,
       }),
     [
       attempts,
@@ -495,6 +651,9 @@ export function WorkflowGraph({
       diagnostics,
       generation,
       locked,
+      basic,
+      projectedHandleLayout,
+      selectedNodeId,
     ],
   );
   // React Flow measures each card in the DOM and reports the size back through
@@ -528,42 +687,105 @@ export function WorkflowGraph({
     },
     [],
   );
+  const basicLayout = useMemo(
+    () =>
+      basic
+        ? basicWorkflowLayout(
+            elements.nodes.map((node) => ({
+              id: node.id,
+              position: node.position,
+              width: sizes[node.id]?.width,
+              height: sizes[node.id]?.height,
+            })),
+            elements.edges,
+            basicDirection,
+          )
+        : null,
+    [basic, basicDirection, elements, sizes],
+  );
   const nodes = useMemo(
     () =>
       elements.nodes.map((node) => {
         const measured = sizes[node.id];
-        return measured ? { ...node, measured } : node;
+        const position = basicLayout?.positions.get(node.id);
+        return {
+          ...node,
+          ...(measured ? { measured } : {}),
+          ...(position ? { position } : {}),
+        };
       }),
-    [elements, sizes],
+    [basicLayout, elements.nodes, sizes],
+  );
+  const edges = useMemo(
+    () =>
+      basic
+        ? elements.edges.map((edge) => ({ ...edge, type: "smoothstep" }))
+        : elements.edges,
+    [basic, elements.edges],
+  );
+  const basicScale = basicLayout
+    ? Math.max(
+        0.8,
+        Math.min(
+          1,
+          (Math.max(0, paneWidth - 48) || basicLayout.bounds.width) /
+            Math.max(1, basicLayout.bounds.width),
+        ),
+      )
+    : 1;
+  const basicVerticalHeight = basicLayout
+    ? Math.ceil(basicLayout.bounds.height * basicScale + 48)
+    : 0;
+  const fitViewOptions = useMemo(
+    () => (basic ? { padding: 0.08, minZoom: 0.8, maxZoom: 1 } : undefined),
+    [basic],
+  );
+  const basicTranslateExtent = useMemo(
+    () =>
+      basicLayout ? basicLayoutTranslateExtent(basicLayout.bounds) : undefined,
+    [basicLayout],
   );
   // A read-only graph is there to be read, so it starts pinned to the pane:
   // no stray scroll wheel zooming it into a corner, nothing to fit back. The
   // control stack keeps one button to hand panning and zooming back.
   const signature = useMemo(
     () =>
-      `${elements.nodes.map(({ id }) => id).join()}|${elements.edges
+      `${nodes
+        .map(
+          ({ id, measured }) =>
+            `${id}:${measured?.width ?? 0}x${measured?.height ?? 0}`,
+        )
+        .join()}|${edges
         .map(({ id }) => id)
-        .join()}|${definition.editor.handleLayout ?? "SIDES"}`,
-    [definition, elements],
+        .join()}|${projectedHandleLayout}|${basicDirection}`,
+    [basicDirection, edges, nodes, projectedHandleLayout],
   );
   return (
     <div
       className={cn(
         "overflow-hidden rounded-xl border bg-muted/20",
         compact ? "h-72" : "h-[min(68vh,760px)] min-h-96",
+        basic && basicDirection === "VERTICAL" && "h-auto min-h-0",
       )}
+      ref={wrapperRef}
+      style={
+        basic && basicDirection === "VERTICAL"
+          ? { height: Math.max(compact ? 288 : 384, basicVerticalHeight) }
+          : undefined
+      }
     >
       <ReactFlow
         className={cn(locked && workflowFitLockPaneClass)}
         colorMode="system"
-        edges={elements.edges}
+        edges={edges}
         // Steps here are read, not picked: a click opens whatever the page
         // hangs off `onNodeClick`, which fires either way, and nothing acts on
         // a selection, so a card should not wear a selected ring.
         elementsSelectable={false}
         fitView
+        fitViewOptions={fitViewOptions}
         maxZoom={1.5}
-        minZoom={0.2}
+        minZoom={basic ? 0.8 : 0.2}
         nodeTypes={workflowNodeTypes}
         nodes={nodes}
         nodesConnectable={false}
@@ -576,13 +798,14 @@ export function WorkflowGraph({
           })
         }
         onNodesChange={onNodesChange}
-        panOnDrag={!locked}
+        panOnDrag={!locked || (basic && basicDirection === "HORIZONTAL")}
         panOnScroll={false}
-        preventScrolling={!locked}
+        preventScrolling={!locked && !basic}
         proOptions={{ hideAttribution: true }}
+        translateExtent={basicTranslateExtent}
         zoomOnDoubleClick={!locked}
         zoomOnPinch={!locked}
-        zoomOnScroll={!locked}
+        zoomOnScroll={!locked && !basic}
       >
         <Background gap={20} size={1} />
         <Controls
@@ -596,7 +819,21 @@ export function WorkflowGraph({
             onToggle={() => setLocked((current) => !current)}
           />
         </Controls>
-        <WorkflowFitLock locked={locked} signature={signature} />
+        {basic ? (
+          <>
+            <WorkflowBasicHorizontalWheel
+              containerRef={wrapperRef}
+              enabled={basicDirection === "HORIZONTAL"}
+              extent={basicTranslateExtent}
+            />
+            <WorkflowBasicViewport
+              direction={basicDirection}
+              signature={signature}
+            />
+          </>
+        ) : (
+          <WorkflowFitLock locked={locked} signature={signature} />
+        )}
         {!compact && !locked && (
           <MiniMap
             className="overflow-hidden rounded-xl border"

@@ -974,7 +974,7 @@ export function GitHubCachePage() {
                             <div className="flex justify-end gap-1">
                               <Button asChild size="icon-sm" variant="ghost">
                                 <Link
-                                  href={`/github/cache/entries/${entry.id}`}
+                                  href={`/github-cache/entries/${entry.id}`}
                                 >
                                   <ExternalLink />
                                   <span className="sr-only">{t("open")}</span>

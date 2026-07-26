@@ -427,7 +427,7 @@ export function JiraCachePage() {
                             <div className="flex justify-end gap-1">
                               <Button asChild size="icon-sm" variant="ghost">
                                 <Link
-                                  href={`/jira/cache/tickets/${ticket.issueKey}`}
+                                  href={`/jira-cache/tickets/${ticket.issueKey}`}
                                 >
                                   <ExternalLink />
                                   <span className="sr-only">{t("open")}</span>

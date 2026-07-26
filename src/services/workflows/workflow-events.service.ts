@@ -4,9 +4,10 @@ import { randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/data/prisma-client";
-import { agentEventBus } from "@/services/agent-control";
 
-export const WORKFLOW_TRIGGER_EVENTS_TOPIC = "workflow:trigger-events";
+const FAILED_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1_000;
+const MAINTENANCE_BATCH_SIZE = 1_000;
 
 export type RecordWorkflowEventInput = {
   kind: string;
@@ -16,14 +17,26 @@ export type RecordWorkflowEventInput = {
 };
 
 export class WorkflowEventsService {
+  private nextMaintenanceAt = 0;
+
   async record(input: RecordWorkflowEventInput) {
     const prisma = await getPrismaClient();
-    const event = await this.recordInTransaction(prisma, input);
-    this.created(event.id);
-    return event;
+    const observed = await prisma.workflowTrigger.findFirst({
+      where: {
+        kind: input.kind,
+        version: {
+          activeFor: {
+            is: { enabled: true, archivedAt: null },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    if (!observed) return null;
+    return this.recordInTransaction(prisma, input);
   }
 
-  async recordInTransaction(
+  private async recordInTransaction(
     transaction: Prisma.TransactionClient,
     input: RecordWorkflowEventInput,
   ) {
@@ -42,15 +55,31 @@ export class WorkflowEventsService {
     });
   }
 
-  created(id: string): void {
-    agentEventBus.publish(WORKFLOW_TRIGGER_EVENTS_TOPIC, {
-      workflowTriggerEventCreated: { id },
-    });
-  }
+  async maintain(): Promise<void> {
+    const now = Date.now();
+    if (now < this.nextMaintenanceAt) return;
 
-  subscribe() {
-    return agentEventBus.iterate<{
-      workflowTriggerEventCreated: { id: string };
-    }>(WORKFLOW_TRIGGER_EVENTS_TOPIC);
+    const prisma = await getPrismaClient();
+    // Legacy PROCESSED rows are durable producer-key receipts. Deleting them
+    // without equivalent delivery rows would let a provider retry create a run.
+    const expired = await prisma.workflowTriggerEvent.findMany({
+      where: {
+        status: "FAILED",
+        receivedAt: { lt: new Date(now - FAILED_EVENT_RETENTION_MS) },
+      },
+      select: { id: true },
+      orderBy: { receivedAt: "asc" },
+      take: MAINTENANCE_BATCH_SIZE,
+    });
+    if (expired.length) {
+      await prisma.workflowTriggerEvent.deleteMany({
+        where: { id: { in: expired.map(({ id }) => id) } },
+      });
+      // Keep draining a legacy backlog on subsequent runtime ticks.
+      this.nextMaintenanceAt = 0;
+      return;
+    }
+
+    this.nextMaintenanceAt = now + MAINTENANCE_INTERVAL_MS;
   }
 }
