@@ -230,13 +230,14 @@ export function SidebarStatusFooter() {
                             ),
                           )
                         : 0;
+                    const unfilledPercent = 100 - usedPercent;
                     return (
                       <span
                         aria-label={`${agent.agent.name} · ${t("role.DERIVED_DATA")}: ${formatDiskBytes(volume.freeBytes, locale)} ${t("free")}`}
                         className="grid size-5 place-items-center rounded-full"
                         key={agent.agent.id}
                         style={{
-                          background: `conic-gradient(${ringColor(agent.status)} ${usedPercent}%, var(--muted) ${usedPercent}% 100%)`,
+                          background: `conic-gradient(var(--muted) 0% ${unfilledPercent}%, ${ringColor(agent.status)} ${unfilledPercent}% 100%)`,
                         }}
                         title={`${agent.agent.name} · ${t("role.DERIVED_DATA")}`}
                       >

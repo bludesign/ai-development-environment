@@ -181,6 +181,7 @@ describe("SidebarStatusFooter", () => {
     const circle = await screen.findByLabelText(
       "Builder · Derived Data: 100 GiB free",
     );
-    expect(circle.style.background).toContain("80%");
+    expect(circle.style.background).toContain("var(--muted) 0% 20%");
+    expect(circle.style.background).toContain("#f59e0b 20% 100%");
   });
 });
