@@ -89,17 +89,34 @@ const RESOURCE_KIND_SEED_PATHS: Record<WorkflowResourceKind, string[]> = {
   CODEBASE: ["codebase.*"],
   JIRA_TICKET: ["ticket.*"],
   AGENT_RUN: ["run.*"],
-  GITHUB_PIPELINE: ["pipeline.*", "repo.*", "pr.*", "worktree.*", "ticket.*"],
+  GITHUB_PIPELINE: [
+    "pipeline.*",
+    "repo.*",
+    "pr.*",
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+    "ticket.*",
+  ],
   GITHUB_JOB: [
     "job.*",
     "pipeline.*",
     "repo.*",
     "pr.*",
     "worktree.*",
+    "codebase.*",
+    "agent.*",
     "ticket.*",
   ],
   PULL_REQUEST: ["pr.*", "repo.*"],
-  WORKTREE: ["worktree.*", "repo.*", "pr.*", "ticket.*"],
+  WORKTREE: [
+    "worktree.*",
+    "codebase.*",
+    "agent.*",
+    "repo.*",
+    "pr.*",
+    "ticket.*",
+  ],
 };
 
 /** The resource kind a resource trigger config targets, if valid. */
@@ -1081,7 +1098,30 @@ const RUN_SEED_PATHS = [
   "run.*",
   "worktree.*",
   "codebase.*",
+  "agent.*",
   "repo.*",
+  "pr.*",
+  "ticket.*",
+];
+
+/** Context shared by build events when the build belongs to a worktree. */
+const BUILD_SEED_PATHS = [
+  "build.*",
+  "worktree.*",
+  "codebase.*",
+  "agent.*",
+  "repo.*",
+  "pr.*",
+  "ticket.*",
+];
+
+/** Context shared by every event emitted for a worktree. */
+const WORKTREE_SEED_PATHS = [
+  "worktree.*",
+  "codebase.*",
+  "agent.*",
+  "repo.*",
+  "pr.*",
   "ticket.*",
 ];
 
@@ -1131,7 +1171,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       description:
         "Fires when someone starts the workflow from a specific resource page — a worktree, pull request, build, codebase, ticket, or run.",
       details:
-        "Must target exactly one resource kind; add a second trigger to accept another. The page seeds that resource's namespace into session data, so a worktree-launched run gets `worktree.*` (and `ticket.*` when the branch maps to one). Those seeds are an optimistic contract — an optional link that is absent resolves to nothing at run time. This is also what makes the workflow show up on that resource's page.",
+        "Must target exactly one resource kind; add a second trigger to accept another. The page seeds that resource's namespace into session data, so a worktree-launched run gets its worktree, codebase, owning agent, repository, and any linked pull request or ticket. Those seeds are an optimistic contract — an optional link that is absent resolves to nothing at run time. This is also what makes the workflow show up on that resource's page.",
     }),
     trigger(
       "RESOURCE_MANUAL_CHOICE",
@@ -1165,7 +1205,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PR_STATE",
       "GitHub",
       "Pull request opened or ready",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description:
           "Fires when a pull request is opened, or when a draft is marked ready for review.",
@@ -1176,7 +1216,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_REVIEW_CHANGES_REQUESTED",
       "GitHub",
       "Changes requested",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description:
           "Fires when a reviewer submits a review requesting changes.",
@@ -1187,7 +1227,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_REVIEW_COMMENT",
       "GitHub",
       "Review comment created",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description:
           "Fires when a new review comment is posted on a pull request.",
@@ -1198,7 +1238,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_PR_CLOSED",
       "GitHub",
       "Pull request merged or closed",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description:
           "Fires when a pull request is merged or closed without merging.",
@@ -1209,7 +1249,15 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_CHECK_FAILED",
       "GitHub",
       "Check suite or run failed",
-      ["repo.*", "pipeline.*"],
+      [
+        "repo.*",
+        "pipeline.*",
+        "worktree.*",
+        "codebase.*",
+        "agent.*",
+        "pr.*",
+        "ticket.*",
+      ],
       {
         description: "Fires when a check suite or check run reports a failure.",
         details: `Seeds \`pipeline.*\`, including the ids the retry and cancel steps need. Flaky suites fire this often, so gate an automatic retry on a count or a delay rather than retrying unconditionally. ${FILTERS_NOTE}`,
@@ -1230,7 +1278,15 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_WORKFLOW_SUCCEEDED",
       "GitHub",
       "Workflow run succeeded",
-      ["repo.*", "pipeline.*"],
+      [
+        "repo.*",
+        "pipeline.*",
+        "worktree.*",
+        "codebase.*",
+        "agent.*",
+        "pr.*",
+        "ticket.*",
+      ],
       {
         description:
           "Fires when a GitHub Actions workflow run completes successfully.",
@@ -1241,7 +1297,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_ISSUE_COMMAND",
       "GitHub",
       "Issue comment command",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description:
           "Fires when a comment from an allow-listed GitHub user matches a command pattern, such as `/deploy`.",
@@ -1252,38 +1308,40 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "GITHUB_ACTIONS_RESULT",
       "GitHub Actions",
       "Workflow result",
-      ["repo.*", "pipeline.*", "pr.*", "ticket.*"],
+      [
+        "repo.*",
+        "pipeline.*",
+        "worktree.*",
+        "codebase.*",
+        "agent.*",
+        "pr.*",
+        "ticket.*",
+      ],
       {
         description:
           "Fires when a tracked GitHub Actions run finishes, whatever its conclusion.",
-        details: `The richest of the Actions triggers: it correlates the run back to its pull request and ticket, so \`pr.*\` and \`ticket.*\` are seeded alongside \`pipeline.*\`. Branch on the conclusion rather than adding separate success and failure triggers. ${FILTERS_NOTE}`,
+        details: `The richest of the Actions triggers: it correlates the run back to its worktree, owning agent, pull request, and ticket when those links exist. Branch on the conclusion rather than adding separate success and failure triggers. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
       "GITHUB_PR_LABEL",
       "GitHub",
       "Pull request label set",
-      ["repo.*", "pr.*"],
+      ["repo.*", "pr.*", "ticket.*"],
       {
         description: "Fires when a label is applied to a pull request.",
         details: `Turns a label into a manual switch — label a pull request \`automerge\` and let a workflow take it from there. Filter on the label name, or every label change in the repository starts the workflow. ${FILTERS_NOTE}`,
       },
     ),
-    trigger(
-      "BUILD_RESULT",
-      "Builds",
-      "Build result",
-      ["repo.*", "worktree.*", "build.*"],
-      {
-        description: "Fires when a build finishes, succeeded or failed.",
-        details: `Seeds \`build.*\` along with the worktree it ran in, so the read-results and coverage steps can follow directly. Branch on \`build.status\` to separate the outcomes. ${FILTERS_NOTE}`,
-      },
-    ),
+    trigger("BUILD_RESULT", "Builds", "Build result", BUILD_SEED_PATHS, {
+      description: "Fires when a build finishes, succeeded or failed.",
+      details: `Seeds \`build.*\` along with the worktree it ran in, so the read-results and coverage steps can follow directly. Branch on \`build.status\` to separate the outcomes. ${FILTERS_NOTE}`,
+    }),
     trigger(
       "BUILD_TEST_THRESHOLD",
       "Builds",
       "Test failure threshold",
-      ["build.*"],
+      BUILD_SEED_PATHS,
       {
         description:
           "Fires when a build's failing-test count crosses a threshold you set.",
@@ -1294,69 +1352,90 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "BUILD_COVERAGE_THRESHOLD",
       "Builds",
       "Coverage threshold",
-      ["build.*"],
+      BUILD_SEED_PATHS,
       {
         description:
           "Fires when a build's code coverage crosses a threshold you set.",
         details: `Point the threshold path at the coverage summary — usually the changed-files percentage rather than the whole-project number — and compare with a less-than operator. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
       },
     ),
-    trigger("BUILD_HOOK_FAILED", "Builds", "Build hook failed", ["build.*"], {
-      description:
-        "Fires when one of a build's pre- or post-build scripts fails.",
-      details: `Distinguishes a broken build script from a genuine compile or test failure, which is what Build result reports. Seeds \`build.*\`. ${FILTERS_NOTE}`,
-    }),
+    trigger(
+      "BUILD_HOOK_FAILED",
+      "Builds",
+      "Build hook failed",
+      BUILD_SEED_PATHS,
+      {
+        description:
+          "Fires when one of a build's pre- or post-build scripts fails.",
+        details: `Distinguishes a broken build script from a genuine compile or test failure, which is what Build result reports. Seeds \`build.*\`. ${FILTERS_NOTE}`,
+      },
+    ),
     trigger(
       "AGENT_CONNECTION",
       "Agents",
       "Agent connection changed",
-      ["codebase.agentId"],
+      ["agent.*", "codebase.agentId"],
       {
         description: "Fires when an agent comes online or goes offline.",
-        details: `Seeds only the agent id, so a workflow hanging off it is usually about notifying a human rather than doing repository work — an offline agent cannot run agent steps anyway. Filter on the connection status to react to one direction only. ${FILTERS_NOTE}`,
+        details: `Seeds the agent id, name, connection state, and capacity metrics. A workflow hanging off it is usually about notifying a human rather than doing repository work — an offline agent cannot run agent steps anyway. Filter on the connection status to react to one direction only. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
       "AGENT_JOB_FAILED",
       "Agents",
       "Agent job failed",
-      ["steps.trigger.*"],
+      [
+        "steps.trigger.*",
+        "agent.*",
+        "codebase.*",
+        "worktree.*",
+        "repo.*",
+        "pr.*",
+        "ticket.*",
+      ],
       {
         description:
           "Fires when a job dispatched to an agent fails — a build, a Git operation, a terminal script.",
-        details: `The failing job is seeded under \`steps.trigger.*\`, including its kind and error. Catches infrastructure failures that a workflow's own failure handles never see, because the job belonged to a different run. ${FILTERS_NOTE}`,
+        details: `The failing job is seeded under \`steps.trigger.*\`, including its kind and error. When it targeted a worktree, the owning agent, codebase, repository, pull request, and ticket are included too. Catches infrastructure failures that a workflow's own failure handles never see, because the job belonged to a different run. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
       "AGENT_DISK_THRESHOLD",
       "Agents",
       "Agent disk threshold",
-      ["codebase.agentId"],
+      ["agent.*", "codebase.agentId"],
       {
         description:
           "Fires when an agent's free disk space crosses a threshold you set.",
         details: `Worktrees, derived data, and build artifacts fill disks quietly; this is the early warning. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
       },
     ),
-    trigger("CCUSAGE_THRESHOLD", "Agents", "Usage threshold", ["run.usage.*"], {
-      description: "Fires when aggregate AI usage crosses a threshold you set.",
-      details: `Watches usage across runs rather than one run's spend — Run usage threshold does that. The cost guardrail: notify, or pause workflows that start AI runs. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
-    }),
+    trigger(
+      "CCUSAGE_THRESHOLD",
+      "Agents",
+      "Usage threshold",
+      ["run.usage.*", "agent.*"],
+      {
+        description:
+          "Fires when aggregate AI usage crosses a threshold you set.",
+        details: `Watches usage across runs rather than one run's spend — Run usage threshold does that. The cost guardrail: notify, or pause workflows that start AI runs. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+      },
+    ),
     trigger(
       "WORKTREE_CREATED",
       "Worktrees",
       "Worktree created",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description: "Fires after a new worktree is successfully created.",
-        details: `Fires once after the created worktree is projected into the control plane. Seeds \`worktree.*\` and \`repo.*\`, including the repository name and normalized origin URL. ${FILTERS_NOTE}`,
+        details: `Fires once after the created worktree is projected into the control plane. Seeds the worktree, repository, codebase, and owning agent, plus a linked pull request and Jira ticket when the branch resolves to them. ${FILTERS_NOTE}`,
       },
     ),
     trigger(
       "WORKTREE_BEHIND",
       "Worktrees",
       "Worktree behind base",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description:
           "Fires when a worktree's branch falls behind the branch it was cut from.",
@@ -1367,7 +1446,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_CONFLICT",
       "Worktrees",
       "Worktree has conflicts",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description:
           "Fires when a worktree is left with Git conflicts after a merge or rebase.",
@@ -1378,7 +1457,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_MISSING",
       "Worktrees",
       "Worktree missing",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description:
           "Fires when a worktree the control plane knows about is no longer on disk.",
@@ -1389,7 +1468,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_DIVERGED",
       "Worktrees",
       "Worktree diverged",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description:
           "Fires when a worktree's branch and its remote have both moved on independently.",
@@ -1400,7 +1479,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_DIRTY_DURATION",
       "Worktrees",
       "Worktree dirty too long",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description:
           "Fires when a worktree has had uncommitted changes for longer than expected.",
@@ -1411,7 +1490,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "WORKTREE_NEW_COMMIT",
       "Worktrees",
       "New worktree commit",
-      ["worktree.*", "repo.*"],
+      WORKTREE_SEED_PATHS,
       {
         description: "Fires when a new commit lands in a worktree.",
         details: `Fires per commit, so a rebase or a batch of commits fires it repeatedly — keep the reaction cheap, or filter to one branch. Useful for kicking off a build or lint pass as work lands. ${FILTERS_NOTE}`,
@@ -1421,7 +1500,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       "CODEBASE_REMOTE_BRANCH",
       "Codebases",
       "Matching remote branch",
-      ["codebase.*"],
+      ["codebase.*", "repo.*"],
       {
         description:
           "Fires when a remote branch matching the codebase's conventions appears.",

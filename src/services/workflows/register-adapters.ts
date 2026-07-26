@@ -33,6 +33,10 @@ import type { WorktreesService } from "@/services/worktrees";
 import type { RunConfigurationInput } from "@/services/runs";
 import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue } from "@/lib/workflows/session";
+import {
+  waitResumeAfter,
+  waitTimeoutAt,
+} from "@/lib/workflows/wait-timing";
 import type {
   WorkflowExecutionContext,
   WorkflowExecutionResult,
@@ -116,12 +120,14 @@ const runResult = (
       ? {
           kind: "AGENT_RUN",
           externalKey: run.id,
-          resumeAfter: new Date(Date.now() + 1_000),
+          resumeAfter: waitResumeAfter(context.node.config),
+          timeoutAt: waitTimeoutAt(context.node.config),
         }
       : undefined,
 });
 
 const jobResult = (
+  context: WorkflowExecutionContext,
   job: { id: string; timeoutSeconds?: number | null },
   sessionPatch?: Record<string, unknown>,
   resourceLinks: WorkflowResourceLinkInput[] = [],
@@ -140,10 +146,9 @@ const jobResult = (
   wait: {
     kind: "AGENT_JOB",
     externalKey: job.id,
-    resumeAfter: new Date(Date.now() + 1_000),
-    timeoutAt: new Date(
-      Date.now() + Math.max(10, job.timeoutSeconds ?? 3_600) * 1_000,
-    ),
+    resumeAfter: waitResumeAfter(context.node.config),
+    // The agent job carries its own budget; a configured timeout overrides it.
+    timeoutAt: waitTimeoutAt(context.node.config, job.timeoutSeconds ?? 3_600),
   },
 });
 
@@ -937,11 +942,8 @@ function registerGitHubAdapters(
       wait: {
         kind: "GITHUB_CHECKS",
         externalKey: JSON.stringify({ repositoryId, workflowRunId }),
-        resumeAfter: new Date(Date.now() + 1_000),
-        timeoutAt:
-          typeof context.node.config.timeoutSeconds === "number"
-            ? new Date(Date.now() + context.node.config.timeoutSeconds * 1_000)
-            : null,
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });
@@ -1020,7 +1022,7 @@ function registerWorktreeAdapters(
       selection,
       requestId: requestId(context, "create"),
     });
-    return jobResult(job, {
+    return jobResult(context, job, {
       worktree: {
         branch: selection.branchName,
         baseBranch: selection.baseBranch,
@@ -1037,6 +1039,7 @@ function registerWorktreeAdapters(
       stashOnFailure: context.node.config.stashOnFailure === true,
     });
     return jobResult(
+      context,
       job,
       {
         worktree: {
@@ -1063,7 +1066,7 @@ function registerWorktreeAdapters(
       operation as WorktreeOperation,
       requestId(context, operation.toLowerCase()),
     );
-    return jobResult(job, undefined, [worktreeLink(id)]);
+    return jobResult(context, job, undefined, [worktreeLink(id)]);
   });
   executor.register("WORKTREE_DELETE", async (context) => {
     const job = await services.worktrees.deleteWorktree({
@@ -1071,7 +1074,7 @@ function registerWorktreeAdapters(
       deleteRemoteBranch: context.node.config.deleteRemoteBranch === true,
       requestId: requestId(context, "delete"),
     });
-    return jobResult(job);
+    return jobResult(context, job);
   });
   executor.register("WORKTREE_MOVE", async (context) => {
     const move = await services.worktrees.moveWorktree({
@@ -1101,7 +1104,8 @@ function registerWorktreeAdapters(
       wait: {
         kind: "WORKTREE_MOVE",
         externalKey: move.id,
-        resumeAfter: new Date(Date.now() + 1_000),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });
@@ -1151,7 +1155,7 @@ function registerWorktreeAdapters(
       stashChanges: context.node.config.stashChanges === true,
       requestId: requestId(context, operation.toLowerCase()),
     });
-    return jobResult(job, undefined, [worktreeLink(id)]);
+    return jobResult(context, job, undefined, [worktreeLink(id)]);
   });
   executor.register("WORKTREE_WAIT_PUSH_READY", async (context) => {
     const id = worktreeId(context);
@@ -1160,11 +1164,8 @@ function registerWorktreeAdapters(
       wait: {
         kind: "WORKTREE_PUSH_READY",
         externalKey: id,
-        resumeAfter: new Date(Date.now() + 1_000),
-        timeoutAt:
-          typeof context.node.config.timeoutSeconds === "number"
-            ? new Date(Date.now() + context.node.config.timeoutSeconds * 1_000)
-            : null,
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });
@@ -1191,7 +1192,7 @@ function registerCodebaseAdapters(
         result.skipped[0]?.reason ?? "Codebase operation was skipped",
       );
     }
-    return jobResult(job, undefined, [codebaseLink(id)]);
+    return jobResult(context, job, undefined, [codebaseLink(id)]);
   });
   executor.register("CODEBASE_INSPECT_GIT", async (context) => {
     const id = codebaseId(context);
@@ -1221,7 +1222,7 @@ function registerCodebaseAdapters(
       stashChanges: context.node.config.stashChanges === true,
       requestId: requestId(context, operation.toLowerCase()),
     });
-    return jobResult(job, undefined, [codebaseLink(id)]);
+    return jobResult(context, job, undefined, [codebaseLink(id)]);
   });
 }
 
@@ -1273,7 +1274,8 @@ function registerBuildAdapters(
       wait: {
         kind: "BUILD",
         externalKey: build.id,
-        resumeAfter: new Date(Date.now() + 1_000),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });
@@ -1330,6 +1332,7 @@ function registerBuildAdapters(
     });
     return result.jobId
       ? jobResult(
+          context,
           { id: result.jobId, timeoutSeconds: 3_600 },
           {
             build: { exportId: result.id },
@@ -1349,7 +1352,7 @@ function registerBuildAdapters(
     });
     const jobId = deployments.find(({ jobId }) => Boolean(jobId))?.jobId;
     return jobId
-      ? jobResult({ id: jobId, timeoutSeconds: 3_600 }, undefined, [
+      ? jobResult(context, { id: jobId, timeoutSeconds: 3_600 }, undefined, [
           buildLink(id),
         ])
       : { output: deployments, links: [buildLink(id)] };
@@ -1505,7 +1508,8 @@ function registerRunAdapters(
           stash: context.node.config.stash === true,
           rollback: context.node.config.rollback !== false,
         }),
-        resumeAfter: new Date(Date.now() + 1_000),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });
@@ -1650,7 +1654,8 @@ function registerMiscellaneousAdapters(
           ? {
               kind: "COMMAND_RUN",
               externalKey: run.id,
-              resumeAfter: new Date(Date.now() + 1_000),
+              resumeAfter: waitResumeAfter(context.node.config),
+              timeoutAt: waitTimeoutAt(context.node.config),
             }
           : undefined,
     };
@@ -1724,7 +1729,8 @@ function registerMiscellaneousAdapters(
           ? {
               kind: "COMMAND_RUN",
               externalKey: run.id,
-              resumeAfter: new Date(Date.now() + 1_000),
+              resumeAfter: waitResumeAfter(context.node.config),
+              timeoutAt: waitTimeoutAt(context.node.config),
             }
           : undefined,
     };
@@ -1749,7 +1755,8 @@ function registerMiscellaneousAdapters(
       wait: {
         kind: "SKILL_RUN",
         externalKey: run.id,
-        resumeAfter: new Date(Date.now() + 1_000),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
       },
     };
   });

@@ -7,6 +7,7 @@ import type { AgentControlService } from "@/services/agent-control";
 import {
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
+  WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
@@ -271,10 +272,19 @@ describe("WorktreesService", () => {
           headSha: "abc123",
           rebaseInProgress: false,
           hasConflicts: false,
+          pushStatus: "READY",
+          hasStagedChanges: false,
+          hasUnstagedChanges: false,
           codebase: {
             id: "codebase-1",
             folder: "/repo",
+            agentId: "agent-1",
             defaultBranch: "main",
+            agent: {
+              id: "agent-1",
+              name: "Studio Mac",
+              hostname: "studio.local",
+            },
             repository: {
               id: "repository-1",
               name: "Widgets",
@@ -311,6 +321,8 @@ describe("WorktreesService", () => {
       worktrees.workflowSessionDataForWorktree("worktree-1"),
     ).resolves.toMatchObject({
       worktree: { id: "worktree-1", baseBranch: "release" },
+      codebase: { id: "codebase-1", agentId: "agent-1" },
+      agent: { id: "agent-1", name: "Studio Mac" },
       repo: {
         id: "repository-1",
         name: "Widgets",
@@ -350,6 +362,12 @@ describe("WorktreesService", () => {
           name: "Widgets",
           canonicalOrigin: "github.com/acme/widgets",
           displayOrigin: "github.com/acme/widgets",
+          jiraBranchRegex: "([A-Z]+-\\d+)",
+        },
+        agent: {
+          id: "agent-1",
+          name: "Studio Mac",
+          hostname: "studio.local",
         },
       },
     };
@@ -364,13 +382,24 @@ describe("WorktreesService", () => {
       codebase: {
         findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
       },
-      worktree: { findUnique: vi.fn().mockResolvedValue(projected) },
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue(projected),
+        findUnique: vi.fn().mockResolvedValue(projected),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn((callback) => callback(transaction)),
     });
     const record = vi.fn().mockResolvedValue({ id: "event-1" });
     new WorktreesService(
       control,
-      {} as JiraService,
+      {
+        cachedTicket: vi.fn().mockResolvedValue({
+          issueKey: "AIDE-24",
+          projectKey: "AIDE",
+          summary: "Add workflow session context",
+          status: "In Progress",
+        }),
+      } as unknown as JiraService,
       {} as GitHubService,
       undefined,
       { record } as never,
@@ -394,6 +423,15 @@ describe("WorktreesService", () => {
             url: "github.com/acme/widgets",
           }),
           worktree: expect.objectContaining({ id: "worktree-created" }),
+          codebase: expect.objectContaining({ agentId: "agent-1" }),
+          agent: expect.objectContaining({
+            id: "agent-1",
+            name: "Studio Mac",
+          }),
+          ticket: expect.objectContaining({
+            key: "AIDE-24",
+            title: "Add workflow session context",
+          }),
         }),
       }),
     });
@@ -801,6 +839,74 @@ describe("WorktreesService", () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { id: "diff-2", visibility: "SYSTEM" },
     });
+  });
+
+  test("holds a Git state inspection behind unrelated codebase work", async () => {
+    const createJob = vi.fn().mockResolvedValue({ id: "git-state-1" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+      getJob: vi.fn((id: string) =>
+        Promise.resolve({
+          id,
+          status: "SUCCEEDED",
+          resultJson:
+            id === "sync-active"
+              ? "{}"
+              : JSON.stringify({
+                  state: {
+                    dirty: true,
+                    branches: [],
+                    branchesTruncated: false,
+                    stashes: [],
+                    stashesTruncated: false,
+                  },
+                }),
+          error: null,
+        }),
+      ),
+    } as unknown as AgentControlService;
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      baseBranchOverride: null,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([WORKTREE_GIT_INSPECT_JOB_KIND]),
+        },
+        repository: { canonicalOrigin: "github.com/openai/codex" },
+      },
+    };
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "sync-active",
+        idempotencyKey: "another-request",
+        kind: "worktree.operation",
+      })
+      .mockResolvedValueOnce(null);
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+      agentJob: { findFirst, deleteMany },
+    });
+
+    await expect(
+      service(control).inspectGitState("worktree-1", "request-1"),
+    ).resolves.toMatchObject({ dirty: true });
+    expect(findFirst).toHaveBeenCalledTimes(2);
+    expect(createJob).toHaveBeenCalledOnce();
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: WORKTREE_GIT_INSPECT_JOB_KIND }),
+    );
   });
 
   test("serializes diff image transfers behind other diff jobs", async () => {

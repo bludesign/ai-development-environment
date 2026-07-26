@@ -467,7 +467,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
     fields: [
       text("repositoryId", "Repository ID"),
       text("workflowRunId", "Workflow run ID"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Worktrees -------------------------------------------------------------
@@ -542,7 +541,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   WORKTREE_WAIT_PUSH_READY: {
     fields: [
       resource("worktreeId", "Worktree", "worktree"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   WORKTREE_SNAPSHOT: {
@@ -713,7 +711,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   HUMAN_CONFIRM: {
     fields: [
       multiline("prompt", "Prompt"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   HUMAN_CHOICE: {
@@ -722,7 +719,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       bool("multiSelect", "Allow multiple selections"),
       bool("allowCustom", "Allow a custom answer"),
       choiceOptions("options", "Buttons"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   // -- Control flow ----------------------------------------------------------
@@ -754,8 +750,6 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   CONTROL_WAIT_UNTIL: {
     fields: [
       json("condition", "Condition", { required: true }),
-      num("cadenceSeconds", "Poll cadence (seconds)"),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
   CONTROL_FOR_EACH: {
@@ -808,8 +802,12 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
         "Target",
         staticOptions(["CONTEXT", "FIXED_AGENT", "FIXED_WORKTREE"]),
       ),
-      text("agentId", "Fixed agent ID"),
-      text("worktreeId", "Fixed worktree ID"),
+      text("agentId", "Fixed agent ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_AGENT" },
+      }),
+      text("worktreeId", "Fixed worktree ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
+      }),
     ],
   },
   CUSTOM_COMMAND: {
@@ -825,8 +823,12 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
         "Target",
         staticOptions(["CONTEXT", "FIXED_AGENT", "FIXED_WORKTREE"]),
       ),
-      text("agentId", "Fixed agent ID"),
-      text("worktreeId", "Fixed worktree ID"),
+      text("agentId", "Fixed agent ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_AGENT" },
+      }),
+      text("worktreeId", "Fixed worktree ID", {
+        visibleWhen: { key: "targetMode", equals: "FIXED_WORKTREE" },
+      }),
     ],
   },
   TERMINAL_RUN: {
@@ -837,10 +839,99 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       json("credentials", "Credential environment", {
         help: "JSON array of { name, credential: { id, kind, ownerId } } entries.",
       }),
-      num("timeoutSeconds", "Timeout (seconds)"),
     ],
   },
 };
+
+// ---------------------------------------------------------------------------
+// Wait timing. Every step that parks on external work accepts the same two
+// keys, so they are declared once here rather than repeated per kind.
+// ---------------------------------------------------------------------------
+
+/**
+ * The steps that park on polled work — an agent job, an agent run, a build, a
+ * command, a sub-workflow, a checks run. Each honours both `timeoutSeconds` and
+ * `cadenceSeconds`; see `lib/workflows/wait-timing.ts` for what the runtime does
+ * with them.
+ *
+ * A step listed here but not waiting would advertise knobs that do nothing, and
+ * one that waits but is missing would keep its timing locked in code — the
+ * adapter's `wait:` result is the thing to check when adding a step.
+ */
+const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
+  // Agent jobs
+  "WORKTREE_CREATE",
+  "WORKTREE_CHANGE_BRANCH",
+  "WORKTREE_OPERATION",
+  "WORKTREE_DELETE",
+  "WORKTREE_GIT_OPERATION",
+  "WORKTREE_MOVE",
+  "WORKTREE_WAIT_PUSH_READY",
+  "WORKTREE_SNAPSHOT",
+  "CODEBASE_FETCH_REFRESH",
+  "CODEBASE_GIT_OPERATION",
+  "BUILD_START",
+  "BUILD_EXPORT",
+  "BUILD_DEPLOY",
+  "TERMINAL_RUN",
+  // Agent runs
+  "RUN_CREATE_PLAN",
+  "RUN_CREATE_SESSION",
+  "RUN_PLAY_PLAN",
+  "RUN_FOLLOW_UP",
+  "RUN_REVISE_ANSWER",
+  // Commands, skills, checks
+  "SAVED_COMMAND",
+  "CUSTOM_COMMAND",
+  "SKILL_APPLY",
+  "GITHUB_WAIT_CHECKS",
+  // Control flow
+  "CONTROL_SUBWORKFLOW",
+  "CONTROL_WAIT_UNTIL",
+];
+
+/**
+ * Steps whose wait ends when a person answers rather than when a poll finds the
+ * work done. A cadence would be meaningless — nothing is being checked — so
+ * these take the timeout alone.
+ */
+const ANSWERED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
+  "HUMAN_CONFIRM",
+  "HUMAN_CHOICE",
+];
+
+const cadenceField = (): ConfigFieldDescriptor =>
+  num("cadenceSeconds", "Poll cadence (seconds)", {
+    help: "How often to check whether the work has finished. Leave empty for this step's default.",
+  });
+
+const waitTimeoutField = (): ConfigFieldDescriptor =>
+  num("timeoutSeconds", "Timeout (seconds)", {
+    help: "How long to keep waiting before the step fails. Leave empty to wait for as long as the work takes.",
+  });
+
+function addWaitFields(
+  kinds: readonly WorkflowStepKind[],
+  fields: () => ConfigFieldDescriptor[],
+): void {
+  for (const kind of kinds) {
+    const descriptor = STEP_CONFIG_DESCRIPTORS[kind];
+    if (!descriptor) continue;
+    const described = new Set(descriptor.fields.map(({ key }) => key));
+    descriptor.fields = [
+      // Timing lands after the step's own config, and never displaces a key a
+      // kind already describes itself.
+      ...descriptor.fields,
+      ...fields().filter(({ key }) => !described.has(key)),
+    ];
+  }
+}
+
+addWaitFields(POLLED_WAIT_STEP_KINDS, () => [
+  cadenceField(),
+  waitTimeoutField(),
+]);
+addWaitFields(ANSWERED_WAIT_STEP_KINDS, () => [waitTimeoutField()]);
 
 // ---------------------------------------------------------------------------
 // Trigger descriptors. Every trigger supports `filters` (path → expected value);

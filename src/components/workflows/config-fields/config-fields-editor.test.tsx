@@ -134,4 +134,42 @@ describe("interactive step configuration", () => {
       },
     ]);
   });
+
+  test("shows only the custom command ID field selected by target mode", () => {
+    render(
+      <Harness config={{ targetMode: "CONTEXT" }} kind="CUSTOM_COMMAND" />,
+    );
+
+    expect(
+      screen.queryByRole("textbox", { name: "Fixed agent ID" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Fixed worktree ID" }),
+    ).toBeNull();
+
+    cleanup();
+    render(
+      <Harness config={{ targetMode: "FIXED_AGENT" }} kind="CUSTOM_COMMAND" />,
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Fixed agent ID" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("textbox", { name: "Fixed worktree ID" }),
+    ).toBeNull();
+
+    cleanup();
+    render(
+      <Harness
+        config={{ targetMode: "FIXED_WORKTREE" }}
+        kind="CUSTOM_COMMAND"
+      />,
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Fixed agent ID" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: "Fixed worktree ID" }),
+    ).toBeTruthy();
+  });
 });

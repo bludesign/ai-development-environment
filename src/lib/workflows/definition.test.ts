@@ -483,12 +483,20 @@ describe("workflow catalog", () => {
     }
   });
 
-  test("worktree triggers advertise repository context", () => {
+  test("worktree triggers advertise their full resource context", () => {
     for (const entry of WORKFLOW_TRIGGER_CATALOG.filter(({ kind }) =>
       kind.startsWith("WORKTREE_"),
     )) {
-      expect(entry.seedPaths, entry.kind).toContain("worktree.*");
-      expect(entry.seedPaths, entry.kind).toContain("repo.*");
+      expect(entry.seedPaths, entry.kind).toEqual(
+        expect.arrayContaining([
+          "worktree.*",
+          "codebase.*",
+          "agent.*",
+          "repo.*",
+          "pr.*",
+          "ticket.*",
+        ]),
+      );
     }
   });
 

@@ -15,6 +15,13 @@ describe("expandSessionPaths", () => {
     ).toBeTruthy();
   });
 
+  test("expands owning agent context exposed by resource triggers", () => {
+    const paths = expandSessionPaths(["agent.*"]).map((info) => info.path);
+    expect(paths).toEqual(
+      expect.arrayContaining(["agent.id", "agent.name", "agent.hostname"]),
+    );
+  });
+
   test("expands an id-qualified wildcard prefix", () => {
     const paths = expandSessionPaths(["steps.load.*"]).map((info) => info.path);
     expect(paths).toContain("steps.load.output");

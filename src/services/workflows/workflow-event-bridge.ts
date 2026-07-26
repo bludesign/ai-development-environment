@@ -10,6 +10,8 @@ import {
   type AgentControlService,
 } from "@/services/agent-control";
 import { getPrismaClient } from "@/data/prisma-client";
+import { mergeSessionData } from "@/lib/workflows/session";
+import type { WorktreesService } from "@/services/worktrees";
 
 import type { WorkflowEventsService } from "./workflow-events.service";
 
@@ -52,6 +54,10 @@ export class WorkflowEventBridge {
   constructor(
     private readonly events: WorkflowEventsService,
     private readonly agentControl: AgentControlService,
+    private readonly worktrees?: Pick<
+      WorktreesService,
+      "workflowSessionDataForWorktree"
+    >,
   ) {}
 
   start(): void {
@@ -84,6 +90,16 @@ export class WorkflowEventBridge {
       subjectKey,
       dedupeKey,
       payload: { ...sessionData, ...extras, sessionData },
+    });
+  }
+
+  private async worktreeSessionData(
+    worktreeId: string | null,
+    includeMissing = false,
+  ): Promise<SessionData> {
+    if (!worktreeId || !this.worktrees) return {};
+    return this.worktrees.workflowSessionDataForWorktree(worktreeId, {
+      includeMissing,
     });
   }
 
@@ -126,13 +142,18 @@ export class WorkflowEventBridge {
       return;
     }
     if (!new Set(["FAILED", "TIMED_OUT"]).has(job.status)) return;
+    const targetSessionData = await this.worktreeSessionData(
+      job.worktreeId,
+      true,
+    );
     await this.record(
       "AGENT_JOB_FAILED",
       job.agentId,
       `agent-job:${job.id}:${job.status}`,
-      {
+      mergeSessionData(targetSessionData, {
+        agent: { id: job.agentId },
         codebase: { id: job.codebaseId, agentId: job.agentId },
-        worktree: { id: job.worktreeId },
+        ...(job.worktreeId ? { worktree: { id: job.worktreeId } } : {}),
         steps: {
           trigger: {
             id: job.id,
@@ -141,7 +162,7 @@ export class WorkflowEventBridge {
             error: job.error,
           },
         },
-      },
+      }),
       { cursorValue: `${job.id}:${job.status}` },
     );
   }
@@ -185,7 +206,10 @@ export class WorkflowEventBridge {
       include: { run: true },
       orderBy: { createdAt: "desc" },
     });
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(
+      run.worktree?.id ?? null,
+    );
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       run: {
         id: run.id,
         kind: run.kind,
@@ -229,7 +253,7 @@ export class WorkflowEventBridge {
           }
         : {}),
       ...(run.jiraIssueKey ? { ticket: { key: run.jiraIssueKey } } : {}),
-    };
+    });
     const correlation = owner
       ? {
           workflowId: owner.run.workflowId,
@@ -393,7 +417,10 @@ export class WorkflowEventBridge {
       },
     });
     if (!build) return;
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(
+      build.worktree?.id ?? null,
+    );
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       build: {
         id: build.id,
         status: build.status,
@@ -423,7 +450,7 @@ export class WorkflowEventBridge {
             },
           }
         : {}),
-    };
+    });
     if (new Set(["SUCCEEDED", "FAILED", "CANCELLED"]).has(build.status)) {
       await this.record(
         "BUILD_RESULT",
@@ -535,7 +562,8 @@ export class WorkflowEventBridge {
   }): Promise<void> {
     const observedAt = worktree.lastCheckedAt ?? worktree.updatedAt;
     const dirty = worktree.hasStagedChanges || worktree.hasUnstagedChanges;
-    const sessionData: SessionData = {
+    const targetSessionData = await this.worktreeSessionData(worktree.id, true);
+    const sessionData: SessionData = mergeSessionData(targetSessionData, {
       repo: repositoryData(
         worktree.codebase.repository,
         worktree.codebase.defaultBranch,
@@ -556,7 +584,7 @@ export class WorkflowEventBridge {
         missingAt: worktree.missingAt?.toISOString() ?? null,
         dirtySince: dirty ? worktree.updatedAt.toISOString() : null,
       },
-    };
+    });
     const common = { cursorValue: observedAt.toISOString() };
     if ((worktree.baseBehind ?? 0) > 0) {
       await this.record(

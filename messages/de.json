@@ -236,7 +236,8 @@
       "STEP_BLOCKED": "Schritt blockiert",
       "STEP_WAITING": "Schritt wartet",
       "STEP_RETRY_SCHEDULED": "Wiederholung geplant",
-      "STEP_RECOVERY_BLOCKED": "Wiederherstellung blockiert"
+      "STEP_RECOVERY_BLOCKED": "Wiederherstellung blockiert",
+      "STEP_WAITING_FOR_RESOURCE": "Wartet auf Codebasis"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Ungültiges Schema",
@@ -1056,6 +1057,7 @@
     "monitorAgent": "Agent überwachen",
     "pressureModeControl": "Druckmodus",
     "noReport": "Noch kein Datenträgerbericht verfügbar.",
+    "notMonitored": "Nicht überwacht",
     "observedAt": "Erfasst {value}",
     "volume": "Volume",
     "freeOf": "frei von",

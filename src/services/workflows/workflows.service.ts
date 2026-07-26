@@ -42,7 +42,13 @@ import {
   type SessionData,
   type WorkflowCondition,
 } from "@/lib/workflows/session";
+import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import { requiredConfigSessionPaths } from "@/lib/workflows/config-descriptors";
+import {
+  waitCadenceSeconds,
+  waitResumeAfter,
+  waitTimeoutAt,
+} from "@/lib/workflows/wait-timing";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
   WORKFLOW_QUICK_ACTION_KINDS,
@@ -103,6 +109,7 @@ const MAX_DEFINITION_BYTES = 2 * 1024 * 1024;
 const MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const GLOBAL_CONCURRENCY = 4;
 const CLAIM_TTL_MS = 5 * 60_000;
+const RESOURCE_HOLD_TIMEOUT_MS = 10 * 60_000;
 
 type WorkflowWithActiveVersion = Workflow & {
   activeVersion: WorkflowVersion | null;
@@ -1242,11 +1249,8 @@ export class WorkflowsService {
       wait: {
         kind: "AGENT_JOB",
         externalKey: job.id,
-        timeoutAt: new Date(
-          Date.now() +
-            Math.max(10, Number(context.node.config.timeoutSeconds ?? 900)) *
-              1_000,
-        ),
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config, 900),
       },
     };
   }
@@ -1289,7 +1293,12 @@ export class WorkflowsService {
           url: `/jobs/${job.id}`,
         },
       ],
-      wait: { kind: "AGENT_JOB", externalKey: job.id },
+      wait: {
+        kind: "AGENT_JOB",
+        externalKey: job.id,
+        resumeAfter: waitResumeAfter(context.node.config),
+        timeoutAt: waitTimeoutAt(context.node.config),
+      },
     };
   }
 
@@ -3177,12 +3186,60 @@ export class WorkflowsService {
         await this.completeAttempt(attempt, node, result);
       }
     } catch (error) {
-      await this.failAttempt(
-        attempt,
-        node,
-        error instanceof Error ? error : new Error(String(error)),
+      const failure =
+        error instanceof Error ? error : new Error(String(error));
+      if (await this.holdForBusyCodebase(attempt, failure)) return;
+      await this.failAttempt(attempt, node, failure);
+    }
+  }
+
+  /**
+   * Puts a step back in the queue when the codebase it needs is momentarily
+   * occupied, instead of failing the run.
+   *
+   * The codebase allows one active agent job at a time, so a step can lose the
+   * race to unrelated work — a diff the UI happens to be refreshing, a sync
+   * someone started by hand. That contention says nothing about the step, and
+   * the error is raised before any agent job exists, so re-running it is safe.
+   * The step holds in `WAITING_FOR_RESOURCE` and the runtime re-dispatches it
+   * every tick until the codebase frees up or {@link RESOURCE_HOLD_TIMEOUT_MS}
+   * passes, at which point the failure is real and the run fails as before.
+   */
+  private async holdForBusyCodebase(
+    attempt: WorkflowStepAttempt,
+    error: Error,
+  ): Promise<boolean> {
+    if (!isCodebaseBusyError(error)) return false;
+    const holdingSince = attempt.startedAt ?? attempt.createdAt;
+    if (Date.now() - holdingSince.getTime() > RESOURCE_HOLD_TIMEOUT_MS) {
+      return false;
+    }
+    const prisma = await getPrismaClient();
+    const held = await prisma.workflowStepAttempt.updateMany({
+      where: { id: attempt.id, status: "RUNNING", claimOwner: this.workerId },
+      data: {
+        status: "READY",
+        phase: "WAITING_FOR_RESOURCE",
+        error: error.message,
+        claimOwner: null,
+        claimExpiresAt: null,
+      },
+    });
+    if (!held.count) return false;
+    await prisma.workflowResourceLease.deleteMany({
+      where: { attemptId: attempt.id },
+    });
+    if (attempt.phase !== "WAITING_FOR_RESOURCE") {
+      await this.appendEvent(
+        attempt.runId,
+        attempt.id,
+        "STEP_WAITING_FOR_RESOURCE",
+        "Step is waiting for the codebase to become available",
+        { error: error.message },
       );
     }
+    publishRunChanged(attempt.runId);
+    return true;
   }
 
   private async iterationSessionData(
@@ -3299,15 +3356,7 @@ export class WorkflowsService {
         if (evaluateWorkflowCondition(condition, sessionData)) {
           return { output: { matched: true } };
         }
-        const cadenceSeconds = Math.max(
-          1,
-          Number(node.config.cadenceSeconds ?? 15),
-        );
-        const timeoutSeconds =
-          node.config.timeoutSeconds === null ||
-          node.config.timeoutSeconds === undefined
-            ? null
-            : Number(node.config.timeoutSeconds);
+        const cadenceSeconds = waitCadenceSeconds(node.config, 15);
         return {
           wait: {
             kind: "PREDICATE",
@@ -3316,10 +3365,7 @@ export class WorkflowsService {
               cadenceSeconds,
             },
             resumeAfter: new Date(Date.now() + cadenceSeconds * 1_000),
-            timeoutAt:
-              timeoutSeconds === null
-                ? null
-                : new Date(Date.now() + timeoutSeconds * 1_000),
+            timeoutAt: waitTimeoutAt(node.config),
           },
         };
       }
@@ -3582,7 +3628,12 @@ export class WorkflowsService {
           url: `/workflows/runs/${child.id}`,
         },
       ],
-      wait: { kind: "WORKFLOW_RUN", externalKey: child.id },
+      wait: {
+        kind: "WORKFLOW_RUN",
+        externalKey: child.id,
+        resumeAfter: waitResumeAfter(node.config),
+        timeoutAt: waitTimeoutAt(node.config),
+      },
     };
   }
 
@@ -3674,20 +3725,12 @@ export class WorkflowsService {
     agentEventBus.publish(runQuestionTopic(run.id), {
       workflowQuestionChanged: { id: batchId, runId: run.id },
     });
-    const timeoutSeconds =
-      node.config.timeoutSeconds === null ||
-      node.config.timeoutSeconds === undefined
-        ? null
-        : Number(node.config.timeoutSeconds);
     return {
       output: { questionBatchId: batchId },
       wait: {
         kind: "HUMAN",
         externalKey: batchId,
-        timeoutAt:
-          timeoutSeconds === null
-            ? null
-            : new Date(Date.now() + timeoutSeconds * 1_000),
+        timeoutAt: waitTimeoutAt(node.config),
       },
     };
   }
@@ -4099,9 +4142,17 @@ export class WorkflowsService {
       } else if (wait.externalKey && this.waitPollers.has(wait.kind)) {
         const polled = await this.waitPollers.get(wait.kind)!(wait.externalKey);
         if (polled.pending) {
+          // The poller proposes a cadence for its resource; an author who set
+          // one on the step overrides it.
+          const config =
+            parseWorkflowDefinition(
+              json(wait.attempt.run.version.definitionJson),
+            ).nodes.find(({ id }) => id === wait.attempt.nodeId)?.config ?? {};
           await updatePendingWait(wait.id, {
             resumeAfter: new Date(
-              Date.now() + Math.max(1, polled.pollAfterSeconds ?? 15) * 1_000,
+              Date.now() +
+                waitCadenceSeconds(config, polled.pollAfterSeconds ?? 15) *
+                  1_000,
             ),
           });
         } else {

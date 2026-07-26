@@ -236,7 +236,8 @@
       "STEP_BLOCKED": "Étape bloquée",
       "STEP_WAITING": "Étape en attente",
       "STEP_RETRY_SCHEDULED": "Nouvelle tentative planifiée",
-      "STEP_RECOVERY_BLOCKED": "Récupération bloquée"
+      "STEP_RECOVERY_BLOCKED": "Récupération bloquée",
+      "STEP_WAITING_FOR_RESOURCE": "En attente du dépôt"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Schéma invalide",
@@ -1056,6 +1057,7 @@
     "monitorAgent": "Surveiller l’agent",
     "pressureModeControl": "Mode pression",
     "noReport": "Aucun rapport de disque n’est encore disponible.",
+    "notMonitored": "Non surveillé",
     "observedAt": "Observé {value}",
     "volume": "Volume",
     "freeOf": "libres sur",

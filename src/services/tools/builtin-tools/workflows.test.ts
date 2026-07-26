@@ -222,7 +222,7 @@ describe("discovery tools", () => {
       kind: "GITHUB_PR_STATE",
     });
     expect(result.scope).toBe("trigger");
-    expect(result.seedPaths).toEqual(["repo.*", "pr.*"]);
+    expect(result.seedPaths).toEqual(["repo.*", "pr.*", "ticket.*"]);
   });
 
   test("an unknown kind is rejected rather than returned empty", async () => {

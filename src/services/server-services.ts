@@ -179,6 +179,7 @@ function createServerServices(): ServerServices {
   const workflowEventBridge = new WorkflowEventBridge(
     workflowEventsService,
     agentControlService,
+    worktreesService,
   );
   workflowEventBridge.start();
   workflowsService.startRuntime();

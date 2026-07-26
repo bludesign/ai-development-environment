@@ -69,6 +69,11 @@ export type ConfigFieldDescriptor = {
   key: string;
   label: string;
   control: ConfigControlType;
+  /** Only render this field when a sibling config value matches. */
+  visibleWhen?: {
+    key: string;
+    equals: unknown;
+  };
   options?: ConfigOptionSource;
   required?: boolean;
   default?: unknown;

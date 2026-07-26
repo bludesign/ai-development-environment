@@ -28,6 +28,9 @@ type RepositoryTarget = {
   name: string;
   owner: string;
   repository: string;
+  canonicalOrigin: string;
+  displayOrigin: string;
+  jiraBranchRegex: string | null;
 };
 
 type WorkflowRun = {
@@ -39,6 +42,8 @@ type WorkflowRun = {
   status: string;
   conclusion: string | null;
   headBranch: string | null;
+  headSha: string | null;
+  pullRequests: Array<{ number: number; url: string | null }>;
   url: string;
   updatedAt: Date;
 };
@@ -70,6 +75,34 @@ function positiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0
     ? value
     : null;
+}
+
+function workflowPullRequests(
+  value: unknown,
+): Array<{ number: number; url: string | null }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const number = positiveInteger(record.number);
+    return number
+      ? [{ number, url: text(record.html_url) ?? text(record.url) }]
+      : [];
+  });
+}
+
+function jiraKeyFromBranch(
+  branch: string | null,
+  pattern: string,
+): string | null {
+  if (!branch || !pattern) return null;
+  try {
+    const match = new RegExp(pattern, "i").exec(branch);
+    const key = (match?.[1] ?? match?.[0])?.trim();
+    return key ? key.toUpperCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -109,16 +142,85 @@ export class GitHubActionsNotificationsService {
     run: WorkflowRun,
   ): Promise<void> {
     if (!this.workflowEvents || run.status !== "completed") return;
+    const prisma = await getPrismaClient();
+    const [worktree, codebaseSettings] = await Promise.all([
+      run.headBranch
+        ? prisma.worktree.findFirst({
+            where: {
+              branch: run.headBranch,
+              missingAt: null,
+              codebase: { repositoryId: target.id },
+            },
+            orderBy: { updatedAt: "desc" },
+            select: {
+              id: true,
+              folder: true,
+              branch: true,
+              baseBranchOverride: true,
+              headSha: true,
+              codebase: {
+                select: {
+                  id: true,
+                  folder: true,
+                  agentId: true,
+                  defaultBranch: true,
+                  agent: {
+                    select: { id: true, name: true, hostname: true },
+                  },
+                },
+              },
+            },
+          })
+        : null,
+      prisma.codebaseSettings.findUnique({ where: { id: "default" } }),
+    ]);
+    const ticketKey = jiraKeyFromBranch(
+      run.headBranch,
+      target.jiraBranchRegex ?? codebaseSettings?.defaultJiraBranchRegex ?? "",
+    );
+    const primaryPullRequest = run.pullRequests[0] ?? null;
     const sessionData = {
-      repo: { id: target.id, displayOrigin: target.name },
+      repo: {
+        id: target.id,
+        name: target.name,
+        owner: target.owner,
+        url: `https://github.com/${target.owner}/${target.repository}`,
+        canonicalOrigin: target.canonicalOrigin,
+        displayOrigin: target.displayOrigin,
+        defaultBranch: worktree?.codebase.defaultBranch ?? null,
+      },
       pipeline: {
         runId: run.id,
         workflowId: run.workflowId,
+        name: run.name,
+        displayTitle: run.displayTitle,
         status: run.status,
         conclusion: run.conclusion,
         headBranch: run.headBranch,
+        headSha: run.headSha,
+        pullRequests: run.pullRequests,
         url: run.url,
       },
+      ...(worktree
+        ? {
+            worktree: {
+              id: worktree.id,
+              path: worktree.folder,
+              branch: worktree.branch,
+              baseBranch:
+                worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
+              headSha: worktree.headSha,
+            },
+            codebase: {
+              id: worktree.codebase.id,
+              folder: worktree.codebase.folder,
+              agentId: worktree.codebase.agentId,
+            },
+            agent: worktree.codebase.agent,
+          }
+        : {}),
+      ...(primaryPullRequest ? { pr: primaryPullRequest } : {}),
+      ...(ticketKey ? { ticket: { key: ticketKey } } : {}),
     };
     const extras = {
       cursorValue: `${run.id}:${run.runAttempt}:${run.conclusion ?? "none"}`,
@@ -206,10 +308,25 @@ export class GitHubActionsNotificationsService {
           return name ? [name] : [];
         })
       : [];
+    const pullRequestHead = pullRequest.head as
+      Record<string, unknown> | undefined;
+    const pullRequestBase = pullRequest.base as
+      Record<string, unknown> | undefined;
+    const headBranch = text(pullRequestHead?.ref);
+    const pushedBranch =
+      text(payload.ref)?.replace(/^refs\/heads\//, "") ?? null;
+    const ticketKey = jiraKeyFromBranch(
+      headBranch ?? pushedBranch,
+      target.jiraBranchRegex ?? "",
+    );
     const sessionData = {
       repo: {
         id: target.id,
-        displayOrigin: text(repository.full_name) ?? target.name,
+        name: target.name,
+        owner: target.owner,
+        url: text(repository.html_url),
+        canonicalOrigin: target.canonicalOrigin,
+        displayOrigin: text(repository.full_name) ?? target.displayOrigin,
         defaultBranch: text(repository.default_branch),
       },
       pr: {
@@ -222,6 +339,11 @@ export class GitHubActionsNotificationsService {
         state: text(pullRequest.state)?.toUpperCase() ?? null,
         merged: pullRequest.merged === true,
         labels,
+        title: text(pullRequest.title),
+        isDraft: pullRequest.draft === true,
+        headBranch,
+        headSha: text(pullRequestHead?.sha),
+        baseBranch: text(pullRequestBase?.ref),
         reviewDecision: text(review.state)?.toUpperCase() ?? null,
       },
       pipeline: {
@@ -239,6 +361,7 @@ export class GitHubActionsNotificationsService {
         before: text(payload.before),
         after: text(payload.after),
       },
+      ...(ticketKey ? { ticket: { key: ticketKey } } : {}),
     };
     await this.workflowEvents.record({
       kind,
@@ -337,7 +460,13 @@ export class GitHubActionsNotificationsService {
       await getPrismaClient()
     ).codebaseRepository.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, name: true, canonicalOrigin: true },
+      select: {
+        id: true,
+        name: true,
+        canonicalOrigin: true,
+        displayOrigin: true,
+        jiraBranchRegex: true,
+      },
     });
     return repositories.flatMap((repository) => {
       const match = /^github\.com\/([^/]+)\/([^/]+)$/i.exec(
@@ -350,6 +479,9 @@ export class GitHubActionsNotificationsService {
           name: repository.name,
           owner: match[1],
           repository: match[2],
+          canonicalOrigin: repository.canonicalOrigin,
+          displayOrigin: repository.displayOrigin,
+          jiraBranchRegex: repository.jiraBranchRegex,
         },
       ];
     });
@@ -408,6 +540,8 @@ export class GitHubActionsNotificationsService {
             status: text(run.status)?.toLowerCase() ?? "unknown",
             conclusion: text(run.conclusion)?.toLowerCase() ?? null,
             headBranch: text(run.head_branch),
+            headSha: text(run.head_sha),
+            pullRequests: workflowPullRequests(run.pull_requests),
             url: text(run.html_url) ?? "",
             updatedAt,
           },
@@ -815,6 +949,8 @@ export class GitHubActionsNotificationsService {
         status: text(workflow?.status)?.toLowerCase() ?? "completed",
         conclusion: text(workflow?.conclusion)?.toLowerCase() ?? null,
         headBranch: text(workflow?.head_branch),
+        headSha: text(workflow?.head_sha),
+        pullRequests: workflowPullRequests(workflow?.pull_requests),
         url: text(workflow?.html_url) ?? "",
         updatedAt: new Date(updatedAtText),
       };

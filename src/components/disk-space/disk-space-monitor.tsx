@@ -313,7 +313,9 @@ export function DiskSpaceMonitor() {
                             </div>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {t(`status.${volume.status}`)}
+                            {volume.monitored
+                              ? t(`status.${volume.status}`)
+                              : t("notMonitored")}
                           </TooltipContent>
                         </Tooltip>
                       ))}

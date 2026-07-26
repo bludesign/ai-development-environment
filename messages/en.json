@@ -236,7 +236,8 @@
       "STEP_BLOCKED": "Step blocked",
       "STEP_WAITING": "Step waiting",
       "STEP_RETRY_SCHEDULED": "Retry scheduled",
-      "STEP_RECOVERY_BLOCKED": "Recovery blocked"
+      "STEP_RECOVERY_BLOCKED": "Recovery blocked",
+      "STEP_WAITING_FOR_RESOURCE": "Waiting for codebase"
     },
     "diagnosticCodes": {
       "SCHEMA_INVALID": "Invalid schema",
@@ -1056,6 +1057,7 @@
     "monitorAgent": "Monitor agent",
     "pressureModeControl": "Pressure mode",
     "noReport": "No disk report is available yet.",
+    "notMonitored": "Not monitored",
     "observedAt": "Observed {value}",
     "volume": "Volume",
     "freeOf": "free of",

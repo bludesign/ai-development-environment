@@ -133,4 +133,58 @@ describe("workflow config descriptors", () => {
       key: "credentials",
     });
   });
+
+  test("offers wait timing on every step that parks on external work", () => {
+    const timingKeys = (kind: string) =>
+      getConfigDescriptor(kind, "step")
+        ?.fields.filter(({ key }) =>
+          ["cadenceSeconds", "timeoutSeconds"].includes(key),
+        )
+        .map(({ key }) => key) ?? [];
+
+    for (const kind of [
+      "BUILD_START",
+      "RUN_CREATE_SESSION",
+      "WORKTREE_OPERATION",
+      "WORKTREE_SNAPSHOT",
+      "CUSTOM_COMMAND",
+      "SKILL_APPLY",
+      "CONTROL_SUBWORKFLOW",
+      "TERMINAL_RUN",
+    ]) {
+      expect(timingKeys(kind)).toEqual(["cadenceSeconds", "timeoutSeconds"]);
+    }
+
+    // Kinds that already described a timing key keep exactly one of it.
+    expect(timingKeys("GITHUB_WAIT_CHECKS")).toEqual([
+      "cadenceSeconds",
+      "timeoutSeconds",
+    ]);
+    expect(timingKeys("CONTROL_WAIT_UNTIL")).toEqual([
+      "cadenceSeconds",
+      "timeoutSeconds",
+    ]);
+
+    // A person answers these, so there is nothing to poll for.
+    expect(timingKeys("HUMAN_CONFIRM")).toEqual(["timeoutSeconds"]);
+    expect(timingKeys("HUMAN_CHOICE")).toEqual(["timeoutSeconds"]);
+
+    // Steps that finish inline gain neither.
+    expect(timingKeys("JIRA_COMMENT")).toEqual([]);
+    expect(timingKeys("WORKTREE_INSPECT_GIT")).toEqual([]);
+    expect(timingKeys("CONTROL_DELAY")).toEqual([]);
+  });
+
+  test("describes wait timing as optional, so no step requires it", () => {
+    const fields = getConfigDescriptor("BUILD_START", "step")?.fields.filter(
+      ({ key }) => ["cadenceSeconds", "timeoutSeconds"].includes(key),
+    );
+
+    expect(fields).toHaveLength(2);
+    for (const field of fields ?? []) {
+      expect(field.required).toBeUndefined();
+      expect(field.control).toBe("number");
+      expect(field.help).toBeTruthy();
+    }
+  });
 });

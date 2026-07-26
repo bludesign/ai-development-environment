@@ -36,6 +36,13 @@ function workflowPayload(
       status: "completed",
       conclusion,
       head_branch: "feature/APP-42",
+      head_sha: "abc123",
+      pull_requests: [
+        {
+          number: 42,
+          html_url: "https://github.com/acme/widgets/pull/42",
+        },
+      ],
       html_url: "https://github.com/acme/widgets/actions/runs/101",
       updated_at: "2026-07-22T12:00:00.000Z",
       ...overrides,
@@ -47,7 +54,7 @@ function githubResponse(runs: Array<Record<string, unknown>>): Response {
   return Response.json({ workflow_runs: runs });
 }
 
-function setup() {
+function setup(workflowEvents?: { record: ReturnType<typeof vi.fn> }) {
   const deliveries = new Map<string, Record<string, unknown>>();
   const observations = new Map<string, Observation>();
   const pollingStates = new Map<string, Record<string, unknown>>();
@@ -115,6 +122,21 @@ function setup() {
       findFirst: vi.fn(async () => ({
         id: "worktree-1",
         highlightColor: "blue",
+        folder: "/repo-feature",
+        branch: "feature/APP-42",
+        baseBranchOverride: null,
+        headSha: "abc123",
+        codebase: {
+          id: "codebase-1",
+          folder: "/repo",
+          agentId: "agent-1",
+          defaultBranch: "main",
+          agent: {
+            id: "agent-1",
+            name: "Studio Mac",
+            hostname: "studio.local",
+          },
+        },
       })),
     },
   };
@@ -125,8 +147,16 @@ function setup() {
           id: "repository-1",
           name: "Widgets",
           canonicalOrigin: "github.com/acme/widgets",
+          displayOrigin: "github.com/acme/widgets",
+          jiraBranchRegex: "([A-Z]+-\\d+)",
         },
       ]),
+    },
+    worktree: transaction.worktree,
+    codebaseSettings: {
+      findUnique: vi.fn(async () => ({
+        defaultJiraBranchRegex: "([A-Z]+-\\d+)",
+      })),
     },
     gitHubAppSettings: {
       findUnique: vi.fn(async () => ({ installationId: "456" })),
@@ -197,6 +227,7 @@ function setup() {
     notifications as never,
     polling as never,
     false,
+    workflowEvents as never,
   );
   return {
     service,
@@ -229,6 +260,47 @@ beforeEach(() => {
 });
 
 describe("GitHub Actions webhook notifications", () => {
+  test("seeds workflow triggers with correlated repository resources", async () => {
+    const workflowEvents = { record: vi.fn(async () => ({})) };
+    const { service } = setup(workflowEvents);
+
+    await service.handleWebhook(webhookInput(workflowPayload("success")));
+
+    expect(workflowEvents.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "GITHUB_ACTIONS_RESULT",
+        payload: expect.objectContaining({
+          sessionData: expect.objectContaining({
+            repo: expect.objectContaining({
+              id: "repository-1",
+              name: "Widgets",
+              canonicalOrigin: "github.com/acme/widgets",
+            }),
+            pipeline: expect.objectContaining({
+              runId: "101",
+              headSha: "abc123",
+              pullRequests: [expect.objectContaining({ number: 42 })],
+            }),
+            worktree: expect.objectContaining({
+              id: "worktree-1",
+              path: "/repo-feature",
+            }),
+            codebase: expect.objectContaining({
+              id: "codebase-1",
+              agentId: "agent-1",
+            }),
+            agent: expect.objectContaining({
+              id: "agent-1",
+              name: "Studio Mac",
+            }),
+            pr: expect.objectContaining({ number: 42 }),
+            ticket: expect.objectContaining({ key: "APP-42" }),
+          }),
+        }),
+      }),
+    );
+  });
+
   test.each([
     ["success", "GITHUB_ACTIONS_SUCCEEDED"],
     ["failure", "GITHUB_ACTIONS_FAILED"],

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { CodebaseBusyError } from "@/lib/codebase-busy";
 import {
   emptyWorkflowDefinition,
   type WorkflowDefinition,
@@ -32,7 +33,7 @@ const prisma = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   workflowStepAttempt: { update: vi.fn(), updateMany: vi.fn() },
-  workflowWait: { create: vi.fn(), findMany: vi.fn() },
+  workflowWait: { create: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   workflowResourceLease: { deleteMany: vi.fn() },
   workflowRunEvent: { findFirst: vi.fn(), create: vi.fn() },
 }));
@@ -509,6 +510,93 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
+  test("holds a step in the queue while the codebase is busy", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+    const workerId = (service as unknown as { workerId: string }).workerId;
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "RUNNING",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(held).toBe(true);
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: "attempt-1", status: "RUNNING", claimOwner: workerId },
+      data: expect.objectContaining({
+        status: "READY",
+        phase: "WAITING_FOR_RESOURCE",
+        claimOwner: null,
+        claimExpiresAt: null,
+      }),
+    });
+    expect(prisma.workflowResourceLease.deleteMany).toHaveBeenCalledWith({
+      where: { attemptId: "attempt-1" },
+    });
+    expect(prisma.workflowRunEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "STEP_WAITING_FOR_RESOURCE" }),
+    });
+  });
+
+  test("stops holding a busy step once its hold budget runs out", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "WAITING_FOR_RESOURCE",
+        startedAt: new Date(Date.now() - 11 * 60_000),
+        createdAt: new Date(Date.now() - 11 * 60_000),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(held).toBe(false);
+    expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("does not hold a step for an unrelated failure", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const held = await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "RUNNING",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new Error("Worktree is unavailable"),
+    );
+
+    expect(held).toBe(false);
+    expect(prisma.workflowStepAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  test("only logs the wait once while a step keeps holding", async () => {
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await internals(service).holdForBusyCodebase(
+      {
+        id: "attempt-1",
+        runId: "run-1",
+        phase: "WAITING_FOR_RESOURCE",
+        startedAt: new Date(),
+        createdAt: new Date(),
+      },
+      new CodebaseBusyError(),
+    );
+
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalled();
+    expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
+  });
+
   test("only resolves due waits for scheduling runs", async () => {
     prisma.workflowWait.findMany.mockResolvedValue([]);
     const service = new WorkflowsService(new WorkflowEventsService());
@@ -522,6 +610,78 @@ describe("workflow runtime lifecycle guards", () => {
         }),
       }),
     );
+  });
+
+  function pendingCommandWait(config: Record<string, unknown>) {
+    const definition = emptyWorkflowDefinition("Wait timing");
+    definition.nodes = [
+      {
+        id: "step-1",
+        kind: "CUSTOM_COMMAND",
+        position: { x: 0, y: 0 },
+        config,
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 1, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    return {
+      id: "wait-1",
+      runId: "run-1",
+      attemptId: "attempt-1",
+      kind: "COMMAND_RUN",
+      externalKey: "command-run-1",
+      status: "PENDING",
+      timeoutAt: null,
+      predicateJson: null,
+      attempt: {
+        id: "attempt-1",
+        runId: "run-1",
+        nodeId: "step-1",
+        run: {
+          id: "run-1",
+          sessionDataJson: "{}",
+          version: { definitionJson: JSON.stringify(definition) },
+        },
+      },
+    };
+  }
+
+  test("polls a pending wait on the step's configured cadence", async () => {
+    prisma.workflowWait.findMany.mockResolvedValue([
+      pendingCommandWait({ cadenceSeconds: 45 }),
+    ]);
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    const service = new WorkflowsService(new WorkflowEventsService());
+    service.registerWaitPoller("COMMAND_RUN", async () => ({
+      pending: true,
+      pollAfterSeconds: 1,
+    }));
+
+    await internals(service).resolveDueWaits();
+
+    const update = prisma.workflowWait.updateMany.mock.calls[0]?.[0];
+    expect(
+      Math.round((update.data.resumeAfter.getTime() - Date.now()) / 1_000),
+    ).toBe(45);
+  });
+
+  test("keeps the poller's own cadence when the step configures none", async () => {
+    prisma.workflowWait.findMany.mockResolvedValue([pendingCommandWait({})]);
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    const service = new WorkflowsService(new WorkflowEventsService());
+    service.registerWaitPoller("COMMAND_RUN", async () => ({
+      pending: true,
+      pollAfterSeconds: 7,
+    }));
+
+    await internals(service).resolveDueWaits();
+
+    const update = prisma.workflowWait.updateMany.mock.calls[0]?.[0];
+    expect(
+      Math.round((update.data.resumeAfter.getTime() - Date.now()) / 1_000),
+    ).toBe(7);
   });
 
   test("parks ready attempts as part of requesting a pause", async () => {

@@ -33,9 +33,14 @@ function worktree(baseBehind: number | null) {
 describe("workflow worktree event bridge", () => {
   test("records behind events only when the worktree is behind", async () => {
     const record = vi.fn().mockResolvedValue({});
+    const workflowSessionDataForWorktree = vi.fn().mockResolvedValue({
+      agent: { id: "agent-1", name: "Studio Mac" },
+      ticket: { key: "AIDE-42", title: "Enrich workflow sessions" },
+    });
     const bridge = new WorkflowEventBridge(
       { record } as never,
       {} as never,
+      { workflowSessionDataForWorktree } as never,
     ) as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
 
     await bridge.observeWorktree(worktree(0));
@@ -45,6 +50,10 @@ describe("workflow worktree event bridge", () => {
 
     record.mockClear();
     await bridge.observeWorktree(worktree(2));
+    expect(workflowSessionDataForWorktree).toHaveBeenLastCalledWith(
+      "worktree-1",
+      { includeMissing: true },
+    );
     expect(record.mock.calls.map(([input]) => input.kind)).toContain(
       "WORKTREE_BEHIND",
     );
@@ -57,6 +66,11 @@ describe("workflow worktree event bridge", () => {
               name: "Widgets",
               url: "github.com/acme/widgets",
             }),
+            agent: expect.objectContaining({
+              id: "agent-1",
+              name: "Studio Mac",
+            }),
+            ticket: expect.objectContaining({ key: "AIDE-42" }),
           }),
         }),
       }),

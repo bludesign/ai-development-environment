@@ -54,6 +54,7 @@ import {
 import {
   DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB,
   DISK_SPACE_STALE_AFTER_SECONDS,
+  monitoredDiskSpaceVolumes,
   type AgentDiskSpaceVolumeReport,
 } from "@ai-development-environment/agent-contract/disk-space";
 import {
@@ -1045,7 +1046,9 @@ export class AgentControlService {
         try {
           const parsed: unknown = JSON.parse(diskState.volumesJson);
           if (Array.isArray(parsed)) {
-            volumes = parsed as AgentDiskSpaceVolumeReport[];
+            volumes = monitoredDiskSpaceVolumes(
+              parsed as AgentDiskSpaceVolumeReport[],
+            );
           }
         } catch {
           // Malformed telemetry fails open like unavailable telemetry.

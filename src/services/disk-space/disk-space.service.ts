@@ -11,6 +11,8 @@ import {
   DEFAULT_DISK_SPACE_THRESHOLD_GIB,
   DISK_SPACE_POLL_INTERVAL_SECONDS,
   DISK_SPACE_STALE_AFTER_SECONDS,
+  isMonitoredDiskSpaceVolume,
+  monitoredDiskSpaceVolumes,
   parseAgentDiskSpaceReport,
   type AgentDiskSpaceEntryReport,
   type AgentDiskSpaceVolumeReport,
@@ -59,7 +61,11 @@ export type DiskSpaceSettingsView = {
 export type DiskSpaceVolumeView = AgentDiskSpaceVolumeReport & {
   status: DiskSpaceAgentStatus;
   effectiveThresholdBytes: number;
+  monitored: boolean;
 };
+
+export const NO_MONITORED_VOLUME_WARNING =
+  "No Derived Data volume was reported, so free space is not being monitored for this agent";
 
 export type AgentDiskSpaceView = {
   agent: Agent;
@@ -281,10 +287,11 @@ export class DiskSpaceService {
         const volumes = parseArray<AgentDiskSpaceVolumeReport>(
           state?.volumesJson,
         );
-        const critical = volumes.some(
+        const monitored = monitoredDiskSpaceVolumes(volumes);
+        const critical = monitored.some(
           (volume) => volume.freeBytes <= settings.pressureThresholdGiB * GIB,
         );
-        const cleanupRequired = volumes.some(
+        const cleanupRequired = monitored.some(
           (volume) => volume.freeBytes < effectiveThresholdBytes,
         );
         let status: DiskSpaceAgentStatus = "IDLE";
@@ -301,24 +308,36 @@ export class DiskSpaceService {
         else if (manualPressureMode || automaticPressureMode)
           status = "PRESSURE";
         else if (cleanupRequired) status = "CLEANUP_REQUIRED";
-        const volumeViews: DiskSpaceVolumeView[] = volumes.map((volume) => ({
-          ...volume,
-          effectiveThresholdBytes,
-          status: !enabled
-            ? "DISABLED"
-            : stale
-              ? "STALE"
-              : volume.freeBytes <= settings.pressureThresholdGiB * GIB
-                ? "CRITICAL"
-                : deleting.has(agent.id) &&
-                    volume.freeBytes < effectiveThresholdBytes
-                  ? "DELETING"
-                  : manualPressureMode || automaticPressureMode
-                    ? "PRESSURE"
-                    : volume.freeBytes < effectiveThresholdBytes
-                      ? "CLEANUP_REQUIRED"
-                      : "IDLE",
-        }));
+        const volumeViews: DiskSpaceVolumeView[] = volumes.map((volume) => {
+          const monitoredVolume = isMonitoredDiskSpaceVolume(volume);
+          return {
+            ...volume,
+            effectiveThresholdBytes,
+            monitored: monitoredVolume,
+            status: !enabled
+              ? "DISABLED"
+              : stale
+                ? "STALE"
+                : // Unmonitored volumes are shown for context only; their free
+                  // space never escalates status.
+                  !monitoredVolume
+                  ? "IDLE"
+                  : volume.freeBytes <= settings.pressureThresholdGiB * GIB
+                    ? "CRITICAL"
+                    : deleting.has(agent.id) &&
+                        volume.freeBytes < effectiveThresholdBytes
+                      ? "DELETING"
+                      : manualPressureMode || automaticPressureMode
+                        ? "PRESSURE"
+                        : volume.freeBytes < effectiveThresholdBytes
+                          ? "CLEANUP_REQUIRED"
+                          : "IDLE",
+          };
+        });
+        const warnings = parseArray<string>(state?.warningsJson);
+        if (enabled && !stale && volumes.length > 0 && monitored.length === 0) {
+          warnings.push(NO_MONITORED_VOLUME_WARNING);
+        }
         return {
           agent,
           enabled,
@@ -328,7 +347,7 @@ export class DiskSpaceService {
           automaticPressureMode,
           lastReportedAt: lastReportedAt?.toISOString() ?? null,
           lastError: state?.lastError ?? null,
-          warnings: parseArray<string>(state?.warningsJson),
+          warnings,
           volumes: volumeViews,
         };
       }),
@@ -412,7 +431,9 @@ export class DiskSpaceService {
     ) {
       return;
     }
-    const volumes = parseArray<AgentDiskSpaceVolumeReport>(state.volumesJson);
+    const volumes = monitoredDiskSpaceVolumes(
+      parseArray<AgentDiskSpaceVolumeReport>(state.volumesJson),
+    );
     if (
       volumes.some(
         (volume) => volume.freeBytes <= settings.pressureThresholdGiB * GIB,
@@ -463,7 +484,11 @@ export class DiskSpaceService {
       return;
     }
     let entries = parseArray<StoredEntry>(state.entriesJson);
-    const volumes = parseArray<AgentDiskSpaceVolumeReport>(state.volumesJson);
+    const allVolumes = parseArray<AgentDiskSpaceVolumeReport>(state.volumesJson);
+    // Only the Derived Data volume drives pressure mode and cleanup; capacity
+    // ids below still resolve against every reported volume so entries keep
+    // matching volumes that share an APFS container.
+    const volumes = monitoredDiskSpaceVolumes(allVolumes);
     const worktreeIds = entries
       .map((entry) => entry.worktreeId)
       .filter((id): id is string => Boolean(id));
@@ -485,7 +510,7 @@ export class DiskSpaceService {
     const capacityId = (volume: AgentDiskSpaceVolumeReport) =>
       volume.capacityId ?? volume.id;
     const capacityByVolumeId = new Map(
-      volumes.map((volume) => [volume.id, capacityId(volume)]),
+      allVolumes.map((volume) => [volume.id, capacityId(volume)]),
     );
     const hasCandidate = (volume: AgentDiskSpaceVolumeReport) =>
       entries.some(

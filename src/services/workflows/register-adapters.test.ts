@@ -357,4 +357,49 @@ describe("custom command workflow adapter", () => {
     );
     expect(result.wait).toBeUndefined();
   });
+
+  test("applies the step's configured wait timing", async () => {
+    const { executor } = customExecutor();
+    const input = context("actual-worktree");
+    input.attempt = { ...input.attempt, idempotencyKey: "custom-attempt" };
+    input.node = {
+      ...input.node,
+      id: "custom-command",
+      kind: "CUSTOM_COMMAND",
+      config: {
+        script: "printf custom",
+        completionMode: "WAIT_FOR_EXIT",
+        cadenceSeconds: 30,
+        timeoutSeconds: 7_200,
+      },
+    };
+
+    const result = await executor.execute(input);
+    const seconds = (value: Date | null | undefined) =>
+      Math.round(((value?.getTime() ?? 0) - Date.now()) / 1_000);
+
+    expect(seconds(result.wait?.resumeAfter)).toBe(30);
+    expect(seconds(result.wait?.timeoutAt)).toBe(7_200);
+  });
+
+  test("keeps the built-in wait timing when the step configures none", async () => {
+    const { executor } = customExecutor();
+    const input = context("actual-worktree");
+    input.attempt = { ...input.attempt, idempotencyKey: "custom-attempt" };
+    input.node = {
+      ...input.node,
+      id: "custom-command",
+      kind: "CUSTOM_COMMAND",
+      config: { script: "printf custom", completionMode: "WAIT_FOR_EXIT" },
+    };
+
+    const result = await executor.execute(input);
+
+    expect(
+      Math.round(
+        ((result.wait?.resumeAfter?.getTime() ?? 0) - Date.now()) / 1_000,
+      ),
+    ).toBe(1);
+    expect(result.wait?.timeoutAt).toBeNull();
+  });
 });
