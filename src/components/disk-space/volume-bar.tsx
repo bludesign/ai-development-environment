@@ -28,10 +28,12 @@ export function VolumeBar({
   volume,
   compact = false,
   hideLabel = false,
+  hideStatus = false,
 }: {
   volume: DiskSpaceVolume;
   compact?: boolean;
   hideLabel?: boolean;
+  hideStatus?: boolean;
 }) {
   const locale = useLocale();
   const t = useTranslations("diskSpace");
@@ -75,9 +77,11 @@ export function VolumeBar({
           style={{ width: `${usedPercent}%` }}
         />
       </div>
-      {!compact && (
+      {!compact && (!hideStatus || volume.paths.length > 0) && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">{t(`status.${volume.status}`)}</Badge>
+          {!hideStatus && (
+            <Badge variant="secondary">{t(`status.${volume.status}`)}</Badge>
+          )}
           {volume.paths.map((path) => (
             <span
               className="break-all font-mono text-[11px] text-muted-foreground"

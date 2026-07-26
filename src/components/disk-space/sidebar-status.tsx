@@ -334,7 +334,12 @@ export function SidebarStatusFooter() {
                   </div>
                 </div>
                 {agent.volumes.map((volume) => (
-                  <VolumeBar compact key={volume.id} volume={volume} />
+                  <VolumeBar
+                    compact
+                    hideLabel
+                    key={volume.id}
+                    volume={volume}
+                  />
                 ))}
                 {(agent.lastError || agent.warnings.length > 0) && (
                   <p className="text-xs text-destructive">

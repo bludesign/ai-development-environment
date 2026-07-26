@@ -62,7 +62,17 @@ const overview = {
       lastReportedAt: reportedAt,
       lastError: null,
       warnings: [],
-      volumes: [],
+      volumes: [
+        {
+          id: "main",
+          totalBytes: 500 * 1024 ** 3,
+          freeBytes: 100 * 1024 ** 3,
+          roles: ["MAIN"],
+          paths: ["/"],
+          status: "PRESSURE",
+          effectiveThresholdBytes: 10 * 1024 ** 3,
+        },
+      ],
     },
   ],
 };
@@ -160,6 +170,7 @@ describe("DiskSpaceMonitor", () => {
     expect(pressure.className).toContain("bg-amber-500/10");
 
     expect(screen.getByText("Pressure").className).toContain("bg-amber-500/10");
+    expect(screen.getAllByText("Pressure")).toHaveLength(1);
     expect(screen.getByText("Manual pressure").className).toContain(
       "bg-amber-500/10",
     );

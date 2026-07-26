@@ -296,7 +296,11 @@ export function DiskSpaceMonitor() {
                   {agent.volumes.length ? (
                     <div className="space-y-3">
                       {agent.volumes.map((volume) => (
-                        <VolumeBar key={volume.id} volume={volume} />
+                        <VolumeBar
+                          hideStatus
+                          key={volume.id}
+                          volume={volume}
+                        />
                       ))}
                     </div>
                   ) : (
