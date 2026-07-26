@@ -62,7 +62,7 @@ model Agent {
   runDrafts                        RunDraft[]
   runCommands                      RunCommand[]
   runProviderSyncs                 RunProviderSync[]
-  targetedCommandDefinitions       CommandDefinition[]          @relation("CommandDefinitionTargetAgent")
+  targetedCommandDefinitions       CommandDefinition[]        @relation("CommandDefinitionTargetAgent")
   commandRuns                      CommandRun[]
   diskSpaceState                   AgentDiskSpaceState?
   derivedDataLocks                 DerivedDataLock[]
@@ -302,10 +302,55 @@ model Worktree {
   runLease                 WorktreeRunLease?
   commandRuns              CommandRun[]
   derivedDataCleanupLease  DerivedDataCleanupLease?
+  autoSync                 WorktreeAutoSync?
+  autoMerge                WorktreeAutoMerge?
 
   @@unique([codebaseId, gitDirectory])
   @@index([codebaseId, missingAt])
   @@index([missingAt])
+}
+
+model WorktreeAutoSync {
+  worktreeId             String    @id
+  state                  String    @default("ACTIVE")
+  branch                 String
+  conflictWorkflowId     String?
+  conflictWorkflowChoice String?
+  activeJobId            String?
+  workflowRunId          String?
+  lastError              String?
+  lastSyncedAt           DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  worktree               Worktree  @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  conflictWorkflow       Workflow? @relation(fields: [conflictWorkflowId], references: [id], onDelete: SetNull)
+
+  @@index([state, updatedAt])
+  @@index([conflictWorkflowId])
+}
+
+model WorktreeAutoMerge {
+  worktreeId              String    @id
+  state                   String    @default("ACTIVE")
+  repositoryNameWithOwner String
+  pullRequestNumber       Int
+  branch                  String
+  mergeMethod             String
+  commitHeadline          String
+  commitBody              String    @default("")
+  authorEmail             String?
+  deleteWorktree          Boolean   @default(false)
+  moveTicketToDone        Boolean   @default(false)
+  ticketKey               String?
+  ticketMovedAt           DateTime?
+  deleteJobId             String?
+  lastError               String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  worktree                Worktree  @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+
+  @@index([state, updatedAt])
+  @@index([repositoryNameWithOwner, pullRequestNumber])
 }
 
 model AgentRun {
@@ -1161,17 +1206,17 @@ model BuildScriptExecution {
 }
 
 model BuildLogChunk {
-  id        String   @id
-  buildId   String
-  scope     String
-  scopeId   String
-  sequence  Int
-  phase     String
-  stream    String
+  id         String   @id
+  buildId    String
+  scope      String
+  scopeId    String
+  sequence   Int
+  phase      String
+  stream     String
   dataBase64 String
   byteLength Int
-  createdAt DateTime @default(now())
-  build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  build      Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
 
   @@unique([scope, scopeId, sequence])
   @@index([buildId, createdAt, sequence, id])
@@ -1360,18 +1405,18 @@ model DiskSpaceSettings {
 }
 
 model AgentDiskSpaceState {
-  agentId               String   @id
-  enabled               Boolean  @default(true)
-  manualPressureMode    Boolean  @default(false)
-  automaticPressureMode Boolean  @default(false)
-  volumesJson           String   @default("[]")
-  entriesJson           String   @default("[]")
-  warningsJson          String   @default("[]")
+  agentId               String    @id
+  enabled               Boolean   @default(true)
+  manualPressureMode    Boolean   @default(false)
+  automaticPressureMode Boolean   @default(false)
+  volumesJson           String    @default("[]")
+  entriesJson           String    @default("[]")
+  warningsJson          String    @default("[]")
   lastReportedAt        DateTime?
   lastError             String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  agent                  Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  agent                 Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@index([enabled, lastReportedAt])
 }
@@ -1786,6 +1831,7 @@ model JiraProject {
   ticketAssignmentFilter String       @default("ALL")
   hideCompletedTickets   Boolean      @default(false)
   completedStatusIdsJson String       @default("[]")
+  doneStatusId           String?
   branchNamingScript     String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
@@ -2077,25 +2123,26 @@ model GitHubRepository {
 }
 
 model Workflow {
-  id                  String            @id
-  name                String
-  description         String            @default("")
-  draftDefinitionJson String
-  draftSchemaVersion  Int               @default(1)
-  activeVersionId     String?           @unique
-  enabled             Boolean           @default(false)
-  overlapPolicy       String            @default("QUEUE")
-  maxConcurrentRuns   Int               @default(1)
-  quickActionKind     String            @default("NONE")
-  quickActionIconKey  String            @default("play")
-  quickActionButtonVariant String       @default("default")
-  archivedAt          DateTime?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  versions            WorkflowVersion[] @relation("WorkflowVersions")
-  activeVersion       WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
-  runs                WorkflowRun[]
-  quickActionRepositories WorkflowQuickActionRepository[]
+  id                       String                          @id
+  name                     String
+  description              String                          @default("")
+  draftDefinitionJson      String
+  draftSchemaVersion       Int                             @default(1)
+  activeVersionId          String?                         @unique
+  enabled                  Boolean                         @default(false)
+  overlapPolicy            String                          @default("QUEUE")
+  maxConcurrentRuns        Int                             @default(1)
+  quickActionKind          String                          @default("NONE")
+  quickActionIconKey       String                          @default("play")
+  quickActionButtonVariant String                          @default("default")
+  archivedAt               DateTime?
+  createdAt                DateTime                        @default(now())
+  updatedAt                DateTime                        @updatedAt
+  versions                 WorkflowVersion[]               @relation("WorkflowVersions")
+  activeVersion            WorkflowVersion?                @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs                     WorkflowRun[]
+  quickActionRepositories  WorkflowQuickActionRepository[]
+  conflictAutoSyncRules    WorktreeAutoSync[]
 
   @@index([archivedAt, updatedAt])
   @@index([enabled, activeVersionId])
@@ -2113,23 +2160,23 @@ model WorkflowQuickActionRepository {
 }
 
 model CommandDefinition {
-  id                       String             @id
+  id                       String              @id
   name                     String
-  description              String             @default("")
+  description              String              @default("")
   script                   String
   targetKind               String
   targetAgentId            String?
   targetRepositoryId       String?
-  restartPolicy            String             @default("NEVER")
-  restartLimit             Int?               @default(3)
-  quickActionEnabled       Boolean            @default(false)
-  quickActionIconKey       String             @default("terminal")
-  quickActionButtonVariant String             @default("default")
-  notificationsEnabled     Boolean            @default(true)
+  restartPolicy            String              @default("NEVER")
+  restartLimit             Int?                @default(3)
+  quickActionEnabled       Boolean             @default(false)
+  quickActionIconKey       String              @default("terminal")
+  quickActionButtonVariant String              @default("default")
+  notificationsEnabled     Boolean             @default(true)
   archivedAt               DateTime?
-  createdAt                DateTime           @default(now())
-  updatedAt                DateTime           @updatedAt
-  targetAgent              Agent?             @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  targetAgent              Agent?              @relation("CommandDefinitionTargetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
   targetRepository         CodebaseRepository? @relation(fields: [targetRepositoryId], references: [id], onDelete: SetNull)
   runs                     CommandRun[]
 
@@ -2139,45 +2186,45 @@ model CommandDefinition {
 }
 
 model CommandRun {
-  id                 String              @id
-  displayNumber      Int                 @unique
-  commandId          String?
-  idempotencyKey     String              @unique
-  origin             String              @default("MANUAL")
-  status             String              @default("QUEUED")
-  snapshotName       String
-  snapshotDescription String             @default("")
-  snapshotScript     String
-  snapshotTargetKind String
-  snapshotRestartPolicy String           @default("NEVER")
-  snapshotRestartLimit Int?
-  snapshotNotificationsEnabled Boolean   @default(true)
-  snapshotJson       String              @default("{}")
-  agentId            String?
-  worktreeId         String?
-  agentName          String
-  agentHostname      String
-  worktreePath       String?
-  worktreeBranch     String?
-  restartCount       Int                 @default(0)
-  stopRequested      Boolean             @default(false)
-  nextRestartAt      DateTime?
-  predecessorRunId   String?             @unique
-  error              String?
-  exitCode           Int?
-  signal             String?
-  queuedAt           DateTime            @default(now())
-  startedAt          DateTime?
-  finishedAt         DateTime?
-  archivedAt         DateTime?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  command            CommandDefinition?  @relation(fields: [commandId], references: [id], onDelete: Restrict)
-  agent              Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  worktree           Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
-  predecessor        CommandRun?         @relation("CommandRunReruns", fields: [predecessorRunId], references: [id], onDelete: SetNull)
-  successor          CommandRun?         @relation("CommandRunReruns")
-  attempts           CommandRunAttempt[]
+  id                           String              @id
+  displayNumber                Int                 @unique
+  commandId                    String?
+  idempotencyKey               String              @unique
+  origin                       String              @default("MANUAL")
+  status                       String              @default("QUEUED")
+  snapshotName                 String
+  snapshotDescription          String              @default("")
+  snapshotScript               String
+  snapshotTargetKind           String
+  snapshotRestartPolicy        String              @default("NEVER")
+  snapshotRestartLimit         Int?
+  snapshotNotificationsEnabled Boolean             @default(true)
+  snapshotJson                 String              @default("{}")
+  agentId                      String?
+  worktreeId                   String?
+  agentName                    String
+  agentHostname                String
+  worktreePath                 String?
+  worktreeBranch               String?
+  restartCount                 Int                 @default(0)
+  stopRequested                Boolean             @default(false)
+  nextRestartAt                DateTime?
+  predecessorRunId             String?             @unique
+  error                        String?
+  exitCode                     Int?
+  signal                       String?
+  queuedAt                     DateTime            @default(now())
+  startedAt                    DateTime?
+  finishedAt                   DateTime?
+  archivedAt                   DateTime?
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+  command                      CommandDefinition?  @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  agent                        Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  worktree                     Worktree?           @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  predecessor                  CommandRun?         @relation("CommandRunReruns", fields: [predecessorRunId], references: [id], onDelete: SetNull)
+  successor                    CommandRun?         @relation("CommandRunReruns")
+  attempts                     CommandRunAttempt[]
 
   @@index([commandId, createdAt])
   @@index([agentId, status, createdAt])

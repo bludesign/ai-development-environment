@@ -99,6 +99,13 @@ type RawPullRequest = {
   } | null;
   reviewDecision: string | null;
   reviewThreads: RawConnection<{ isResolved: boolean }>;
+  isDraft: boolean;
+  mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
+  mergeStateStatus: string;
+  autoMergeRequest: { enabledAt: string } | null;
+  viewerCanEnableAutoMerge: boolean;
+  viewerCanDisableAutoMerge: boolean;
+  headRefOid: string;
 };
 
 type RawCheckSuite = {
@@ -241,6 +248,12 @@ type RawPullRequestMergeState = {
   mergeable: "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
   mergeStateStatus: string;
   headRefOid: string;
+  headRefName: string;
+  headRepository: { nameWithOwner: string } | null;
+  mergedAt: string | null;
+  autoMergeRequest: { enabledAt: string } | null;
+  viewerCanEnableAutoMerge: boolean;
+  viewerCanDisableAutoMerge: boolean;
 };
 
 type RepositoryPermission = "ADMIN" | "MAINTAIN" | "WRITE" | "TRIAGE" | "READ";
@@ -343,6 +356,7 @@ const PULL_REQUEST_FRAGMENT = `
     state
     mergedAt
     headRefName
+    headRefOid
     headRepository { nameWithOwner }
     repository { id nameWithOwner url }
     labels(first: 100) {
@@ -357,6 +371,12 @@ const PULL_REQUEST_FRAGMENT = `
       }
     }
     reviewDecision
+    isDraft
+    mergeable
+    mergeStateStatus
+    autoMergeRequest { enabledAt }
+    viewerCanEnableAutoMerge
+    viewerCanDisableAutoMerge
     reviewThreads(first: 100) {
       nodes { isResolved }
       pageInfo { hasNextPage endCursor }
@@ -3084,6 +3104,13 @@ export class GitHubService {
       reviewDecision: reviewDecision(pullRequest.reviewDecision),
       unresolvedReviewThreadCount,
       state: pullRequest.mergedAt ? "MERGED" : pullRequest.state,
+      isDraft: pullRequest.isDraft,
+      mergeable: pullRequest.mergeable,
+      mergeStateStatus: pullRequest.mergeStateStatus,
+      autoMergeEnabled: Boolean(pullRequest.autoMergeRequest),
+      viewerCanEnableAutoMerge: Boolean(pullRequest.viewerCanEnableAutoMerge),
+      viewerCanDisableAutoMerge: Boolean(pullRequest.viewerCanDisableAutoMerge),
+      headRefOid: pullRequest.headRefOid,
       headRefName: pullRequest.headRefName,
       // Callers that show the pull request alongside its worktree overlay the
       // tint from `worktreeHighlights`; on its own a pull request carries no
@@ -3803,7 +3830,11 @@ export class GitHubService {
           squashMergeAllowed
           viewerPermission
           pullRequest(number: $number) {
-            id title body url state isDraft mergeable mergeStateStatus headRefOid
+            id title body url state isDraft mergeable mergeStateStatus
+            headRefOid headRefName headRepository { nameWithOwner } mergedAt
+            autoMergeRequest { enabledAt }
+            viewerCanEnableAutoMerge
+            viewerCanDisableAutoMerge
           }
         }
       }`,
@@ -3880,8 +3911,162 @@ export class GitHubService {
       defaultCommitHeadline: state.pullRequest.title,
       defaultCommitBody: state.pullRequest.body,
       canMerge: blockedReason === null,
+      canEnableAutoMerge:
+        state.pullRequest.state === "OPEN" &&
+        !state.pullRequest.isDraft &&
+        !state.pullRequest.autoMergeRequest &&
+        Boolean(state.pullRequest.viewerCanEnableAutoMerge) &&
+        state.availableMethods.length > 0,
+      autoMergeEnabled: Boolean(state.pullRequest.autoMergeRequest),
+      viewerCanDisableAutoMerge: Boolean(
+        state.pullRequest.viewerCanDisableAutoMerge,
+      ),
+      mergeStateStatus: state.pullRequest.mergeStateStatus,
+      headRefOid: state.pullRequest.headRefOid,
       blockedReason,
     };
+  }
+
+  async pullRequestAutomationState(
+    ownerValue: string,
+    nameValue: string,
+    number: number,
+  ) {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${ownerValue}/${nameValue}`,
+    );
+    const token = await this.requireToken();
+    const { pullRequest } = await this.mergeState(owner, name, number, token);
+    return {
+      id: pullRequest.id,
+      state: pullRequest.mergedAt ? ("MERGED" as const) : pullRequest.state,
+      url: pullRequest.url,
+      mergedAt: pullRequest.mergedAt,
+      headRefOid: pullRequest.headRefOid,
+      headRefName: pullRequest.headRefName,
+      headRepositoryNameWithOwner:
+        pullRequest.headRepository?.nameWithOwner ?? null,
+      mergeable: pullRequest.mergeable,
+      mergeStateStatus: pullRequest.mergeStateStatus,
+      autoMergeEnabled: Boolean(pullRequest.autoMergeRequest),
+      viewerCanEnableAutoMerge: Boolean(pullRequest.viewerCanEnableAutoMerge),
+      viewerCanDisableAutoMerge: Boolean(pullRequest.viewerCanDisableAutoMerge),
+    };
+  }
+
+  async enablePullRequestAutoMerge(input: {
+    owner: string;
+    name: string;
+    number: number;
+    method: GitHubMergeMethod;
+    commitHeadline: string;
+    commitBody: string;
+    authorEmail?: string | null;
+  }) {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const token = await this.requireToken();
+    const state = await this.mergeState(owner, name, input.number, token);
+    if (state.pullRequest.state !== "OPEN" || state.pullRequest.isDraft) {
+      throw new Error(
+        "Only an open, non-draft pull request can use Auto Merge",
+      );
+    }
+    if (!state.availableMethods.includes(input.method)) {
+      throw new Error(
+        "The selected merge method is not enabled for this repository.",
+      );
+    }
+    if (
+      !state.pullRequest.autoMergeRequest &&
+      !state.pullRequest.viewerCanEnableAutoMerge
+    ) {
+      throw new Error(
+        "GitHub does not allow Auto Merge for this pull request. It may already be ready to merge.",
+      );
+    }
+    if (state.pullRequest.autoMergeRequest) {
+      if (!state.pullRequest.viewerCanDisableAutoMerge) {
+        throw new Error("You cannot update this Auto Merge request");
+      }
+      await this.disablePullRequestAutoMerge({
+        owner,
+        name,
+        number: input.number,
+      });
+    }
+    const commitHeadline = input.commitHeadline.trim();
+    if (!commitHeadline) throw new Error("A commit message is required");
+    const data = await this.request<{
+      enablePullRequestAutoMerge: {
+        pullRequest: RawPullRequestMergeState | null;
+      };
+    }>(
+      `mutation EnableGitHubPullRequestAutoMerge(
+        $pullRequestId: ID!
+        $method: PullRequestMergeMethod!
+        $commitHeadline: String!
+        $commitBody: String!
+        $authorEmail: String
+      ) {
+        enablePullRequestAutoMerge(input: {
+          pullRequestId: $pullRequestId
+          mergeMethod: $method
+          commitHeadline: $commitHeadline
+          commitBody: $commitBody
+          authorEmail: $authorEmail
+        }) {
+          pullRequest {
+            id title body url state isDraft mergeable mergeStateStatus
+            headRefOid headRefName headRepository { nameWithOwner } mergedAt
+            autoMergeRequest { enabledAt }
+            viewerCanEnableAutoMerge
+            viewerCanDisableAutoMerge
+          }
+        }
+      }`,
+      {
+        pullRequestId: state.pullRequest.id,
+        method: input.method,
+        commitHeadline,
+        commitBody: input.commitBody,
+        authorEmail: input.authorEmail?.trim() || null,
+      },
+      token,
+    );
+    if (!data.enablePullRequestAutoMerge.pullRequest) {
+      throw new Error("GitHub did not return the updated pull request");
+    }
+    return this.pullRequestAutomationState(owner, name, input.number);
+  }
+
+  async disablePullRequestAutoMerge(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }) {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const token = await this.requireToken();
+    const state = await this.mergeState(owner, name, input.number, token);
+    if (!state.pullRequest.autoMergeRequest) {
+      return this.pullRequestAutomationState(owner, name, input.number);
+    }
+    if (!state.pullRequest.viewerCanDisableAutoMerge) {
+      throw new Error("You cannot disable this Auto Merge request");
+    }
+    await this.request(
+      `mutation DisableGitHubPullRequestAutoMerge($pullRequestId: ID!) {
+        disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) {
+          pullRequest { id }
+        }
+      }`,
+      { pullRequestId: state.pullRequest.id },
+      token,
+    );
+    return this.pullRequestAutomationState(owner, name, input.number);
   }
 
   async mergePullRequest(input: {

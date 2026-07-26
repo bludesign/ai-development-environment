@@ -547,6 +547,38 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     },
   ),
   step(
+    "WORKTREE_SET_AUTO_SYNC",
+    "Worktrees",
+    "Set worktree Auto Sync",
+    "SERVER",
+    ["worktree.id"],
+    ["worktree.autoSync"],
+    {
+      description:
+        "Enables, updates, retries, or cancels persistent Auto Sync for a worktree.",
+      details:
+        "An enabled rule rebases on the target branch whenever it changes and force-pushes with lease. A merge-conflict quick-action workflow can be selected as the automatic recovery path; unresolved conflicts pause the rule.",
+      mutatesWorktree: true,
+      mutatesExternal: true,
+    },
+  ),
+  step(
+    "WORKTREE_SET_AUTO_MERGE",
+    "Worktrees",
+    "Set worktree Auto Merge",
+    "SERVER",
+    ["worktree.id"],
+    ["worktree.autoMerge"],
+    {
+      description:
+        "Enables, updates, retries, or cancels GitHub-native Auto Merge for a worktree.",
+      details:
+        "GitHub remains the authority for required checks and reviews. Optional post-merge actions can move the linked Jira ticket to its configured done status and safely delete a clean linked worktree.",
+      mutatesWorktree: true,
+      mutatesExternal: true,
+    },
+  ),
+  step(
     "WORKTREE_DELETE",
     "Worktrees",
     "Delete worktree",

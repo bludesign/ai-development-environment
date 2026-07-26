@@ -1,5 +1,5 @@
 export const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
 
 export const WORKTREE_FIELDS = `
   id codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
@@ -8,6 +8,8 @@ export const WORKTREE_FIELDS = `
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt
   tags { id name color createdAt updatedAt }
   activeJob { id agentId kind payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
+  autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError lastSyncedAt updatedAt }
+  autoMerge { worktreeId state repositoryNameWithOwner pullRequestNumber mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
   latestBuild {
     id status action destinationType destination outOfDate createdAt

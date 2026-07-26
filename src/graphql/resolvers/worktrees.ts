@@ -8,8 +8,10 @@ import type {
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type {
   WorktreeBranchSelection,
+  WorktreeAutomationService,
   WorktreesService,
 } from "@/services/worktrees";
+import type { GitHubMergeMethod } from "@/services/github";
 
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
@@ -26,7 +28,10 @@ function requireControlPlane(context: GraphQLContext): void {
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
-export const createWorktreeResolvers = (service: WorktreesService) => ({
+export const createWorktreeResolvers = (
+  service: WorktreesService,
+  automation: WorktreeAutomationService,
+) => ({
   WorktreeLatestBuild: {
     destination: (value: { destinationJson: string }) =>
       JSON.parse(value.destinationJson) as unknown,
@@ -38,6 +43,26 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
     missingAt: (value: { missingAt: Date | null }) => iso(value.missingAt),
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+    autoSync: (value: {
+      autoSync?: {
+        lastSyncedAt: Date | null;
+        updatedAt: Date;
+      } | null;
+    }) =>
+      value.autoSync
+        ? {
+            ...value.autoSync,
+            lastSyncedAt: iso(value.autoSync.lastSyncedAt),
+            updatedAt: value.autoSync.updatedAt.toISOString(),
+          }
+        : null,
+    autoMerge: (value: { autoMerge?: { updatedAt: Date } | null }) =>
+      value.autoMerge
+        ? {
+            ...value.autoMerge,
+            updatedAt: value.autoMerge.updatedAt.toISOString(),
+          }
+        : null,
   },
   WorktreeTag: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
@@ -99,6 +124,22 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
     ) => {
       requireControlPlane(context);
       return service.getMove(id);
+    },
+    worktreeAutoSync: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.autoSync(worktreeId);
+    },
+    worktreeAutoMerge: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.autoMerge(worktreeId);
     },
   },
   Mutation: {
@@ -322,6 +363,72 @@ export const createWorktreeResolvers = (service: WorktreesService) => ({
     ) => {
       requireControlPlane(context);
       return service.purgeAll();
+    },
+    configureWorktreeAutoSync: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: Parameters<WorktreeAutomationService["configureAutoSync"]>[0];
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.configureAutoSync(input);
+    },
+    cancelWorktreeAutoSync: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.cancelAutoSync(worktreeId);
+    },
+    retryWorktreeAutoSync: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.retryAutoSync(worktreeId);
+    },
+    configureWorktreeAutoMerge: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          repositoryNameWithOwner: string;
+          pullRequestNumber: number;
+          method: GitHubMergeMethod;
+          commitHeadline: string;
+          commitBody: string;
+          authorEmail?: string | null;
+          deleteWorktree: boolean;
+          moveTicketToDone: boolean;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.configureAutoMerge(input);
+    },
+    cancelWorktreeAutoMerge: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.cancelAutoMerge(worktreeId);
+    },
+    retryWorktreeAutoMerge: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return automation.retryAutoMerge(worktreeId);
     },
   },
   Subscription: {

@@ -10,6 +10,7 @@ import type { DiskSpaceService } from "@/services/disk-space";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { TelemetryService } from "@/services/telemetry";
 import type { WorkflowsService } from "@/services/workflows";
+import type { WorktreeAutomationService } from "@/services/worktrees";
 
 import { createAgentToolGroup } from "./builtin-tools/agents";
 import { createBuildToolGroup } from "./builtin-tools/builds";
@@ -17,6 +18,7 @@ import { createCodebaseToolGroup } from "./builtin-tools/codebases";
 import { createDebuggingToolGroup } from "./builtin-tools/debugging";
 import { createDiskSpaceToolGroup } from "./builtin-tools/disk-space";
 import { createWorkflowToolGroup } from "./builtin-tools/workflows";
+import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
 import type { ToolCatalogGroup } from "./types";
 
 export type ToolAnnotations = {
@@ -79,6 +81,7 @@ export type BuiltInToolServices = {
    * tool is invoked.
    */
   workflows?: () => WorkflowsService;
+  worktreeAutomations?: () => WorktreeAutomationService;
 };
 
 export function defineTool<I extends z.ZodType, O extends z.ZodType>(input: {
@@ -225,5 +228,10 @@ export function createBuiltInToolRegistry(
     groups.push(createDiskSpaceToolGroup(services.diskSpace));
   if (services.workflows)
     groups.push(createWorkflowToolGroup(services.workflows));
+  if (services.worktreeAutomations) {
+    groups.push(
+      createWorktreeAutomationToolGroup(services.worktreeAutomations),
+    );
+  }
   return new BuiltInToolRegistry(groups);
 }

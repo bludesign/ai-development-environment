@@ -240,6 +240,7 @@ export const createJiraResolvers = (jiraService: JiraService) => ({
           ticketAssignmentFilter: JiraTicketAssignmentFilter;
           hideCompletedTickets: boolean;
           completedStatusIds: string[];
+          doneStatusId?: string | null;
         };
       },
       context: GraphQLContext,

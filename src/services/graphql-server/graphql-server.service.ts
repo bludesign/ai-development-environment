@@ -76,6 +76,7 @@ class GraphQLServerService {
       this.services.codebasesService,
       this.services.toolsService,
       this.services.worktreesService,
+      this.services.worktreeAutomationService,
       this.services.buildDataService,
       this.services.skillsService,
       this.services.buildsService,

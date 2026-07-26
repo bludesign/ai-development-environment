@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
 import {
   worktreeBranchJobPayload,
+  worktreeAutoSyncJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
   worktreeGitInspectPayload,
@@ -2538,6 +2539,266 @@ export const operateWorktree: AgentJobHandler = async (
 
   return {
     ...successfulProcess,
+    worktree: await inspectWorktreeItem(
+      folder,
+      folder,
+      input.baseBranch,
+      false,
+      Math.min(timeoutMs, 30_000),
+      signal,
+    ),
+  };
+};
+
+export const autoSyncWorktree: AgentJobHandler = async (
+  payload,
+  timeoutMs,
+  signal,
+) => {
+  const input = worktreeAutoSyncJobPayload(payload);
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  const runGit = async (args: string[], fallback: string) =>
+    requireSuccess(await git(folder, args, timeoutMs, signal), fallback);
+  const branchResult = await git(
+    folder,
+    ["symbolic-ref", "--short", "-q", "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  const symbolicBranch =
+    branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+  const branch =
+    symbolicBranch ??
+    (input.phase === "FINALIZE"
+      ? await rebaseBranch(folder, timeoutMs, signal)
+      : null);
+  if (branch !== input.expectedBranch) {
+    throw new Error(
+      `Auto Sync expected branch ${input.expectedBranch}, but found ${branch ?? "detached HEAD"}`,
+    );
+  }
+  const upstreamResult = branch
+    ? await git(
+        folder,
+        ["rev-parse", "--abbrev-ref", "@{upstream}"],
+        timeoutMs,
+        signal,
+      )
+    : null;
+  const upstream =
+    upstreamResult?.exitCode === 0 ? upstreamResult.stdout.trim() : null;
+  if (input.phase === "SYNC" && (!branch || !upstream)) {
+    throw new Error("Auto Sync requires a branch with an upstream");
+  }
+
+  if (input.phase === "FINALIZE") {
+    let status = await runGit(
+      ["status", "--porcelain=v1", "-z"],
+      "Could not inspect worktree changes",
+    );
+    let changes = statusChangeState(status.stdout);
+    const continuingRebase = await rebaseInProgress(folder, timeoutMs, signal);
+    if (changes.hasConflicts && !continuingRebase) {
+      return {
+        ...successfulProcess,
+        outcome: "UNRESOLVED",
+        worktree: await inspectWorktreeItem(
+          folder,
+          folder,
+          input.baseBranch,
+          false,
+          Math.min(timeoutMs, 30_000),
+          signal,
+        ),
+      };
+    }
+    if (continuingRebase) {
+      await runGit(["add", "--all"], "Could not stage resolved conflicts");
+      const continued = await command(
+        "git",
+        ["-C", folder, "rebase", "--continue"],
+        timeoutMs,
+        signal,
+        {
+          ...process.env,
+          GIT_EDITOR: "true",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+        },
+      );
+      if (continued.exitCode !== 0) {
+        return {
+          ...successfulProcess,
+          outcome: "UNRESOLVED",
+          worktree: await inspectWorktreeItem(
+            folder,
+            folder,
+            input.baseBranch,
+            false,
+            Math.min(timeoutMs, 30_000),
+            signal,
+          ),
+        };
+      }
+      status = await runGit(
+        ["status", "--porcelain=v1", "-z"],
+        "Could not inspect resolved worktree changes",
+      );
+      changes = statusChangeState(status.stdout);
+    }
+    if (
+      changes.hasConflicts ||
+      changes.hasStagedChanges ||
+      changes.hasUnstagedChanges ||
+      (await rebaseInProgress(folder, timeoutMs, signal))
+    ) {
+      return {
+        ...successfulProcess,
+        outcome: "UNRESOLVED",
+        worktree: await inspectWorktreeItem(
+          folder,
+          folder,
+          input.baseBranch,
+          false,
+          Math.min(timeoutMs, 30_000),
+          signal,
+        ),
+      };
+    }
+    const finalBranch = await git(
+      folder,
+      ["symbolic-ref", "--short", "-q", "HEAD"],
+      timeoutMs,
+      signal,
+    );
+    const finalUpstream =
+      finalBranch.exitCode === 0
+        ? await git(
+            folder,
+            ["rev-parse", "--abbrev-ref", "@{upstream}"],
+            timeoutMs,
+            signal,
+          )
+        : null;
+    if (
+      finalBranch.exitCode !== 0 ||
+      finalBranch.stdout.trim() !== input.expectedBranch ||
+      finalUpstream?.exitCode !== 0 ||
+      !finalUpstream.stdout.trim()
+    ) {
+      throw new Error(
+        `Auto Sync expected branch ${input.expectedBranch} with an upstream`,
+      );
+    }
+    await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+    return {
+      ...successfulProcess,
+      outcome: "SYNCED",
+      worktree: await inspectWorktreeItem(
+        folder,
+        folder,
+        input.baseBranch,
+        false,
+        Math.min(timeoutMs, 30_000),
+        signal,
+      ),
+    };
+  }
+
+  const status = await runGit(
+    ["status", "--porcelain"],
+    "Could not inspect worktree changes",
+  );
+  if (status.stdout.trim()) {
+    throw new Error("Stash or commit changes before Auto Sync can continue");
+  }
+  await runGit(["fetch", "origin"], "Could not fetch origin");
+  const remoteBase = `refs/remotes/origin/${input.baseBranch}`;
+  const isCurrent = await git(
+    folder,
+    ["merge-base", "--is-ancestor", remoteBase, "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  if (isCurrent.exitCode === 0) {
+    const upstreamContainsHead = await git(
+      folder,
+      ["merge-base", "--is-ancestor", "HEAD", "@{upstream}"],
+      timeoutMs,
+      signal,
+    );
+    if (
+      upstreamContainsHead.exitCode !== 0 &&
+      upstreamContainsHead.exitCode !== 1
+    ) {
+      throw new Error(
+        cleanError(
+          upstreamContainsHead.stderr ||
+            "Could not compare the upstream branch",
+        ),
+      );
+    }
+    if (upstreamContainsHead.exitCode !== 0) {
+      await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+      return {
+        ...successfulProcess,
+        outcome: "SYNCED",
+        worktree: await inspectWorktreeItem(
+          folder,
+          folder,
+          input.baseBranch,
+          false,
+          Math.min(timeoutMs, 30_000),
+          signal,
+        ),
+      };
+    }
+    return {
+      ...successfulProcess,
+      outcome: "NO_CHANGE",
+      worktree: await inspectWorktreeItem(
+        folder,
+        folder,
+        input.baseBranch,
+        false,
+        Math.min(timeoutMs, 30_000),
+        signal,
+      ),
+    };
+  }
+
+  const rebase = await git(folder, ["rebase", remoteBase], timeoutMs, signal);
+  if (rebase.exitCode !== 0) {
+    const conflictStatus = await git(
+      folder,
+      ["status", "--porcelain=v1", "-z"],
+      timeoutMs,
+      signal,
+    );
+    const conflicts =
+      conflictStatus.exitCode === 0 &&
+      statusChangeState(conflictStatus.stdout).hasConflicts;
+    if (conflicts && (await rebaseInProgress(folder, timeoutMs, signal))) {
+      return {
+        ...successfulProcess,
+        outcome: "CONFLICT",
+        worktree: await inspectWorktreeItem(
+          folder,
+          folder,
+          input.baseBranch,
+          false,
+          Math.min(timeoutMs, 30_000),
+          signal,
+        ),
+      };
+    }
+    await git(folder, ["rebase", "--abort"], timeoutMs, signal);
+    throw new Error(cleanError(rebase.stderr || "Auto Sync rebase failed"));
+  }
+  await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+  return {
+    ...successfulProcess,
+    outcome: "SYNCED",
     worktree: await inspectWorktreeItem(
       folder,
       folder,

@@ -138,6 +138,13 @@ type GitHubPullRequest {
   reviewDecision: GitHubReviewDecision!
   unresolvedReviewThreadCount: Int!
   state: GitHubPullRequestState!
+  isDraft: Boolean!
+  mergeable: String!
+  mergeStateStatus: String!
+  autoMergeEnabled: Boolean!
+  viewerCanEnableAutoMerge: Boolean!
+  viewerCanDisableAutoMerge: Boolean!
+  headRefOid: String!
   headRefName: String!
   worktreeId: ID
   worktreeHighlightColor: String
@@ -447,6 +454,11 @@ type GitHubPullRequestMergeOptions {
   defaultCommitHeadline: String!
   defaultCommitBody: String!
   canMerge: Boolean!
+  canEnableAutoMerge: Boolean!
+  autoMergeEnabled: Boolean!
+  viewerCanDisableAutoMerge: Boolean!
+  mergeStateStatus: String!
+  headRefOid: String!
   blockedReason: String
 }
 

@@ -14,7 +14,10 @@ import { JiraService } from "@/services/jira";
 import { IosDevicesService } from "@/services/ios-devices";
 import { PrismaService } from "@/services/prisma";
 import { ToolsService } from "@/services/tools";
-import { WorktreesService } from "@/services/worktrees";
+import {
+  WorktreeAutomationService,
+  WorktreesService,
+} from "@/services/worktrees";
 import { SkillsService } from "@/services/skills";
 import { TelemetryService } from "@/services/telemetry";
 import { SigningAssetsService } from "@/services/signing-assets";
@@ -51,6 +54,7 @@ export type ServerServices = {
   cacheServerService: CacheServerService;
   toolsService: ToolsService;
   worktreesService: WorktreesService;
+  worktreeAutomationService: WorktreeAutomationService;
   skillsService: SkillsService;
   telemetryService: TelemetryService;
   signingAssetsService: SigningAssetsService;
@@ -148,6 +152,7 @@ function createServerServices(): ServerServices {
       // A thunk, not the instance: `workflowsService` is constructed below and
       // takes `toolsService` itself. Resolved when a workflow tool is called.
       workflows: () => workflowsService,
+      worktreeAutomations: () => worktreeAutomationService,
     },
     credentialService,
   );
@@ -165,11 +170,20 @@ function createServerServices(): ServerServices {
     gitHubService,
     jiraService,
   );
+  const worktreeAutomationService = new WorktreeAutomationService(
+    worktreesService,
+    gitHubService,
+    jiraService,
+    workflowsService,
+    agentControlService,
+    pollingService,
+  );
   registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
     agentControl: agentControlService,
     jira: jiraService,
     github: gitHubService,
     worktrees: worktreesService,
+    worktreeAutomations: worktreeAutomationService,
     codebases: codebasesService,
     builds: buildsService,
     skills: skillsService,
@@ -188,6 +202,7 @@ function createServerServices(): ServerServices {
   );
   workflowEventBridge.start();
   workflowsService.startRuntime();
+  worktreeAutomationService.startRuntime();
   const systemStatusService = new SystemStatusService(
     ccusageService,
     diskSpaceService,
@@ -209,6 +224,7 @@ function createServerServices(): ServerServices {
     gitHubActionsNotificationsService,
     cacheServerService,
     worktreesService,
+    worktreeAutomationService,
     skillsService,
     telemetryService,
     signingAssetsService,
