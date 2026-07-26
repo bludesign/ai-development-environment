@@ -199,7 +199,9 @@ function HeaderBreadcrumbItem({
   breadcrumb: AppBreadcrumb;
   className?: string;
 }) {
-  const labelClassName = "block max-w-48 truncate lg:max-w-64";
+  const labelClassName = breadcrumb.isCurrent
+    ? "block min-w-0 truncate"
+    : "block max-w-48 truncate lg:max-w-64";
 
   return (
     <BreadcrumbItem className={`min-w-0 ${className ?? ""}`}>

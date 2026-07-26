@@ -167,6 +167,9 @@ describe("AppShell", () => {
     expect(
       within(breadcrumb).getByText("Welcome").getAttribute("aria-current"),
     ).toBe("page");
+    expect(within(breadcrumb).getByText("Welcome").className).not.toContain(
+      "max-w-",
+    );
     expect(breadcrumb.className).toContain("flex-1");
     expect(
       navigationToggle.compareDocumentPosition(breadcrumb) &
