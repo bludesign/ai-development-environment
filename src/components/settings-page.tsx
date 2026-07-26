@@ -56,7 +56,29 @@ import type {
 const SETTINGS_FIELDS =
   "tokenConfigured defaultJiraKeyRegex actionsNotificationPollIntervalSeconds cacheTtlSeconds updatedAt";
 const APP_SETTINGS_FIELDS =
-  "configured appId installationId privateKeyConfigured keyFingerprint appSlug accountLogin repositorySelection actionsPermission checksPermission commitStatusesPermission webhookEvents enhancedPipelineWebhooksEnabled enhancedPipelineWebhooksReady enhancedPipelineWebhooksMissing verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
+  "configured appId installationId privateKeyConfigured keyFingerprint appSlug appOwnerLogin appOwnerType accountLogin repositorySelection actionsPermission checksPermission commitStatusesPermission webhookEvents enhancedPipelineWebhooksEnabled enhancedPipelineWebhooksReady enhancedPipelineWebhooksMissing verifiedAt webhookConfigured webhookUrl webhookConfiguredAt webhookLastReceivedAt webhookLastOutcome webhookLastError updatedAt";
+
+export function githubAppSettingsUrl(
+  settings: Pick<
+    GitHubAppSettingsView,
+    "appSlug" | "appOwnerLogin" | "appOwnerType"
+  > | null,
+): string | null {
+  if (!settings?.appSlug) return null;
+  const slug = encodeURIComponent(settings.appSlug);
+  if (settings.appOwnerType === "User") {
+    return `https://github.com/settings/apps/${slug}`;
+  }
+  if (!settings.appOwnerLogin) return null;
+  const owner = encodeURIComponent(settings.appOwnerLogin);
+  if (settings.appOwnerType === "Organization") {
+    return `https://github.com/organizations/${owner}/settings/apps/${slug}`;
+  }
+  if (settings.appOwnerType === "Enterprise") {
+    return `https://github.com/enterprises/${owner}/settings/apps/${slug}`;
+  }
+  return null;
+}
 
 export function SettingsPage() {
   const t = useTranslations("settings");
@@ -254,6 +276,9 @@ function GitHubAppSettingsCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const appSettingsUrl = githubAppSettingsUrl(settings);
+  const enhancedPipelineWebhooksBlocked =
+    !settings || (settings.enhancedPipelineWebhooksMissing?.length ?? 0) > 0;
 
   const applySettings = useCallback((next: GitHubAppSettingsView) => {
     setSettings(next);
@@ -542,6 +567,7 @@ function GitHubAppSettingsCard() {
                 <div className="flex items-start gap-3">
                   <Checkbox
                     checked={enhancedPipelineWebhooksEnabled}
+                    disabled={enhancedPipelineWebhooksBlocked}
                     id="github-enhanced-pipeline-webhooks"
                     onCheckedChange={(checked) =>
                       setEnhancedPipelineWebhooksEnabled(checked === true)
@@ -557,11 +583,9 @@ function GitHubAppSettingsCard() {
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("enhancedWebhooksHelp")}
                     </p>
-                    {settings?.appSlug && (
+                    {appSettingsUrl && (
                       <p className="mt-2 text-xs">
-                        <SettingsHelpLink
-                          href={`https://github.com/settings/apps/${settings.appSlug}`}
-                        >
+                        <SettingsHelpLink href={appSettingsUrl}>
                           {t("openAppSettings")}
                         </SettingsHelpLink>
                       </p>

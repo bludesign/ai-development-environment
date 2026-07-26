@@ -6,6 +6,7 @@ import {
   cancelGitHubActionsWorkflow,
   clearGitHubAppTokenCache,
   configureGitHubAppWebhook,
+  getGitHubAppRegistration,
   githubAppGraphql,
   GitHubAppError,
   listGitHubActionsWorkflowJobs,
@@ -1745,6 +1746,8 @@ export class GitHubService {
       installationId: string;
       keyFingerprint: string;
       appSlug: string;
+      appOwnerLogin: string | null;
+      appOwnerType: string | null;
       accountLogin: string;
       repositorySelection: string;
       actionsPermission: string;
@@ -1789,6 +1792,8 @@ export class GitHubService {
       privateKeyConfigured,
       keyFingerprint: settings?.keyFingerprint ?? null,
       appSlug: settings?.appSlug ?? null,
+      appOwnerLogin: settings?.appOwnerLogin ?? null,
+      appOwnerType: settings?.appOwnerType ?? null,
       accountLogin: settings?.accountLogin ?? null,
       repositorySelection: settings?.repositorySelection ?? null,
       actionsPermission: settings?.actionsPermission ?? null,
@@ -1814,7 +1819,7 @@ export class GitHubService {
   async getAppSettings(): Promise<GitHubAppSettingsView> {
     const prisma = await getPrismaClient();
     const [
-      settings,
+      storedSettings,
       privateKeyConfigured,
       webhookSecretConfigured,
       lastDelivery,
@@ -1829,6 +1834,29 @@ export class GitHubService {
         select: { receivedAt: true, outcome: true, error: true },
       }),
     ]);
+    let settings = storedSettings;
+    if (
+      settings &&
+      privateKeyConfigured &&
+      (!settings.appOwnerLogin || !settings.appOwnerType)
+    ) {
+      try {
+        const registration = await getGitHubAppRegistration(
+          await this.appCredentials(settings),
+        );
+        settings = await prisma.gitHubAppSettings.update({
+          where: { id: GITHUB_APP_SETTINGS_ID },
+          data: {
+            appSlug: registration.appSlug,
+            appOwnerLogin: registration.appOwnerLogin,
+            appOwnerType: registration.appOwnerType,
+          },
+        });
+      } catch {
+        // Owner metadata is supplemental; keep settings available if GitHub
+        // cannot be reached during the one-time backfill.
+      }
+    }
     return this.appSettingsView(
       settings,
       privateKeyConfigured,
@@ -2074,6 +2102,8 @@ export class GitHubService {
           graphqlUrl: GITHUB_GRAPHQL_URL,
           keyFingerprint: verification.keyFingerprint,
           appSlug: verification.appSlug,
+          appOwnerLogin: verification.appOwnerLogin,
+          appOwnerType: verification.appOwnerType,
           accountLogin: verification.accountLogin,
           repositorySelection: verification.repositorySelection,
           actionsPermission: verification.actionsPermission,
@@ -2183,6 +2213,8 @@ export class GitHubService {
         data: {
           keyFingerprint: verification.keyFingerprint,
           appSlug: verification.appSlug,
+          appOwnerLogin: verification.appOwnerLogin,
+          appOwnerType: verification.appOwnerType,
           accountLogin: verification.accountLogin,
           repositorySelection: verification.repositorySelection,
           actionsPermission: verification.actionsPermission,

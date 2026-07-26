@@ -111,6 +111,13 @@ describe("GitHub App authentication", () => {
           repository_selection: "selected",
         });
       }
+      if (url.endsWith("/app")) {
+        return response({
+          id: 123,
+          slug: "workflow-rerunner",
+          owner: { login: "bludesign", type: "Organization" },
+        });
+      }
       if (url.endsWith("/access_tokens")) return tokenResponse();
       if (url.endsWith("/graphql")) {
         return response({ data: { viewer: { login: "rerunner[bot]" } } });
@@ -125,6 +132,8 @@ describe("GitHub App authentication", () => {
       appId: "123",
       installationId: "456",
       appSlug: "workflow-rerunner",
+      appOwnerLogin: "bludesign",
+      appOwnerType: "Organization",
       accountLogin: "acme",
       actionsPermission: "write",
       viewerLogin: "rerunner[bot]",
@@ -274,6 +283,13 @@ describe("GitHub App authentication", () => {
             app_slug: "workflow-rerunner",
             account: { login: "acme" },
             repository_selection: "selected",
+          });
+        }
+        if (url.endsWith("/app")) {
+          return response({
+            id: 123,
+            slug: "workflow-rerunner",
+            owner: { login: "octocat", type: "User" },
           });
         }
         return response({

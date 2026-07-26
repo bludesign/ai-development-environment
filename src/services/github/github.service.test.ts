@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
     graphqlUrl: "https://api.github.com/graphql",
     keyFingerprint: "SHA256:fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
@@ -39,6 +41,8 @@ const state = vi.hoisted(() => ({
     graphqlUrl: string;
     keyFingerprint: string;
     appSlug: string;
+    appOwnerLogin: string | null;
+    appOwnerType: string | null;
     accountLogin: string;
     repositorySelection: string;
     actionsPermission: string;
@@ -115,6 +119,7 @@ const appClient = vi.hoisted(() => ({
   clearTokenCache: vi.fn(),
   graphql: vi.fn(),
   listJobs: vi.fn(),
+  registration: vi.fn(),
   rerun: vi.fn(),
   rerunJob: vi.fn(),
   verify: vi.fn(),
@@ -244,6 +249,7 @@ vi.mock("@/server/github/github-app", async (importOriginal) => {
     clearGitHubAppTokenCache: appClient.clearTokenCache,
     githubAppGraphql: appClient.graphql,
     listGitHubActionsWorkflowJobs: appClient.listJobs,
+    getGitHubAppRegistration: appClient.registration,
     rerunGitHubActionsJob: appClient.rerunJob,
     rerunGitHubActionsWorkflow: appClient.rerun,
     verifyGitHubAppConfiguration: appClient.verify,
@@ -710,6 +716,8 @@ beforeEach(() => {
     graphqlUrl: "https://api.github.com/graphql",
     keyFingerprint: "SHA256:fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
@@ -783,6 +791,8 @@ beforeEach(() => {
     installationId: credentials.installationId.trim(),
     keyFingerprint: "SHA256:new-fingerprint",
     appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
     accountLogin: "acme",
     repositorySelection: "selected",
     actionsPermission: "write",
@@ -798,6 +808,13 @@ beforeEach(() => {
     viewerLogin: "workflow-rerunner[bot]",
     verifiedAt: new Date("2026-07-16T00:00:00.000Z"),
   }));
+  appClient.registration.mockReset();
+  appClient.registration.mockResolvedValue({
+    appSlug: "workflow-rerunner",
+    appOwnerLogin: "bludesign",
+    appOwnerType: "Organization",
+    githubRequestId: "APP-1",
+  });
   appClient.configureWebhook.mockReset();
   appClient.configureWebhook.mockResolvedValue({
     configured: true,
@@ -807,6 +824,21 @@ beforeEach(() => {
 });
 
 describe("GitHub service", () => {
+  test("backfills GitHub App registration ownership for existing settings", async () => {
+    if (!state.appSettings) throw new Error("Missing settings");
+    state.appSettings.appOwnerLogin = null;
+    state.appSettings.appOwnerType = null;
+
+    await expect(new GitHubService().getAppSettings()).resolves.toMatchObject({
+      appSlug: "workflow-rerunner",
+      appOwnerLogin: "bludesign",
+      appOwnerType: "Organization",
+    });
+    expect(appClient.registration).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: "123", installationId: "456" }),
+    );
+  });
+
   test("validates repository names and Jira regex extraction", () => {
     expect(normalizeGitHubRepositoryName(" acme/widgets ")).toEqual({
       owner: "acme",
@@ -2488,6 +2520,8 @@ describe("GitHub service", () => {
       installationId: "456",
       keyFingerprint: "SHA256:new-fingerprint",
       appSlug: "workflow-rerunner",
+      appOwnerLogin: "bludesign",
+      appOwnerType: "Organization",
       accountLogin: "acme",
       repositorySelection: "selected",
       actionsPermission: "read",

@@ -2092,6 +2092,8 @@ model GitHubAppSettings {
   graphqlUrl                      String    @default("https://api.github.com/graphql")
   keyFingerprint                  String
   appSlug                         String
+  appOwnerLogin                   String?
+  appOwnerType                    String?
   accountLogin                    String
   repositorySelection             String
   actionsPermission               String

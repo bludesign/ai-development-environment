@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import { SettingsPage } from "./settings-page";
+import { githubAppSettingsUrl, SettingsPage } from "./settings-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -36,6 +36,32 @@ afterEach(() => {
 });
 
 describe("SettingsPage", () => {
+  test.each([
+    [
+      "personal",
+      {
+        appSlug: "workflow-rerunner",
+        appOwnerLogin: "octocat",
+        appOwnerType: "User",
+      },
+      "https://github.com/settings/apps/workflow-rerunner",
+    ],
+    [
+      "organization",
+      {
+        appSlug: "workflow-rerunner",
+        appOwnerLogin: "bludesign",
+        appOwnerType: "Organization",
+      },
+      "https://github.com/organizations/bludesign/settings/apps/workflow-rerunner",
+    ],
+  ])(
+    "builds the %s-owned GitHub App settings URL",
+    (_owner, settings, expected) => {
+      expect(githubAppSettingsUrl(settings)).toBe(expected);
+    },
+  );
+
   test("keeps the stored GitHub token write-only and submits a replacement", async () => {
     requestMock.mockImplementation(async (query) => {
       if (query.includes("jiraSettings")) {
@@ -159,6 +185,8 @@ describe("SettingsPage", () => {
             privateKeyConfigured: false,
             keyFingerprint: null,
             appSlug: null,
+            appOwnerLogin: null,
+            appOwnerType: null,
             accountLogin: null,
             repositorySelection: null,
             actionsPermission: null,
@@ -167,7 +195,9 @@ describe("SettingsPage", () => {
             webhookEvents: [],
             enhancedPipelineWebhooksEnabled: false,
             enhancedPipelineWebhooksReady: false,
-            enhancedPipelineWebhooksMissing: [],
+            enhancedPipelineWebhooksMissing: [
+              "Configure and verify the GitHub App",
+            ],
             verifiedAt: null,
             updatedAt: null,
           },
@@ -182,6 +212,8 @@ describe("SettingsPage", () => {
             privateKeyConfigured: true,
             keyFingerprint: "SHA256:fingerprint",
             appSlug: "workflow-rerunner",
+            appOwnerLogin: "bludesign",
+            appOwnerType: "Organization",
             accountLogin: "acme",
             repositorySelection: "selected",
             actionsPermission: "write",
@@ -209,6 +241,13 @@ describe("SettingsPage", () => {
 
     const appId = await screen.findByLabelText("GitHub App ID");
     const installationId = screen.getByLabelText("Installation ID");
+    const enhancedWebhooks = screen.getByRole("checkbox", {
+      name: "Enhanced pipeline webhooks",
+    });
+    expect(enhancedWebhooks.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText("Configure and verify the GitHub App"),
+    ).toBeDefined();
     const webhookUrl = screen.getByLabelText("Webhook URL") as HTMLInputElement;
     const privateKey = screen.getByLabelText(
       "PEM private key",
@@ -295,5 +334,13 @@ describe("SettingsPage", () => {
     expect(
       screen.getByText("Connected to workflow-rerunner on acme"),
     ).toBeDefined();
+    expect(enhancedWebhooks.hasAttribute("disabled")).toBe(false);
+    expect(
+      screen
+        .getByRole("link", { name: "Open GitHub App settings" })
+        .getAttribute("href"),
+    ).toBe(
+      "https://github.com/organizations/bludesign/settings/apps/workflow-rerunner",
+    );
   });
 });

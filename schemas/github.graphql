@@ -226,6 +226,8 @@ type GitHubAppSettings {
   privateKeyConfigured: Boolean!
   keyFingerprint: String
   appSlug: String
+  appOwnerLogin: String
+  appOwnerType: String
   accountLogin: String
   repositorySelection: String
   actionsPermission: String

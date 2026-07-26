@@ -178,6 +178,8 @@ export type GitHubAppSettingsView = {
   privateKeyConfigured: boolean;
   keyFingerprint: string | null;
   appSlug: string | null;
+  appOwnerLogin: string | null;
+  appOwnerType: string | null;
   accountLogin: string | null;
   repositorySelection: string | null;
   actionsPermission: string | null;
