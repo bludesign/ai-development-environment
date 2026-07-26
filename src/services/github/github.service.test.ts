@@ -105,6 +105,11 @@ const appClient = vi.hoisted(() => ({
   configureWebhook: vi.fn(),
 }));
 
+const cacheClient = vi.hoisted(() => ({
+  recordGraphqlTransportCall: vi.fn(),
+  recordRestCall: vi.fn(),
+}));
+
 vi.mock("@/services/github/github-cache", () => ({
   GitHubCache: class {
     async query<T>(input: { fetcher: () => Promise<{ data: T }> }) {
@@ -125,6 +130,9 @@ vi.mock("@/services/github/github-cache", () => ({
     async clear() {
       return true;
     }
+
+    recordGraphqlTransportCall = cacheClient.recordGraphqlTransportCall;
+    recordRestCall = cacheClient.recordRestCall;
   },
 }));
 
@@ -555,6 +563,10 @@ function rawReviewThread(
 }
 
 beforeEach(() => {
+  cacheClient.recordGraphqlTransportCall.mockReset();
+  cacheClient.recordGraphqlTransportCall.mockResolvedValue(undefined);
+  cacheClient.recordRestCall.mockReset();
+  cacheClient.recordRestCall.mockResolvedValue(undefined);
   state.apiToken = "secret-token";
   state.webhookSecret = null;
   state.repositories = [
@@ -1127,6 +1139,14 @@ describe("GitHub service", () => {
       }),
     ]);
     expect(appClient.listJobs).not.toHaveBeenCalled();
+    expect(cacheClient.recordRestCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authentication: "PAT",
+        method: "GET",
+        endpoint: expect.stringContaining("/actions/runs/44/jobs"),
+        statusCode: 200,
+      }),
+    );
 
     state.appSettings = null;
     const jobs = await service.actionsWorkflowJobs(

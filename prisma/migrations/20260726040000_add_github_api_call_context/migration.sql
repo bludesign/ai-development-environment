@@ -1,0 +1,5 @@
+ALTER TABLE "GitHubApiCallLog" ADD COLUMN "apiType" TEXT NOT NULL DEFAULT 'GRAPHQL';
+ALTER TABLE "GitHubApiCallLog" ADD COLUMN "method" TEXT NOT NULL DEFAULT 'POST';
+ALTER TABLE "GitHubApiCallLog" ADD COLUMN "endpoint" TEXT NOT NULL DEFAULT 'https://api.github.com/graphql';
+ALTER TABLE "GitHubApiCallLog" ADD COLUMN "requestSummary" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "GitHubApiCallLog" ADD COLUMN "variablesJson" TEXT NOT NULL DEFAULT '{}';

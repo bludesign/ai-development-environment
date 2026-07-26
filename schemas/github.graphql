@@ -76,6 +76,11 @@ enum GitHubCallSource {
   ERROR
 }
 
+enum GitHubApiType {
+  GRAPHQL
+  REST
+}
+
 type GitHubSettings {
   tokenConfigured: Boolean!
   defaultJiraKeyRegex: String!
@@ -118,7 +123,12 @@ type GitHubCacheMetrics {
 type GitHubApiCall {
   id: ID!
   authentication: GitHubAuthentication!
+  apiType: GitHubApiType!
+  method: String!
+  endpoint: String!
   operation: String!
+  requestSummary: String!
+  variables: JSON
   source: GitHubCallSource!
   durationMs: Int!
   statusCode: Int

@@ -12,6 +12,12 @@ import type {
 import type { PollingService } from "@/services/polling";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
+import { GitHubCache } from "./github-cache";
+import {
+  observeGitHubRateLimit,
+  type GitHubRateLimitMetadata,
+} from "./github-rate-limit";
+
 const OPERATION_ID = "server:github-actions-notifications";
 const DEFAULT_INTERVAL_SECONDS = 60;
 const GITHUB_RUNS_PAGE_SIZE = 100;
@@ -125,6 +131,7 @@ export class GitHubActionsNotificationsService {
     private readonly polling: PollingService,
     startPolling = true,
     private readonly workflowEvents?: WorkflowEventsService,
+    private readonly cache = new GitHubCache(),
   ) {
     this.polling.register({
       id: OPERATION_ID,
@@ -562,9 +569,25 @@ export class GitHubActionsNotificationsService {
   ): Promise<WorkflowRun[]> {
     const runs: WorkflowRun[] = [];
     for (let page = 1; ; page += 1) {
-      const response = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`,
-        {
+      const url = `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
+      const startedAt = Date.now();
+      const record = (input: {
+        statusCode?: number | null;
+        error?: string | null;
+        rateLimit?: GitHubRateLimitMetadata | null;
+      }) =>
+        this.cache
+          .recordRestCall({
+            authentication: "PAT",
+            method: "GET",
+            endpoint: url,
+            durationMs: Date.now() - startedAt,
+            ...input,
+          })
+          .catch(() => undefined);
+      let response: Response;
+      try {
+        response = await fetch(url, {
           headers: {
             accept: "application/vnd.github+json",
             authorization: `Bearer ${token}`,
@@ -572,18 +595,25 @@ export class GitHubActionsNotificationsService {
             "x-github-api-version": "2022-11-28",
           },
           cache: "no-store",
-        },
-      );
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await record({ error: message });
+        throw error;
+      }
+      const rateLimit = await observeGitHubRateLimit("PAT", response);
       const body = (await response.json().catch(() => null)) as {
         workflow_runs?: Array<Record<string, unknown>>;
         message?: string;
       } | null;
       if (!response.ok || !Array.isArray(body?.workflow_runs)) {
-        throw new Error(
+        const error =
           body?.message ||
-            `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`,
-        );
+          `GitHub returned HTTP ${response.status} while polling ${target.owner}/${target.repository}`;
+        await record({ statusCode: response.status, error, rateLimit });
+        throw new Error(error);
       }
+      await record({ statusCode: response.status, rateLimit });
       const pageRuns = body.workflow_runs.flatMap((run) => {
         const id = positiveInteger(run.id);
         const workflowId = positiveInteger(run.workflow_id);

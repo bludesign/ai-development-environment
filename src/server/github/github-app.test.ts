@@ -60,20 +60,33 @@ beforeEach(() => {
 
 describe("GitHub App authentication", () => {
   test("treats GitHub's 404 as a disabled App webhook", async () => {
+    const requestObserver = vi.fn();
     const fetchMock = vi.fn(async () =>
       response({ message: "Not Found" }, 404),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      configureGitHubAppWebhook(credentials, {
-        url: "https://control.example/api/public/github/webhook",
-        secret: "webhook-secret",
-      }),
+      configureGitHubAppWebhook(
+        { ...credentials, requestObserver },
+        {
+          url: "https://control.example/api/public/github/webhook",
+          secret: "webhook-secret",
+        },
+      ),
     ).resolves.toEqual({ configured: false, githubRequestId: "REQUEST-1" });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/app/hook/config",
       expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/app/hook/config",
+        method: "PATCH",
+        body: null,
+        statusCode: 404,
+        error: "GitHub returned HTTP 404",
+      }),
     );
   });
 
@@ -166,6 +179,40 @@ describe("GitHub App authentication", () => {
 
     await githubAppGraphql(credentials, "query { viewer { login } }", {});
     expect(tokenMints).toBe(2);
+  });
+
+  test("observes GitHub App REST and GraphQL requests with GraphQL context", async () => {
+    const requestObserver = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/access_tokens")) return tokenResponse();
+        return response({ data: { node: { id: "PR_kwDO123" } } });
+      }),
+    );
+
+    await githubAppGraphql(
+      { ...credentials, requestObserver },
+      "query PullRequest($id: ID!) { node(id: $id) { id } }",
+      { id: "PR_kwDO123" },
+    );
+
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/app/installations/456/access_tokens",
+        method: "POST",
+        body: null,
+        statusCode: 200,
+      }),
+    );
+    expect(requestObserver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.github.com/graphql",
+        method: "POST",
+        body: expect.stringContaining('"id":"PR_kwDO123"'),
+        statusCode: 200,
+      }),
+    );
   });
 
   test("refreshes a cached token inside the expiry cushion", async () => {

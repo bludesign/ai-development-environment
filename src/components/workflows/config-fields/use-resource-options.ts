@@ -32,7 +32,14 @@ function pick<T>(value: unknown): T {
   return value as T;
 }
 
-function resourcePlan(
+/**
+ * Builds the list query for one resource kind. Exported for the test that
+ * guards the page-size arguments: the GitHub list resolvers reject a `first`
+ * above their page size rather than clamping it, and the hook swallows the
+ * error into a free-text fallback, so an over-large page size silently removes
+ * the picker instead of failing loudly.
+ */
+export function resourcePlan(
   resource: ResourceKind,
   scope: string | null,
 ): ResourcePlan | null {
@@ -143,7 +150,7 @@ function resourcePlan(
     case "githubPullRequest":
       return {
         query: `query WorkflowPullRequestOptions($scope: GitHubPullRequestScope!, $repositoryId: ID) {
-          githubPullRequests(scope: $scope, repositoryId: $repositoryId, first: 50) {
+          githubPullRequests(scope: $scope, repositoryId: $repositoryId, first: 25) {
             items { number title }
           }
         }`,
@@ -309,7 +316,7 @@ function resourcePlan(
       if (!scope) return null;
       return {
         query: `query WorkflowActionsRunOptions($codebaseRepositoryId: ID) {
-          githubActionsWorkflowRuns(codebaseRepositoryId: $codebaseRepositoryId, first: 50) {
+          githubActionsWorkflowRuns(codebaseRepositoryId: $codebaseRepositoryId, first: 25) {
             items { id displayTitle headBranch }
           }
         }`,

@@ -18,7 +18,12 @@ type CacheEntry = {
 type CallLog = {
   id: string;
   authentication: string;
+  apiType: string;
+  method: string;
+  endpoint: string;
   operation: string;
+  requestSummary: string;
+  variablesJson: string;
   source: string;
   durationMs: number;
   statusCode: number | null;
@@ -222,6 +227,7 @@ describe("GitHubCache", () => {
     expect(state.entries).toHaveLength(2);
     expect(state.calls.map((call) => call.pointCost)).toEqual([7, 0, 7]);
     expect(state.calls[1]?.pointsAvoided).toBe(7);
+    expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({ a: 1, b: 2 });
   });
 
   test("coalesces concurrent misses and records the avoided exact cost", async () => {
@@ -350,5 +356,44 @@ describe("GitHubCache", () => {
       total: 2,
     });
     expect(metrics.operations[0]?.operation).toBe("TestQuery");
+  });
+
+  test("records uncached REST and GraphQL transport calls with sanitized request context", async () => {
+    const cache = new GitHubCache();
+    await cache.recordRestCall({
+      authentication: "APP",
+      method: "GET",
+      endpoint:
+        "https://api.github.com/repos/acme/widgets/actions/runs/44/jobs?page=2",
+      durationMs: 12,
+      statusCode: 200,
+    });
+    await cache.recordGraphqlTransportCall({
+      authentication: "APP",
+      endpoint: "https://api.github.com/graphql",
+      operation: "VerifyGitHubApp",
+      variables: { pullRequestId: "PR_kwDO123", apiToken: "secret" },
+      durationMs: 8,
+      statusCode: 200,
+    });
+
+    expect(state.calls[0]).toMatchObject({
+      authentication: "APP",
+      apiType: "REST",
+      method: "GET",
+      operation: "GET /repos/acme/widgets/actions/runs/44/jobs",
+    });
+    expect(JSON.parse(state.calls[0]!.variablesJson)).toEqual({
+      path: "/repos/acme/widgets/actions/runs/44/jobs",
+      query: { page: "2" },
+    });
+    expect(state.calls[1]).toMatchObject({
+      apiType: "GRAPHQL",
+      operation: "VerifyGitHubApp",
+    });
+    expect(JSON.parse(state.calls[1]!.variablesJson)).toEqual({
+      apiToken: "[REDACTED]",
+      pullRequestId: "PR_kwDO123",
+    });
   });
 });

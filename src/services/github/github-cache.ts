@@ -7,6 +7,7 @@ import { getPrismaClient } from "@/data/prisma-client";
 import type { GitHubRateLimitMetadata } from "./github-rate-limit";
 import type {
   GitHubApiCallView,
+  GitHubApiType,
   GitHubAuthentication,
   GitHubCachedEntryDetail,
   GitHubCachedEntryView,
@@ -73,6 +74,38 @@ function canonicalize(value: unknown): unknown {
 
 function stableStringify(value: unknown): string {
   return JSON.stringify(canonicalize(value));
+}
+
+const SENSITIVE_REQUEST_KEY =
+  /(?:authorization|password|private.?key|secret|token)$/i;
+
+function sanitizeRequestValue(value: unknown, key = ""): unknown {
+  if (SENSITIVE_REQUEST_KEY.test(key)) return "[REDACTED]";
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeRequestValue(item));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([itemKey, item]) => [
+      itemKey,
+      sanitizeRequestValue(item, itemKey),
+    ]),
+  );
+}
+
+function requestSummary(variables: unknown): string {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
+    return "No variables";
+  }
+  const entries = Object.entries(variables as Record<string, unknown>);
+  if (!entries.length) return "No variables";
+  return entries
+    .map(([key, value]) => {
+      const encoded = typeof value === "string" ? value : JSON.stringify(value);
+      const serialized = encoded ?? String(value);
+      return `${key}=${serialized.length > 120 ? `${serialized.slice(0, 117)}…` : serialized}`;
+    })
+    .join(" · ");
 }
 
 function parseJson(value: string): unknown {
@@ -157,6 +190,7 @@ export class GitHubCache {
       Date.now() - existing.fetchedAt.getTime() < ttlSeconds * 1000;
     if (!input.force && fresh) {
       await this.log({
+        ...this.graphqlContext(input),
         authentication: input.authentication,
         operation: input.operation,
         source: "CACHE",
@@ -178,6 +212,7 @@ export class GitHubCache {
     if (pending) {
       const result = (await pending) as CachedResult<T>;
       await this.log({
+        ...this.graphqlContext(input),
         authentication: input.authentication,
         operation: input.operation,
         source: "CACHE",
@@ -196,6 +231,7 @@ export class GitHubCache {
       const canServeStale =
         existing !== null && input.allowStaleOnError !== false;
       await this.log({
+        ...this.graphqlContext(input),
         authentication: input.authentication,
         operation: input.operation,
         source: "ERROR",
@@ -253,6 +289,7 @@ export class GitHubCache {
           },
         });
         await this.log({
+          ...this.graphqlContext(input),
           authentication: input.authentication,
           operation: input.operation,
           source: "LIVE",
@@ -274,6 +311,7 @@ export class GitHubCache {
         const canServeStale =
           existing !== null && input.allowStaleOnError !== false;
         await this.log({
+          ...this.graphqlContext(input),
           authentication: input.authentication,
           operation: input.operation,
           source: "ERROR",
@@ -310,6 +348,7 @@ export class GitHubCache {
     try {
       const live = await input.fetcher();
       await this.log({
+        ...this.graphqlContext(input),
         authentication: input.authentication,
         operation: input.operation,
         source: "LIVE",
@@ -323,6 +362,7 @@ export class GitHubCache {
     } catch (error) {
       const metadata = errorMetadata(error);
       await this.log({
+        ...this.graphqlContext(input),
         authentication: input.authentication,
         operation: input.operation,
         source: "ERROR",
@@ -349,6 +389,65 @@ export class GitHubCache {
       update: { cacheTtlSeconds: ttlMinutes * 60 },
     });
     return settingsView();
+  }
+
+  async recordRestCall(input: {
+    authentication: GitHubAuthentication;
+    method: string;
+    endpoint: string;
+    durationMs: number;
+    statusCode?: number | null;
+    error?: string | null;
+    rateLimit?: GitHubRateLimitMetadata | null;
+  }): Promise<void> {
+    let path = input.endpoint;
+    let variables: Record<string, unknown> = {};
+    try {
+      const url = new URL(input.endpoint);
+      path = url.pathname;
+      variables = {
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+      };
+    } catch {
+      variables = { endpoint: input.endpoint };
+    }
+    await this.log({
+      authentication: input.authentication,
+      apiType: "REST",
+      method: input.method.toUpperCase(),
+      endpoint: input.endpoint,
+      operation: `${input.method.toUpperCase()} ${path}`,
+      requestSummary: `${input.method.toUpperCase()} ${path}`,
+      variables,
+      source: input.error ? "ERROR" : "LIVE",
+      durationMs: input.durationMs,
+      statusCode: input.statusCode,
+      error: input.error,
+      rateLimit: input.rateLimit,
+    });
+  }
+
+  async recordGraphqlTransportCall(input: {
+    authentication: GitHubAuthentication;
+    endpoint: string;
+    operation: string;
+    variables: Record<string, unknown>;
+    durationMs: number;
+    statusCode?: number | null;
+    error?: string | null;
+    rateLimit?: GitHubRateLimitMetadata | null;
+  }): Promise<void> {
+    await this.log({
+      ...this.graphqlContext(input),
+      authentication: input.authentication,
+      operation: input.operation,
+      source: input.error ? "ERROR" : "LIVE",
+      durationMs: input.durationMs,
+      statusCode: input.statusCode,
+      error: input.error,
+      rateLimit: input.rateLimit,
+    });
   }
 
   async clear(): Promise<boolean> {
@@ -423,7 +522,12 @@ export class GitHubCache {
       items: calls.map((call) => ({
         id: call.id,
         authentication: call.authentication as GitHubAuthentication,
+        apiType: call.apiType as GitHubApiType,
+        method: call.method,
+        endpoint: call.endpoint,
         operation: call.operation,
+        requestSummary: call.requestSummary,
+        variables: parseJson(call.variablesJson),
         source: call.source as GitHubCallSource,
         durationMs: call.durationMs,
         statusCode: call.statusCode,
@@ -545,9 +649,28 @@ export class GitHubCache {
     return { limit, offset };
   }
 
+  private graphqlContext(input: {
+    endpoint: string;
+    variables: Record<string, unknown>;
+  }) {
+    const variables = sanitizeRequestValue(input.variables);
+    return {
+      apiType: "GRAPHQL" as const,
+      method: "POST",
+      endpoint: input.endpoint,
+      requestSummary: requestSummary(variables),
+      variables,
+    };
+  }
+
   private async log(input: {
     authentication: GitHubAuthentication;
+    apiType: GitHubApiType;
+    method: string;
+    endpoint: string;
     operation: string;
+    requestSummary: string;
+    variables: unknown;
     source: GitHubCallSource;
     durationMs: number;
     statusCode?: number | null;
@@ -563,7 +686,12 @@ export class GitHubCache {
       data: {
         id: randomUUID(),
         authentication: input.authentication,
+        apiType: input.apiType,
+        method: input.method,
+        endpoint: input.endpoint,
         operation: input.operation,
+        requestSummary: input.requestSummary,
+        variablesJson: stableStringify(sanitizeRequestValue(input.variables)),
         source: input.source,
         durationMs: Math.max(0, Math.round(input.durationMs)),
         statusCode: input.statusCode ?? null,

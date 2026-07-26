@@ -46,6 +46,7 @@ export type GitHubSettingsView = {
 
 export type GitHubAuthentication = "PAT" | "APP";
 export type GitHubCallSource = "LIVE" | "CACHE" | "ERROR";
+export type GitHubApiType = "GRAPHQL" | "REST";
 
 export type GitHubRateLimitSnapshotView = {
   authentication: GitHubAuthentication;
@@ -81,7 +82,12 @@ export type GitHubCacheMetrics = {
 export type GitHubApiCallView = {
   id: string;
   authentication: GitHubAuthentication;
+  apiType: GitHubApiType;
+  method: string;
+  endpoint: string;
   operation: string;
+  requestSummary: string;
+  variables: unknown;
   source: GitHubCallSource;
   durationMs: number;
   statusCode: number | null;

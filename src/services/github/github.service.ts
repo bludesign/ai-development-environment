@@ -1093,6 +1093,21 @@ export class GitHubService {
   }
 
   private async restRequest<T>(url: string, token: string): Promise<T> {
+    const startedAt = Date.now();
+    const record = (input: {
+      statusCode?: number | null;
+      error?: string | null;
+      rateLimit?: GitHubRateLimitMetadata | null;
+    }) =>
+      this.cache
+        .recordRestCall({
+          authentication: "PAT",
+          method: "GET",
+          endpoint: url,
+          durationMs: Date.now() - startedAt,
+          ...input,
+        })
+        .catch(() => undefined);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -1105,20 +1120,22 @@ export class GitHubService {
         cache: "no-store",
       });
     } catch (error) {
-      throw new Error(
-        sanitizeError(
-          error instanceof Error ? error.message : String(error),
-          token,
-        ),
+      const message = sanitizeError(
+        error instanceof Error ? error.message : String(error),
+        token,
       );
+      await record({ error: message });
+      throw new Error(message);
     }
-    await observeGitHubRateLimit("PAT", response);
+    const rateLimit = await observeGitHubRateLimit("PAT", response);
 
     let body: unknown;
     try {
       body = await response.json();
     } catch {
-      throw new Error(`GitHub returned HTTP ${response.status}`);
+      const message = `GitHub returned HTTP ${response.status}`;
+      await record({ statusCode: response.status, error: message, rateLimit });
+      throw new Error(message);
     }
     if (!response.ok) {
       const message =
@@ -1128,8 +1145,15 @@ export class GitHubService {
         typeof body.message === "string"
           ? body.message
           : `GitHub returned HTTP ${response.status}`;
-      throw new Error(sanitizeError(message, token));
+      const sanitized = sanitizeError(message, token);
+      await record({
+        statusCode: response.status,
+        error: sanitized,
+        rateLimit,
+      });
+      throw new Error(sanitized);
     }
+    await record({ statusCode: response.status, rateLimit });
     return body as T;
   }
 
@@ -1596,8 +1620,69 @@ export class GitHubService {
       apiBaseUrl: settings.apiBaseUrl,
       graphqlUrl: settings.graphqlUrl,
       keyFingerprint: settings.keyFingerprint,
-      responseObserver: (response) =>
+      ...this.appTransportObservers(settings.graphqlUrl),
+    };
+  }
+
+  private appTransportObservers(
+    graphqlUrl: string,
+    logGraphqlTransport = false,
+  ) {
+    return {
+      responseObserver: (response: Response) =>
         observeGitHubRateLimit("APP", response).then(() => undefined),
+      requestObserver: (observation: {
+        url: string;
+        method: string;
+        body: string | null;
+        durationMs: number;
+        statusCode: number | null;
+        error: string | null;
+        rateLimit: GitHubRateLimitMetadata | null;
+      }) => {
+        if (observation.url === graphqlUrl) {
+          if (!logGraphqlTransport) return;
+          let operation = "GitHubAppGraphql";
+          let variables: Record<string, unknown> = {};
+          try {
+            const body = JSON.parse(observation.body ?? "{}") as {
+              query?: unknown;
+              variables?: unknown;
+            };
+            if (typeof body.query === "string") {
+              operation = prepareGitHubGraphql(body.query).operation;
+            }
+            if (
+              body.variables &&
+              typeof body.variables === "object" &&
+              !Array.isArray(body.variables)
+            ) {
+              variables = body.variables as Record<string, unknown>;
+            }
+          } catch {
+            // Keep a generic operation when an observer cannot parse a body.
+          }
+          return this.cache.recordGraphqlTransportCall({
+            authentication: "APP",
+            endpoint: observation.url,
+            operation,
+            variables,
+            durationMs: observation.durationMs,
+            statusCode: observation.statusCode,
+            error: observation.error,
+            rateLimit: observation.rateLimit,
+          });
+        }
+        return this.cache.recordRestCall({
+          authentication: "APP",
+          method: observation.method,
+          endpoint: observation.url,
+          durationMs: observation.durationMs,
+          statusCode: observation.statusCode,
+          error: observation.error,
+          rateLimit: observation.rateLimit,
+        });
+      },
     };
   }
 
@@ -1649,8 +1734,7 @@ export class GitHubService {
         privateKey,
         apiBaseUrl: GITHUB_API_BASE_URL,
         graphqlUrl: GITHUB_GRAPHQL_URL,
-        responseObserver: (response) =>
-          observeGitHubRateLimit("APP", response).then(() => undefined),
+        ...this.appTransportObservers(GITHUB_GRAPHQL_URL, true),
       };
       const verification = await verifyGitHubAppConfiguration(credentials);
       const existingWebhookSecret = await this.credentials.getText(
@@ -1792,7 +1876,10 @@ export class GitHubService {
     try {
       const credentials = await this.requireAppCredentials();
       clearGitHubAppTokenCache();
-      const verification = await verifyGitHubAppConfiguration(credentials);
+      const verification = await verifyGitHubAppConfiguration({
+        ...credentials,
+        ...this.appTransportObservers(credentials.graphqlUrl, true),
+      });
       const prisma = await getPrismaClient();
       await prisma.gitHubAppSettings.update({
         where: { id: GITHUB_APP_SETTINGS_ID },

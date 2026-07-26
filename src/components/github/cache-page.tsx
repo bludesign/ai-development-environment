@@ -80,7 +80,7 @@ export function GitHubCachePage() {
           githubRateLimitSnapshots { authentication resource limit remaining used resetAt observedAt }
           githubCacheMetrics { windows { ${WINDOW_FIELDS} } operations { operation windows { ${WINDOW_FIELDS} } } }
           githubApiCalls(limit: $limit, offset: $callOffset) {
-            items { id authentication operation source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
+            items { id authentication apiType method endpoint operation requestSummary variables source durationMs statusCode error servedStale pointCost pointsAvoided rateLimitLimit rateLimitRemaining rateLimitUsed rateLimitResetAt rateLimitResource createdAt }
             total limit offset
           }
           githubCachedEntries(limit: $limit, offset: $entryOffset) {
@@ -291,6 +291,7 @@ export function GitHubCachePage() {
                       <TableRow>
                         <TableHead>{t("time")}</TableHead>
                         <TableHead>{t("operation")}</TableHead>
+                        <TableHead>{t("callInfo")}</TableHead>
                         <TableHead>{t("source")}</TableHead>
                         <TableHead>{t("authentication")}</TableHead>
                         <TableHead>{t("cost")}</TableHead>
@@ -306,7 +307,19 @@ export function GitHubCachePage() {
                             <DateTime value={call.createdAt} />
                           </TableCell>
                           <TableCell className="font-medium">
-                            {call.operation.replaceAll("_", " ")}
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline">{call.apiType}</Badge>
+                              <span>{call.operation.replaceAll("_", " ")}</span>
+                            </div>
+                            <p className="mt-1 max-w-sm truncate font-mono text-xs font-normal text-muted-foreground">
+                              {call.method} {call.endpoint}
+                            </p>
+                          </TableCell>
+                          <TableCell className="max-w-md whitespace-normal">
+                            <p className="text-sm">{call.requestSummary}</p>
+                            <pre className="mt-1 max-h-24 max-w-md overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs leading-4">
+                              {JSON.stringify(call.variables, null, 2)}
+                            </pre>
                           </TableCell>
                           <TableCell>
                             <Badge className={sourceClass(call.source)}>

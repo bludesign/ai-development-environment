@@ -59,6 +59,19 @@ export type GitHubAppCredentials = {
   graphqlUrl: string;
   keyFingerprint?: string;
   responseObserver?: (response: Response) => Promise<void> | void;
+  requestObserver?: (
+    observation: GitHubAppRequestObservation,
+  ) => Promise<void> | void;
+};
+
+export type GitHubAppRequestObservation = {
+  url: string;
+  method: string;
+  body: string | null;
+  durationMs: number;
+  statusCode: number | null;
+  error: string | null;
+  rateLimit: GitHubRateLimitMetadata | null;
 };
 
 export type GitHubAppVerification = {
@@ -219,20 +232,58 @@ function githubHeaders(authorization: string): Record<string, string> {
 async function githubFetch(
   url: string,
   init: RequestInit,
-  observer?: GitHubAppCredentials["responseObserver"],
+  observers?: Pick<
+    GitHubAppCredentials,
+    "graphqlUrl" | "responseObserver" | "requestObserver"
+  >,
 ): Promise<Response> {
+  const startedAt = Date.now();
+  const method = (init.method ?? "GET").toUpperCase();
+  const requestBody =
+    url === observers?.graphqlUrl && typeof init.body === "string"
+      ? init.body
+      : null;
+  let response: Response;
   try {
-    const response = await fetch(url, { ...init, cache: "no-store" });
-    if (observer) {
-      await Promise.resolve(observer(response)).catch(() => undefined);
-    }
-    return response;
+    response = await fetch(url, { ...init, cache: "no-store" });
   } catch {
+    if (observers?.requestObserver) {
+      await Promise.resolve(
+        observers.requestObserver({
+          url,
+          method,
+          body: requestBody,
+          durationMs: Date.now() - startedAt,
+          statusCode: null,
+          error: "GitHub could not be reached",
+          rateLimit: null,
+        }),
+      ).catch(() => undefined);
+    }
     throw new GitHubAppError(
       "GITHUB_APP_REQUEST_FAILED",
       "GitHub could not be reached",
     );
   }
+  if (observers?.responseObserver) {
+    await Promise.resolve(observers.responseObserver(response)).catch(
+      () => undefined,
+    );
+  }
+  if (observers?.requestObserver) {
+    await Promise.resolve(
+      observers.requestObserver({
+        url,
+        method,
+        body: requestBody,
+        durationMs: Date.now() - startedAt,
+        statusCode: response.status,
+        error: response.ok ? null : `GitHub returned HTTP ${response.status}`,
+        rateLimit: parseGitHubRateLimitHeaders(response.headers),
+      }),
+    ).catch(() => undefined);
+  }
+  return response;
 }
 
 async function responseBody(response: Response): Promise<unknown> {
@@ -274,7 +325,7 @@ async function installationDetails(
   const response = await githubFetch(
     `${prepared.apiBaseUrl}/app/installations/${prepared.installationId}`,
     { headers: githubHeaders(`Bearer ${appJwt}`) },
-    prepared.responseObserver,
+    prepared,
   );
   const body = await responseBody(response);
   const githubRequestId = requestId(response);
@@ -325,7 +376,7 @@ async function mintInstallationToken(
       method: "POST",
       headers: githubHeaders(`Bearer ${jwt}`),
     },
-    prepared.responseObserver,
+    prepared,
   );
   const body = await responseBody(response);
   const githubRequestId = requestId(response);
@@ -447,7 +498,7 @@ export async function githubAppGraphql<T>(
         },
         body: JSON.stringify({ query, variables }),
       },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const { response, token } = requestResult;
@@ -537,7 +588,7 @@ export async function configureGitHubAppWebhook(
         insecure_ssl: "0",
       }),
     },
-    prepared.responseObserver,
+    prepared,
   );
   const githubRequestId = requestId(response);
   if (response.status === 404) {
@@ -574,7 +625,7 @@ export async function rerunGitHubActionsWorkflow(
         method: "POST",
         headers: githubHeaders(`Bearer ${token}`),
       },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const { response, token } = requestResult;
@@ -620,7 +671,7 @@ export async function rerunGitHubActionsFailedJobs(
         method: "POST",
         headers: githubHeaders(`Bearer ${token}`),
       },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const { response, token } = requestResult;
@@ -665,7 +716,7 @@ export async function cancelGitHubActionsWorkflow(
         method: "POST",
         headers: githubHeaders(`Bearer ${token}`),
       },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const { response, token } = requestResult;
@@ -712,7 +763,7 @@ export async function listGitHubActionsWorkflowJobs(
       githubFetch(
         url,
         { headers: githubHeaders(`Bearer ${token}`) },
-        credentials.responseObserver,
+        credentials,
       ),
     );
     const { response, token } = requestResult;
@@ -767,7 +818,7 @@ export async function rerunGitHubActionsJob(
     githubFetch(
       jobUrl,
       { headers: githubHeaders(`Bearer ${token}`) },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const jobRequestId = requestId(jobResult.response);
@@ -816,7 +867,7 @@ export async function rerunGitHubActionsJob(
         method: "POST",
         headers: githubHeaders(`Bearer ${token}`),
       },
-      credentials.responseObserver,
+      credentials,
     ),
   );
   const githubRequestId = requestId(rerunResult.response);

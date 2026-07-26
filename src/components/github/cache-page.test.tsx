@@ -60,7 +60,12 @@ describe("GitHubCachePage", () => {
               {
                 id: "call-1",
                 authentication: "PAT",
+                apiType: "GRAPHQL",
+                method: "POST",
+                endpoint: "https://api.github.com/graphql",
                 operation: "Viewer",
+                requestSummary: "pullRequestId=PR_kwDO123",
+                variables: { pullRequestId: "PR_kwDO123" },
                 source: "LIVE",
                 durationMs: 20,
                 statusCode: 200,
@@ -94,6 +99,8 @@ describe("GitHubCachePage", () => {
     expect(screen.getByText("APP · core")).toBeDefined();
     expect(screen.getByText("4993 / 5000")).toBeDefined();
     expect(screen.getByText("Point cost")).toBeDefined();
+    expect(screen.getByText("pullRequestId=PR_kwDO123")).toBeDefined();
+    expect(screen.getAllByText(/PR_kwDO123/)).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Clear cache" }));
     expect(await screen.findByRole("alertdialog")).toBeDefined();

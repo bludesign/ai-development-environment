@@ -1947,22 +1947,27 @@ model GitHubGraphqlCacheEntry {
 }
 
 model GitHubApiCallLog {
-  id                 String   @id
+  id                 String    @id
   authentication     String
+  apiType            String    @default("GRAPHQL")
+  method             String    @default("POST")
+  endpoint           String    @default("https://api.github.com/graphql")
   operation          String
+  requestSummary     String    @default("")
+  variablesJson      String    @default("{}")
   source             String
   durationMs         Int
   statusCode         Int?
   error              String?
-  servedStale        Boolean  @default(false)
+  servedStale        Boolean   @default(false)
   pointCost          Int?
-  pointsAvoided      Int      @default(0)
+  pointsAvoided      Int       @default(0)
   rateLimitLimit     Int?
   rateLimitRemaining Int?
   rateLimitUsed      Int?
   rateLimitResetAt   DateTime?
   rateLimitResource  String?
-  createdAt          DateTime @default(now())
+  createdAt          DateTime  @default(now())
 
   @@index([createdAt])
   @@index([operation, source, createdAt])
