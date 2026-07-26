@@ -111,6 +111,11 @@ describe("AppShell", () => {
       screen.getByRole("link", { name: "Usage" }).getAttribute("href"),
     ).toBe("/usage");
     expect(
+      screen
+        .getAllByRole("link", { name: "Action Center" })
+        .some((link) => link.getAttribute("href") === "/action-center"),
+    ).toBe(true);
+    expect(
       screen.getByRole("link", { name: "Comments" }).getAttribute("href"),
     ).toBe("/comments");
     expect(

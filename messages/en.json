@@ -16,6 +16,7 @@
     "navigation": "Navigation",
     "breadcrumbLabel": "Breadcrumb",
     "navigationDescription": "Primary navigation for AI Development Environment.",
+    "actionCenter": "Action Center",
     "notifications": "Notifications",
     "notificationsDescription": "Notification updates and alerts.",
     "showNavigation": "Show navigation",
@@ -67,6 +68,42 @@
     "repositories": "Repositories",
     "runs": "Runs",
     "sync": "Sync"
+  },
+  "actionCenter": {
+    "title": "Action Center",
+    "description": "Live work, decisions, failures, and iOS builds waiting to run.",
+    "refresh": "Refresh Action Center",
+    "totalCount": "{count, plural, one {# item} other {# items}}",
+    "attentionCount": "{count, plural, one {# needs attention} other {# need attention}}",
+    "activeCount": "{count, plural, one {# active} other {# active}}",
+    "emptyTitle": "Nothing needs action",
+    "emptyDescription": "Active work and new decisions will appear here automatically.",
+    "needsAttention": "Needs attention",
+    "active": "Active",
+    "noAttention": "No items currently need attention.",
+    "noActive": "No work is currently active.",
+    "loadMore": "Load more",
+    "miniLabel": "Mini Action Center",
+    "miniEmpty": "Nothing needs action.",
+    "kinds": {
+      "PLAN": "Plan",
+      "SESSION": "Session",
+      "BUILD": "Build",
+      "WORKFLOW": "Workflow"
+    },
+    "reasons": {
+      "QUESTION": "Answer needed",
+      "BLOCKED": "Blocked",
+      "FAILED": "Failed",
+      "UNRUN_BUILD": "Ready to run",
+      "ACTIVE": "Active"
+    },
+    "acknowledge": "Acknowledge",
+    "acknowledgeNamed": "Acknowledge {name}",
+    "questionFrom": "Question from {source}",
+    "customAnswerFor": "Custom answer for {question}",
+    "customAnswer": "Custom answer",
+    "submitAnswer": "Submit answer"
   },
   "workflows": {
     "title": "Workflows",

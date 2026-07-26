@@ -26,6 +26,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { NotificationCard } from "./notification-card";
+import { MiniActionCenter } from "@/components/action-center/mini-action-center";
 import {
   APP_NOTIFICATION_FIELDS,
   type AppNotificationView,
@@ -300,22 +301,35 @@ export function NotificationsSidebar() {
           <MobileClose />
         </div>
       </SidebarHeader>
-      <SidebarContent className="p-0">
-        <div className="flex flex-col gap-0" aria-live="polite">
-          {notifications.map((notification) => (
-            <NotificationCard
-              arriving={arrivingIds.has(notification.id)}
-              key={notification.id}
-              notification={notification}
-              onDelete={(id) => void deleteNotification(id)}
-              onDismiss={(id) => void dismiss(id)}
-            />
-          ))}
-          {loaded && notifications.length === 0 && (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {t("sidebarEmpty")}
-            </p>
-          )}
+      <SidebarContent className="min-h-0 overflow-hidden p-0">
+        <div className="flex h-full min-h-0 flex-col">
+          <div
+            className="min-h-0 flex-[2_1_0%] overflow-y-auto overscroll-contain"
+            data-slot="notifications-feed"
+          >
+            <div className="flex flex-col gap-0" aria-live="polite">
+              {notifications.map((notification) => (
+                <NotificationCard
+                  arriving={arrivingIds.has(notification.id)}
+                  key={notification.id}
+                  notification={notification}
+                  onDelete={(id) => void deleteNotification(id)}
+                  onDismiss={(id) => void dismiss(id)}
+                />
+              ))}
+              {loaded && notifications.length === 0 && (
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  {t("sidebarEmpty")}
+                </p>
+              )}
+            </div>
+          </div>
+          <div
+            className="min-h-0 flex-[1_1_0%] border-t border-sidebar-border"
+            data-slot="mini-action-center"
+          >
+            <MiniActionCenter />
+          </div>
         </div>
       </SidebarContent>
     </Sidebar>

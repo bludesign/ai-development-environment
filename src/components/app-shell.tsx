@@ -20,6 +20,7 @@ import {
   FilePenLine,
   House,
   KeyRound,
+  ListTodo,
   MessageSquareText,
   MessagesSquare,
   MousePointerClick,
@@ -51,6 +52,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
+import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
 import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
 import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
 import {
@@ -92,16 +94,18 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <GitHubPipelineStatusProvider>
-      <SidebarProvider
-        cookieName={LEFT_SIDEBAR_COOKIE}
-        defaultOpen={leftDefaultOpen}
-        className="h-dvh min-h-0 overflow-hidden"
-      >
-        <NavigationSidebar />
-        <RightSidebarLayout rightDefaultOpen={rightDefaultOpen}>
-          {children}
-        </RightSidebarLayout>
-      </SidebarProvider>
+      <ActionCenterProvider>
+        <SidebarProvider
+          cookieName={LEFT_SIDEBAR_COOKIE}
+          defaultOpen={leftDefaultOpen}
+          className="h-dvh min-h-0 overflow-hidden"
+        >
+          <NavigationSidebar />
+          <RightSidebarLayout rightDefaultOpen={rightDefaultOpen}>
+            {children}
+          </RightSidebarLayout>
+        </SidebarProvider>
+      </ActionCenterProvider>
     </GitHubPipelineStatusProvider>
   );
 }
@@ -398,6 +402,22 @@ function NavigationSidebar() {
                   >
                     <House />
                     <span>{t("welcome")}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/action-center")}
+                >
+                  <Link
+                    href="/action-center"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
+                  >
+                    <ListTodo />
+                    <span>{t("actionCenter")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

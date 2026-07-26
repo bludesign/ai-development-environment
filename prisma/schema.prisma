@@ -1545,6 +1545,17 @@ model SidebarUsageSummary {
   updatedAt   DateTime @updatedAt
 }
 
+model ActionCenterAcknowledgement {
+  id                 String   @id
+  resourceKind       String
+  resourceId         String
+  failureFingerprint String
+  acknowledgedAt     DateTime @default(now())
+
+  @@unique([resourceKind, resourceId, failureFingerprint])
+  @@index([acknowledgedAt])
+}
+
 model SigningProfileAsset {
   id                   String    @id
   agentId              String

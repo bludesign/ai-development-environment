@@ -6,6 +6,7 @@ import {
 } from "@/lib/breadcrumbs";
 
 const labels: Record<BreadcrumbLabelKey, string> = {
+  actionCenter: "Action Center",
   actions: "Actions",
   actionsCache: "Actions Cache",
   agents: "Agents",

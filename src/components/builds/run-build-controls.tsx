@@ -9,6 +9,8 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -24,6 +26,7 @@ export function RunBuildControls({
   onCompleted,
   onError,
   size = "default",
+  compact = false,
 }: {
   buildId: string;
   destinationType: BuildDestination["type"];
@@ -31,6 +34,7 @@ export function RunBuildControls({
   onCompleted?: () => void | Promise<void>;
   onError: (error: string | null) => void;
   size?: "sm" | "default";
+  compact?: boolean;
 }) {
   const t = useTranslations("builds");
   const preferred = preferredDestination?.generic
@@ -111,6 +115,67 @@ export function RunBuildControls({
       setRunning(false);
     }
   };
+
+  if (compact) {
+    return (
+      <div
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <DropdownMenu
+          onOpenChange={(open) => {
+            if (open && !destinationsLoaded) void loadDestinations();
+          }}
+        >
+          <DropdownMenuTrigger asChild>
+            <Button disabled={running} size={size} type="button">
+              {loadingDestinations || running ? <Spinner /> : <Play />}
+              {t("run")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72">
+            {loadingDestinations && (
+              <div className="flex justify-center p-2 text-muted-foreground">
+                <Spinner />
+              </div>
+            )}
+            {destinations.map((destination) => (
+              <DropdownMenuCheckboxItem
+                checked={selectedDestinations.has(destination.id)}
+                key={destination.id}
+                onCheckedChange={(checked) =>
+                  setSelectedDestinations((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(destination.id);
+                    else next.delete(destination.id);
+                    return next;
+                  })
+                }
+              >
+                {destination.name}
+                {destination.osVersion ? ` · ${destination.osVersion}` : ""}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {destinationsLoaded && !destinations.length && (
+              <p className="p-2 text-xs text-muted-foreground">
+                {t("noCompatibleDevices")}
+              </p>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={running || selectedDestinations.size === 0}
+              onSelect={(event) => {
+                event.preventDefault();
+                void run();
+              }}
+            >
+              {running ? <Spinner /> : <Play />} {t("run")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  }
 
   return (
     <div

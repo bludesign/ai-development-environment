@@ -16,6 +16,7 @@
     "navigation": "Navigation",
     "breadcrumbLabel": "Breadcrumb-Navigation",
     "navigationDescription": "Hauptnavigation von AI Development Environment.",
+    "actionCenter": "Aktionszentrum",
     "notifications": "Benachrichtigungen",
     "notificationsDescription": "Benachrichtigungsaktualisierungen und Warnungen.",
     "showNavigation": "Navigation anzeigen",
@@ -67,6 +68,42 @@
     "repositories": "Repositorys",
     "runs": "Ausführungen",
     "sync": "Synchronisierung"
+  },
+  "actionCenter": {
+    "title": "Aktionszentrum",
+    "description": "Laufende Arbeit, Entscheidungen, Fehler und ausführbereite iOS-Builds.",
+    "refresh": "Aktionszentrum aktualisieren",
+    "totalCount": "{count, plural, one {# Element} other {# Elemente}}",
+    "attentionCount": "{count, plural, one {# erfordert Aufmerksamkeit} other {# erfordern Aufmerksamkeit}}",
+    "activeCount": "{count, plural, one {# aktiv} other {# aktiv}}",
+    "emptyTitle": "Keine Aktion erforderlich",
+    "emptyDescription": "Aktive Arbeit und neue Entscheidungen erscheinen hier automatisch.",
+    "needsAttention": "Aufmerksamkeit erforderlich",
+    "active": "Aktiv",
+    "noAttention": "Derzeit erfordert kein Element Aufmerksamkeit.",
+    "noActive": "Derzeit ist keine Arbeit aktiv.",
+    "loadMore": "Mehr laden",
+    "miniLabel": "Kompaktes Aktionszentrum",
+    "miniEmpty": "Keine Aktion erforderlich.",
+    "kinds": {
+      "PLAN": "Planung",
+      "SESSION": "Sitzung",
+      "BUILD": "Build",
+      "WORKFLOW": "Workflow"
+    },
+    "reasons": {
+      "QUESTION": "Antwort erforderlich",
+      "BLOCKED": "Blockiert",
+      "FAILED": "Fehlgeschlagen",
+      "UNRUN_BUILD": "Ausführbereit",
+      "ACTIVE": "Aktiv"
+    },
+    "acknowledge": "Bestätigen",
+    "acknowledgeNamed": "{name} bestätigen",
+    "questionFrom": "Frage von {source}",
+    "customAnswerFor": "Eigene Antwort für {question}",
+    "customAnswer": "Eigene Antwort",
+    "submitAnswer": "Antwort senden"
   },
   "workflows": {
     "title": "Workflows",
