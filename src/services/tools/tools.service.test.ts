@@ -33,6 +33,7 @@ describe("external MCP configuration", () => {
     expect(catalog.groups.map(({ id }) => id)).toEqual([
       "builtin:codebases",
       "builtin:builds",
+      "builtin:tool-administration",
     ]);
     expect(catalog.groups[1]?.tools.map(({ name }) => name)).toEqual([
       "get_builds",
@@ -43,6 +44,21 @@ describe("external MCP configuration", () => {
       "cancel_build",
       "run_build",
       "export_build_archive",
+      "get_build_project",
+      "create_build_project",
+      "save_build_configuration",
+      "delete_build_configuration",
+      "discover_build_sources",
+      "inspect_build_source",
+      "get_build_scripts",
+      "save_build_script",
+      "delete_build_script",
+      "rebuild_build",
+      "delete_builds",
+      "get_build_reports",
+      "generate_build_report",
+      "start_worktree_coverage",
+      "get_worktree_coverage",
     ]);
     await expect(
       service.callTool({
@@ -262,5 +278,219 @@ describe("external MCP configuration", () => {
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer secret");
     expect(headers.get("accept")).toBe("application/json, text/event-stream");
+  });
+});
+
+describe("MCP tool presets", () => {
+  test("creates, replaces membership on edit, and deletes presets", async () => {
+    const service = new ToolsService({} as never);
+    const [first, second] = service.builtInTools
+      .definitions()
+      .slice(0, 2)
+      .map(({ name }) => name);
+    const now = new Date("2026-07-26T12:00:00.000Z");
+    const state = {
+      id: "",
+      name: "",
+      description: "",
+      iconKey: "wrench",
+      enabledForPlans: false,
+      enabledForSessions: false,
+      createdAt: now,
+      updatedAt: now,
+      tools: [] as Array<{ toolName: string }>,
+    };
+    const transaction = {
+      mcpToolPreset: {
+        upsert: vi.fn(
+          async ({
+            create,
+            update,
+          }: {
+            create: typeof state;
+            update: Partial<typeof state>;
+          }) => {
+            Object.assign(state, state.id ? update : create);
+            return state;
+          },
+        ),
+      },
+      mcpToolPresetTool: {
+        deleteMany: vi.fn(async () => {
+          state.tools = [];
+          return { count: 0 };
+        }),
+        createMany: vi.fn(
+          async ({ data }: { data: Array<{ toolName: string }> }) => {
+            state.tools = data.map(({ toolName }) => ({ toolName }));
+            return { count: data.length };
+          },
+        ),
+      },
+    };
+    const remove = vi.fn(async () => state);
+    getPrismaClient.mockResolvedValue({
+      mcpToolPreset: {
+        findMany: vi.fn(async () =>
+          state.id ? [{ id: state.id, name: state.name }] : [],
+        ),
+        findUnique: vi.fn(async () => (state.id ? state : null)),
+        findUniqueOrThrow: vi.fn(async () => state),
+        delete: remove,
+      },
+      $transaction: vi.fn(
+        async (callback: (value: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    });
+
+    const created = await service.createMcpToolPreset({
+      name: "Reader",
+      description: "Read only",
+      iconKey: "code",
+      enabledForPlans: true,
+      enabledForSessions: false,
+      toolNames: [first],
+    });
+    expect(created).toMatchObject({
+      name: "Reader",
+      toolNames: [first],
+      enabledForPlans: true,
+    });
+
+    const updated = await service.updateMcpToolPreset(created.id, {
+      name: "Reader and lookup",
+      description: "",
+      iconKey: "sparkles",
+      enabledForPlans: true,
+      enabledForSessions: true,
+      toolNames: [second],
+    });
+    expect(updated).toMatchObject({
+      name: "Reader and lookup",
+      toolNames: [second],
+      enabledForSessions: true,
+    });
+
+    await expect(service.deleteMcpToolPreset(created.id)).resolves.toEqual({
+      id: created.id,
+    });
+    expect(remove).toHaveBeenCalledWith({ where: { id: created.id } });
+  });
+
+  test("validates non-empty, supported, duplicate-free built-in membership", async () => {
+    const service = new ToolsService({} as never);
+    const toolName = service.builtInTools.definitions()[0]!.name;
+    const base = {
+      name: "Read only",
+      description: "",
+      iconKey: "wrench",
+      enabledForPlans: true,
+      enabledForSessions: false,
+      toolNames: [toolName],
+    };
+
+    await expect(
+      service.createMcpToolPreset({ ...base, toolNames: [] }),
+    ).rejects.toThrow(/at least one/);
+    await expect(
+      service.createMcpToolPreset({ ...base, iconKey: "unknown" }),
+    ).rejects.toThrow(/icon/);
+    await expect(
+      service.createMcpToolPreset({
+        ...base,
+        toolNames: [toolName, toolName],
+      }),
+    ).rejects.toThrow(/duplicates/);
+    await expect(
+      service.createMcpToolPreset({ ...base, toolNames: ["future_tool"] }),
+    ).rejects.toThrow(/Unknown built-in tool/);
+  });
+
+  test("enforces case-insensitive preset names", async () => {
+    const service = new ToolsService({} as never);
+    const toolName = service.builtInTools.definitions()[0]!.name;
+    getPrismaClient.mockResolvedValue({
+      mcpToolPreset: {
+        findMany: vi.fn().mockResolvedValue([{ id: "preset-1", name: "Safe" }]),
+      },
+    });
+
+    await expect(
+      service.createMcpToolPreset({
+        name: " safe ",
+        description: "",
+        iconKey: "wrench",
+        enabledForPlans: false,
+        enabledForSessions: false,
+        toolNames: [toolName],
+      }),
+    ).rejects.toThrow(/already exists/);
+  });
+
+  test("deduplicates selections, filters eligibility and stale tools, and unions membership", async () => {
+    const service = new ToolsService({} as never);
+    const [first, second] = service.builtInTools
+      .definitions()
+      .slice(0, 2)
+      .map(({ name }) => name);
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "preset-1",
+        tools: [{ toolName: first }, { toolName: "removed_tool" }],
+      },
+      { id: "preset-2", tools: [{ toolName: first }, { toolName: second }] },
+    ]);
+    getPrismaClient.mockResolvedValue({ mcpToolPreset: { findMany } });
+
+    await expect(
+      service.resolveRunMcpPresets("SESSION", [
+        "preset-1",
+        "missing",
+        "preset-1",
+        "preset-2",
+      ]),
+    ).resolves.toEqual({
+      presetIds: ["preset-1", "preset-2"],
+      toolNames: [first, second].sort(),
+    });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: { in: ["preset-1", "missing", "preset-2"] },
+          enabledForSessions: true,
+        },
+      }),
+    );
+  });
+
+  test("serves surviving preset tools and enforces run ownership for snapshots", async () => {
+    const service = new ToolsService({} as never);
+    const toolName = service.builtInTools.definitions()[0]!.name;
+    getPrismaClient.mockResolvedValue({
+      mcpToolPreset: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "preset-1",
+          tools: [{ toolName }, { toolName: "removed_tool" }],
+        }),
+      },
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          agentId: "agent-1",
+          mcpToolNamesJson: JSON.stringify([toolName, "removed_tool"]),
+        }),
+      },
+    });
+
+    await expect(service.mcpPresetToolNames("preset-1")).resolves.toEqual([
+      toolName,
+    ]);
+    await expect(service.mcpRunToolNames("run-1", "agent-2")).resolves.toEqual({
+      status: "FORBIDDEN",
+    });
+    await expect(service.mcpRunToolNames("run-1", "agent-1")).resolves.toEqual({
+      status: "OK",
+      toolNames: [toolName],
+    });
   });
 });

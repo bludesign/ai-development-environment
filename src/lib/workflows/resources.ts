@@ -103,6 +103,10 @@ const jiraTriggerKinds = new Set([
   "JIRA_SOURCE_NEW_TICKET",
   "JIRA_MENTION",
   "JIRA_SPRINT_STARTED",
+  "JIRA_TICKET_UPDATED",
+  "JIRA_COMMENT_ADDED",
+  "JIRA_WORKLOG_ADDED",
+  "JIRA_SPRINT_ENDED",
 ]);
 const runTriggerKinds = new Set([
   "RUN_STARTED",
@@ -133,6 +137,9 @@ const worktreeTriggerKinds = new Set([
   "WORKTREE_DIVERGED",
   "WORKTREE_DIRTY_DURATION",
   "WORKTREE_NEW_COMMIT",
+  "WORKTREE_SYNC_STATE_CHANGED",
+  "WORKTREE_AUTOMATION_RESULT",
+  "WORKTREE_CLEAN",
 ]);
 const pullRequestTriggerKinds = new Set([
   "GITHUB_PR_STATE",
@@ -141,11 +148,14 @@ const pullRequestTriggerKinds = new Set([
   "GITHUB_PR_CLOSED",
   "GITHUB_ISSUE_COMMAND",
   "GITHUB_PR_LABEL",
+  "GITHUB_PR_SYNCHRONIZED",
+  "GITHUB_REVIEW_APPROVED",
 ]);
 const workflowRunTriggerKinds = new Set([
   "GITHUB_CHECK_FAILED",
   "GITHUB_WORKFLOW_SUCCEEDED",
   "GITHUB_ACTIONS_RESULT",
+  "GITHUB_PIPELINE_STATUS_CHANGED",
 ]);
 
 /** Returns the primary resource that caused a workflow trigger event. */
@@ -191,6 +201,45 @@ export function workflowTriggerResourceLink(
   }
   if (kind === "CODEBASE_REMOTE_BRANCH") {
     return resourceLink("CODEBASE", nested(session, "codebase", "id"));
+  }
+  if (
+    kind === "CODEBASE_SYNC_STATE_CHANGED" ||
+    kind === "CODEBASE_OPERATION_FAILED"
+  ) {
+    return resourceLink("CODEBASE", nested(session, "codebase", "id"));
+  }
+  if (kind === "COMMAND_RUN_RESULT" || kind === "COMMAND_OUTPUT_MATCH") {
+    return resourceLink("COMMAND_RUN", nested(session, "command", "id"));
+  }
+  if (kind === "SKILL_SYNC_RESULT" || kind === "SKILL_SYNC_CONFLICT") {
+    return resourceLink("SKILL_SYNC", nested(session, "skillSync", "id"));
+  }
+  if (
+    kind === "IOS_DEVICE_ENROLLED" ||
+    kind === "IOS_DEVICE_REGISTRATION_RESULT"
+  ) {
+    return resourceLink("IOS_DEVICE", nested(session, "device", "id"));
+  }
+  if (
+    kind === "SIGNING_OPERATION_RESULT" ||
+    kind === "SIGNING_ASSET_EXPIRING"
+  ) {
+    return resourceLink(
+      "SIGNING_PROFILE",
+      nested(session, "signingProfile", "id"),
+    );
+  }
+  if (kind === "PUSH_NOTIFICATION_RESULT") {
+    return resourceLink(
+      "PUSH_NOTIFICATION_BATCH",
+      nested(session, "pushBatch", "id"),
+    );
+  }
+  if (kind === "BUILD_DATA_THRESHOLD" || kind === "BUILD_DATA_CLEANUP_RESULT") {
+    return resourceLink(
+      "BUILD_DATA_COLLECTION",
+      nested(session, "buildData", "id"),
+    );
   }
   if (kind === "AGENT_JOB_FAILED") {
     return resourceLink(
@@ -313,13 +362,23 @@ export function workflowResourceDestination(
                       ? `/commands/runs/${segment(id)}`
                       : kind === "WORKFLOW_RUN"
                         ? `/workflows/runs/${segment(id)}`
-                        : kind === "SKILL_RUN"
+                        : kind === "SKILL_SYNC"
                           ? `/skills/sync/${segment(id)}`
-                          : kind === "AGENT"
-                            ? `/agents/${segment(id)}`
-                            : kind === "CODEBASE_REPOSITORY"
-                              ? `/codebases/repositories/${segment(id)}`
-                              : null;
+                          : kind === "SKILL"
+                            ? `/skills/${segment(id)}`
+                            : kind === "IOS_DEVICE"
+                              ? `/devices/${segment(id)}`
+                              : kind === "SIGNING_PROFILE"
+                                ? `/provisioning-profiles/${segment(id)}`
+                                : kind === "PUSH_NOTIFICATION_BATCH"
+                                  ? `/push-notifications`
+                                  : kind === "BUILD_DATA_COLLECTION"
+                                    ? `/build-data`
+                                    : kind === "AGENT"
+                                      ? `/agents/${segment(id)}`
+                                      : kind === "CODEBASE_REPOSITORY"
+                                        ? `/codebases/repositories/${segment(id)}`
+                                        : null;
   if (derived) return { href: derived, external: false };
 
   const provider = externalUrl(link.url);

@@ -1,6 +1,10 @@
 import "server-only";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import {
+  agentEventBus,
+  MODEL_COST_CATALOG_CHANGED_TOPIC,
+} from "@/services/agent-control";
 
 import type {
   ModelCostCatalogView,
@@ -212,7 +216,9 @@ export class ModelCostsService {
     // The last check may have approved a different source. Make the next read
     // compare the newly active URL with the source of the stored entries.
     this.checkedAt = 0;
-    return this.getCatalog();
+    const catalog = await this.getCatalog();
+    agentEventBus.publish(MODEL_COST_CATALOG_CHANGED_TOPIC, { catalog });
+    return catalog;
   }
 
   /**
@@ -266,7 +272,9 @@ export class ModelCostsService {
         data: { error: message.slice(0, 2_000) },
       });
     }
-    return this.getCatalog();
+    const catalog = await this.getCatalog();
+    agentEventBus.publish(MODEL_COST_CATALOG_CHANGED_TOPIC, { catalog });
+    return catalog;
   }
 
   /**

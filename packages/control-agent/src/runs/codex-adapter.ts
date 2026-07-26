@@ -60,6 +60,24 @@ export function supportedCodexVersion(version: string | null): boolean {
   );
 }
 
+export function codexRunConfig(
+  input: Pick<ProviderStartInput, "run" | "mcpServer">,
+): Record<string, unknown> {
+  return {
+    web_search: input.run.webSearchEnabled ? "live" : "disabled",
+    ...(input.mcpServer
+      ? {
+          mcp_servers: {
+            [input.mcpServer.name]: {
+              url: input.mcpServer.url,
+              http_headers: input.mcpServer.headers,
+            },
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * Codex app-server includes cached input in its total input count. The shared
  * usage contract keeps cache reads separate, so subtract that subset before
@@ -424,9 +442,7 @@ export class CodexAdapter implements ProviderAdapter {
               model: input.run.model === "default" ? null : input.run.model,
               approvalPolicy: "never",
               sandbox,
-              config: {
-                web_search: input.run.webSearchEnabled ? "live" : "disabled",
-              },
+              config: codexRunConfig(input),
             },
           )
         : await this.server.request("thread/start", {
@@ -434,9 +450,7 @@ export class CodexAdapter implements ProviderAdapter {
             model: input.run.model === "default" ? null : input.run.model,
             approvalPolicy: "never",
             sandbox,
-            config: {
-              web_search: input.run.webSearchEnabled ? "live" : "disabled",
-            },
+            config: codexRunConfig(input),
             ephemeral: false,
             experimentalRawEvents: false,
           }),

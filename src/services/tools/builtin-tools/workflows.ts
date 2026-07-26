@@ -1333,6 +1333,44 @@ export function createWorkflowToolGroup(workflows: Service): BuiltInToolGroup {
           };
         },
       }),
+      defineTool({
+        name: "archive_workflow_runs",
+        title: "Archive workflow runs",
+        description: "Archive or restore workflow runs.",
+        inputSchema: z.object({
+          ids: z.array(z.string().min(1)).min(1),
+          archived: z.boolean().default(true),
+        }),
+        outputSchema: z.object({ count: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ ids, archived }) => ({
+          count: await workflows().archiveRuns(ids, archived),
+        }),
+      }),
+      defineTool({
+        name: "delete_workflow_runs",
+        title: "Delete workflow runs",
+        description:
+          "Permanently delete workflow runs and their retained execution history.",
+        inputSchema: z.object({ ids: z.array(z.string().min(1)).min(1) }),
+        outputSchema: z.object({ count: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ ids }) => ({
+          count: await workflows().deleteRuns(ids),
+        }),
+      }),
+      defineTool({
+        name: "repair_workflow_run_data",
+        title: "Repair workflow run data",
+        description:
+          "Repair session data for a blocked or paused workflow run.",
+        inputSchema: z.object({ runId: z.string().min(1), patch: z.unknown() }),
+        outputSchema: z.object({ run: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ runId, patch }) => ({
+          run: await workflows().repairRunData(runId, patch),
+        }),
+      }),
     ],
   };
 

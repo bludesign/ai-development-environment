@@ -2501,6 +2501,7 @@ export class WorkflowsService {
       payload,
     ) as Record<string, unknown>;
     let cursorChanged: boolean | null = null;
+    let previousCursor: unknown;
     if (
       payload.cursorValue !== undefined &&
       !(
@@ -2512,11 +2513,36 @@ export class WorkflowsService {
       const previous = await prisma.workflowTriggerState.findUnique({
         where: { triggerId_subjectKey: { triggerId: trigger.id, subjectKey } },
       });
-      const previousCursor = previous?.cursorJson
+      previousCursor = previous?.cursorJson
         ? parseObject(json(previous.cursorJson), "Trigger cursor").value
         : undefined;
       cursorChanged =
         canonical(previousCursor) !== canonical(payload.cursorValue);
+      if (trigger.kind === "WORKTREE_CLEAN") {
+        cursorChanged =
+          previousCursor === true && payload.cursorValue === false;
+      }
+      if (
+        trigger.kind === "JIRA_SPRINT_STARTED" ||
+        trigger.kind === "JIRA_SPRINT_ENDED"
+      ) {
+        const previousSprints = Array.isArray(previousCursor)
+          ? previousCursor
+          : null;
+        const currentSprints = Array.isArray(payload.cursorValue)
+          ? payload.cursorValue
+          : null;
+        cursorChanged =
+          previousSprints !== null &&
+          currentSprints !== null &&
+          currentSprints.some(
+            (value) =>
+              !previousSprints.some(
+                (previousValue) =>
+                  canonical(previousValue) === canonical(value),
+              ),
+          );
+      }
       await prisma.workflowTriggerState.upsert({
         where: { triggerId_subjectKey: { triggerId: trigger.id, subjectKey } },
         create: {
@@ -2545,6 +2571,16 @@ export class WorkflowsService {
         typeof body !== "string" ||
         typeof config.commandPattern !== "string" ||
         !new RegExp(config.commandPattern).test(body)
+      ) {
+        return false;
+      }
+    }
+    if (trigger.kind === "COMMAND_OUTPUT_MATCH") {
+      const output = getSessionValue(payload, "output.data");
+      if (
+        typeof output !== "string" ||
+        typeof config.outputPattern !== "string" ||
+        !new RegExp(config.outputPattern).test(output)
       ) {
         return false;
       }

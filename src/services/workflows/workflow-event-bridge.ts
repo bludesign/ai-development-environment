@@ -3,12 +3,24 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
+import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 
 import {
   AGENT_CHANGED_TOPIC,
+  BUILD_DATA_CHANGED_TOPIC,
   BUILDS_CHANGED_TOPIC,
   CODEBASE_CHANGED_TOPIC,
+  COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
+  COMMAND_RUNS_CHANGED_TOPIC,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+  IOS_DEVICES_CHANGED_TOPIC,
+  MODEL_COST_CATALOG_CHANGED_TOPIC,
+  POLLING_CHANGED_TOPIC,
+  PUSH_NOTIFICATIONS_CHANGED_TOPIC,
   RUNS_CHANGED_TOPIC,
+  SIGNING_ASSETS_CHANGED_TOPIC,
+  SKILLS_CHANGED_TOPIC,
+  TOOL_CALL_AUDIT_CHANGED_TOPIC,
   WORKTREE_CHANGED_TOPIC,
   agentEventBus,
   type AgentControlService,
@@ -24,10 +36,30 @@ import {
   type DiskSpaceSessionData,
 } from "@/services/disk-space";
 import type { WorktreesService } from "@/services/worktrees";
+import type { GitHubPipelineStatusChangeView } from "@/services/github";
+import type { BuildDataService } from "@/services/build-data";
+import type { CommandsService } from "@/services/commands";
+import type { CredentialService } from "@/services/credentials";
+import type { IosDevicesService } from "@/services/ios-devices";
+import type { PollingService } from "@/services/polling";
+import type { PushNotificationsService } from "@/services/push-notifications";
+import type { SigningAssetsService } from "@/services/signing-assets";
+import type { SkillsService } from "@/services/skills";
 
 import type { WorkflowEventsService } from "./workflow-events.service";
 
 type SessionData = Record<string, unknown>;
+
+export type WorkflowEventBridgeDomains = {
+  buildData?: Pick<BuildDataService, "getCollection">;
+  commands?: Pick<CommandsService, "getRun">;
+  credentials?: Pick<CredentialService, "status">;
+  iosDevices?: Pick<IosDevicesService, "device">;
+  polling?: Pick<PollingService, "list">;
+  pushNotifications?: Pick<PushNotificationsService, "history">;
+  signingAssets?: Pick<SigningAssetsService, "operations" | "profiles">;
+  skills?: Pick<SkillsService, "getRun">;
+};
 
 function parsed(value: string): Record<string, unknown> {
   try {
@@ -91,6 +123,7 @@ export class WorkflowEventBridge {
       "workflowSessionDataForWorktree"
     >,
     private readonly diskSpace?: DiskSpaceService,
+    private readonly domains: WorkflowEventBridgeDomains = {},
   ) {}
 
   start(): void {
@@ -105,6 +138,17 @@ export class WorkflowEventBridge {
     void this.consumeWorktrees();
     void this.consumeCodebases();
     void this.consumeAgents();
+    void this.consumePipelineStatuses();
+    void this.consumeCommandRuns();
+    void this.consumeCommandOutput();
+    void this.consumeSkillSyncs();
+    void this.consumeIosDevices();
+    void this.consumeSigningAssets();
+    void this.consumePushNotifications();
+    void this.consumeBuildData();
+    void this.consumePollingOperations();
+    void this.consumeModelCosts();
+    void this.consumeToolCalls();
     if (this.diskSpace) {
       void this.consumeDiskSpace();
       void this.auditDiskSpace(true);
@@ -153,6 +197,27 @@ export class WorkflowEventBridge {
     ccusageCollectionId?: string | null;
     resultJson: string | null;
   }): Promise<void> {
+    if (job.kind === WORKTREE_AUTO_SYNC_JOB_KIND && job.worktreeId) {
+      const targetSessionData = await this.worktreeSessionData(
+        job.worktreeId,
+        true,
+      );
+      await this.record(
+        "WORKTREE_AUTOMATION_RESULT",
+        job.worktreeId,
+        `worktree-automation:${job.id}:${job.status}`,
+        mergeSessionData(targetSessionData, {
+          worktree: { id: job.worktreeId },
+          automation: {
+            jobId: job.id,
+            status: job.status,
+            error: job.error,
+            result: parsed(job.resultJson ?? "{}"),
+          },
+        }),
+        { cursorValue: `${job.id}:${job.status}` },
+      );
+    }
     if (
       job.kind === "ccusage.report" &&
       job.status === "SUCCEEDED" &&
@@ -218,6 +283,528 @@ export class WorkflowEventBridge {
             console.error("Could not record workflow run trigger:", error),
           );
         }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumePipelineStatuses(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      githubPipelineStatusChanged: GitHubPipelineStatusChangeView;
+    }>(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const change = payload.githubPipelineStatusChanged;
+        const snapshot = change.snapshot;
+        const pipeline = change.changedPipeline ?? {
+          status: snapshot.pipelineStatus,
+        };
+        await this.record(
+          "GITHUB_PIPELINE_STATUS_CHANGED",
+          `${snapshot.repositoryGithubId}:${snapshot.headSha}`,
+          `github-pipeline:${snapshot.repositoryGithubId}:${snapshot.headSha}:${snapshot.revision}`,
+          {
+            repo: {
+              githubId: snapshot.repositoryGithubId,
+              nameWithOwner: snapshot.repositoryNameWithOwner,
+              url: snapshot.repositoryUrl,
+            },
+            pipeline: {
+              ...pipeline,
+              headSha: snapshot.headSha,
+              aggregateStatus: snapshot.pipelineStatus,
+              revision: snapshot.revision,
+            },
+          },
+          { cursorValue: snapshot.revision },
+        ).catch((error) =>
+          console.error("Could not record GitHub pipeline trigger:", error),
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeCommandRuns(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      commandRunsChanged: { id: string };
+    }>(COMMAND_RUNS_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const service = this.domains.commands;
+        if (!service) continue;
+        const run = await service.getRun(payload.commandRunsChanged.id);
+        if (
+          !run ||
+          !new Set(["SUCCEEDED", "FAILED", "CANCELLED"]).has(run.status)
+        ) {
+          continue;
+        }
+        const target = await this.worktreeSessionData(run.worktreeId, true);
+        const sessionData = mergeSessionData(target, {
+          command: {
+            id: run.id,
+            commandId: run.commandId,
+            name: run.snapshotName,
+            status: run.status,
+            exitCode: run.exitCode,
+            signal: run.signal,
+            error: run.error,
+            finishedAt: run.finishedAt?.toISOString() ?? null,
+          },
+          agent: { id: run.agentId, name: run.agentName },
+          ...(run.worktreeId ? { worktree: { id: run.worktreeId } } : {}),
+        });
+        const terminalAt = run.finishedAt?.toISOString() ?? "terminal";
+        await this.record(
+          "COMMAND_RUN_RESULT",
+          run.id,
+          `command-result:${run.id}:${run.status}:${terminalAt}`,
+          sessionData,
+          { cursorValue: `${run.status}:${terminalAt}` },
+        ).catch((error) =>
+          console.error("Could not record command result trigger:", error),
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeCommandOutput(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      commandRunOutputAdded: {
+        id: string;
+        runId: string;
+        attemptNumber: number;
+        sequence: number;
+        stream: string;
+        dataBase64: string;
+        createdAt: Date;
+      };
+    }>(COMMAND_RUN_OUTPUT_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const chunk = payload.commandRunOutputAdded;
+        const data = Buffer.from(chunk.dataBase64, "base64").toString("utf8");
+        await this.record(
+          "COMMAND_OUTPUT_MATCH",
+          chunk.runId,
+          `command-output:${chunk.id}`,
+          {
+            command: { id: chunk.runId },
+            output: {
+              data,
+              stream: chunk.stream,
+              attempt: chunk.attemptNumber,
+              sequence: chunk.sequence,
+            },
+          },
+          { cursorValue: chunk.id },
+        ).catch((error) =>
+          console.error("Could not record command output trigger:", error),
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeSkillSyncs(): Promise<void> {
+    const stream = agentEventBus.iterate<{ id: string | null }>(
+      SKILLS_CHANGED_TOPIC,
+    );
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const service = this.domains.skills;
+        if (!service || !payload.id) continue;
+        const run = await service.getRun(payload.id);
+        if (!run) continue;
+        const conflicts = run.items
+          .filter((item) => item.status === "BLOCKED")
+          .map((item) => ({
+            id: item.id,
+            skillId: item.skillId,
+            skillName: item.skill?.name ?? null,
+            direction: item.direction,
+            error: item.error,
+          }));
+        const sessionData = {
+          skillSync: {
+            id: run.id,
+            kind: run.kind,
+            status: run.status,
+            error: run.error,
+            conflictCount: conflicts.length,
+            conflicts,
+            updatedAt: run.updatedAt.toISOString(),
+            finishedAt: run.finishedAt?.toISOString() ?? null,
+          },
+          ...(run.groupId ? { skill: { groupId: run.groupId } } : {}),
+        };
+        if (run.status === "NEEDS_RESOLUTION" || conflicts.length) {
+          await this.record(
+            "SKILL_SYNC_CONFLICT",
+            run.id,
+            `skill-conflict:${run.id}:${run.updatedAt.toISOString()}`,
+            sessionData,
+            { cursorValue: run.updatedAt.toISOString() },
+          );
+        }
+        if (new Set(["READY", "PARTIAL", "SUCCEEDED"]).has(run.status)) {
+          await this.record(
+            "SKILL_SYNC_RESULT",
+            run.id,
+            `skill-result:${run.id}:${run.status}:${run.updatedAt.toISOString()}`,
+            sessionData,
+            { cursorValue: `${run.status}:${run.updatedAt.toISOString()}` },
+          );
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeIosDevices(): Promise<void> {
+    const stream = agentEventBus.iterate<{ id: string | null }>(
+      IOS_DEVICES_CHANGED_TOPIC,
+    );
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const service = this.domains.iosDevices;
+        if (!service || !payload.id) continue;
+        const device = await service.device(payload.id);
+        if (!device) continue;
+        const sessionData = {
+          device: {
+            id: device.id,
+            udid: device.udid,
+            name: device.displayName,
+            product: device.product,
+            osVersion: device.osVersion,
+            status: device.status,
+            error: device.registrationError,
+            updatedAt: device.updatedAt.toISOString(),
+          },
+        };
+        await this.record(
+          "IOS_DEVICE_ENROLLED",
+          device.id,
+          `ios-device-enrolled:${device.id}:${device.createdAt.toISOString()}`,
+          sessionData,
+          { cursorValue: device.createdAt.toISOString() },
+        );
+        if (
+          new Set(["REGISTERED", "REGISTRATION_FAILED", "REJECTED"]).has(
+            device.status,
+          )
+        ) {
+          await this.record(
+            "IOS_DEVICE_REGISTRATION_RESULT",
+            device.id,
+            `ios-device-registration:${device.id}:${device.status}:${device.updatedAt.toISOString()}`,
+            sessionData,
+            {
+              cursorValue: `${device.status}:${device.updatedAt.toISOString()}`,
+            },
+          );
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeSigningAssets(): Promise<void> {
+    const stream = agentEventBus.iterate<{ changed: boolean }>(
+      SIGNING_ASSETS_CHANGED_TOPIC,
+    );
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        if (!payload.changed) continue;
+        const service = this.domains.signingAssets;
+        if (!service) continue;
+        const [operations, profiles] = await Promise.all([
+          service.operations(200),
+          service.profiles(),
+        ]);
+        for (const operation of operations.filter((item) => item.finishedAt)) {
+          const sessionData = {
+            signingOperation: {
+              id: operation.id,
+              kind: operation.kind,
+              status: operation.status,
+              assetKey: operation.assetKey,
+              error: operation.error,
+              finishedAt: operation.finishedAt?.toISOString() ?? null,
+            },
+            ...(operation.assetKey
+              ? { signingProfile: { id: operation.assetKey } }
+              : {}),
+          };
+          await this.record(
+            "SIGNING_OPERATION_RESULT",
+            operation.id,
+            `signing-operation:${operation.id}:${operation.status}:${operation.updatedAt.toISOString()}`,
+            sessionData,
+            {
+              cursorValue: `${operation.status}:${operation.updatedAt.toISOString()}`,
+            },
+          );
+        }
+        for (const profile of profiles.filter((item) => item.expiresAt)) {
+          const expiresAt = profile.expiresAt!;
+          await this.record(
+            "SIGNING_ASSET_EXPIRING",
+            profile.id,
+            `signing-expiry:${profile.id}:${expiresAt}`,
+            { signingProfile: { ...profile, id: profile.id } },
+            {
+              cursorValue: expiresAt,
+              expiresInDays: Math.ceil(
+                (new Date(expiresAt).getTime() - Date.now()) / 86_400_000,
+              ),
+            },
+          );
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumePushNotifications(): Promise<void> {
+    const stream = agentEventBus.iterate<{ changed: boolean }>(
+      PUSH_NOTIFICATIONS_CHANGED_TOPIC,
+    );
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        if (!payload.changed) continue;
+        const service = this.domains.pushNotifications;
+        if (!service) continue;
+        const batches = await service.history(200);
+        for (const batch of batches.filter(
+          (item) => !new Set(["DRAFT", "QUEUED", "SENDING"]).has(item.status),
+        )) {
+          const updatedAt = batch.updatedAt.toISOString();
+          await this.record(
+            "PUSH_NOTIFICATION_RESULT",
+            batch.id,
+            `push-result:${batch.id}:${batch.status}:${updatedAt}`,
+            {
+              pushBatch: {
+                id: batch.id,
+                status: batch.status,
+                targetMode: batch.targetMode,
+                deliveryCount: batch.deliveries.length,
+                updatedAt,
+              },
+            },
+            { cursorValue: `${batch.status}:${updatedAt}` },
+          );
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeBuildData(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      buildDataCollectionChanged: { id: string };
+    }>(BUILD_DATA_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const service = this.domains.buildData;
+        if (!service) continue;
+        const collection = await service.getCollection(
+          payload.buildDataCollectionChanged.id,
+        );
+        if (!collection || collection.status !== "COMPLETED") continue;
+        const totalBytes = collection.entries.reduce(
+          (total, entry) => total + (entry.sizeBytes ?? 0),
+          0,
+        );
+        const sessionData = {
+          buildData: {
+            id: collection.id,
+            status: collection.status,
+            finishedAt: collection.finishedAt,
+            totalBytes,
+            entryCount: collection.entries.length,
+            successfulAgentCount: collection.progress.successfulCount,
+          },
+        };
+        const revision = collection.finishedAt ?? collection.deadlineAt;
+        await this.record(
+          "BUILD_DATA_THRESHOLD",
+          collection.id,
+          `build-data-threshold:${collection.id}:${revision}`,
+          sessionData,
+          { cursorValue: totalBytes },
+        );
+        await this.record(
+          "BUILD_DATA_CLEANUP_RESULT",
+          collection.id,
+          `build-data-result:${collection.id}:${revision}`,
+          sessionData,
+          { cursorValue: revision },
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumePollingOperations(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      pollingOperationChanged: string;
+    }>(POLLING_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const service = this.domains.polling;
+        if (!service) continue;
+        const operation = (await service.list()).find(
+          (item) => item.id === payload.pollingOperationChanged,
+        );
+        if (!operation) continue;
+        const revision =
+          operation.lastCompletedAt ??
+          operation.lastStartedAt ??
+          operation.nextScheduledAt ??
+          operation.status;
+        await this.record(
+          "POLLING_OPERATION_STATE",
+          operation.id,
+          `polling-state:${operation.id}:${operation.status}:${revision}`,
+          { polling: operation },
+          { cursorValue: `${operation.status}:${revision}` },
+        ).catch((error) =>
+          console.error("Could not record polling operation trigger:", error),
+        );
+        const credentialStore = await this.domains.credentials?.status();
+        if (credentialStore && credentialStore.state !== "READY") {
+          const warningCodes = credentialStore.warnings.map(({ code }) => code);
+          await this.record(
+            "CREDENTIAL_STORE_DEGRADED",
+            credentialStore.storageType,
+            `credential-store:${credentialStore.state}:${warningCodes.join(",")}`,
+            { credentialStore },
+            {
+              cursorValue: {
+                state: credentialStore.state,
+                warningCodes,
+                mismatchCount: credentialStore.mismatchCount,
+              },
+            },
+          );
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeModelCosts(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      catalog: {
+        url: string;
+        fetchedAt: string | null;
+        entryCount: number;
+        error: string | null;
+      };
+    }>(MODEL_COST_CATALOG_CHANGED_TOPIC);
+    try {
+      for await (const { catalog } of stream) {
+        if (!this.running) break;
+        const revision =
+          catalog.fetchedAt ?? `${catalog.url}:${catalog.error ?? "pending"}`;
+        await this.record(
+          "MODEL_COST_CATALOG_CHANGED",
+          catalog.url,
+          `model-costs:${catalog.url}:${revision}`,
+          { modelCosts: catalog },
+          { cursorValue: revision },
+        );
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  private async consumeToolCalls(): Promise<void> {
+    const stream = agentEventBus.iterate<{
+      toolCallAuditChanged: { id: string };
+    }>(TOOL_CALL_AUDIT_CHANGED_TOPIC);
+    try {
+      for await (const payload of stream) {
+        if (!this.running) break;
+        const prisma = await getPrismaClient();
+        const audit = await prisma.toolCallAudit.findUnique({
+          where: { id: payload.toolCallAuditChanged.id },
+        });
+        if (!audit || audit.resultStatus === "RUNNING") continue;
+        const callerRunId = audit.caller.startsWith("workflow:")
+          ? audit.caller.slice("workflow:".length)
+          : null;
+        const workflowRun = callerRunId
+          ? await prisma.workflowRun.findUnique({
+              where: { id: callerRunId },
+              select: { id: true, workflowId: true },
+            })
+          : null;
+        const correlatedAttempt = workflowRun
+          ? null
+          : await prisma.workflowStepAttempt.findUnique({
+              where: { id: audit.correlationId },
+              select: {
+                run: { select: { id: true, workflowId: true } },
+              },
+            });
+        const owningRun = workflowRun ?? correlatedAttempt?.run ?? null;
+        const finishedAt = audit.finishedAt?.toISOString() ?? "unfinished";
+        await this.record(
+          "TOOL_CALL_RESULT",
+          audit.id,
+          `tool-call:${audit.id}:${audit.resultStatus}:${finishedAt}`,
+          {
+            toolCall: {
+              id: audit.id,
+              correlationId: audit.correlationId,
+              caller: audit.caller,
+              source: audit.source,
+              groupId: audit.groupId,
+              toolName: audit.toolName,
+              argumentsSha256: audit.argumentsSha256,
+              resultStatus: audit.resultStatus,
+              durationMs: audit.durationMs,
+              finishedAt: audit.finishedAt?.toISOString() ?? null,
+            },
+          },
+          {
+            cursorValue: `${audit.resultStatus}:${finishedAt}`,
+            ...(owningRun
+              ? {
+                  workflowCorrelation: {
+                    workflowId: owningRun.workflowId,
+                    runId: owningRun.id,
+                  },
+                }
+              : {}),
+          },
+        );
       }
     } finally {
       await stream.return?.();
@@ -605,7 +1192,9 @@ export class WorkflowEventBridge {
     folder: string;
     branch: string | null;
     headSha: string | null;
+    syncState: string;
     pushStatus: string;
+    statusError: string | null;
     baseBehind: number | null;
     hasStagedChanges: boolean;
     hasUnstagedChanges: boolean;
@@ -643,7 +1232,9 @@ export class WorkflowEventBridge {
         path: worktree.folder,
         branch: worktree.branch,
         headSha: worktree.headSha,
+        syncState: worktree.syncState,
         pushStatus: worktree.pushStatus,
+        statusError: worktree.statusError,
         baseBehind: worktree.baseBehind,
         dirty,
         missingAt: worktree.missingAt?.toISOString() ?? null,
@@ -651,6 +1242,20 @@ export class WorkflowEventBridge {
       },
     });
     const common = { cursorValue: observedAt.toISOString() };
+    await this.record(
+      "WORKTREE_SYNC_STATE_CHANGED",
+      worktree.id,
+      `worktree-sync:${worktree.id}:${worktree.syncState}:${observedAt.toISOString()}`,
+      sessionData,
+      { cursorValue: worktree.syncState },
+    );
+    await this.record(
+      "WORKTREE_CLEAN",
+      worktree.id,
+      `worktree-clean:${worktree.id}:${observedAt.toISOString()}`,
+      sessionData,
+      { cursorValue: dirty },
+    );
     if ((worktree.baseBehind ?? 0) > 0) {
       await this.record(
         "WORKTREE_BEHIND",
@@ -734,11 +1339,37 @@ export class WorkflowEventBridge {
               folder: codebase.folder,
               agentId: codebase.agentId,
               branch: codebase.defaultBranch,
+              syncState: codebase.syncState,
+              availability: codebase.availability,
+              statusError: codebase.statusError,
+              lastFetchError: codebase.lastFetchError,
               remoteBranches: JSON.parse(
                 codebase.remoteBranchesJson,
               ) as unknown,
             },
           };
+          const revision = (
+            codebase.lastCheckedAt ?? codebase.updatedAt
+          ).toISOString();
+          await this.record(
+            "CODEBASE_SYNC_STATE_CHANGED",
+            codebase.id,
+            `codebase-sync:${codebase.id}:${codebase.syncState}:${revision}`,
+            sessionData,
+            { cursorValue: codebase.syncState },
+          );
+          if (codebase.statusError || codebase.lastFetchError) {
+            await this.record(
+              "CODEBASE_OPERATION_FAILED",
+              codebase.id,
+              `codebase-failed:${codebase.id}:${revision}`,
+              sessionData,
+              {
+                cursorValue: revision,
+                error: codebase.statusError ?? codebase.lastFetchError,
+              },
+            );
+          }
           const branches: unknown = sessionData.codebase.remoteBranches;
           if (Array.isArray(branches)) {
             for (const branch of branches.filter(
@@ -919,6 +1550,33 @@ export class WorkflowEventBridge {
           `agent-connection:${agent.id}:${agent.updatedAt.toISOString()}`,
           sessionData,
           { cursorValue: connected },
+        );
+        await this.record(
+          "AGENT_RESOURCE_THRESHOLD",
+          agent.id,
+          `agent-resource:${agent.id}:${agent.updatedAt.toISOString()}`,
+          sessionData,
+          {
+            cursorValue: {
+              diskFreeBytes: agent.diskFreeBytes,
+              memoryFreeBytes: agent.memoryFreeBytes,
+            },
+          },
+        );
+        await this.record(
+          "AGENT_VERSION_CHANGED",
+          agent.id,
+          `agent-version:${agent.id}:${agent.version}`,
+          {
+            ...sessionData,
+            agent: {
+              ...sessionData.agent,
+              version: agent.version,
+              osVersion: agent.osVersion,
+              architecture: agent.architecture,
+            },
+          },
+          { cursorValue: agent.version },
         );
       }
     } finally {

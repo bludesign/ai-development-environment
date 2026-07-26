@@ -23,6 +23,7 @@ import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { DiskSpaceMonitor } from "@/components/disk-space/disk-space-monitor";
+import { WorkflowResourcePanel } from "@/components/workflows/workflow-resource-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -492,6 +493,14 @@ export function BuildDataPage() {
       <DiskSpaceMonitor />
 
       {collection && <ProgressPanel collection={collection} />}
+
+      {collection && (
+        <WorkflowResourcePanel
+          resourceId={collection.id}
+          resourceKind="BUILD_DATA_COLLECTION"
+          sessionData={{ buildData: { id: collection.id } }}
+        />
+      )}
 
       {loading && !collection ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">

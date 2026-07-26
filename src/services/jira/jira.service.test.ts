@@ -140,6 +140,8 @@ describe("Jira workflow events", () => {
     assigneeAccountId,
     labels: [],
     sprintNames: [],
+    activeSprintNames: [],
+    closedSprintNames: [],
     jiraUrl: "https://example.atlassian.net/browse/APP-1",
     comments: [],
     cache: { fetchedAt: "2026-07-24T12:00:00.000Z" },
@@ -164,5 +166,31 @@ describe("Jira workflow events", () => {
     expect(record.mock.calls.map(([input]) => input.kind)).toContain(
       "JIRA_ASSIGNED_SELF",
     );
+  });
+
+  test("tracks active and closed sprint state independently", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const service = new JiraService(undefined, { record } as never);
+    const runtime = service as unknown as Record<string, unknown>;
+    runtime.currentAccountId = vi.fn().mockResolvedValue(null);
+    const recordTicketWorkflowEvents = runtime.recordTicketWorkflowEvents as (
+      value: unknown,
+    ) => Promise<void>;
+
+    await recordTicketWorkflowEvents.call(service, {
+      ...ticket(null),
+      sprintNames: ["Sprint 1", "Sprint 0"],
+      activeSprintNames: ["Sprint 1"],
+      closedSprintNames: ["Sprint 0"],
+    });
+
+    const event = (kind: string) =>
+      record.mock.calls.find(([input]) => input.kind === kind)?.[0];
+    expect(event("JIRA_SPRINT_STARTED")?.payload.cursorValue).toEqual([
+      "Sprint 1",
+    ]);
+    expect(event("JIRA_SPRINT_ENDED")?.payload.cursorValue).toEqual([
+      "Sprint 0",
+    ]);
   });
 });

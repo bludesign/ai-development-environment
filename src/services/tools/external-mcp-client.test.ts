@@ -132,9 +132,11 @@ describe("external MCP client transport", () => {
       new URL(sseServer.url),
       expect.objectContaining({ fetch: expect.any(Function) }),
     );
-    expect(catalog.groups.slice(1).map((group) => group.tools[0].name)).toEqual(
-      ["http_search", "sse_search"],
-    );
+    expect(
+      catalog.groups
+        .filter(({ source }) => source === "EXTERNAL")
+        .map((group) => group.tools[0].name),
+    ).toEqual(["http_search", "sse_search"]);
     expect(mocks.close).toHaveBeenCalledTimes(2);
   });
 
@@ -189,7 +191,9 @@ describe("external MCP client transport", () => {
 
     const catalog = await service.catalog();
 
-    expect(catalog.groups[1].error).toContain("repeated tools/list cursor");
+    expect(
+      catalog.groups.find(({ id }) => id === "external:http-1")?.error,
+    ).toContain("repeated tools/list cursor");
     expect(mocks.listTools).toHaveBeenCalledTimes(2);
     expect(mocks.close).toHaveBeenCalledOnce();
   });
@@ -209,9 +213,9 @@ describe("external MCP client transport", () => {
 
     const catalog = await service.catalog();
 
-    expect(catalog.groups[1].error).toContain(
-      "tools/list pagination limit of 100 pages",
-    );
+    expect(
+      catalog.groups.find(({ id }) => id === "external:http-1")?.error,
+    ).toContain("tools/list pagination limit of 100 pages");
     expect(mocks.listTools).toHaveBeenCalledTimes(100);
     expect(mocks.close).toHaveBeenCalledOnce();
   });

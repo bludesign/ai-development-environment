@@ -4,6 +4,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import { validatePushEditor } from "@/services/push-notifications";
 
 import {
+  DESTRUCTIVE_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
   WRITE_ANNOTATIONS,
   defineTool,
@@ -505,6 +506,116 @@ export function createPushNotificationToolGroup(
               unknown
             >,
           ),
+        }),
+      }),
+      defineTool({
+        name: "rename_push_registration",
+        title: "Rename push registration",
+        description: "Rename an APNs device registration.",
+        inputSchema: z.object({
+          id: z.string().min(1),
+          displayName: z.string().min(1),
+        }),
+        outputSchema: z.object({ registration: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ id, displayName }) => ({
+          registration: await push.renameRegistration(id, displayName),
+        }),
+      }),
+      defineTool({
+        name: "set_push_registration_enabled",
+        title: "Set push registration enabled",
+        description: "Enable or disable an APNs device registration.",
+        inputSchema: z.object({ id: z.string().min(1), enabled: z.boolean() }),
+        outputSchema: z.object({ registration: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ id, enabled }) => ({
+          registration: await push.setRegistrationActive(id, enabled),
+        }),
+      }),
+      defineTool({
+        name: "delete_push_registration",
+        title: "Delete push registration",
+        description: "Permanently delete an APNs device registration.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        outputSchema: z.object({ deleted: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ id }) => ({
+          deleted: await push.deleteRegistration(id),
+        }),
+      }),
+      defineTool({
+        name: "save_push_preset",
+        title: "Save push preset",
+        description: "Create or update a reusable push-notification preset.",
+        inputSchema: z.object({
+          id: z.string().nullable().optional(),
+          name: z.string().min(1),
+          editor: z.record(z.string(), z.unknown()),
+        }),
+        outputSchema: z.object({ preset: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ id, name, editor }) => ({
+          preset: await push.savePreset(name, editor as never, id),
+        }),
+      }),
+      defineTool({
+        name: "delete_push_preset",
+        title: "Delete push preset",
+        description: "Delete a saved push-notification preset.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        outputSchema: z.object({ deleted: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ id }) => ({ deleted: await push.deletePreset(id) }),
+      }),
+      defineTool({
+        name: "delete_push_history",
+        title: "Delete push history",
+        description: "Delete one push-notification history batch.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        outputSchema: z.object({ deleted: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ id }) => ({ deleted: await push.deleteHistory(id) }),
+      }),
+      defineTool({
+        name: "clear_push_history",
+        title: "Clear push history",
+        description: "Permanently clear all push-notification history.",
+        inputSchema: z.object({}),
+        outputSchema: z.object({ count: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async () => ({ count: await push.clearHistory() }),
+      }),
+      defineTool({
+        name: "create_push_channel",
+        title: "Create push channel",
+        description: "Create a push-notification broadcast channel.",
+        inputSchema: z.object({ input: z.record(z.string(), z.unknown()) }),
+        outputSchema: z.object({ channel: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ input }) => ({
+          channel: await push.createChannel(input as never),
+        }),
+      }),
+      defineTool({
+        name: "delete_push_channel",
+        title: "Delete push channel",
+        description: "Delete a push-notification broadcast channel.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        outputSchema: z.object({ deleted: z.unknown() }),
+        annotations: DESTRUCTIVE_ANNOTATIONS,
+        handler: async ({ id }) => ({ deleted: await push.deleteChannel(id) }),
+      }),
+      defineTool({
+        name: "retest_push_certificate",
+        title: "Retest push certificate",
+        description:
+          "Retest an existing APNs certificate credential without returning its secret material.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+        outputSchema: z.object({ credential: z.unknown() }),
+        annotations: WRITE_ANNOTATIONS,
+        handler: async ({ id }) => ({
+          credential: await push.retestCertificateCredential(id),
         }),
       }),
     ],

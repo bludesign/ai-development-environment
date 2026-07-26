@@ -147,6 +147,11 @@ function createServerServices(): ServerServices {
     workflowEventsService,
     gitHubPipelineStatusService,
   );
+  const systemStatusService = new SystemStatusService(
+    ccusageService,
+    diskSpaceService,
+    pollingService,
+  );
   const toolsService = new ToolsService(
     codebaseToolsService,
     buildsService,
@@ -156,12 +161,31 @@ function createServerServices(): ServerServices {
       pushNotifications: pushNotificationsService,
       agents: agentControlService,
       diskSpace: diskSpaceService,
+      worktrees: worktreesService,
+      runs: runsService,
+      commands: commandsService,
+      jira: jiraService,
+      github: gitHubService,
+      buildData: buildDataService,
+      cacheServer: cacheServerService,
+      ccusage: ccusageService,
+      credentials: credentialService,
+      iosDevices: iosDevicesService,
+      modelCosts: modelCostsService,
+      notifications: notificationsService,
+      polling: pollingService,
+      signingAssets: signingAssetsService,
+      skills: skillsService,
+      systemStatus: systemStatusService,
       // A thunk, not the instance: `workflowsService` is constructed below and
       // takes `toolsService` itself. Resolved when a workflow tool is called.
       workflows: () => workflowsService,
       worktreeAutomations: () => worktreeAutomationService,
     },
     credentialService,
+  );
+  runsService.setMcpPresetResolver((kind, ids) =>
+    toolsService.resolveRunMcpPresets(kind, ids),
   );
   const workflowStepExecutor = new WorkflowStepExecutor();
   const workflowsService = new WorkflowsService(
@@ -199,21 +223,31 @@ function createServerServices(): ServerServices {
     pushNotifications: pushNotificationsService,
     tools: toolsService,
     diskSpace: diskSpaceService,
+    buildData: buildDataService,
+    ccusage: ccusageService,
+    iosDevices: iosDevicesService,
+    modelCosts: modelCostsService,
+    signingAssets: signingAssetsService,
   });
   const workflowEventBridge = new WorkflowEventBridge(
     workflowEventsService,
     agentControlService,
     worktreesService,
     diskSpaceService,
+    {
+      buildData: buildDataService,
+      commands: commandsService,
+      credentials: credentialService,
+      iosDevices: iosDevicesService,
+      polling: pollingService,
+      pushNotifications: pushNotificationsService,
+      signingAssets: signingAssetsService,
+      skills: skillsService,
+    },
   );
   workflowEventBridge.start();
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
-  const systemStatusService = new SystemStatusService(
-    ccusageService,
-    diskSpaceService,
-    pollingService,
-  );
   systemStatusService.startRuntime();
   return {
     prismaService,

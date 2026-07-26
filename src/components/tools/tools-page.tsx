@@ -19,7 +19,9 @@ import { useTranslations } from "next-intl";
 import {
   FormEvent,
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -64,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { copyText } from "@/lib/browser-utils";
@@ -75,12 +78,16 @@ import type {
   ExternalMcpServerView,
   ToolCatalogGroup,
 } from "./types";
+import { McpPresetManagement } from "./mcp-preset-management";
+import { ToolAuditTable } from "./tool-audit-table";
 
 const SERVER_FIELDS =
   "id name url transport toolNamePrefix createdAt updatedAt headers { id name valueConfigured }";
 
 /** Suggested key for the client's own MCP config file; purely a local alias. */
 const BUILT_IN_SERVER_NAME = "ai-development-environment";
+const CUSTOM_SERVER_ORIGIN = "__custom__";
+const ToolApiTokenContext = createContext("");
 
 type JsonSchema = Record<string, unknown>;
 
@@ -123,9 +130,14 @@ async function responseJson(response: Response): Promise<unknown> {
   return body;
 }
 
-export function ToolsPage() {
+export function ToolsPage({
+  localServerOrigins = [],
+}: {
+  localServerOrigins?: string[];
+}) {
   const t = useTranslations("tools");
   const tc = useTranslations("common");
+  const [tab, setTab] = useState<"tools" | "audit">("tools");
   const [query, setQuery] = useState("");
   const [servers, setServers] = useState<ExternalMcpServerView[]>([]);
   const [groups, setGroups] = useState<ToolCatalogGroup[]>([]);
@@ -137,6 +149,25 @@ export function ToolsPage() {
   const [draft, setDraft] = useState<ExternalMcpServerDraft>(emptyDraft);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [toolApiToken, setToolApiToken] = useState("");
+  const browserOrigin = useSyncExternalStore(
+    subscribeToNothing,
+    readOrigin,
+    () => "",
+  );
+  const [selectedServerOrigin, setSelectedServerOrigin] = useState<
+    string | null
+  >(null);
+  const [customServerOrigin, setCustomServerOrigin] = useState("");
+  const serverOrigins = useMemo(
+    () => [...new Set([browserOrigin, ...localServerOrigins].filter(Boolean))],
+    [browserOrigin, localServerOrigins],
+  );
+  const selectedOrigin =
+    selectedServerOrigin === CUSTOM_SERVER_ORIGIN
+      ? customServerOrigin.trim()
+      : (selectedServerOrigin ?? browserOrigin);
+  const mcpBaseUrl = `${selectedOrigin.replace(/\/$/, "")}/api/mcp`;
 
   const loadServers = useCallback(async () => {
     const data = await controlPlaneRequest<{
@@ -256,152 +287,191 @@ export function ToolsPage() {
             {t("description")}
           </p>
         </div>
-        <Button onClick={openCreate} type="button">
-          <Plus />
-          {t("addServer")}
-        </Button>
+        {tab === "tools" && (
+          <Button onClick={openCreate} type="button">
+            <Plus />
+            {t("addServer")}
+          </Button>
+        )}
       </div>
 
-      <ConnectClientsCard />
+      <Tabs
+        onValueChange={(value) => setTab(value as "tools" | "audit")}
+        value={tab}
+      >
+        <TabsList>
+          <TabsTrigger value="tools">{t("toolsTab")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("auditTab")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {tab === "tools" ? (
+        <>
+          <ConnectClientsCard
+            baseMcpUrl={mcpBaseUrl}
+            customServerOrigin={customServerOrigin}
+            onCustomServerOriginChange={setCustomServerOrigin}
+            onServerOriginChange={setSelectedServerOrigin}
+            onTokenChange={setToolApiToken}
+            selectedServerOrigin={selectedServerOrigin}
+            serverOrigins={serverOrigins}
+            token={toolApiToken}
+          />
 
-      <Card className="gap-0 py-0">
-        <CardHeader>
-          <CardTitle>{t("serversTitle")}</CardTitle>
-          <CardDescription>{t("serversDescription")}</CardDescription>
-        </CardHeader>
-        {loading ? (
-          <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-            <Spinner /> {t("loadingServers")}
-          </div>
-        ) : servers.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">{t("noServers")}</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("url")}</TableHead>
-                <TableHead>{t("transport")}</TableHead>
-                <TableHead>{t("prefix")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {servers.map((server) => (
-                <TableRow key={server.id}>
-                  <TableCell className="font-medium">{server.name}</TableCell>
-                  <TableCell className="max-w-md truncate font-mono text-xs">
-                    {server.url}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {server.transport === "STREAMABLE_HTTP"
-                        ? t("http")
-                        : t("sse")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {server.toolNamePrefix || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        aria-label={t("editServer", { name: server.name })}
-                        onClick={() => openEdit(server)}
-                        size="icon-sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Pencil />
-                      </Button>
-                      <ConfirmationDialog
-                        actionLabel={t("delete")}
-                        cancelLabel={tc("cancel")}
-                        description={t("confirmDeleteDescription", {
-                          name: server.name,
-                        })}
-                        onConfirm={() => deleteServer(server.id)}
-                        title={t("confirmDelete")}
-                        trigger={
+          <McpPresetManagement baseMcpUrl={mcpBaseUrl} groups={groups} />
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card className="gap-0 py-0">
+            <CardHeader>
+              <CardTitle>{t("serversTitle")}</CardTitle>
+              <CardDescription>{t("serversDescription")}</CardDescription>
+            </CardHeader>
+            {loading ? (
+              <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                <Spinner /> {t("loadingServers")}
+              </div>
+            ) : servers.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                {t("noServers")}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("name")}</TableHead>
+                    <TableHead>{t("url")}</TableHead>
+                    <TableHead>{t("transport")}</TableHead>
+                    <TableHead>{t("prefix")}</TableHead>
+                    <TableHead className="text-right">{t("actions")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {servers.map((server) => (
+                    <TableRow key={server.id}>
+                      <TableCell className="font-medium">
+                        {server.name}
+                      </TableCell>
+                      <TableCell className="max-w-md truncate font-mono text-xs">
+                        {server.url}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {server.transport === "STREAMABLE_HTTP"
+                            ? t("http")
+                            : t("sse")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {server.toolNamePrefix || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
                           <Button
-                            aria-label={t("deleteServer", {
-                              name: server.name,
-                            })}
+                            aria-label={t("editServer", { name: server.name })}
+                            onClick={() => openEdit(server)}
                             size="icon-sm"
                             type="button"
                             variant="ghost"
                           >
-                            <Trash2 />
+                            <Pencil />
                           </Button>
-                        }
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+                          <ConfirmationDialog
+                            actionLabel={t("delete")}
+                            cancelLabel={tc("cancel")}
+                            description={t("confirmDeleteDescription", {
+                              name: server.name,
+                            })}
+                            onConfirm={() => deleteServer(server.id)}
+                            title={t("confirmDelete")}
+                            trigger={
+                              <Button
+                                aria-label={t("deleteServer", {
+                                  name: server.name,
+                                })}
+                                size="icon-sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 />
+                              </Button>
+                            }
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Card>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">{t("catalogTitle")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("catalogDescription")}
-            </p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">{t("catalogTitle")}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t("catalogDescription")}
+                </p>
+              </div>
+              <Button
+                disabled={catalogLoading}
+                onClick={() => void loadCatalog()}
+                type="button"
+                variant="outline"
+              >
+                {catalogLoading ? <Spinner /> : <RotateCw />}
+                {t("refresh")}
+              </Button>
+            </div>
+
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label={t("search")}
+                className="pl-9"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("searchPlaceholder")}
+                type="search"
+                value={query}
+              />
+            </div>
           </div>
-          <Button
-            disabled={catalogLoading}
-            onClick={() => void loadCatalog()}
-            type="button"
-            variant="outline"
-          >
-            {catalogLoading ? <Spinner /> : <RotateCw />}
-            {t("refresh")}
-          </Button>
-        </div>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label={t("search")}
-            className="pl-9"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("searchPlaceholder")}
-            type="search"
-            value={query}
+          <ToolApiTokenContext.Provider value={toolApiToken}>
+            {catalogLoading && groups.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner /> {t("loadingTools")}
+              </div>
+            ) : visibleGroups.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t("noMatchingTools")}
+              </p>
+            ) : (
+              visibleGroups.map((group) => (
+                <ToolGroup group={group} key={group.id} />
+              ))
+            )}
+          </ToolApiTokenContext.Provider>
+
+          <ServerDialog
+            draft={draft}
+            editing={editing}
+            error={dialogError}
+            onDraftChange={setDraft}
+            onOpenChange={setDialogOpen}
+            onSubmit={saveServer}
+            open={dialogOpen}
+            saving={saving}
           />
-        </div>
-      </div>
-
-      {catalogLoading && groups.length === 0 ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> {t("loadingTools")}
-        </div>
-      ) : visibleGroups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("noMatchingTools")}</p>
+        </>
       ) : (
-        visibleGroups.map((group) => <ToolGroup group={group} key={group.id} />)
+        <ToolAuditTable />
       )}
-
-      <ServerDialog
-        draft={draft}
-        editing={editing}
-        error={dialogError}
-        onDraftChange={setDraft}
-        onOpenChange={setDialogOpen}
-        onSubmit={saveServer}
-        open={dialogOpen}
-        saving={saving}
-      />
     </section>
   );
 }
@@ -413,19 +483,40 @@ const readOrigin = () => window.location.origin;
  * Shows external MCP clients how to reach this app's own built-in tool server,
  * which is mounted at /api/mcp on the same origin.
  */
-function ConnectClientsCard() {
+function ConnectClientsCard({
+  baseMcpUrl,
+  customServerOrigin,
+  onCustomServerOriginChange,
+  onServerOriginChange,
+  onTokenChange,
+  selectedServerOrigin,
+  serverOrigins,
+  token,
+}: {
+  baseMcpUrl: string;
+  customServerOrigin: string;
+  onCustomServerOriginChange: (value: string) => void;
+  onServerOriginChange: (value: string) => void;
+  onTokenChange: (value: string) => void;
+  selectedServerOrigin: string | null;
+  serverOrigins: string[];
+  token: string;
+}) {
   const t = useTranslations("tools");
-  // The server cannot know the browsing origin — the port comes from however
-  // the process was started — so the client fills it in on hydration.
-  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, () => "");
   const [copied, setCopied] = useState<"URL" | "CONFIG" | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
 
-  const url = `${origin}/api/mcp`;
+  const url = baseMcpUrl;
   const config = JSON.stringify(
     {
       mcpServers: {
-        [BUILT_IN_SERVER_NAME]: { type: "http", url },
+        [BUILT_IN_SERVER_NAME]: {
+          type: "http",
+          url,
+          ...(token.trim()
+            ? { headers: { Authorization: "Bearer <TOOLS_API_TOKEN>" } }
+            : {}),
+        },
       },
     },
     null,
@@ -450,6 +541,55 @@ function ConnectClientsCard() {
         <CardDescription>{t("connectDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>{t("serverHost")}</Label>
+          <Select
+            onValueChange={onServerOriginChange}
+            value={selectedServerOrigin ?? serverOrigins[0]}
+          >
+            <SelectTrigger
+              aria-label={t("serverHost")}
+              className="w-full sm:max-w-md"
+            >
+              <SelectValue placeholder={t("serverHost")} />
+            </SelectTrigger>
+            <SelectContent>
+              {serverOrigins.map((origin) => (
+                <SelectItem key={origin} value={origin}>
+                  {origin}
+                </SelectItem>
+              ))}
+              <SelectItem value={CUSTOM_SERVER_ORIGIN}>
+                {t("customServerHost")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {selectedServerOrigin === CUSTOM_SERVER_ORIGIN && (
+            <Input
+              aria-label={t("customServerHost")}
+              onChange={(event) =>
+                onCustomServerOriginChange(event.target.value)
+              }
+              placeholder="https://aide.example.com"
+              type="url"
+              value={customServerOrigin}
+            />
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="tools-api-token">{t("toolApiToken")}</Label>
+          <Input
+            autoComplete="off"
+            id="tools-api-token"
+            onChange={(event) => onTokenChange(event.target.value)}
+            placeholder={t("toolApiTokenPlaceholder")}
+            type="password"
+            value={token}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("toolApiTokenHelp")}
+          </p>
+        </div>
         <div className="space-y-1.5">
           <h3 className="text-sm font-medium">{t("serverUrl")}</h3>
           <div className="flex items-start gap-2 rounded-lg bg-muted p-3">
@@ -865,7 +1005,10 @@ function ToolRow({
           )}
         </TableCell>
         <TableCell>
-          <p className="font-mono text-xs font-medium">{tool.name}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="font-mono text-xs font-medium">{tool.name}</p>
+            <ToolRiskBadges annotations={tool.annotations} />
+          </div>
           {tool.title && tool.title !== tool.name && (
             <p className="text-xs text-muted-foreground">{tool.title}</p>
           )}
@@ -880,12 +1023,39 @@ function ToolRow({
         <TableCell colSpan={3} className="whitespace-normal p-4">
           <ToolRunner
             groupId={groupId}
+            annotations={tool.annotations}
             schema={tool.inputSchema}
             toolName={tool.name}
           />
         </TableCell>
       </TableRow>
     </Fragment>
+  );
+}
+
+function ToolRiskBadges({
+  annotations,
+}: {
+  annotations: ToolCatalogGroup["tools"][number]["annotations"];
+}) {
+  const t = useTranslations("tools");
+  const readOnly =
+    annotations === undefined || annotations?.readOnlyHint === true;
+  const destructive = annotations?.destructiveHint === true;
+  const externalEffect = annotations?.openWorldHint ?? annotations === null;
+  return (
+    <>
+      <Badge variant={destructive ? "destructive" : "outline"}>
+        {destructive
+          ? t("destructiveBadge")
+          : readOnly
+            ? t("readOnlyBadge")
+            : t("writeBadge")}
+      </Badge>
+      {externalEffect && (
+        <Badge variant="secondary">{t("externalEffectBadge")}</Badge>
+      )}
+    </>
   );
 }
 
@@ -966,15 +1136,18 @@ function getAtPath(source: Record<string, unknown>, path: string[]): unknown {
 }
 
 function ToolRunner({
+  annotations,
   groupId,
   schema,
   toolName,
 }: {
+  annotations: ToolCatalogGroup["tools"][number]["annotations"];
   groupId: string;
   schema: JsonSchema;
   toolName: string;
 }) {
   const t = useTranslations("tools");
+  const toolApiToken = useContext(ToolApiTokenContext);
   const [argumentsValue, setArgumentsValue] = useState<Record<string, unknown>>(
     () => (defaultsForSchema(schema) as Record<string, unknown>) ?? {},
   );
@@ -984,21 +1157,27 @@ function ToolRunner({
   const [copyState, setCopyState] = useState<"IDLE" | "COPIED" | "FAILED">(
     "IDLE",
   );
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const properties = asProperties(schema.properties);
   const dynamicRootArguments = acceptsDynamicRootArguments(schema);
   const required = new Set(asStringArray(schema.required));
   const rootArgumentsId = `${groupId}-${toolName}-arguments`;
 
-  const run = async (event: FormEvent) => {
-    event.preventDefault();
+  const run = async () => {
     setBusy(true);
     setError(null);
     setCopyState("IDLE");
     try {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (toolApiToken.trim()) {
+        headers.authorization = `Bearer ${toolApiToken.trim()}`;
+      }
       const body = (await responseJson(
         await fetch("/api/tools/call", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: JSON.stringify({
             groupId,
             name: toolName,
@@ -1015,6 +1194,10 @@ function ToolRunner({
     }
   };
 
+  const requiresConfirmation =
+    annotations === null || annotations?.readOnlyHint === false;
+  const destructive = annotations?.destructiveHint === true;
+
   const responseText =
     result === undefined ? "" : JSON.stringify(result, null, 2);
   const copyResponse = async () => {
@@ -1027,7 +1210,14 @@ function ToolRunner({
   };
 
   return (
-    <form className="grid gap-4 lg:grid-cols-2" onSubmit={run}>
+    <form
+      className="grid gap-4 lg:grid-cols-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (requiresConfirmation) setConfirmationOpen(true);
+        else void run();
+      }}
+    >
       <div className="space-y-4">
         <h4 className="text-sm font-medium">{t("parameters")}</h4>
         {dynamicRootArguments ? (
@@ -1066,6 +1256,30 @@ function ToolRunner({
           {busy ? <Spinner /> : <Wrench />}
           {busy ? t("running") : t("run")}
         </Button>
+        {requiresConfirmation && (
+          <ConfirmationDialog
+            actionLabel={
+              destructive ? t("confirmDestructiveAction") : t("confirmRun")
+            }
+            cancelLabel={t("cancelRun")}
+            description={
+              destructive
+                ? t("confirmDestructiveDescription", { name: toolName })
+                : t("confirmWriteDescription", { name: toolName })
+            }
+            onConfirm={async () => {
+              setConfirmationOpen(false);
+              await run();
+            }}
+            onOpenChange={setConfirmationOpen}
+            open={confirmationOpen}
+            title={
+              destructive
+                ? t("confirmDestructiveTitle")
+                : t("confirmWriteTitle")
+            }
+          />
+        )}
       </div>
       <div className="min-w-0 space-y-2">
         <div className="flex min-h-7 items-center justify-between gap-2">

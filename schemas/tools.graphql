@@ -24,6 +24,40 @@ type ExternalMcpServerRemoval {
   id: ID!
 }
 
+type McpToolPreset {
+  id: ID!
+  name: String!
+  description: String!
+  iconKey: String!
+  enabledForPlans: Boolean!
+  enabledForSessions: Boolean!
+  toolNames: [String!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type McpToolPresetRemoval {
+  id: ID!
+}
+
+type ToolCallAudit {
+  id: ID!
+  correlationId: String!
+  caller: String!
+  source: String!
+  groupId: String!
+  toolName: String!
+  argumentsSha256: String!
+  resultStatus: String!
+  durationMs: Int
+  startedAt: String!
+  finishedAt: String
+}
+
+type ToolCallAuditClearResult {
+  count: Int!
+}
+
 input ExternalMcpServerHeaderInput {
   id: ID
   name: String!
@@ -38,15 +72,34 @@ input ExternalMcpServerInput {
   headers: [ExternalMcpServerHeaderInput!]!
 }
 
+input McpToolPresetInput {
+  name: String!
+  description: String
+  iconKey: String!
+  enabledForPlans: Boolean!
+  enabledForSessions: Boolean!
+  toolNames: [String!]!
+}
+
 extend type Query {
   externalMcpServers: [ExternalMcpServer!]!
+  mcpToolPresets(kind: RunKind): [McpToolPreset!]!
+  toolCallAudits(
+    first: Int
+    toolName: String
+    resultStatus: String
+  ): [ToolCallAudit!]!
 }
 
 extend type Mutation {
+  clearToolCallAudits: ToolCallAuditClearResult!
   createExternalMcpServer(input: ExternalMcpServerInput!): ExternalMcpServer!
   updateExternalMcpServer(
     id: ID!
     input: ExternalMcpServerInput!
   ): ExternalMcpServer!
   deleteExternalMcpServer(id: ID!): ExternalMcpServerRemoval!
+  createMcpToolPreset(input: McpToolPresetInput!): McpToolPreset!
+  updateMcpToolPreset(id: ID!, input: McpToolPresetInput!): McpToolPreset!
+  deleteMcpToolPreset(id: ID!): McpToolPresetRemoval!
 }

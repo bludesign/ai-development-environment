@@ -104,6 +104,14 @@ describe("built-in tool registry", () => {
       "get_telemetry_separators",
       "add_telemetry_separator",
       "get_telemetry_settings",
+      "update_telemetry_settings",
+      "get_telemetry_view_settings",
+      "update_telemetry_highlight",
+      "get_telemetry_presets",
+      "save_telemetry_preset",
+      "get_saved_telemetry_filters",
+      "save_telemetry_filter",
+      "export_telemetry",
     ]);
     expect(debugging.children[0]!.tools.map(({ name }) => name)).toEqual([
       "get_console_logs",
@@ -132,11 +140,80 @@ describe("built-in tool registry", () => {
       "send_push_notification",
       "send_push_notification_preset",
       "resend_push_notification",
+      "rename_push_registration",
+      "set_push_registration_enabled",
+      "delete_push_registration",
+      "save_push_preset",
+      "delete_push_preset",
+      "delete_push_history",
+      "clear_push_history",
+      "create_push_channel",
+      "delete_push_channel",
+      "retest_push_certificate",
     ]);
     const names = registry()
       .value.definitions()
       .map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  test("registers every expanded domain with explicit risk annotations", () => {
+    const placeholder = {} as never;
+    const audit = {
+      list: vi.fn(),
+      get: vi.fn(),
+    } as never;
+    const expanded = createBuiltInToolRegistry({
+      codebaseTools: placeholder,
+      builds: placeholder,
+      codebases: placeholder,
+      telemetry: placeholder,
+      pushNotifications: placeholder,
+      agents: placeholder,
+      diskSpace: placeholder,
+      worktrees: placeholder,
+      runs: placeholder,
+      commands: placeholder,
+      jira: placeholder,
+      github: placeholder,
+      skills: placeholder,
+      buildData: placeholder,
+      signingAssets: placeholder,
+      iosDevices: placeholder,
+      notifications: placeholder,
+      ccusage: placeholder,
+      modelCosts: placeholder,
+      systemStatus: placeholder,
+      polling: placeholder,
+      credentials: placeholder,
+      cacheServer: placeholder,
+      toolAudit: audit,
+      testExternalMcpServer: vi.fn(),
+    });
+    const catalog = expanded.catalog();
+    const groupIds = catalog.map(({ id }) => id);
+    expect(groupIds).toEqual(
+      expect.arrayContaining([
+        "builtin:worktrees",
+        "builtin:agent-runs",
+        "builtin:commands",
+        "builtin:jira",
+        "builtin:github",
+        "builtin:skills",
+        "builtin:build-data",
+        "builtin:signing-assets",
+        "builtin:ios-devices",
+        "builtin:notifications",
+        "builtin:usage-costs",
+        "builtin:system",
+        "builtin:cache-administration",
+        "builtin:tool-administration",
+      ]),
+    );
+    const tools = expanded.definitions();
+    expect(tools).toHaveLength(277);
+    expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
+    expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });
 
   test("advertises satisfiable JSON schemas for push send tools", () => {

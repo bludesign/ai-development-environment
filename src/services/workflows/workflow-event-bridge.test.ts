@@ -1,5 +1,18 @@
 import { describe, expect, test, vi } from "vitest";
 
+const getPrismaClient = vi.hoisted(() => vi.fn());
+vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
+
+import {
+  agentEventBus,
+  COMMAND_RUNS_CHANGED_TOPIC,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
+  IOS_DEVICES_CHANGED_TOPIC,
+  POLLING_CHANGED_TOPIC,
+  SIGNING_ASSETS_CHANGED_TOPIC,
+  SKILLS_CHANGED_TOPIC,
+  TOOL_CALL_AUDIT_CHANGED_TOPIC,
+} from "@/services/agent-control";
 import type { DiskSpaceChangedPayload } from "@/services/disk-space";
 
 import { WorkflowEventBridge } from "./workflow-event-bridge";
@@ -10,7 +23,9 @@ function worktree(baseBehind: number | null) {
     folder: "/tmp/worktree-1",
     branch: "feature/test",
     headSha: null,
+    syncState: "SYNCED",
     pushStatus: "READY",
+    statusError: null,
     baseBehind,
     hasStagedChanges: false,
     hasUnstagedChanges: false,
@@ -31,6 +46,247 @@ function worktree(baseBehind: number | null) {
     },
   };
 }
+
+describe("expanded workflow event producers", () => {
+  test("records command, skill conflict, device, signing, and polling results", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const timestamp = new Date("2026-07-26T12:00:00.000Z");
+    const bridge = new WorkflowEventBridge(
+      { record } as never,
+      { registerCompletionObserver: vi.fn() } as never,
+      undefined,
+      undefined,
+      {
+        commands: {
+          getRun: vi.fn().mockResolvedValue({
+            id: "command-run-1",
+            commandId: "command-1",
+            snapshotName: "Verify",
+            status: "FAILED",
+            exitCode: 1,
+            signal: null,
+            error: "failed",
+            agentId: "agent-1",
+            agentName: "Studio Mac",
+            worktreeId: null,
+            finishedAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        } as never,
+        skills: {
+          getRun: vi.fn().mockResolvedValue({
+            id: "skill-sync-1",
+            kind: "ALL",
+            groupId: null,
+            status: "NEEDS_RESOLUTION",
+            error: null,
+            updatedAt: timestamp,
+            finishedAt: null,
+            items: [
+              {
+                id: "item-1",
+                skillId: "skill-1",
+                skill: { name: "Release" },
+                direction: "PUSH",
+                status: "BLOCKED",
+                error: null,
+              },
+            ],
+          }),
+        } as never,
+        iosDevices: {
+          device: vi.fn().mockResolvedValue({
+            id: "device-1",
+            udid: "UDID",
+            displayName: "iPhone",
+            product: "iPhone17,1",
+            osVersion: "20.0",
+            status: "REGISTERED",
+            registrationError: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        } as never,
+        signingAssets: {
+          operations: vi.fn().mockResolvedValue([
+            {
+              id: "signing-1",
+              kind: "SYNC_PROFILE",
+              status: "SUCCEEDED",
+              assetKey: "profile-1",
+              error: null,
+              finishedAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ]),
+          profiles: vi.fn().mockResolvedValue([]),
+        } as never,
+        polling: {
+          list: vi.fn().mockResolvedValue([
+            {
+              id: "server:test",
+              status: "ERROR",
+              lastCompletedAt: timestamp.toISOString(),
+              lastStartedAt: timestamp.toISOString(),
+              nextScheduledAt: null,
+              lastError: "poll failed",
+            },
+          ]),
+        } as never,
+      },
+    );
+    bridge.start();
+
+    agentEventBus.publish(COMMAND_RUNS_CHANGED_TOPIC, {
+      commandRunsChanged: { id: "command-run-1" },
+    });
+    agentEventBus.publish(SKILLS_CHANGED_TOPIC, { id: "skill-sync-1" });
+    agentEventBus.publish(IOS_DEVICES_CHANGED_TOPIC, { id: "device-1" });
+    agentEventBus.publish(SIGNING_ASSETS_CHANGED_TOPIC, { changed: true });
+    agentEventBus.publish(POLLING_CHANGED_TOPIC, {
+      pollingOperationChanged: "server:test",
+    });
+    agentEventBus.publish(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, {
+      githubPipelineStatusChanged: {
+        snapshot: {
+          repositoryGithubId: "repo-node-1",
+          repositoryNameWithOwner: "acme/widgets",
+          repositoryUrl: "https://github.com/acme/widgets",
+          headSha: "abc123",
+          pipelineStatus: "FAILED",
+          pipelines: [],
+          revision: 2,
+          updatedAt: timestamp.toISOString(),
+        },
+        changedPipeline: null,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(record.mock.calls.map(([input]) => input.kind)).toEqual(
+        expect.arrayContaining([
+          "COMMAND_RUN_RESULT",
+          "SKILL_SYNC_CONFLICT",
+          "IOS_DEVICE_ENROLLED",
+          "IOS_DEVICE_REGISTRATION_RESULT",
+          "SIGNING_OPERATION_RESULT",
+          "POLLING_OPERATION_STATE",
+          "GITHUB_PIPELINE_STATUS_CHANGED",
+        ]),
+      );
+    });
+    bridge.stop();
+  });
+
+  test("correlates audited workflow tools to suppress same-workflow triggers", async () => {
+    const finishedAt = new Date("2026-07-26T12:00:00.000Z");
+    getPrismaClient.mockResolvedValue({
+      toolCallAudit: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "audit-1",
+          correlationId: "attempt-1",
+          caller: "workflow:run-1",
+          source: "WORKFLOW",
+          groupId: "builtin:github",
+          toolName: "update_pull_request",
+          argumentsSha256: "hash",
+          resultStatus: "SUCCEEDED",
+          durationMs: 10,
+          finishedAt,
+        }),
+      },
+      workflowRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "run-1",
+          workflowId: "workflow-1",
+        }),
+      },
+      workflowStepAttempt: { findUnique: vi.fn() },
+    });
+    const record = vi.fn().mockResolvedValue({});
+    const bridge = new WorkflowEventBridge(
+      { record } as never,
+      { registerCompletionObserver: vi.fn() } as never,
+    );
+    bridge.start();
+
+    agentEventBus.publish(TOOL_CALL_AUDIT_CHANGED_TOPIC, {
+      toolCallAuditChanged: { id: "audit-1" },
+    });
+
+    await vi.waitFor(() => {
+      expect(record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "TOOL_CALL_RESULT",
+          payload: expect.objectContaining({
+            workflowCorrelation: {
+              workflowId: "workflow-1",
+              runId: "run-1",
+            },
+          }),
+        }),
+      );
+    });
+    bridge.stop();
+  });
+
+  test("keeps command completion identity stable after archive updates", async () => {
+    const finishedAt = new Date("2026-07-26T12:00:00.000Z");
+    let updatedAt = finishedAt;
+    const record = vi.fn().mockResolvedValue({});
+    const getRun = vi.fn().mockImplementation(async () => ({
+      id: "command-run-1",
+      commandId: "command-1",
+      snapshotName: "Verify",
+      status: "SUCCEEDED",
+      exitCode: 0,
+      signal: null,
+      error: null,
+      agentId: "agent-1",
+      agentName: "Studio Mac",
+      worktreeId: null,
+      finishedAt,
+      updatedAt,
+    }));
+    const bridge = new WorkflowEventBridge(
+      { record } as never,
+      { registerCompletionObserver: vi.fn() } as never,
+      undefined,
+      undefined,
+      { commands: { getRun } as never },
+    );
+    bridge.start();
+
+    agentEventBus.publish(COMMAND_RUNS_CHANGED_TOPIC, {
+      commandRunsChanged: { id: "command-run-1" },
+    });
+    await vi.waitFor(() => {
+      expect(
+        record.mock.calls.filter(
+          ([input]) => input.kind === "COMMAND_RUN_RESULT",
+        ),
+      ).toHaveLength(1);
+    });
+    updatedAt = new Date("2026-07-26T13:00:00.000Z");
+    agentEventBus.publish(COMMAND_RUNS_CHANGED_TOPIC, {
+      commandRunsChanged: { id: "command-run-1" },
+    });
+    await vi.waitFor(() => {
+      expect(
+        record.mock.calls.filter(
+          ([input]) => input.kind === "COMMAND_RUN_RESULT",
+        ),
+      ).toHaveLength(2);
+    });
+
+    const events = record.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.kind === "COMMAND_RUN_RESULT");
+    expect(events[0].dedupeKey).toBe(events[1].dedupeKey);
+    expect(events[0].payload.cursorValue).toBe(events[1].payload.cursorValue);
+    bridge.stop();
+  });
+});
 
 const diskSnapshot = {
   agent: {
@@ -123,6 +379,32 @@ describe("workflow worktree event bridge", () => {
         }),
       }),
     );
+  });
+
+  test("records dirty state on every clean-trigger observation", async () => {
+    const record = vi.fn().mockResolvedValue({});
+    const bridge = new WorkflowEventBridge(
+      { record } as never,
+      {} as never,
+    ) as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    const clean = worktree(0);
+    const dirty = { ...clean, hasUnstagedChanges: true };
+
+    await bridge.observeWorktree(clean);
+    await bridge.observeWorktree(dirty);
+    await bridge.observeWorktree({
+      ...clean,
+      lastCheckedAt: new Date("2026-07-24T12:02:00.000Z"),
+    });
+
+    const observations = record.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.kind === "WORKTREE_CLEAN");
+    expect(observations.map(({ payload }) => payload.cursorValue)).toEqual([
+      false,
+      true,
+      false,
+    ]);
   });
 });
 

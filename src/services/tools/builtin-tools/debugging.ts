@@ -17,6 +17,7 @@ import {
   type BuiltInToolGroup,
 } from "../builtin-tools";
 import { createPushNotificationToolGroup } from "./push-notifications";
+import { serviceTool } from "./service-tool";
 
 const TelemetryEntrySchema = z.object({
   id: z.string(),
@@ -312,6 +313,106 @@ export function createDebuggingToolGroup(
       }),
       annotations: READ_ONLY_ANNOTATIONS,
       handler: async () => ({ settings: await telemetry.settings() }),
+    }),
+    serviceTool({
+      name: "update_telemetry_settings",
+      title: "Update telemetry settings",
+      description: "Update telemetry collection and ingestion URL settings.",
+      inputSchema: z.object({
+        localBaseUrlOverride: z.string().nullable().optional(),
+        remoteBaseUrlOverride: z.string().nullable().optional(),
+        consoleCollectionEnabled: z.boolean().nullable().optional(),
+        analyticsCollectionEnabled: z.boolean().nullable().optional(),
+      }),
+      service: telemetry,
+      method: "saveSettings",
+      resultKey: "settings",
+      annotations: WRITE_ANNOTATIONS,
+    }),
+    serviceTool({
+      name: "get_telemetry_view_settings",
+      title: "Get telemetry view settings",
+      description: "Get display settings for a telemetry view.",
+      inputSchema: z.object({
+        view: z.enum(["UNIFIED", "CONSOLE", "ANALYTICS"]),
+      }),
+      service: telemetry,
+      method: "viewSettings",
+      arguments: ({ view }) => [view],
+      resultKey: "settings",
+    }),
+    serviceTool({
+      name: "update_telemetry_highlight",
+      title: "Update telemetry highlight",
+      description: "Set or clear the highlight color on a telemetry entry.",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        color: z.string().nullable().optional(),
+      }),
+      service: telemetry,
+      method: "highlight",
+      arguments: ({ id, color }) => [id, color ?? null],
+      resultKey: "entry",
+      annotations: WRITE_ANNOTATIONS,
+    }),
+    serviceTool({
+      name: "get_telemetry_presets",
+      title: "Get telemetry presets",
+      description: "List saved column presets for a telemetry view.",
+      inputSchema: z.object({
+        view: z.enum(["UNIFIED", "CONSOLE", "ANALYTICS"]),
+      }),
+      service: telemetry,
+      method: "columnPresets",
+      arguments: ({ view }) => [view],
+      resultKey: "presets",
+    }),
+    serviceTool({
+      name: "save_telemetry_preset",
+      title: "Save telemetry preset",
+      description: "Create or update a telemetry column preset.",
+      inputSchema: z.object({ input: z.record(z.string(), z.unknown()) }),
+      service: telemetry,
+      method: "saveColumnPreset",
+      arguments: ({ input }) => [input],
+      resultKey: "preset",
+      annotations: WRITE_ANNOTATIONS,
+    }),
+    serviceTool({
+      name: "get_saved_telemetry_filters",
+      title: "Get saved telemetry filters",
+      description: "List saved filters for a telemetry view.",
+      inputSchema: z.object({
+        view: z.enum(["UNIFIED", "CONSOLE", "ANALYTICS"]),
+      }),
+      service: telemetry,
+      method: "savedFilters",
+      arguments: ({ view }) => [view],
+      resultKey: "filters",
+    }),
+    serviceTool({
+      name: "save_telemetry_filter",
+      title: "Save telemetry filter",
+      description: "Create or update a saved telemetry filter.",
+      inputSchema: z.object({ input: z.record(z.string(), z.unknown()) }),
+      service: telemetry,
+      method: "saveFilter",
+      arguments: ({ input }) => [input],
+      resultKey: "filter",
+      annotations: WRITE_ANNOTATIONS,
+    }),
+    serviceTool({
+      name: "export_telemetry",
+      title: "Export telemetry",
+      description: "Export a bounded telemetry query as structured JSON.",
+      inputSchema: z.object({
+        view: z.enum(["UNIFIED", "CONSOLE", "ANALYTICS"]).default("UNIFIED"),
+        search: z.string().nullable().optional(),
+        first: z.number().int().min(1).max(5000).default(1000),
+      }),
+      service: telemetry,
+      method: "timeline",
+      resultKey: "export",
     }),
   );
 

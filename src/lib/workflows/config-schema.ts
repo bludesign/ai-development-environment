@@ -142,6 +142,7 @@ function baseSchema(field: ConfigFieldDescriptor): JsonSchema {
       return { type: "string" };
     case "resourceMulti":
     case "stringList":
+    case "mcpPresetMulti":
       return { type: "array", items: { type: "string" } };
     case "record":
       return {

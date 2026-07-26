@@ -100,6 +100,10 @@ export const APP_NOTIFICATIONS_CHANGED_TOPIC = "app-notifications.changed";
 export const RUNS_CHANGED_TOPIC = "runs.changed";
 export const COMMANDS_CHANGED_TOPIC = "commands.changed";
 export const COMMAND_RUNS_CHANGED_TOPIC = "command-runs.changed";
+export const COMMAND_RUN_OUTPUT_CHANGED_TOPIC = "command-runs.output.changed";
+export const BUILD_DATA_CHANGED_TOPIC = "build-data.changed";
+export const MODEL_COST_CATALOG_CHANGED_TOPIC = "model-costs.catalog.changed";
+export const TOOL_CALL_AUDIT_CHANGED_TOPIC = "tool-call-audit.changed";
 export const commandRunChangedTopic = (runId: string) =>
   `command-run.${runId}.changed`;
 export const commandRunOutputTopic = (runId: string) =>

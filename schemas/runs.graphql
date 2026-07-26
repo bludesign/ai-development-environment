@@ -184,6 +184,8 @@ type AgentRun {
   model: String!
   effort: String
   webSearchEnabled: Boolean!
+  mcpPresetIds: [ID!]!
+  mcpToolNames: [String!]!
   initialPrompt: String!
   finalOutput: String
   error: String
@@ -238,6 +240,7 @@ type RunDraft {
   model: String!
   effort: String
   webSearchEnabled: Boolean!
+  mcpPresetIds: [ID!]!
   prompt: String!
   attachments: [RunAttachment!]!
   archivedAt: String
@@ -313,6 +316,7 @@ input RunConfigurationInput {
   webSearchEnabled: Boolean = true
   prompt: String!
   attachmentIds: [ID!] = []
+  mcpPresetIds: [ID!] = []
   draftId: ID
   sourcePlanId: ID
   parentRunId: ID
@@ -331,6 +335,7 @@ input SaveRunDraftInput {
   webSearchEnabled: Boolean = true
   prompt: String!
   attachmentIds: [ID!] = []
+  mcpPresetIds: [ID!] = []
 }
 
 input RunEventInput {
@@ -458,7 +463,7 @@ extend type Query {
 
 extend type Mutation {
   createAgentRun(input: RunConfigurationInput!): AgentRun!
-  playPlan(planId: ID!): AgentRun!
+  playPlan(planId: ID!, mcpPresetIds: [ID!] = []): AgentRun!
   createRunFollowUp(sourceId: ID!, input: RunConfigurationInput!): AgentRun!
   saveRunDraft(input: SaveRunDraftInput!): RunDraft!
   archiveAgentRuns(ids: [ID!]!, archived: Boolean!): Int!

@@ -21,6 +21,7 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 
 vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
   Link: ({
     href,
     children,

@@ -30,6 +30,81 @@ afterEach(() => {
 });
 
 describe("ToolsPage", () => {
+  test("switches to a searchable tool call audit table", async () => {
+    let cleared = false;
+    requestMock.mockImplementation(async (query) => {
+      if (query.includes("mutation ClearToolCallAudits")) {
+        cleared = true;
+        return { clearToolCallAudits: { count: 1 } } as never;
+      }
+      if (query.includes("query ToolCallAudits")) {
+        return {
+          toolCallAudits: cleared
+            ? []
+            : [
+                {
+                  id: "audit-1",
+                  correlationId: "correlation-1",
+                  caller: "runner-1",
+                  source: "WORKFLOW",
+                  groupId: "builtin:codebases",
+                  toolName: "get_codebase",
+                  argumentsSha256:
+                    "807074c963aab9d3d09b49b6056652a6b05b1f1e88066dbac57e2a03658be3dc",
+                  resultStatus: "SUCCEEDED",
+                  durationMs: 42,
+                  startedAt: "2026-07-26T12:00:00.000Z",
+                  finishedAt: "2026-07-26T12:00:00.042Z",
+                },
+              ],
+        } as never;
+      }
+      return { externalMcpServers: [] } as never;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ groups: [] })),
+    );
+
+    render(<ToolsPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Audit" }));
+
+    expect(await screen.findByText("get_codebase")).toBeDefined();
+    expect(screen.getByText("Succeeded")).toBeDefined();
+    expect(screen.getByText("Workflow")).toBeDefined();
+    expect(screen.getByText("42 ms")).toBeDefined();
+    expect(screen.getByTitle("correlation-1")).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.stringContaining("toolCallAudits(first: 200)"),
+    );
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search tool call audit" }),
+      { target: { value: "no-match" } },
+    );
+    expect(screen.queryByText("get_codebase")).toBeNull();
+    expect(
+      screen.getByText("No audit records match the search."),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear audit" }));
+    expect(
+      await screen.findByText(
+        "Delete all completed tool-call audit records? Calls currently running will be preserved.",
+      ),
+    ).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete audit records" }),
+    );
+
+    expect(
+      await screen.findByText("No tool calls have been audited."),
+    ).toBeDefined();
+    expect(requestMock).toHaveBeenCalledWith(
+      "mutation ClearToolCallAudits { clearToolCallAudits { count } }",
+    );
+  });
+
   test("searches, expands, runs a tool, and renders its response", async () => {
     requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -75,6 +150,9 @@ describe("ToolsPage", () => {
 
     render(<ToolsPage />);
     await screen.findByText("get_codebase");
+    fireEvent.change(screen.getByLabelText("Tool API token (optional)"), {
+      target: { value: "deployment-secret" },
+    });
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
       target: { value: "missing-tool" },
@@ -117,7 +195,12 @@ describe("ToolsPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/tools/call",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            authorization: "Bearer deployment-secret",
+          }),
+        }),
       );
     });
   });
@@ -157,6 +240,9 @@ describe("ToolsPage", () => {
           name: "dynamic_lookup",
           arguments: { region: "us-east" },
         });
+        expect(init?.headers).toEqual({
+          "content-type": "application/json",
+        });
         return Response.json({ result: { found: true } });
       },
     );
@@ -178,6 +264,57 @@ describe("ToolsPage", () => {
       "/api/tools/call",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  test("requires explicit confirmation before a destructive tool call", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/tools/catalog")) {
+        return Response.json({
+          groups: [
+            {
+              id: "builtin:danger",
+              name: "Danger",
+              source: "BUILTIN",
+              transport: null,
+              url: null,
+              error: null,
+              children: [],
+              tools: [
+                {
+                  name: "delete_everything",
+                  title: "Delete everything",
+                  description: "Deletes data.",
+                  inputSchema: { type: "object", properties: {} },
+                  outputSchema: null,
+                  annotations: {
+                    readOnlyHint: false,
+                    destructiveHint: true,
+                    idempotentHint: true,
+                    openWorldHint: false,
+                  },
+                },
+              ],
+            },
+          ],
+        });
+      }
+      return Response.json({ result: { deleted: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ToolsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand delete_everything" }),
+    );
+    expect(screen.getByText("Destructive")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Run a destructive tool?")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Run destructive tool" }),
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   test("renders, searches, counts, and invokes nested built-in groups", async () => {
@@ -340,7 +477,10 @@ describe("ToolsPage", () => {
         JSON.stringify(
           {
             mcpServers: {
-              "ai-development-environment": { type: "http", url },
+              "ai-development-environment": {
+                type: "http",
+                url,
+              },
             },
           },
           null,

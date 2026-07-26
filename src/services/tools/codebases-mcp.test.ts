@@ -162,6 +162,21 @@ describe("codebases MCP server", () => {
       "cancel_build",
       "run_build",
       "export_build_archive",
+      "get_build_project",
+      "create_build_project",
+      "save_build_configuration",
+      "delete_build_configuration",
+      "discover_build_sources",
+      "inspect_build_source",
+      "get_build_scripts",
+      "save_build_script",
+      "delete_build_script",
+      "rebuild_build",
+      "delete_builds",
+      "get_build_reports",
+      "generate_build_report",
+      "start_worktree_coverage",
+      "get_worktree_coverage",
     ]);
     expect(
       catalog.tools.find(({ name }) => name === "start_build")?.annotations,
@@ -297,5 +312,33 @@ describe("codebases MCP server", () => {
         settings: { normalThresholdGiB: 40, pressureThresholdGiB: 10 },
       },
     });
+  });
+
+  test("registers only allowlisted tools and rejects calls outside the snapshot", async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    const registry = createBuiltInToolRegistry({
+      codebaseTools: { list } as unknown as CodebaseToolsService,
+    });
+    const server = createBuiltInMcpServer(
+      registry,
+      undefined,
+      new Set(["get_codebases"]),
+    );
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    closeCallbacks.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    await expect(client.listTools()).resolves.toMatchObject({
+      tools: [{ name: "get_codebases" }],
+    });
+    await expect(
+      client.callTool({ name: "get_codebase", arguments: { path: "/tmp" } }),
+    ).resolves.toMatchObject({ isError: true });
   });
 });

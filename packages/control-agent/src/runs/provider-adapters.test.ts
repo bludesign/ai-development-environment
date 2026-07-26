@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   claudeAnswers,
   claudeEnvironment,
+  claudeMcpServers,
   claudeModelUsages,
   findClaudeCodeExecutable,
   questionsFromInput,
@@ -27,6 +28,22 @@ async function fixture(name: string): Promise<unknown> {
 }
 
 describe("provider protocol fixtures", () => {
+  test("configures Claude with a non-strict HTTP MCP server", () => {
+    expect(
+      claudeMcpServers({
+        name: "ai-development-environment",
+        url: "https://control.test/api/mcp?run=run-1",
+        headers: { authorization: "Bearer agent" },
+      }),
+    ).toEqual({
+      "ai-development-environment": {
+        type: "http",
+        url: "https://control.test/api/mcp?run=run-1",
+        headers: { authorization: "Bearer agent" },
+      },
+    });
+  });
+
   test("normalizes Codex structured user-input requests", async () => {
     expect(codexQuestions(await fixture("codex-user-input.json"))).toEqual([
       expect.objectContaining({

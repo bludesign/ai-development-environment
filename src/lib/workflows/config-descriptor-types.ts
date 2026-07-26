@@ -17,6 +17,7 @@ export type ConfigControlType =
   | "condition" // if / wait-until condition built as comparison rows
   | "choiceOptions" // HUMAN_CHOICE buttons — label + description rows
   | "triggerChoices" // choice-trigger options — key + label + description rows
+  | "mcpPresetMulti" // reusable MCP preset checkboxes
   | "model" // combined provider/model/effort picker (catalog or session data)
   | "json"; // per-field JSON fallback for a complex blob
 
@@ -98,6 +99,8 @@ export type ConfigFieldDescriptor = {
     effort: string;
     scopeFrom?: string;
   };
+  /** Eligibility filter for the MCP preset picker; null shows both kinds. */
+  presetKind?: "PLAN" | "SESSION" | null;
 };
 
 export type KindConfigDescriptor = {

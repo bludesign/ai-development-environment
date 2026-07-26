@@ -1,6 +1,7 @@
 export const GITHUB_REST_OPERATIONS = {
   actions: {
     cancelWorkflowRun: "actions.cancelWorkflowRun",
+    dispatchWorkflow: "actions.dispatchWorkflow",
     forceCancelWorkflowRun: "actions.forceCancelWorkflowRun",
     getJobForWorkflowRun: "actions.getJobForWorkflowRun",
     getWorkflowRun: "actions.getWorkflowRun",

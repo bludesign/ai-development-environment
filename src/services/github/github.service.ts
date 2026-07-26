@@ -1330,6 +1330,74 @@ export class GitHubService {
     return body as T;
   }
 
+  private async restMutation(
+    url: string,
+    operation: GitHubRestOperation,
+    token: string,
+    requestSource: GitHubRequestSource,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    const record = (input: {
+      statusCode?: number | null;
+      error?: string | null;
+      rateLimit?: GitHubRateLimitMetadata | null;
+    }) =>
+      this.cache
+        .recordRestCall({
+          authentication: "PAT",
+          method: "POST",
+          endpoint: url,
+          operation,
+          requestSource,
+          durationMs: Date.now() - startedAt,
+          ...input,
+        })
+        .catch(() => undefined);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "user-agent": "ai-development-environment",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      });
+    } catch (error) {
+      const message = sanitizeError(
+        error instanceof Error ? error.message : String(error),
+        token,
+      );
+      await record({ error: message });
+      throw new Error(message);
+    }
+    const rateLimit = await observeGitHubRateLimit("PAT", response);
+    if (!response.ok) {
+      let message = `GitHub returned HTTP ${response.status}`;
+      try {
+        const responseBody = (await response.json()) as { message?: unknown };
+        if (typeof responseBody.message === "string") {
+          message = responseBody.message;
+        }
+      } catch {
+        // Preserve the status-only error when GitHub does not return JSON.
+      }
+      const sanitized = sanitizeError(message, token);
+      await record({
+        statusCode: response.status,
+        error: sanitized,
+        rateLimit,
+      });
+      throw new Error(sanitized);
+    }
+    await record({ statusCode: response.status, rateLimit });
+  }
+
   private async appRequest<T>(
     credentials: GitHubAppCredentials,
     query: string,
@@ -5590,6 +5658,248 @@ export class GitHubService {
     );
     if (!detail) throw new Error("The new pull request could not be loaded");
     return detail;
+  }
+
+  async updatePullRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    title?: string | null;
+    body?: string | null;
+    draft?: boolean | null;
+  }): Promise<GitHubPullRequestDetail> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const current = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!current) throw new Error("Pull request was not found");
+    const mutationInput: Record<string, unknown> = {
+      pullRequestId: current.id,
+    };
+    if (input.title !== undefined && input.title !== null) {
+      const title = input.title.trim();
+      if (!title) throw new Error("Pull request title cannot be empty");
+      mutationInput.title = title;
+    }
+    if (input.body !== undefined && input.body !== null) {
+      mutationInput.body = input.body;
+    }
+    const token = await this.requireToken();
+    if (Object.keys(mutationInput).length > 1) {
+      await this.request(
+        `mutation WorkflowUpdatePullRequest($input: UpdatePullRequestInput!) {
+          updatePullRequest(input: $input) { pullRequest { id } }
+        }`,
+        { input: mutationInput },
+        token,
+        { requestSource: "WORKFLOW_AUTOMATION" },
+      );
+    }
+    if (input.draft !== undefined && input.draft !== null) {
+      if (input.draft && !current.isDraft) {
+        await this.request(
+          `mutation WorkflowConvertPullRequestToDraft($id: ID!) {
+            convertPullRequestToDraft(input: { pullRequestId: $id }) {
+              pullRequest { id }
+            }
+          }`,
+          { id: current.id },
+          token,
+          { requestSource: "WORKFLOW_AUTOMATION" },
+        );
+      } else if (!input.draft && current.isDraft) {
+        await this.request(
+          `mutation WorkflowMarkPullRequestReady($id: ID!) {
+            markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+              pullRequest { id }
+            }
+          }`,
+          { id: current.id },
+          token,
+          { requestSource: "WORKFLOW_AUTOMATION" },
+        );
+      }
+    }
+    await this.cache.clear();
+    const detail = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!detail)
+      throw new Error("The updated pull request could not be loaded");
+    return detail;
+  }
+
+  async submitPullRequestReview(input: {
+    owner: string;
+    name: string;
+    number: number;
+    event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+    body?: string | null;
+  }): Promise<GitHubPullRequestDetail> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const pullRequest = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!pullRequest) throw new Error("Pull request was not found");
+    const body = input.body?.trim() ?? "";
+    if (input.event === "REQUEST_CHANGES" && !body) {
+      throw new Error("A review body is required when requesting changes");
+    }
+    const token = await this.requireToken();
+    await this.request(
+      `mutation WorkflowSubmitPullRequestReview(
+        $pullRequestId: ID!
+        $event: PullRequestReviewEvent!
+        $body: String
+      ) {
+        addPullRequestReview(input: {
+          pullRequestId: $pullRequestId
+          event: $event
+          body: $body
+        }) { pullRequestReview { id } }
+      }`,
+      { pullRequestId: pullRequest.id, event: input.event, body },
+      token,
+      { requestSource: "WORKFLOW_AUTOMATION" },
+    );
+    await this.cache.clear();
+    const detail = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!detail)
+      throw new Error("The reviewed pull request could not be loaded");
+    return detail;
+  }
+
+  async requestPullRequestReviewers(input: {
+    owner: string;
+    name: string;
+    number: number;
+    reviewers?: string[] | null;
+    teamReviewers?: string[] | null;
+  }): Promise<GitHubPullRequestDetail> {
+    const { owner, name } = normalizeGitHubRepositoryName(
+      `${input.owner}/${input.name}`,
+    );
+    const pullRequest = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!pullRequest) throw new Error("Pull request was not found");
+    const reviewers = [
+      ...new Set(
+        (input.reviewers ?? []).map((value) => value.trim()).filter(Boolean),
+      ),
+    ];
+    const teamReviewers = [
+      ...new Set(
+        (input.teamReviewers ?? [])
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (!reviewers.length && !teamReviewers.length) {
+      throw new Error("At least one user or team reviewer is required");
+    }
+    const token = await this.requireToken();
+    const userIds: string[] = [];
+    for (const login of reviewers) {
+      const data = await this.request<{ user: { id: string } | null }>(
+        `query WorkflowReviewer($login: String!) { user(login: $login) { id } }`,
+        { login },
+        token,
+        { requestSource: "WORKFLOW_AUTOMATION" },
+      );
+      if (!data.user) throw new Error(`GitHub user was not found: ${login}`);
+      userIds.push(data.user.id);
+    }
+    const teamIds: string[] = [];
+    for (const slug of teamReviewers) {
+      const data = await this.request<{
+        organization: { team: { id: string } | null } | null;
+      }>(
+        `query WorkflowReviewTeam($organization: String!, $slug: String!) {
+          organization(login: $organization) { team(slug: $slug) { id } }
+        }`,
+        { organization: owner, slug },
+        token,
+        { requestSource: "WORKFLOW_AUTOMATION" },
+      );
+      const team = data.organization?.team;
+      if (!team) throw new Error(`GitHub team was not found: ${slug}`);
+      teamIds.push(team.id);
+    }
+    await this.request(
+      `mutation WorkflowRequestPullRequestReviews(
+        $pullRequestId: ID!
+        $userIds: [ID!]
+        $teamIds: [ID!]
+      ) {
+        requestReviews(input: {
+          pullRequestId: $pullRequestId
+          userIds: $userIds
+          teamIds: $teamIds
+        }) { pullRequest { id } }
+      }`,
+      { pullRequestId: pullRequest.id, userIds, teamIds },
+      token,
+      { requestSource: "WORKFLOW_AUTOMATION" },
+    );
+    await this.cache.clear();
+    const detail = await this.pullRequest(
+      owner,
+      name,
+      input.number,
+      "WORKFLOW_AUTOMATION",
+    );
+    if (!detail)
+      throw new Error("The updated pull request could not be loaded");
+    return detail;
+  }
+
+  async dispatchWorkflow(input: {
+    repositoryId: string;
+    workflowId: string;
+    ref: string;
+    inputs?: Record<string, string> | null;
+  }): Promise<boolean> {
+    const repositoryId = input.repositoryId.trim();
+    const workflowId = input.workflowId.trim();
+    const ref = input.ref.trim();
+    if (!repositoryId || !workflowId || !ref) {
+      throw new Error("Repository, workflow, and Git ref are required");
+    }
+    const target = await this.actionsTargetByIdentifier(repositoryId);
+    const token = await this.requireToken();
+    await this.restMutation(
+      `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(
+        target.name,
+      )}/actions/workflows/${encodeURIComponent(workflowId)}/dispatches`,
+      GITHUB_REST_OPERATIONS.actions.dispatchWorkflow,
+      token,
+      "WORKFLOW_AUTOMATION",
+      { ref, inputs: input.inputs ?? {} },
+    );
+    await this.cache.clear();
+    return true;
   }
 
   async setPullRequestLabels(input: {

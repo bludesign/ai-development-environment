@@ -17,6 +17,7 @@ import {
   agentOnlineWindowMs,
   AgentControlService,
   agentEventBus,
+  BUILD_DATA_CHANGED_TOPIC,
   buildDataCollectionChangedTopic,
 } from "@/services/agent-control";
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
@@ -996,6 +997,9 @@ export class BuildDataService {
   }
 
   private publish(id: string): void {
+    agentEventBus.publish(BUILD_DATA_CHANGED_TOPIC, {
+      buildDataCollectionChanged: { id },
+    });
     agentEventBus.publish(buildDataCollectionChangedTopic(id), {
       buildDataCollectionChanged: { id },
     });

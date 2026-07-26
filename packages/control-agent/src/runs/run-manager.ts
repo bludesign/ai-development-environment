@@ -408,6 +408,9 @@ export class RunManager {
           attachments,
           resumeNativeId: resumeNativeId || undefined,
           fork: command.type !== "CONTINUE",
+          mcpServer: run.mcpToolNames?.length
+            ? (this.client.mcpServerDescriptor(run.id) ?? undefined)
+            : undefined,
         },
         callbacks,
       );

@@ -29,12 +29,55 @@ export type ExternalMcpServerInput = {
   }>;
 };
 
+export type McpToolPresetInput = {
+  name: string;
+  description?: string | null;
+  iconKey: string;
+  enabledForPlans: boolean;
+  enabledForSessions: boolean;
+  toolNames: string[];
+};
+
+export type McpToolPresetView = {
+  id: string;
+  name: string;
+  description: string;
+  iconKey: string;
+  enabledForPlans: boolean;
+  enabledForSessions: boolean;
+  toolNames: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ToolAnnotations = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
+
 export type ToolCatalogItem = {
   name: string;
   title: string | null;
   description: string | null;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown> | null;
+  annotations: ToolAnnotations | null;
+};
+
+export type ToolCallAuditView = {
+  id: string;
+  correlationId: string;
+  caller: string;
+  source: string;
+  groupId: string;
+  toolName: string;
+  argumentsSha256: string;
+  resultStatus: string;
+  durationMs: number | null;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 export type ToolCatalogGroup = {

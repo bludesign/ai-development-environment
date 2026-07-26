@@ -580,6 +580,8 @@ export class GitHubActionsNotificationsService {
       new Set(["opened", "reopened", "ready_for_review"]).has(action ?? "")
     ) {
       kind = "GITHUB_PR_STATE";
+    } else if (event === "pull_request" && action === "synchronize") {
+      kind = "GITHUB_PR_SYNCHRONIZED";
     } else if (event === "pull_request" && action === "closed") {
       kind = "GITHUB_PR_CLOSED";
     } else if (event === "pull_request" && action === "labeled") {
@@ -590,6 +592,12 @@ export class GitHubActionsNotificationsService {
       text(review.state)?.toLowerCase() === "changes_requested"
     ) {
       kind = "GITHUB_REVIEW_CHANGES_REQUESTED";
+    } else if (
+      event === "pull_request_review" &&
+      action === "submitted" &&
+      text(review.state)?.toLowerCase() === "approved"
+    ) {
+      kind = "GITHUB_REVIEW_APPROVED";
     } else if (
       event === "pull_request_review_comment" &&
       action === "created"

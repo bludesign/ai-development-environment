@@ -13,6 +13,83 @@ vi.mock("@opencode-ai/sdk/v2", () => ({
 import { OpenCodeAdapter } from "./opencode-adapter.js";
 
 describe("OpenCodeAdapter questions", () => {
+  test("uses a run-isolated MCP runtime and closes it when the run settles", async () => {
+    const close = vi.fn();
+    const client = {
+      event: {
+        subscribe: vi.fn(async () => ({
+          stream: (async function* () {})(),
+        })),
+      },
+      question: {
+        list: vi.fn(async () => ({ data: [] })),
+        reply: vi.fn(),
+      },
+      session: {
+        create: vi.fn(async () => ({ data: { id: "session-1" } })),
+        prompt: vi.fn(async () => ({
+          data: {
+            info: { tokens: {} },
+            parts: [{ type: "text", text: "Done" }],
+          },
+        })),
+        status: vi.fn(async () => ({ data: {} })),
+        messages: vi.fn(async () => ({ data: [] })),
+      },
+      v2: {
+        session: {
+          interrupt: vi.fn(),
+          question: { list: vi.fn(async () => ({ data: [] })), reply: vi.fn() },
+        },
+      },
+    };
+    sdk.createOpencode.mockResolvedValue({ client, server: { close } });
+    const adapter = new OpenCodeAdapter();
+    const handle = await adapter.start(
+      {
+        run: {
+          kind: "SESSION",
+          model: "default",
+          effort: null,
+          webSearchEnabled: false,
+          worktree: { folder: "/workspace" },
+        },
+        prompt: "Implement",
+        attachments: [],
+        mcpServer: {
+          name: "ai-development-environment",
+          url: "https://control.test/api/mcp?run=run-1",
+          headers: { authorization: "Bearer agent" },
+        },
+      } as unknown as ProviderStartInput,
+      {
+        onNativeId: vi.fn(async () => undefined),
+        onEvent: vi.fn(async () => undefined),
+        onQuestion: vi.fn(async () => undefined),
+        onUsage: vi.fn(async () => undefined),
+      },
+    );
+
+    expect(sdk.createOpencode).toHaveBeenCalledWith({
+      port: 0,
+      config: {
+        mcp: {
+          "ai-development-environment": {
+            type: "remote",
+            url: "https://control.test/api/mcp?run=run-1",
+            headers: { authorization: "Bearer agent" },
+            oauth: false,
+          },
+        },
+      },
+    });
+    await expect(handle.completion).resolves.toMatchObject({
+      status: "COMPLETED",
+      finalOutput: "Done",
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   test("recovers and answers a legacy question missed by the event stream", async () => {
     let resolvePrompt!: (value: unknown) => void;
     const prompt = new Promise<unknown>((resolve) => {
