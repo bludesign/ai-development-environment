@@ -16,6 +16,7 @@
     "navigation": "Navegación",
     "breadcrumbLabel": "Ruta de navegación",
     "navigationDescription": "Navegación principal de AI Development Environment.",
+    "actionCenter": "Centro de acciones",
     "notifications": "Notificaciones",
     "notificationsDescription": "Actualizaciones y alertas de notificaciones.",
     "showNavigation": "Mostrar navegación",
@@ -67,6 +68,42 @@
     "repositories": "Repositorios",
     "runs": "Ejecuciones",
     "sync": "Sincronización"
+  },
+  "actionCenter": {
+    "title": "Centro de acciones",
+    "description": "Trabajo en curso, decisiones, fallos y compilaciones de iOS listas para ejecutar.",
+    "refresh": "Actualizar el centro de acciones",
+    "totalCount": "{count, plural, one {# elemento} other {# elementos}}",
+    "attentionCount": "{count, plural, one {# requiere atención} other {# requieren atención}}",
+    "activeCount": "{count, plural, one {# activo} other {# activos}}",
+    "emptyTitle": "No hay acciones pendientes",
+    "emptyDescription": "El trabajo activo y las nuevas decisiones aparecerán aquí automáticamente.",
+    "needsAttention": "Requiere atención",
+    "active": "Activo",
+    "noAttention": "Ningún elemento requiere atención ahora.",
+    "noActive": "No hay trabajo activo ahora.",
+    "loadMore": "Cargar más",
+    "miniLabel": "Centro de acciones compacto",
+    "miniEmpty": "No hay acciones pendientes.",
+    "kinds": {
+      "PLAN": "Plan",
+      "SESSION": "Sesión",
+      "BUILD": "Compilación",
+      "WORKFLOW": "Flujo de trabajo"
+    },
+    "reasons": {
+      "QUESTION": "Respuesta necesaria",
+      "BLOCKED": "Bloqueado",
+      "FAILED": "Fallido",
+      "UNRUN_BUILD": "Listo para ejecutar",
+      "ACTIVE": "Activo"
+    },
+    "acknowledge": "Confirmar",
+    "acknowledgeNamed": "Confirmar {name}",
+    "questionFrom": "Pregunta de {source}",
+    "customAnswerFor": "Respuesta personalizada para {question}",
+    "customAnswer": "Respuesta personalizada",
+    "submitAnswer": "Enviar respuesta"
   },
   "workflows": {
     "title": "Flujos de trabajo",

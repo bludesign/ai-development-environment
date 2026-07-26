@@ -1,0 +1,99 @@
+enum ActionCenterResourceKind {
+  PLAN
+  SESSION
+  BUILD
+  WORKFLOW
+}
+
+enum ActionCenterReason {
+  QUESTION
+  BLOCKED
+  FAILED
+  UNRUN_BUILD
+  ACTIVE
+}
+
+type ActionCenterWorktree {
+  id: ID!
+  folder: String!
+  branch: String
+  highlightColor: String
+}
+
+type ActionCenterQuestionOption {
+  id: ID!
+  position: Int!
+  label: String!
+  description: String
+}
+
+type ActionCenterQuestion {
+  id: ID!
+  position: Int!
+  header: String
+  prompt: String!
+  multiSelect: Boolean!
+  allowCustom: Boolean!
+  options: [ActionCenterQuestionOption!]!
+}
+
+type ActionCenterQuestionBatch {
+  id: ID!
+  sourceKind: String
+  createdAt: String!
+  questions: [ActionCenterQuestion!]!
+}
+
+type ActionCenterBuildRun {
+  buildId: ID!
+  destinationType: BuildDestinationType!
+  preferredDestination: JSON!
+}
+
+type ActionCenterItem {
+  key: ID!
+  resourceKind: ActionCenterResourceKind!
+  reason: ActionCenterReason!
+  resourceId: ID!
+  href: String!
+  displayNumber: Int
+  label: String!
+  summary: String
+  status: String!
+  phase: String
+  error: String
+  createdAt: String!
+  updatedAt: String!
+  worktree: ActionCenterWorktree
+  questionBatches: [ActionCenterQuestionBatch!]!
+  buildRun: ActionCenterBuildRun
+  failureFingerprint: String
+}
+
+type ActionCenterPage {
+  items: [ActionCenterItem!]!
+  nextCursor: String
+  totalCount: Int!
+  needsAttentionCount: Int!
+  activeCount: Int!
+}
+
+input AcknowledgeActionCenterItemInput {
+  resourceKind: ActionCenterResourceKind!
+  resourceId: ID!
+  failureFingerprint: String!
+}
+
+extend type Query {
+  actionCenter(first: Int = 50, after: String): ActionCenterPage!
+}
+
+extend type Mutation {
+  acknowledgeActionCenterItem(
+    input: AcknowledgeActionCenterItemInput!
+  ): Boolean!
+}
+
+extend type Subscription {
+  actionCenterChanged: Boolean!
+}

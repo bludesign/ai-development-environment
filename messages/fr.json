@@ -16,6 +16,7 @@
     "navigation": "Navigation",
     "breadcrumbLabel": "Fil d’Ariane",
     "navigationDescription": "Navigation principale d’AI Development Environment.",
+    "actionCenter": "Centre d’actions",
     "notifications": "Notifications",
     "notificationsDescription": "Mises à jour et alertes de notification.",
     "showNavigation": "Afficher la navigation",
@@ -67,6 +68,42 @@
     "repositories": "Dépôts",
     "runs": "Exécutions",
     "sync": "Synchronisation"
+  },
+  "actionCenter": {
+    "title": "Centre d’actions",
+    "description": "Travail en cours, décisions, échecs et builds iOS prêts à être exécutés.",
+    "refresh": "Actualiser le centre d’actions",
+    "totalCount": "{count, plural, one {# élément} other {# éléments}}",
+    "attentionCount": "{count, plural, one {# nécessite une attention} other {# nécessitent une attention}}",
+    "activeCount": "{count, plural, one {# actif} other {# actifs}}",
+    "emptyTitle": "Aucune action requise",
+    "emptyDescription": "Le travail actif et les nouvelles décisions apparaîtront ici automatiquement.",
+    "needsAttention": "Nécessite une attention",
+    "active": "Actif",
+    "noAttention": "Aucun élément ne nécessite d’attention actuellement.",
+    "noActive": "Aucun travail n’est actif actuellement.",
+    "loadMore": "Charger plus",
+    "miniLabel": "Centre d’actions compact",
+    "miniEmpty": "Aucune action requise.",
+    "kinds": {
+      "PLAN": "Plan",
+      "SESSION": "Session",
+      "BUILD": "Build",
+      "WORKFLOW": "Workflow"
+    },
+    "reasons": {
+      "QUESTION": "Réponse requise",
+      "BLOCKED": "Bloqué",
+      "FAILED": "Échec",
+      "UNRUN_BUILD": "Prêt à exécuter",
+      "ACTIVE": "Actif"
+    },
+    "acknowledge": "Acquitter",
+    "acknowledgeNamed": "Acquitter {name}",
+    "questionFrom": "Question de {source}",
+    "customAnswerFor": "Réponse personnalisée pour {question}",
+    "customAnswer": "Réponse personnalisée",
+    "submitAnswer": "Envoyer la réponse"
   },
   "workflows": {
     "title": "Workflows",

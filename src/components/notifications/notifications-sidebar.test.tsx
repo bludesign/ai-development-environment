@@ -138,6 +138,19 @@ function renderSidebar() {
 }
 
 describe("NotificationsSidebar", () => {
+  test("reserves an independently scrollable two-thirds notification feed and one-third action center", () => {
+    renderSidebar();
+
+    const feed = document.querySelector('[data-slot="notifications-feed"]');
+    const actionCenter = document.querySelector(
+      '[data-slot="mini-action-center"]',
+    );
+    expect(feed?.className).toContain("flex-[2_1_0%]");
+    expect(feed?.className).toContain("overflow-y-auto");
+    expect(actionCenter?.className).toContain("flex-[1_1_0%]");
+    expect(actionCenter?.className).toContain("overflow-hidden");
+  });
+
   test("shows live relative times without a tooltip or hover card", async () => {
     const setInterval = vi.spyOn(window, "setInterval");
     renderSidebar();

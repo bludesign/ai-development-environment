@@ -1,4 +1,5 @@
 export type BreadcrumbLabelKey =
+  | "actionCenter"
   | "actions"
   | "actionsCache"
   | "agents"
@@ -52,6 +53,7 @@ export type AppBreadcrumb = {
 type BreadcrumbTranslator = (key: BreadcrumbLabelKey) => string;
 
 const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
+  "action-center": "actionCenter",
   actions: "actions",
   "actions-cache": "actionsCache",
   agents: "agents",
@@ -128,6 +130,7 @@ const STATIC_NESTED_PATH_PATTERNS = [
 ];
 
 const ROUTABLE_STATIC_PATHS = new Set([
+  "/action-center",
   "/actions",
   "/actions-cache",
   "/agents",

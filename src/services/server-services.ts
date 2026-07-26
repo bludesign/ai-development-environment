@@ -31,6 +31,7 @@ import { RunsService } from "@/services/runs";
 import { CommandsService } from "@/services/commands";
 import { DiskSpaceService } from "@/services/disk-space";
 import { SystemStatusService } from "@/services/system-status";
+import { ActionCenterService } from "@/services/action-center";
 import {
   WorkflowEventsService,
   WorkflowsService,
@@ -68,6 +69,7 @@ export type ServerServices = {
   commandsService: CommandsService;
   diskSpaceService: DiskSpaceService;
   systemStatusService: SystemStatusService;
+  actionCenterService: ActionCenterService;
   workflowEventsService: WorkflowEventsService;
   workflowsService: WorkflowsService;
   workflowEventBridge: WorkflowEventBridge;
@@ -152,6 +154,7 @@ function createServerServices(): ServerServices {
     diskSpaceService,
     pollingService,
   );
+  const actionCenterService = new ActionCenterService();
   const toolsService = new ToolsService(
     codebaseToolsService,
     buildsService,
@@ -277,6 +280,7 @@ function createServerServices(): ServerServices {
     commandsService,
     diskSpaceService,
     systemStatusService,
+    actionCenterService,
     toolsService,
     workflowEventsService,
     workflowsService,
