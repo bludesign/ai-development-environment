@@ -2565,8 +2565,18 @@ export const autoSyncWorktree: AgentJobHandler = async (
     timeoutMs,
     signal,
   );
-  const branch =
+  const symbolicBranch =
     branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+  const branch =
+    symbolicBranch ??
+    (input.phase === "FINALIZE"
+      ? await rebaseBranch(folder, timeoutMs, signal)
+      : null);
+  if (branch !== input.expectedBranch) {
+    throw new Error(
+      `Auto Sync expected branch ${input.expectedBranch}, but found ${branch ?? "detached HEAD"}`,
+    );
+  }
   const upstreamResult = branch
     ? await git(
         folder,
@@ -2672,11 +2682,13 @@ export const autoSyncWorktree: AgentJobHandler = async (
         : null;
     if (
       finalBranch.exitCode !== 0 ||
-      !finalBranch.stdout.trim() ||
+      finalBranch.stdout.trim() !== input.expectedBranch ||
       finalUpstream?.exitCode !== 0 ||
       !finalUpstream.stdout.trim()
     ) {
-      throw new Error("Auto Sync requires a branch with an upstream");
+      throw new Error(
+        `Auto Sync expected branch ${input.expectedBranch} with an upstream`,
+      );
     }
     await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
     return {
@@ -2709,6 +2721,38 @@ export const autoSyncWorktree: AgentJobHandler = async (
     signal,
   );
   if (isCurrent.exitCode === 0) {
+    const upstreamContainsHead = await git(
+      folder,
+      ["merge-base", "--is-ancestor", "HEAD", "@{upstream}"],
+      timeoutMs,
+      signal,
+    );
+    if (
+      upstreamContainsHead.exitCode !== 0 &&
+      upstreamContainsHead.exitCode !== 1
+    ) {
+      throw new Error(
+        cleanError(
+          upstreamContainsHead.stderr ||
+            "Could not compare the upstream branch",
+        ),
+      );
+    }
+    if (upstreamContainsHead.exitCode !== 0) {
+      await runGit(["push", "--force-with-lease"], "Auto Sync push failed");
+      return {
+        ...successfulProcess,
+        outcome: "SYNCED",
+        worktree: await inspectWorktreeItem(
+          folder,
+          folder,
+          input.baseBranch,
+          false,
+          Math.min(timeoutMs, 30_000),
+          signal,
+        ),
+      };
+    }
     return {
       ...successfulProcess,
       outcome: "NO_CHANGE",

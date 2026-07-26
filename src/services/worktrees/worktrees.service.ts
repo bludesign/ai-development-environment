@@ -1588,6 +1588,7 @@ export class WorktreesService {
     deleteRemoteBranch: boolean;
     requestId: string;
     requireClean?: boolean;
+    expectedBranch?: string | null;
     expectedHeadSha?: string | null;
   }) {
     const worktree = await this.requireRunnable(
@@ -1596,6 +1597,19 @@ export class WorktreesService {
     );
     if (worktree.primary)
       throw new Error("The primary worktree cannot be deleted");
+    if (
+      input.expectedBranch !== undefined &&
+      worktree.branch !== input.expectedBranch
+    ) {
+      throw new Error("The worktree branch changed before deletion");
+    }
+    if (
+      input.requireClean === true &&
+      input.expectedHeadSha !== undefined &&
+      worktree.headSha !== input.expectedHeadSha
+    ) {
+      throw new Error("The worktree HEAD changed before deletion");
+    }
     if (
       input.deleteRemoteBranch &&
       (!worktree.branch || worktree.branch === worktree.codebase.defaultBranch)
@@ -1614,7 +1628,10 @@ export class WorktreesService {
         folder: worktree.folder,
         gitDirectory: worktree.gitDirectory,
         expectedOrigin: worktree.codebase.repository.canonicalOrigin,
-        branch: worktree.branch,
+        branch:
+          input.expectedBranch === undefined
+            ? worktree.branch
+            : input.expectedBranch,
         defaultBranch: worktree.codebase.defaultBranch,
         deleteRemoteBranch: input.deleteRemoteBranch,
         requireClean: input.requireClean ?? false,
@@ -1870,6 +1887,7 @@ export class WorktreesService {
   async createAutoSyncJob(
     id: string,
     phase: WorktreeAutoSyncPhase,
+    expectedBranch: string,
     requestId: string,
   ) {
     const worktree = await this.requireRunnable(
@@ -1886,6 +1904,7 @@ export class WorktreesService {
       kind: WORKTREE_AUTO_SYNC_JOB_KIND,
       payload: {
         ...payload,
+        expectedBranch,
         baseBranch: payload.baseBranch,
         phase,
       },

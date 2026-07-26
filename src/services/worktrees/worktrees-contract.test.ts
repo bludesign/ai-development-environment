@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   parseCodebaseWorktreeReport,
   parseWorktreeActivityReport,
+  worktreeAutoSyncJobPayload,
   worktreeBranchJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
@@ -123,6 +124,29 @@ describe("worktree agent contract", () => {
     expect(() => worktreeJobPayload({ ...base, command: "rm -rf /" })).toThrow(
       "Unexpected worktree payload field",
     );
+  });
+
+  test("requires Auto Sync jobs to identify the configured branch", () => {
+    const payload = {
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      expectedOrigin: "github.com/openai/codex",
+      expectedBranch: "feature/AIDE-71",
+      baseBranch: "main",
+      phase: "SYNC",
+    };
+
+    expect(worktreeAutoSyncJobPayload(payload)).toMatchObject({
+      expectedBranch: "feature/AIDE-71",
+      phase: "SYNC",
+    });
+    expect(() =>
+      worktreeAutoSyncJobPayload({
+        ...payload,
+        expectedBranch: undefined,
+      }),
+    ).toThrow("expectedBranch");
   });
 
   test("validates watcher jobs and activity reports", () => {

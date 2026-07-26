@@ -6,6 +6,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 import type { AgentControlService } from "@/services/agent-control";
 import {
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
   WORKTREE_GIT_INSPECT_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
@@ -88,6 +89,129 @@ describe("WorktreesService", () => {
       "agent-1",
       "agent-2",
     ]);
+  });
+
+  test("pins Auto Sync jobs to the configured branch", async () => {
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      baseBranchOverride: null,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([WORKTREE_AUTO_SYNC_JOB_KIND]),
+        },
+        repository: { canonicalOrigin: "github.com/openai/codex" },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+      agentJob: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+
+    await service(control).createAutoSyncJob(
+      "worktree-1",
+      "SYNC",
+      "feature/configured",
+      "request-1",
+    );
+
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: WORKTREE_AUTO_SYNC_JOB_KIND,
+        payload: expect.objectContaining({
+          expectedBranch: "feature/configured",
+        }),
+      }),
+    );
+  });
+
+  test("pins guarded deletion jobs to the expected branch", async () => {
+    const runnable = {
+      id: "worktree-1",
+      codebaseId: "codebase-1",
+      folder: "/repo-linked",
+      gitDirectory: "/repo/.git/worktrees/repo-linked",
+      branch: "feature/AIDE-71",
+      headSha: "pr-head",
+      primary: false,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        folder: "/repo",
+        defaultBranch: "main",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify(["worktree.delete"]),
+        },
+        repository: { canonicalOrigin: "github.com/openai/codex" },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+      agentJob: { findFirst: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "delete-job" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+    const worktrees = service(control);
+
+    await expect(
+      worktrees.deleteWorktree({
+        worktreeId: "worktree-1",
+        deleteRemoteBranch: false,
+        requireClean: true,
+        expectedBranch: "feature/other",
+        expectedHeadSha: "pr-head",
+        requestId: "request-1",
+      }),
+    ).rejects.toThrow("branch changed");
+    await expect(
+      worktrees.deleteWorktree({
+        worktreeId: "worktree-1",
+        deleteRemoteBranch: false,
+        requireClean: true,
+        expectedBranch: "feature/AIDE-71",
+        expectedHeadSha: "other-head",
+        requestId: "request-2",
+      }),
+    ).rejects.toThrow("HEAD changed");
+    await worktrees.deleteWorktree({
+      worktreeId: "worktree-1",
+      deleteRemoteBranch: false,
+      requireClean: true,
+      expectedBranch: "feature/AIDE-71",
+      expectedHeadSha: "pr-head",
+      requestId: "request-3",
+    });
+
+    expect(createJob).toHaveBeenCalledOnce();
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          branch: "feature/AIDE-71",
+          expectedHeadSha: "pr-head",
+        }),
+      }),
+    );
   });
 
   test("refetches pull requests after case-insensitive cache invalidation", async () => {

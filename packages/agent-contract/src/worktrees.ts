@@ -842,6 +842,7 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
   folder: string;
   gitDirectory: string;
   expectedOrigin: string;
+  expectedBranch: string;
   baseBranch: string;
   phase: WorktreeAutoSyncPhase;
 } {
@@ -851,6 +852,7 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
     "folder",
     "gitDirectory",
     "expectedOrigin",
+    "expectedBranch",
     "baseBranch",
     "phase",
   ]);
@@ -876,6 +878,10 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
     expectedOrigin: stringValue(
       payload.expectedOrigin,
       "worktree auto sync payload.expectedOrigin",
+    ),
+    expectedBranch: stringValue(
+      payload.expectedBranch,
+      "worktree auto sync payload.expectedBranch",
     ),
     baseBranch: stringValue(
       payload.baseBranch,

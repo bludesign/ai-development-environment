@@ -195,6 +195,8 @@ describe("workflow config descriptors", () => {
     // Steps that finish inline gain neither.
     expect(timingKeys("JIRA_COMMENT")).toEqual([]);
     expect(timingKeys("WORKTREE_INSPECT_GIT")).toEqual([]);
+    expect(timingKeys("WORKTREE_SET_AUTO_SYNC")).toEqual([]);
+    expect(timingKeys("WORKTREE_SET_AUTO_MERGE")).toEqual([]);
     expect(timingKeys("CONTROL_DELAY")).toEqual([]);
   });
 

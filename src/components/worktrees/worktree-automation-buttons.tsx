@@ -310,6 +310,14 @@ export function AutoMergeButton({
   const tp = useTranslations("pullRequests");
   const pullRequest = worktree.pullRequest;
   const rule = worktree.autoMerge;
+  const currentRule =
+    rule &&
+    (!pullRequest ||
+      (rule.pullRequestNumber === pullRequest.number &&
+        rule.repositoryNameWithOwner.toLowerCase() ===
+          pullRequest.repositoryNameWithOwner.toLowerCase()))
+      ? rule
+      : null;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -356,31 +364,31 @@ export function AutoMergeButton({
         if (!active) return;
         const next = data.githubPullRequestMergeOptions;
         setOptions(next);
-        setMethod(rule?.mergeMethod ?? next.availableMethods[0] ?? "");
-        setHeadline(rule?.commitHeadline ?? next.defaultCommitHeadline);
-        setBody(rule?.commitBody ?? next.defaultCommitBody);
+        setMethod(currentRule?.mergeMethod ?? next.availableMethods[0] ?? "");
+        setHeadline(currentRule?.commitHeadline ?? next.defaultCommitHeadline);
+        setBody(currentRule?.commitBody ?? next.defaultCommitBody);
         setAuthorEmail(
-          rule?.authorEmail ?? next.defaultCommitEmail ?? DEFAULT_EMAIL,
+          currentRule?.authorEmail ?? next.defaultCommitEmail ?? DEFAULT_EMAIL,
         );
-        setDeleteWorktree(rule?.deleteWorktree ?? false);
-        setMoveTicketToDone(rule?.moveTicketToDone ?? false);
+        setDeleteWorktree(currentRule?.deleteWorktree ?? false);
+        setMoveTicketToDone(currentRule?.moveTicketToDone ?? false);
       })
       .catch((value) => active && setError(errorMessage(value)))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [open, pullRequest, rule]);
+  }, [currentRule, open, pullRequest]);
 
   if (
     pullRequest &&
-    rule?.state !== "COMPLETED" &&
+    currentRule?.state !== "COMPLETED" &&
     directlyMergeable(worktree)
   ) {
     return (
       <MergePullRequestButton
         onMerged={async () => {
-          if (rule) {
+          if (currentRule) {
             await controlPlaneRequest(
               `mutation RetryWorktreeAutoMerge($worktreeId: ID!) {
                 retryWorktreeAutoMerge(worktreeId: $worktreeId) {
@@ -458,17 +466,17 @@ export function AutoMergeButton({
     }
   };
 
-  const paused = rule?.state === "ACTION_REQUIRED";
-  const completed = rule?.state === "COMPLETED";
+  const paused = currentRule?.state === "ACTION_REQUIRED";
+  const completed = currentRule?.state === "COMPLETED";
   return (
     <>
       <Button
         className={
-          rule && !paused
+          currentRule && !paused
             ? "bg-emerald-600 text-white hover:bg-emerald-700"
             : undefined
         }
-        disabled={!pullRequest || (disabled && !rule) || completed}
+        disabled={!pullRequest || (disabled && !currentRule) || completed}
         onClick={(event) => {
           event.stopPropagation();
           setLoading(true);
@@ -478,14 +486,14 @@ export function AutoMergeButton({
         }}
         size="sm"
         type="button"
-        variant={paused ? "destructive" : rule ? "default" : "outline"}
+        variant={paused ? "destructive" : currentRule ? "default" : "outline"}
       >
         <GitMerge />
         {completed
           ? t("autoMergeComplete")
           : paused
             ? t("autoMergePaused")
-            : rule
+            : currentRule
               ? t("autoMerging")
               : t("autoMerge")}
       </Button>
@@ -501,10 +509,10 @@ export function AutoMergeButton({
             </div>
           ) : (
             <div className="space-y-4">
-              {(error || rule?.lastError) && (
+              {(error || currentRule?.lastError) && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    {error || rule?.lastError}
+                    {error || currentRule?.lastError}
                   </AlertDescription>
                 </Alert>
               )}
@@ -609,7 +617,7 @@ export function AutoMergeButton({
             </div>
           )}
           <DialogFooter>
-            {rule && (
+            {currentRule && (
               <Button
                 disabled={busy}
                 onClick={() => void cancel()}
@@ -633,7 +641,7 @@ export function AutoMergeButton({
                 busy ||
                 !method ||
                 !headline.trim() ||
-                (!rule && !options?.canEnableAutoMerge)
+                (!currentRule && !options?.canEnableAutoMerge)
               }
               onClick={() => void save()}
               type="button"
