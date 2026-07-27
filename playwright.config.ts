@@ -16,7 +16,7 @@ const mockDatabaseUrl = `file:${path.resolve(process.cwd(), "prisma/mock.db")}`;
 const DESKTOP_VIEWPORT = { width: 1920, height: 1080 };
 
 // Capture at 3x so text and icons stay crisp when the PNGs are viewed or scaled down.
-const DEVICE_SCALE_FACTOR = 3;
+const DEVICE_SCALE_FACTOR = 2;
 
 export default defineConfig({
   testDir: "./playwright",

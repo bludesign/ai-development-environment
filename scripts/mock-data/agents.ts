@@ -1,12 +1,23 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { ids } from "./ids";
-import { daysAgo, hoursAgo, minutesAgo, secondsAgo } from "./time";
+import { daysAgo, fromNow, hoursAgo, minutesAgo } from "./time";
 
 const GIB = 1024 * 1024 * 1024;
 
 /** Large heartbeat interval keeps every seeded agent inside its ONLINE window for hours. */
 const HEARTBEAT_INTERVAL_SECONDS = 86_400;
+
+/**
+ * A disk report goes STALE two poll intervals (120s) after it was taken, but the seed runs once
+ * and the database is then read for the length of a whole capture run — agents whose rings start
+ * out CRITICAL were turning grey partway through it. Dating the reports an hour ahead means the
+ * clock never catches up. The monitor renders `lastReportedAt` as a plain time of day rather
+ * than a relative age, so the lead is not visible in the captures.
+ */
+const REPORT_LEAD_MS = 60 * 60_000;
+const reportedAt = (secondsApart: number): Date =>
+  fromNow(REPORT_LEAD_MS - secondsApart * 1_000);
 
 /**
  * Deliberately omits the live git-inspection capabilities (`codebase.git.inspect`,
@@ -184,7 +195,7 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       volumesJson: JSON.stringify(studioDisk.volumes),
       entriesJson: JSON.stringify(studioDisk.entries),
       warningsJson: JSON.stringify(studioDisk.warnings),
-      lastReportedAt: secondsAgo(20),
+      lastReportedAt: reportedAt(20),
     },
   });
 
@@ -204,9 +215,7 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       warningsJson: JSON.stringify([
         "Derived Data volume is below the pressure threshold.",
       ]),
-      // Disk reports go stale after two poll intervals (120s), so every agent reports well
-      // inside that window and the monitor cards read as live rather than STALE.
-      lastReportedAt: secondsAgo(45),
+      lastReportedAt: reportedAt(45),
     },
   });
 
@@ -224,7 +233,7 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       ),
       entriesJson: JSON.stringify(ciDisk.entries),
       warningsJson: JSON.stringify(ciDisk.warnings),
-      lastReportedAt: secondsAgo(30),
+      lastReportedAt: reportedAt(30),
     },
   });
 
