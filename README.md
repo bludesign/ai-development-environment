@@ -32,8 +32,6 @@ Everything lives at **[ai-development-environment.mintlify.app](https://ai-devel
 | [Database](https://ai-development-environment.mintlify.app/reference/database) | Prisma, migrations, and reclaiming space |
 | [Hosting and networking](https://ai-development-environment.mintlify.app/reference/hosting) | Public HTTPS, Cloudflare Access, and reverse proxies |
 
-The documentation source is in [`bludesign/ai-development-environment-docs`](https://github.com/bludesign/ai-development-environment-docs).
-
 ## Install
 
 ```bash
