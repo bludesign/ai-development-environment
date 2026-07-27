@@ -1,9 +1,5 @@
-import Readme from "../../../README.md";
+import { ActionCenterPage } from "@/components/action-center/action-center-page";
 
 export default function Home() {
-  return (
-    <article className="prose prose-neutral dark:prose-invert w-full max-w-none">
-      <Readme />
-    </article>
-  );
+  return <ActionCenterPage />;
 }

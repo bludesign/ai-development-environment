@@ -1,0 +1,61 @@
+enum GlobalSearchGroup {
+  WORKTREES
+  TICKETS
+  PULL_REQUESTS
+  REPOSITORIES
+  CODEBASES
+  WORKFLOWS
+  GITHUB_ACTIONS
+  BUILDS
+  AGENTS_JOBS
+  PLANS_SESSIONS
+  COMMANDS_RUNS
+  SKILLS
+  DEVICES_PROFILES
+}
+
+enum GlobalSearchKind {
+  WORKTREE
+  JIRA_TICKET
+  GITHUB_PULL_REQUEST
+  REPOSITORY
+  CODEBASE
+  WORKFLOW
+  WORKFLOW_RUN
+  GITHUB_ACTIONS_RUN
+  BUILD
+  AGENT
+  AGENT_JOB
+  PLAN
+  SESSION
+  COMMAND
+  COMMAND_RUN
+  SKILL
+  SKILL_GROUP
+  DEVICE
+  PROVISIONING_PROFILE
+}
+
+type GlobalSearchItem {
+  key: ID!
+  kind: GlobalSearchKind!
+  group: GlobalSearchGroup!
+  title: String!
+  subtitle: String
+  href: String!
+  status: String
+  updatedAt: String
+  children: [GlobalSearchItem!]!
+}
+
+type GlobalSearchPayload {
+  items: [GlobalSearchItem!]!
+}
+
+extend type Query {
+  globalSearch(
+    query: String!
+    firstPerGroup: Int = 5
+    relatedFirst: Int = 3
+  ): GlobalSearchPayload!
+}

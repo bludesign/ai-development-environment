@@ -4,12 +4,15 @@ import {
   CircleDollarSign,
   ClipboardList,
   Hammer,
+  ListTodo,
   MessagesSquare,
+  Terminal,
   Waypoints,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useOptionalActionCenter } from "@/components/action-center/action-center-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +44,7 @@ type SidebarStatusData = {
     sessions: number;
     builds: number;
     workflows: number;
+    commands: number;
   };
   diskSpace: DiskSpaceOverview;
 };
@@ -80,6 +84,7 @@ export function SidebarStatusFooter() {
   const t = useTranslations("diskSpace");
   const shell = useTranslations("shell");
   const locale = useLocale();
+  const actionCenter = useOptionalActionCenter();
   const [status, setStatus] = useState<SidebarStatusData | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -92,7 +97,7 @@ export function SidebarStatusFooter() {
       }>(`query SidebarStatus {
         sidebarStatus {
           usageToday { totalCost collectedAt }
-          activity { plans sessions builds workflows }
+          activity { plans sessions builds workflows commands }
           diskSpace { ${DISK_SPACE_FIELDS} }
         }
         derivedDataDeletionHistory(first: 5) {
@@ -154,11 +159,45 @@ export function SidebarStatusFooter() {
     }
   };
 
+  // Action Center items come from the provider that already streams them into
+  // the shell; the rest are running-work counts from the sidebar status query.
   const activity = [
-    { key: "plans", href: "/plans", icon: ClipboardList },
-    { key: "sessions", href: "/sessions", icon: MessagesSquare },
-    { key: "builds", href: "/builds", icon: Hammer },
-    { key: "workflows", href: "/workflows", icon: Waypoints },
+    {
+      key: "actions",
+      href: "/",
+      icon: ListTodo,
+      count: actionCenter?.totalCount ?? 0,
+    },
+    {
+      key: "workflows",
+      href: "/workflows",
+      icon: Waypoints,
+      count: status?.activity.workflows ?? 0,
+    },
+    {
+      key: "plans",
+      href: "/plans",
+      icon: ClipboardList,
+      count: status?.activity.plans ?? 0,
+    },
+    {
+      key: "sessions",
+      href: "/sessions",
+      icon: MessagesSquare,
+      count: status?.activity.sessions ?? 0,
+    },
+    {
+      key: "builds",
+      href: "/builds",
+      icon: Hammer,
+      count: status?.activity.builds ?? 0,
+    },
+    {
+      key: "commands",
+      href: "/commands",
+      icon: Terminal,
+      count: status?.activity.commands ?? 0,
+    },
   ] as const;
 
   return (
@@ -181,7 +220,7 @@ export function SidebarStatusFooter() {
         </span>
       </Link>
       <div className="grid grid-cols-2 gap-1">
-        {activity.map(({ key, href, icon: Icon }) => (
+        {activity.map(({ key, href, icon: Icon, count }) => (
           <Link
             className="flex items-center justify-between rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent"
             href={href}
@@ -191,7 +230,7 @@ export function SidebarStatusFooter() {
               <Icon className="size-3.5" />
               {shell(key)}
             </span>
-            <span className="tabular-nums">{status?.activity[key] ?? 0}</span>
+            <span className="tabular-nums">{count}</span>
           </Link>
         ))}
       </div>

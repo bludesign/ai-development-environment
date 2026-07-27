@@ -202,43 +202,53 @@ export class SystemStatusService {
   async status() {
     const prisma = await getPrismaClient();
     const period = localDay();
-    const [storedUsage, plans, sessions, builds, workflows, diskSpace] =
-      await Promise.all([
-        prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
-        prisma.agentRun.count({
-          where: {
-            kind: "PLAN",
-            archivedAt: null,
-            status: "IN_PROGRESS",
-            attempts: {
-              some: {
-                status: { in: ["STARTING", "RUNNING"] },
-                supersededAt: null,
-              },
+    const [
+      storedUsage,
+      plans,
+      sessions,
+      builds,
+      workflows,
+      commands,
+      diskSpace,
+    ] = await Promise.all([
+      prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
+      prisma.agentRun.count({
+        where: {
+          kind: "PLAN",
+          archivedAt: null,
+          status: "IN_PROGRESS",
+          attempts: {
+            some: {
+              status: { in: ["STARTING", "RUNNING"] },
+              supersededAt: null,
             },
           },
-        }),
-        prisma.agentRun.count({
-          where: {
-            kind: "SESSION",
-            archivedAt: null,
-            status: "IN_PROGRESS",
-            attempts: {
-              some: {
-                status: { in: ["STARTING", "RUNNING"] },
-                supersededAt: null,
-              },
+        },
+      }),
+      prisma.agentRun.count({
+        where: {
+          kind: "SESSION",
+          archivedAt: null,
+          status: "IN_PROGRESS",
+          attempts: {
+            some: {
+              status: { in: ["STARTING", "RUNNING"] },
+              supersededAt: null,
             },
           },
-        }),
-        prisma.build.count({
-          where: { status: { in: ["PREPARING", "RUNNING"] } },
-        }),
-        prisma.workflowRun.count({
-          where: { archivedAt: null, status: "RUNNING" },
-        }),
-        this.diskSpace.overview(),
-      ]);
+        },
+      }),
+      prisma.build.count({
+        where: { status: { in: ["PREPARING", "RUNNING"] } },
+      }),
+      prisma.workflowRun.count({
+        where: { archivedAt: null, status: "RUNNING" },
+      }),
+      prisma.commandRun.count({
+        where: { archivedAt: null, status: "RUNNING" },
+      }),
+      this.diskSpace.overview(),
+    ]);
     let usageToday =
       storedUsage?.period === period
         ? {
@@ -263,7 +273,7 @@ export class SystemStatusService {
         totalCost: usageToday?.totalCost ?? null,
         collectedAt: usageToday?.collectedAt.toISOString() ?? null,
       },
-      activity: { plans, sessions, builds, workflows },
+      activity: { plans, sessions, builds, workflows, commands },
       diskSpace,
     };
   }

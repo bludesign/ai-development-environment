@@ -1,47 +1,14 @@
 "use client";
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import {
-  Blocks,
-  BellRing,
-  Bell,
-  ChartNoAxesCombined,
-  Combine,
-  ClipboardList,
-  CircleDollarSign,
-  Cpu,
-  Database,
-  DatabaseZap,
-  GitPullRequest,
-  GitBranch,
-  HardDrive,
-  Hammer,
-  FolderGit2,
-  FilePenLine,
-  House,
-  KeyRound,
-  ListTodo,
-  MessageSquareText,
-  MessagesSquare,
-  MousePointerClick,
-  PanelLeft,
-  PanelRight,
-  PlayCircle,
-  Settings,
-  Smartphone,
-  ShieldCheck,
-  Sparkles,
-  TicketCheck,
-  Terminal,
-  TimerReset,
-  Waypoints,
-  Webhook,
-  Wrench,
-  X,
-} from "lucide-react";
+import { Blocks, PanelLeft, PanelRight, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { Button } from "@/components/ui/button";
+import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
+import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
+import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
+import { GlobalSearch } from "@/components/global-search";
+import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
 import {
   Breadcrumb,
   BreadcrumbEllipsis,
@@ -51,18 +18,15 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { NotificationsSidebar } from "@/components/notifications/notifications-sidebar";
-import { ActionCenterProvider } from "@/components/action-center/action-center-provider";
-import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
-import { SidebarStatusFooter } from "@/components/disk-space/sidebar-status";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarFooter,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -70,6 +34,13 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Link, usePathname } from "@/i18n/navigation";
+import {
+  APP_DESTINATIONS,
+  NAVIGATION_SECTIONS,
+  destinationActive,
+  destinationVisible,
+  type NavigationFeatures,
+} from "@/lib/app-destinations";
 import { buildAppBreadcrumbs, type AppBreadcrumb } from "@/lib/breadcrumbs";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { LEFT_SIDEBAR_COOKIE, RIGHT_SIDEBAR_COOKIE } from "@/lib/sidebar-state";
@@ -87,6 +58,43 @@ type SidebarControls = {
   toggleSidebar: () => void;
 };
 
+function useNavigationFeatures(): NavigationFeatures {
+  const pathname = usePathname();
+  const [features, setFeatures] = useState<NavigationFeatures>({
+    actionsCache: false,
+    webhooks: false,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    void controlPlaneRequest<{
+      cacheServerSettings: { configured: boolean };
+      githubWebhooksEnabled: boolean;
+    }>(`query NavigationFeatures {
+      cacheServerSettings { configured }
+      githubWebhooksEnabled
+    }`)
+      .then((data) => {
+        if (!cancelled) {
+          setFeatures({
+            actionsCache: data.cacheServerSettings.configured,
+            webhooks: data.githubWebhooksEnabled,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFeatures({ actionsCache: false, webhooks: false });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  return features;
+}
+
 export function AppShell({
   children,
   leftDefaultOpen,
@@ -95,47 +103,72 @@ export function AppShell({
   return (
     <GitHubPipelineStatusProvider>
       <ActionCenterProvider>
-        <SidebarProvider
-          cookieName={LEFT_SIDEBAR_COOKIE}
-          defaultOpen={leftDefaultOpen}
-          className="h-dvh min-h-0 overflow-hidden"
+        <AppShellFrame
+          leftDefaultOpen={leftDefaultOpen}
+          rightDefaultOpen={rightDefaultOpen}
         >
-          <NavigationSidebar />
-          <RightSidebarLayout rightDefaultOpen={rightDefaultOpen}>
-            {children}
-          </RightSidebarLayout>
-        </SidebarProvider>
+          {children}
+        </AppShellFrame>
       </ActionCenterProvider>
     </GitHubPipelineStatusProvider>
   );
 }
 
+function AppShellFrame({
+  children,
+  leftDefaultOpen,
+  rightDefaultOpen,
+}: AppShellProps) {
+  const features = useNavigationFeatures();
+  return (
+    <SidebarProvider
+      className="h-dvh min-h-0 overflow-hidden"
+      cookieName={LEFT_SIDEBAR_COOKIE}
+      defaultOpen={leftDefaultOpen}
+    >
+      <NavigationSidebar features={features} />
+      <RightSidebarLayout
+        features={features}
+        rightDefaultOpen={rightDefaultOpen}
+      >
+        {children}
+      </RightSidebarLayout>
+    </SidebarProvider>
+  );
+}
+
 function RightSidebarLayout({
   children,
+  features,
   rightDefaultOpen,
 }: {
   children: ReactNode;
+  features: NavigationFeatures;
   rightDefaultOpen: boolean;
 }) {
   const leftSidebar = useSidebar();
 
   return (
     <SidebarProvider
+      className="h-full min-h-0 min-w-0 flex-1 overflow-hidden"
       cookieName={RIGHT_SIDEBAR_COOKIE}
       defaultOpen={rightDefaultOpen}
       keyboardShortcut={null}
-      className="h-full min-h-0 min-w-0 flex-1 overflow-hidden"
     >
-      <ShellContent leftSidebar={leftSidebar}>{children}</ShellContent>
+      <ShellContent features={features} leftSidebar={leftSidebar}>
+        {children}
+      </ShellContent>
     </SidebarProvider>
   );
 }
 
 function ShellContent({
   children,
+  features,
   leftSidebar,
 }: {
   children: ReactNode;
+  features: NavigationFeatures;
   leftSidebar: SidebarControls;
 }) {
   const rightSidebar = useSidebar();
@@ -146,7 +179,11 @@ function ShellContent({
         className="relative flex h-full min-h-0 min-w-0 w-full flex-1 flex-col bg-background"
         data-slot="sidebar-inset"
       >
-        <AppHeader leftSidebar={leftSidebar} rightSidebar={rightSidebar} />
+        <AppHeader
+          features={features}
+          leftSidebar={leftSidebar}
+          rightSidebar={rightSidebar}
+        />
         <main className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
           <div
             className="w-full p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] [&>*]:!mx-0 [&>*]:!w-full [&>*]:!max-w-none"
@@ -162,9 +199,11 @@ function ShellContent({
 }
 
 function AppHeader({
+  features,
   leftSidebar,
   rightSidebar,
 }: {
+  features: NavigationFeatures;
   leftSidebar: SidebarControls;
   rightSidebar: SidebarControls;
 }) {
@@ -179,7 +218,9 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 shrink-0 border-b bg-background/90 backdrop-blur-xl backdrop-saturate-150 supports-backdrop-filter:bg-background/70">
       <div aria-hidden="true" className="h-[env(safe-area-inset-top)]" />
-      <div className="flex h-14 items-center gap-2 pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
+      {/* @container so the search trigger sizes off the header's own width,
+          which shrinks as the sidebars open, rather than off the viewport. */}
+      <div className="@container flex h-14 items-center gap-2 pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
         <SidebarToggle
           expanded={leftOpen}
           hideLabel={t("hideNavigation")}
@@ -188,6 +229,7 @@ function AppHeader({
           side="left"
         />
         <AppBreadcrumbs />
+        <GlobalSearch features={features} />
         <SidebarToggle
           expanded={rightOpen}
           hideLabel={t("hideNotifications")}
@@ -334,38 +376,10 @@ function MobileSidebarClose({ label }: { label: string }) {
   );
 }
 
-function NavigationSidebar() {
+function NavigationSidebar({ features }: { features: NavigationFeatures }) {
   const t = useTranslations("shell");
   const { isMobile, setOpenMobile } = useSidebar();
   const pathname = usePathname();
-  const [cacheServerConfigured, setCacheServerConfigured] = useState(false);
-  const [webhooksEnabled, setWebhooksEnabled] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void controlPlaneRequest<{
-      cacheServerSettings: { configured: boolean };
-      githubWebhooksEnabled: boolean;
-    }>(`query NavigationFeatures {
-      cacheServerSettings { configured }
-      githubWebhooksEnabled
-    }`)
-      .then((data) => {
-        if (!cancelled) {
-          setCacheServerConfigured(data.cacheServerSettings.configured);
-          setWebhooksEnabled(data.githubWebhooksEnabled);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCacheServerConfigured(false);
-          setWebhooksEnabled(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname]);
 
   return (
     <Sidebar
@@ -386,603 +400,45 @@ function NavigationSidebar() {
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("dashboard")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === "/"}>
-                  <Link
-                    href="/"
-                    onClick={() => {
-                      if (isMobile) {
-                        setOpenMobile(false);
-                      }
-                    }}
-                  >
-                    <House />
-                    <span>{t("welcome")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/action-center")}
-                >
-                  <Link
-                    href="/action-center"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ListTodo />
-                    <span>{t("actionCenter")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/notifications")}
-                >
-                  <Link
-                    href="/notifications"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Bell />
-                    <span>{t("notifications")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={
-                    pathname.startsWith("/agents") ||
-                    pathname.startsWith("/jobs")
-                  }
-                >
-                  <Link
-                    href="/agents"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Cpu />
-                    <span>{t("agents")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/workflows")}
-                >
-                  <Link
-                    href="/workflows"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Waypoints />
-                    <span>{t("workflows")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/commands")}
-                >
-                  <Link
-                    href="/commands"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Terminal />
-                    <span>{t("commands")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/codebases")}
-                >
-                  <Link
-                    href="/codebases"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <FolderGit2 />
-                    <span>{t("codebases")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/worktrees")}
-                >
-                  <Link
-                    href="/worktrees"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <GitBranch />
-                    <span>{t("worktrees")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/builds")}
-                >
-                  <Link
-                    href="/builds"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Hammer />
-                    <span>{t("builds")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("ai")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/plans")}
-                >
-                  <Link
-                    href="/plans"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ClipboardList />
-                    <span>{t("plans")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/sessions")}
-                >
-                  <Link
-                    href="/sessions"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <MessagesSquare />
-                    <span>{t("sessions")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={
-                    pathname.startsWith("/drafts") ||
-                    pathname.startsWith("/runs/new")
-                  }
-                >
-                  <Link
-                    href="/drafts"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <FilePenLine />
-                    <span>{t("drafts")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/usage")}
-                >
-                  <Link
-                    href="/usage"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ChartNoAxesCombined />
-                    <span>{t("usage")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/costs")}
-                >
-                  <Link
-                    href="/costs"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <CircleDollarSign />
-                    <span>{t("costs")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/skills")}
-                >
-                  <Link
-                    href="/skills"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Sparkles />
-                    <span>{t("skills")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("debugging")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/push-notifications")}
-                >
-                  <Link
-                    href="/push-notifications"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <BellRing />
-                    <span>{t("pushNotifications")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/console-logs")}
-                >
-                  <Link
-                    href="/console-logs"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Terminal />
-                    <span>{t("consoleLogs")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/analytics-events")}
-                >
-                  <Link
-                    href="/analytics-events"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <MousePointerClick />
-                    <span>{t("analyticsEvents")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/unified-events")}
-                >
-                  <Link
-                    href="/unified-events"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Combine />
-                    <span>{t("unifiedEvents")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("github")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/pull-requests")}
-                >
-                  <Link
-                    href="/pull-requests"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <GitPullRequest />
-                    <span>{t("pullRequests")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={
-                    pathname === "/actions" || pathname.startsWith("/actions/")
-                  }
-                >
-                  <Link
-                    href="/actions"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <PlayCircle />
-                    <span>{t("actions")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {webhooksEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname.startsWith("/webhooks")}
-                  >
-                    <Link
-                      href="/webhooks"
-                      onClick={() => {
-                        if (isMobile) setOpenMobile(false);
-                      }}
-                    >
-                      <Webhook />
-                      <span>{t("webhooks")}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/comments")}
-                >
-                  <Link
-                    href="/comments"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <MessageSquareText />
-                    <span>{t("comments")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/github-cache")}
-                >
-                  <Link
-                    href="/github-cache"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Database />
-                    <span>{t("cache")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {cacheServerConfigured && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname.startsWith("/actions-cache")}
-                  >
-                    <Link
-                      href="/actions-cache"
-                      onClick={() => {
-                        if (isMobile) setOpenMobile(false);
-                      }}
-                    >
-                      <DatabaseZap />
-                      <span>{t("actionsCache")}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("jira")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/jira/tickets")}
-                >
-                  <Link
-                    href="/jira/tickets"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <TicketCheck />
-                    <span>{t("tickets")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/jira-cache")}
-                >
-                  <Link
-                    href="/jira-cache"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Database />
-                    <span>{t("cache")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("system")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/polling")}
-                >
-                  <Link
-                    href="/polling"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <TimerReset />
-                    <span>{t("polling")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/build-data")}
-                >
-                  <Link
-                    href="/build-data"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <HardDrive />
-                    <span>{t("buildData")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/provisioning-profiles")}
-                >
-                  <Link
-                    href="/provisioning-profiles"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <ShieldCheck />
-                    <span>{t("provisioningProfiles")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/devices")}
-                >
-                  <Link
-                    href="/devices"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Smartphone />
-                    <span>{t("devices")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/tools")}
-                >
-                  <Link
-                    href="/tools"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Wrench />
-                    <span>{t("tools")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/credentials")}
-                >
-                  <Link
-                    href="/credentials"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <KeyRound />
-                    <span>{t("credentials")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/settings")}
-                >
-                  <Link
-                    href="/settings"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(false);
-                    }}
-                  >
-                    <Settings />
-                    <span>{t("settings")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {NAVIGATION_SECTIONS.map((section) => {
+          const destinations = APP_DESTINATIONS.filter(
+            (destination) =>
+              destination.sidebar &&
+              destination.section === section &&
+              destinationVisible(destination, features),
+          );
+          if (!destinations.length) return null;
+          return (
+            <SidebarGroup key={section}>
+              <SidebarGroupLabel>{t(section)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {destinations.map((destination) => {
+                    const Icon = destination.icon;
+                    return (
+                      <SidebarMenuItem key={destination.key}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={destinationActive(destination, pathname)}
+                        >
+                          <Link
+                            href={destination.href}
+                            onClick={() => {
+                              if (isMobile) setOpenMobile(false);
+                            }}
+                          >
+                            <Icon />
+                            <span>{t(destination.labelKey)}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          );
+        })}
       </SidebarContent>
       <SidebarFooter className="p-0">
         <SidebarStatusFooter />

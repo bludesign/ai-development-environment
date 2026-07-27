@@ -66,7 +66,7 @@ export function ActionCenterPage() {
         <Badge className="border-amber-500/40" variant="outline">
           {t("attentionCount", { count: needsAttentionCount })}
         </Badge>
-        <Badge variant="secondary">
+        <Badge variant="success">
           {t("activeCount", { count: activeCount })}
         </Badge>
       </div>
@@ -123,7 +123,7 @@ export function ActionCenterPage() {
               <h2 className="text-lg font-semibold" id="active-heading">
                 {t("active")}
               </h2>
-              <Badge variant="secondary">{activeCount}</Badge>
+              <Badge variant="success">{activeCount}</Badge>
             </div>
             {active.length ? (
               <div
