@@ -25,8 +25,22 @@ const requestMock = vi.mocked(controlPlaneRequest);
 const subscriptionsMock = vi.mocked(controlPlaneSubscriptions);
 const subscribe = vi.fn(() => vi.fn());
 
+// Recharts' ResponsiveContainer measures itself with getBoundingClientRect, which is
+// always 0x0 in jsdom, and then warns that the chart has no size. Reporting a fixed box
+// from the observer on observe() gives the chart real dimensions instead.
 class ResizeObserverMock {
-  observe() {}
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    this.callback(
+      [
+        {
+          target,
+          contentRect: { width: 800, height: 400 },
+        } as ResizeObserverEntry,
+      ],
+      this as unknown as ResizeObserver,
+    );
+  }
   unobserve() {}
   disconnect() {}
 }
