@@ -15,7 +15,7 @@ const HEARTBEAT_INTERVAL_SECONDS = 86_400;
  * clock never catches up. The monitor renders `lastReportedAt` as a plain time of day rather
  * than a relative age, so the lead is not visible in the captures.
  */
-const REPORT_LEAD_MS = 60 * 60_000;
+const REPORT_LEAD_MS = 300 * 60_000;
 const reportedAt = (secondsApart: number): Date =>
   fromNow(REPORT_LEAD_MS - secondsApart * 1_000);
 
