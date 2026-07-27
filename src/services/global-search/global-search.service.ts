@@ -121,7 +121,7 @@ function ranked(
     : { ...item, children: item.children ?? [], score };
 }
 
-function sortAndLimit(items: Array<RankedItem | null>, limit: number) {
+function sortRanked(items: Array<RankedItem | null>): RankedItem[] {
   return items
     .filter((item): item is RankedItem => item !== null)
     .sort((left, right) => {
@@ -130,6 +130,25 @@ function sortAndLimit(items: Array<RankedItem | null>, limit: number) {
         left.updatedAt ?? "",
       );
       return recency || left.title.localeCompare(right.title);
+    });
+}
+
+function sortAndLimit(items: Array<RankedItem | null>, limit: number) {
+  return sortRanked(items).slice(0, limit);
+}
+
+function sortAndLimitUnique(
+  items: Array<RankedItem | null>,
+  limit: number,
+  identity: (item: RankedItem) => string,
+) {
+  const seen = new Set<string>();
+  return sortRanked(items)
+    .filter((item) => {
+      const key = identity(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     })
     .slice(0, limit);
 }
@@ -522,8 +541,20 @@ export class GlobalSearchService {
       }),
     ]);
 
+    const pipelineRepositoryOrigins = [
+      ...new Set(
+        pipelineRecords.map((record) =>
+          githubCanonicalOrigin(record.snapshot.repositoryNameWithOwner),
+        ),
+      ),
+    ];
+    const pipelineRepositories = pipelineRepositoryOrigins.length
+      ? await prisma.codebaseRepository.findMany({
+          where: { canonicalOrigin: { in: pipelineRepositoryOrigins } },
+        })
+      : [];
     const repositoryByOrigin = new Map(
-      repositories.map((repository) => [
+      [...repositories, ...pipelineRepositories].map((repository) => [
         repository.canonicalOrigin.toLocaleLowerCase(),
         repository,
       ]),
@@ -623,7 +654,7 @@ export class GlobalSearchService {
       firstPerGroup,
     );
 
-    const pullRequestItems = sortAndLimit(
+    const pullRequestItems = sortAndLimitUnique(
       pullRequests.map((pullRequest) => {
         const [owner, ...repositoryParts] =
           pullRequest.repositoryNameWithOwner.split("/");
@@ -655,6 +686,7 @@ export class GlobalSearchService {
         );
       }),
       firstPerGroup,
+      (item) => item.key.toLocaleLowerCase(),
     );
 
     const repositoryItems = sortAndLimit(
@@ -1071,40 +1103,48 @@ export class GlobalSearchService {
     if (!items.length) return;
     const prisma = await getPrismaClient();
     const ids = items.map((item) => item.key.slice("worktree:".length));
-    const [links, builds] = await Promise.all([
-      prisma.workflowRunResourceLink.findMany({
-        where: { kind: "WORKTREE", resourceId: { in: ids } },
-        include: { run: { include: { workflow: true } } },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.build.findMany({
-        where: { worktreeId: { in: ids } },
-        include: { configuration: true },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+    const relatedByWorktree = new Map(
+      await Promise.all(
+        ids.map(async (id) => {
+          const [runs, builds] = await Promise.all([
+            prisma.workflowRun.findMany({
+              where: {
+                resourceLinks: {
+                  some: { kind: "WORKTREE", resourceId: id },
+                },
+              },
+              include: { workflow: true },
+              orderBy: { createdAt: "desc" },
+              take: relatedFirst,
+            }),
+            prisma.build.findMany({
+              where: { worktreeId: id },
+              include: { configuration: true },
+              orderBy: { createdAt: "desc" },
+              take: relatedFirst,
+            }),
+          ]);
+          return [id, { runs, builds }] as const;
+        }),
+      ),
+    );
     for (const item of items) {
       const id = item.key.slice("worktree:".length);
-      const seenRuns = new Set<string>();
-      const runChildren = [];
-      for (const link of links) {
-        if (link.resourceId !== id || seenRuns.has(link.runId)) continue;
-        seenRuns.add(link.runId);
-        runChildren.push({
-          key: `workflow-run:${link.run.id}`,
+      const related = relatedByWorktree.get(id);
+      const runChildren = (related?.runs ?? [])
+        .slice(0, relatedFirst)
+        .map((run) => ({
+          key: `workflow-run:${run.id}`,
           kind: "WORKFLOW_RUN" as const,
           group: "WORKFLOWS" as const,
-          title: `${link.run.workflow.name} #${link.run.displayNumber}`,
+          title: `${run.workflow.name} #${run.displayNumber}`,
           subtitle: null,
-          href: `/workflows/runs/${segment(link.run.id)}`,
-          status: link.run.status,
-          updatedAt: iso(link.run.updatedAt),
+          href: `/workflows/runs/${segment(run.id)}`,
+          status: run.status,
+          updatedAt: iso(run.updatedAt),
           children: [],
-        });
-        if (runChildren.length === relatedFirst) break;
-      }
-      const buildChildren = builds
-        .filter((build) => build.worktreeId === id)
+        }));
+      const buildChildren = (related?.builds ?? [])
         .slice(0, relatedFirst)
         .map((build) => ({
           key: `build:${build.id}`,
@@ -1128,15 +1168,25 @@ export class GlobalSearchService {
     if (!items.length) return;
     const prisma = await getPrismaClient();
     const ids = items.map((item) => item.key.slice("workflow:".length));
-    const runs = await prisma.workflowRun.findMany({
-      where: { workflowId: { in: ids } },
-      include: { workflow: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const runsByWorkflow = new Map(
+      await Promise.all(
+        ids.map(
+          async (id) =>
+            [
+              id,
+              await prisma.workflowRun.findMany({
+                where: { workflowId: id },
+                include: { workflow: true },
+                orderBy: { createdAt: "desc" },
+                take: relatedFirst,
+              }),
+            ] as const,
+        ),
+      ),
+    );
     for (const item of items) {
       const id = item.key.slice("workflow:".length);
-      item.children = runs
-        .filter((run) => run.workflowId === id)
+      item.children = (runsByWorkflow.get(id) ?? [])
         .slice(0, relatedFirst)
         .map((run) => ({
           key: `workflow-run:${run.id}`,

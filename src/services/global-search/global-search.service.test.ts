@@ -9,7 +9,6 @@ const prisma = vi.hoisted(() => ({
   build: { findMany: vi.fn() },
   workflow: { findMany: vi.fn() },
   workflowRun: { findMany: vi.fn() },
-  workflowRunResourceLink: { findMany: vi.fn() },
   jiraCachedTicket: { findMany: vi.fn() },
   worktreePullRequest: { findMany: vi.fn() },
   gitHubPipelineRecord: { findMany: vi.fn() },
@@ -164,19 +163,17 @@ describe("GlobalSearchService", () => {
         pullRequest: null,
       },
     ]);
-    prisma.workflowRunResourceLink.findMany.mockResolvedValue([
-      {
-        resourceId: "worktree/one",
-        runId: "workflow/run",
-        run: {
+    prisma.workflowRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
           id: "workflow/run",
           displayNumber: 19,
           status: "SUCCEEDED",
           updatedAt: new Date("2026-06-02T00:00:00.000Z"),
           workflow: { name: "Release" },
         },
-      },
-    ]);
+      ]);
     prisma.build.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
       {
         id: "build/one",
@@ -211,9 +208,25 @@ describe("GlobalSearchService", () => {
     expect(
       result.items.filter((item) => item.kind === "WORKFLOW_RUN"),
     ).toHaveLength(0);
+    expect(prisma.workflowRun.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        resourceLinks: {
+          some: { kind: "WORKTREE", resourceId: "worktree/one" },
+        },
+      },
+      include: { workflow: true },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+    });
+    expect(prisma.build.findMany).toHaveBeenNthCalledWith(2, {
+      where: { worktreeId: "worktree/one" },
+      include: { configuration: true },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+    });
   });
 
-  test("nests one child per run when a worktree is linked by several attempts", async () => {
+  test("queries linked runs directly so attempt links cannot duplicate children", async () => {
     prisma.worktree.findMany.mockResolvedValue([
       {
         id: "worktree/one",
@@ -236,10 +249,9 @@ describe("GlobalSearchService", () => {
       updatedAt: new Date("2026-06-02T00:00:00.000Z"),
       workflow: { name: "Release" },
     };
-    prisma.workflowRunResourceLink.findMany.mockResolvedValue([
-      { resourceId: "worktree/one", runId: run.id, run },
-      { resourceId: "worktree/one", runId: run.id, run },
-    ]);
+    prisma.workflowRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([run]);
     prisma.build.findMany.mockResolvedValue([]);
 
     const result = await new GlobalSearchService().search("AIDE-42", 5, 3);
@@ -247,6 +259,45 @@ describe("GlobalSearchService", () => {
     expect(result.items[0]?.children).toEqual([
       expect.objectContaining({ key: "workflow-run:workflow/run" }),
     ]);
+  });
+
+  test("bounds related runs for each matched workflow", async () => {
+    const updatedAt = new Date("2026-06-01T00:00:00.000Z");
+    prisma.workflow.findMany.mockResolvedValue([
+      {
+        id: "workflow/one",
+        name: "Needle Workflow",
+        description: "",
+        enabled: true,
+        archivedAt: null,
+        updatedAt,
+      },
+    ]);
+    prisma.workflowRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "workflow-run/one",
+          workflowId: "workflow/one",
+          displayNumber: 7,
+          status: "SUCCEEDED",
+          triggerSubjectKey: "needle",
+          updatedAt,
+          workflow: { name: "Needle Workflow" },
+        },
+      ]);
+
+    const result = await new GlobalSearchService().search("needle", 5, 2);
+
+    expect(result.items[0]?.children).toEqual([
+      expect.objectContaining({ key: "workflow-run:workflow-run/one" }),
+    ]);
+    expect(prisma.workflowRun.findMany).toHaveBeenNthCalledWith(2, {
+      where: { workflowId: "workflow/one" },
+      include: { workflow: true },
+      orderBy: { createdAt: "desc" },
+      take: 2,
+    });
   });
 
   test("builds encoded detail routes for every remaining primary resource kind", async () => {
@@ -509,5 +560,83 @@ describe("GlobalSearchService", () => {
         where: expect.objectContaining({ missingAt: null }),
       }),
     );
+  });
+
+  test("resolves the repository for an Actions run matched outside repository fields", async () => {
+    const updatedAt = new Date("2026-06-01T00:00:00.000Z");
+    prisma.codebaseRepository.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "repository/one",
+          name: "AIDE",
+          description: "",
+          canonicalOrigin: "github.com/acme/aide",
+          displayOrigin: "github.com/acme/aide",
+          updatedAt,
+        },
+      ]);
+    prisma.gitHubPipelineRecord.findMany.mockResolvedValue([
+      {
+        id: "pipeline/one",
+        githubPipelineId: "pipeline-one",
+        workflowRunId: "remote-run/one",
+        workflowId: "remote-workflow/one",
+        runNumber: 8,
+        name: "Release App",
+        status: "COMPLETED",
+        updatedAt,
+        snapshot: { repositoryNameWithOwner: "acme/aide" },
+      },
+    ]);
+
+    const result = await new GlobalSearchService().search("Release", 5, 0);
+
+    expect(prisma.codebaseRepository.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        canonicalOrigin: { in: ["github.com/acme/aide"] },
+      },
+    });
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        key: "github-actions:pipeline/one",
+        href: "/actions?repository=repository%2Fone&pipeline=remote-workflow%2Fone",
+      }),
+    ]);
+  });
+
+  test("deduplicates pull requests before applying the group limit", async () => {
+    const pullRequest = {
+      githubId: "github-pr-42",
+      number: 42,
+      title: "Needle search",
+      repositoryNameWithOwner: "acme/aide",
+      headRefName: "feature/needle",
+      jiraKey: null,
+      state: "OPEN",
+      updatedAt: new Date("2026-06-03T00:00:00.000Z"),
+      worktree: null,
+    };
+    prisma.worktreePullRequest.findMany.mockResolvedValue([
+      pullRequest,
+      {
+        ...pullRequest,
+        githubId: "stale-observation-id",
+        updatedAt: new Date("2026-06-02T00:00:00.000Z"),
+      },
+      {
+        ...pullRequest,
+        githubId: "github-pr-43",
+        number: 43,
+        updatedAt: new Date("2026-06-01T00:00:00.000Z"),
+      },
+    ]);
+
+    const result = await new GlobalSearchService().search("Needle", 2, 0);
+
+    expect(result.items.map((item) => item.key)).toEqual([
+      "pull-request:acme/aide:42",
+      "pull-request:acme/aide:43",
+    ]);
   });
 });
