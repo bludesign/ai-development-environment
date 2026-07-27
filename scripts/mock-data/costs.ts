@@ -136,6 +136,24 @@ const AGENT_USAGE: AgentUsage[] = [
       [{ modelName: "claude-sonnet-4.5", tokens: [6_000, 830, 1_400, 26_300] }],
     ],
   },
+  {
+    agentId: ids.agents.ci,
+    agentName: "CI Runner",
+    hostname: "ci-runner.local",
+    sources: ["claude"],
+    days: [
+      [{ modelName: "claude-sonnet-4.5", tokens: [3_100, 420, 700, 13_400] }],
+      null,
+      [{ modelName: "claude-sonnet-4.5", tokens: [2_700, 360, 620, 11_800] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [4_400, 590, 980, 19_200] }],
+      null,
+      [{ modelName: "claude-sonnet-4.5", tokens: [3_600, 480, 810, 15_600] }],
+      null,
+      [{ modelName: "claude-sonnet-4.5", tokens: [2_900, 390, 660, 12_500] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [3_300, 450, 740, 14_300] }],
+      null,
+    ],
+  },
 ];
 
 const K = 1_000;
@@ -216,24 +234,24 @@ function reportFor(usage: AgentUsage) {
 export async function seedCosts(prisma: PrismaClient): Promise<void> {
   await prisma.sidebarUsageSummary.createMany({
     data: [
-      // Kept in step with the ccusage days above: today's report totals about $236 and the
-      // trailing week about $1,753, so these read as the same spend seen from the sidebar.
+      // Kept in step with the ccusage days above: today's report totals about $258 and the
+      // trailing week about $1,851, so these read as the same spend seen from the sidebar.
       {
         id: "sidebar-usage-day",
         period: "DAY",
-        totalCost: 236.42,
+        totalCost: 258.74,
         collectedAt: hoursAgo(1),
       },
       {
         id: "sidebar-usage-week",
         period: "WEEK",
-        totalCost: 1758.9,
+        totalCost: 1854.6,
         collectedAt: hoursAgo(1),
       },
       {
         id: "sidebar-usage-month",
         period: "MONTH",
-        totalCost: 7412.35,
+        totalCost: 7826.05,
         collectedAt: hoursAgo(1),
       },
     ],
@@ -260,8 +278,7 @@ export async function seedCosts(prisma: PrismaClient): Promise<void> {
           // carry the reports that turn each member SUCCEEDED.
           { agentId: ids.agents.studio, initialStatus: "QUEUING" },
           { agentId: ids.agents.build, initialStatus: "QUEUING" },
-          // Offline agents are excluded from the eligible count rather than awaited.
-          { agentId: ids.agents.ci, initialStatus: "OFFLINE" },
+          { agentId: ids.agents.ci, initialStatus: "QUEUING" },
         ],
       },
     },

@@ -1,7 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { ids } from "./ids";
-import { daysAgo, hoursAgo, minutesAgo } from "./time";
+import { daysAgo, hoursAgo, minutesAgo, secondsAgo } from "./time";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -168,8 +168,10 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       derivedDataLocationMode: "DEFAULT",
       heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
       ipAddress: "192.168.1.44",
-      lastSeenAt: daysAgo(3),
-      disconnectedAt: daysAgo(3),
+      // Every seeded agent is connected: pages gated on an ONLINE agent (usage collection,
+      // command targets, capability invocation) show their populated state in the captures
+      // instead of an offline fallback.
+      lastSeenAt: minutesAgo(3),
       createdAt: daysAgo(20),
     },
   });
@@ -182,7 +184,7 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       volumesJson: JSON.stringify(studioDisk.volumes),
       entriesJson: JSON.stringify(studioDisk.entries),
       warningsJson: JSON.stringify(studioDisk.warnings),
-      lastReportedAt: minutesAgo(1),
+      lastReportedAt: secondsAgo(20),
     },
   });
 
@@ -202,7 +204,27 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       warningsJson: JSON.stringify([
         "Derived Data volume is below the pressure threshold.",
       ]),
-      lastReportedAt: minutesAgo(2),
+      // Disk reports go stale after two poll intervals (120s), so every agent reports well
+      // inside that window and the monitor cards read as live rather than STALE.
+      lastReportedAt: secondsAgo(45),
+    },
+  });
+
+  const ciDisk = diskSpaceState("/Users/ci", "disk4s2");
+  await prisma.agentDiskSpaceState.create({
+    data: {
+      agentId: ids.agents.ci,
+      enabled: true,
+      volumesJson: JSON.stringify(
+        ciDisk.volumes.map((volume) => ({
+          ...volume,
+          totalBytes: 1024 * GIB,
+          freeBytes: 61 * GIB,
+        })),
+      ),
+      entriesJson: JSON.stringify(ciDisk.entries),
+      warningsJson: JSON.stringify(ciDisk.warnings),
+      lastReportedAt: secondsAgo(30),
     },
   });
 
