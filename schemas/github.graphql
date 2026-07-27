@@ -1,903 +1,1669 @@
+"Values supported for GitHub pull request."
 enum GitHubPullRequestScope {
+  "Limits the operation to mine."
   MINE
+  "Limits the operation to review requested."
   REVIEW_REQUESTED
+  "Limits the operation to repository."
   REPOSITORY
 }
 
+"States reported for GitHub pull request."
 enum GitHubPullRequestState {
+  "Represents the open state for GitHub pull request."
   OPEN
+  "Represents the closed state for GitHub pull request."
   CLOSED
+  "Represents the merged state for GitHub pull request."
   MERGED
 }
 
+"Values supported for GitHub pull request state."
 enum GitHubPullRequestStateFilter {
+  "Represents the all option."
   ALL
+  "Represents the open option."
   OPEN
+  "Represents the closed option."
   CLOSED
+  "Represents the merged option."
   MERGED
 }
 
+"Lifecycle statuses for GitHub pipeline."
 enum GitHubPipelineStatus {
+  "Represents the error status for GitHub pipeline."
   ERROR
+  "Represents the expected status for GitHub pipeline."
   EXPECTED
+  "Represents the failure status for GitHub pipeline."
   FAILURE
+  "Represents the pending status for GitHub pipeline."
   PENDING
+  "Represents the success status for GitHub pipeline."
   SUCCESS
+  "No GitHub pipeline applies."
   NONE
 }
 
+"States reported for GitHub pipeline."
 enum GitHubPipelineState {
+  "Represents the action required state for GitHub pipeline."
   ACTION_REQUIRED
+  "Represents the cancelled state for GitHub pipeline."
   CANCELLED
+  "Represents the error state for GitHub pipeline."
   ERROR
+  "Represents the expected state for GitHub pipeline."
   EXPECTED
+  "Represents the failure state for GitHub pipeline."
   FAILURE
+  "Represents the in progress state for GitHub pipeline."
   IN_PROGRESS
+  "Represents the neutral state for GitHub pipeline."
   NEUTRAL
+  "Represents the pending state for GitHub pipeline."
   PENDING
+  "Represents the queued state for GitHub pipeline."
   QUEUED
+  "Represents the skipped state for GitHub pipeline."
   SKIPPED
+  "Represents the stale state for GitHub pipeline."
   STALE
+  "Represents the startup failure state for GitHub pipeline."
   STARTUP_FAILURE
+  "Represents the success state for GitHub pipeline."
   SUCCESS
+  "Represents the timed out state for GitHub pipeline."
   TIMED_OUT
+  "No GitHub pipeline applies."
   NONE
 }
 
+"Values supported for GitHub review decision."
 enum GitHubReviewDecision {
+  "Represents the approved option."
   APPROVED
+  "Represents the changes requested option."
   CHANGES_REQUESTED
+  "Represents the review required option."
   REVIEW_REQUIRED
+  "No GitHub review decision applies."
   NONE
 }
 
+"Values supported for GitHub merge."
 enum GitHubMergeMethod {
+  "Uses the merge method."
   MERGE
+  "Uses the rebase method."
   REBASE
+  "Uses the squash method."
   SQUASH
 }
 
+"Reasons reported for GitHub pipeline retry unavailable."
 enum GitHubPipelineRetryUnavailableReason {
+  "Indicates GitHub app not configured as the reason."
   GITHUB_APP_NOT_CONFIGURED
+  "Indicates not completed as the reason."
   NOT_COMPLETED
+  "Indicates not GitHub actions as the reason."
   NOT_GITHUB_ACTIONS
+  "Indicates workflow run unavailable as the reason."
   WORKFLOW_RUN_UNAVAILABLE
+  "Indicates historical attempt as the reason."
   HISTORICAL_ATTEMPT
 }
 
+"Values supported for GitHub authentication."
 enum GitHubAuthentication {
+  "Represents the pat option."
   PAT
+  "Represents the app option."
   APP
 }
 
+"Values supported for GitHub call source."
 enum GitHubCallSource {
+  "Represents the live option."
   LIVE
+  "Represents the cache option."
   CACHE
+  "Represents the error option."
   ERROR
 }
 
+"Values supported for GitHub API."
 enum GitHubApiType {
+  "Represents the GraphQL option."
   GRAPHQL
+  "Represents the rest option."
   REST
 }
 
+"Values supported for GitHub request source."
 enum GitHubRequestSource {
+  "Represents the GitHub API option."
   GITHUB_API
+  "Represents the GitHub settings option."
   GITHUB_SETTINGS
+  "Represents the comments page option."
   COMMENTS_PAGE
+  "Represents the codebase repository option."
   CODEBASE_REPOSITORY
+  "Represents the pull requests page option."
   PULL_REQUESTS_PAGE
+  "Represents the pull request details option."
   PULL_REQUEST_DETAILS
+  "Represents the actions page option."
   ACTIONS_PAGE
+  "Represents the worktrees option."
   WORKTREES
+  "Represents the worktree pipelines option."
   WORKTREE_PIPELINES
+  "Represents the worktree automation option."
   WORKTREE_AUTOMATION
+  "Represents the auto retry option."
   AUTO_RETRY
+  "Represents the workflow automation option."
   WORKFLOW_AUTOMATION
+  "Represents the actions notifications option."
   ACTIONS_NOTIFICATIONS
+  "Represents the cache management option."
   CACHE_MANAGEMENT
 }
 
+"Configurable settings for GitHub."
 type GitHubSettings {
+  "Whether the token configured condition is true for this GitHub settings."
   tokenConfigured: Boolean!
+  "The default Jira key regex associated with this GitHub settings."
   defaultJiraKeyRegex: String!
+  "Actions notification poll interval, in seconds."
   actionsNotificationPollIntervalSeconds: Int!
+  "Cache TTL, in seconds."
   cacheTtlSeconds: Int!
+  "ISO 8601 timestamp when this GitHub settings was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub cache TTL override in the GraphQL API."
 type GitHubCacheTtlOverride {
+  "The operation associated with this GitHub cache TTL override."
   operation: String!
+  "TTL, in seconds."
   ttlSeconds: Int!
+  "Whether the built in condition is true for this GitHub cache TTL override."
   builtIn: Boolean!
+  "ISO 8601 timestamp when this GitHub cache TTL override was created."
   createdAt: String!
+  "ISO 8601 timestamp when this GitHub cache TTL override was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub rate limit snapshot in the GraphQL API."
 type GitHubRateLimitSnapshot {
+  "The authentication associated with this GitHub rate limit snapshot."
   authentication: GitHubAuthentication!
+  "The resource associated with this GitHub rate limit snapshot."
   resource: String!
+  "The limit associated with this GitHub rate limit snapshot."
   limit: Int!
+  "The remaining associated with this GitHub rate limit snapshot."
   remaining: Int!
+  "The used associated with this GitHub rate limit snapshot."
   used: Int!
+  "ISO 8601 timestamp when this GitHub rate limit snapshot reset."
   resetAt: String!
+  "ISO 8601 timestamp when this GitHub rate limit snapshot was observed."
   observedAt: String!
 }
 
+"Represents a GitHub metric window in the GraphQL API."
 type GitHubMetricWindow {
+  "The window associated with this GitHub metric window."
   window: String!
+  "The total associated with this GitHub metric window."
   total: Int!
+  "The live associated with this GitHub metric window."
   live: Int!
+  "The cache associated with this GitHub metric window."
   cache: Int!
+  "The errors associated with this GitHub metric window."
   errors: Int!
+  "The average ms associated with this GitHub metric window."
   averageMs: Int!
+  "The points used associated with this GitHub metric window."
   pointsUsed: Int!
+  "The points avoided associated with this GitHub metric window."
   pointsAvoided: Int!
 }
 
+"Represents a GitHub operation metric in the GraphQL API."
 type GitHubOperationMetric {
+  "The operation associated with this GitHub operation metric."
   operation: String!
+  "Windows associated with this GitHub operation metric."
   windows: [GitHubMetricWindow!]!
 }
 
+"Represents a GitHub API type metric in the GraphQL API."
 type GitHubApiTypeMetric {
+  "The API type associated with this GitHub API type metric."
   apiType: GitHubApiType!
+  "Windows associated with this GitHub API type metric."
   windows: [GitHubMetricWindow!]!
 }
 
+"Represents a GitHub request source metric in the GraphQL API."
 type GitHubRequestSourceMetric {
+  "The request source associated with this GitHub request source metric."
   requestSource: GitHubRequestSource!
+  "Windows associated with this GitHub request source metric."
   windows: [GitHubMetricWindow!]!
 }
 
+"Represents GitHub cache metrics in the GraphQL API."
 type GitHubCacheMetrics {
+  "Windows associated with this GitHub cache metrics."
   windows: [GitHubMetricWindow!]!
+  "API types associated with this GitHub cache metrics."
   apiTypes: [GitHubApiTypeMetric!]!
+  "Operations associated with this GitHub cache metrics."
   operations: [GitHubOperationMetric!]!
+  "Request sources associated with this GitHub cache metrics."
   requestSources: [GitHubRequestSourceMetric!]!
 }
 
+"Represents a GitHub API call in the GraphQL API."
 type GitHubApiCall {
+  "Stable identifier for this GitHub API call."
   id: ID!
+  "The authentication associated with this GitHub API call."
   authentication: GitHubAuthentication!
+  "The API type associated with this GitHub API call."
   apiType: GitHubApiType!
+  "The method associated with this GitHub API call."
   method: String!
+  "The endpoint associated with this GitHub API call."
   endpoint: String!
+  "The operation associated with this GitHub API call."
   operation: String!
+  "The request source associated with this GitHub API call."
   requestSource: GitHubRequestSource!
+  "The request summary associated with this GitHub API call."
   requestSummary: String!
+  "The variables associated with this GitHub API call. May be null when unavailable or not applicable."
   variables: JSON
+  "The source associated with this GitHub API call."
   source: GitHubCallSource!
+  "The duration ms associated with this GitHub API call."
   durationMs: Int!
+  "The status code associated with this GitHub API call. May be null when unavailable or not applicable."
   statusCode: Int
+  "Error message when this GitHub API call did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Whether the served stale condition is true for this GitHub API call."
   servedStale: Boolean!
+  "The point cost associated with this GitHub API call. May be null when unavailable or not applicable."
   pointCost: Int
+  "The points avoided associated with this GitHub API call."
   pointsAvoided: Int!
+  "The rate limit limit associated with this GitHub API call. May be null when unavailable or not applicable."
   rateLimitLimit: Int
+  "The rate limit remaining associated with this GitHub API call. May be null when unavailable or not applicable."
   rateLimitRemaining: Int
+  "The rate limit used associated with this GitHub API call. May be null when unavailable or not applicable."
   rateLimitUsed: Int
+  "ISO 8601 timestamp when this GitHub API call rate limit reset. May be null when unavailable or not applicable."
   rateLimitResetAt: String
+  "The rate limit resource associated with this GitHub API call. May be null when unavailable or not applicable."
   rateLimitResource: String
+  "ISO 8601 timestamp when this GitHub API call was created."
   createdAt: String!
 }
 
+"A paginated collection of GitHub API calls."
 type GitHubApiCallPage {
+  "Items associated with this GitHub API call page."
   items: [GitHubApiCall!]!
+  "The total associated with this GitHub API call page."
   total: Int!
+  "The limit associated with this GitHub API call page."
   limit: Int!
+  "The offset associated with this GitHub API call page."
   offset: Int!
 }
 
+"Represents a GitHub cached entry in the GraphQL API."
 type GitHubCachedEntry {
+  "Stable identifier for this GitHub cached entry."
   id: ID!
+  "The authentication associated with this GitHub cached entry."
   authentication: GitHubAuthentication!
+  "The operation associated with this GitHub cached entry."
   operation: String!
+  "The endpoint associated with this GitHub cached entry."
   endpoint: String!
+  "ISO 8601 timestamp when this GitHub cached entry was fetched."
   fetchedAt: String!
+  "The point cost associated with this GitHub cached entry. May be null when unavailable or not applicable."
   pointCost: Int
+  "Whether this GitHub cached entry is stale."
   stale: Boolean!
 }
 
+"A paginated collection of GitHub cached entries."
 type GitHubCachedEntryPage {
+  "Items associated with this GitHub cached entry page."
   items: [GitHubCachedEntry!]!
+  "The total associated with this GitHub cached entry page."
   total: Int!
+  "The limit associated with this GitHub cached entry page."
   limit: Int!
+  "The offset associated with this GitHub cached entry page."
   offset: Int!
 }
 
+"Detailed information about GitHub cached entry."
 type GitHubCachedEntryDetail {
+  "Stable identifier for this GitHub cached entry detail."
   id: ID!
+  "The authentication associated with this GitHub cached entry detail."
   authentication: GitHubAuthentication!
+  "The operation associated with this GitHub cached entry detail."
   operation: String!
+  "The endpoint associated with this GitHub cached entry detail."
   endpoint: String!
+  "ISO 8601 timestamp when this GitHub cached entry detail was fetched."
   fetchedAt: String!
+  "The point cost associated with this GitHub cached entry detail. May be null when unavailable or not applicable."
   pointCost: Int
+  "Whether this GitHub cached entry detail is stale."
   stale: Boolean!
+  "The query associated with this GitHub cached entry detail."
   query: String!
+  "The variables associated with this GitHub cached entry detail. May be null when unavailable or not applicable."
   variables: JSON
+  "The response associated with this GitHub cached entry detail. May be null when unavailable or not applicable."
   response: JSON
 }
 
+"Configurable settings for GitHub app."
 type GitHubAppSettings {
+  "Whether this GitHub app settings is configured."
   configured: Boolean!
+  "Identifier of the related app. May be null when unavailable or not applicable."
   appId: String
+  "Identifier of the related installation. May be null when unavailable or not applicable."
   installationId: String
+  "Whether the private key configured condition is true for this GitHub app settings."
   privateKeyConfigured: Boolean!
+  "The key fingerprint associated with this GitHub app settings. May be null when unavailable or not applicable."
   keyFingerprint: String
+  "The app slug associated with this GitHub app settings. May be null when unavailable or not applicable."
   appSlug: String
+  "The app owner login associated with this GitHub app settings. May be null when unavailable or not applicable."
   appOwnerLogin: String
+  "The app owner type associated with this GitHub app settings. May be null when unavailable or not applicable."
   appOwnerType: String
+  "The account login associated with this GitHub app settings. May be null when unavailable or not applicable."
   accountLogin: String
+  "The repository selection associated with this GitHub app settings. May be null when unavailable or not applicable."
   repositorySelection: String
+  "The actions permission associated with this GitHub app settings. May be null when unavailable or not applicable."
   actionsPermission: String
+  "The checks permission associated with this GitHub app settings. May be null when unavailable or not applicable."
   checksPermission: String
+  "The commit statuses permission associated with this GitHub app settings. May be null when unavailable or not applicable."
   commitStatusesPermission: String
+  "Webhook events associated with this GitHub app settings."
   webhookEvents: [String!]!
+  "Whether the enhanced pipeline webhooks enabled condition is true for this GitHub app settings."
   enhancedPipelineWebhooksEnabled: Boolean!
+  "Whether the enhanced pipeline webhooks ready condition is true for this GitHub app settings."
   enhancedPipelineWebhooksReady: Boolean!
+  "Enhanced pipeline webhooks missings associated with this GitHub app settings."
   enhancedPipelineWebhooksMissing: [String!]!
+  "ISO 8601 timestamp when this GitHub app settings verified. May be null when unavailable or not applicable."
   verifiedAt: String
+  "Whether the webhook configured condition is true for this GitHub app settings."
   webhookConfigured: Boolean!
+  "URL for this GitHub app settings. May be null when unavailable or not applicable."
   webhookUrl: String
+  "ISO 8601 timestamp when this GitHub app settings webhook configured. May be null when unavailable or not applicable."
   webhookConfiguredAt: String
+  "ISO 8601 timestamp when this GitHub app settings webhook last received. May be null when unavailable or not applicable."
   webhookLastReceivedAt: String
+  "The webhook last outcome associated with this GitHub app settings. May be null when unavailable or not applicable."
   webhookLastOutcome: String
+  "The webhook last error associated with this GitHub app settings. May be null when unavailable or not applicable."
   webhookLastError: String
+  "ISO 8601 timestamp when this GitHub app settings was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
 
+"Represents a GitHub webhook delivery in the GraphQL API."
 type GitHubWebhookDelivery {
+  "Identifier of the related delivery."
   deliveryId: ID!
+  "The event associated with this GitHub webhook delivery."
   event: String!
+  "The action associated with this GitHub webhook delivery. May be null when unavailable or not applicable."
   action: String
+  "The repository name associated with this GitHub webhook delivery. May be null when unavailable or not applicable."
   repositoryName: String
+  "Identifier of the related workflow run. May be null when unavailable or not applicable."
   workflowRunId: ID
+  "The outcome associated with this GitHub webhook delivery."
   outcome: String!
+  "Error message when this GitHub webhook delivery did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this GitHub webhook delivery received."
   receivedAt: String!
+  "ISO 8601 timestamp when this GitHub webhook delivery processed. May be null when unavailable or not applicable."
   processedAt: String
 }
 
+"A paginated collection of GitHub webhook deliveries."
 type GitHubWebhookDeliveryPage {
+  "Whether this GitHub webhook delivery page is enabled."
   enabled: Boolean!
+  "Items associated with this GitHub webhook delivery page."
   items: [GitHubWebhookDelivery!]!
+  "The total associated with this GitHub webhook delivery page."
   total: Int!
+  "The limit associated with this GitHub webhook delivery page."
   limit: Int!
+  "The offset associated with this GitHub webhook delivery page."
   offset: Int!
 }
 
+"Represents a GitHub viewer in the GraphQL API."
 type GitHubViewer {
+  "The login associated with this GitHub viewer."
   login: String!
+  "Display name of this GitHub viewer."
   name: String
+  "URL for this GitHub viewer."
   avatarUrl: String!
+  "URL for this GitHub viewer."
   url: String!
 }
 
+"Represents a GitHub repository in the GraphQL API."
 type GitHubRepository {
+  "Stable identifier for this GitHub repository."
   id: ID!
+  "Identifier of the related GitHub."
   githubId: ID!
+  "The owner associated with this GitHub repository."
   owner: String!
+  "Display name of this GitHub repository."
   name: String!
+  "The name with owner associated with this GitHub repository."
   nameWithOwner: String!
+  "URL for this GitHub repository."
   url: String!
+  "The Jira key regex associated with this GitHub repository. May be null when unavailable or not applicable."
   jiraKeyRegex: String
 }
 
+"Represents a GitHub repository candidate in the GraphQL API."
 type GitHubRepositoryCandidate {
+  "Identifier of the related GitHub."
   githubId: ID!
+  "The name with owner associated with this GitHub repository candidate."
   nameWithOwner: String!
+  "URL for this GitHub repository candidate."
   url: String!
+  "Whether this GitHub repository candidate is private."
   isPrivate: Boolean!
+  "Whether the managed condition is true for this GitHub repository candidate."
   managed: Boolean!
 }
 
+"A paginated collection of GitHub repository candidates."
 type GitHubRepositoryCandidatePage {
+  "Items associated with this GitHub repository candidate page."
   items: [GitHubRepositoryCandidate!]!
+  "Whether this GitHub repository candidate page has next page."
   hasNextPage: Boolean!
+  "The end cursor associated with this GitHub repository candidate page. May be null when unavailable or not applicable."
   endCursor: String
 }
 
+"Represents a GitHub pull request in the GraphQL API."
 type GitHubPullRequest {
+  "Stable identifier for this GitHub pull request."
   id: ID!
+  "The number associated with this GitHub pull request."
   number: Int!
+  "Human-readable title for this GitHub pull request."
   title: String!
+  "URL for this GitHub pull request."
   url: String!
+  "Identifier of the related repository GitHub."
   repositoryGithubId: ID!
+  "The repository name with owner associated with this GitHub pull request."
   repositoryNameWithOwner: String!
+  "URL for this GitHub pull request."
   repositoryUrl: String!
+  "Labels associated with this GitHub pull request."
   labels: [String!]!
+  "The Jira key associated with this GitHub pull request. May be null when unavailable or not applicable."
   jiraKey: String
+  "The pipeline status associated with this GitHub pull request."
   pipelineStatus: GitHubPipelineStatus!
+  "Pipelines associated with this GitHub pull request."
   pipelines: [GitHubPipeline!]!
+  "The pipeline revision associated with this GitHub pull request."
   pipelineRevision: Int!
+  "The review decision associated with this GitHub pull request."
   reviewDecision: GitHubReviewDecision!
+  "Number of unresolved review threads."
   unresolvedReviewThreadCount: Int!
+  "Current state of this GitHub pull request."
   state: GitHubPullRequestState!
+  "Whether this GitHub pull request is draft."
   isDraft: Boolean!
+  "The mergeable associated with this GitHub pull request."
   mergeable: String!
+  "The merge state status associated with this GitHub pull request."
   mergeStateStatus: String!
+  "Whether the auto merge enabled condition is true for this GitHub pull request."
   autoMergeEnabled: Boolean!
+  "Whether the viewer can enable auto merge condition is true for this GitHub pull request."
   viewerCanEnableAutoMerge: Boolean!
+  "Whether the viewer can disable auto merge condition is true for this GitHub pull request."
   viewerCanDisableAutoMerge: Boolean!
+  "The head ref oid associated with this GitHub pull request."
   headRefOid: String!
+  "The head ref name associated with this GitHub pull request."
   headRefName: String!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The worktree highlight color associated with this GitHub pull request. May be null when unavailable or not applicable."
   worktreeHighlightColor: String
+  "ISO 8601 timestamp when this GitHub pull request was created."
   createdAt: String!
 }
 
+"Represents a GitHub pipeline in the GraphQL API."
 type GitHubPipeline {
+  "Stable identifier for this GitHub pipeline."
   id: ID!
+  "Display name of this GitHub pipeline."
   name: String!
+  "Current status of this GitHub pipeline."
   status: GitHubPipelineState!
+  "URL for this GitHub pipeline. May be null when unavailable or not applicable."
   url: String
+  "Identifier of the related check suite. May be null when unavailable or not applicable."
   checkSuiteId: ID
+  "Whether this GitHub pipeline can retry."
   canRetry: Boolean!
+  "The retry unavailable reason associated with this GitHub pipeline. May be null when unavailable or not applicable."
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  "Jobs associated with this GitHub pipeline."
   jobs: [GitHubWorkflowJob!]!
+  "Identifier of the related workflow run. May be null when unavailable or not applicable."
   workflowRunId: ID
+  "Identifier of the related workflow. May be null when unavailable or not applicable."
   workflowId: ID
+  "The run number associated with this GitHub pipeline. May be null when unavailable or not applicable."
   runNumber: Int
+  "The run attempt associated with this GitHub pipeline. May be null when unavailable or not applicable."
   runAttempt: Int
 }
 
+"Input values for GitHub pipeline status key."
 input GitHubPipelineStatusKeyInput {
+  "Identifier of the repository GitHub to use."
   repositoryGithubId: ID!
+  "The head SHA to use for the request."
   headSha: String!
 }
 
+"Input values for GitHub pipeline record key."
 input GitHubPipelineRecordKeyInput {
+  "Identifier of the repository GitHub to use."
   repositoryGithubId: ID!
+  "Identifier of the workflow run to use."
   workflowRunId: ID!
 }
 
+"Represents a GitHub pipeline status snapshot in the GraphQL API."
 type GitHubPipelineStatusSnapshot {
+  "Identifier of the related repository GitHub."
   repositoryGithubId: ID!
+  "The repository name with owner associated with this GitHub pipeline status snapshot."
   repositoryNameWithOwner: String!
+  "URL for this GitHub pipeline status snapshot."
   repositoryUrl: String!
+  "Git commit SHA associated with this GitHub pipeline status snapshot."
   headSha: String!
+  "The pipeline status associated with this GitHub pipeline status snapshot."
   pipelineStatus: GitHubPipelineStatus!
+  "Pipelines associated with this GitHub pipeline status snapshot."
   pipelines: [GitHubPipeline!]!
+  "The revision associated with this GitHub pipeline status snapshot."
   revision: Int!
+  "ISO 8601 timestamp when this GitHub pipeline status snapshot was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub pipeline record in the GraphQL API."
 type GitHubPipelineRecord {
+  "Stable identifier for this GitHub pipeline record."
   id: ID!
+  "Display name of this GitHub pipeline record."
   name: String!
+  "Current status of this GitHub pipeline record."
   status: GitHubPipelineState!
+  "URL for this GitHub pipeline record. May be null when unavailable or not applicable."
   url: String
+  "Identifier of the related check suite. May be null when unavailable or not applicable."
   checkSuiteId: ID
+  "Whether this GitHub pipeline record can retry."
   canRetry: Boolean!
+  "The retry unavailable reason associated with this GitHub pipeline record. May be null when unavailable or not applicable."
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  "Jobs associated with this GitHub pipeline record."
   jobs: [GitHubWorkflowJob!]!
+  "Identifier of the related workflow run. May be null when unavailable or not applicable."
   workflowRunId: ID
+  "Identifier of the related workflow. May be null when unavailable or not applicable."
   workflowId: ID
+  "The run number associated with this GitHub pipeline record. May be null when unavailable or not applicable."
   runNumber: Int
+  "The run attempt associated with this GitHub pipeline record. May be null when unavailable or not applicable."
   runAttempt: Int
+  "Identifier of the related repository GitHub."
   repositoryGithubId: ID!
+  "Git commit SHA associated with this GitHub pipeline record."
   headSha: String!
+  "The revision associated with this GitHub pipeline record."
   revision: Int!
+  "Whether this GitHub pipeline record is current."
   isCurrent: Boolean!
 }
 
+"Represents a GitHub pipeline status changed in the GraphQL API."
 type GitHubPipelineStatusChanged {
+  "The snapshot associated with this GitHub pipeline status changed."
   snapshot: GitHubPipelineStatusSnapshot!
+  "The changed pipeline associated with this GitHub pipeline status changed. May be null when unavailable or not applicable."
   changedPipeline: GitHubPipelineRecord
 }
 
+"Represents a GitHub workflow job step in the GraphQL API."
 type GitHubWorkflowJobStep {
+  "The number associated with this GitHub workflow job step."
   number: Int!
+  "Display name of this GitHub workflow job step."
   name: String!
+  "Current status of this GitHub workflow job step."
   status: GitHubPipelineState!
 }
 
+"Represents a GitHub workflow job in the GraphQL API."
 type GitHubWorkflowJob {
+  "Stable identifier for this GitHub workflow job."
   id: ID!
+  "Display name of this GitHub workflow job."
   name: String!
+  "Current status of this GitHub workflow job."
   status: GitHubPipelineState!
+  "URL for this GitHub workflow job. May be null when unavailable or not applicable."
   url: String
+  "Whether this GitHub workflow job can retry."
   canRetry: Boolean!
+  "The retry unavailable reason associated with this GitHub workflow job. May be null when unavailable or not applicable."
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  "Steps associated with this GitHub workflow job."
   steps: [GitHubWorkflowJobStep!]!
+  "The run attempt associated with this GitHub workflow job. May be null when unavailable or not applicable."
   runAttempt: Int
 }
 
+"Represents a GitHub actions repository in the GraphQL API."
 type GitHubActionsRepository {
+  "Stable identifier for this GitHub actions repository."
   id: ID!
+  "The name with owner associated with this GitHub actions repository."
   nameWithOwner: String!
+  "URL for this GitHub actions repository."
   url: String!
 }
 
+"An error reported for GitHub actions repository."
 type GitHubActionsRepositoryError {
+  "Identifier of the related codebase repository."
   codebaseRepositoryId: ID!
+  "The name with owner associated with this GitHub actions repository error."
   nameWithOwner: String!
+  "Human-readable message associated with this GitHub actions repository error."
   message: String!
 }
 
+"Represents a GitHub actions pull request in the GraphQL API."
 type GitHubActionsPullRequest {
+  "The number associated with this GitHub actions pull request."
   number: Int!
+  "URL for this GitHub actions pull request."
   url: String!
 }
 
+"Represents a GitHub actions workflow run in the GraphQL API."
 type GitHubActionsWorkflowRun {
+  "Stable identifier for this GitHub actions workflow run."
   id: ID!
+  "Identifier of the related workflow."
   workflowId: ID!
+  "Identifier of the related repository GitHub."
   repositoryGithubId: ID!
+  "Identifier of the related codebase repository."
   codebaseRepositoryId: ID!
+  "The repository name with owner associated with this GitHub actions workflow run."
   repositoryNameWithOwner: String!
+  "URL for this GitHub actions workflow run."
   repositoryUrl: String!
+  "Display name of this GitHub actions workflow run."
   name: String!
+  "The display title associated with this GitHub actions workflow run."
   displayTitle: String!
+  "The run number associated with this GitHub actions workflow run."
   runNumber: Int!
+  "The run attempt associated with this GitHub actions workflow run."
   runAttempt: Int!
+  "The event associated with this GitHub actions workflow run."
   event: String!
+  "Current status of this GitHub actions workflow run."
   status: GitHubPipelineState!
+  "URL for this GitHub actions workflow run."
   url: String!
+  "Git branch associated with this GitHub actions workflow run. May be null when unavailable or not applicable."
   headBranch: String
+  "Git commit SHA associated with this GitHub actions workflow run."
   headSha: String!
+  "Identifier of the related check suite. May be null when unavailable or not applicable."
   checkSuiteId: ID
+  "Whether this GitHub actions workflow run can retry."
   canRetry: Boolean!
+  "The retry unavailable reason associated with this GitHub actions workflow run. May be null when unavailable or not applicable."
   retryUnavailableReason: GitHubPipelineRetryUnavailableReason
+  "Pull requests associated with this GitHub actions workflow run."
   pullRequests: [GitHubActionsPullRequest!]!
+  "The Jira key associated with this GitHub actions workflow run. May be null when unavailable or not applicable."
   jiraKey: String
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The worktree highlight color associated with this GitHub actions workflow run. May be null when unavailable or not applicable."
   worktreeHighlightColor: String
+  "ISO 8601 timestamp when this GitHub actions workflow run started."
   startedAt: String!
+  "ISO 8601 timestamp when this GitHub actions workflow run was created."
   createdAt: String!
+  "ISO 8601 timestamp when this GitHub actions workflow run was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub workflow run attempt in the GraphQL API."
 type GitHubWorkflowRunAttempt {
+  "Identifier of the related workflow run."
   workflowRunId: ID!
+  "The run attempt associated with this GitHub workflow run attempt."
   runAttempt: Int!
+  "Current status of this GitHub workflow run attempt."
   status: GitHubPipelineState!
+  "URL for this GitHub workflow run attempt."
   url: String!
+  "The triggering actor associated with this GitHub workflow run attempt. May be null when unavailable or not applicable."
   triggeringActor: GitHubWorkflowRunActor
+  "ISO 8601 timestamp when this GitHub workflow run attempt started."
   startedAt: String!
+  "ISO 8601 timestamp when this GitHub workflow run attempt was created."
   createdAt: String!
+  "ISO 8601 timestamp when this GitHub workflow run attempt was last updated."
   updatedAt: String!
+  "Jobs associated with this GitHub workflow run attempt."
   jobs: [GitHubWorkflowJob!]!
 }
 
+"Represents a GitHub workflow run actor in the GraphQL API."
 type GitHubWorkflowRunActor {
+  "The login associated with this GitHub workflow run actor."
   login: String!
+  "URL for this GitHub workflow run actor."
   avatarUrl: String!
+  "URL for this GitHub workflow run actor."
   url: String!
 }
 
+"Represents a GitHub repository workflow in the GraphQL API."
 type GitHubRepositoryWorkflow {
+  "Stable identifier for this GitHub repository workflow."
   id: ID!
+  "Display name of this GitHub repository workflow."
   name: String!
+  "Filesystem path associated with this GitHub repository workflow."
   path: String!
+  "Current state of this GitHub repository workflow."
   state: String!
+  "URL for this GitHub repository workflow."
   url: String!
+  "Job names associated with this GitHub repository workflow."
   jobNames: [String!]!
 }
 
+"Values supported for GitHub auto retry."
 enum GitHubAutoRetryScope {
+  "Limits the operation to workflow run."
   WORKFLOW_RUN
+  "Limits the operation to worktree branch."
   WORKTREE_BRANCH
+  "Limits the operation to pull request."
   PULL_REQUEST
+  "Limits the operation to repository."
   REPOSITORY
 }
 
+"Values supported for GitHub auto retry."
 enum GitHubAutoRetryMode {
+  "Uses the count mode."
   COUNT
+  "Uses the failure mode."
   FAILURE
 }
 
+"Values supported for GitHub auto retry failure strategy."
 enum GitHubAutoRetryFailureStrategy {
+  "Represents the failed jobs option."
   FAILED_JOBS
+  "Represents the all jobs option."
   ALL_JOBS
 }
 
+"Lifecycle statuses for GitHub auto retry rule."
 enum GitHubAutoRetryRuleStatus {
+  "Represents the active status for GitHub auto retry rule."
   ACTIVE
+  "Represents the paused status for GitHub auto retry rule."
   PAUSED
+  "Represents the completed status for GitHub auto retry rule."
   COMPLETED
+  "Represents the exhausted status for GitHub auto retry rule."
   EXHAUSTED
+  "Represents the error status for GitHub auto retry rule."
   ERROR
 }
 
+"Represents a GitHub auto retry target in the GraphQL API."
 type GitHubAutoRetryTarget {
+  "Stable identifier for this GitHub auto retry target."
   id: ID!
+  "Identifier of the related workflow. May be null when unavailable or not applicable."
   workflowId: ID
+  "Identifier of the related workflow run. May be null when unavailable or not applicable."
   workflowRunId: ID
+  "The job name associated with this GitHub auto retry target. May be null when unavailable or not applicable."
   jobName: String
 }
 
+"Represents a GitHub auto retry execution in the GraphQL API."
 type GitHubAutoRetryExecution {
+  "Stable identifier for this GitHub auto retry execution."
   id: ID!
+  "Identifier of the related workflow run."
   workflowRunId: ID!
+  "Identifier of the related workflow."
   workflowId: ID!
+  "The target key associated with this GitHub auto retry execution."
   targetKey: String!
+  "Current status of this GitHub auto retry execution."
   status: String!
+  "The observed attempt associated with this GitHub auto retry execution."
   observedAttempt: Int!
+  "The automatic retries associated with this GitHub auto retry execution."
   automaticRetries: Int!
+  "The last status associated with this GitHub auto retry execution. May be null when unavailable or not applicable."
   lastStatus: GitHubPipelineState
+  "The last error associated with this GitHub auto retry execution. May be null when unavailable or not applicable."
   lastError: String
+  "ISO 8601 timestamp when this GitHub auto retry execution was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub auto retry rule in the GraphQL API."
 type GitHubAutoRetryRule {
+  "Stable identifier for this GitHub auto retry rule."
   id: ID!
+  "The scope associated with this GitHub auto retry rule."
   scope: GitHubAutoRetryScope!
+  "Identifier of the related codebase repository."
   codebaseRepositoryId: ID!
+  "Identifier of the related repository GitHub. May be null when unavailable or not applicable."
   repositoryGithubId: ID
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Git branch associated with this GitHub auto retry rule. May be null when unavailable or not applicable."
   branch: String
+  "The pull request number associated with this GitHub auto retry rule. May be null when unavailable or not applicable."
   pullRequestNumber: Int
+  "Whether the all workflows condition is true for this GitHub auto retry rule."
   allWorkflows: Boolean!
+  "The mode associated with this GitHub auto retry rule."
   mode: GitHubAutoRetryMode!
+  "The retry limit associated with this GitHub auto retry rule. May be null when unavailable or not applicable."
   retryLimit: Int
+  "The failure strategy associated with this GitHub auto retry rule."
   failureStrategy: GitHubAutoRetryFailureStrategy!
+  "Current status of this GitHub auto retry rule."
   status: GitHubAutoRetryRuleStatus!
+  "Whether this GitHub auto retry rule is enabled."
   enabled: Boolean!
+  "The last error associated with this GitHub auto retry rule. May be null when unavailable or not applicable."
   lastError: String
+  "Targets associated with this GitHub auto retry rule."
   targets: [GitHubAutoRetryTarget!]!
+  "Executions associated with this GitHub auto retry rule."
   executions: [GitHubAutoRetryExecution!]!
+  "ISO 8601 timestamp when this GitHub auto retry rule was created."
   createdAt: String!
+  "ISO 8601 timestamp when this GitHub auto retry rule was last updated."
   updatedAt: String!
 }
 
+"Input values for GitHub auto retry target."
 input GitHubAutoRetryTargetInput {
+  "Identifier of the workflow to use."
   workflowId: ID
+  "Identifier of the workflow run to use."
   workflowRunId: ID
+  "The job name to use for the request."
   jobName: String
 }
 
+"Values used to save a GitHub auto retry rule."
 input SaveGitHubAutoRetryRuleInput {
+  "Identifier of the save GitHub auto retry rule to affect."
   id: ID
+  "The scope to use for the request."
   scope: GitHubAutoRetryScope!
+  "Identifier of the codebase repository to use."
   codebaseRepositoryId: ID!
+  "Identifier of the repository GitHub to use."
   repositoryGithubId: ID
+  "Identifier of the worktree to use."
   worktreeId: ID
+  "The branch to use for the request."
   branch: String
+  "The pull request number to use for the request."
   pullRequestNumber: Int
+  "Whether all workflows applies to the request."
   allWorkflows: Boolean!
+  "The mode to use for the request."
   mode: GitHubAutoRetryMode!
+  "The retry limit to use for the request."
   retryLimit: Int
+  "The failure strategy to use for the request."
   failureStrategy: GitHubAutoRetryFailureStrategy!
+  "Targets to use for the request."
   targets: [GitHubAutoRetryTargetInput!]!
 }
 
+"A paginated collection of GitHub actions workflow runs."
 type GitHubActionsWorkflowRunPage {
+  "Items associated with this GitHub actions workflow run page."
   items: [GitHubActionsWorkflowRun!]!
+  "Repositories associated with this GitHub actions workflow run page."
   repositories: [GitHubActionsRepository!]!
+  "Repository errors associated with this GitHub actions workflow run page."
   repositoryErrors: [GitHubActionsRepositoryError!]!
+  "Whether this GitHub actions workflow run page has next page."
   hasNextPage: Boolean!
+  "The end cursor associated with this GitHub actions workflow run page. May be null when unavailable or not applicable."
   endCursor: String
 }
 
+"Represents a GitHub pull request actor in the GraphQL API."
 type GitHubPullRequestActor {
+  "The login associated with this GitHub pull request actor."
   login: String!
+  "URL for this GitHub pull request actor."
   avatarUrl: String!
+  "URL for this GitHub pull request actor."
   url: String!
 }
 
+"Represents a GitHub review comment in the GraphQL API."
 type GitHubReviewComment {
+  "Stable identifier for this GitHub review comment."
   id: ID!
+  "The body associated with this GitHub review comment."
   body: String!
+  "The body text associated with this GitHub review comment."
   bodyText: String!
+  "The body html associated with this GitHub review comment."
   bodyHtml: String!
+  "URL for this GitHub review comment."
   url: String!
+  "The author associated with this GitHub review comment. May be null when unavailable or not applicable."
   author: GitHubPullRequestActor
+  "ISO 8601 timestamp when this GitHub review comment was created."
   createdAt: String!
+  "ISO 8601 timestamp when this GitHub review comment was last updated."
   updatedAt: String!
 }
 
+"Represents a GitHub review thread pull request in the GraphQL API."
 type GitHubReviewThreadPullRequest {
+  "Stable identifier for this GitHub review thread pull request."
   id: ID!
+  "The number associated with this GitHub review thread pull request."
   number: Int!
+  "Human-readable title for this GitHub review thread pull request."
   title: String!
+  "URL for this GitHub review thread pull request."
   url: String!
+  "The repository name with owner associated with this GitHub review thread pull request."
   repositoryNameWithOwner: String!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The worktree highlight color associated with this GitHub review thread pull request. May be null when unavailable or not applicable."
   worktreeHighlightColor: String
 }
 
+"Represents a GitHub review thread in the GraphQL API."
 type GitHubReviewThread {
+  "Stable identifier for this GitHub review thread."
   id: ID!
+  "Whether this GitHub review thread is resolved."
   isResolved: Boolean!
+  "Whether this GitHub review thread is outdated."
   isOutdated: Boolean!
+  "The subject type associated with this GitHub review thread."
   subjectType: String!
+  "Filesystem path associated with this GitHub review thread."
   path: String!
+  "The line associated with this GitHub review thread. May be null when unavailable or not applicable."
   line: Int
+  "The start line associated with this GitHub review thread. May be null when unavailable or not applicable."
   startLine: Int
+  "The original line associated with this GitHub review thread. May be null when unavailable or not applicable."
   originalLine: Int
+  "The original start line associated with this GitHub review thread. May be null when unavailable or not applicable."
   originalStartLine: Int
+  "Whether the viewer can reply condition is true for this GitHub review thread."
   viewerCanReply: Boolean!
+  "Whether the viewer can resolve condition is true for this GitHub review thread."
   viewerCanResolve: Boolean!
+  "Whether the viewer can unresolve condition is true for this GitHub review thread."
   viewerCanUnresolve: Boolean!
+  "The resolved by associated with this GitHub review thread. May be null when unavailable or not applicable."
   resolvedBy: GitHubPullRequestActor
+  "The pull request associated with this GitHub review thread."
   pullRequest: GitHubReviewThreadPullRequest!
+  "The root comment associated with this GitHub review thread."
   rootComment: GitHubReviewComment!
+  "Replies associated with this GitHub review thread."
   replies: [GitHubReviewComment!]!
 }
 
+"A paginated collection of GitHub review threads."
 type GitHubReviewThreadPage {
+  "The viewer login associated with this GitHub review thread page."
   viewerLogin: String!
+  "Pull requests associated with this GitHub review thread page."
   pullRequests: [GitHubReviewThreadPullRequest!]!
+  "Threads associated with this GitHub review thread page."
   threads: [GitHubReviewThread!]!
+  "Whether this GitHub review thread page is truncated."
   truncated: Boolean!
 }
 
+"Represents a GitHub review thread state in the GraphQL API."
 type GitHubReviewThreadState {
+  "Stable identifier for this GitHub review thread state."
   id: ID!
+  "Whether this GitHub review thread state is resolved."
   isResolved: Boolean!
+  "Whether the viewer can resolve condition is true for this GitHub review thread state."
   viewerCanResolve: Boolean!
+  "Whether the viewer can unresolve condition is true for this GitHub review thread state."
   viewerCanUnresolve: Boolean!
+  "The resolved by associated with this GitHub review thread state. May be null when unavailable or not applicable."
   resolvedBy: GitHubPullRequestActor
 }
 
+"Detailed information about GitHub pull request."
 type GitHubPullRequestDetail {
+  "Stable identifier for this GitHub pull request detail."
   id: ID!
+  "Identifier of the related codebase repository. May be null when unavailable or not applicable."
   codebaseRepositoryId: ID
+  "The number associated with this GitHub pull request detail."
   number: Int!
+  "Human-readable title for this GitHub pull request detail."
   title: String!
+  "URL for this GitHub pull request detail."
   url: String!
+  "Identifier of the related repository GitHub."
   repositoryGithubId: ID!
+  "The repository name with owner associated with this GitHub pull request detail."
   repositoryNameWithOwner: String!
+  "URL for this GitHub pull request detail."
   repositoryUrl: String!
+  "Labels associated with this GitHub pull request detail."
   labels: [String!]!
+  "The Jira key associated with this GitHub pull request detail. May be null when unavailable or not applicable."
   jiraKey: String
+  "The pipeline status associated with this GitHub pull request detail."
   pipelineStatus: GitHubPipelineStatus!
+  "Pipelines associated with this GitHub pull request detail."
   pipelines: [GitHubPipeline!]!
+  "The pipeline revision associated with this GitHub pull request detail."
   pipelineRevision: Int!
+  "The review decision associated with this GitHub pull request detail."
   reviewDecision: GitHubReviewDecision!
+  "Number of unresolved review threads."
   unresolvedReviewThreadCount: Int!
+  "ISO 8601 timestamp when this GitHub pull request detail was created."
   createdAt: String!
+  "The body associated with this GitHub pull request detail."
   body: String!
+  "The body html associated with this GitHub pull request detail."
   bodyHtml: String!
+  "The author associated with this GitHub pull request detail. May be null when unavailable or not applicable."
   author: GitHubPullRequestActor
+  "Assignees associated with this GitHub pull request detail."
   assignees: [GitHubPullRequestActor!]!
+  "Review threads associated with this GitHub pull request detail."
   reviewThreads: [GitHubReviewThread!]!
+  "The base ref name associated with this GitHub pull request detail."
   baseRefName: String!
+  "The head ref name associated with this GitHub pull request detail."
   headRefName: String!
+  "The head ref oid associated with this GitHub pull request detail."
   headRefOid: String!
+  "Current state of this GitHub pull request detail."
   state: String!
+  "Whether this GitHub pull request detail is draft."
   isDraft: Boolean!
+  "The mergeable associated with this GitHub pull request detail."
   mergeable: String!
+  "The additions associated with this GitHub pull request detail."
   additions: Int!
+  "The deletions associated with this GitHub pull request detail."
   deletions: Int!
+  "The changed files associated with this GitHub pull request detail. May be null when unavailable or not applicable."
   changedFiles: Int
+  "Number of commits."
   commitCount: Int!
+  "ISO 8601 timestamp when this GitHub pull request detail was last updated."
   updatedAt: String!
+  "ISO 8601 timestamp when this GitHub pull request detail merged. May be null when unavailable or not applicable."
   mergedAt: String
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The worktree highlight color associated with this GitHub pull request detail. May be null when unavailable or not applicable."
   worktreeHighlightColor: String
 }
 
+"Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  "Available methods associated with this GitHub pull request merge options."
   availableMethods: [GitHubMergeMethod!]!
+  "Commit emails associated with this GitHub pull request merge options."
   commitEmails: [String!]!
+  "The default commit email associated with this GitHub pull request merge options. May be null when unavailable or not applicable."
   defaultCommitEmail: String
+  "The default commit headline associated with this GitHub pull request merge options."
   defaultCommitHeadline: String!
+  "The default commit body associated with this GitHub pull request merge options."
   defaultCommitBody: String!
+  "Whether this GitHub pull request merge options can merge."
   canMerge: Boolean!
+  "Whether this GitHub pull request merge options can enable auto merge."
   canEnableAutoMerge: Boolean!
+  "Whether the auto merge enabled condition is true for this GitHub pull request merge options."
   autoMergeEnabled: Boolean!
+  "Whether the viewer can disable auto merge condition is true for this GitHub pull request merge options."
   viewerCanDisableAutoMerge: Boolean!
+  "The merge state status associated with this GitHub pull request merge options."
   mergeStateStatus: String!
+  "The head ref oid associated with this GitHub pull request merge options."
   headRefOid: String!
+  "The blocked reason associated with this GitHub pull request merge options. May be null when unavailable or not applicable."
   blockedReason: String
 }
 
+"The result of GitHub pull request merge."
 type GitHubPullRequestMergeResult {
+  "Stable identifier for this GitHub pull request merge result."
   id: ID!
+  "Current state of this GitHub pull request merge result."
   state: String!
+  "URL for this GitHub pull request merge result."
   url: String!
+  "ISO 8601 timestamp when this GitHub pull request merge result merged. May be null when unavailable or not applicable."
   mergedAt: String
 }
 
+"A paginated collection of GitHub pull requests."
 type GitHubPullRequestPage {
+  "Items associated with this GitHub pull request page."
   items: [GitHubPullRequest!]!
+  "Whether this GitHub pull request page is truncated."
   truncated: Boolean!
+  "Whether this GitHub pull request page has next page."
   hasNextPage: Boolean!
+  "The end cursor associated with this GitHub pull request page. May be null when unavailable or not applicable."
   endCursor: String
 }
 
+"Values used to save GitHub settings."
 input SaveGitHubSettingsInput {
+  "The API token to use for the request."
   apiToken: String
+  "The default Jira key regex to use for the request."
   defaultJiraKeyRegex: String
+  "Actions notification poll interval in seconds."
   actionsNotificationPollIntervalSeconds: Int
 }
 
+"Values used to save a GitHub cache TTL override."
 input SaveGitHubCacheTtlOverrideInput {
+  "The operation to use for the request."
   operation: String!
+  "TTL in seconds."
   ttlSeconds: Int!
 }
 
+"Values used to save GitHub app settings."
 input SaveGitHubAppSettingsInput {
+  "Identifier of the app to use."
   appId: String!
+  "Identifier of the installation to use."
   installationId: String!
+  "The private key to use for the request."
   privateKey: String
+  "The webhook URL to use for the request."
   webhookUrl: String
+  "Whether enhanced pipeline webhooks enabled applies to the request."
   enhancedPipelineWebhooksEnabled: Boolean
 }
 
+"Values used to add a GitHub repository."
 input AddGitHubRepositoryInput {
+  "The name with owner to use for the request."
   nameWithOwner: String!
+  "The Jira key regex to use for the request."
   jiraKeyRegex: String
 }
 
+"Values used to update a GitHub repository."
 input UpdateGitHubRepositoryInput {
+  "Identifier of the update GitHub repository to affect."
   id: ID!
+  "The Jira key regex to use for the request."
   jiraKeyRegex: String
 }
 
+"Values used to merge a GitHub pull request."
 input MergeGitHubPullRequestInput {
+  "The owner to use for the request."
   owner: String!
+  "The name to use for the request."
   name: String!
+  "The number to use for the request."
   number: Int!
+  "The method to use for the request."
   method: GitHubMergeMethod!
+  "The commit headline to use for the request."
   commitHeadline: String!
+  "The commit body to use for the request."
   commitBody: String!
+  "The author email to use for the request."
   authorEmail: String
 }
 
+"Values used to create a GitHub pull request."
 input CreateGitHubPullRequestInput {
+  "The owner to use for the request."
   owner: String!
+  "The name to use for the request."
   name: String!
+  "The base ref name to use for the request."
   baseRefName: String!
+  "The head ref name to use for the request."
   headRefName: String!
+  "The title to use for the request."
   title: String!
+  "The body to use for the request."
   body: String
+  "Whether draft applies to the request."
   draft: Boolean = false
 }
 
+"Values used to set GitHub pull request labels."
 input SetGitHubPullRequestLabelsInput {
+  "The owner to use for the request."
   owner: String!
+  "The name to use for the request."
   name: String!
+  "The number to use for the request."
   number: Int!
+  "Labels to use for the request."
   labels: [String!]!
 }
 
 extend type Query {
+  "Returns GitHub settings."
   githubSettings: GitHubSettings!
+  "Returns GitHub cache TTL overrides."
   githubCacheTtlOverrides: [GitHubCacheTtlOverride!]!
+  "Returns strings."
   githubCacheableGraphqlOperations: [String!]!
+  "Returns GitHub rate limit snapshots."
   githubRateLimitSnapshots: [GitHubRateLimitSnapshot!]!
+  "Returns GitHub cache metrics."
   githubCacheMetrics: GitHubCacheMetrics!
+  "Returns a GitHub API call page."
   githubApiCalls(
+    "Maximum number of records to return. Defaults to `50`."
     limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
     offset: Int = 0
+    "The API type used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     apiType: GitHubApiType
+    "The request source used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     requestSource: GitHubRequestSource
+    "The source used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     source: GitHubCallSource
   ): GitHubApiCallPage!
-  githubCachedEntries(limit: Int = 50, offset: Int = 0): GitHubCachedEntryPage!
-  githubCachedEntry(id: ID!): GitHubCachedEntryDetail
-  githubAppSettings: GitHubAppSettings!
-  githubWebhooksEnabled: Boolean!
-  githubWebhookDeliveries(
+  "Returns a GitHub cached entry page."
+  githubCachedEntries(
+    "Maximum number of records to return. Defaults to `50`."
     limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
+    offset: Int = 0
+  ): GitHubCachedEntryPage!
+  "Returns a GitHub cached entry detail, or null when it cannot be found."
+  githubCachedEntry(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): GitHubCachedEntryDetail
+  "Returns GitHub app settings."
+  githubAppSettings: GitHubAppSettings!
+  "Returns whether GitHub webhooks are enabled."
+  githubWebhooksEnabled: Boolean!
+  "Returns a GitHub webhook delivery page."
+  githubWebhookDeliveries(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
     offset: Int = 0
   ): GitHubWebhookDeliveryPage!
+  "Returns GitHub repositories."
   githubRepositories: [GitHubRepository!]!
-  githubAvailableRepositories(after: String): GitHubRepositoryCandidatePage!
+  "Returns a GitHub repository candidate page."
+  githubAvailableRepositories(
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
+    after: String
+  ): GitHubRepositoryCandidatePage!
+  "Returns a GitHub actions workflow run page."
   githubActionsWorkflowRuns(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "Identifier of the codebase repository. Omit it to leave this dimension unfiltered."
     codebaseRepositoryId: ID
+    "The branch used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     branch: String
+    "Identifier of the workflow. Omit it to leave this dimension unfiltered."
     workflowId: ID
+    "Maximum number of records to return. Defaults to `25`."
     first: Int = 25
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: String
   ): GitHubActionsWorkflowRunPage!
+  "Returns GitHub workflow jobs."
   githubActionsWorkflowJobs(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "Identifier of the codebase repository."
     codebaseRepositoryId: ID!
+    "Identifier of the workflow run."
     workflowRunId: ID!
   ): [GitHubWorkflowJob!]!
+  "Returns a GitHub workflow run attempt."
   githubActionsWorkflowRunAttempt(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "Identifier of the repository."
     repositoryId: ID!
+    "Identifier of the workflow run."
     workflowRunId: ID!
+    "The attempt used to filter or perform the operation."
     attempt: Int!
   ): GitHubWorkflowRunAttempt!
-  githubWorktreeWorkflowRuns(worktreeId: ID!): [GitHubActionsWorkflowRun!]!
+  "Returns GitHub actions workflow runs."
+  githubWorktreeWorkflowRuns(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): [GitHubActionsWorkflowRun!]!
+  "Returns GitHub repository workflows."
   githubRepositoryWorkflows(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "Identifier of the codebase repository."
     codebaseRepositoryId: ID!
   ): [GitHubRepositoryWorkflow!]!
+  "Returns GitHub auto retry rules."
   githubAutoRetryRules(
+    "Identifier of the codebase repository. Omit it to leave this dimension unfiltered."
     codebaseRepositoryId: ID
+    "Identifier of the workflow run. Omit it to leave this dimension unfiltered."
     workflowRunId: ID
   ): [GitHubAutoRetryRule!]!
+  "Returns a GitHub pull request page."
   githubPullRequests(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "The scope used to filter or perform the operation."
     scope: GitHubPullRequestScope!
+    "Identifier of the repository. Omit it to leave this dimension unfiltered."
     repositoryId: ID
+    "The state used to filter or perform the operation. Defaults to `OPEN`."
     state: GitHubPullRequestStateFilter = OPEN
+    "Maximum number of records to return. Defaults to `25`."
     first: Int = 25
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: String
   ): GitHubPullRequestPage!
+  "Returns a GitHub pull request detail, or null when it cannot be found."
   githubPullRequest(
+    "The owner used to filter or perform the operation."
     owner: String!
+    "The name used to filter or perform the operation."
     name: String!
+    "The number used to filter or perform the operation."
     number: Int!
   ): GitHubPullRequestDetail
+  "Returns GitHub pull request merge options."
   githubPullRequestMergeOptions(
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
+    "The owner used to filter or perform the operation."
     owner: String!
+    "The name used to filter or perform the operation."
     name: String!
+    "The number used to filter or perform the operation."
     number: Int!
   ): GitHubPullRequestMergeOptions!
+  "Returns a GitHub review thread page."
   githubReviewThreads: GitHubReviewThreadPage!
+  "Returns GitHub pipeline status snapshots."
   githubPipelineStatuses(
+    "Keys used to filter or perform the operation."
     keys: [GitHubPipelineStatusKeyInput!]!
   ): [GitHubPipelineStatusSnapshot!]!
+  "Returns GitHub pipeline records."
   githubPipelineRecords(
+    "Keys used to filter or perform the operation."
     keys: [GitHubPipelineRecordKeyInput!]!
   ): [GitHubPipelineRecord!]!
 }
 
 extend type Subscription {
+  "Emits a GitHub pipeline status change whenever GitHub pipeline status change."
   githubPipelineStatusChanged: GitHubPipelineStatusChanged!
 }
 
 extend type Mutation {
-  saveGitHubSettings(input: SaveGitHubSettingsInput!): GitHubSettings!
-  updateGitHubCacheTtl(ttlMinutes: Int!): GitHubSettings!
+  "Saves GitHub settings and returns the updated GitHub settings."
+  saveGitHubSettings(
+    "Values for the requested operation."
+    input: SaveGitHubSettingsInput!
+  ): GitHubSettings!
+  "Updates a GitHub cache TTL and returns the updated GitHub settings."
+  updateGitHubCacheTtl(
+    "The TTL minutes used to filter or perform the operation."
+    ttlMinutes: Int!
+  ): GitHubSettings!
+  "Saves a GitHub cache TTL override and returns the updated GitHub cache TTL override."
   saveGitHubCacheTtlOverride(
+    "Values for the requested operation."
     input: SaveGitHubCacheTtlOverrideInput!
   ): GitHubCacheTtlOverride!
-  deleteGitHubCacheTtlOverride(operation: String!): Boolean!
+  "Deletes a GitHub cache TTL override and reports whether the operation succeeded."
+  deleteGitHubCacheTtlOverride(
+    "The operation used to filter or perform the operation."
+    operation: String!
+  ): Boolean!
+  "Clears a GitHub cache and reports whether the operation succeeded."
   clearGitHubCache: Boolean!
+  "Clears GitHub API calls and reports whether the operation succeeded."
   clearGitHubApiCalls: Boolean!
+  "Clears GitHub webhook deliveries and reports whether the operation succeeded."
   clearGitHubWebhookDeliveries: Boolean!
-  refreshGitHubCachedEntry(id: ID!): GitHubCachedEntryDetail!
-  deleteGitHubCachedEntry(id: ID!): Boolean!
-  saveGitHubAppSettings(input: SaveGitHubAppSettingsInput!): GitHubAppSettings!
+  "Refreshes a GitHub cached entry and returns a GitHub cached entry detail."
+  refreshGitHubCachedEntry(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): GitHubCachedEntryDetail!
+  "Deletes a GitHub cached entry and reports whether the operation succeeded."
+  deleteGitHubCachedEntry(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves GitHub app settings and returns the updated GitHub app settings."
+  saveGitHubAppSettings(
+    "Values for the requested operation."
+    input: SaveGitHubAppSettingsInput!
+  ): GitHubAppSettings!
+  "Tests a GitHub connection and returns a GitHub viewer."
   testGitHubConnection: GitHubViewer!
+  "Tests a GitHub app connection and returns GitHub app settings."
   testGitHubAppConnection: GitHubAppSettings!
+  "Clears GitHub credentials and returns GitHub settings."
   clearGitHubCredentials: GitHubSettings!
+  "Clears GitHub app credentials and returns GitHub app settings."
   clearGitHubAppCredentials: GitHubAppSettings!
-  addGitHubRepository(input: AddGitHubRepositoryInput!): [GitHubRepository!]!
+  "Adds a GitHub repository and returns GitHub repositories."
+  addGitHubRepository(
+    "Values for the requested operation."
+    input: AddGitHubRepositoryInput!
+  ): [GitHubRepository!]!
+  "Updates a GitHub repository and returns the updated GitHub repository."
   updateGitHubRepository(
+    "Values for the requested operation."
     input: UpdateGitHubRepositoryInput!
   ): [GitHubRepository!]!
-  removeGitHubRepository(id: ID!): [GitHubRepository!]!
+  "Removes a GitHub repository and returns GitHub repositories."
+  removeGitHubRepository(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): [GitHubRepository!]!
+  "Merges a GitHub pull request and returns a GitHub pull request merge result."
   mergeGitHubPullRequest(
+    "Values for the requested operation."
     input: MergeGitHubPullRequestInput!
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
   ): GitHubPullRequestMergeResult!
+  "Creates a GitHub pull request and returns a GitHub pull request detail."
   createGitHubPullRequest(
+    "Values for the requested operation."
     input: CreateGitHubPullRequestInput!
   ): GitHubPullRequestDetail!
+  "Sets GitHub pull request labels and returns the updated GitHub pull request detail."
   setGitHubPullRequestLabels(
+    "Values for the requested operation."
     input: SetGitHubPullRequestLabelsInput!
   ): GitHubPullRequestDetail!
+  "Retries a GitHub pipeline and returns a GitHub pipeline."
   retryGitHubPipeline(
+    "Identifier of the repository."
     repositoryId: ID!
+    "Identifier of the check suite."
     checkSuiteId: ID!
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
   ): GitHubPipeline!
+  "Retries a GitHub workflow job and reports whether the operation succeeded."
   retryGitHubWorkflowJob(
+    "Identifier of the repository."
     repositoryId: ID!
+    "Identifier of the check suite."
     checkSuiteId: ID!
+    "Identifier of the job."
     jobId: ID!
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
   ): Boolean!
+  "Cancels a GitHub actions workflow run and reports whether the operation succeeded."
   cancelGitHubActionsWorkflowRun(
+    "Identifier of the codebase repository."
     codebaseRepositoryId: ID!
+    "Identifier of the workflow run."
     workflowRunId: ID!
+    "Whether force applies to the operation. Defaults to `false`."
     force: Boolean! = false
+    "The source used to filter or perform the operation."
     source: GitHubRequestSource!
   ): Boolean!
+  "Saves a GitHub auto retry rule and returns the updated GitHub auto retry rule."
   saveGitHubAutoRetryRule(
+    "Values for the requested operation."
     input: SaveGitHubAutoRetryRuleInput!
   ): GitHubAutoRetryRule!
+  "Sets whether GitHub auto retry rule is enabled and returns the updated GitHub auto retry rule."
   setGitHubAutoRetryRuleEnabled(
+    "Identifier of the resource to return or affect."
     id: ID!
+    "Whether enabled applies to the operation."
     enabled: Boolean!
   ): GitHubAutoRetryRule!
-  deleteGitHubAutoRetryRule(id: ID!): Boolean!
-  replyToGitHubReviewThread(threadId: ID!, body: String!): GitHubReviewComment!
-  setGitHubReviewThreadResolved(
+  "Deletes a GitHub auto retry rule and reports whether the operation succeeded."
+  deleteGitHubAutoRetryRule(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Replies to a GitHub review thread and returns a GitHub review comment."
+  replyToGitHubReviewThread(
+    "Identifier of the thread."
     threadId: ID!
+    "The body used to filter or perform the operation."
+    body: String!
+  ): GitHubReviewComment!
+  "Sets whether GitHub review thread is resolved and returns the updated GitHub review thread state."
+  setGitHubReviewThreadResolved(
+    "Identifier of the thread."
+    threadId: ID!
+    "Whether resolved applies to the operation."
     resolved: Boolean!
   ): GitHubReviewThreadState!
 }

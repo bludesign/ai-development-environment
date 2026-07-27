@@ -9,11 +9,15 @@
  * swaps them with `dark:hidden` / `hidden dark:block`, so `desktop-light` maps onto
  * `images/light/` and `desktop-dark` onto `images/dark/`. Mobile captures stay local.
  */
-import { createInterface } from "node:readline/promises";
-import { cp, mkdir, readdir, stat } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
+import { cp, mkdir, readdir } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 
-const DEFAULT_TARGET = "../ai-development-environment-docs";
+import {
+  DEFAULT_DOCS_DIRECTORY,
+  directoryExists,
+  resolveDocsDirectoryPath,
+  selectDocsDirectory,
+} from "./docs-directory.mjs";
 
 // Playwright project -> path within the docs project that its captures belong in.
 const PROJECT_DESTINATIONS = [
@@ -27,40 +31,8 @@ const PUBLISHED_EXTENSIONS = [".png", ".webm"];
 
 const sourceRoot = resolve(process.cwd(), "screenshots");
 
-/**
- * Resolves the docs directory from the CLI argument, or asks for it when the terminal is
- * interactive. A non-interactive run (CI, a task with no stdin) takes the default rather
- * than hanging on a prompt nobody can answer.
- */
-async function resolveTargetDirectory() {
-  const [argument] = process.argv.slice(2);
-  if (argument) return argument;
-  if (!process.stdin.isTTY) return DEFAULT_TARGET;
-
-  const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    const answer = await readline.question(
-      `Docs project directory [${DEFAULT_TARGET}]: `,
-    );
-    return answer.trim() || DEFAULT_TARGET;
-  } finally {
-    readline.close();
-  }
-}
-
-async function directoryExists(path) {
-  try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-const target = await resolveTargetDirectory();
-const targetRoot = isAbsolute(target) ? target : resolve(process.cwd(), target);
+const target = await selectDocsDirectory();
+const targetRoot = resolveDocsDirectoryPath(target);
 
 // Mistyping the prompt is ordinary, not exceptional, so these exit with a readable message
 // rather than a stack trace.
@@ -71,7 +43,7 @@ function fail(message) {
 
 if (!(await directoryExists(targetRoot))) {
   fail(
-    `Docs project not found at ${targetRoot}. Pass the directory as an argument, e.g. npm run screenshots:copy -- ${DEFAULT_TARGET}`,
+    `Docs project not found at ${targetRoot}. Pass the directory as an argument, e.g. npm run screenshots:copy -- ${DEFAULT_DOCS_DIRECTORY}`,
   );
 }
 

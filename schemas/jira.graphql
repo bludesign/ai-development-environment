@@ -1,444 +1,863 @@
+"Values supported for Jira source."
 enum JiraSourceKind {
+  "Represents the jql option."
   JQL
+  "Represents the board option."
   BOARD
 }
 
+"Values supported for Jira call source."
 enum JiraCallSource {
+  "Represents the live option."
   LIVE
+  "Represents the cache option."
   CACHE
+  "Represents the error option."
   ERROR
 }
 
+"Values supported for Jira ticket assignment."
 enum JiraTicketAssignmentFilter {
+  "Represents the all option."
   ALL
+  "Represents the unassigned or self option."
   UNASSIGNED_OR_SELF
+  "Represents the self in progress option."
   SELF_IN_PROGRESS
 }
 
+"Values supported for Jira text format."
 enum JiraTextFormat {
+  "Represents the adf option."
   ADF
+  "Represents the markdown option."
   MARKDOWN
+  "Represents the Jira wiki option."
   JIRA_WIKI
 }
 
+"Values supported for Jira text input format."
 enum JiraTextInputFormat {
+  "Represents the markdown option."
   MARKDOWN
+  "Represents the Jira wiki option."
   JIRA_WIKI
 }
 
+"Configurable settings for Jira."
 type JiraSettings {
+  "URL for this Jira settings. May be null when unavailable or not applicable."
   siteUrl: String
+  "The email associated with this Jira settings. May be null when unavailable or not applicable."
   email: String
+  "Whether the token configured condition is true for this Jira settings."
   tokenConfigured: Boolean!
+  "Cache TTL, in seconds."
   cacheTtlSeconds: Int!
+  "ISO 8601 timestamp when this Jira settings was last updated."
   updatedAt: String!
 }
 
+"Represents a Jira cache meta in the GraphQL API."
 type JiraCacheMeta {
+  "The source associated with this Jira cache meta."
   source: JiraCallSource!
+  "Whether this Jira cache meta is stale."
   stale: Boolean!
+  "ISO 8601 timestamp when this Jira cache meta was fetched."
   fetchedAt: String!
 }
 
+"Represents a Jira source in the GraphQL API."
 type JiraSource {
+  "Stable identifier for this Jira source."
   id: ID!
+  "Identifier of the related project."
   projectId: ID!
+  "Display name of this Jira source."
   name: String!
+  "Category of this Jira source."
   kind: JiraSourceKind!
+  "The value associated with this Jira source."
   value: String!
+  "Identifier of the related board. May be null when unavailable or not applicable."
   boardId: Int
+  "Zero-based position within the containing collection."
   position: Int!
 }
 
+"Represents a Jira project in the GraphQL API."
 type JiraProject {
+  "Stable identifier for this Jira project."
   id: ID!
+  "Identifier of the related Jira."
   jiraId: ID!
+  "The key associated with this Jira project."
   key: String!
+  "Display name of this Jira project."
   name: String!
+  "URL for this Jira project. May be null when unavailable or not applicable."
   avatarUrl: String
+  "Zero-based position within the containing collection."
   position: Int!
+  "The ticket assignment filter associated with this Jira project."
   ticketAssignmentFilter: JiraTicketAssignmentFilter!
+  "Whether the hide completed tickets condition is true for this Jira project."
   hideCompletedTickets: Boolean!
+  "Identifiers of the related completed statuses."
   completedStatusIds: [ID!]!
+  "Identifier of the related done status. May be null when unavailable or not applicable."
   doneStatusId: ID
+  "The branch naming script associated with this Jira project."
   branchNamingScript: String!
+  "Sources associated with this Jira project."
   sources: [JiraSource!]!
 }
 
+"Represents Jira project status in the GraphQL API."
 type JiraProjectStatus {
+  "Stable identifier for this Jira project status."
   id: ID!
+  "Display name of this Jira project status."
   name: String!
+  "The category associated with this Jira project status."
   category: String!
 }
 
+"Represents a Jira available project in the GraphQL API."
 type JiraAvailableProject {
+  "Identifier of the related Jira."
   jiraId: ID!
+  "The key associated with this Jira available project."
   key: String!
+  "Display name of this Jira available project."
   name: String!
+  "URL for this Jira available project. May be null when unavailable or not applicable."
   avatarUrl: String
 }
 
+"A summary of Jira ticket."
 type JiraTicketSummary {
+  "Stable identifier for this Jira ticket summary."
   id: ID!
+  "The key associated with this Jira ticket summary."
   key: String!
+  "The summary associated with this Jira ticket summary."
   summary: String!
+  "Identifier of the related status."
   statusId: String!
+  "Current status of this Jira ticket summary."
   status: String!
+  "The status category associated with this Jira ticket summary."
   statusCategory: String!
+  "Whether this Jira ticket summary is sue type."
   issueType: String
+  "The priority associated with this Jira ticket summary. May be null when unavailable or not applicable."
   priority: String
+  "The assignee associated with this Jira ticket summary. May be null when unavailable or not applicable."
   assignee: String
+  "Identifier of the related assignee account. May be null when unavailable or not applicable."
   assigneeAccountId: ID
+  "URL for this Jira ticket summary. May be null when unavailable or not applicable."
   assigneeAvatarUrl: String
+  "The project key associated with this Jira ticket summary."
   projectKey: String!
+  "ISO 8601 timestamp when this Jira ticket summary was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
 
+"Represents a Jira ticket board in the GraphQL API."
 type JiraTicketBoard {
+  "The source associated with this Jira ticket board."
   source: JiraSource!
+  "Tickets associated with this Jira ticket board."
   tickets: [JiraTicketSummary!]!
+  "Status orders associated with this Jira ticket board."
   statusOrder: [String!]!
+  "The cache associated with this Jira ticket board."
   cache: JiraCacheMeta!
+  "Whether this Jira ticket board is truncated."
   truncated: Boolean!
+  "Warnings associated with this Jira ticket board."
   warnings: [String!]!
 }
 
+"Represents a Jira person in the GraphQL API."
 type JiraPerson {
+  "Identifier of the related account. May be null when unavailable or not applicable."
   accountId: String
+  "The display name associated with this Jira person."
   displayName: String!
+  "URL for this Jira person. May be null when unavailable or not applicable."
   avatarUrl: String
 }
 
+"Represents a Jira named value in the GraphQL API."
 type JiraNamedValue {
+  "Stable identifier for this Jira named value."
   id: String
+  "Display name of this Jira named value."
   name: String!
 }
 
+"Represents a Jira comment in the GraphQL API."
 type JiraComment {
+  "Stable identifier for this Jira comment."
   id: ID!
+  "The author associated with this Jira comment. May be null when unavailable or not applicable."
   author: JiraPerson
+  "The body associated with this Jira comment. May be null when unavailable or not applicable."
   body: JSON
+  "The content associated with this Jira comment. May be null when unavailable or not applicable."
   content: JiraRichText
+  "ISO 8601 timestamp when this Jira comment was created. May be null when unavailable or not applicable."
   createdAt: String
+  "ISO 8601 timestamp when this Jira comment was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
 
+"Represents a Jira rich text in the GraphQL API."
 type JiraRichText {
+  "The format associated with this Jira rich text."
   format: JiraTextFormat!
+  "The raw associated with this Jira rich text. May be null when unavailable or not applicable."
   raw: JSON
+  "The raw text associated with this Jira rich text."
   rawText: String!
+  "The markdown associated with this Jira rich text."
   markdown: String!
+  "The wiki markup associated with this Jira rich text."
   wikiMarkup: String!
 }
 
+"Represents a Jira ticket field in the GraphQL API."
 type JiraTicketField {
+  "Stable identifier for this Jira ticket field."
   id: ID!
+  "Display name of this Jira ticket field."
   name: String!
+  "The schema type associated with this Jira ticket field. May be null when unavailable or not applicable."
   schemaType: String
+  "Whether the custom condition is true for this Jira ticket field."
   custom: Boolean!
+  "The value associated with this Jira ticket field. May be null when unavailable or not applicable."
   value: JSON
+  "The content associated with this Jira ticket field. May be null when unavailable or not applicable."
   content: JiraRichText
 }
 
+"Represents a Jira edit field in the GraphQL API."
 type JiraEditField {
+  "Stable identifier for this Jira edit field."
   id: ID!
+  "Display name of this Jira edit field."
   name: String!
+  "Whether this Jira edit field is required."
   required: Boolean!
+  "The schema type associated with this Jira edit field. May be null when unavailable or not applicable."
   schemaType: String
+  "Allowed values associated with this Jira edit field."
   allowedValues: [JiraNamedValue!]!
 }
 
+"Represents a Jira transition in the GraphQL API."
 type JiraTransition {
+  "Stable identifier for this Jira transition."
   id: ID!
+  "Display name of this Jira transition."
   name: String!
+  "Identifier of the related to status. May be null when unavailable or not applicable."
   toStatusId: ID
+  "The to status associated with this Jira transition."
   toStatus: String!
+  "The to status category associated with this Jira transition. May be null when unavailable or not applicable."
   toStatusCategory: String
+  "Whether this Jira transition has screen."
   hasScreen: Boolean!
+  "Required fields associated with this Jira transition."
   requiredFields: [String!]!
 }
 
+"Represents a Jira attachment in the GraphQL API."
 type JiraAttachment {
+  "Stable identifier for this Jira attachment."
   id: ID!
+  "The filename associated with this Jira attachment."
   filename: String!
+  "URL for this Jira attachment. May be null when unavailable or not applicable."
   contentUrl: String
+  "The mime type associated with this Jira attachment. May be null when unavailable or not applicable."
   mimeType: String
+  "The size associated with this Jira attachment. May be null when unavailable or not applicable."
   size: Int
+  "The author associated with this Jira attachment. May be null when unavailable or not applicable."
   author: JiraPerson
+  "ISO 8601 timestamp when this Jira attachment was created. May be null when unavailable or not applicable."
   createdAt: String
 }
 
+"Represents a Jira issue link in the GraphQL API."
 type JiraIssueLink {
+  "The relationship associated with this Jira issue link."
   relationship: String!
+  "The key associated with this Jira issue link."
   key: String!
+  "The summary associated with this Jira issue link."
   summary: String!
+  "Current status of this Jira issue link."
   status: String
 }
 
+"Detailed information about Jira ticket."
 type JiraTicketDetail {
+  "Stable identifier for this Jira ticket detail."
   id: ID!
+  "The key associated with this Jira ticket detail."
   key: String!
+  "The summary associated with this Jira ticket detail."
   summary: String!
+  "Identifier of the related status."
   statusId: String!
+  "Current status of this Jira ticket detail."
   status: String!
+  "The status category associated with this Jira ticket detail."
   statusCategory: String!
+  "Whether this Jira ticket detail is sue type."
   issueType: String
+  "The priority associated with this Jira ticket detail. May be null when unavailable or not applicable."
   priority: String
+  "The assignee associated with this Jira ticket detail. May be null when unavailable or not applicable."
   assignee: String
+  "Identifier of the related assignee account. May be null when unavailable or not applicable."
   assigneeAccountId: ID
+  "URL for this Jira ticket detail. May be null when unavailable or not applicable."
   assigneeAvatarUrl: String
+  "The project key associated with this Jira ticket detail."
   projectKey: String!
+  "ISO 8601 timestamp when this Jira ticket detail was last updated. May be null when unavailable or not applicable."
   updatedAt: String
+  "URL for this Jira ticket detail."
   jiraUrl: String!
+  "Human-readable description of this Jira ticket detail. May be null when unavailable or not applicable."
   description: JSON
+  "The description content associated with this Jira ticket detail. May be null when unavailable or not applicable."
   descriptionContent: JiraRichText
+  "The reporter associated with this Jira ticket detail. May be null when unavailable or not applicable."
   reporter: JiraPerson
+  "The creator associated with this Jira ticket detail. May be null when unavailable or not applicable."
   creator: JiraPerson
+  "Labels associated with this Jira ticket detail."
   labels: [String!]!
+  "Components associated with this Jira ticket detail."
   components: [JiraNamedValue!]!
+  "Fix versions associated with this Jira ticket detail."
   fixVersions: [JiraNamedValue!]!
+  "Affected versions associated with this Jira ticket detail."
   affectedVersions: [JiraNamedValue!]!
+  "Sprint names associated with this Jira ticket detail."
   sprintNames: [String!]!
+  "The parent associated with this Jira ticket detail. May be null when unavailable or not applicable."
   parent: JiraIssueLink
+  "Subtasks associated with this Jira ticket detail."
   subtasks: [JiraIssueLink!]!
+  "Whether this Jira ticket detail is sue links."
   issueLinks: [JiraIssueLink!]!
+  "Attachments associated with this Jira ticket detail."
   attachments: [JiraAttachment!]!
+  "Comments associated with this Jira ticket detail."
   comments: [JiraComment!]!
+  "ISO 8601 timestamp when this Jira ticket detail was created. May be null when unavailable or not applicable."
   createdAt: String
+  "ISO 8601 timestamp when this Jira ticket detail due. May be null when unavailable or not applicable."
   dueAt: String
+  "ISO 8601 timestamp when this Jira ticket detail was resolved. May be null when unavailable or not applicable."
   resolvedAt: String
+  "The time tracking associated with this Jira ticket detail. May be null when unavailable or not applicable."
   timeTracking: JSON
+  "All fields associated with this Jira ticket detail."
   allFields: [JiraTicketField!]!
+  "The cache associated with this Jira ticket detail."
   cache: JiraCacheMeta!
+  "The comments cache associated with this Jira ticket detail."
   commentsCache: JiraCacheMeta!
 }
 
+"Represents a Jira change item in the GraphQL API."
 type JiraChangeItem {
+  "The field associated with this Jira change item."
   field: String!
+  "Identifier of the related field. May be null when unavailable or not applicable."
   fieldId: ID
+  "The from associated with this Jira change item. May be null when unavailable or not applicable."
   from: String
+  "The to associated with this Jira change item. May be null when unavailable or not applicable."
   to: String
 }
 
+"Represents a Jira change in the GraphQL API."
 type JiraChange {
+  "Stable identifier for this Jira change."
   id: ID!
+  "The author associated with this Jira change. May be null when unavailable or not applicable."
   author: JiraPerson
+  "ISO 8601 timestamp when this Jira change was created. May be null when unavailable or not applicable."
   createdAt: String
+  "Items associated with this Jira change."
   items: [JiraChangeItem!]!
 }
 
+"A paginated collection of Jira changes."
 type JiraChangePage {
+  "Items associated with this Jira change page."
   items: [JiraChange!]!
+  "The total associated with this Jira change page."
   total: Int!
+  "The limit associated with this Jira change page."
   limit: Int!
+  "The offset associated with this Jira change page."
   offset: Int!
+  "The cache associated with this Jira change page."
   cache: JiraCacheMeta!
 }
 
+"Represents a Jira worklog in the GraphQL API."
 type JiraWorklog {
+  "Stable identifier for this Jira worklog."
   id: ID!
+  "The author associated with this Jira worklog. May be null when unavailable or not applicable."
   author: JiraPerson
+  "The comment associated with this Jira worklog. May be null when unavailable or not applicable."
   comment: JiraRichText
+  "The time spent associated with this Jira worklog. May be null when unavailable or not applicable."
   timeSpent: String
+  "Time spent, in seconds. May be null when unavailable or not applicable."
   timeSpentSeconds: Int
+  "ISO 8601 timestamp when this Jira worklog started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this Jira worklog was created. May be null when unavailable or not applicable."
   createdAt: String
+  "ISO 8601 timestamp when this Jira worklog was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
 
+"A paginated collection of Jira worklogs."
 type JiraWorklogPage {
+  "Items associated with this Jira worklog page."
   items: [JiraWorklog!]!
+  "The total associated with this Jira worklog page."
   total: Int!
+  "The limit associated with this Jira worklog page."
   limit: Int!
+  "The offset associated with this Jira worklog page."
   offset: Int!
+  "The cache associated with this Jira worklog page."
   cache: JiraCacheMeta!
 }
 
+"Represents a Jira connection test in the GraphQL API."
 type JiraConnectionTest {
+  "Identifier of the related account. May be null when unavailable or not applicable."
   accountId: String
+  "The display name associated with this Jira connection test."
   displayName: String!
+  "The email address associated with this Jira connection test. May be null when unavailable or not applicable."
   emailAddress: String
+  "The cache associated with this Jira connection test."
   cache: JiraCacheMeta!
 }
 
+"Represents a Jira metric window in the GraphQL API."
 type JiraMetricWindow {
+  "The window associated with this Jira metric window."
   window: String!
+  "The total associated with this Jira metric window."
   total: Int!
+  "The live associated with this Jira metric window."
   live: Int!
+  "The cache associated with this Jira metric window."
   cache: Int!
+  "The errors associated with this Jira metric window."
   errors: Int!
+  "The average ms associated with this Jira metric window."
   averageMs: Int!
 }
 
+"Represents a Jira operation metric in the GraphQL API."
 type JiraOperationMetric {
+  "The operation associated with this Jira operation metric."
   operation: String!
+  "Windows associated with this Jira operation metric."
   windows: [JiraMetricWindow!]!
 }
 
+"Represents Jira cache metrics in the GraphQL API."
 type JiraCacheMetrics {
+  "Windows associated with this Jira cache metrics."
   windows: [JiraMetricWindow!]!
+  "Operations associated with this Jira cache metrics."
   operations: [JiraOperationMetric!]!
 }
 
+"Represents a Jira API call in the GraphQL API."
 type JiraApiCall {
+  "Stable identifier for this Jira API call."
   id: ID!
+  "The operation associated with this Jira API call."
   operation: String!
+  "The request summary associated with this Jira API call."
   requestSummary: String!
+  "The source associated with this Jira API call."
   source: JiraCallSource!
+  "The duration ms associated with this Jira API call."
   durationMs: Int!
+  "The status code associated with this Jira API call. May be null when unavailable or not applicable."
   statusCode: Int
+  "Error message when this Jira API call did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Number of items. May be null when unavailable or not applicable."
   itemCount: Int
+  "Whether the served stale condition is true for this Jira API call."
   servedStale: Boolean!
+  "ISO 8601 timestamp when this Jira API call was created."
   createdAt: String!
 }
 
+"A paginated collection of Jira API calls."
 type JiraApiCallPage {
+  "Items associated with this Jira API call page."
   items: [JiraApiCall!]!
+  "The total associated with this Jira API call page."
   total: Int!
+  "The limit associated with this Jira API call page."
   limit: Int!
+  "The offset associated with this Jira API call page."
   offset: Int!
 }
 
+"Represents a Jira cached ticket in the GraphQL API."
 type JiraCachedTicket {
+  "Whether this Jira cached ticket is sue key."
   issueKey: ID!
+  "The project key associated with this Jira cached ticket."
   projectKey: String!
+  "The summary associated with this Jira cached ticket."
   summary: String!
+  "Current status of this Jira cached ticket."
   status: String
+  "The coverage associated with this Jira cached ticket."
   coverage: String!
+  "Whether this Jira cached ticket is stale."
   stale: Boolean!
+  "ISO 8601 timestamp when this Jira cached ticket summary fetched. May be null when unavailable or not applicable."
   summaryFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket detail fetched. May be null when unavailable or not applicable."
   detailFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket comments fetched. May be null when unavailable or not applicable."
   commentsFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket was last updated."
   updatedAt: String!
 }
 
+"A paginated collection of Jira cached tickets."
 type JiraCachedTicketPage {
+  "Items associated with this Jira cached ticket page."
   items: [JiraCachedTicket!]!
+  "The total associated with this Jira cached ticket page."
   total: Int!
+  "The limit associated with this Jira cached ticket page."
   limit: Int!
+  "The offset associated with this Jira cached ticket page."
   offset: Int!
 }
 
+"Represents a Jira cached entry reference in the GraphQL API."
 type JiraCachedEntryReference {
+  "Stable identifier for this Jira cached entry reference."
   id: ID!
+  "The operation associated with this Jira cached entry reference."
   operation: String!
+  "ISO 8601 timestamp when this Jira cached entry reference was fetched."
   fetchedAt: String!
 }
 
+"Detailed information about Jira cached ticket."
 type JiraCachedTicketDetail {
+  "Whether this Jira cached ticket detail is sue key."
   issueKey: ID!
+  "The project key associated with this Jira cached ticket detail."
   projectKey: String!
+  "The summary associated with this Jira cached ticket detail."
   summary: String!
+  "Current status of this Jira cached ticket detail."
   status: String
+  "The coverage associated with this Jira cached ticket detail."
   coverage: String!
+  "Whether this Jira cached ticket detail is stale."
   stale: Boolean!
+  "ISO 8601 timestamp when this Jira cached ticket detail summary fetched. May be null when unavailable or not applicable."
   summaryFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket detail detail fetched. May be null when unavailable or not applicable."
   detailFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket detail comments fetched. May be null when unavailable or not applicable."
   commentsFetchedAt: String
+  "ISO 8601 timestamp when this Jira cached ticket detail was last updated."
   updatedAt: String!
+  "The summary data associated with this Jira cached ticket detail. May be null when unavailable or not applicable."
   summaryData: JSON
+  "The detail data associated with this Jira cached ticket detail. May be null when unavailable or not applicable."
   detailData: JSON
+  "The comments data associated with this Jira cached ticket detail. May be null when unavailable or not applicable."
   commentsData: JSON
+  "Cache entries associated with this Jira cached ticket detail."
   cacheEntries: [JiraCachedEntryReference!]!
 }
 
+"Values used to save Jira settings."
 input SaveJiraSettingsInput {
+  "The site URL to use for the request."
   siteUrl: String!
+  "The email to use for the request."
   email: String!
+  "The API token to use for the request."
   apiToken: String
+  "Whether reset site applies to the request."
   resetSite: Boolean = false
 }
 
+"Values used to create a Jira source."
 input CreateJiraSourceInput {
+  "Identifier of the project to use."
   projectId: ID!
+  "The name to use for the request."
   name: String!
+  "The kind to use for the request."
   kind: JiraSourceKind!
+  "The value to use for the request."
   value: String!
 }
 
+"Values used to update a Jira source."
 input UpdateJiraSourceInput {
+  "Identifier of the update Jira source to affect."
   id: ID!
+  "The name to use for the request."
   name: String!
+  "The kind to use for the request."
   kind: JiraSourceKind!
+  "The value to use for the request."
   value: String!
 }
 
+"Values used to update Jira project display settings."
 input UpdateJiraProjectDisplaySettingsInput {
+  "Identifier of the project to use."
   projectId: ID!
+  "The ticket assignment filter to use for the request."
   ticketAssignmentFilter: JiraTicketAssignmentFilter!
+  "Whether hide completed tickets applies to the request."
   hideCompletedTickets: Boolean!
+  "Identifiers of the completed statuses to use."
   completedStatusIds: [ID!]!
+  "Identifier of the done status to use."
   doneStatusId: ID
 }
 
+"Input values for Jira text."
 input JiraTextInput {
+  "The format to use for the request."
   format: JiraTextInputFormat!
+  "The value to use for the request."
   value: String!
 }
 
+"Values used to update a Jira ticket."
 input UpdateJiraTicketInput {
+  "The issue key to use for the request."
   issueKey: ID!
+  "The summary to use for the request."
   summary: String
+  "The description to use for the request."
   description: JiraTextInput
+  "Identifier of the priority to use."
   priorityId: ID
+  "Labels to use for the request."
   labels: [String!]
+  "Identifiers of the components to use."
   componentIds: [ID!]
+  "Identifiers of the fix versions to use."
   fixVersionIds: [ID!]
+  "Identifiers of the affected versions to use."
   affectedVersionIds: [ID!]
+  "The due date to use for the request."
   dueDate: String
 }
 
 extend type Query {
+  "Returns Jira settings."
   jiraSettings: JiraSettings!
+  "Returns Jira available projects."
   jiraAvailableProjects: [JiraAvailableProject!]!
+  "Returns Jira projects."
   jiraProjects: [JiraProject!]!
-  jiraProjectStatuses(projectId: ID!): [JiraProjectStatus!]!
-  jiraTicketBoard(sourceId: ID!): JiraTicketBoard!
-  jiraTicket(issueKey: ID!): JiraTicketDetail!
-  jiraAssignableUsers(issueKey: ID!, query: String = ""): [JiraPerson!]!
-  jiraTicketTransitions(issueKey: ID!): [JiraTransition!]!
-  jiraTicketEditFields(issueKey: ID!): [JiraEditField!]!
-  jiraTicketChanges(
+  "Returns Jira project statuses."
+  jiraProjectStatuses(
+    "Identifier of the project."
+    projectId: ID!
+  ): [JiraProjectStatus!]!
+  "Returns a Jira ticket board."
+  jiraTicketBoard("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  "Returns a Jira ticket detail."
+  jiraTicket(
+    "The issue key used to filter or perform the operation."
     issueKey: ID!
+  ): JiraTicketDetail!
+  "Returns Jira people."
+  jiraAssignableUsers(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+    "Text used to filter matching records. Defaults to `\"\"`."
+    query: String = ""
+  ): [JiraPerson!]!
+  "Returns Jira transitions."
+  jiraTicketTransitions(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+  ): [JiraTransition!]!
+  "Returns Jira edit fields."
+  jiraTicketEditFields(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+  ): [JiraEditField!]!
+  "Returns a Jira change page."
+  jiraTicketChanges(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+    "Maximum number of records to return. Defaults to `50`."
     limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
     offset: Int = 0
   ): JiraChangePage!
+  "Returns a Jira worklog page."
   jiraTicketWorklogs(
+    "The issue key used to filter or perform the operation."
     issueKey: ID!
+    "Maximum number of records to return. Defaults to `50`."
     limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
     offset: Int = 0
   ): JiraWorklogPage!
+  "Returns Jira cache metrics."
   jiraCacheMetrics: JiraCacheMetrics!
-  jiraApiCalls(limit: Int = 50, offset: Int = 0): JiraApiCallPage!
-  jiraCachedTickets(limit: Int = 50, offset: Int = 0): JiraCachedTicketPage!
-  jiraCachedTicket(issueKey: ID!): JiraCachedTicketDetail
+  "Returns a Jira API call page."
+  jiraApiCalls(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
+    offset: Int = 0
+  ): JiraApiCallPage!
+  "Returns a Jira cached ticket page."
+  jiraCachedTickets(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+    "Number of matching records to skip. Defaults to `0`."
+    offset: Int = 0
+  ): JiraCachedTicketPage!
+  "Returns a Jira cached ticket detail, or null when it cannot be found."
+  jiraCachedTicket(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+  ): JiraCachedTicketDetail
 }
 
 extend type Mutation {
-  saveJiraSettings(input: SaveJiraSettingsInput!): JiraSettings!
+  "Saves Jira settings and returns the updated Jira settings."
+  saveJiraSettings(
+    "Values for the requested operation."
+    input: SaveJiraSettingsInput!
+  ): JiraSettings!
+  "Tests a Jira connection and returns a Jira connection test."
   testJiraConnection: JiraConnectionTest!
+  "Clears Jira credentials and returns Jira settings."
   clearJiraCredentials: JiraSettings!
-  addJiraProject(jiraId: ID!): [JiraProject!]!
-  removeJiraProject(projectId: ID!): [JiraProject!]!
-  createJiraSource(input: CreateJiraSourceInput!): [JiraProject!]!
-  updateJiraSource(input: UpdateJiraSourceInput!): [JiraProject!]!
-  deleteJiraSource(id: ID!): [JiraProject!]!
+  "Adds a Jira project and returns Jira projects."
+  addJiraProject("Identifier of the Jira." jiraId: ID!): [JiraProject!]!
+  "Removes a Jira project and returns Jira projects."
+  removeJiraProject(
+    "Identifier of the project."
+    projectId: ID!
+  ): [JiraProject!]!
+  "Creates a Jira source and returns Jira projects."
+  createJiraSource(
+    "Values for the requested operation."
+    input: CreateJiraSourceInput!
+  ): [JiraProject!]!
+  "Updates a Jira source and returns the updated Jira project."
+  updateJiraSource(
+    "Values for the requested operation."
+    input: UpdateJiraSourceInput!
+  ): [JiraProject!]!
+  "Deletes a Jira source and returns Jira projects."
+  deleteJiraSource(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): [JiraProject!]!
+  "Updates Jira project display settings and returns the updated Jira project."
   updateJiraProjectDisplaySettings(
+    "Values for the requested operation."
     input: UpdateJiraProjectDisplaySettingsInput!
   ): [JiraProject!]!
+  "Updates a Jira project branch naming and returns the updated Jira project."
   updateJiraProjectBranchNaming(
+    "Identifier of the project."
     projectId: ID!
+    "The branch naming script used to filter or perform the operation."
     branchNamingScript: String!
   ): [JiraProject!]!
-  refreshJiraSource(sourceId: ID!): JiraTicketBoard!
-  updateJiraCacheTtl(ttlMinutes: Int!): JiraSettings!
+  "Refreshes a Jira source and returns a Jira ticket board."
+  refreshJiraSource("Identifier of the source." sourceId: ID!): JiraTicketBoard!
+  "Updates a Jira cache TTL and returns the updated Jira settings."
+  updateJiraCacheTtl(
+    "The TTL minutes used to filter or perform the operation."
+    ttlMinutes: Int!
+  ): JiraSettings!
+  "Clears a Jira cache and reports whether the operation succeeded."
   clearJiraCache: Boolean!
+  "Clears Jira API calls and reports whether the operation succeeded."
   clearJiraApiCalls: Boolean!
-  refreshJiraCachedTicket(issueKey: ID!): JiraTicketDetail!
-  deleteJiraCachedTicket(issueKey: ID!): Boolean!
-  addJiraComment(issueKey: ID!, content: JiraTextInput!): JiraTicketDetail!
-  assignJiraTicket(issueKey: ID!, accountId: ID): JiraTicketDetail!
-  transitionJiraTicket(issueKey: ID!, transitionId: ID!): JiraTicketDetail!
-  updateJiraTicket(input: UpdateJiraTicketInput!): JiraTicketDetail!
+  "Refreshes a Jira cached ticket and returns a Jira ticket detail."
+  refreshJiraCachedTicket(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+  ): JiraTicketDetail!
+  "Deletes a Jira cached ticket and reports whether the operation succeeded."
+  deleteJiraCachedTicket(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+  ): Boolean!
+  "Adds a Jira comment and returns a Jira ticket detail."
+  addJiraComment(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+    "The content used to filter or perform the operation."
+    content: JiraTextInput!
+  ): JiraTicketDetail!
+  "Assigns a Jira ticket and returns a Jira ticket detail."
+  assignJiraTicket(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+    "Identifier of the account."
+    accountId: ID
+  ): JiraTicketDetail!
+  "Transitions a Jira ticket and returns a Jira ticket detail."
+  transitionJiraTicket(
+    "The issue key used to filter or perform the operation."
+    issueKey: ID!
+    "Identifier of the transition."
+    transitionId: ID!
+  ): JiraTicketDetail!
+  "Updates a Jira ticket and returns the updated Jira ticket detail."
+  updateJiraTicket(
+    "Values for the requested operation."
+    input: UpdateJiraTicketInput!
+  ): JiraTicketDetail!
 }

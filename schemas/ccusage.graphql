@@ -1,110 +1,199 @@
+"Values supported for Claude Code usage range."
 enum CcusageRange {
+  "Represents the all option."
   ALL
+  "Represents the last 7 days option."
   LAST_7_DAYS
+  "Represents the last 30 days option."
   LAST_30_DAYS
 }
 
+"Lifecycle statuses for Claude Code usage collection."
 enum CcusageCollectionStatus {
+  "Represents the collecting status for Claude Code usage collection."
   COLLECTING
+  "Represents the completed status for Claude Code usage collection."
   COMPLETED
 }
 
+"Lifecycle statuses for Claude Code usage agent."
 enum CcusageAgentStatus {
+  "Represents the queuing status for Claude Code usage agent."
   QUEUING
+  "Represents the queued status for Claude Code usage agent."
   QUEUED
+  "Represents the running status for Claude Code usage agent."
   RUNNING
+  "Represents the succeeded status for Claude Code usage agent."
   SUCCEEDED
+  "Represents the failed status for Claude Code usage agent."
   FAILED
+  "Represents the cancelled status for Claude Code usage agent."
   CANCELLED
+  "Represents the timed out status for Claude Code usage agent."
   TIMED_OUT
+  "Represents the offline status for Claude Code usage agent."
   OFFLINE
+  "Represents the unsupported status for Claude Code usage agent."
   UNSUPPORTED
+  "Represents the invalid status for Claude Code usage agent."
   INVALID
 }
 
+"Represents Claude Code usage metrics in the GraphQL API."
 type CcusageMetrics {
+  "The input tokens associated with this Claude Code usage metrics."
   inputTokens: Float!
+  "The output tokens associated with this Claude Code usage metrics."
   outputTokens: Float!
+  "The cache creation tokens associated with this Claude Code usage metrics."
   cacheCreationTokens: Float!
+  "The cache read tokens associated with this Claude Code usage metrics."
   cacheReadTokens: Float!
+  "The total tokens associated with this Claude Code usage metrics."
   totalTokens: Float!
+  "The total cost associated with this Claude Code usage metrics."
   totalCost: Float!
 }
 
+"Represents Claude Code usage agent usage in the GraphQL API."
 type CcusageAgentUsage {
+  "Identifier of the related agent."
   agentId: ID!
+  "The agent name associated with this Claude Code usage agent usage."
   agentName: String!
+  "Host name reported by this Claude Code usage agent usage."
   hostname: String!
+  "Sources associated with this Claude Code usage agent usage."
   sources: [String!]!
+  "The input tokens associated with this Claude Code usage agent usage."
   inputTokens: Float!
+  "The output tokens associated with this Claude Code usage agent usage."
   outputTokens: Float!
+  "The cache creation tokens associated with this Claude Code usage agent usage."
   cacheCreationTokens: Float!
+  "The cache read tokens associated with this Claude Code usage agent usage."
   cacheReadTokens: Float!
+  "The total tokens associated with this Claude Code usage agent usage."
   totalTokens: Float!
+  "The total cost associated with this Claude Code usage agent usage."
   totalCost: Float!
 }
 
+"Represents Claude Code usage model usage in the GraphQL API."
 type CcusageModelUsage {
+  "The model name associated with this Claude Code usage model usage."
   modelName: String!
+  "Whether the unattributed condition is true for this Claude Code usage model usage."
   unattributed: Boolean!
+  "Agents associated with this Claude Code usage model usage."
   agents: [CcusageAgentUsage!]!
+  "The input tokens associated with this Claude Code usage model usage."
   inputTokens: Float!
+  "The output tokens associated with this Claude Code usage model usage."
   outputTokens: Float!
+  "The cache creation tokens associated with this Claude Code usage model usage."
   cacheCreationTokens: Float!
+  "The cache read tokens associated with this Claude Code usage model usage."
   cacheReadTokens: Float!
+  "The total tokens associated with this Claude Code usage model usage."
   totalTokens: Float!
+  "The total cost associated with this Claude Code usage model usage."
   totalCost: Float!
 }
 
+"Represents Claude Code usage day usage in the GraphQL API."
 type CcusageDayUsage {
+  "The period associated with this Claude Code usage day usage."
   period: String!
+  "Sources associated with this Claude Code usage day usage."
   sources: [String!]!
+  "Models associated with this Claude Code usage day usage."
   models: [CcusageModelUsage!]!
+  "The input tokens associated with this Claude Code usage day usage."
   inputTokens: Float!
+  "The output tokens associated with this Claude Code usage day usage."
   outputTokens: Float!
+  "The cache creation tokens associated with this Claude Code usage day usage."
   cacheCreationTokens: Float!
+  "The cache read tokens associated with this Claude Code usage day usage."
   cacheReadTokens: Float!
+  "The total tokens associated with this Claude Code usage day usage."
   totalTokens: Float!
+  "The total cost associated with this Claude Code usage day usage."
   totalCost: Float!
 }
 
+"Represents a Claude Code usage aggregate in the GraphQL API."
 type CcusageAggregate {
+  "Days associated with this Claude Code usage aggregate."
   days: [CcusageDayUsage!]!
+  "The totals associated with this Claude Code usage aggregate."
   totals: CcusageMetrics!
 }
 
+"Represents Claude Code usage agent progress in the GraphQL API."
 type CcusageAgentProgress {
+  "The agent associated with this Claude Code usage agent progress."
   agent: Agent!
+  "Current status of this Claude Code usage agent progress."
   status: CcusageAgentStatus!
+  "Identifier of the related job. May be null when unavailable or not applicable."
   jobId: ID
+  "Error message when this Claude Code usage agent progress did not complete successfully. May be null when unavailable or not applicable."
   error: String
 }
 
+"Represents Claude Code usage progress in the GraphQL API."
 type CcusageProgress {
+  "Number of eligibles."
   eligibleCount: Int!
+  "Number of finisheds."
   finishedCount: Int!
+  "Number of successfuls."
   successfulCount: Int!
+  "Agents associated with this Claude Code usage progress."
   agents: [CcusageAgentProgress!]!
 }
 
+"A collected set of Claude Code usages."
 type CcusageCollection {
+  "Stable identifier for this Claude Code usage collection."
   id: ID!
+  "Current status of this Claude Code usage collection."
   status: CcusageCollectionStatus!
+  "ISO 8601 timestamp when this Claude Code usage collection was created."
   createdAt: String!
+  "ISO 8601 timestamp when this Claude Code usage collection deadline."
   deadlineAt: String!
+  "ISO 8601 timestamp when this Claude Code usage collection finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "The progress associated with this Claude Code usage collection."
   progress: CcusageProgress!
-  aggregate(range: CcusageRange = ALL): CcusageAggregate!
+  "The aggregate associated with this Claude Code usage collection."
+  aggregate(
+    "The range used to filter or perform the operation. Defaults to `ALL`."
+    range: CcusageRange = ALL
+  ): CcusageAggregate!
 }
 
 extend type Query {
-  ccusageCollection(id: ID!): CcusageCollection
+  "Returns a Claude Code usage collection, or null when it cannot be found."
+  ccusageCollection(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CcusageCollection
 }
 
 extend type Mutation {
-  collectCcusage(requestId: ID): CcusageCollection!
+  "Collects Claude Code usage and returns a Claude Code usage collection."
+  collectCcusage("Identifier of the request." requestId: ID): CcusageCollection!
 }
 
 extend type Subscription {
-  ccusageCollectionChanged(id: ID!): CcusageCollection!
+  "Emits a Claude Code usage collection whenever Claude Code usage collection changes."
+  ccusageCollectionChanged(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CcusageCollection!
 }

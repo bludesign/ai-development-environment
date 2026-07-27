@@ -1,416 +1,762 @@
+"Values supported for run."
 enum RunKind {
+  "Represents the plan option."
   PLAN
+  "Represents the session option."
   SESSION
 }
 
+"Lifecycle statuses for run."
 enum RunStatus {
+  "Represents the in progress status for run."
   IN_PROGRESS
+  "Represents the paused status for run."
   PAUSED
+  "Represents the completed status for run."
   COMPLETED
+  "Represents the cancelled status for run."
   CANCELLED
+  "Represents the failed status for run."
   FAILED
 }
 
+"Values supported for run origin."
 enum RunOrigin {
+  "Represents the managed option."
   MANAGED
+  "Represents the imported option."
   IMPORTED
 }
 
+"Represents a run worktree ref in the GraphQL API."
 type RunWorktreeRef {
+  "Stable identifier for this run worktree ref."
   id: ID!
+  "The folder associated with this run worktree ref."
   folder: String!
+  "Git branch associated with this run worktree ref. May be null when unavailable or not applicable."
   branch: String
+  "The highlight color associated with this run worktree ref. May be null when unavailable or not applicable."
   highlightColor: String
 }
 
+"Represents a run attachment in the GraphQL API."
 type RunAttachment {
+  "Stable identifier for this run attachment."
   id: ID!
+  "The filename associated with this run attachment."
   filename: String!
+  "The content type associated with this run attachment."
   contentType: String!
+  "The size associated with this run attachment."
   size: Int!
+  "The sha256 associated with this run attachment."
   sha256: String!
+  "Filesystem path associated with this run attachment."
   downloadPath: String!
+  "ISO 8601 timestamp when this run attachment was created."
   createdAt: String!
 }
 
+"Represents a run input in the GraphQL API."
 type RunInput {
+  "Stable identifier for this run input."
   id: ID!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "Category of this run input."
   kind: String!
+  "The prompt associated with this run input."
   prompt: String!
+  "Attachments associated with this run input."
   attachments: [RunAttachment!]!
+  "ISO 8601 timestamp when this run input was created."
   createdAt: String!
 }
 
+"Represents a run attempt in the GraphQL API."
 type RunAttempt {
+  "Stable identifier for this run attempt."
   id: ID!
+  "The generation associated with this run attempt."
   generation: Int!
+  "Identifier of the related native. May be null when unavailable or not applicable."
   nativeId: String
+  "Current status of this run attempt."
   status: String!
+  "The resume strategy associated with this run attempt. May be null when unavailable or not applicable."
   resumeStrategy: String
+  "ISO 8601 timestamp when this run attempt started."
   startedAt: String!
+  "ISO 8601 timestamp when this run attempt finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this run attempt was superseded. May be null when unavailable or not applicable."
   supersededAt: String
 }
 
+"An event emitted for run."
 type RunEvent {
+  "Stable identifier for this run event."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related attempt. May be null when unavailable or not applicable."
   attemptId: ID
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "Category of this run event."
   type: String!
+  "The summary associated with this run event."
   summary: String!
+  "The detail markdown associated with this run event. May be null when unavailable or not applicable."
   detailMarkdown: String
+  "The raw associated with this run event. May be null when unavailable or not applicable."
   raw: JSON
+  "ISO 8601 timestamp when this run event was created."
   createdAt: String!
+  "ISO 8601 timestamp when this run event was superseded. May be null when unavailable or not applicable."
   supersededAt: String
 }
 
+"Represents a run tool call in the GraphQL API."
 type RunToolCall {
+  "Stable identifier for this run tool call."
   id: ID!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "Display name of this run tool call."
   name: String!
+  "Current status of this run tool call."
   status: String!
+  "The input associated with this run tool call. May be null when unavailable or not applicable."
   input: JSON
+  "The output associated with this run tool call. May be null when unavailable or not applicable."
   output: JSON
+  "Error message when this run tool call did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this run tool call started."
   startedAt: String!
+  "ISO 8601 timestamp when this run tool call finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this run tool call was superseded. May be null when unavailable or not applicable."
   supersededAt: String
 }
 
+"Represents run model usage in the GraphQL API."
 type RunModelUsage {
+  "Stable identifier for this run model usage."
   id: ID!
+  "The model associated with this run model usage."
   model: String!
+  "The input tokens associated with this run model usage."
   inputTokens: Int!
+  "The output tokens associated with this run model usage."
   outputTokens: Int!
+  "The reasoning tokens associated with this run model usage."
   reasoningTokens: Int!
+  "The cache read tokens associated with this run model usage."
   cacheReadTokens: Int!
+  "The cache write tokens associated with this run model usage."
   cacheWriteTokens: Int!
+  "The estimated cost associated with this run model usage. May be null when unavailable or not applicable."
   estimatedCost: Float
+  "Whether the superseded condition is true for this run model usage."
   superseded: Boolean!
 }
 
+"Represents a run question option in the GraphQL API."
 type RunQuestionOption {
+  "Stable identifier for this run question option."
   id: ID!
+  "Zero-based position within the containing collection."
   position: Int!
+  "Human-readable label for this run question option."
   label: String!
+  "Human-readable description of this run question option. May be null when unavailable or not applicable."
   description: String
 }
 
+"Represents a run question in the GraphQL API."
 type RunQuestion {
+  "Stable identifier for this run question."
   id: ID!
+  "Zero-based position within the containing collection."
   position: Int!
+  "The header associated with this run question. May be null when unavailable or not applicable."
   header: String
+  "The prompt associated with this run question."
   prompt: String!
+  "Whether the multi select condition is true for this run question."
   multiSelect: Boolean!
+  "Whether the allow custom condition is true for this run question."
   allowCustom: Boolean!
+  "Options associated with this run question."
   options: [RunQuestionOption!]!
 }
 
+"Represents a run answer revision in the GraphQL API."
 type RunAnswerRevision {
+  "Stable identifier for this run answer revision."
   id: ID!
+  "The revision associated with this run answer revision."
   revision: Int!
+  "The answers associated with this run answer revision."
   answers: JSON!
+  "ISO 8601 timestamp when this run answer revision was created."
   createdAt: String!
+  "ISO 8601 timestamp when this run answer revision was superseded. May be null when unavailable or not applicable."
   supersededAt: String
+  "Identifier of the related replacement attempt. May be null when unavailable or not applicable."
   replacementAttemptId: ID
 }
 
+"A batch of run questions processed together."
 type RunQuestionBatch {
+  "Stable identifier for this run question batch."
   id: ID!
+  "Identifier of the related native request. May be null when unavailable or not applicable."
   nativeRequestId: String
+  "The event sequence associated with this run question batch. May be null when unavailable or not applicable."
   eventSequence: Int
+  "Current status of this run question batch."
   status: String!
+  "Questions associated with this run question batch."
   questions: [RunQuestion!]!
+  "Answer revisions associated with this run question batch."
   answerRevisions: [RunAnswerRevision!]!
+  "ISO 8601 timestamp when this run question batch was created."
   createdAt: String!
+  "ISO 8601 timestamp when this run question batch answered. May be null when unavailable or not applicable."
   answeredAt: String
+  "ISO 8601 timestamp when this run question batch was superseded. May be null when unavailable or not applicable."
   supersededAt: String
+  "ISO 8601 timestamp when this run question batch revision prepared. May be null when unavailable or not applicable."
   revisionPreparedAt: String
+  "The rollback patch associated with this run question batch. May be null when unavailable or not applicable."
   rollbackPatch: String
+  "The pushed commit warning associated with this run question batch. May be null when unavailable or not applicable."
   pushedCommitWarning: String
+  "The checkpoint associated with this run question batch. May be null when unavailable or not applicable."
   checkpoint: RunCheckpoint
 }
 
+"A paginated collection of run question batches."
 type RunQuestionBatchPage {
+  "Items associated with this run question batch page."
   items: [RunQuestionBatch!]!
+  "The next cursor associated with this run question batch page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"A summary of run usage."
 type RunUsageSummary {
+  "The input tokens associated with this run usage summary."
   inputTokens: Int!
+  "The output tokens associated with this run usage summary."
   outputTokens: Int!
+  "The reasoning tokens associated with this run usage summary."
   reasoningTokens: Int!
+  "The cache read tokens associated with this run usage summary."
   cacheReadTokens: Int!
+  "The cache write tokens associated with this run usage summary."
   cacheWriteTokens: Int!
+  "Number of tool calls."
   toolCallCount: Int!
+  "The estimated cost associated with this run usage summary. May be null when unavailable or not applicable."
   estimatedCost: Float
+  "Model usages associated with this run usage summary."
   modelUsage: [RunModelUsage!]!
+  "Tool calls associated with this run usage summary."
   toolCalls: [RunToolCall!]!
 }
 
+"Represents a run checkpoint in the GraphQL API."
 type RunCheckpoint {
+  "Stable identifier for this run checkpoint."
   id: ID!
+  "Category of this run checkpoint."
   kind: String!
+  "Git commit SHA associated with this run checkpoint. May be null when unavailable or not applicable."
   headSha: String
+  "Git branch associated with this run checkpoint. May be null when unavailable or not applicable."
   branch: String
+  "Git commit SHA associated with this run checkpoint. May be null when unavailable or not applicable."
   upstreamSha: String
+  "The index tree associated with this run checkpoint. May be null when unavailable or not applicable."
   indexTree: String
+  "The worktree tree associated with this run checkpoint. May be null when unavailable or not applicable."
   worktreeTree: String
+  "The ref name associated with this run checkpoint. May be null when unavailable or not applicable."
   refName: String
+  "The diff summary associated with this run checkpoint. May be null when unavailable or not applicable."
   diffSummary: String
+  "The diff patch associated with this run checkpoint. May be null when unavailable or not applicable."
   diffPatch: String
+  "The stash ref associated with this run checkpoint. May be null when unavailable or not applicable."
   stashRef: String
+  "ISO 8601 timestamp when this run checkpoint was created."
   createdAt: String!
 }
 
+"Represents an agent run in the GraphQL API."
 type AgentRun {
+  "Stable identifier for this agent run."
   id: ID!
+  "Category of this agent run."
   kind: RunKind!
+  "The display number associated with this agent run."
   displayNumber: Int!
+  "Current status of this agent run."
   status: RunStatus!
+  "The phase associated with this agent run."
   phase: String!
+  "The origin associated with this agent run."
   origin: RunOrigin!
+  "The provider associated with this agent run."
   provider: String!
+  "The provider version associated with this agent run. May be null when unavailable or not applicable."
   providerVersion: String
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Identifier of the related agent. May be null when unavailable or not applicable."
   agentId: ID
+  "The worktree associated with this agent run. May be null when unavailable or not applicable."
   worktree: RunWorktreeRef
+  "The Jira issue key associated with this agent run. May be null when unavailable or not applicable."
   jiraIssueKey: String
+  "The repository name associated with this agent run."
   repositoryName: String!
+  "Git branch associated with this agent run. May be null when unavailable or not applicable."
   branch: String
+  "The model associated with this agent run."
   model: String!
+  "The effort associated with this agent run. May be null when unavailable or not applicable."
   effort: String
+  "Whether the web search enabled condition is true for this agent run."
   webSearchEnabled: Boolean!
+  "Identifiers of the related MCP presets."
   mcpPresetIds: [ID!]!
+  "MCP tool names associated with this agent run."
   mcpToolNames: [String!]!
+  "The initial prompt associated with this agent run."
   initialPrompt: String!
+  "The final output associated with this agent run. May be null when unavailable or not applicable."
   finalOutput: String
+  "Error message when this agent run did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The estimated cost associated with this agent run. May be null when unavailable or not applicable."
   estimatedCost: Float
+  "The pricing source associated with this agent run. May be null when unavailable or not applicable."
   pricingSource: String
+  "ISO 8601 timestamp when this agent run pricing updated. May be null when unavailable or not applicable."
   pricingUpdatedAt: String
+  "The input tokens associated with this agent run."
   inputTokens: Int!
+  "The output tokens associated with this agent run."
   outputTokens: Int!
+  "The reasoning tokens associated with this agent run."
   reasoningTokens: Int!
+  "The cache read tokens associated with this agent run."
   cacheReadTokens: Int!
+  "The cache write tokens associated with this agent run."
   cacheWriteTokens: Int!
+  "Number of tool calls."
   toolCallCount: Int!
+  "Identifier of the related source plan. May be null when unavailable or not applicable."
   sourcePlanId: ID
+  "The source plan number associated with this agent run. May be null when unavailable or not applicable."
   sourcePlanNumber: Int
+  "ISO 8601 timestamp when this agent run played. May be null when unavailable or not applicable."
   playedAt: String
+  "The played session number associated with this agent run. May be null when unavailable or not applicable."
   playedSessionNumber: Int
+  "The source plan associated with this agent run. May be null when unavailable or not applicable."
   sourcePlan: AgentRun
+  "The played session associated with this agent run. May be null when unavailable or not applicable."
   playedSession: AgentRun
+  "Identifier of the related parent run. May be null when unavailable or not applicable."
   parentRunId: ID
+  "The parent run number associated with this agent run. May be null when unavailable or not applicable."
   parentRunNumber: Int
+  "The parent run associated with this agent run. May be null when unavailable or not applicable."
   parentRun: AgentRun
+  "The follow up mode associated with this agent run. May be null when unavailable or not applicable."
   followUpMode: String
+  "Follow ups associated with this agent run."
   followUps: [AgentRun!]!
+  "Attempts associated with this agent run."
   attempts: [RunAttempt!]!
+  "Inputs associated with this agent run."
   inputs: [RunInput!]!
+  "Model usages associated with this agent run."
   modelUsage: [RunModelUsage!]!
+  "Tool calls associated with this agent run."
   toolCalls: [RunToolCall!]!
+  "Question batches associated with this agent run."
   questionBatches: [RunQuestionBatch!]!
+  "Checkpoints associated with this agent run."
   checkpoints: [RunCheckpoint!]!
+  "ISO 8601 timestamp when this agent run was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "ISO 8601 timestamp when this agent run native archived. May be null when unavailable or not applicable."
   nativeArchivedAt: String
+  "ISO 8601 timestamp when this agent run started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this agent run finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this agent run was created."
   createdAt: String!
+  "ISO 8601 timestamp when this agent run was last updated."
   updatedAt: String!
 }
 
+"A paginated collection of agent runs."
 type AgentRunPage {
+  "Items associated with this agent run page."
   items: [AgentRun!]!
+  "The next cursor associated with this agent run page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"Represents a run draft in the GraphQL API."
 type RunDraft {
+  "Stable identifier for this run draft."
   id: ID!
+  "Category of this run draft."
   kind: RunKind!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Identifier of the related agent. May be null when unavailable or not applicable."
   agentId: ID
+  "The worktree associated with this run draft. May be null when unavailable or not applicable."
   worktree: RunWorktreeRef
+  "The Jira issue key associated with this run draft. May be null when unavailable or not applicable."
   jiraIssueKey: String
+  "The provider associated with this run draft."
   provider: String!
+  "The model associated with this run draft."
   model: String!
+  "The effort associated with this run draft. May be null when unavailable or not applicable."
   effort: String
+  "Whether the web search enabled condition is true for this run draft."
   webSearchEnabled: Boolean!
+  "Identifiers of the related MCP presets."
   mcpPresetIds: [ID!]!
+  "The prompt associated with this run draft."
   prompt: String!
+  "Attachments associated with this run draft."
   attachments: [RunAttachment!]!
+  "ISO 8601 timestamp when this run draft was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "ISO 8601 timestamp when this run draft was created."
   createdAt: String!
+  "ISO 8601 timestamp when this run draft was last updated."
   updatedAt: String!
 }
 
+"A paginated collection of run drafts."
 type RunDraftPage {
+  "Items associated with this run draft page."
   items: [RunDraft!]!
+  "The next cursor associated with this run draft page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"Represents a run provider model in the GraphQL API."
 type RunProviderModel {
+  "Stable identifier for this run provider model."
   id: String!
+  "Human-readable label for this run provider model."
   label: String!
+  "Efforts associated with this run provider model."
   efforts: [String!]!
   "Sub-catalog this model belongs to, where the provider fronts several."
   group: String
 }
 
+"Represents a run provider catalog entry in the GraphQL API."
 type RunProviderCatalogEntry {
+  "The key associated with this run provider catalog entry."
   key: String!
+  "Human-readable label for this run provider catalog entry."
   label: String!
+  "Whether this run provider catalog entry is available."
   available: Boolean!
+  "Models associated with this run provider catalog entry."
   models: [RunProviderModel!]!
+  "Whether this run provider catalog entry supports web search."
   supportsWebSearch: Boolean!
+  "Whether this run provider catalog entry supports questions."
   supportsQuestions: Boolean!
+  "Whether this run provider catalog entry supports import."
   supportsImport: Boolean!
+  "Whether this run provider catalog entry supports pause."
   supportsPause: Boolean!
+  "Whether this run provider catalog entry supports steering."
   supportsSteering: Boolean!
+  "Whether this run provider catalog entry supports resume."
   supportsResume: Boolean!
+  "Whether this run provider catalog entry supports native delete."
   supportsNativeDelete: Boolean!
 }
 
+"Represents a run command in the GraphQL API."
 type RunCommand {
+  "Stable identifier for this run command."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "Identifier of the related agent."
   agentId: ID!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "Category of this run command."
   type: String!
+  "Structured payload associated with this run command."
   payload: JSON!
+  "Current status of this run command."
   status: String!
+  "Error message when this run command did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The run associated with this run command."
   run: AgentRun!
+  "ISO 8601 timestamp when this run command was created."
   createdAt: String!
+  "ISO 8601 timestamp when this run command claimed. May be null when unavailable or not applicable."
   claimedAt: String
+  "ISO 8601 timestamp when this run command finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Represents run provider import status in the GraphQL API."
 type RunProviderImportStatus {
+  "Stable identifier for this run provider import status."
   id: ID!
+  "Identifier of the related agent."
   agentId: ID!
+  "The provider associated with this run provider import status."
   provider: String!
+  "The cursor associated with this run provider import status. May be null when unavailable or not applicable."
   cursor: String
+  "Current status of this run provider import status."
   status: String!
+  "ISO 8601 timestamp when this run provider import status last started. May be null when unavailable or not applicable."
   lastStartedAt: String
+  "ISO 8601 timestamp when this run provider import status last completed. May be null when unavailable or not applicable."
   lastCompletedAt: String
+  "The last error associated with this run provider import status. May be null when unavailable or not applicable."
   lastError: String
+  "Number of importeds."
   importedCount: Int!
+  "Number of unmatcheds."
   unmatchedCount: Int!
+  "The catalog associated with this run provider import status. May be null when unavailable or not applicable."
   catalog: JSON
+  "ISO 8601 timestamp when this run provider import status was last updated."
   updatedAt: String!
 }
 
+"Values used to run a configuration."
 input RunConfigurationInput {
+  "The kind to use for the request."
   kind: RunKind!
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The Jira issue key to use for the request."
   jiraIssueKey: String
+  "The provider to use for the request."
   provider: String!
+  "The model to use for the request."
   model: String!
+  "The effort to use for the request."
   effort: String
+  "Whether web search enabled applies to the request."
   webSearchEnabled: Boolean = true
+  "The prompt to use for the request."
   prompt: String!
+  "Identifiers of the attachments to use."
   attachmentIds: [ID!] = []
+  "Identifiers of the MCP presets to use."
   mcpPresetIds: [ID!] = []
+  "Identifier of the draft to use."
   draftId: ID
+  "Identifier of the source plan to use."
   sourcePlanId: ID
+  "Identifier of the parent run to use."
   parentRunId: ID
+  "The follow up mode to use for the request."
   followUpMode: String
+  "The context mode to use for the request."
   contextMode: String
 }
 
+"Values used to save a run draft."
 input SaveRunDraftInput {
+  "Identifier of the save run draft to affect."
   id: ID
+  "The kind to use for the request."
   kind: RunKind!
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The Jira issue key to use for the request."
   jiraIssueKey: String
+  "The provider to use for the request."
   provider: String!
+  "The model to use for the request."
   model: String!
+  "The effort to use for the request."
   effort: String
+  "Whether web search enabled applies to the request."
   webSearchEnabled: Boolean = true
+  "The prompt to use for the request."
   prompt: String!
+  "Identifiers of the attachments to use."
   attachmentIds: [ID!] = []
+  "Identifiers of the MCP presets to use."
   mcpPresetIds: [ID!] = []
 }
 
+"Values used to run an event."
 input RunEventInput {
+  "Identifier of the run event to affect."
   id: ID!
+  "The sequence to use for the request."
   sequence: Int!
+  "The type to use for the request."
   type: String!
+  "The summary to use for the request."
   summary: String!
+  "The search text to use for the request."
   searchText: String
+  "The detail markdown to use for the request."
   detailMarkdown: String
+  "The raw to use for the request."
   raw: JSON
+  "The created at to use for the request."
   createdAt: String
 }
 
+"Values used to run a question option."
 input RunQuestionOptionInput {
+  "The label to use for the request."
   label: String!
+  "The description to use for the request."
   description: String
 }
 
+"Values used to run a question."
 input RunQuestionInput {
+  "Identifier of the run question to affect."
   id: ID
+  "The header to use for the request."
   header: String
+  "The prompt to use for the request."
   prompt: String!
+  "Whether multi select applies to the request."
   multiSelect: Boolean = false
+  "Whether allow custom applies to the request."
   allowCustom: Boolean = true
+  "Options to use for the request."
   options: [RunQuestionOptionInput!] = []
 }
 
+"Values used to run usage."
 input RunUsageInput {
+  "The model to use for the request."
   model: String!
+  "The input tokens to use for the request."
   inputTokens: Int
+  "The output tokens to use for the request."
   outputTokens: Int
+  "The reasoning tokens to use for the request."
   reasoningTokens: Int
+  "The cache read tokens to use for the request."
   cacheReadTokens: Int
+  "The cache write tokens to use for the request."
   cacheWriteTokens: Int
+  "The estimated cost to use for the request."
   estimatedCost: Float
+  "The tool call count to use for the request."
   toolCallCount: Int
+  "The pricing source to use for the request."
   pricingSource: String
 }
 
+"Values used to finish a run attempt."
 input FinishRunAttemptInput {
+  "The status to use for the request."
   status: RunStatus!
+  "The phase to use for the request."
   phase: String
+  "The final output to use for the request."
   finalOutput: String
+  "The error to use for the request."
   error: String
 }
 
+"Values used to report a run checkpoint."
 input ReportRunCheckpointInput {
+  "The kind to use for the request."
   kind: String!
+  "The head SHA to use for the request."
   headSha: String
+  "The branch to use for the request."
   branch: String
+  "The upstream SHA to use for the request."
   upstreamSha: String
+  "The index tree to use for the request."
   indexTree: String
+  "The worktree tree to use for the request."
   worktreeTree: String
+  "The ref name to use for the request."
   refName: String
+  "The manifest JSON to use for the request."
   manifestJson: String
+  "The diff summary to use for the request."
   diffSummary: String
+  "The diff patch to use for the request."
   diffPatch: String
+  "The stash ref to use for the request."
   stashRef: String
+  "Identifier of the question batch to use."
   questionBatchId: ID
 }
 
+"Input values for imported run."
 input ImportedRunInput {
+  "Identifier of the native to use."
   nativeId: String!
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The kind to use for the request."
   kind: RunKind
+  "The status to use for the request."
   status: String
+  "Whether the resource should be archived."
   archived: Boolean
+  "The model to use for the request."
   model: String
+  "The effort to use for the request."
   effort: String
+  "The prompt to use for the request."
   prompt: String
+  "The final output to use for the request."
   finalOutput: String
+  "The branch to use for the request."
   branch: String
+  "The Jira issue key to use for the request."
   jiraIssueKey: String
+  "The created at to use for the request."
   createdAt: String
+  "The updated at to use for the request."
   updatedAt: String
+  "The raw metadata to use for the request."
   rawMetadata: JSON
 }
 
@@ -419,119 +765,304 @@ The untouched on-disk session transcript from the AI tool (Claude Code or Codex)
 base64-encoded. Read live off the agent host, so it requires an online agent.
 """
 type RunNativeSessionFile {
+  "The filename associated with this run native session file."
   filename: String!
+  "Content Base64, encoded as Base64."
   contentBase64: String!
 }
 
 extend type Query {
+  "Returns an agent run page."
   agentRuns(
+    "The kind used to filter or perform the operation."
     kind: RunKind!
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "The archive used to filter or perform the operation. Defaults to `\"ACTIVE\"`."
     archive: String = "ACTIVE"
+    "The provider used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     provider: String
+    "The origin used to filter or perform the operation. Omit it to leave this dimension unfiltered."
     origin: RunOrigin
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): AgentRunPage!
-  agentRun(id: ID!): AgentRun
+  "Returns an agent run, or null when it cannot be found."
+  agentRun("Identifier of the resource to return or affect." id: ID!): AgentRun
+  "Returns run events."
   runEvents(
+    "Identifier of the run."
     runId: ID!
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "The after sequence used to filter or perform the operation. Defaults to `-1`."
     afterSequence: Int = -1
+    "Maximum number of records to return. Defaults to `200`."
     first: Int = 200
+    "Whether include superseded applies to the operation. Defaults to `false`."
     includeSuperseded: Boolean = false
   ): [RunEvent!]!
+  "Returns a run question batch page."
   runQuestionBatches(
+    "Identifier of the run."
     runId: ID!
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): RunQuestionBatchPage!
-  runUsage(runId: ID!): RunUsageSummary
-  runNativeSessionFile(runId: ID!): RunNativeSessionFile!
-  runLinkedItems(runId: ID!): [AgentRun!]!
+  "Returns a run usage summary, or null when it cannot be found."
+  runUsage("Identifier of the run." runId: ID!): RunUsageSummary
+  "Returns a run native session file."
+  runNativeSessionFile(
+    "Identifier of the run."
+    runId: ID!
+  ): RunNativeSessionFile!
+  "Returns agent runs."
+  runLinkedItems("Identifier of the run." runId: ID!): [AgentRun!]!
+  "Returns a run draft page."
   runDrafts(
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "The archive used to filter or perform the operation. Defaults to `\"ACTIVE\"`."
     archive: String = "ACTIVE"
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): RunDraftPage!
-  runDraft(id: ID!): RunDraft
-  runProviderCatalog(runId: ID, worktreeId: ID): [RunProviderCatalogEntry!]!
+  "Returns a run draft, or null when it cannot be found."
+  runDraft("Identifier of the resource to return or affect." id: ID!): RunDraft
+  "Returns run provider catalog entries."
+  runProviderCatalog(
+    "Identifier of the run. Omit it to leave this dimension unfiltered."
+    runId: ID
+    "Identifier of the worktree. Omit it to leave this dimension unfiltered."
+    worktreeId: ID
+  ): [RunProviderCatalogEntry!]!
+  "Returns run provider import statuses."
   runProviderImportStatus: [RunProviderImportStatus!]!
+  "Returns run commands."
   pendingRunCommands: [RunCommand!]!
 }
 
 extend type Mutation {
-  createAgentRun(input: RunConfigurationInput!): AgentRun!
-  playPlan(planId: ID!, mcpPresetIds: [ID!] = []): AgentRun!
-  createRunFollowUp(sourceId: ID!, input: RunConfigurationInput!): AgentRun!
-  saveRunDraft(input: SaveRunDraftInput!): RunDraft!
-  archiveAgentRuns(ids: [ID!]!, archived: Boolean!): Int!
-  deleteAgentRuns(ids: [ID!]!): Int!
-  archiveRunDrafts(ids: [ID!]!, archived: Boolean!): Int!
-  deleteRunDrafts(ids: [ID!]!): Int!
-  pauseAgentRun(id: ID!): AgentRun!
-  continueAgentRun(id: ID!): AgentRun!
-  cancelAgentRun(id: ID!): AgentRun!
-  steerAgentRun(id: ID!, prompt: String!, attachmentIds: [ID!] = []): AgentRun!
-  answerRunQuestion(batchId: ID!, answers: JSON!): AgentRun!
-  prepareRunAnswerRevision(batchId: ID!): AgentRun!
-  reviseRunAnswer(
+  "Creates an agent run and returns an agent run."
+  createAgentRun(
+    "Values for the requested operation."
+    input: RunConfigurationInput!
+  ): AgentRun!
+  "Plays a plan and returns an agent run."
+  playPlan(
+    "Identifier of the plan."
+    planId: ID!
+    "Identifiers of the MCP presets. Defaults to `[]`."
+    mcpPresetIds: [ID!] = []
+  ): AgentRun!
+  "Creates a run follow up and returns an agent run."
+  createRunFollowUp(
+    "Identifier of the source."
+    sourceId: ID!
+    "Values for the requested operation."
+    input: RunConfigurationInput!
+  ): AgentRun!
+  "Saves a run draft and returns the updated run draft."
+  saveRunDraft(
+    "Values for the requested operation."
+    input: SaveRunDraftInput!
+  ): RunDraft!
+  "Archives agent runs and returns the number of affected records."
+  archiveAgentRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): Int!
+  "Deletes agent runs and returns the number of deleted records."
+  deleteAgentRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Int!
+  "Archives run drafts and returns the number of affected records."
+  archiveRunDrafts(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): Int!
+  "Deletes run drafts and returns the number of deleted records."
+  deleteRunDrafts(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Int!
+  "Pauses an agent run and returns an agent run."
+  pauseAgentRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): AgentRun!
+  "Continues an agent run and returns an agent run."
+  continueAgentRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): AgentRun!
+  "Cancels an agent run and returns an agent run."
+  cancelAgentRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): AgentRun!
+  "Steers an agent run and returns an agent run."
+  steerAgentRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The prompt used to filter or perform the operation."
+    prompt: String!
+    "Identifiers of the attachments. Defaults to `[]`."
+    attachmentIds: [ID!] = []
+  ): AgentRun!
+  "Answers a run question and returns an agent run."
+  answerRunQuestion(
+    "Identifier of the batch."
     batchId: ID!
+    "The answers used to filter or perform the operation."
     answers: JSON!
+  ): AgentRun!
+  "Prepares a run answer revision and returns an agent run."
+  prepareRunAnswerRevision("Identifier of the batch." batchId: ID!): AgentRun!
+  "Revises a run answer and returns an agent run."
+  reviseRunAnswer(
+    "Identifier of the batch."
+    batchId: ID!
+    "The answers used to filter or perform the operation."
+    answers: JSON!
+    "Whether stash applies to the operation. Defaults to `false`."
     stash: Boolean = false
+    "Whether rollback applies to the operation. Defaults to `true`."
     rollback: Boolean = true
   ): AgentRun!
-
-  claimRunCommand(id: ID!): RunCommand!
-  completeRunCommand(id: ID!, status: String!, error: String): RunCommand!
-  beginRunAttempt(runId: ID!, nativeId: String): RunAttempt!
+  "Claims a run command and returns a run command."
+  claimRunCommand(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): RunCommand!
+  "Completes a run command and returns a run command."
+  completeRunCommand(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The status used to filter or perform the operation."
+    status: String!
+    "The error used to filter or perform the operation."
+    error: String
+  ): RunCommand!
+  "Begins a run attempt and returns a run attempt."
+  beginRunAttempt(
+    "Identifier of the run."
+    runId: ID!
+    "Identifier of the native."
+    nativeId: String
+  ): RunAttempt!
+  "Updates a run attempt native ID and returns the updated run attempt."
   updateRunAttemptNativeId(
+    "Identifier of the attempt."
     attemptId: ID!
+    "Identifier of the native."
     nativeId: String!
+    "The provider version used to filter or perform the operation."
     providerVersion: String
   ): RunAttempt!
+  "Appends run events and returns run events."
   appendRunEvents(
+    "Identifier of the run."
     runId: ID!
+    "Identifier of the attempt."
     attemptId: ID
+    "Events used to filter or perform the operation."
     events: [RunEventInput!]!
   ): [RunEvent!]!
+  "Reports a run question and returns a run question batch."
   reportRunQuestion(
+    "Identifier of the run."
     runId: ID!
+    "Identifier of the attempt."
     attemptId: ID
+    "Identifier of the native request."
     nativeRequestId: String
+    "The event sequence used to filter or perform the operation."
     eventSequence: Int
+    "Questions used to filter or perform the operation."
     questions: [RunQuestionInput!]!
   ): RunQuestionBatch!
-  reportRunUsage(runId: ID!, attemptId: ID, input: RunUsageInput!): AgentRun!
-  finishRunAttempt(attemptId: ID!, input: FinishRunAttemptInput!): AgentRun!
-  reportRunCheckpoint(
+  "Reports run usage and returns an agent run."
+  reportRunUsage(
+    "Identifier of the run."
     runId: ID!
+    "Identifier of the attempt."
     attemptId: ID
+    "Values for the requested operation."
+    input: RunUsageInput!
+  ): AgentRun!
+  "Finishes a run attempt and returns an agent run."
+  finishRunAttempt(
+    "Identifier of the attempt."
+    attemptId: ID!
+    "Values for the requested operation."
+    input: FinishRunAttemptInput!
+  ): AgentRun!
+  "Reports a run checkpoint and returns a run checkpoint."
+  reportRunCheckpoint(
+    "Identifier of the run."
+    runId: ID!
+    "Identifier of the attempt."
+    attemptId: ID
+    "Values for the requested operation."
     input: ReportRunCheckpointInput!
   ): RunCheckpoint!
+  "Reports a run answer revision preview and returns a run question batch."
   reportRunAnswerRevisionPreview(
+    "Identifier of the batch."
     batchId: ID!
+    "The rollback patch used to filter or perform the operation."
     rollbackPatch: String!
+    "The pushed commit warning used to filter or perform the operation."
     pushedCommitWarning: String
   ): RunQuestionBatch!
+  "Applies a run answer revision and returns an agent run."
   applyRunAnswerRevision(
+    "Identifier of the batch."
     batchId: ID!
+    "Identifier of the revision."
     revisionId: ID!
+    "Identifier of the replacement attempt."
     replacementAttemptId: ID!
   ): AgentRun!
-  importProviderRuns(provider: String!, runs: [ImportedRunInput!]!): Int!
-  reportRunProviderImportStatus(
+  "Imports provider runs and returns the number of affected records."
+  importProviderRuns(
+    "The provider used to filter or perform the operation."
     provider: String!
+    "Runs used to filter or perform the operation."
+    runs: [ImportedRunInput!]!
+  ): Int!
+  "Reports run provider import status and returns run provider import status."
+  reportRunProviderImportStatus(
+    "The provider used to filter or perform the operation."
+    provider: String!
+    "The status used to filter or perform the operation."
     status: String!
+    "The error used to filter or perform the operation."
     error: String
+    "The catalog used to filter or perform the operation."
     catalog: JSON
   ): RunProviderImportStatus!
 }
 
 extend type Subscription {
+  "Emits an agent run whenever agent runs change."
   agentRunsChanged: AgentRun
-  agentRunChanged(runId: ID!): AgentRun!
-  runEventAdded(runId: ID!): RunEvent!
-  runQuestionChanged(runId: ID!): RunQuestionBatch!
+  "Emits an agent run whenever agent run changes."
+  agentRunChanged("Identifier of the run." runId: ID!): AgentRun!
+  "Emits a run event whenever run event is added."
+  runEventAdded("Identifier of the run." runId: ID!): RunEvent!
+  "Emits a run question batch whenever run question changes."
+  runQuestionChanged("Identifier of the run." runId: ID!): RunQuestionBatch!
 }

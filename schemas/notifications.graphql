@@ -1,124 +1,239 @@
+"Represents an app notification in the GraphQL API."
 type AppNotification {
+  "Stable identifier for this app notification."
   id: ID!
+  "The type key associated with this app notification."
   typeKey: String!
+  "Human-readable title for this app notification."
   title: String!
+  "The body associated with this app notification."
   body: String!
+  "Application URL for this app notification."
   href: String!
+  "The resource kind associated with this app notification."
   resourceKind: String!
+  "Identifier of the related resource."
   resourceId: ID!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The highlight color associated with this app notification. May be null when unavailable or not applicable."
   highlightColor: String
+  "Whether the sidebar requested condition is true for this app notification."
   sidebarRequested: Boolean!
+  "Whether the browser requested condition is true for this app notification."
   browserRequested: Boolean!
+  "Whether the web push requested condition is true for this app notification."
   webPushRequested: Boolean!
+  "ISO 8601 timestamp when this app notification sidebar dismissed. May be null when unavailable or not applicable."
   sidebarDismissedAt: String
+  "ISO 8601 timestamp when this app notification was created."
   createdAt: String!
+  "ISO 8601 timestamp when this app notification was last updated."
   updatedAt: String!
 }
 
+"A paginated collection of app notifications."
 type AppNotificationPage {
+  "Items associated with this app notification page."
   items: [AppNotification!]!
+  "The next cursor associated with this app notification page. May be null when unavailable or not applicable."
   nextCursor: ID
+  "Number of totals."
   totalCount: Int!
 }
 
+"Represents a notification preference in the GraphQL API."
 type NotificationPreference {
+  "The key associated with this notification preference."
   key: String!
+  "The category associated with this notification preference."
   category: String!
+  "Human-readable label for this notification preference."
   label: String!
+  "Human-readable description of this notification preference."
   description: String!
+  "Whether the sidebar enabled condition is true for this notification preference."
   sidebarEnabled: Boolean!
+  "Whether the browser enabled condition is true for this notification preference."
   browserEnabled: Boolean!
+  "Whether the web push enabled condition is true for this notification preference."
   webPushEnabled: Boolean!
+  "ISO 8601 timestamp when this notification preference was last updated. May be null when unavailable or not applicable."
   updatedAt: String
 }
 
+"Represents a web push state in the GraphQL API."
 type WebPushState {
+  "Whether this web push state is configured."
   configured: Boolean!
+  "The public key associated with this web push state. May be null when unavailable or not applicable."
   publicKey: String
+  "Number of subscriptions."
   subscriptionCount: Int!
 }
 
+"Represents a web push subscription in the GraphQL API."
 type WebPushSubscription {
+  "Stable identifier for this web push subscription."
   id: ID!
+  "The endpoint associated with this web push subscription."
   endpoint: String!
+  "The expiration time associated with this web push subscription. May be null when unavailable or not applicable."
   expirationTime: String
+  "The locale associated with this web push subscription. May be null when unavailable or not applicable."
   locale: String
+  "The user agent associated with this web push subscription. May be null when unavailable or not applicable."
   userAgent: String
+  "ISO 8601 timestamp when this web push subscription was last seen."
   lastSeenAt: String!
+  "ISO 8601 timestamp when this web push subscription was created."
   createdAt: String!
+  "ISO 8601 timestamp when this web push subscription was last updated."
   updatedAt: String!
 }
 
+"Values supported for notification change."
 enum NotificationChangeKind {
+  "Represents the created option."
   CREATED
+  "Represents the dismissed option."
   DISMISSED
+  "Represents the sidebar cleared option."
   SIDEBAR_CLEARED
+  "Represents the deleted option."
   DELETED
+  "Represents the history cleared option."
   HISTORY_CLEARED
+  "Represents the preferences updated option."
   PREFERENCES_UPDATED
 }
 
+"Represents a notification change in the GraphQL API."
 type NotificationChange {
+  "Category of this notification change."
   kind: NotificationChangeKind!
+  "The notification associated with this notification change. May be null when unavailable or not applicable."
   notification: AppNotification
+  "Identifier of the related notification. May be null when unavailable or not applicable."
   notificationId: ID
 }
 
+"Values used to save a notification preference."
 input SaveNotificationPreferenceInput {
+  "The type key to use for the request."
   typeKey: String!
+  "Whether sidebar enabled applies to the request."
   sidebarEnabled: Boolean!
+  "Whether browser enabled applies to the request."
   browserEnabled: Boolean!
+  "Whether web push enabled applies to the request."
   webPushEnabled: Boolean!
 }
 
+"Input values for notification time range."
 input NotificationTimeRangeInput {
+  "The start to use for the request."
   start: String!
+  "The end to use for the request."
   end: String!
 }
 
+"Input values for notification selection."
 input NotificationSelectionInput {
+  "Whether all applies to the request."
   all: Boolean = false
+  "Identifiers of the resources to affect."
   ids: [ID!] = []
+  "Identifiers of the excludeds to use."
   excludedIds: [ID!] = []
+  "Ranges to use for the request."
   ranges: [NotificationTimeRangeInput!] = []
+  "Excluded ranges to use for the request."
   excludedRanges: [NotificationTimeRangeInput!] = []
 }
 
+"Values used to register a web push subscription."
 input RegisterWebPushSubscriptionInput {
+  "The endpoint to use for the request."
   endpoint: String!
+  "The p256dh to use for the request."
   p256dh: String!
+  "The auth to use for the request."
   auth: String!
+  "The expiration time to use for the request."
   expirationTime: Float
+  "The locale to use for the request."
   locale: String
+  "The user agent to use for the request."
   userAgent: String
 }
 
 extend type Query {
-  notifications(first: Int = 100, after: ID): AppNotificationPage!
-  sidebarNotifications(limit: Int = 50): [AppNotification!]!
+  "Returns an app notification page."
+  notifications(
+    "Maximum number of records to return. Defaults to `100`."
+    first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
+    after: ID
+  ): AppNotificationPage!
+  "Returns app notifications."
+  sidebarNotifications(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+  ): [AppNotification!]!
+  "Returns notification preferences."
   notificationPreferences: [NotificationPreference!]!
+  "Returns a web push state."
   webPushState: WebPushState!
+  "Returns web push subscriptions."
   webPushSubscriptions: [WebPushSubscription!]!
 }
 
 extend type Mutation {
+  "Saves a notification preference and returns the updated notification preference."
   saveNotificationPreference(
+    "Values for the requested operation."
     input: SaveNotificationPreferenceInput!
   ): NotificationPreference!
-  dismissNotification(id: ID!): Boolean!
+  "Dismisses a notification and reports whether the operation succeeded."
+  dismissNotification(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Dismisses all sidebar notifications and returns the number of affected records."
   dismissAllSidebarNotifications: Int!
-  deleteNotifications(selection: NotificationSelectionInput!): Int!
+  "Deletes notifications and returns the number of deleted records."
+  deleteNotifications(
+    "The selection used to filter or perform the operation."
+    selection: NotificationSelectionInput!
+  ): Int!
+  "Deletes all notifications and returns the number of deleted records."
   deleteAllNotifications: Int!
+  "Prepares a web push and returns a web push state."
   prepareWebPush: WebPushState!
+  "Registers a web push subscription and returns a web push state."
   registerWebPushSubscription(
+    "Values for the requested operation."
     input: RegisterWebPushSubscriptionInput!
   ): WebPushState!
-  unregisterWebPushSubscription(endpoint: String!): Boolean!
-  deleteWebPushSubscription(id: ID!): Boolean!
-  testWebPushSubscription(id: ID!): Boolean!
+  "Unregisters a web push subscription and reports whether the operation succeeded."
+  unregisterWebPushSubscription(
+    "The endpoint used to filter or perform the operation."
+    endpoint: String!
+  ): Boolean!
+  "Deletes a web push subscription and reports whether the operation succeeded."
+  deleteWebPushSubscription(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Tests a web push subscription and reports whether the operation succeeded."
+  testWebPushSubscription(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
 }
 
 extend type Subscription {
+  "Emits a notification change whenever notifications change."
   notificationsChanged: NotificationChange!
 }

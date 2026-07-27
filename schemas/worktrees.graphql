@@ -1,464 +1,926 @@
+"Values supported for worktree editor variant."
 enum WorktreeEditorVariant {
+  "Represents the code option."
   CODE
+  "Represents the code insiders option."
   CODE_INSIDERS
+  "No worktree editor variant applies."
   NONE
 }
 
+"Values supported for worktree operation."
 enum WorktreeOperation {
+  "Represents the open editor option."
   OPEN_EDITOR
+  "Represents the force push option."
   FORCE_PUSH
+  "Represents the sync option."
   SYNC
+  "Represents the rebase option."
   REBASE
+  "Represents the cancel rebase option."
   CANCEL_REBASE
+  "Represents the push option."
   PUSH
+  "Represents the reset option."
   RESET
+  "Represents the stash all option."
   STASH_ALL
+  "Represents the stage all option."
   STAGE_ALL
+  "Represents the unstage all option."
   UNSTAGE_ALL
 }
 
+"Values supported for worktree branch."
 enum WorktreeBranchMode {
+  "Uses the new mode."
   NEW
+  "Uses the existing mode."
   EXISTING
+  "Uses the ticket mode."
   TICKET
 }
 
+"Lifecycle statuses for worktree push."
 enum WorktreePushStatus {
+  "Represents the ready status for worktree push."
   READY
+  "Represents the dirty status for worktree push."
   DIRTY
+  "Represents the detached status for worktree push."
   DETACHED
+  "Represents the behind status for worktree push."
   BEHIND
+  "Represents the diverged status for worktree push."
   DIVERGED
+  "The worktree push is not known."
   UNKNOWN
 }
 
+"Values supported for worktree move destination."
 enum WorktreeMoveDestinationMode {
+  "Uses the new mode."
   NEW
+  "Uses the existing mode."
   EXISTING
 }
 
+"Lifecycle statuses for worktree move."
 enum WorktreeMoveStatus {
+  "Represents the pushing status for worktree move."
   PUSHING
+  "Represents the checking out status for worktree move."
   CHECKING_OUT
+  "Represents the awaiting stash status for worktree move."
   AWAITING_STASH
+  "Represents the cleaning up status for worktree move."
   CLEANING_UP
+  "Represents the succeeded status for worktree move."
   SUCCEEDED
+  "Represents the succeeded with warning status for worktree move."
   SUCCEEDED_WITH_WARNING
+  "Represents the failed status for worktree move."
   FAILED
+  "Represents the cancelled status for worktree move."
   CANCELLED
 }
 
+"Represents a worktree tag in the GraphQL API."
 type WorktreeTag {
+  "Stable identifier for this worktree tag."
   id: ID!
+  "Display name of this worktree tag."
   name: String!
+  "The color associated with this worktree tag."
   color: String!
+  "ISO 8601 timestamp when this worktree tag was created."
   createdAt: String!
+  "ISO 8601 timestamp when this worktree tag was last updated."
   updatedAt: String!
 }
 
+"Configurable settings for worktree."
 type WorktreeSettings {
+  "The editor variant associated with this worktree settings."
   editorVariant: WorktreeEditorVariant!
+  "ISO 8601 timestamp when this worktree settings was last updated."
   updatedAt: String!
 }
 
+"Represents a worktree latest build artifact in the GraphQL API."
 type WorktreeLatestBuildArtifact {
+  "Stable identifier for this worktree latest build artifact."
   id: ID!
+  "Category of this worktree latest build artifact."
   kind: String!
 }
 
+"Represents a worktree latest build in the GraphQL API."
 type WorktreeLatestBuild {
+  "Stable identifier for this worktree latest build."
   id: ID!
+  "Current status of this worktree latest build."
   status: BuildStatus!
+  "The action associated with this worktree latest build."
   action: BuildAction!
+  "The destination type associated with this worktree latest build."
   destinationType: BuildDestinationType!
+  "The destination associated with this worktree latest build."
   destination: JSON!
+  "Whether the out of date condition is true for this worktree latest build."
   outOfDate: Boolean!
+  "Artifacts associated with this worktree latest build."
   artifacts: [WorktreeLatestBuildArtifact!]!
+  "ISO 8601 timestamp when this worktree latest build was created."
   createdAt: String!
 }
 
+"Represents a worktree auto sync in the GraphQL API."
 type WorktreeAutoSync {
+  "Identifier of the related worktree."
   worktreeId: ID!
+  "Current state of this worktree auto sync."
   state: String!
+  "Identifier of the related conflict workflow. May be null when unavailable or not applicable."
   conflictWorkflowId: ID
+  "The conflict workflow choice associated with this worktree auto sync. May be null when unavailable or not applicable."
   conflictWorkflowChoice: String
+  "The last error associated with this worktree auto sync. May be null when unavailable or not applicable."
   lastError: String
+  "ISO 8601 timestamp when this worktree auto sync was last synchronized. May be null when unavailable or not applicable."
   lastSyncedAt: String
+  "ISO 8601 timestamp when this worktree auto sync was last updated."
   updatedAt: String!
 }
 
+"Represents a worktree auto merge in the GraphQL API."
 type WorktreeAutoMerge {
+  "Identifier of the related worktree."
   worktreeId: ID!
+  "Current state of this worktree auto merge."
   state: String!
+  "The repository name with owner associated with this worktree auto merge."
   repositoryNameWithOwner: String!
+  "The pull request number associated with this worktree auto merge."
   pullRequestNumber: Int!
+  "The merge method associated with this worktree auto merge."
   mergeMethod: GitHubMergeMethod!
+  "The commit headline associated with this worktree auto merge."
   commitHeadline: String!
+  "The commit body associated with this worktree auto merge."
   commitBody: String!
+  "The author email associated with this worktree auto merge. May be null when unavailable or not applicable."
   authorEmail: String
+  "Whether the delete worktree condition is true for this worktree auto merge."
   deleteWorktree: Boolean!
+  "Whether the move ticket to done condition is true for this worktree auto merge."
   moveTicketToDone: Boolean!
+  "The ticket key associated with this worktree auto merge. May be null when unavailable or not applicable."
   ticketKey: ID
+  "The last error associated with this worktree auto merge. May be null when unavailable or not applicable."
   lastError: String
+  "ISO 8601 timestamp when this worktree auto merge was last updated."
   updatedAt: String!
 }
 
+"Represents a worktree in the GraphQL API."
 type Worktree {
+  "Stable identifier for this worktree."
   id: ID!
+  "Identifier of the related codebase."
   codebaseId: ID!
+  "Filesystem directory associated with this worktree."
   gitDirectory: String!
+  "The folder associated with this worktree."
   folder: String!
+  "Filesystem path associated with this worktree."
   relativePath: String!
+  "Whether this worktree is the primary item."
   primary: Boolean!
+  "Git branch associated with this worktree. May be null when unavailable or not applicable."
   branch: String
+  "Git commit SHA associated with this worktree. May be null when unavailable or not applicable."
   headSha: String
+  "The upstream associated with this worktree. May be null when unavailable or not applicable."
   upstream: String
+  "The ahead associated with this worktree. May be null when unavailable or not applicable."
   ahead: Int
+  "The behind associated with this worktree. May be null when unavailable or not applicable."
   behind: Int
+  "The sync state associated with this worktree."
   syncState: CodebaseSyncState!
+  "Git branch associated with this worktree. May be null when unavailable or not applicable."
   baseBranch: String
+  "The base branch override associated with this worktree. May be null when unavailable or not applicable."
   baseBranchOverride: String
+  "The base ahead associated with this worktree. May be null when unavailable or not applicable."
   baseAhead: Int
+  "The base behind associated with this worktree. May be null when unavailable or not applicable."
   baseBehind: Int
+  "Whether this worktree has staged changes."
   hasStagedChanges: Boolean!
+  "Whether this worktree has unstaged changes."
   hasUnstagedChanges: Boolean!
+  "Whether the rebase in progress condition is true for this worktree."
   rebaseInProgress: Boolean!
+  "Whether this worktree has conflicts."
   hasConflicts: Boolean!
+  "The push status associated with this worktree."
   pushStatus: WorktreePushStatus!
+  "The highlight color associated with this worktree. May be null when unavailable or not applicable."
   highlightColor: String
+  "The availability associated with this worktree."
   availability: String!
+  "The status error associated with this worktree. May be null when unavailable or not applicable."
   statusError: String
+  "The ticket key associated with this worktree. May be null when unavailable or not applicable."
   ticketKey: String
+  "The ticket title associated with this worktree. May be null when unavailable or not applicable."
   ticketTitle: String
+  "The ticket status associated with this worktree. May be null when unavailable or not applicable."
   ticketStatus: String
+  "The pull request associated with this worktree. May be null when unavailable or not applicable."
   pullRequest: GitHubPullRequest
+  "The latest build associated with this worktree. May be null when unavailable or not applicable."
   latestBuild: WorktreeLatestBuild
+  "Tags associated with this worktree."
   tags: [WorktreeTag!]!
+  "The active job associated with this worktree. May be null when unavailable or not applicable."
   activeJob: AgentJob
+  "The auto sync associated with this worktree. May be null when unavailable or not applicable."
   autoSync: WorktreeAutoSync
+  "The auto merge associated with this worktree. May be null when unavailable or not applicable."
   autoMerge: WorktreeAutoMerge
+  "ISO 8601 timestamp when this worktree was last checked. May be null when unavailable or not applicable."
   lastCheckedAt: String
+  "ISO 8601 timestamp when this worktree was first observed missing. May be null when unavailable or not applicable."
   missingAt: String
+  "ISO 8601 timestamp when this worktree was created."
   createdAt: String!
+  "ISO 8601 timestamp when this worktree was last updated."
   updatedAt: String!
 }
 
+"Represents a worktree codebase group in the GraphQL API."
 type WorktreeCodebaseGroup {
+  "The codebase associated with this worktree codebase group."
   codebase: Codebase!
+  "The repository associated with this worktree codebase group."
   repository: CodebaseRepository!
+  "Worktrees associated with this worktree codebase group."
   worktrees: [Worktree!]!
+  "Whether the iOS build configured condition is true for this worktree codebase group."
   iosBuildConfigured: Boolean!
+  "Quick actions associated with this worktree codebase group."
   quickActions: [Workflow!]!
+  "Merge conflict quick actions associated with this worktree codebase group."
   mergeConflictQuickActions: [Workflow!]!
 }
 
+"Represents a worktree agent group in the GraphQL API."
 type WorktreeAgentGroup {
+  "The agent associated with this worktree agent group."
   agent: Agent!
+  "Codebases associated with this worktree agent group."
   codebases: [WorktreeCodebaseGroup!]!
 }
 
+"Represents a worktree overview in the GraphQL API."
 type WorktreeOverview {
+  "Agents associated with this worktree overview."
   agents: [WorktreeAgentGroup!]!
+  "Tags associated with this worktree overview."
   tags: [WorktreeTag!]!
+  "The settings associated with this worktree overview."
   settings: WorktreeSettings!
+  "Number of hiddens."
   hiddenCount: Int!
+  "Active moves associated with this worktree overview."
   activeMoves: [WorktreeMove!]!
 }
 
+"Represents a worktree move in the GraphQL API."
 type WorktreeMove {
+  "Stable identifier for this worktree move."
   id: ID!
+  "Identifier of the related source worktree."
   sourceWorktreeId: ID!
+  "Identifier of the related source codebase."
   sourceCodebaseId: ID!
+  "Identifier of the related target codebase."
   targetCodebaseId: ID!
+  "Identifier of the related target worktree. May be null when unavailable or not applicable."
   targetWorktreeId: ID
+  "The destination mode associated with this worktree move."
   destinationMode: WorktreeMoveDestinationMode!
+  "Git branch associated with this worktree move."
   branch: String!
+  "Git commit SHA associated with this worktree move."
   headSha: String!
+  "Whether the delete source condition is true for this worktree move."
   deleteSource: Boolean!
+  "Current status of this worktree move."
   status: WorktreeMoveStatus!
+  "Identifier of the related source job. May be null when unavailable or not applicable."
   sourceJobId: ID
+  "Identifier of the related target job. May be null when unavailable or not applicable."
   targetJobId: ID
+  "Identifier of the related cleanup job. May be null when unavailable or not applicable."
   cleanupJobId: ID
+  "Error message when this worktree move did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Warning associated with this worktree move. May be null when unavailable or not applicable."
   warning: String
+  "ISO 8601 timestamp when this worktree move was created."
   createdAt: String!
+  "ISO 8601 timestamp when this worktree move was last updated."
   updatedAt: String!
+  "ISO 8601 timestamp when this worktree move finished. May be null when unavailable or not applicable."
   finishedAt: String
 }
 
+"Represents a worktree commit in the GraphQL API."
 type WorktreeCommit {
+  "Git commit SHA associated with this worktree commit."
   sha: String!
+  "The subject associated with this worktree commit."
   subject: String!
+  "The author name associated with this worktree commit."
   authorName: String!
+  "ISO 8601 timestamp when this worktree commit was authored."
   authoredAt: String!
+  "The additions associated with this worktree commit."
   additions: Int!
+  "The deletions associated with this worktree commit."
   deletions: Int!
 }
 
+"Represents a worktree change in the GraphQL API."
 type WorktreeChange {
+  "Filesystem path associated with this worktree change."
   path: String!
+  "Filesystem path associated with this worktree change. May be null when unavailable or not applicable."
   previousPath: String
+  "The change type associated with this worktree change."
   changeType: String!
+  "Whether the staged condition is true for this worktree change."
   staged: Boolean!
+  "Whether the unstaged condition is true for this worktree change."
   unstaged: Boolean!
+  "Whether the untracked condition is true for this worktree change."
   untracked: Boolean!
+  "Whether the conflicted condition is true for this worktree change."
   conflicted: Boolean!
+  "The staged additions associated with this worktree change. May be null when unavailable or not applicable."
   stagedAdditions: Int
+  "The staged deletions associated with this worktree change. May be null when unavailable or not applicable."
   stagedDeletions: Int
+  "The unstaged additions associated with this worktree change. May be null when unavailable or not applicable."
   unstagedAdditions: Int
+  "The unstaged deletions associated with this worktree change. May be null when unavailable or not applicable."
   unstagedDeletions: Int
 }
 
+"Represents a worktree diff file in the GraphQL API."
 type WorktreeDiffFile {
+  "Filesystem path associated with this worktree diff file."
   path: String!
+  "Filesystem path associated with this worktree diff file. May be null when unavailable or not applicable."
   previousPath: String
+  "The change type associated with this worktree diff file."
   changeType: String!
+  "The additions associated with this worktree diff file. May be null when unavailable or not applicable."
   additions: Int
+  "The deletions associated with this worktree diff file. May be null when unavailable or not applicable."
   deletions: Int
+  "Whether the binary condition is true for this worktree diff file."
   binary: Boolean!
+  "Whether the image condition is true for this worktree diff file."
   image: Boolean!
 }
 
+"Represents a worktree file diff in the GraphQL API."
 type WorktreeFileDiff {
+  "Files associated with this worktree file diff."
   files: [WorktreeDiffFile!]!
+  "The patch associated with this worktree file diff. May be null when unavailable or not applicable."
   patch: String
+  "Whether the image condition is true for this worktree file diff."
   image: Boolean
+  "Whether the binary condition is true for this worktree file diff."
   binary: Boolean
+  "Whether this worktree file diff is truncated."
   truncated: Boolean!
+  "Whether the before available condition is true for this worktree file diff."
   beforeAvailable: Boolean
+  "Whether the after available condition is true for this worktree file diff."
   afterAvailable: Boolean
 }
 
+"Values supported for worktree diff."
 enum WorktreeDiffScope {
+  "Limits the operation to staged."
   STAGED
+  "Limits the operation to unstaged."
   UNSTAGED
+  "Limits the operation to untracked."
   UNTRACKED
+  "Limits the operation to commit."
   COMMIT
+  "Limits the operation to branch."
   BRANCH
 }
 
+"Input values for worktree diff."
 input WorktreeDiffInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The scope to use for the request."
   scope: WorktreeDiffScope!
+  "The path to use for the request."
   path: String
+  "The previous path to use for the request."
   previousPath: String
+  "The commit SHA to use for the request."
   commitSha: String
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Detailed information about worktree."
 type WorktreeDetail {
+  "Commits associated with this worktree detail."
   commits: [WorktreeCommit!]!
+  "Changes associated with this worktree detail."
   changes: [WorktreeChange!]!
+  "Branch changes associated with this worktree detail."
   branchChanges: [WorktreeDiffFile!]!
+  "Whether the commits truncated condition is true for this worktree detail."
   commitsTruncated: Boolean!
+  "Whether the changes truncated condition is true for this worktree detail."
   changesTruncated: Boolean!
+  "Whether the branch changes truncated condition is true for this worktree detail."
   branchChangesTruncated: Boolean!
 }
 
+"Represents a worktree overview change in the GraphQL API."
 type WorktreeOverviewChange {
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Identifier of the related codebase. May be null when unavailable or not applicable."
   codebaseId: ID
 }
 
+"Represents a worktree activity in the GraphQL API."
 type WorktreeActivity {
+  "Identifier of the related worktree."
   worktreeId: ID!
+  "Git branch associated with this worktree activity. May be null when unavailable or not applicable."
   branch: String
+  "Git commit SHA associated with this worktree activity. May be null when unavailable or not applicable."
   headSha: String
+  "The upstream associated with this worktree activity. May be null when unavailable or not applicable."
   upstream: String
+  "The ahead associated with this worktree activity. May be null when unavailable or not applicable."
   ahead: Int
+  "The behind associated with this worktree activity. May be null when unavailable or not applicable."
   behind: Int
+  "The sync state associated with this worktree activity. May be null when unavailable or not applicable."
   syncState: CodebaseSyncState
+  "The base ahead associated with this worktree activity. May be null when unavailable or not applicable."
   baseAhead: Int
+  "The base behind associated with this worktree activity. May be null when unavailable or not applicable."
   baseBehind: Int
+  "Whether this worktree activity has staged changes."
   hasStagedChanges: Boolean
+  "Whether this worktree activity has unstaged changes."
   hasUnstagedChanges: Boolean
+  "Whether the rebase in progress condition is true for this worktree activity."
   rebaseInProgress: Boolean
+  "Whether this worktree activity has conflicts."
   hasConflicts: Boolean
+  "The push status associated with this worktree activity. May be null when unavailable or not applicable."
   pushStatus: WorktreePushStatus
+  "ISO 8601 timestamp when this worktree activity was observed."
   observedAt: String!
 }
 
+"A preview of worktree ticket branch."
 type WorktreeTicketBranchPreview {
+  "The ticket key associated with this worktree ticket branch preview."
   ticketKey: ID!
+  "The ticket title associated with this worktree ticket branch preview."
   ticketTitle: String!
+  "The ticket type associated with this worktree ticket branch preview. May be null when unavailable or not applicable."
   ticketType: String
+  "The project key associated with this worktree ticket branch preview."
   projectKey: String!
+  "The branch name associated with this worktree ticket branch preview."
   branchName: String!
 }
 
+"Input values for worktree inventory."
 input WorktreeInventoryInput {
+  "The git directory to use for the request."
   gitDirectory: String!
+  "The folder to use for the request."
   folder: String!
+  "The relative path to use for the request."
   relativePath: String!
+  "Whether primary applies to the request."
   primary: Boolean!
+  "The branch to use for the request."
   branch: String
+  "The head SHA to use for the request."
   headSha: String
+  "The code state hash to use for the request."
   codeStateHash: String
+  "The upstream to use for the request."
   upstream: String
+  "The ahead to use for the request."
   ahead: Int
+  "The behind to use for the request."
   behind: Int
+  "The sync state to use for the request."
   syncState: CodebaseSyncState!
+  "The base ahead to use for the request."
   baseAhead: Int
+  "The base behind to use for the request."
   baseBehind: Int
+  "Whether has staged changes applies to the request."
   hasStagedChanges: Boolean
+  "Whether has unstaged changes applies to the request."
   hasUnstagedChanges: Boolean
+  "Whether rebase in progress applies to the request."
   rebaseInProgress: Boolean
+  "Whether has conflicts applies to the request."
   hasConflicts: Boolean
+  "The push status to use for the request."
   pushStatus: WorktreePushStatus
+  "The availability to use for the request."
   availability: String!
+  "The error to use for the request."
   error: String
+  "The checked at to use for the request."
   checkedAt: String!
 }
 
+"Input values for codebase worktree report."
 input CodebaseWorktreeReportInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "Whether complete applies to the request."
   complete: Boolean!
+  "The default branch to use for the request."
   defaultBranch: String
+  "Local branches to use for the request."
   localBranches: [String!]! = []
+  "Remote branches to use for the request."
   remoteBranches: [String!]!
+  "The fetched at to use for the request."
   fetchedAt: String
+  "The fetch attempted at to use for the request."
   fetchAttemptedAt: String
+  "The fetch error to use for the request."
   fetchError: String
+  "Worktrees to use for the request."
   worktrees: [WorktreeInventoryInput!]!
 }
 
+"Input values for worktree activity report."
 input WorktreeActivityReportInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The git directory to use for the request."
   gitDirectory: String!
+  "The branch to use for the request."
   branch: String
+  "The head SHA to use for the request."
   headSha: String
+  "The code state hash to use for the request."
   codeStateHash: String
+  "The upstream to use for the request."
   upstream: String
+  "The ahead to use for the request."
   ahead: Int
+  "The behind to use for the request."
   behind: Int
+  "The sync state to use for the request."
   syncState: CodebaseSyncState
+  "The base ahead to use for the request."
   baseAhead: Int
+  "The base behind to use for the request."
   baseBehind: Int
+  "Whether has staged changes applies to the request."
   hasStagedChanges: Boolean
+  "Whether has unstaged changes applies to the request."
   hasUnstagedChanges: Boolean
+  "Whether rebase in progress applies to the request."
   rebaseInProgress: Boolean
+  "Whether has conflicts applies to the request."
   hasConflicts: Boolean
+  "The push status to use for the request."
   pushStatus: WorktreePushStatus
+  "The observed at to use for the request."
   observedAt: String!
 }
 
+"Values used to save a worktree tag."
 input SaveWorktreeTagInput {
+  "Identifier of the save worktree tag to affect."
   id: ID
+  "The name to use for the request."
   name: String!
+  "The color to use for the request."
   color: String!
 }
 
+"Values used to run a worktree operation."
 input RunWorktreeOperationInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The operation to use for the request."
   operation: WorktreeOperation!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Input values for worktree branch selection."
 input WorktreeBranchSelectionInput {
+  "The mode to use for the request."
   mode: WorktreeBranchMode!
+  "The branch name to use for the request."
   branchName: String
+  "The ticket key to use for the request."
   ticketKey: ID
+  "The base branch to use for the request."
   baseBranch: String!
 }
 
+"Input values for preview worktree ticket branch."
 input PreviewWorktreeTicketBranchInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "Identifier of the worktree to use."
   worktreeId: ID
+  "The ticket key to use for the request."
   ticketKey: ID!
 }
 
+"Values used to create a worktree."
 input CreateWorktreeInput {
+  "Identifier of the codebase to use."
   codebaseId: ID!
+  "The selection to use for the request."
   selection: WorktreeBranchSelectionInput!
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to change a worktree branch."
 input ChangeWorktreeBranchInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The selection to use for the request."
   selection: WorktreeBranchSelectionInput!
+  "Identifier of the request to use."
   requestId: ID!
+  "Whether stash on failure applies to the request."
   stashOnFailure: Boolean = false
 }
 
+"Values used to move a worktree."
 input MoveWorktreeInput {
+  "Identifier of the source worktree to use."
   sourceWorktreeId: ID!
+  "Identifier of the target codebase to use."
   targetCodebaseId: ID!
+  "Identifier of the target worktree to use."
   targetWorktreeId: ID
+  "Whether to delete source after the operation succeeds."
   deleteSource: Boolean! = false
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to delete a worktree."
 input DeleteWorktreeInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "Whether to delete remote branch after the operation succeeds."
   deleteRemoteBranch: Boolean! = false
+  "Identifier of the request to use."
   requestId: ID!
 }
 
+"Values used to configure a worktree auto sync."
 input ConfigureWorktreeAutoSyncInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "Identifier of the conflict workflow to use."
   conflictWorkflowId: ID
+  "The conflict workflow choice to use for the request."
   conflictWorkflowChoice: String
 }
 
+"Values used to configure a worktree auto merge."
 input ConfigureWorktreeAutoMergeInput {
+  "Identifier of the worktree to use."
   worktreeId: ID!
+  "The repository name with owner to use for the request."
   repositoryNameWithOwner: String!
+  "The pull request number to use for the request."
   pullRequestNumber: Int!
+  "The method to use for the request."
   method: GitHubMergeMethod!
+  "The commit headline to use for the request."
   commitHeadline: String!
+  "The commit body to use for the request."
   commitBody: String!
+  "The author email to use for the request."
   authorEmail: String
+  "Whether to delete worktree after the operation succeeds."
   deleteWorktree: Boolean! = false
+  "Whether move ticket to done applies to the request."
   moveTicketToDone: Boolean! = false
 }
 
 extend type Query {
+  "Returns a worktree overview."
   worktreeOverview: WorktreeOverview!
+  "Returns worktrees."
   hiddenWorktrees: [Worktree!]!
+  "Returns worktree settings."
   worktreeSettings: WorktreeSettings!
+  "Returns a worktree ticket branch preview."
   previewWorktreeTicketBranch(
+    "Values for the requested operation."
     input: PreviewWorktreeTicketBranchInput!
   ): WorktreeTicketBranchPreview!
-  worktreeMove(id: ID!): WorktreeMove
-  worktreeAutoSync(worktreeId: ID!): WorktreeAutoSync
-  worktreeAutoMerge(worktreeId: ID!): WorktreeAutoMerge
+  "Returns a worktree move, or null when it cannot be found."
+  worktreeMove(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorktreeMove
+  "Returns a worktree auto sync, or null when it cannot be found."
+  worktreeAutoSync(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeAutoSync
+  "Returns a worktree auto merge, or null when it cannot be found."
+  worktreeAutoMerge(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeAutoMerge
 }
 
 extend type Mutation {
+  "Refreshes worktrees and returns the number of affected records."
   refreshWorktrees: Int!
-  refreshWorktreePullRequest(id: ID!): Worktree!
-  reportWorktrees(reports: [CodebaseWorktreeReportInput!]!): [Worktree!]!
-  reportWorktreeActivity(input: WorktreeActivityReportInput!): WorktreeActivity!
-  inspectWorktree(id: ID!, requestId: ID!): WorktreeDetail!
-  inspectWorktreeDiff(input: WorktreeDiffInput!): WorktreeFileDiff!
-  runWorktreeOperation(input: RunWorktreeOperationInput!): AgentJob!
-  createWorktree(input: CreateWorktreeInput!): AgentJob!
-  changeWorktreeBranch(input: ChangeWorktreeBranchInput!): AgentJob!
-  moveWorktree(input: MoveWorktreeInput!): WorktreeMove!
-  retryWorktreeMoveWithStash(id: ID!): WorktreeMove!
-  cancelWorktreeMove(id: ID!): WorktreeMove!
-  deleteWorktree(input: DeleteWorktreeInput!): AgentJob!
-  updateWorktreeBaseBranch(id: ID!, baseBranch: String): Worktree!
-  updateWorktreeHighlight(id: ID!, color: String): Worktree!
-  setWorktreeTags(id: ID!, tagIds: [ID!]!): Worktree!
-  saveWorktreeTag(input: SaveWorktreeTagInput!): WorktreeTag!
-  deleteWorktreeTag(id: ID!): Boolean!
-  saveWorktreeSettings(editorVariant: WorktreeEditorVariant!): WorktreeSettings!
-  purgeHiddenWorktree(id: ID!): Boolean!
+  "Refreshes a worktree pull request and returns a worktree."
+  refreshWorktreePullRequest(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Worktree!
+  "Reports worktrees and returns worktrees."
+  reportWorktrees(
+    "Reports used to filter or perform the operation."
+    reports: [CodebaseWorktreeReportInput!]!
+  ): [Worktree!]!
+  "Reports a worktree activity and returns a worktree activity."
+  reportWorktreeActivity(
+    "Values for the requested operation."
+    input: WorktreeActivityReportInput!
+  ): WorktreeActivity!
+  "Inspects a worktree and returns a worktree detail."
+  inspectWorktree(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Identifier of the request."
+    requestId: ID!
+  ): WorktreeDetail!
+  "Inspects a worktree diff and returns a worktree file diff."
+  inspectWorktreeDiff(
+    "Values for the requested operation."
+    input: WorktreeDiffInput!
+  ): WorktreeFileDiff!
+  "Runs a worktree operation and returns an agent job."
+  runWorktreeOperation(
+    "Values for the requested operation."
+    input: RunWorktreeOperationInput!
+  ): AgentJob!
+  "Creates a worktree and returns an agent job."
+  createWorktree(
+    "Values for the requested operation."
+    input: CreateWorktreeInput!
+  ): AgentJob!
+  "Changes a worktree branch and returns an agent job."
+  changeWorktreeBranch(
+    "Values for the requested operation."
+    input: ChangeWorktreeBranchInput!
+  ): AgentJob!
+  "Moves a worktree and returns a worktree move."
+  moveWorktree(
+    "Values for the requested operation."
+    input: MoveWorktreeInput!
+  ): WorktreeMove!
+  "Retries a worktree move with stash and returns a worktree move."
+  retryWorktreeMoveWithStash(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorktreeMove!
+  "Cancels a worktree move and returns a worktree move."
+  cancelWorktreeMove(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): WorktreeMove!
+  "Deletes a worktree and returns an agent job."
+  deleteWorktree(
+    "Values for the requested operation."
+    input: DeleteWorktreeInput!
+  ): AgentJob!
+  "Updates a worktree base branch and returns the updated worktree."
+  updateWorktreeBaseBranch(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The base branch used to filter or perform the operation."
+    baseBranch: String
+  ): Worktree!
+  "Updates a worktree highlight and returns the updated worktree."
+  updateWorktreeHighlight(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "The color used to filter or perform the operation."
+    color: String
+  ): Worktree!
+  "Sets worktree tags and returns the updated worktree."
+  setWorktreeTags(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Identifiers of the tags."
+    tagIds: [ID!]!
+  ): Worktree!
+  "Saves a worktree tag and returns the updated worktree tag."
+  saveWorktreeTag(
+    "Values for the requested operation."
+    input: SaveWorktreeTagInput!
+  ): WorktreeTag!
+  "Deletes a worktree tag and reports whether the operation succeeded."
+  deleteWorktreeTag(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Saves worktree settings and returns the updated worktree settings."
+  saveWorktreeSettings(
+    "The editor variant used to filter or perform the operation."
+    editorVariant: WorktreeEditorVariant!
+  ): WorktreeSettings!
+  "Purges a hidden worktree and reports whether the operation succeeded."
+  purgeHiddenWorktree(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Purges all hidden worktrees and returns the number of affected records."
   purgeAllHiddenWorktrees: Int!
+  "Configures a worktree auto sync and returns the updated worktree auto sync."
   configureWorktreeAutoSync(
+    "Values for the requested operation."
     input: ConfigureWorktreeAutoSyncInput!
   ): WorktreeAutoSync!
-  cancelWorktreeAutoSync(worktreeId: ID!): Boolean!
-  retryWorktreeAutoSync(worktreeId: ID!): WorktreeAutoSync!
+  "Cancels a worktree auto sync and reports whether the operation succeeded."
+  cancelWorktreeAutoSync(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): Boolean!
+  "Retries a worktree auto sync and returns a worktree auto sync."
+  retryWorktreeAutoSync(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeAutoSync!
+  "Configures a worktree auto merge and returns the updated worktree auto merge."
   configureWorktreeAutoMerge(
+    "Values for the requested operation."
     input: ConfigureWorktreeAutoMergeInput!
   ): WorktreeAutoMerge!
-  cancelWorktreeAutoMerge(worktreeId: ID!): Boolean!
-  retryWorktreeAutoMerge(worktreeId: ID!): WorktreeAutoMerge!
+  "Cancels a worktree auto merge and reports whether the operation succeeded."
+  cancelWorktreeAutoMerge(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): Boolean!
+  "Retries a worktree auto merge and returns a worktree auto merge."
+  retryWorktreeAutoMerge(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeAutoMerge!
 }
 
 extend type Subscription {
+  "Emits a worktree overview change whenever worktree overview changes."
   worktreeOverviewChanged: WorktreeOverviewChange!
-  worktreeInspectionChanged(worktreeId: ID!): WorktreeActivity!
+  "Emits a worktree activity whenever worktree inspection changes."
+  worktreeInspectionChanged(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeActivity!
 }

@@ -1,148 +1,295 @@
+"A summary of signing agent."
 type SigningAgentSummary {
+  "Stable identifier for this signing agent summary."
   id: ID!
+  "Display name of this signing agent summary."
   name: String!
+  "Host name reported by this signing agent summary."
   hostname: String
+  "Whether the supported condition is true for this signing agent summary."
   supported: Boolean
+  "ISO 8601 timestamp when this signing agent summary was last seen. May be null when unavailable or not applicable."
   lastSeenAt: String
 }
 
+"Represents a signing installation agent in the GraphQL API."
 type SigningInstallationAgent {
+  "Stable identifier for this signing installation agent."
   id: ID!
+  "Display name of this signing installation agent."
   name: String!
 }
 
+"Represents a signing profile device in the GraphQL API."
 type SigningProfileDevice {
+  "The udid associated with this signing profile device."
   udid: String!
+  "Identifier of the related device. May be null when unavailable or not applicable."
   deviceId: ID
+  "The display name associated with this signing profile device. May be null when unavailable or not applicable."
   displayName: String
+  "The product associated with this signing profile device. May be null when unavailable or not applicable."
   product: String
+  "The OS version associated with this signing profile device. May be null when unavailable or not applicable."
   osVersion: String
+  "Current status of this signing profile device."
   status: String
 }
 
+"Represents a local signing profile in the GraphQL API."
 type LocalSigningProfile {
+  "Stable identifier for this local signing profile."
   id: ID!
+  "The uuid associated with this local signing profile."
   uuid: String!
+  "The content hash associated with this local signing profile."
   contentHash: String!
+  "Display name of this local signing profile."
   name: String!
+  "The profile type associated with this local signing profile."
   profileType: String!
+  "Identifier of the related bundle."
   bundleId: String!
+  "Identifier of the related team. May be null when unavailable or not applicable."
   teamId: String
+  "The team name associated with this local signing profile. May be null when unavailable or not applicable."
   teamName: String
+  "Platforms associated with this local signing profile."
   platforms: [String!]!
+  "Number of devices."
   deviceCount: Int!
+  "Device udids associated with this local signing profile."
   deviceUdids: [String!]!
+  "Provisioned devices associated with this local signing profile."
   provisionedDevices: [SigningProfileDevice!]!
+  "Certificate sha1s associated with this local signing profile."
   certificateSha1s: [String!]!
+  "ISO 8601 timestamp when this local signing profile was created. May be null when unavailable or not applicable."
   createdAt: String
+  "ISO 8601 timestamp when this local signing profile expires. May be null when unavailable or not applicable."
   expiresAt: String
+  "Whether this local signing profile is expired."
   expired: Boolean!
+  "Whether the Xcode managed condition is true for this local signing profile."
   xcodeManaged: Boolean!
+  "Installed agents associated with this local signing profile."
   installedAgents: [SigningInstallationAgent!]!
 }
 
+"Represents a local signing certificate in the GraphQL API."
 type LocalSigningCertificate {
+  "Stable identifier for this local signing certificate."
   id: ID!
+  "The sha1 associated with this local signing certificate."
   sha1: String!
+  "The sha256 associated with this local signing certificate. May be null when unavailable or not applicable."
   sha256: String
+  "Display name of this local signing certificate."
   name: String!
+  "Identifier of the related team. May be null when unavailable or not applicable."
   teamId: String
+  "The certificate type associated with this local signing certificate. May be null when unavailable or not applicable."
   certificateType: String
+  "The not before associated with this local signing certificate. May be null when unavailable or not applicable."
   notBefore: String
+  "ISO 8601 timestamp when this local signing certificate expires. May be null when unavailable or not applicable."
   expiresAt: String
+  "Whether this local signing certificate is expired."
   expired: Boolean!
+  "Whether this local signing certificate has private key."
   hasPrivateKey: Boolean!
+  "Installed agents associated with this local signing certificate."
   installedAgents: [SigningInstallationAgent!]!
+  "Private key agents associated with this local signing certificate."
   privateKeyAgents: [SigningInstallationAgent!]!
 }
 
+"Represents a signing operation item in the GraphQL API."
 type SigningOperationItem {
+  "Stable identifier for this signing operation item."
   id: ID!
+  "Identifier of the related agent."
   agentId: ID!
+  "Current status of this signing operation item."
   status: String!
+  "Error message when this signing operation item did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this signing operation item was created."
   createdAt: String!
+  "ISO 8601 timestamp when this signing operation item finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "The agent associated with this signing operation item."
   agent: SigningInstallationAgent!
 }
 
+"Represents a signing operation in the GraphQL API."
 type SigningOperation {
+  "Stable identifier for this signing operation."
   id: ID!
+  "Category of this signing operation."
   kind: String!
+  "The asset key associated with this signing operation. May be null when unavailable or not applicable."
   assetKey: String
+  "Identifier of the related source agent. May be null when unavailable or not applicable."
   sourceAgentId: ID
+  "Current status of this signing operation."
   status: String!
+  "Error message when this signing operation did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this signing operation was created."
   createdAt: String!
+  "ISO 8601 timestamp when this signing operation was last updated."
   updatedAt: String!
+  "ISO 8601 timestamp when this signing operation finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "Items associated with this signing operation."
   items: [SigningOperationItem!]!
 }
 
+"Represents an Apple developer resource in the GraphQL API."
 type AppleDeveloperResource {
+  "Stable identifier for this Apple developer resource."
   id: ID!
+  "Category of this Apple developer resource."
   type: String!
+  "The attributes associated with this Apple developer resource."
   attributes: JSON!
+  "The relationships associated with this Apple developer resource. May be null when unavailable or not applicable."
   relationships: JSON
 }
 
+"Represents an Apple developer inventory in the GraphQL API."
 type AppleDeveloperInventory {
+  "Profiles associated with this Apple developer inventory."
   profiles: [AppleDeveloperResource!]!
+  "Certificates associated with this Apple developer inventory."
   certificates: [AppleDeveloperResource!]!
+  "Identifiers of the related bundles."
   bundleIds: [AppleDeveloperResource!]!
+  "Devices associated with this Apple developer inventory."
   devices: [AppleDeveloperResource!]!
 }
 
+"Represents a signing profile download in the GraphQL API."
 type SigningProfileDownload {
+  "The uuid associated with this signing profile download."
   uuid: ID!
+  "The filename associated with this signing profile download."
   filename: String!
+  "Content Base64, encoded as Base64."
   contentBase64: String!
 }
 
+"Values used to create an Apple portal profile."
 input CreateApplePortalProfileInput {
+  "The name to use for the request."
   name: String!
+  "The profile type to use for the request."
   profileType: String!
+  "Identifier of the bundle ID to use."
   bundleIdId: ID!
+  "Identifiers of the certificates to use."
   certificateIds: [ID!]!
+  "Identifiers of the devices to use."
   deviceIds: [ID!]
 }
 
 extend type Query {
+  "Returns signing agent summaries."
   signingAgents: [SigningAgentSummary!]!
+  "Returns local signing profiles."
   signingProfiles: [LocalSigningProfile!]!
-  signingProfile(id: ID!): LocalSigningProfile
+  "Returns a local signing profile, or null when it cannot be found."
+  signingProfile(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): LocalSigningProfile
+  "Returns local signing certificates."
   signingCertificates: [LocalSigningCertificate!]!
-  signingOperations(limit: Int = 50): [SigningOperation!]!
+  "Returns signing operations."
+  signingOperations(
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+  ): [SigningOperation!]!
+  "Returns an Apple developer inventory."
   appleDeveloperInventory: AppleDeveloperInventory!
 }
 
 extend type Mutation {
-  refreshSigningAssets(agentIds: [ID!]): [AgentJob!]!
+  "Refreshes signing assets and returns agent jobs."
+  refreshSigningAssets(
+    "Identifiers of the agents."
+    agentIds: [ID!]
+  ): [AgentJob!]!
+  "Uploads a signing profile and returns a signing operation."
   uploadSigningProfile(
+    "The content Base64 used to filter or perform the operation."
     contentBase64: String!
+    "Identifiers of the target agents."
     targetAgentIds: [ID!]!
   ): SigningOperation!
-  downloadSigningProfile(uuid: String!, agentId: ID!): SigningProfileDownload!
-  syncSigningProfile(
+  "Downloads a signing profile and returns a signing profile download."
+  downloadSigningProfile(
+    "The uuid used to filter or perform the operation."
     uuid: String!
+    "Identifier of the agent."
+    agentId: ID!
+  ): SigningProfileDownload!
+  "Syncs a signing profile and returns a signing operation."
+  syncSigningProfile(
+    "The uuid used to filter or perform the operation."
+    uuid: String!
+    "Identifier of the source agent."
     sourceAgentId: ID!
+    "Identifiers of the target agents."
     targetAgentIds: [ID!]!
   ): SigningOperation!
-  deleteSigningProfile(uuid: String!, agentIds: [ID!]!): SigningOperation!
-  deleteExpiredSigningProfiles(agentIds: [ID!]): [SigningOperation!]!
+  "Deletes a signing profile and returns a signing operation."
+  deleteSigningProfile(
+    "The uuid used to filter or perform the operation."
+    uuid: String!
+    "Identifiers of the agents."
+    agentIds: [ID!]!
+  ): SigningOperation!
+  "Deletes expired signing profiles and returns signing operations."
+  deleteExpiredSigningProfiles(
+    "Identifiers of the agents."
+    agentIds: [ID!]
+  ): [SigningOperation!]!
+  "Imports a signing identity and returns a signing operation."
   importSigningIdentity(
+    "The PKCS #12 Base64 used to filter or perform the operation."
     p12Base64: String!
+    "The passphrase used to filter or perform the operation."
     passphrase: String!
+    "Identifiers of the target agents."
     targetAgentIds: [ID!]!
   ): SigningOperation!
-  deleteSigningIdentity(sha1: String!, agentIds: [ID!]!): SigningOperation!
+  "Deletes a signing identity and returns a signing operation."
+  deleteSigningIdentity(
+    "The sha1 used to filter or perform the operation."
+    sha1: String!
+    "Identifiers of the agents."
+    agentIds: [ID!]!
+  ): SigningOperation!
+  "Creates an Apple portal profile and returns an Apple developer resource."
   createApplePortalProfile(
+    "Values for the requested operation."
     input: CreateApplePortalProfileInput!
   ): AppleDeveloperResource!
-  deleteApplePortalProfile(id: ID!): Boolean!
-  revokeApplePortalCertificate(id: ID!): Boolean!
+  "Deletes an Apple portal profile and reports whether the operation succeeded."
+  deleteApplePortalProfile(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
+  "Revokes an Apple portal certificate and reports whether the operation succeeded."
+  revokeApplePortalCertificate(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): Boolean!
 }
 
 extend type Subscription {
+  "Emits a change signal whenever signing assets changes."
   signingAssetsChanged: Boolean!
 }

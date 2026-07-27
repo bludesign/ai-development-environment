@@ -1,142 +1,255 @@
+"Lifecycle statuses for build data collection."
 enum BuildDataCollectionStatus {
+  "Represents the collecting status for build data collection."
   COLLECTING
+  "Represents the completed status for build data collection."
   COMPLETED
 }
 
+"Lifecycle statuses for build data agent."
 enum BuildDataAgentStatus {
+  "Represents the queuing status for build data agent."
   QUEUING
+  "Represents the queued status for build data agent."
   QUEUED
+  "Represents the running status for build data agent."
   RUNNING
+  "Represents the succeeded status for build data agent."
   SUCCEEDED
+  "Represents the failed status for build data agent."
   FAILED
+  "Represents the cancelled status for build data agent."
   CANCELLED
+  "Represents the timed out status for build data agent."
   TIMED_OUT
+  "Represents the offline status for build data agent."
   OFFLINE
+  "Represents the unsupported status for build data agent."
   UNSUPPORTED
+  "Represents the invalid status for build data agent."
   INVALID
 }
 
+"Lifecycle statuses for derived data entry."
 enum DerivedDataEntryStatus {
+  "Represents the ready status for derived data entry."
   READY
+  "Represents the unlinked status for derived data entry."
   UNLINKED
+  "Represents the pending status for derived data entry."
   PENDING
+  "Represents the shared cache status for derived data entry."
   SHARED_CACHE
 }
 
+"Values supported for derived data entry operation."
 enum DerivedDataEntryOperation {
+  "Represents the idle option."
   IDLE
+  "Represents the sizing option."
   SIZING
+  "Represents the deleting option."
   DELETING
 }
 
+"Values supported for build data entry."
 enum BuildDataEntryKind {
+  "Represents the project option."
   PROJECT
+  "Represents the pending option."
   PENDING
+  "Represents the shared cache option."
   SHARED_CACHE
+  "Represents the device support option."
   DEVICE_SUPPORT
 }
 
+"Values supported for derived data delete source."
 enum DerivedDataDeleteSource {
+  "Represents the user option."
   USER
+  "Represents the automatic option."
   AUTOMATIC
 }
 
+"Represents build data agent progress in the GraphQL API."
 type BuildDataAgentProgress {
+  "The agent associated with this build data agent progress."
   agent: Agent!
+  "Current status of this build data agent progress."
   status: BuildDataAgentStatus!
+  "Identifier of the related job. May be null when unavailable or not applicable."
   jobId: ID
+  "Error message when this build data agent progress did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Warnings associated with this build data agent progress."
   warnings: [String!]!
 }
 
+"Represents build data progress in the GraphQL API."
 type BuildDataProgress {
+  "Number of eligibles."
   eligibleCount: Int!
+  "Number of finisheds."
   finishedCount: Int!
+  "Number of successfuls."
   successfulCount: Int!
+  "Agents associated with this build data progress."
   agents: [BuildDataAgentProgress!]!
 }
 
+"Represents a derived data entry in the GraphQL API."
 type DerivedDataEntry {
+  "Stable identifier for this derived data entry."
   id: ID!
+  "Display name of this derived data entry."
   name: String!
+  "Category of this derived data entry."
   kind: BuildDataEntryKind!
+  "Current status of this derived data entry."
   status: DerivedDataEntryStatus!
+  "Filesystem path associated with this derived data entry. May be null when unavailable or not applicable."
   workspacePath: String
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Filesystem path associated with this derived data entry. May be null when unavailable or not applicable."
   worktreePath: String
+  "Size, in bytes. May be null when unavailable or not applicable."
   sizeBytes: Float
+  "The operation associated with this derived data entry."
   operation: DerivedDataEntryOperation!
+  "Error message when this derived data entry did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The agent associated with this derived data entry."
   agent: Agent!
+  "ISO 8601 timestamp when this derived data entry modified. May be null when unavailable or not applicable."
   modifiedAt: String
+  "Identifier of the related volume. May be null when unavailable or not applicable."
   volumeId: ID
+  "Whether this derived data entry is locked."
   locked: Boolean!
+  "Active resources associated with this derived data entry."
   activeResources: [DerivedDataActiveResource!]!
 }
 
+"Represents a derived data active resource in the GraphQL API."
 type DerivedDataActiveResource {
+  "Category of this derived data active resource."
   kind: String!
+  "Stable identifier for this derived data active resource."
   id: ID!
+  "Human-readable label for this derived data active resource."
   label: String!
+  "Application URL for this derived data active resource."
   href: String!
 }
 
+"A collected set of derived data."
 type DerivedDataCollection {
+  "Stable identifier for this derived data collection."
   id: ID!
+  "Current status of this derived data collection."
   status: BuildDataCollectionStatus!
+  "ISO 8601 timestamp when this derived data collection was created."
   createdAt: String!
+  "ISO 8601 timestamp when this derived data collection deadline."
   deadlineAt: String!
+  "ISO 8601 timestamp when this derived data collection finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "The progress associated with this derived data collection."
   progress: BuildDataProgress!
+  "Entries associated with this derived data collection."
   entries: [DerivedDataEntry!]!
 }
 
+"Represents derived data deletion history in the GraphQL API."
 type DerivedDataDeletionHistory {
+  "Stable identifier for this derived data deletion history."
   id: ID!
+  "Identifier of the related agent. May be null when unavailable or not applicable."
   agentId: ID
+  "The agent name associated with this derived data deletion history."
   agentName: String!
+  "The folder name associated with this derived data deletion history."
   folderName: String!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Filesystem path associated with this derived data deletion history. May be null when unavailable or not applicable."
   worktreePath: String
+  "The source associated with this derived data deletion history."
   source: DerivedDataDeleteSource!
+  "The entry kind associated with this derived data deletion history."
   entryKind: BuildDataEntryKind!
+  "ISO 8601 timestamp when this derived data deletion history was deleted."
   deletedAt: String!
 }
 
+"A paginated collection of derived data deletion histories."
 type DerivedDataDeletionHistoryPage {
+  "Items associated with this derived data deletion history page."
   items: [DerivedDataDeletionHistory!]!
+  "The next cursor associated with this derived data deletion history page. May be null when unavailable or not applicable."
   nextCursor: ID
 }
 
 extend type Query {
-  derivedDataCollection(id: ID!): DerivedDataCollection
+  "Returns a derived data collection, or null when it cannot be found."
+  derivedDataCollection(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): DerivedDataCollection
+  "Returns a derived data deletion history page."
   derivedDataDeletionHistory(
+    "Maximum number of records to return. Defaults to `100`."
     first: Int = 100
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): DerivedDataDeletionHistoryPage!
 }
 
 extend type Mutation {
-  refreshDerivedData(requestId: ID!): DerivedDataCollection!
-  calculateDerivedDataSizes(
-    collectionId: ID!
-    entryIds: [ID!]!
+  "Refreshes derived data and returns a derived data collection."
+  refreshDerivedData(
+    "Identifier of the request."
     requestId: ID!
   ): DerivedDataCollection!
-  deleteDerivedDataEntries(
+  "Calculates derived data sizes and returns a derived data collection."
+  calculateDerivedDataSizes(
+    "Identifier of the collection."
     collectionId: ID!
+    "Identifiers of the entries."
     entryIds: [ID!]!
+    "Identifier of the request."
     requestId: ID!
+  ): DerivedDataCollection!
+  "Deletes derived data entries and returns a derived data collection."
+  deleteDerivedDataEntries(
+    "Identifier of the collection."
+    collectionId: ID!
+    "Identifiers of the entries."
+    entryIds: [ID!]!
+    "Identifier of the request."
+    requestId: ID!
+    "Whether override protection applies to the operation. Defaults to `false`."
     overrideProtection: Boolean = false
   ): DerivedDataCollection!
+  "Clears derived data deletion history and returns the number of affected records."
   clearDerivedDataDeletionHistory: Int!
+  "Sets whether derived data entry is locked and returns the updated derived data collection."
   setDerivedDataEntryLocked(
+    "Identifier of the collection."
     collectionId: ID!
+    "Identifier of the entry."
     entryId: ID!
+    "Whether locked applies to the operation."
     locked: Boolean!
   ): DerivedDataCollection!
 }
 
 extend type Subscription {
-  derivedDataCollectionChanged(id: ID!): DerivedDataCollection!
+  "Emits a derived data collection whenever derived data collection changes."
+  derivedDataCollectionChanged(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): DerivedDataCollection!
 }

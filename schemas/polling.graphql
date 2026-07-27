@@ -1,36 +1,61 @@
+"Values supported for polling operation runtime."
 enum PollingOperationRuntime {
+  "Represents the server option."
   SERVER
+  "Represents the agent option."
   AGENT
 }
 
+"Lifecycle statuses for polling operation."
 enum PollingOperationStatus {
+  "Represents the disabled status for polling operation."
   DISABLED
+  "Represents the healthy status for polling operation."
   HEALTHY
+  "Represents the running status for polling operation."
   RUNNING
+  "Represents the stale status for polling operation."
   STALE
+  "Represents the error status for polling operation."
   ERROR
 }
 
+"Represents a polling operation in the GraphQL API."
 type PollingOperation {
+  "Stable identifier for this polling operation."
   id: ID!
+  "Category of this polling operation."
   kind: String!
+  "The runtime associated with this polling operation."
   runtime: PollingOperationRuntime!
+  "Current status of this polling operation."
   status: PollingOperationStatus!
+  "Whether this polling operation is enabled."
   enabled: Boolean!
+  "Cadence, in seconds. May be null when unavailable or not applicable."
   cadenceSeconds: Int
+  "ISO 8601 timestamp when this polling operation last started. May be null when unavailable or not applicable."
   lastStartedAt: String
+  "ISO 8601 timestamp when this polling operation last completed. May be null when unavailable or not applicable."
   lastCompletedAt: String
+  "ISO 8601 timestamp when this polling operation last succeeded. May be null when unavailable or not applicable."
   lastSucceededAt: String
+  "ISO 8601 timestamp when this polling operation next scheduled. May be null when unavailable or not applicable."
   nextScheduledAt: String
+  "The duration ms associated with this polling operation. May be null when unavailable or not applicable."
   durationMs: Int
+  "The last error associated with this polling operation. May be null when unavailable or not applicable."
   lastError: String
+  "The details associated with this polling operation."
   details: JSON!
 }
 
 extend type Query {
+  "Returns polling operations."
   pollingOperations: [PollingOperation!]!
 }
 
 extend type Subscription {
+  "Emits a change signal whenever polling operation changes."
   pollingOperationChanged: ID!
 }

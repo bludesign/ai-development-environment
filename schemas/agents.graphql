@@ -1,221 +1,440 @@
+"An arbitrary JSON value whose object shape is defined by the field that uses it."
 scalar JSON
 
+"Lifecycle statuses for agent connection."
 enum AgentConnectionStatus {
+  "Represents the online status for agent connection."
   ONLINE
+  "Represents the offline status for agent connection."
   OFFLINE
 }
 
+"Lifecycle statuses for agent job."
 enum AgentJobStatus {
+  "Represents the queued status for agent job."
   QUEUED
+  "Represents the running status for agent job."
   RUNNING
+  "Represents the cancelling status for agent job."
   CANCELLING
+  "Represents the succeeded status for agent job."
   SUCCEEDED
+  "Represents the failed status for agent job."
   FAILED
+  "Represents the cancelled status for agent job."
   CANCELLED
+  "Represents the timed out status for agent job."
   TIMED_OUT
 }
 
+"Values supported for agent log stream."
 enum AgentLogStream {
+  "Represents the stdout option."
   STDOUT
+  "Represents the stderr option."
   STDERR
+  "Represents the system option."
   SYSTEM
 }
 
+"Values supported for derived data location."
 enum DerivedDataLocationMode {
+  "Uses the default mode."
   DEFAULT
+  "Uses the absolute mode."
   ABSOLUTE
+  "Uses the relative mode."
   RELATIVE
 }
 
+"Values supported for agent event."
 enum AgentEventType {
+  "Represents the job available option."
   JOB_AVAILABLE
+  "Represents the job cancel requested option."
   JOB_CANCEL_REQUESTED
+  "Represents the codebase reconcile requested option."
   CODEBASE_RECONCILE_REQUESTED
+  "Represents the agent configuration changed option."
   AGENT_CONFIGURATION_CHANGED
+  "Represents the run command available option."
   RUN_COMMAND_AVAILABLE
+  "Represents the disk space poll requested option."
   DISK_SPACE_POLL_REQUESTED
 }
 
+"Represents an agent in the GraphQL API."
 type Agent {
+  "Stable identifier for this agent."
   id: ID!
+  "Display name of this agent."
   name: String!
+  "Host name reported by this agent."
   hostname: String!
+  "Version reported for this agent."
   version: String!
+  "The OS version associated with this agent."
   osVersion: String!
+  "CPU architecture reported for this agent."
   architecture: String!
+  "The CPU model associated with this agent. May be null when unavailable or not applicable."
   cpuModel: String
+  "Total memory, in bytes. May be null when unavailable or not applicable."
   memoryTotalBytes: Float
+  "Free memory, in bytes. May be null when unavailable or not applicable."
   memoryFreeBytes: Float
+  "Total disk, in bytes. May be null when unavailable or not applicable."
   diskTotalBytes: Float
+  "Free disk, in bytes. May be null when unavailable or not applicable."
   diskFreeBytes: Float
+  "Capability identifiers advertised by this agent."
   capabilities: [String!]!
+  "Filesystem directory associated with this agent. May be null when unavailable or not applicable."
   baseRepoDirectory: String
+  "The derived data location mode associated with this agent."
   derivedDataLocationMode: DerivedDataLocationMode!
+  "Filesystem path associated with this agent. May be null when unavailable or not applicable."
   derivedDataPath: String
+  "Filesystem directory associated with this agent. May be null when unavailable or not applicable."
   buildsDirectory: String
+  "Filesystem directory associated with this agent. May be null when unavailable or not applicable."
   defaultBuildsDirectory: String
+  "Filesystem directory associated with this agent. May be null when unavailable or not applicable."
   effectiveBuildsDirectory: String
+  "The connection status associated with this agent."
   connectionStatus: AgentConnectionStatus!
+  "The IP address associated with this agent. May be null when unavailable or not applicable."
   ipAddress: String
+  "ISO 8601 timestamp when this agent was last seen. May be null when unavailable or not applicable."
   lastSeenAt: String
+  "ISO 8601 timestamp when this agent disconnected. May be null when unavailable or not applicable."
   disconnectedAt: String
+  "ISO 8601 timestamp when this agent was created."
   createdAt: String!
+  "ISO 8601 timestamp when this agent was last updated."
   updatedAt: String!
 }
 
+"Represents an agent enrollment token in the GraphQL API."
 type AgentEnrollmentToken {
+  "Sensitive token returned for the requested operation."
   token: String!
+  "ISO 8601 timestamp when this agent enrollment token expires."
   expiresAt: String!
 }
 
+"Configurable settings for agent cadence."
 type AgentCadenceSettings {
+  "Identifier of the related agent."
   agentId: ID!
+  "Codebase scan interval, in seconds."
   codebaseScanIntervalSeconds: Int!
+  "Job reconciliation interval, in seconds."
   jobReconciliationIntervalSeconds: Int!
+  "Git fetch interval, in seconds."
   gitFetchIntervalSeconds: Int!
+  "Heartbeat interval, in seconds."
   heartbeatIntervalSeconds: Int!
 }
 
+"Represents a signing secret transfer in the GraphQL API."
 type SigningSecretTransfer {
+  "PKCS #12 Base64, encoded as Base64."
   p12Base64: String!
+  "Sensitive passphrase returned for the requested operation."
   passphrase: String!
 }
 
+"Represents an enrolled agent in the GraphQL API."
 type EnrolledAgent {
+  "The agent associated with this enrolled agent."
   agent: Agent!
+  "Sensitive credential returned for the requested operation."
   credential: String!
 }
 
+"Represents an agent job in the GraphQL API."
 type AgentJob {
+  "Stable identifier for this agent job."
   id: ID!
+  "Identifier of the related agent."
   agentId: ID!
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "Category of this agent job."
   kind: String!
+  "Structured payload associated with this agent job."
   payload: JSON!
+  "Current status of this agent job."
   status: AgentJobStatus!
+  "The idempotency key associated with this agent job."
   idempotencyKey: String!
+  "Structured result associated with this agent job. May be null when unavailable or not applicable."
   result: JSON
+  "Error message when this agent job did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Timeout, in seconds."
   timeoutSeconds: Int!
+  "ISO 8601 timestamp when this agent job was created."
   createdAt: String!
+  "ISO 8601 timestamp when this agent job started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this agent job finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this agent job was last updated."
   updatedAt: String!
 }
 
+"Represents an agent job log in the GraphQL API."
 type AgentJobLog {
+  "Stable identifier for this agent job log."
   id: ID!
+  "Identifier of the related job."
   jobId: ID!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "The stream associated with this agent job log."
   stream: AgentLogStream!
+  "Human-readable message associated with this agent job log."
   message: String!
+  "ISO 8601 timestamp when this agent job log was created."
   createdAt: String!
 }
 
+"An event emitted for agent."
 type AgentEvent {
+  "Category of this agent event."
   type: AgentEventType!
+  "The job associated with this agent event. May be null when unavailable or not applicable."
   job: AgentJob
+  "The run command associated with this agent event. May be null when unavailable or not applicable."
   runCommand: RunCommand
 }
 
+"Values used to enroll an agent."
 input EnrollAgentInput {
+  "The enrollment token to use for the request."
   enrollmentToken: String!
+  "The name to use for the request."
   name: String!
+  "The hostname to use for the request."
   hostname: String!
+  "The version to use for the request."
   version: String!
+  "The OS version to use for the request."
   osVersion: String!
+  "The architecture to use for the request."
   architecture: String!
+  "The CPU model to use for the request."
   cpuModel: String
+  "Memory total in bytes."
   memoryTotalBytes: Float
+  "Memory free in bytes."
   memoryFreeBytes: Float
+  "Disk total in bytes."
   diskTotalBytes: Float
+  "Disk free in bytes."
   diskFreeBytes: Float
+  "Capabilities to use for the request."
   capabilities: [String!]!
+  "The default builds directory to use for the request."
   defaultBuildsDirectory: String
 }
 
+"Input values for agent heartbeat."
 input AgentHeartbeatInput {
+  "The version to use for the request."
   version: String!
+  "The OS version to use for the request."
   osVersion: String!
+  "The architecture to use for the request."
   architecture: String!
+  "The CPU model to use for the request."
   cpuModel: String
+  "Memory total in bytes."
   memoryTotalBytes: Float
+  "Memory free in bytes."
   memoryFreeBytes: Float
+  "Disk total in bytes."
   diskTotalBytes: Float
+  "Disk free in bytes."
   diskFreeBytes: Float
+  "Capabilities to use for the request."
   capabilities: [String!]!
+  "The default builds directory to use for the request."
   defaultBuildsDirectory: String
 }
 
+"Values used to update agent derived data settings."
 input UpdateAgentDerivedDataSettingsInput {
+  "The mode to use for the request."
   mode: DerivedDataLocationMode!
+  "The path to use for the request."
   path: String
 }
 
+"Values used to update agent cadence settings."
 input UpdateAgentCadenceSettingsInput {
+  "Codebase scan interval in seconds."
   codebaseScanIntervalSeconds: Int!
+  "Job reconciliation interval in seconds."
   jobReconciliationIntervalSeconds: Int!
+  "Git fetch interval in seconds."
   gitFetchIntervalSeconds: Int!
+  "Heartbeat interval in seconds."
   heartbeatIntervalSeconds: Int!
 }
 
+"Values used to create an agent job."
 input CreateAgentJobInput {
+  "Identifier of the agent to use."
   agentId: ID!
+  "The kind to use for the request."
   kind: String!
+  "Structured payload for the request."
   payload: JSON!
+  "The idempotency key to use for the request."
   idempotencyKey: String!
+  "Timeout in seconds."
   timeoutSeconds: Int = 86400
 }
 
+"Input values for agent job log."
 input AgentJobLogInput {
+  "The sequence to use for the request."
   sequence: Int!
+  "The stream to use for the request."
   stream: AgentLogStream!
+  "The message to use for the request."
   message: String!
+  "The created at to use for the request."
   createdAt: String!
 }
 
 extend type Query {
+  "Returns agents."
   agents: [Agent!]!
-  agent(id: ID!): Agent
+  "Returns an agent, or null when it cannot be found."
+  agent("Identifier of the resource to return or affect." id: ID!): Agent
+  "Returns an agent, or null when it cannot be found."
   agentSelf: Agent
-  agentCadenceSettings(agentId: ID!): AgentCadenceSettings!
-  agentJobs(agentId: ID!, limit: Int = 50): [AgentJob!]!
-  agentJob(id: ID!): AgentJob
-  agentJobLogs(jobId: ID!, afterSequence: Int = -1): [AgentJobLog!]!
+  "Returns agent cadence settings."
+  agentCadenceSettings(
+    "Identifier of the agent."
+    agentId: ID!
+  ): AgentCadenceSettings!
+  "Returns agent jobs."
+  agentJobs(
+    "Identifier of the agent."
+    agentId: ID!
+    "Maximum number of records to return. Defaults to `50`."
+    limit: Int = 50
+  ): [AgentJob!]!
+  "Returns an agent job, or null when it cannot be found."
+  agentJob("Identifier of the resource to return or affect." id: ID!): AgentJob
+  "Returns agent job logs."
+  agentJobLogs(
+    "Identifier of the job."
+    jobId: ID!
+    "The after sequence used to filter or perform the operation. Defaults to `-1`."
+    afterSequence: Int = -1
+  ): [AgentJobLog!]!
 }
 
+"Entry points that change control-plane state or start an operation."
 type Mutation {
-  createAgentEnrollmentToken(expiresInMinutes: Int = 15): AgentEnrollmentToken!
-  enrollAgent(input: EnrollAgentInput!): EnrolledAgent!
-  heartbeatAgent(input: AgentHeartbeatInput!): Agent!
-  createAgentJob(input: CreateAgentJobInput!): AgentJob!
-  claimAgentJob(jobId: ID!): AgentJob!
-  claimSigningSecretTransfer(transferId: ID!): SigningSecretTransfer!
-  appendAgentJobLogs(jobId: ID!, logs: [AgentJobLogInput!]!): [AgentJobLog!]!
-  completeAgentJob(
+  "Creates an agent enrollment token and returns an agent enrollment token."
+  createAgentEnrollmentToken(
+    "The expires in minutes used to filter or perform the operation. Defaults to `15`."
+    expiresInMinutes: Int = 15
+  ): AgentEnrollmentToken!
+  "Enrolls an agent and returns an enrolled agent."
+  enrollAgent(
+    "Values for the requested operation."
+    input: EnrollAgentInput!
+  ): EnrolledAgent!
+  "Records an agent heartbeat and returns the refreshed agent."
+  heartbeatAgent(
+    "Values for the requested operation."
+    input: AgentHeartbeatInput!
+  ): Agent!
+  "Creates an agent job and returns an agent job."
+  createAgentJob(
+    "Values for the requested operation."
+    input: CreateAgentJobInput!
+  ): AgentJob!
+  "Claims an agent job and returns an agent job."
+  claimAgentJob("Identifier of the job." jobId: ID!): AgentJob!
+  "Claims a signing secret transfer and returns a signing secret transfer."
+  claimSigningSecretTransfer(
+    "Identifier of the transfer."
+    transferId: ID!
+  ): SigningSecretTransfer!
+  "Appends agent job logs and returns agent job logs."
+  appendAgentJobLogs(
+    "Identifier of the job."
     jobId: ID!
+    "Logs used to filter or perform the operation."
+    logs: [AgentJobLogInput!]!
+  ): [AgentJobLog!]!
+  "Completes an agent job and returns an agent job."
+  completeAgentJob(
+    "Identifier of the job."
+    jobId: ID!
+    "The status used to filter or perform the operation."
     status: AgentJobStatus!
+    "The result used to filter or perform the operation."
     result: JSON
+    "The error used to filter or perform the operation."
     error: String
   ): AgentJob!
-  cancelAgentJob(jobId: ID!): AgentJob!
-  requestAgentCodebaseReconcile(agentId: ID!): Boolean!
-  updateAgentBaseRepoDirectory(agentId: ID!, baseRepoDirectory: String): Agent!
-  updateAgentBuildsDirectory(agentId: ID!, buildsDirectory: String): Agent!
-  updateAgentDerivedDataSettings(
+  "Cancels an agent job and returns an agent job."
+  cancelAgentJob("Identifier of the job." jobId: ID!): AgentJob!
+  "Requests an agent codebase reconcile and reports whether the operation succeeded."
+  requestAgentCodebaseReconcile(
+    "Identifier of the agent."
     agentId: ID!
+  ): Boolean!
+  "Updates an agent base repo directory and returns the updated agent."
+  updateAgentBaseRepoDirectory(
+    "Identifier of the agent."
+    agentId: ID!
+    "The base repo directory used to filter or perform the operation."
+    baseRepoDirectory: String
+  ): Agent!
+  "Updates an agent builds directory and returns the updated agent."
+  updateAgentBuildsDirectory(
+    "Identifier of the agent."
+    agentId: ID!
+    "The builds directory used to filter or perform the operation."
+    buildsDirectory: String
+  ): Agent!
+  "Updates agent derived data settings and returns the updated agent."
+  updateAgentDerivedDataSettings(
+    "Identifier of the agent."
+    agentId: ID!
+    "Values for the requested operation."
     input: UpdateAgentDerivedDataSettingsInput!
   ): Agent!
+  "Updates agent cadence settings and returns the updated agent cadence settings."
   updateAgentCadenceSettings(
+    "Identifier of the agent."
     agentId: ID!
+    "Values for the requested operation."
     input: UpdateAgentCadenceSettingsInput!
   ): AgentCadenceSettings!
-  deleteAgent(agentId: ID!): Boolean!
+  "Deletes an agent and reports whether the operation succeeded."
+  deleteAgent("Identifier of the agent." agentId: ID!): Boolean!
 }
 
+"Live events emitted as control-plane resources change."
 type Subscription {
-  agentEvents(agentId: ID!): AgentEvent!
-  agentChanged(agentId: ID): Agent!
-  agentJobChanged(jobId: ID!): AgentJob!
-  agentJobLogAdded(jobId: ID!): AgentJobLog!
+  "Emits an agent event for this event stream."
+  agentEvents("Identifier of the agent." agentId: ID!): AgentEvent!
+  "Emits an agent whenever agent changes."
+  agentChanged("Identifier of the agent." agentId: ID): Agent!
+  "Emits an agent job whenever agent job changes."
+  agentJobChanged("Identifier of the job." jobId: ID!): AgentJob!
+  "Emits an agent job log whenever agent job log is added."
+  agentJobLogAdded("Identifier of the job." jobId: ID!): AgentJobLog!
 }

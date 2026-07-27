@@ -1,217 +1,440 @@
+"Values supported for command target."
 enum CommandTargetKind {
+  "Represents the any agent home option."
   ANY_AGENT_HOME
+  "Represents the specific agent home option."
   SPECIFIC_AGENT_HOME
+  "Represents the any worktree option."
   ANY_WORKTREE
+  "Represents the repository worktree option."
   REPOSITORY_WORKTREE
 }
 
+"Values supported for command restart policy."
 enum CommandRestartPolicy {
+  "Represents the never option."
   NEVER
+  "Represents the on failure option."
   ON_FAILURE
+  "Represents the always option."
   ALWAYS
 }
 
+"Lifecycle statuses for command run."
 enum CommandRunStatus {
+  "Represents the queued status for command run."
   QUEUED
+  "Represents the running status for command run."
   RUNNING
+  "Represents the restarting status for command run."
   RESTARTING
+  "Represents the cancelling status for command run."
   CANCELLING
+  "Represents the succeeded status for command run."
   SUCCEEDED
+  "Represents the failed status for command run."
   FAILED
+  "Represents the cancelled status for command run."
   CANCELLED
 }
 
+"Values supported for command run origin."
 enum CommandRunOrigin {
+  "Represents the manual option."
   MANUAL
+  "Represents the quick action option."
   QUICK_ACTION
+  "Represents the workflow option."
   WORKFLOW
+  "Represents the rerun option."
   RERUN
 }
 
+"Represents a command definition in the GraphQL API."
 type CommandDefinition {
+  "Stable identifier for this command definition."
   id: ID!
+  "Display name of this command definition."
   name: String!
+  "Human-readable description of this command definition."
   description: String!
+  "The script associated with this command definition."
   script: String!
+  "The target kind associated with this command definition."
   targetKind: CommandTargetKind!
+  "Identifier of the related target agent. May be null when unavailable or not applicable."
   targetAgentId: ID
+  "The target agent associated with this command definition. May be null when unavailable or not applicable."
   targetAgent: Agent
+  "Identifier of the related target repository. May be null when unavailable or not applicable."
   targetRepositoryId: ID
+  "The target repository associated with this command definition. May be null when unavailable or not applicable."
   targetRepository: CodebaseRepository
+  "The restart policy associated with this command definition."
   restartPolicy: CommandRestartPolicy!
+  "The restart limit associated with this command definition. May be null when unavailable or not applicable."
   restartLimit: Int
+  "Whether the quick action enabled condition is true for this command definition."
   quickActionEnabled: Boolean!
+  "The quick action icon key associated with this command definition."
   quickActionIconKey: String!
+  "The quick action button variant associated with this command definition."
   quickActionButtonVariant: String!
+  "Whether the notifications enabled condition is true for this command definition."
   notificationsEnabled: Boolean!
+  "ISO 8601 timestamp when this command definition was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "ISO 8601 timestamp when this command definition was created."
   createdAt: String!
+  "ISO 8601 timestamp when this command definition was last updated."
   updatedAt: String!
 }
 
+"Represents a command run attempt in the GraphQL API."
 type CommandRunAttempt {
+  "Stable identifier for this command run attempt."
   id: ID!
+  "Identifier of the related run."
   runId: ID!
+  "The attempt associated with this command run attempt."
   attempt: Int!
+  "Identifier of the related agent job. May be null when unavailable or not applicable."
   agentJobId: ID
+  "The agent job associated with this command run attempt. May be null when unavailable or not applicable."
   agentJob: AgentJob
+  "Current status of this command run attempt."
   status: AgentJobStatus!
+  "The exit code associated with this command run attempt. May be null when unavailable or not applicable."
   exitCode: Int
+  "The signal associated with this command run attempt. May be null when unavailable or not applicable."
   signal: String
+  "Error message when this command run attempt did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "ISO 8601 timestamp when this command run attempt started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this command run attempt finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this command run attempt was created."
   createdAt: String!
+  "ISO 8601 timestamp when this command run attempt was last updated."
   updatedAt: String!
 }
 
+"Represents a command run output chunk in the GraphQL API."
 type CommandRunOutputChunk {
+  "Stable identifier for this command run output chunk."
   id: ID!
+  "Identifier of the related attempt."
   attemptId: ID!
+  "The attempt number associated with this command run output chunk."
   attemptNumber: Int!
+  "Monotonically increasing sequence number used for ordering."
   sequence: Int!
+  "The stream associated with this command run output chunk."
   stream: AgentLogStream!
+  "Data Base64, encoded as Base64."
   dataBase64: String!
+  "The byte length associated with this command run output chunk."
   byteLength: Int!
+  "ISO 8601 timestamp when this command run output chunk was created."
   createdAt: String!
 }
 
+"Represents a command run in the GraphQL API."
 type CommandRun {
+  "Stable identifier for this command run."
   id: ID!
+  "The display number associated with this command run."
   displayNumber: Int!
+  "Identifier of the related command. May be null when unavailable or not applicable."
   commandId: ID
+  "The command associated with this command run. May be null when unavailable or not applicable."
   command: CommandDefinition
+  "The origin associated with this command run."
   origin: CommandRunOrigin!
+  "Current status of this command run."
   status: CommandRunStatus!
+  "The snapshot name associated with this command run."
   snapshotName: String!
+  "The snapshot description associated with this command run."
   snapshotDescription: String!
+  "The snapshot script associated with this command run."
   snapshotScript: String!
+  "The snapshot target kind associated with this command run."
   snapshotTargetKind: CommandTargetKind!
+  "The snapshot restart policy associated with this command run."
   snapshotRestartPolicy: CommandRestartPolicy!
+  "The snapshot restart limit associated with this command run. May be null when unavailable or not applicable."
   snapshotRestartLimit: Int
+  "Whether the snapshot notifications enabled condition is true for this command run."
   snapshotNotificationsEnabled: Boolean!
+  "The snapshot associated with this command run."
   snapshot: JSON!
+  "Identifier of the related agent. May be null when unavailable or not applicable."
   agentId: ID
+  "The agent associated with this command run. May be null when unavailable or not applicable."
   agent: Agent
+  "Identifier of the related worktree. May be null when unavailable or not applicable."
   worktreeId: ID
+  "The worktree associated with this command run. May be null when unavailable or not applicable."
   worktree: Worktree
+  "The agent name associated with this command run."
   agentName: String!
+  "The agent hostname associated with this command run."
   agentHostname: String!
+  "Filesystem path associated with this command run. May be null when unavailable or not applicable."
   worktreePath: String
+  "Git branch associated with this command run. May be null when unavailable or not applicable."
   worktreeBranch: String
+  "Number of restarts."
   restartCount: Int!
+  "Whether the stop requested condition is true for this command run."
   stopRequested: Boolean!
+  "ISO 8601 timestamp when this command run next restart. May be null when unavailable or not applicable."
   nextRestartAt: String
+  "Identifier of the related predecessor run. May be null when unavailable or not applicable."
   predecessorRunId: ID
+  "The predecessor associated with this command run. May be null when unavailable or not applicable."
   predecessor: CommandRun
+  "The successor associated with this command run. May be null when unavailable or not applicable."
   successor: CommandRun
+  "Error message when this command run did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "The exit code associated with this command run. May be null when unavailable or not applicable."
   exitCode: Int
+  "The signal associated with this command run. May be null when unavailable or not applicable."
   signal: String
+  "Attempts associated with this command run."
   attempts: [CommandRunAttempt!]!
+  "ISO 8601 timestamp when this command run was queued."
   queuedAt: String!
+  "ISO 8601 timestamp when this command run started. May be null when unavailable or not applicable."
   startedAt: String
+  "ISO 8601 timestamp when this command run finished. May be null when unavailable or not applicable."
   finishedAt: String
+  "ISO 8601 timestamp when this command run was archived. May be null when unavailable or not applicable."
   archivedAt: String
+  "ISO 8601 timestamp when this command run was created."
   createdAt: String!
+  "ISO 8601 timestamp when this command run was last updated."
   updatedAt: String!
 }
 
+"Represents a command run page info in the GraphQL API."
 type CommandRunPageInfo {
+  "Whether this command run page info has next page."
   hasNextPage: Boolean!
+  "The end cursor associated with this command run page info. May be null when unavailable or not applicable."
   endCursor: ID
 }
 
+"A paginated collection of command runs."
 type CommandRunPage {
+  "Nodes associated with this command run page."
   nodes: [CommandRun!]!
+  "Number of totals."
   totalCount: Int!
+  "The page info associated with this command run page."
   pageInfo: CommandRunPageInfo!
 }
 
+"Input values for command definition."
 input CommandDefinitionInput {
+  "The name to use for the request."
   name: String!
+  "The description to use for the request."
   description: String = ""
+  "The script to use for the request."
   script: String!
+  "The target kind to use for the request."
   targetKind: CommandTargetKind!
+  "Identifier of the target agent to use."
   targetAgentId: ID
+  "Identifier of the target repository to use."
   targetRepositoryId: ID
+  "The restart policy to use for the request."
   restartPolicy: CommandRestartPolicy = NEVER
+  "The restart limit to use for the request."
   restartLimit: Int = 3
+  "Whether quick action enabled applies to the request."
   quickActionEnabled: Boolean = false
+  "The quick action icon key to use for the request."
   quickActionIconKey: String = "terminal"
+  "The quick action button variant to use for the request."
   quickActionButtonVariant: String = "default"
+  "Whether notifications enabled applies to the request."
   notificationsEnabled: Boolean = true
 }
 
+"Values used to start a command run."
 input StartCommandRunInput {
+  "Identifier of the command to use."
   commandId: ID!
+  "Identifier of the agent to use."
   agentId: ID
+  "Identifier of the worktree to use."
   worktreeId: ID
+  "The origin to use for the request."
   origin: CommandRunOrigin = MANUAL
+  "The idempotency key to use for the request."
   idempotencyKey: String
 }
 
+"Values used to start a custom command run."
 input StartCustomCommandRunInput {
+  "The script to use for the request."
   script: String!
+  "Identifier of the agent to use."
   agentId: ID
+  "Identifier of the worktree to use."
   worktreeId: ID
+  "The origin to use for the request."
   origin: CommandRunOrigin = MANUAL
+  "The idempotency key to use for the request."
   idempotencyKey: String
 }
 
+"Input values for command run output."
 input CommandRunOutputInput {
+  "The sequence to use for the request."
   sequence: Int!
+  "The stream to use for the request."
   stream: AgentLogStream!
+  "Data Base64, encoded as Base64."
   dataBase64: String!
+  "The byte length to use for the request."
   byteLength: Int!
+  "The created at to use for the request."
   createdAt: String!
 }
 
 extend type Query {
-  commandDefinitions(includeArchived: Boolean = false): [CommandDefinition!]!
-  commandDefinition(id: ID!): CommandDefinition
-  commandRuns(
+  "Returns command definitions."
+  commandDefinitions(
+    "Whether archived records should be included. Defaults to `false`."
     includeArchived: Boolean = false
+  ): [CommandDefinition!]!
+  "Returns a command definition, or null when it cannot be found."
+  commandDefinition(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CommandDefinition
+  "Returns a command run page."
+  commandRuns(
+    "Whether archived records should be included. Defaults to `false`."
+    includeArchived: Boolean = false
+    "Text used to filter matching records. Omit it to leave this dimension unfiltered."
     search: String
+    "Identifier of the agent. Omit it to leave this dimension unfiltered."
     agentId: ID
+    "Identifier of the worktree. Omit it to leave this dimension unfiltered."
     worktreeId: ID
+    "Maximum number of records to return. Defaults to `50`."
     first: Int = 50
+    "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
   ): CommandRunPage!
-  commandRun(id: ID!): CommandRun
+  "Returns a command run, or null when it cannot be found."
+  commandRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CommandRun
+  "Returns command run output chunks."
   commandRunOutput(
+    "Identifier of the run."
     runId: ID!
+    "The after attempt used to filter or perform the operation. Defaults to `0`."
     afterAttempt: Int = 0
+    "The after sequence used to filter or perform the operation. Defaults to `-1`."
     afterSequence: Int = -1
+    "Maximum number of records to return. Defaults to `1000`."
     first: Int = 1000
   ): [CommandRunOutputChunk!]!
-  eligibleCommandsForAgent(agentId: ID!): [CommandDefinition!]!
-  eligibleCommandsForWorktree(worktreeId: ID!): [CommandDefinition!]!
+  "Returns command definitions eligible for the specified agent."
+  eligibleCommandsForAgent(
+    "Identifier of the agent."
+    agentId: ID!
+  ): [CommandDefinition!]!
+  "Returns command definitions eligible for the specified worktree."
+  eligibleCommandsForWorktree(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): [CommandDefinition!]!
 }
 
 extend type Mutation {
-  createCommandDefinition(input: CommandDefinitionInput!): CommandDefinition!
-  updateCommandDefinition(
-    id: ID!
+  "Creates a command definition and returns a command definition."
+  createCommandDefinition(
+    "Values for the requested operation."
     input: CommandDefinitionInput!
   ): CommandDefinition!
-  archiveCommandDefinition(id: ID!, archived: Boolean!): CommandDefinition!
-  startCommandRun(input: StartCommandRunInput!): CommandRun!
-  startCustomCommandRun(input: StartCustomCommandRunInput!): CommandRun!
-  terminateCommandRun(id: ID!): CommandRun!
-  rerunCommandRun(id: ID!): CommandRun!
-  archiveCommandRuns(ids: [ID!]!, archived: Boolean!): Boolean!
-  deleteCommandRuns(ids: [ID!]!): Int!
+  "Updates a command definition and returns the updated command definition."
+  updateCommandDefinition(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Values for the requested operation."
+    input: CommandDefinitionInput!
+  ): CommandDefinition!
+  "Archives a command definition and returns a command definition."
+  archiveCommandDefinition(
+    "Identifier of the resource to return or affect."
+    id: ID!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): CommandDefinition!
+  "Starts a command run and returns a command run."
+  startCommandRun(
+    "Values for the requested operation."
+    input: StartCommandRunInput!
+  ): CommandRun!
+  "Starts a custom command run and returns a command run."
+  startCustomCommandRun(
+    "Values for the requested operation."
+    input: StartCustomCommandRunInput!
+  ): CommandRun!
+  "Terminates a command run and returns a command run."
+  terminateCommandRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CommandRun!
+  "Reruns a command run and returns a command run."
+  rerunCommandRun(
+    "Identifier of the resource to return or affect."
+    id: ID!
+  ): CommandRun!
+  "Archives command runs and reports whether the operation succeeded."
+  archiveCommandRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+    "Whether the affected resource should be archived."
+    archived: Boolean!
+  ): Boolean!
+  "Deletes command runs and returns the number of deleted records."
+  deleteCommandRuns(
+    "Identifiers of the resources to return or affect."
+    ids: [ID!]!
+  ): Int!
+  "Appends command run output and returns command run output chunks."
   appendCommandRunOutput(
+    "Identifier of the job."
     jobId: ID!
+    "Identifier of the attempt."
     attemptId: ID!
+    "Chunks used to filter or perform the operation."
     chunks: [CommandRunOutputInput!]!
   ): [CommandRunOutputChunk!]!
 }
 
 extend type Subscription {
+  "Emits a command definition whenever commands change."
   commandsChanged: CommandDefinition
+  "Emits a command run whenever command runs change."
   commandRunsChanged: CommandRun!
-  commandRunChanged(runId: ID!): CommandRun!
-  commandRunOutputAdded(runId: ID!): CommandRunOutputChunk!
+  "Emits a command run whenever command run changes."
+  commandRunChanged("Identifier of the run." runId: ID!): CommandRun!
+  "Emits a command run output chunk whenever command run output is added."
+  commandRunOutputAdded(
+    "Identifier of the run."
+    runId: ID!
+  ): CommandRunOutputChunk!
 }
