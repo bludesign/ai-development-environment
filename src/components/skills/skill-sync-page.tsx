@@ -2,7 +2,6 @@
 
 import {
   ArrowDownToLine,
-  ArrowLeft,
   ArrowUpFromLine,
   Check,
   GitCompareArrows,
@@ -51,7 +50,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -429,11 +427,6 @@ export function SkillSyncPage({ runId }: { runId: string }) {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Button asChild size="icon" variant="ghost">
-            <Link aria-label={t("backToSkills")} href="/skills">
-              <ArrowLeft />
-            </Link>
-          </Button>
           <div>
             <h1 className="text-2xl font-semibold">{t("syncTitle")}</h1>
             <p className="text-sm text-muted-foreground">

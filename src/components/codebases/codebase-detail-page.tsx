@@ -446,14 +446,6 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <Button asChild size="sm" variant="ghost">
-          <Link href="/codebases">
-            <ArrowLeft /> {t("back")}
-          </Link>
-        </Button>
-      </div>
-
       {loadError && (
         <Alert variant="destructive">
           <AlertDescription>{loadError}</AlertDescription>

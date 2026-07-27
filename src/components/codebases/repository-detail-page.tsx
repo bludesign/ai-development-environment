@@ -208,13 +208,6 @@ export function RepositoryDetailPage({
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href="/codebases">
-            <ArrowLeft /> {t("backToCodebases")}
-          </Link>
-        </Button>
-      </div>
-      <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           {t("editTitle")}
         </h1>

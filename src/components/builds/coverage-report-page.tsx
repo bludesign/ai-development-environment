@@ -231,13 +231,6 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   }
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-      <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href={`/builds/${buildId}`}>
-            <ArrowLeft /> {t("backToBuild")}
-          </Link>
-        </Button>
-      </div>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>

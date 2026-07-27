@@ -18,7 +18,6 @@ import {
   MIN_WORKTREE_FETCH_INTERVAL_SECONDS,
 } from "@ai-development-environment/agent-contract/worktrees";
 import {
-  ArrowLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -390,13 +389,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
-      <div className="flex items-center justify-between gap-4">
-        <Button asChild size="sm" variant="ghost">
-          <Link href="/agents">
-            <ArrowLeft />
-            {t("back")}
-          </Link>
-        </Button>
+      <div className="flex items-center justify-end gap-4">
         <ConfirmationDialog
           actionLabel={t("deleteAgent")}
           cancelLabel={common("cancel")}

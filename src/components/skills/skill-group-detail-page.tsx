@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { Link, useRouter } from "@/i18n/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import type {
@@ -158,11 +158,6 @@ export function SkillGroupDetailPage({ groupId }: { groupId: string }) {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Button asChild size="icon" variant="ghost">
-            <Link aria-label={t("backToGroups")} href="/skills/groups">
-              <ArrowLeft />
-            </Link>
-          </Button>
           <div>
             <h1 className="text-2xl font-semibold">{group.name}</h1>
             <p className="text-sm text-muted-foreground">

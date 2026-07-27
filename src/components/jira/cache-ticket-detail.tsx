@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Link, useRouter } from "@/i18n/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraCachedTicketDetail } from "@/services/jira/types";
 
@@ -90,14 +90,6 @@ export function JiraCacheTicketDetailPage({ issueKey }: { issueKey: string }) {
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <Button asChild size="sm" variant="ghost">
-          <Link href="/jira-cache">
-            <ArrowLeft />
-            {t("back")}
-          </Link>
-        </Button>
-      </div>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{issueKey}</h1>

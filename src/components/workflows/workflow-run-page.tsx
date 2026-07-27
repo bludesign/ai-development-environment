@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   CirclePause,
   CirclePlay,
   CircleStop,
@@ -378,21 +377,6 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         )}
       >
         <div className="flex items-start gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                asChild
-                aria-label={t("back")}
-                size="icon"
-                variant="ghost"
-              >
-                <Link href={`/workflows/${run.workflowId}`}>
-                  <ArrowLeft />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("back")}</TooltipContent>
-          </Tooltip>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">

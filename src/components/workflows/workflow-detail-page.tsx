@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   ChevronDown,
   CircleOff,
   CirclePause,
@@ -312,21 +311,6 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                asChild
-                aria-label={t("back")}
-                size="icon"
-                variant="ghost"
-              >
-                <Link href="/workflows">
-                  <ArrowLeft />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("back")}</TooltipContent>
-          </Tooltip>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">

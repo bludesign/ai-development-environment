@@ -11,7 +11,6 @@ import {
 import {
   AlertTriangle,
   Archive,
-  ChevronLeft,
   CircleStop,
   ClipboardList,
   Download,
@@ -923,7 +922,6 @@ export function RunDetailPage({
         <AlertDescription>{error ?? t("runNotFound")}</AlertDescription>
       </Alert>
     );
-  const base = run.kind === "PLAN" ? "/plans" : "/sessions";
   const highlighted = run.worktree?.highlightColor;
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
@@ -996,14 +994,6 @@ export function RunDetailPage({
           highlighted && worktreeHighlightAccentClasses[highlighted],
         )}
       >
-        <Button asChild variant="ghost">
-          <Link href={base}>
-            <ChevronLeft />{" "}
-            {t("backTo", {
-              kind: run.kind === "PLAN" ? t("plans") : t("sessions"),
-            })}
-          </Link>
-        </Button>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">

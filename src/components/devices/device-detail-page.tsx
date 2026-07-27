@@ -316,14 +316,6 @@ export function DeviceDetailPage({ id }: { id: string }) {
 
   return (
     <section className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-5">
-      <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href="/devices">
-            <ArrowLeft /> {t("back")}
-          </Link>
-        </Button>
-      </div>
-
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>

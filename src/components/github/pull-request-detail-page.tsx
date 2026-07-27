@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
@@ -269,12 +268,6 @@ export function PullRequestDetailPage({
         )}
       >
         <div className="min-w-0">
-          <Button asChild className="mb-3 -ml-2" variant="ghost">
-            <Link href="/pull-requests">
-              <ArrowLeft />
-              {t("back")}
-            </Link>
-          </Button>
           <p className="text-sm text-muted-foreground">
             {pullRequest.repositoryNameWithOwner} #{pullRequest.number}
           </p>
