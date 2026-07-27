@@ -44,6 +44,15 @@ const SEEDS: Seed[] = [
     createdAt: daysAgo(60),
   },
   {
+    // GitHubService.webhooksEnabled() gates the Webhooks page on this secret in addition to
+    // gitHubAppSettings.webhookUrl; without it the page redirects home and the screenshot
+    // captures the Action Center instead.
+    id: "github-app/default/webhook-secret",
+    kind: "github-app-webhook-secret",
+    value: "acme-mock-github-app-webhook-secret",
+    createdAt: daysAgo(60),
+  },
+  {
     id: "jira/default/api-token",
     kind: "jira-api-token",
     value: "ATATT3xFfGF0AcmeMockScreenshotJiraToken00",

@@ -10,6 +10,7 @@ import { routes } from "./routes";
 test.describe("app screenshots", () => {
   for (const route of routes) {
     test(route.name, async ({ page }, testInfo) => {
+      if (route.initScript) await page.addInitScript(route.initScript);
       await page.goto(`/en${route.path}`, {
         waitUntil: "domcontentloaded",
         timeout: 45_000,

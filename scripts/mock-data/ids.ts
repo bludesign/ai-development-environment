@@ -35,6 +35,11 @@ export const ids = {
     sessionSearch: "run-session-quick-search",
     sessionAuth: "run-session-api-auth",
     planImported: "run-plan-imported",
+    /** Paused on a pending question — the Action Center's second "needs attention" item. */
+    planCheckoutQuestion: "run-plan-checkout-question",
+  },
+  runQuestionBatches: {
+    planCheckout: "question-batch-plan-checkout",
   },
   runDrafts: {
     refactor: "draft-refactor-checkout",
@@ -84,6 +89,8 @@ export const ids = {
   },
   workflowRuns: {
     latest: "workflow-run-latest",
+    /** Still running — the Action Center's second "active" item. */
+    running: "workflow-run-running",
   },
   commands: {
     runTests: "command-run-tests",
@@ -126,6 +133,14 @@ export const ids = {
   notifications: {
     buildFailed: "notification-build-failed",
   },
+  ccusageCollections: {
+    /**
+     * Doubles as the Usage page's collection request id — playwright/routes.ts pins the
+     * page's client-generated id to this value so it resolves the seeded, already-finished
+     * collection instead of dispatching a fresh one no agent can answer.
+     */
+    captured: "0f1e2d3c-4b5a-4697-8899-aabbccddeeff",
+  },
 } as const;
 
 /** Display numbers must be unique per their scope; kept here so the seed stays consistent. */
@@ -135,11 +150,13 @@ export const displayNumbers = {
     sessionSearch: 2001,
     sessionAuth: 2002,
     planImported: 1002,
+    planCheckoutQuestion: 1003,
   },
   commandRuns: {
     latest: 3001,
   },
   workflowRuns: {
     latest: 4001,
+    running: 4002,
   },
 } as const;

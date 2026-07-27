@@ -10,6 +10,11 @@ export type RouteEntry = {
   path: string;
   /** Full-page capture by default; set false for pages better shown at viewport height. */
   fullPage?: boolean;
+  /**
+   * JavaScript evaluated before any of the page's own scripts run. Only for pages whose data
+   * depends on an id the client mints at random; see the `usage` route.
+   */
+  initScript?: string;
 };
 
 export const routes: RouteEntry[] = [
@@ -115,7 +120,19 @@ export const routes: RouteEntry[] = [
   { name: "unified-events", path: "/unified-events" },
 
   // Usage & costs
-  { name: "usage", path: "/usage" },
+  {
+    name: "usage",
+    path: "/usage",
+    // The page collects ccusage afresh under a request id from `createClientId()` and waits
+    // for every online agent to report. No agent is connected during a capture, so a random
+    // id leaves it on its spinner until the 150s collection deadline. Pinning the id to the
+    // finished collection the seed wrote (scripts/mock-data/costs.ts) makes the first
+    // reconcile return completed data instead.
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.ccusageCollections.captured}",
+    });`,
+  },
   { name: "costs", path: "/costs" },
 
   // Notifications & push

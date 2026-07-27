@@ -107,7 +107,7 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
   });
 
   await prisma.workflowRunNumberSequence.create({
-    data: { id: "default", nextValue: displayNumbers.workflowRuns.latest + 1 },
+    data: { id: "default", nextValue: displayNumbers.workflowRuns.running + 1 },
   });
 
   await prisma.workflowRun.create({
@@ -187,6 +187,93 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
             resourceId: "acme/web-app#42",
             label: "acme/web-app#42",
             url: "https://github.com/acme/web-app/pull/42",
+          },
+        ],
+      },
+    },
+  });
+
+  /**
+   * A run still in flight. The Action Center index treats any non-terminal WorkflowRun with no
+   * pending questions as reason ACTIVE, which is what makes this its second "active" item; the
+   * worktree id in `sessionDataJson` is how that item picks up the worktree highlight.
+   */
+  await prisma.workflowRun.create({
+    data: {
+      id: ids.workflowRuns.running,
+      displayNumber: displayNumbers.workflowRuns.running,
+      workflowId: ids.workflows.prReview,
+      versionId: ids.workflowVersions.prReviewV1,
+      idempotencyKey: "workflow-run-running-key",
+      triggerKind: "MANUAL",
+      triggerSubjectKey: "acme/api#58",
+      triggerPayloadJson: JSON.stringify({ pr: { number: 58 } }),
+      status: "RUNNING",
+      phase: "RUNNING",
+      sessionDataJson: JSON.stringify({
+        pr: { number: 58 },
+        repo: { displayOrigin: "github.com/acme/api" },
+        worktree: { id: ids.worktrees.apiFeature },
+      }),
+      queuedAt: minutesAgo(4),
+      startedAt: minutesAgo(4),
+      createdAt: minutesAgo(4),
+      attempts: {
+        create: [
+          {
+            id: "workflow-running-attempt-load-pr",
+            nodeId: "loadPr",
+            kind: "GITHUB_LOAD_PR",
+            status: "SUCCEEDED",
+            phase: "COMPLETED",
+            idempotencyKey: "workflow-running-attempt-load-pr-key",
+            startedAt: minutesAgo(4),
+            finishedAt: minutesAgo(4),
+          },
+          {
+            id: "workflow-running-attempt-collect-threads",
+            nodeId: "collectThreads",
+            kind: "GITHUB_COLLECT_REVIEW_THREADS",
+            status: "RUNNING",
+            phase: "RUNNING",
+            idempotencyKey: "workflow-running-attempt-collect-threads-key",
+            startedAt: minutesAgo(3),
+          },
+        ],
+      },
+      events: {
+        create: [
+          {
+            id: "workflow-running-event-1",
+            sequence: 1,
+            type: "RUN_STARTED",
+            message: "Workflow run started",
+            createdAt: minutesAgo(4),
+          },
+          {
+            id: "workflow-running-event-2",
+            sequence: 2,
+            type: "STEP_SUCCEEDED",
+            message: "Loaded pull request acme/api#58",
+            createdAt: minutesAgo(4),
+          },
+          {
+            id: "workflow-running-event-3",
+            sequence: 3,
+            type: "STEP_STARTED",
+            message: "Collecting review threads",
+            createdAt: minutesAgo(3),
+          },
+        ],
+      },
+      resourceLinks: {
+        create: [
+          {
+            id: "workflow-running-resource-link-1",
+            kind: "PULL_REQUEST",
+            resourceId: "acme/api#58",
+            label: "acme/api#58",
+            url: "https://github.com/acme/api/pull/58",
           },
         ],
       },

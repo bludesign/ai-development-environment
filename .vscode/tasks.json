@@ -116,6 +116,20 @@
     },
     {
       "type": "shell",
+      "label": "screenshots",
+      "group": "test",
+      "command": "npm run screenshots",
+      "detail": "Generate, reset the mock database, build, and run the Playwright screenshot tests"
+    },
+    {
+      "type": "shell",
+      "label": "screenshots:run",
+      "group": "test",
+      "command": "npm run screenshots:run",
+      "detail": "Run the Playwright screenshot tests against the existing mock build"
+    },
+    {
+      "type": "shell",
       "label": "check-translations",
       "group": "test",
       "command": "npm run check-translations",

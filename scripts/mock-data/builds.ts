@@ -4,86 +4,207 @@ import { ids } from "./ids";
 import { daysAgo, hoursAgo, minutesAgo } from "./time";
 
 const BUILDS_DIR = "/Users/acme/Repositories/Builds";
+const IOS_HEAD_SHA = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
+
+const ARCHIVE_DESTINATION = {
+  type: "PHYSICAL_DEVICE",
+  id: "generic",
+  name: "Any iOS Device (arm64)",
+};
+
+const TEST_DESTINATION = {
+  type: "SIMULATOR",
+  id: "sim-iphone-16",
+  name: "iPhone 16 Pro",
+};
+
+/**
+ * The build pages read their repository name, branch, commit, scheme and configuration from
+ * the nested snapshot BuildsService.startBuild writes (`repository`/`worktree`/`configuration`
+ * keys), not from the live relations — a flat `{ scheme, configuration }` object leaves every
+ * one of those fields rendering its "—" fallback. Mirrors that shape.
+ */
+function buildSnapshot(overrides: {
+  action: string;
+  destination: Record<string, unknown>;
+  testPlan?: string;
+}) {
+  return {
+    repository: {
+      id: ids.repositories.ios,
+      name: "ios-app",
+      canonicalOrigin: "github.com/acme/ios-app",
+    },
+    codebase: {
+      id: ids.codebases.ios,
+      folder: "/Users/acme/Repositories/ios-app",
+    },
+    worktree: {
+      id: ids.worktrees.iosMain,
+      folder: "/Users/acme/Repositories/ios-app",
+      branch: "main",
+      headSha: IOS_HEAD_SHA,
+      codeStateHash: "sha256-ios-main-code-state-0001",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+    },
+    agent: {
+      id: ids.agents.build,
+      name: "Build Mac",
+      hostname: "build-mac.local",
+    },
+    configuration: {
+      id: ids.buildConfigurations.release,
+      name: "App Store Release",
+      iconKey: "rocket",
+      source: {
+        id: ids.buildSources.ios,
+        kind: "WORKSPACE",
+        relativePath: "AcmeApp.xcworkspace",
+      },
+      scheme: "AcmeApp",
+      buildConfiguration: "Release",
+      action: overrides.action,
+      advancedSettings: { codeCoverage: true },
+      autoExport: true,
+      exportSettings: { method: "APP_STORE_CONNECT" },
+      ...(overrides.testPlan ? { testPlan: overrides.testPlan } : {}),
+      parse: {
+        status: "VALID",
+        schemes: ["AcmeApp", "AcmeAppTests"],
+        configurations: ["Debug", "Release"],
+        testPlans: ["AcmeApp"],
+        headSha: IOS_HEAD_SHA,
+        xcodeVersion: "16.4",
+        parsedAt: hoursAgo(5).toISOString(),
+      },
+    },
+    destination: overrides.destination,
+    scripts: [
+      {
+        id: ids.buildScripts.swiftlint,
+        name: "SwiftLint",
+        preBuildScript: "swiftlint --strict",
+        timeoutSeconds: 300,
+        failureBehavior: "FAIL_BUILD",
+      },
+    ],
+    worktreeCoverage: false,
+  };
+}
 
 /**
  * Report payloads must match the GraphQL shapes in schemas/builds.graphql: `BuildReport.tests`
  * reads `data.tests` as `BuildTestCase`, and the coverage report reads `data.files` /
  * `data.changedFiles`. Both are only surfaced when the report status is READY.
  */
-const COVERAGE_FILES = [
-  {
-    target: "AcmeApp",
-    name: "CheckoutViewModel.swift",
-    path: "AcmeApp/Checkout/CheckoutViewModel.swift",
-    coveredLines: 412,
-    executableLines: 468,
-    lineCoverage: 0.8803,
-  },
-  {
-    target: "AcmeApp",
-    name: "SearchCoordinator.swift",
-    path: "AcmeApp/Search/SearchCoordinator.swift",
-    coveredLines: 286,
-    executableLines: 374,
-    lineCoverage: 0.7647,
-  },
-  {
-    target: "AcmeApp",
-    name: "AppDelegate.swift",
-    path: "AcmeApp/AppDelegate.swift",
-    coveredLines: 74,
-    executableLines: 132,
-    lineCoverage: 0.5606,
-  },
-  {
-    target: "AcmeKit",
-    name: "AuthTokenStore.swift",
-    path: "AcmeKit/Auth/AuthTokenStore.swift",
-    coveredLines: 318,
-    executableLines: 332,
-    lineCoverage: 0.9578,
-  },
-  {
-    target: "AcmeKit",
-    name: "NetworkClient.swift",
-    path: "AcmeKit/Networking/NetworkClient.swift",
-    coveredLines: 504,
-    executableLines: 548,
-    lineCoverage: 0.9197,
-  },
-  {
-    target: "AcmeKit",
-    name: "CacheStore.swift",
-    path: "AcmeKit/Storage/CacheStore.swift",
-    coveredLines: 196,
-    executableLines: 244,
-    lineCoverage: 0.8033,
-  },
-];
+/**
+ * Every file in the report, as `path → [coveredLines, executableLines]`. Coverage ratios and
+ * the report summary are derived from these numbers below so the tiles, the per-file rows and
+ * the file count can never drift apart.
+ */
+const COVERAGE_LINES: Record<string, [number, number]> = {
+  "AcmeApp/AppDelegate.swift": [74, 132],
+  "AcmeApp/Checkout/CheckoutViewModel.swift": [412, 468],
+  "AcmeApp/Checkout/CheckoutSummaryView.swift": [52, 74],
+  "AcmeApp/Checkout/PaymentMethodPicker.swift": [188, 232],
+  "AcmeApp/Checkout/PromotionCodeField.swift": [96, 118],
+  "AcmeApp/Checkout/OrderConfirmationView.swift": [134, 176],
+  "AcmeApp/Search/SearchCoordinator.swift": [286, 374],
+  "AcmeApp/Search/SearchResultsView.swift": [214, 268],
+  "AcmeApp/Search/RecentSearchesStore.swift": [122, 138],
+  "AcmeApp/Catalog/CatalogListViewModel.swift": [346, 402],
+  "AcmeApp/Catalog/ProductDetailView.swift": [258, 336],
+  "AcmeApp/Profile/ProfileSettingsView.swift": [166, 244],
+  "AcmeApp/Profile/NotificationPreferences.swift": [88, 104],
+  "AcmeApp/Onboarding/WelcomeFlowView.swift": [72, 148],
+  "AcmeKit/Auth/AuthTokenStore.swift": [318, 332],
+  "AcmeKit/Auth/DeviceAuthorizationClient.swift": [204, 226],
+  "AcmeKit/Auth/KeychainAdapter.swift": [142, 164],
+  "AcmeKit/Networking/NetworkClient.swift": [504, 548],
+  "AcmeKit/Networking/RequestRetryPolicy.swift": [176, 192],
+  "AcmeKit/Networking/MultipartEncoder.swift": [118, 158],
+  "AcmeKit/Storage/CacheStore.swift": [196, 244],
+  "AcmeKit/Storage/MigrationRunner.swift": [154, 218],
+  "AcmeKit/Analytics/EventDispatcher.swift": [232, 264],
+  "AcmeKit/Analytics/SessionTracker.swift": [108, 152],
+};
 
-const CHANGED_COVERAGE_FILES = [
-  {
-    path: "AcmeApp/Search/SearchCoordinator.swift",
-    changeType: "MODIFIED",
-    changedCoveredLines: 148,
-    changedExecutableLines: 176,
-    changedLineCoverage: 0.8409,
-  },
-  {
-    path: "AcmeKit/Auth/AuthTokenStore.swift",
-    changeType: "MODIFIED",
-    changedCoveredLines: 212,
-    changedExecutableLines: 236,
-    changedLineCoverage: 0.8983,
-  },
-  {
-    path: "AcmeApp/Checkout/CheckoutSummaryView.swift",
-    changeType: "ADDED",
-    changedCoveredLines: 52,
-    changedExecutableLines: 74,
-    changedLineCoverage: 0.7027,
-  },
-];
+/** Which of the above the build's diff touched, and how the diff itself was covered. */
+const CHANGED_LINES: Record<string, ["MODIFIED" | "ADDED", number, number]> = {
+  "AcmeApp/Search/SearchCoordinator.swift": ["MODIFIED", 148, 176],
+  "AcmeApp/Search/SearchResultsView.swift": ["MODIFIED", 96, 112],
+  "AcmeApp/Search/RecentSearchesStore.swift": ["ADDED", 64, 71],
+  "AcmeKit/Auth/AuthTokenStore.swift": ["MODIFIED", 212, 236],
+  "AcmeKit/Auth/DeviceAuthorizationClient.swift": ["ADDED", 118, 142],
+  "AcmeKit/Auth/KeychainAdapter.swift": ["MODIFIED", 74, 88],
+  "AcmeApp/Checkout/CheckoutSummaryView.swift": ["ADDED", 52, 74],
+  "AcmeApp/Checkout/CheckoutViewModel.swift": ["MODIFIED", 186, 204],
+  "AcmeApp/Checkout/PaymentMethodPicker.swift": ["MODIFIED", 92, 118],
+  "AcmeApp/Checkout/PromotionCodeField.swift": ["ADDED", 48, 62],
+  "AcmeApp/Checkout/OrderConfirmationView.swift": ["ADDED", 66, 98],
+  "AcmeApp/Catalog/CatalogListViewModel.swift": ["MODIFIED", 138, 152],
+  "AcmeApp/Catalog/ProductDetailView.swift": ["MODIFIED", 104, 148],
+  "AcmeApp/Profile/ProfileSettingsView.swift": ["MODIFIED", 58, 96],
+  "AcmeApp/Profile/NotificationPreferences.swift": ["ADDED", 42, 51],
+  "AcmeApp/Onboarding/WelcomeFlowView.swift": ["MODIFIED", 24, 68],
+  "AcmeKit/Networking/RequestRetryPolicy.swift": ["MODIFIED", 82, 90],
+  "AcmeKit/Networking/MultipartEncoder.swift": ["ADDED", 56, 84],
+  "AcmeKit/Storage/MigrationRunner.swift": ["MODIFIED", 71, 112],
+  "AcmeKit/Analytics/SessionTracker.swift": ["ADDED", 38, 74],
+};
+
+/** Ratios are rounded to four places, the precision a real xccov export reports. */
+const ratio = (covered: number, executable: number): number =>
+  executable === 0 ? 0 : Math.round((covered / executable) * 10_000) / 10_000;
+
+const COVERAGE_FILES = Object.entries(COVERAGE_LINES).map(
+  ([path, [coveredLines, executableLines]]) => ({
+    target: path.split("/")[0]!,
+    name: path.split("/").at(-1)!,
+    path,
+    coveredLines,
+    executableLines,
+    lineCoverage: ratio(coveredLines, executableLines),
+  }),
+);
+
+const CHANGED_COVERAGE_FILES = Object.entries(CHANGED_LINES).map(
+  ([path, [changeType, changedCoveredLines, changedExecutableLines]]) => ({
+    path,
+    changeType,
+    changedCoveredLines,
+    changedExecutableLines,
+    changedLineCoverage: ratio(changedCoveredLines, changedExecutableLines),
+  }),
+);
+
+function sum(values: number[]): number {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+const COVERAGE_SUMMARY = (() => {
+  const coveredLines = sum(COVERAGE_FILES.map((file) => file.coveredLines));
+  const executableLines = sum(
+    COVERAGE_FILES.map((file) => file.executableLines),
+  );
+  const changedCoveredLines = sum(
+    CHANGED_COVERAGE_FILES.map((file) => file.changedCoveredLines),
+  );
+  const changedExecutableLines = sum(
+    CHANGED_COVERAGE_FILES.map((file) => file.changedExecutableLines),
+  );
+  return {
+    coveredLines,
+    executableLines,
+    lineCoverage: ratio(coveredLines, executableLines),
+    targetCount: new Set(COVERAGE_FILES.map((file) => file.target)).size,
+    fileCount: COVERAGE_FILES.length,
+    changedCoveredLines,
+    changedExecutableLines,
+    changedLineCoverage: ratio(changedCoveredLines, changedExecutableLines),
+  };
+})();
 
 const TEST_SUMMARY = {
   total: 128,
@@ -272,15 +393,10 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       status: "SUCCEEDED",
       action: "ARCHIVE",
       destinationType: "PHYSICAL_DEVICE",
-      destinationJson: JSON.stringify({
-        type: "PHYSICAL_DEVICE",
-        id: "generic",
-        name: "Any iOS Device (arm64)",
-      }),
-      snapshotJson: JSON.stringify({
-        scheme: "AcmeApp",
-        configuration: "Release",
-      }),
+      destinationJson: JSON.stringify(ARCHIVE_DESTINATION),
+      snapshotJson: JSON.stringify(
+        buildSnapshot({ action: "ARCHIVE", destination: ARCHIVE_DESTINATION }),
+      ),
       commandSummary:
         "xcodebuild archive -workspace AcmeApp.xcworkspace -scheme AcmeApp -configuration Release",
       artifactDirectory: `${BUILDS_DIR}/${ids.builds.archive}`,
@@ -312,16 +428,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
             kind: "CODE_COVERAGE",
             source: "AUTOMATIC",
             status: "READY",
-            summaryJson: JSON.stringify({
-              coveredLines: 8420,
-              executableLines: 10270,
-              lineCoverage: 0.8199,
-              targetCount: 2,
-              fileCount: COVERAGE_FILES.length,
-              changedCoveredLines: 412,
-              changedExecutableLines: 486,
-              changedLineCoverage: 0.8477,
-            }),
+            summaryJson: JSON.stringify(COVERAGE_SUMMARY),
             dataJson: JSON.stringify({
               files: COVERAGE_FILES,
               changedFiles: CHANGED_COVERAGE_FILES,
@@ -429,12 +536,14 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       status: "FAILED",
       action: "TEST",
       destinationType: "SIMULATOR",
-      destinationJson: JSON.stringify({
-        type: "SIMULATOR",
-        id: "sim-iphone-16",
-        name: "iPhone 16 Pro",
-      }),
-      snapshotJson: JSON.stringify({ scheme: "AcmeApp", testPlan: "AcmeApp" }),
+      destinationJson: JSON.stringify(TEST_DESTINATION),
+      snapshotJson: JSON.stringify(
+        buildSnapshot({
+          action: "TEST",
+          destination: TEST_DESTINATION,
+          testPlan: "AcmeApp",
+        }),
+      ),
       commandSummary:
         "xcodebuild test -workspace AcmeApp.xcworkspace -scheme AcmeApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro'",
       artifactDirectory: `${BUILDS_DIR}/${ids.builds.test}`,

@@ -5,6 +5,20 @@ import { daysAgo, hoursAgo, minutesAgo } from "./time";
 
 const BASE = "/Users/acme/Repositories";
 
+/**
+ * Highlight colors are Tailwind palette *names* (see COLORS in
+ * src/components/worktrees/worktrees-page.tsx), not hex — the UI maps the stored value
+ * through the class records in src/lib/worktree-highlight.ts, so a hex value silently
+ * renders unhighlighted. Every worktree gets one so the accent stripe is visible on each
+ * page that surfaces a worktree: primary checkouts green, feature branches purple/blue.
+ */
+const HIGHLIGHTS = {
+  webMain: "green",
+  webFeature: "purple",
+  iosMain: "green",
+  apiFeature: "blue",
+} as const;
+
 export async function seedCodebases(prisma: PrismaClient): Promise<void> {
   await prisma.codebaseRepository.createMany({
     data: [
@@ -114,6 +128,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         behind: 0,
         syncState: "IN_SYNC",
         pushStatus: "READY",
+        highlightColor: HIGHLIGHTS.webMain,
         availability: "AVAILABLE",
         lastCheckedAt: minutesAgo(3),
         createdAt: daysAgo(120),
@@ -133,7 +148,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         hasStagedChanges: true,
         hasUnstagedChanges: true,
         pushStatus: "DIVERGED",
-        highlightColor: "#8b5cf6",
+        highlightColor: HIGHLIGHTS.webFeature,
         availability: "AVAILABLE",
         lastCheckedAt: minutesAgo(2),
         createdAt: daysAgo(6),
@@ -155,6 +170,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         behind: 0,
         syncState: "AHEAD",
         pushStatus: "READY",
+        highlightColor: HIGHLIGHTS.iosMain,
         availability: "AVAILABLE",
         lastCheckedAt: minutesAgo(5),
         createdAt: daysAgo(110),
@@ -173,7 +189,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         syncState: "AHEAD",
         hasUnstagedChanges: true,
         pushStatus: "READY",
-        highlightColor: "#0ea5e9",
+        highlightColor: HIGHLIGHTS.apiFeature,
         availability: "AVAILABLE",
         lastCheckedAt: minutesAgo(6),
         createdAt: daysAgo(3),
@@ -181,11 +197,12 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
     ],
   });
 
+  // Tag colors go through the same palette-name lookup as highlights, so they are names too.
   await prisma.worktreeTag.createMany({
     data: [
-      { id: ids.worktreeTags.review, name: "In Review", color: "#8b5cf6" },
-      { id: ids.worktreeTags.ready, name: "Ready to Merge", color: "#10b981" },
-      { id: ids.worktreeTags.blocked, name: "Blocked", color: "#ef4444" },
+      { id: ids.worktreeTags.review, name: "In Review", color: "violet" },
+      { id: ids.worktreeTags.ready, name: "Ready to Merge", color: "emerald" },
+      { id: ids.worktreeTags.blocked, name: "Blocked", color: "red" },
     ],
   });
 

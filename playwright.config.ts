@@ -13,10 +13,10 @@ const mockApiURL = `http://${HOST}:${MOCK_API_PORT}`;
 // Absolute file URL so the standalone server resolves the same database regardless of its CWD.
 const mockDatabaseUrl = `file:${path.resolve(process.cwd(), "prisma/mock.db")}`;
 
-const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
+const DESKTOP_VIEWPORT = { width: 1920, height: 1080 };
 
-// Capture at 2x so text and icons stay crisp when the PNGs are viewed or scaled down.
-const DEVICE_SCALE_FACTOR = 2;
+// Capture at 3x so text and icons stay crisp when the PNGs are viewed or scaled down.
+const DEVICE_SCALE_FACTOR = 3;
 
 export default defineConfig({
   testDir: "./playwright",

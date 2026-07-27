@@ -317,6 +317,146 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  /**
+   * Paused waiting on an answer. A PENDING RunQuestionBatch on a non-FAILED run is what the
+   * Action Center index classifies as reason QUESTION — its highest priority — so this is the
+   * item that renders the answer form at the top of the Action Center and the sidebar.
+   */
+  await prisma.agentRun.create({
+    data: {
+      id: ids.runs.planCheckoutQuestion,
+      kind: "PLAN",
+      displayNumber: displayNumbers.runs.planCheckoutQuestion,
+      status: "PAUSED",
+      phase: "WAITING_FOR_ANSWER",
+      origin: "MANAGED",
+      provider: "CLAUDE",
+      providerVersion: "claude-agent-sdk 0.3.2",
+      worktreeId: ids.worktrees.webFeature,
+      agentId: ids.agents.studio,
+      repositoryName: "acme/web-app",
+      branch: "feature/quick-search",
+      model: "claude-sonnet-4.5",
+      effort: "high",
+      webSearchEnabled: false,
+      initialPrompt:
+        "Plan a migration of the checkout flow onto the new payments SDK, keeping the existing gift-card path working.",
+      estimatedCost: 0.18,
+      inputTokens: 22600,
+      outputTokens: 2840,
+      reasoningTokens: 1420,
+      cacheReadTokens: 8100,
+      toolCallCount: 3,
+      startedAt: minutesAgo(26),
+      createdAt: minutesAgo(28),
+      attempts: {
+        create: [
+          {
+            id: "attempt-plan-checkout-1",
+            generation: 1,
+            nativeId: "claude-plan-jkl012",
+            status: "RUNNING",
+            startedAt: minutesAgo(26),
+          },
+        ],
+      },
+      inputs: {
+        create: [
+          {
+            id: "input-plan-checkout-1",
+            sequence: 1,
+            kind: "INITIAL",
+            prompt:
+              "Plan a migration of the checkout flow onto the new payments SDK.",
+            createdAt: minutesAgo(28),
+          },
+        ],
+      },
+      events: {
+        create: [
+          {
+            id: "event-plan-checkout-1",
+            sequence: 1,
+            type: "TOOL_CALL",
+            summary: "Reviewed the current payments integration",
+            searchText: "reviewed the current payments integration",
+            createdAt: minutesAgo(25),
+          },
+          {
+            id: "event-plan-checkout-2",
+            sequence: 2,
+            type: "QUESTION",
+            summary: "Asked how to handle gift cards during the migration",
+            searchText: "asked how to handle gift cards during the migration",
+            createdAt: minutesAgo(21),
+          },
+        ],
+      },
+      questionBatches: {
+        create: [
+          {
+            id: ids.runQuestionBatches.planCheckout,
+            nativeRequestId: "claude-question-checkout-1",
+            eventSequence: 2,
+            status: "PENDING",
+            createdAt: minutesAgo(21),
+            questions: {
+              create: [
+                {
+                  id: "question-plan-checkout-1",
+                  position: 0,
+                  header: "Gift cards",
+                  prompt:
+                    "The new payments SDK has no gift-card primitive. How should the migration handle existing gift-card balances?",
+                  multiSelect: false,
+                  allowCustom: true,
+                  options: {
+                    create: [
+                      {
+                        id: "question-option-checkout-1",
+                        position: 0,
+                        label: "Keep the legacy path",
+                        description:
+                          "Route gift-card orders through the current integration until the SDK ships support.",
+                      },
+                      {
+                        id: "question-option-checkout-2",
+                        position: 1,
+                        label: "Model them as store credit",
+                        description:
+                          "Convert balances to store credit and apply them as a discount line.",
+                      },
+                      {
+                        id: "question-option-checkout-3",
+                        position: 2,
+                        label: "Block the migration",
+                        description:
+                          "Wait for first-class gift-card support before migrating checkout.",
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      modelUsage: {
+        create: [
+          {
+            id: "usage-plan-checkout-1",
+            model: "claude-sonnet-4.5",
+            inputTokens: 22600,
+            outputTokens: 2840,
+            reasoningTokens: 1420,
+            cacheReadTokens: 8100,
+            estimatedCost: 0.18,
+          },
+        ],
+      },
+    },
+  });
+
   // Imported plan (no managed worktree relationship).
   await prisma.agentRun.create({
     data: {
@@ -346,7 +486,7 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
 
   await prisma.runNumberSequence.createMany({
     data: [
-      { kind: "PLAN", nextValue: 1003 },
+      { kind: "PLAN", nextValue: 1004 },
       { kind: "SESSION", nextValue: 2003 },
     ],
   });
