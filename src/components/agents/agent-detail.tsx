@@ -389,20 +389,36 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
-      <div className="flex items-center justify-end gap-4">
-        <ConfirmationDialog
-          actionLabel={t("deleteAgent")}
-          cancelLabel={common("cancel")}
-          description={t("deleteAgentDescription", { name: agent.name })}
-          onConfirm={deleteAgent}
-          title={t("deleteAgentTitle")}
-          trigger={
-            <Button disabled={deleting} size="sm" variant="destructive">
-              {deleting ? <Spinner /> : <Trash2 />}
-              {t("deleteAgent")}
-            </Button>
-          }
-        />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {agent.name}
+            </h1>
+            <StatusBadge status={agent.connectionStatus} />
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {agent.hostname} · {agent.osVersion} · {agent.architecture}
+          </p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {agent.id}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ConfirmationDialog
+            actionLabel={t("deleteAgent")}
+            cancelLabel={common("cancel")}
+            description={t("deleteAgentDescription", { name: agent.name })}
+            onConfirm={deleteAgent}
+            title={t("deleteAgentTitle")}
+            trigger={
+              <Button disabled={deleting} variant="destructive">
+                {deleting ? <Spinner /> : <Trash2 />}
+                {t("deleteAgent")}
+              </Button>
+            }
+          />
+        </div>
       </div>
       {loadError && (
         <Alert variant="destructive">
@@ -412,30 +428,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-2xl font-semibold tracking-tight">
-                  {agent.name}
-                </CardTitle>
-                <StatusBadge status={agent.connectionStatus} />
-              </div>
-              <CardDescription className="mt-1">
-                {agent.hostname} · {agent.osVersion} · {agent.architecture}
-              </CardDescription>
-            </div>
-            <p className="font-mono text-xs text-muted-foreground">
-              {agent.id}
-            </p>
-          </div>
+          <CardTitle>{t("generalInformation")}</CardTitle>
+          <CardDescription>
+            {t("generalInformationDescription")}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div>
-            <h2 className="font-medium">{t("generalInformation")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("generalInformationDescription")}
-            </p>
-          </div>
           <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Info label={t("version")} value={agent.version} />
             <Info

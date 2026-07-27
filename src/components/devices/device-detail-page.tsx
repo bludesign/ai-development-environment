@@ -351,16 +351,16 @@ export function DeviceDetailPage({ id }: { id: string }) {
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-muted-foreground">
-            {firmware?.name ?? device.product ?? t("unavailable")}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">{device.displayName}</h1>
             <IosDeviceStatusBadge
               label={t(`status.${device.status}`)}
               status={device.status}
             />
           </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {firmware?.name ?? device.product ?? t("unavailable")}
+          </p>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
             {device.maskedUdid}
           </p>

@@ -288,14 +288,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner /> {t("loadingSkill")}
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 sm:p-6">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div>

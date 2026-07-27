@@ -554,10 +554,7 @@ export function BuildDetailPage({
         )}
       >
         <div>
-          <p className="text-sm text-muted-foreground">
-            {repository?.name ?? "—"}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold">
               {configuration?.name ?? build.id}
             </h1>
@@ -574,6 +571,9 @@ export function BuildDetailPage({
               </Badge>
             )}
           </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {repository?.name ?? "—"}
+          </p>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
             {worktree?.branch ?? worktree?.folder ?? "—"} ·{" "}
             {build.destination.name}

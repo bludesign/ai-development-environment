@@ -205,7 +205,7 @@ export function SkillsPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 sm:p-6">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">

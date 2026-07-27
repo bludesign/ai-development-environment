@@ -268,12 +268,12 @@ export function PullRequestDetailPage({
         )}
       >
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">
-            {pullRequest.repositoryNameWithOwner} #{pullRequest.number}
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
+          <h1 className="text-2xl font-semibold break-words tracking-tight [overflow-wrap:anywhere]">
             {pullRequest.title}
           </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {pullRequest.repositoryNameWithOwner} #{pullRequest.number}
+          </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Badge>{tp(`pullRequestStates.${pullRequest.state}`)}</Badge>
             {pullRequest.isDraft && <Badge>{t("draft")}</Badge>}
