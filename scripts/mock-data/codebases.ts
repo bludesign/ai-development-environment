@@ -11,8 +11,11 @@ const BASE = "/Users/acme/Repositories";
  * through the class records in src/lib/worktree-highlight.ts, so a hex value silently
  * renders unhighlighted. Every worktree gets one so the accent stripe is visible on each
  * page that surfaces a worktree: primary checkouts green, feature branches purple/blue.
+ *
+ * Records that snapshot a worktree's color when they are created — notifications, for one —
+ * import this map so the copy stays in step with the worktree it came from.
  */
-const HIGHLIGHTS = {
+export const HIGHLIGHTS = {
   webMain: "green",
   webFeature: "purple",
   iosMain: "green",

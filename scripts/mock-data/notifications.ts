@@ -1,11 +1,21 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
+import { HIGHLIGHTS } from "./codebases";
 import { ids } from "./ids";
 import { daysAgo, hoursAgo, minutesAgo } from "./time";
 
+/**
+ * Notifications snapshot their worktree's highlight color when they are recorded (see
+ * `recordInTransaction` callers such as builds.service.ts), so every row that carries a
+ * `worktreeId` also carries the matching `HIGHLIGHTS` entry — the sidebar card and the
+ * history table both key their accent stripe off `highlightColor`, not off the relation.
+ * Rows whose resource has no worktree (a workflow run without one, an agent, a skill sync)
+ * stay unhighlighted, which is what the notifications table should show for them.
+ */
 export async function seedNotifications(prisma: PrismaClient): Promise<void> {
   await prisma.appNotification.createMany({
     data: [
+      // Six live sidebar cards: still requested, never dismissed, each one worktree-tinted.
       {
         id: ids.notifications.buildFailed,
         dedupeKey: "build-failed-ios-test-1",
@@ -15,6 +25,8 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         href: `/builds/${ids.builds.test}`,
         resourceKind: "BUILD",
         resourceId: ids.builds.test,
+        worktreeId: ids.worktrees.iosMain,
+        highlightColor: HIGHLIGHTS.iosMain,
         sidebarRequested: true,
         browserRequested: true,
         webPushRequested: false,
@@ -30,6 +42,7 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         resourceKind: "PULL_REQUEST",
         resourceId: "acme/web-app#42",
         worktreeId: ids.worktrees.webFeature,
+        highlightColor: HIGHLIGHTS.webFeature,
         sidebarRequested: true,
         browserRequested: false,
         webPushRequested: true,
@@ -45,11 +58,66 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         resourceKind: "AGENT_RUN",
         resourceId: ids.runs.sessionSearch,
         worktreeId: ids.worktrees.webFeature,
+        highlightColor: HIGHLIGHTS.webFeature,
         sidebarRequested: true,
         browserRequested: false,
         webPushRequested: false,
         createdAt: daysAgo(4),
       },
+      {
+        id: "notification-question-asked",
+        dedupeKey: "run-question-1003",
+        typeKey: "run.question_asked",
+        title: "Answer needed",
+        body: "Plan #1003 is waiting on a decision about gift cards.",
+        href: `/plans/${ids.runs.planCheckoutQuestion}`,
+        resourceKind: "AGENT_RUN",
+        resourceId: ids.runs.planCheckoutQuestion,
+        worktreeId: ids.worktrees.webFeature,
+        highlightColor: HIGHLIGHTS.webFeature,
+        sidebarRequested: true,
+        browserRequested: true,
+        webPushRequested: true,
+        createdAt: minutesAgo(21),
+      },
+      {
+        id: "notification-deployment-complete",
+        dedupeKey: "deployment-complete-testflight-1",
+        typeKey: "build.deployed",
+        title: "Deployed to TestFlight",
+        body: "acme/ios-app archive 3.4.1 (3410) finished uploading.",
+        href: `/builds/${ids.builds.archive}`,
+        resourceKind: "BUILD",
+        resourceId: ids.builds.archive,
+        worktreeId: ids.worktrees.iosMain,
+        highlightColor: HIGHLIGHTS.iosMain,
+        sidebarRequested: true,
+        browserRequested: true,
+        webPushRequested: true,
+        createdAt: hoursAgo(3),
+      },
+      {
+        id: "notification-pipeline-failed",
+        dedupeKey: "pipeline-failed-web-412",
+        typeKey: "pull_request.pipeline_failed",
+        title: "Pipeline failed",
+        body: "Test run 412 failed on acme/web-app#42.",
+        href: "/pull-requests/acme/web-app/42",
+        resourceKind: "PULL_REQUEST",
+        resourceId: "acme/web-app#42",
+        worktreeId: ids.worktrees.webFeature,
+        highlightColor: HIGHLIGHTS.webFeature,
+        sidebarRequested: true,
+        browserRequested: false,
+        webPushRequested: true,
+        createdAt: hoursAgo(4),
+      },
+      /**
+       * History-only rows. They carry channel flags so the Notifications table shows the
+       * Channels column populated, but each is already dismissed so the app-shell sidebar —
+       * which reads `sidebarRequested: true, sidebarDismissedAt: null` — keeps the same six
+       * cards it shows in every other screenshot.
+       */
       {
         id: "notification-command-complete",
         dedupeKey: "command-complete-3001",
@@ -59,6 +127,8 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         href: `/commands/runs/${ids.commandRuns.latest}`,
         resourceKind: "COMMAND_RUN",
         resourceId: ids.commandRuns.latest,
+        worktreeId: ids.worktrees.webMain,
+        highlightColor: HIGHLIGHTS.webMain,
         sidebarRequested: false,
         browserRequested: false,
         webPushRequested: false,
@@ -66,10 +136,8 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         createdAt: minutesAgo(11),
       },
       /**
-       * History-only rows. They carry channel flags so the Notifications table shows the
-       * Channels column populated, but each is already dismissed so the app-shell sidebar —
-       * which reads `sidebarRequested: true, sidebarDismissedAt: null` — keeps the same three
-       * cards it shows in every other screenshot.
+       * The remaining rows stay unhighlighted on purpose: this workflow run's session data
+       * carries no worktree, and agents and skill syncs are not worktree-scoped at all.
        */
       {
         id: "notification-workflow-succeeded",
@@ -85,53 +153,6 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
         webPushRequested: false,
         sidebarDismissedAt: minutesAgo(30),
         createdAt: minutesAgo(34),
-      },
-      {
-        id: "notification-question-asked",
-        dedupeKey: "run-question-1003",
-        typeKey: "run.question_asked",
-        title: "Answer needed",
-        body: "Plan #1003 is waiting on a decision about gift cards.",
-        href: `/plans/${ids.runs.planCheckoutQuestion}`,
-        resourceKind: "AGENT_RUN",
-        resourceId: ids.runs.planCheckoutQuestion,
-        worktreeId: ids.worktrees.webFeature,
-        sidebarRequested: true,
-        browserRequested: true,
-        webPushRequested: true,
-        sidebarDismissedAt: minutesAgo(15),
-        createdAt: minutesAgo(21),
-      },
-      {
-        id: "notification-pipeline-failed",
-        dedupeKey: "pipeline-failed-web-412",
-        typeKey: "pull_request.pipeline_failed",
-        title: "Pipeline failed",
-        body: "Test run 412 failed on acme/web-app#42.",
-        href: "/pull-requests/acme/web-app/42",
-        resourceKind: "PULL_REQUEST",
-        resourceId: "acme/web-app#42",
-        worktreeId: ids.worktrees.webFeature,
-        sidebarRequested: true,
-        browserRequested: false,
-        webPushRequested: true,
-        sidebarDismissedAt: hoursAgo(3),
-        createdAt: hoursAgo(4),
-      },
-      {
-        id: "notification-deployment-complete",
-        dedupeKey: "deployment-complete-testflight-1",
-        typeKey: "build.deployed",
-        title: "Deployed to TestFlight",
-        body: "acme/ios-app archive 3.4.1 (3410) finished uploading.",
-        href: `/builds/${ids.builds.archive}`,
-        resourceKind: "BUILD",
-        resourceId: ids.builds.archive,
-        sidebarRequested: true,
-        browserRequested: true,
-        webPushRequested: true,
-        sidebarDismissedAt: hoursAgo(1),
-        createdAt: hoursAgo(2),
       },
       {
         id: "notification-agent-offline",
