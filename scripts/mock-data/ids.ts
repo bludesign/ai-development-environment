@@ -74,6 +74,13 @@ export const ids = {
     lint: "skill-lint-guardrails",
     docs: "skill-doc-writer",
     tests: "skill-test-author",
+    review: "skill-code-reviewer",
+    migrations: "skill-migration-planner",
+    release: "skill-release-notes",
+    triage: "skill-bug-triage",
+    perf: "skill-perf-profiler",
+    a11y: "skill-accessibility-audit",
+    apiDocs: "skill-api-contract",
   },
   skillGroups: {
     core: "skill-group-core",

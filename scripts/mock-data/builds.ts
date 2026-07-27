@@ -228,7 +228,7 @@ const TEST_CASES = [
     durationSeconds: 4.82,
     tags: ["checkout", "regression"],
     details: [
-      "XCTAssertEqual failed: (\"$41.98\") is not equal to (\"$39.99\") — CheckoutTests.swift:142",
+      'XCTAssertEqual failed: ("$41.98") is not equal to ("$39.99") — CheckoutTests.swift:142',
     ],
   },
   {
@@ -306,6 +306,94 @@ const TEST_CASES = [
     details: ["Requires a physical device"],
   },
 ];
+
+/**
+ * Older builds behind the two detailed ones below. The Builds table only reads the snapshot,
+ * status, action, destination and timestamps, so these carry no artifacts or reports — the
+ * detail-page screenshots still point at the two fully-populated builds.
+ *
+ * None of them is FAILED on purpose: the Action Center index surfaces every FAILED build as a
+ * "needs attention" card, so a failed row here would change the sidebar in every other
+ * screenshot. CANCELLED gives the list a non-green row without that.
+ */
+const BUILD_HISTORY: Array<{
+  slug: string;
+  status: "SUCCEEDED" | "CANCELLED";
+  action: "ARCHIVE" | "BUILD" | "TEST";
+  startedHoursAgo: number;
+  durationMinutes: number;
+  errorCode?: string;
+  error?: string;
+}> = [
+  {
+    slug: "test-2",
+    status: "SUCCEEDED",
+    action: "TEST",
+    startedHoursAgo: 9,
+    durationMinutes: 7,
+  },
+  {
+    slug: "build-1",
+    status: "SUCCEEDED",
+    action: "BUILD",
+    startedHoursAgo: 12,
+    durationMinutes: 4,
+  },
+  {
+    slug: "build-2",
+    status: "CANCELLED",
+    action: "BUILD",
+    startedHoursAgo: 27,
+    durationMinutes: 2,
+    errorCode: "CANCELLED",
+    error: "Cancelled from the Builds page",
+  },
+  {
+    slug: "build-3",
+    status: "SUCCEEDED",
+    action: "BUILD",
+    startedHoursAgo: 28,
+    durationMinutes: 5,
+  },
+  {
+    slug: "test-3",
+    status: "CANCELLED",
+    action: "TEST",
+    startedHoursAgo: 31,
+    durationMinutes: 1,
+    errorCode: "CANCELLED",
+    error: "Cancelled from the Builds page",
+  },
+  {
+    slug: "archive-2",
+    status: "SUCCEEDED",
+    action: "ARCHIVE",
+    startedHoursAgo: 52,
+    durationMinutes: 58,
+  },
+  {
+    slug: "test-4",
+    status: "SUCCEEDED",
+    action: "TEST",
+    startedHoursAgo: 54,
+    durationMinutes: 6,
+  },
+  {
+    slug: "build-4",
+    status: "SUCCEEDED",
+    action: "BUILD",
+    startedHoursAgo: 76,
+    durationMinutes: 4,
+  },
+];
+
+const COMMAND_SUMMARIES: Record<"ARCHIVE" | "BUILD" | "TEST", string> = {
+  ARCHIVE:
+    "xcodebuild archive -workspace AcmeApp.xcworkspace -scheme AcmeApp -configuration Release",
+  BUILD:
+    "xcodebuild build -workspace AcmeApp.xcworkspace -scheme AcmeApp -configuration Debug",
+  TEST: "xcodebuild test -workspace AcmeApp.xcworkspace -scheme AcmeApp -destination 'platform=iOS Simulator,name=iPhone 16 Pro'",
+};
 
 export async function seedBuilds(prisma: PrismaClient): Promise<void> {
   await prisma.codebaseProject.create({
@@ -567,4 +655,42 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       },
     },
   });
+
+  for (const build of BUILD_HISTORY) {
+    const id = `build-ios-${build.slug}`;
+    const destination =
+      build.action === "TEST" ? TEST_DESTINATION : ARCHIVE_DESTINATION;
+    const startedAt = hoursAgo(build.startedHoursAgo);
+    await prisma.build.create({
+      data: {
+        id,
+        requestKey: `build-request-${build.slug}`,
+        requestId: `req-${build.slug}`,
+        agentId: ids.agents.build,
+        codebaseId: ids.codebases.ios,
+        worktreeId: ids.worktrees.iosMain,
+        configurationId: ids.buildConfigurations.release,
+        status: build.status,
+        action: build.action,
+        destinationType: destination.type,
+        destinationJson: JSON.stringify(destination),
+        snapshotJson: JSON.stringify(
+          buildSnapshot({
+            action: build.action,
+            destination,
+            ...(build.action === "TEST" ? { testPlan: "AcmeApp" } : {}),
+          }),
+        ),
+        commandSummary: COMMAND_SUMMARIES[build.action],
+        artifactDirectory: `${BUILDS_DIR}/${id}`,
+        errorCode: build.errorCode ?? null,
+        error: build.error ?? null,
+        createdAt: startedAt,
+        startedAt,
+        finishedAt: minutesAgo(
+          build.startedHoursAgo * 60 - build.durationMinutes,
+        ),
+      },
+    });
+  }
 }

@@ -60,6 +60,173 @@ const definition = {
   editor: { handleLayout: "SIDES", displayLayout: "REGULAR" },
 };
 
+/**
+ * Completed runs behind the two detailed ones below. They are numbered *under*
+ * `displayNumbers.workflowRuns.latest` because they are older, which keeps the run number and
+ * the started column in the same order. Each gets the two step attempts and the three events
+ * the definition produces, so the run rows expand into a coherent detail page.
+ *
+ * None of them is FAILED on purpose: the Action Center index treats every non-archived FAILED
+ * WorkflowRun as a "needs attention" item, so a failed row here would add cards to the sidebar
+ * that every other screenshot shows. CANCELLED gives the list a non-green row without that.
+ */
+const WORKFLOW_RUN_HISTORY: Array<{
+  repository: "web-app" | "ios-app" | "api";
+  prNumber: number;
+  status: "SUCCEEDED" | "CANCELLED";
+  triggerKind: "MANUAL" | "RESOURCE_MANUAL";
+  startedMinutesAgo: number;
+  durationMinutes: number;
+  error?: string;
+}> = [
+  {
+    repository: "web-app",
+    prNumber: 42,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 88,
+    durationMinutes: 1,
+  },
+  {
+    repository: "api",
+    prNumber: 40,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 132,
+    durationMinutes: 2,
+  },
+  {
+    repository: "web-app",
+    prNumber: 41,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 174,
+    durationMinutes: 1,
+  },
+  {
+    repository: "ios-app",
+    prNumber: 118,
+    status: "CANCELLED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 236,
+    durationMinutes: 1,
+    error: "Cancelled while loading acme/ios-app#118",
+  },
+  {
+    repository: "ios-app",
+    prNumber: 118,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 249,
+    durationMinutes: 2,
+  },
+  {
+    repository: "web-app",
+    prNumber: 42,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 305,
+    durationMinutes: 1,
+  },
+  {
+    repository: "api",
+    prNumber: 40,
+    status: "CANCELLED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 361,
+    durationMinutes: 1,
+  },
+  {
+    repository: "web-app",
+    prNumber: 39,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 8,
+    durationMinutes: 2,
+  },
+  {
+    repository: "web-app",
+    prNumber: 41,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 60 * 9,
+    durationMinutes: 1,
+  },
+  {
+    repository: "api",
+    prNumber: 40,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 11,
+    durationMinutes: 3,
+  },
+  {
+    repository: "web-app",
+    prNumber: 42,
+    status: "CANCELLED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 26,
+    durationMinutes: 1,
+    error: "Cancelled while collecting review threads",
+  },
+  {
+    repository: "ios-app",
+    prNumber: 118,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 60 * 27,
+    durationMinutes: 2,
+  },
+  {
+    repository: "web-app",
+    prNumber: 39,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 30,
+    durationMinutes: 1,
+  },
+  {
+    repository: "api",
+    prNumber: 40,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 60 * 33,
+    durationMinutes: 2,
+  },
+  {
+    repository: "web-app",
+    prNumber: 41,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 50,
+    durationMinutes: 1,
+  },
+  {
+    repository: "web-app",
+    prNumber: 42,
+    status: "SUCCEEDED",
+    triggerKind: "RESOURCE_MANUAL",
+    startedMinutesAgo: 60 * 52,
+    durationMinutes: 2,
+  },
+  {
+    repository: "ios-app",
+    prNumber: 118,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 74,
+    durationMinutes: 1,
+  },
+  {
+    repository: "web-app",
+    prNumber: 39,
+    status: "SUCCEEDED",
+    triggerKind: "MANUAL",
+    startedMinutesAgo: 60 * 76,
+    durationMinutes: 2,
+  },
+];
+
 export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
   const definitionJson = JSON.stringify(definition);
 
@@ -279,4 +446,102 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
       },
     },
   });
+
+  for (const [index, run] of WORKFLOW_RUN_HISTORY.entries()) {
+    const slug = `history-${index + 1}`;
+    // Newest first, counting back from the run just below the latest detailed one, so run
+    // numbers and start times stay in the same order.
+    const displayNumber = displayNumbers.workflowRuns.latest - 1 - index;
+    const subject = `acme/${run.repository}#${run.prNumber}`;
+    const startedAt = minutesAgo(run.startedMinutesAgo);
+    const finishedAt = minutesAgo(run.startedMinutesAgo - run.durationMinutes);
+    const succeeded = run.status === "SUCCEEDED";
+    await prisma.workflowRun.create({
+      data: {
+        id: `workflow-run-${slug}`,
+        displayNumber,
+        workflowId: ids.workflows.prReview,
+        versionId: ids.workflowVersions.prReviewV1,
+        idempotencyKey: `workflow-run-${slug}-key`,
+        triggerKind: run.triggerKind,
+        triggerSubjectKey: subject,
+        triggerPayloadJson: JSON.stringify({ pr: { number: run.prNumber } }),
+        status: run.status,
+        phase: succeeded ? "COMPLETED" : run.status,
+        sessionDataJson: JSON.stringify({
+          pr: { number: run.prNumber },
+          repo: { displayOrigin: `github.com/acme/${run.repository}` },
+        }),
+        error: run.error ?? null,
+        queuedAt: startedAt,
+        startedAt,
+        finishedAt,
+        createdAt: startedAt,
+        attempts: {
+          create: [
+            {
+              id: `workflow-attempt-${slug}-load-pr`,
+              nodeId: "loadPr",
+              kind: "GITHUB_LOAD_PR",
+              status: "SUCCEEDED",
+              phase: "SUCCEEDED",
+              idempotencyKey: `workflow-attempt-${slug}-load-pr-key`,
+              startedAt,
+              finishedAt,
+            },
+            {
+              id: `workflow-attempt-${slug}-collect-threads`,
+              nodeId: "collectThreads",
+              kind: "GITHUB_COLLECT_REVIEW_THREADS",
+              status: succeeded ? "SUCCEEDED" : run.status,
+              phase: succeeded ? "SUCCEEDED" : run.status,
+              idempotencyKey: `workflow-attempt-${slug}-collect-threads-key`,
+              startedAt,
+              finishedAt,
+            },
+          ],
+        },
+        events: {
+          create: [
+            {
+              id: `workflow-event-${slug}-1`,
+              sequence: 1,
+              type: "RUN_STARTED",
+              message: "Workflow run started",
+              createdAt: startedAt,
+            },
+            {
+              id: `workflow-event-${slug}-2`,
+              sequence: 2,
+              type: "STEP_SUCCEEDED",
+              message: `Loaded pull request ${subject}`,
+              createdAt: startedAt,
+            },
+            {
+              id: `workflow-event-${slug}-3`,
+              sequence: 3,
+              type: succeeded ? "RUN_SUCCEEDED" : "RUN_CANCELLED",
+              message:
+                run.error ??
+                (succeeded
+                  ? "Workflow completed successfully"
+                  : "Workflow run cancelled"),
+              createdAt: finishedAt,
+            },
+          ],
+        },
+        resourceLinks: {
+          create: [
+            {
+              id: `workflow-resource-link-${slug}`,
+              kind: "PULL_REQUEST",
+              resourceId: subject,
+              label: subject,
+              url: `https://github.com/acme/${run.repository}/pull/${run.prNumber}`,
+            },
+          ],
+        },
+      },
+    });
+  }
 }

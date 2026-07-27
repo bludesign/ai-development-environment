@@ -55,34 +55,62 @@ const AGENT_USAGE: AgentUsage[] = [
     sources: ["claude", "codex"],
     days: [
       [
-        { modelName: "claude-sonnet-4.5", tokens: [412, 58, 96, 1_840] },
-        { modelName: "gpt-5-codex", tokens: [186, 24, 0, 640] },
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [21_200, 3_000, 4_900, 94_500],
+        },
+        { modelName: "gpt-5-codex", tokens: [9_600, 1_200, 0, 32_900] },
       ],
       [
-        { modelName: "claude-sonnet-4.5", tokens: [986, 132, 214, 4_120] },
-        { modelName: "claude-opus-4.1", tokens: [148, 22, 41, 610] },
-        { modelName: "gpt-5-codex", tokens: [402, 51, 0, 1_380] },
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [22_000, 2_900, 4_800, 91_800],
+        },
+        { modelName: "claude-opus-4.1", tokens: [3_300, 490, 910, 13_600] },
+        { modelName: "gpt-5-codex", tokens: [9_000, 1_100, 0, 30_800] },
       ],
       [
-        { modelName: "claude-sonnet-4.5", tokens: [742, 104, 168, 3_260] },
-        { modelName: "gpt-5-codex", tokens: [268, 34, 0, 910] },
-      ],
-      [{ modelName: "claude-sonnet-4.5", tokens: [318, 44, 71, 1_420] }],
-      [
-        { modelName: "claude-sonnet-4.5", tokens: [1_204, 164, 262, 5_080] },
-        { modelName: "claude-opus-4.1", tokens: [206, 31, 58, 840] },
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [32_200, 4_500, 7_300, 141_300],
+        },
+        { modelName: "gpt-5-codex", tokens: [11_600, 1_500, 0, 39_400] },
       ],
       [
-        { modelName: "claude-sonnet-4.5", tokens: [864, 118, 194, 3_640] },
-        { modelName: "gpt-5-codex", tokens: [312, 41, 0, 1_060] },
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [18_200, 2_500, 4_100, 81_400],
+        },
+      ],
+      [
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [24_700, 3_400, 5_400, 104_200],
+        },
+        { modelName: "claude-opus-4.1", tokens: [4_200, 640, 1_200, 17_200] },
+      ],
+      [
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [36_100, 4_900, 8_100, 152_000],
+        },
+        { modelName: "gpt-5-codex", tokens: [13_000, 1_700, 0, 44_300] },
       ],
       null,
       [
-        { modelName: "claude-sonnet-4.5", tokens: [648, 92, 148, 2_780] },
-        { modelName: "gpt-5-codex", tokens: [224, 28, 0, 760] },
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [25_400, 3_600, 5_800, 109_000],
+        },
+        { modelName: "gpt-5-codex", tokens: [8_800, 1_100, 0, 29_800] },
       ],
-      [{ modelName: "claude-opus-4.1", tokens: [264, 39, 74, 1_080] }],
-      [{ modelName: "claude-sonnet-4.5", tokens: [508, 71, 116, 2_180] }],
+      [{ modelName: "claude-opus-4.1", tokens: [8_800, 1_300, 2_500, 36_100] }],
+      [
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [24_800, 3_500, 5_700, 106_200],
+        },
+      ],
     ],
   },
   {
@@ -91,16 +119,21 @@ const AGENT_USAGE: AgentUsage[] = [
     hostname: "build-mac.local",
     sources: ["claude"],
     days: [
-      [{ modelName: "claude-sonnet-4.5", tokens: [142, 19, 34, 620] }],
-      [{ modelName: "claude-sonnet-4.5", tokens: [286, 38, 62, 1_240] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [7_300, 980, 1_700, 31_800] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [6_400, 850, 1_400, 27_600] }],
       null,
-      [{ modelName: "claude-sonnet-4.5", tokens: [198, 27, 44, 880] }],
-      [{ modelName: "claude-sonnet-4.5", tokens: [364, 48, 78, 1_560] }],
+      [
+        {
+          modelName: "claude-sonnet-4.5",
+          tokens: [11_300, 1_500, 2_500, 50_400],
+        },
+      ],
+      [{ modelName: "claude-sonnet-4.5", tokens: [7_500, 980, 1_600, 32_000] }],
       null,
       null,
-      [{ modelName: "claude-sonnet-4.5", tokens: [172, 24, 38, 740] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [6_700, 940, 1_500, 29_000] }],
       null,
-      [{ modelName: "claude-sonnet-4.5", tokens: [124, 17, 29, 540] }],
+      [{ modelName: "claude-sonnet-4.5", tokens: [6_000, 830, 1_400, 26_300] }],
     ],
   },
 ];
@@ -128,8 +161,13 @@ function entryFor(usage: AgentUsage, daysBack: number, models: Breakdown[]) {
       ),
     };
   });
-  const total = (key: "inputTokens" | "outputTokens" | "cacheCreationTokens" | "cacheReadTokens") =>
-    modelBreakdowns.reduce((sum, model) => sum + model[key], 0);
+  const total = (
+    key:
+      | "inputTokens"
+      | "outputTokens"
+      | "cacheCreationTokens"
+      | "cacheReadTokens",
+  ) => modelBreakdowns.reduce((sum, model) => sum + model[key], 0);
   const inputTokens = total("inputTokens");
   const outputTokens = total("outputTokens");
   const cacheCreationTokens = total("cacheCreationTokens");
@@ -178,22 +216,24 @@ function reportFor(usage: AgentUsage) {
 export async function seedCosts(prisma: PrismaClient): Promise<void> {
   await prisma.sidebarUsageSummary.createMany({
     data: [
+      // Kept in step with the ccusage days above: today's report totals about $236 and the
+      // trailing week about $1,753, so these read as the same spend seen from the sidebar.
       {
         id: "sidebar-usage-day",
         period: "DAY",
-        totalCost: 4.87,
+        totalCost: 236.42,
         collectedAt: hoursAgo(1),
       },
       {
         id: "sidebar-usage-week",
         period: "WEEK",
-        totalCost: 38.42,
+        totalCost: 1758.9,
         collectedAt: hoursAgo(1),
       },
       {
         id: "sidebar-usage-month",
         period: "MONTH",
-        totalCost: 162.15,
+        totalCost: 7412.35,
         collectedAt: hoursAgo(1),
       },
     ],

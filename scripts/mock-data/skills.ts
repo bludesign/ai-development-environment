@@ -7,6 +7,77 @@ function skillFile(body: string) {
   return Buffer.from(body, "utf8");
 }
 
+/**
+ * The rest of the catalog. These carry one SKILL.md apiece and no installations of their own —
+ * enough to fill the Skills table without changing what the sync and installation panels show.
+ */
+const MORE_SKILLS = [
+  {
+    id: ids.skills.review,
+    name: "code-reviewer",
+    title: "Code Reviewer",
+    description: "Reviews diffs for correctness, security, and performance.",
+    instruction: "Read the diff, flag defects, and suggest concrete fixes.",
+    syncGlobally: true,
+    createdDaysAgo: 36,
+  },
+  {
+    id: ids.skills.migrations,
+    name: "migration-planner",
+    title: "Migration Planner",
+    description: "Plans and reviews database schema migrations.",
+    instruction: "Check every migration for backfills and rollback safety.",
+    syncGlobally: true,
+    createdDaysAgo: 33,
+  },
+  {
+    id: ids.skills.release,
+    name: "release-notes",
+    title: "Release Notes",
+    description: "Drafts release notes from merged pull requests.",
+    instruction: "Group merged PRs by area and summarize user-visible changes.",
+    syncGlobally: false,
+    createdDaysAgo: 29,
+  },
+  {
+    id: ids.skills.triage,
+    name: "bug-triage",
+    title: "Bug Triage",
+    description: "Reproduces reported bugs and proposes a severity.",
+    instruction:
+      "Reproduce the report, isolate the cause, then assign severity.",
+    syncGlobally: true,
+    createdDaysAgo: 26,
+  },
+  {
+    id: ids.skills.perf,
+    name: "perf-profiler",
+    title: "Performance Profiler",
+    description: "Profiles hot paths and reports regressions with traces.",
+    instruction: "Measure before and after, and attach traces to every claim.",
+    syncGlobally: false,
+    createdDaysAgo: 22,
+  },
+  {
+    id: ids.skills.a11y,
+    name: "accessibility-audit",
+    title: "Accessibility Audit",
+    description: "Audits screens against WCAG 2.2 AA and files findings.",
+    instruction: "Check contrast, focus order, and labels on every new screen.",
+    syncGlobally: true,
+    createdDaysAgo: 17,
+  },
+  {
+    id: ids.skills.apiDocs,
+    name: "api-contract",
+    title: "API Contract",
+    description: "Keeps GraphQL and REST contracts in step with the code.",
+    instruction: "Diff the schema against the resolvers and flag drift.",
+    syncGlobally: false,
+    createdDaysAgo: 11,
+  },
+];
+
 export async function seedSkills(prisma: PrismaClient): Promise<void> {
   await prisma.skill.create({
     data: {
@@ -44,7 +115,9 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
           {
             id: "skill-file-docs-md",
             path: "SKILL.md",
-            contents: skillFile("# Doc Writer\n\nKeep README and API docs current."),
+            contents: skillFile(
+              "# Doc Writer\n\nKeep README and API docs current.",
+            ),
             contentHash: "sha256-docs-md-0001",
           },
         ],
@@ -65,13 +138,38 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
           {
             id: "skill-file-tests-md",
             path: "SKILL.md",
-            contents: skillFile("# Test Author\n\nCreate focused, deterministic tests."),
+            contents: skillFile(
+              "# Test Author\n\nCreate focused, deterministic tests.",
+            ),
             contentHash: "sha256-tests-md-0001",
           },
         ],
       },
     },
   });
+
+  for (const skill of MORE_SKILLS) {
+    await prisma.skill.create({
+      data: {
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        syncGlobally: skill.syncGlobally,
+        packageHash: `sha256-${skill.name}-0001`,
+        createdAt: daysAgo(skill.createdDaysAgo),
+        files: {
+          create: [
+            {
+              id: `skill-file-${skill.name}-md`,
+              path: "SKILL.md",
+              contents: skillFile(`# ${skill.title}\n\n${skill.instruction}`),
+              contentHash: `sha256-${skill.name}-md-0001`,
+            },
+          ],
+        },
+      },
+    });
+  }
 
   await prisma.skillGroup.create({
     data: {
@@ -83,6 +181,7 @@ export async function seedSkills(prisma: PrismaClient): Promise<void> {
           { skillId: ids.skills.lint },
           { skillId: ids.skills.docs },
           { skillId: ids.skills.tests },
+          ...MORE_SKILLS.map((skill) => ({ skillId: skill.id })),
         ],
       },
       repositories: {
