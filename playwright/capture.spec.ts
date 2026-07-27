@@ -31,7 +31,7 @@ test.describe("app screenshots", () => {
       await page.waitForTimeout(800);
 
       await page.screenshot({
-        path: `docs/screenshots/${testInfo.project.name}/${route.name}.png`,
+        path: `screenshots/${testInfo.project.name}/${route.name}.png`,
         fullPage: route.fullPage ?? true,
         animations: "disabled",
       });

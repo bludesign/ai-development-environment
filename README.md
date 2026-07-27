@@ -54,13 +54,16 @@ For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSO
 
 ### Screenshots
 
-`npm run screenshots` captures every app route at four combinations of viewport and colour scheme. It installs the Chromium build Playwright needs, rebuilds `prisma/mock.db` from the seed modules in `scripts/mock-data/`, produces an isolated Next output in `.next-mock/`, and runs the capture suite. PNGs land in `docs/screenshots/<project>/` and are gitignored — they are generated on demand, not a committed baseline.
+`npm run screenshots` captures every app route at four combinations of viewport and colour scheme. It installs the Chromium build Playwright needs, rebuilds `prisma/mock.db` from the seed modules in `scripts/mock-data/`, produces an isolated Next output in `.next-mock/`, and runs the capture suite. PNGs land in `screenshots/<project>/` and are gitignored — they are generated on demand, not a committed baseline.
 
 ```bash
 npm run screenshots           # full pipeline: browsers, seed, build, capture
 npm run screenshots:run       # capture only, against an existing .next-mock build
+npm run screenshots:copy      # publish the desktop captures to the docs project
 npm run mock:reset            # rebuild and reseed prisma/mock.db on its own
 ```
+
+`npm run screenshots:copy` prompts for the docs project directory, defaulting to `../ai-development-environment-docs`, and copies `screenshots/desktop-light/` into its `images/light/` and `screenshots/desktop-dark/` into its `images/dark/` — the two directories the Mintlify pages swap between by theme. Pass the directory to skip the prompt: `npm run screenshots:copy -- ../elsewhere`. The mobile captures stay local.
 
 Nothing reaches the network: `scripts/mock-api-server.ts` stubs the GitHub and Jira APIs, and the capture server points at it with the `GITHUB_API_BASE_URL` / `GITHUB_GRAPHQL_URL` overrides.
 

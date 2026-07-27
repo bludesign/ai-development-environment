@@ -130,6 +130,13 @@
     },
     {
       "type": "shell",
+      "label": "screenshots:copy",
+      "group": "test",
+      "command": "npm run screenshots:copy -- '${input:docsDirectory}'",
+      "detail": "Copy the desktop light and dark screenshots into the docs project"
+    },
+    {
+      "type": "shell",
       "label": "check-translations",
       "group": "test",
       "command": "npm run check-translations",
@@ -298,6 +305,14 @@
       "group": "build",
       "command": "npm run upgrade:check --workspace @ai-development-environment/control-agent",
       "detail": "Show available control agent dependency upgrades without modifying package.json"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "docsDirectory",
+      "type": "promptString",
+      "description": "Docs project directory to copy screenshots into",
+      "default": "../ai-development-environment-docs"
     }
   ]
 }
