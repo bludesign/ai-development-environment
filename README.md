@@ -1,159 +1,38 @@
-# AI Development Environment
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/logo-light.svg">
+    <img src=".github/assets/logo-light.svg" alt="AI Development Environment" width="296">
+  </picture>
+</p>
 
-A Next.js application for an AI-focused development environment.
+<p align="center">A self-hosted control plane for AI-assisted development across your Macs.</p>
 
-## Development
+<p align="center">
+  <a href="https://ai-development-environment.mintlify.app/">Documentation</a> ·
+  <a href="https://ai-development-environment.mintlify.app/quickstart">Quickstart</a> ·
+  <a href="https://ai-development-environment.mintlify.app/reference/development">Local development</a> ·
+  <a href="https://github.com/bludesign/ai-development-environment/issues">Issues</a>
+</p>
 
-Install Node.js 24.16 or newer in the Node 24 release line, then install dependencies:
+<p align="center">
+  <img src=".github/assets/worktrees.png" alt="The Worktrees page" width="100%">
+</p>
 
-```bash
-npm ci
-```
+## Documentation
 
-Common commands:
+Everything lives at **[ai-development-environment.mintlify.app](https://ai-development-environment.mintlify.app/)**.
 
-- `npm run dev:all` starts the development server and a watch-mode local agent.
-- `npm run dev` starts only the development server.
-- `npm run agent:dev` starts only the watch-mode development agent and waits for the local server.
-- `npm run full-check` formats and fixes the project before checking it.
-- `npm run full-check:ci` runs the non-mutating CI checks.
-- `npm run check-translations` verifies that locale files have matching keys, do not contain strings copied unchanged across every language, and match the unit-test mock.
-- `npm run build` creates a deployable standalone build.
-- `npm run start` starts the standalone production server.
-- `npm run generate` regenerates the Prisma client, bundled GraphQL SDL, and resolver types.
-- `npm run db:migrate` creates and applies a development migration; `npm run db:deploy` applies committed migrations; `npm run db:studio` opens Prisma Studio.
+|                                                                                             |                                                                    |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [Introduction](https://ai-development-environment.mintlify.app/)                            | What the product does and how the pieces fit together              |
+| [Quickstart](https://ai-development-environment.mintlify.app/quickstart)                    | Install via Homebrew, npm, or from source, and enroll an agent     |
+| [Local development](https://ai-development-environment.mintlify.app/reference/development)  | Running from source, the command list, and the screenshot pipeline |
+| [APIs](https://ai-development-environment.mintlify.app/reference/api)                       | GraphQL, the codebase REST endpoints, and MCP                      |
+| [Database](https://ai-development-environment.mintlify.app/reference/database)              | Prisma, migrations, and reclaiming space                           |
+| [Hosting and networking](https://ai-development-environment.mintlify.app/reference/hosting) | Public HTTPS, Cloudflare Access, and reverse proxies               |
 
-Copy `.env.example` to `.env` to configure `DATABASE_URL`. The production server accepts the standard Next.js `HOSTNAME` and `PORT` environment variables plus `DATABASE_URL`.
-
-### One-command agent development
-
-Start the complete local environment with:
-
-```bash
-npm run dev:all
-```
-
-Next.js runs on `http://127.0.0.1:3000` and the development GraphQL WebSocket runs on port `3092`, so an installed Homebrew service can continue using ports `3090` and `3091`. The agent waits for Next.js, then automatically enrolls `<hostname>-dev` on its first run. Later runs reuse the stable identity stored at:
-
-```text
-~/.config/control-agent-dev/config.json
-```
-
-Next.js retains hot reload and agent source changes restart only the development agent. Open `http://127.0.0.1:3000/en/agents` to inspect it.
-
-The common overrides are:
-
-```bash
-PORT=3010 \
-AGENT_WS_PORT=3093 \
-NEXT_PUBLIC_AGENT_WS_URL=ws://127.0.0.1:3093/graphql \
-npm run dev:all
-```
-
-For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
-
-### Screenshots
-
-`npm run screenshots` captures every app route at four combinations of viewport and colour scheme, and records a walkthrough screencast at each of them. It installs the Chromium build Playwright needs, rebuilds `prisma/mock.db` from the seed modules in `scripts/mock-data/`, produces an isolated Next output in `.next-mock/`, and runs the capture suite. Everything lands in `screenshots/<project>/` and is gitignored — captures are generated on demand, not a committed baseline.
-
-```bash
-npm run screenshots              # full pipeline: browsers, seed, build, capture
-npm run screenshots:run          # capture only, against an existing .next-mock build
-npm run screenshots:walkthrough  # record only the walkthroughs
-npm run screenshots:copy         # publish the desktop captures to the docs project
-npm run mock:reset               # rebuild and reseed prisma/mock.db on its own
-```
-
-`npm run screenshots:copy` prompts for the docs project directory, defaulting to `../ai-development-environment-docs`, and copies `screenshots/desktop-light/` into its `images/light/` and `screenshots/desktop-dark/` into its `images/dark/` — the two directories the Mintlify pages swap between by theme. Pass the directory to skip the prompt: `npm run screenshots:copy -- ../elsewhere`. The mobile captures stay local.
-
-Nothing reaches the network: `scripts/mock-api-server.ts` stubs the GitHub and Jira APIs, and the capture server points at it with the `GITHUB_API_BASE_URL` / `GITHUB_GRAPHQL_URL` overrides.
-
-Routes are listed in `playwright/routes.ts`, keyed to the deterministic IDs the seed writes, so detail pages always resolve to a populated record. A route fails if it returns HTTP 4xx/5xx or raises an uncaught page error; the screenshot is still written first so failures stay diagnosable. The seeder refuses to write to any database not named `mock.db` — override with `MOCK_SEED_ALLOW_ANY_DATABASE=1` only if you mean it.
-
-#### Walkthrough screencasts
-
-`playwright/walkthrough.spec.ts` writes `walkthrough.webm` alongside the stills — a ~13s click-through of the Action Center, Worktrees, a worktree's detail page and Sessions, ending where it began so the docs landing page can loop it seamlessly. The stops live in `playwright/walkthrough.ts`, each reached by clicking either its primary navigation entry or the plain surface of a worktree card, the way a reader would. That is also what keeps the recording honest: a stop that stops being reachable fails the test rather than quietly filming the wrong page.
-
-There is no cursor in the recording. Each click is marked by a dot that pops, holds, and fades, drawn by an init script in `walkthrough.ts` — Playwright's own video overlay can draw one, but only bundled with a cursor sprite and an action label, and the option controlling how long it lingers delays every action, so a pointer move costs as much as a click. Marking clicks from inside the page also covers the taps on the mobile projects.
-
-The desktop projects record at their full 1920x1080; the mobile ones at their viewport's 390x664, because Playwright only ever scales a recorded frame down into the size it is asked for. The mobile screencasts are captured but not published — Mintlify has no responsive-asset story to use them with.
-
-## GraphQL API
-
-An Apollo Server (Federation subgraph) is mounted at `/api/graphql` through a Next.js route handler. Outside production — or when `APOLLO_SANDBOX=true` — introspection and the Apollo sandbox are enabled; open `/api/graphql` in a browser to explore the schema.
-
-The SDL lives in `schemas/**/*.graphql` and is bundled into the app by `scripts/prebuild-schema.ts`; resolvers are dependency-injected factories under `src/graphql/resolvers/`. A placeholder `health` query verifies database connectivity — it returns `"ok"` when the database is reachable, otherwise `"degraded"`:
-
-```graphql
-{
-  health
-}
-```
-
-## iOS device enrollment
-
-The localized **Devices** area enrolls iPhones and iPads through Apple’s Profile Service flow. A user first opens the authenticated `/en/devices/enroll` page (or the equivalent locale), supplies a recognizable device label, consents to the disclosed collection, and installs a temporary profile. The profile requests only `UDID`, `PRODUCT`, and `VERSION`; iOS returns those values to a short-lived, token-authenticated callback. The server also records the IP address observed at profile download and response time.
-
-Each enrollment token contains 256 bits of randomness, expires after 30 minutes, is stored only as a SHA-256 hash, and is consumed atomically. Identical iOS callback retries are idempotent; a different replay is rejected. Expired, unattached enrollments are retained for seven days before cleanup. Deleting a local device also deletes its enrollment and IP history, but does not remove the device from Apple’s annual registration list.
-
-The first enrollment automatically creates a ten-year RSA-2048/SHA-256 self-signed profile signer. Its certificate, private key, device UDIDs, IP history, and any App Store Connect `.p8` key are stored in the configured SQLite database. They are intentionally excluded from ordinary logs and list views, but the database file must be treated as sensitive. A self-signed enrollment profile appears as **Unverified** in iOS; users should confirm the displayed organization before installation.
-
-App Store Connect registration is optional. In Settings, provide an issuer ID, key ID, and ES256 PKCS#8 `.p8` key that has Certificates, Identifiers & Profiles access. Saving verifies the credentials against `GET /v1/devices?limit=1`. Registration first reconciles the UDID with Apple, then calls the Devices API only when needed. It does not regenerate a provisioning profile or rebuild an IPA; after adding a device, create a new provisioning profile and export a new IPA from **Builds**.
-
-### Cloudflare Access paths
-
-When the dashboard is behind Cloudflare Access, create one more-specific Access application for `/api/public/*` and attach a **Bypass / Everyone** policy. Configure the path without a query string because Access path matching does not support one. This namespace contains only intentionally unauthenticated endpoints: the signed iOS enrollment flow, short-lived build artifact and OTA manifest downloads, and the signature-verified GitHub webhook at `/api/public/github/webhook`.
-
-Do **not** bypass `/en/devices*` (or another locale), `/api/ios/enrollment/start`, `/api/ios/devices/export.tsv`, or `/api/graphql`. Those remain behind Cloudflare Access. Access applications are path-scoped rather than method-scoped; the route handlers themselves expose only the methods listed above. Avoid JavaScript or CAPTCHA challenges on the callback. Add a WAF skip for the exact `/api/public/ios/profile-response` path only if production logs show that a managed rule blocks genuine iOS callbacks.
-
-Cloudflare Tunnel keeps the origin private, so IP observations trust headers in this order: a valid `CF-Connecting-IP`, the first valid `X-Forwarded-For` entry, then `X-Real-IP`. The selected header source is saved with every observation. In direct mode this same behavior assumes the existing trusted localhost/LAN deployment boundary; do not expose an unprotected origin to untrusted networks.
-
-Without Cloudflare, enrollment works behind any reverse proxy that provides publicly trusted HTTPS and correct `X-Forwarded-Proto`/`X-Forwarded-Host` values, or when `PUBLIC_BASE_URL` specifies the public HTTPS origin. Direct HTTP localhost/LAN dashboard access remains available, but the enrollment form and profile download are disabled because iOS requires a trusted HTTPS callback.
-
-## Codebase REST and MCP APIs
-
-Read-only codebase data is also available through REST and the Model Context Protocol:
-
-- `GET /api/codebases` lists registered codebase checkouts.
-- `GET /api/codebases/by-path?path=/absolute/folder` resolves one checkout by its exact path.
-- `GET /api/openapi.json` serves the OpenAPI 3.1 contract for both REST operations.
-- `/api/mcp` is a stateless Streamable HTTP MCP endpoint exposing `get_codebases` and `get_codebase`.
-
-The localized `/en/tools` page discovers and runs these built-in tools. It can also manage and test external Streamable HTTP or legacy SSE MCP servers; saved custom header values remain server-side and are never returned to the browser.
-
-## Database (Prisma)
-
-Data access uses [Prisma 7](https://www.prisma.io/) with the `prisma-client` generator (TypeScript query compiler, no native query-engine binary) and the better-sqlite3 driver adapter. It defaults to a SQLite file at `prisma/dev.db`; set `DATABASE_URL` to another `file:` URL to change its location. Other database URL schemes are rejected. Migrations are versioned in `prisma/migrations/` and applied with `prisma migrate deploy`.
-
-Deleted SQLite pages are reused automatically but do not reduce the database file's size. To return unused pages to the filesystem, stop the application and any database clients, ensure the volume has enough temporary free space to rebuild the database, and run `npm run db:vacuum`. The command uses `DATABASE_URL` when set and otherwise vacuums `prisma/dev.db`.
-
-## Credential storage
-
-Long-lived Jira, GitHub, cache-server, external MCP, iOS-signing, App Store Connect, and APNs credentials go through a server-only credential service. `/en/credentials` shows the selected backend, protection warnings, and item metadata; it never returns secret values, ciphertext, authentication headers, or secret-derived previews.
-
-`CREDENTIAL_STORAGE_TYPE` selects one of three backends:
-
-- `database` (the npm, Linux, Docker, and source-install default) stores payloads in the SQLite `Credential` table. Without `CREDENTIAL_ENCRYPTION_KEY`, new payloads are plaintext and Settings/Credentials show a warning. Generate a key with `openssl rand -base64 32`, set the resulting strict base64 value, and restart. The key must decode to exactly 32 bytes. Adding a valid key encrypts every existing plaintext credential atomically with AES-256-GCM. Back up and retain the key: a missing, invalid, or changed key blocks credential reads and writes whenever encrypted rows exist, and key rotation is not yet supported.
-- `vault` uses HashiCorp Vault KV v2. Set `VAULT_ADDR`; optionally set `VAULT_TOKEN`, `VAULT_NAMESPACE`, `CREDENTIAL_VAULT_MOUNT` (default `secret`), `CREDENTIAL_VAULT_PATH_PREFIX` (default `ai-development-environment/credentials`), and `CREDENTIAL_VAULT_HEADERS`. The latter must be a JSON object of string values and should be shell-quoted, for example `CREDENTIAL_VAULT_HEADERS='{"X-Vault-AWS-IAM-Server-ID":"vault.example.com"}'`. Custom headers cannot override transport-managed headers or conflict with `VAULT_TOKEN`/`VAULT_NAMESPACE`. TLS options are `VAULT_CACERT`, `VAULT_TLS_SERVER_NAME`, and `VAULT_SKIP_VERIFY`. Plaintext HTTP and disabled certificate verification are supported but produce prominent security warnings.
-- `keychain` uses the native macOS login Keychain service `com.bludesign.ai-development-environment.credentials`. It is loaded only on Darwin. Selecting it on Linux or in a container leaves the app running and reports an unsupported-backend error; credential-dependent operations fail with an actionable message. Run Homebrew services without `sudo`, because a root service uses a different or unavailable Keychain and may trigger authorization problems.
-
-Vault needs data read/write access and permanent metadata deletion, but never `LIST` access. For the default mount and prefix, a minimal policy is:
-
-```hcl
-path "secret/data/ai-development-environment/credentials/*" {
-  capabilities = ["create", "read", "update"]
-}
-
-path "secret/metadata/ai-development-environment/credentials/*" {
-  capabilities = ["delete"]
-}
-```
-
-Each metadata row records the backend that received its payload. Changing `CREDENTIAL_STORAGE_TYPE` does not migrate, read, or delete values from the previous backend: mismatched items are reported and must be re-entered through their owning settings forms. Backend-to-backend migration and key rotation are intentionally unsupported. Vault/Keychain outages do not take down the dashboard; only features that need an unavailable credential fail.
-
-## Homebrew
-
-The Homebrew formula is maintained in [`bludesign/homebrew-ai-development-environment`](https://github.com/bludesign/homebrew-ai-development-environment).
+## Install
 
 ```bash
 brew tap bludesign/ai-development-environment
@@ -161,49 +40,15 @@ brew install ai-development-environment
 brew services start ai-development-environment
 ```
 
-The service listens on `http://127.0.0.1:3090` by default, with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`. It applies pending database migrations on start, stores its SQLite database under Homebrew's `var/ai-development-environment/`, and defaults credential storage to macOS Keychain. Settings — including every credential/Vault variable — live in the owner-only `$(brew --prefix)/etc/ai-development-environment.env`, and logs are in `$(brew --prefix)/var/log/`.
-
-## npm
-
-The server and the agent are also published to npm as [`@ai-development-environment/server`](https://www.npmjs.com/package/@ai-development-environment/server) (a prebuilt standalone build) and [`@ai-development-environment/control-agent`](https://www.npmjs.com/package/@ai-development-environment/control-agent):
+Or from npm:
 
 ```bash
 npm install -g @ai-development-environment/server @ai-development-environment/control-agent
 ai-development-environment
 ```
 
-The `ai-development-environment` command applies pending database migrations, then starts the server on `http://127.0.0.1:3090` with agent GraphQL WebSockets on `ws://127.0.0.1:3091/graphql`, storing its SQLite database at `~/.ai-development-environment/production.db`. It accepts the same server and credential-storage variables as the Homebrew service, but defaults to database credential storage on every platform.
+Full instructions, including enrolling a control agent, are in the [Quickstart](https://ai-development-environment.mintlify.app/quickstart).
 
-Saved commands run through the enrolled agent user's login shell and stream their terminal output back to the control plane.
+## License
 
-npm versions track the repository's `vX.Y.Z` release tags; the `publish-npm` job in `.github/workflows/release.yml` publishes both packages via npm trusted publishing on every release.
-
-## Control agents
-
-The generic TypeScript agent lives in `packages/control-agent`. It makes authenticated outbound HTTP and GraphQL WebSocket connections to the control plane; managed Macs do not expose a listening port. Agent identity and job history are durable, while subscriptions provide immediate delivery and live logs.
-
-Install the agent from the tap:
-
-```bash
-brew install control-agent
-```
-
-Open the app's **Agents** page and create a one-time enrollment command, then run it on the target Mac. The server defaults to the same computer when omitted:
-
-```bash
-control-agent enroll \
-  --server http://127.0.0.1:3090 \
-  --enrollment-token <one-time-token>
-brew services start control-agent
-```
-
-For a control plane protected by Cloudflare Access, add each service-token header with a repeatable `--header "Name: value"` argument. The enrollment page builds a shell-safe command without retaining those values in the browser or server. The enrolled agent stores them only in its owner-readable `0600` configuration and applies them to GraphQL, artifact uploads, health checks, and WebSocket upgrades; `status` redacts every value.
-
-Useful diagnostics:
-
-```bash
-control-agent status
-control-agent doctor
-```
-
-The credential and stable agent ID are stored at `~/.config/control-agent/config.json`. Saved commands are the explicit shell execution surface and run with the permissions of the agent service account.
+MIT. See [`LICENSE.md`](LICENSE.md).
