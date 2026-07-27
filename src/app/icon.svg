@@ -1,0 +1,7 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI Development Environment">
+  <rect width="32" height="32" rx="8" fill="#1447E6"/>
+  <svg x="5" y="5" width="22" height="22" viewBox="-1 -0.5 26 26" fill="none" stroke="#FAFAFA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/>
+    <rect x="14" y="2" width="8" height="8" rx="1"/>
+  </svg>
+</svg>
