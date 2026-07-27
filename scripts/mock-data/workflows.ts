@@ -363,7 +363,7 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
   /**
    * A run still in flight. The Action Center index treats any non-terminal WorkflowRun with no
    * pending questions as reason ACTIVE, which is what makes this its second "active" item; the
-   * worktree id in `sessionDataJson` is how that item picks up the worktree highlight.
+   * worktree id in `sessionDataJson` is how that item links back to its worktree.
    */
   await prisma.workflowRun.create({
     data: {
