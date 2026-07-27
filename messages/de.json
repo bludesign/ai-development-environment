@@ -1923,7 +1923,7 @@
     "everySeconds": "Alle {seconds}s",
     "duration": "{milliseconds} ms",
     "kinds": {
-      "GITHUB_ACTIONS_NOTIFICATIONS": "GitHub-Actions-Benachrichtigungen",
+      "GITHUB_ACTIONS_NOTIFICATIONS": "GitHub-actions-Benachrichtigungen",
       "GITHUB_AUTO_RETRY": "GitHub Auto-Retry",
       "APNS_RECOVERY": "APNs-Batch-Wiederherstellung",
       "AGENT_HEARTBEAT": "Agent-Heartbeat",
