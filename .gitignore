@@ -16,6 +16,7 @@
 
 # next.js
 /.next/
+/.next-mock/
 /out/
 
 # production
@@ -50,3 +51,10 @@ next-env.d.ts
 /prisma/*.db-*
 /prisma/run-data/
 /supergraph.graphql
+
+# screenshots (generated on demand via `npm run screenshots`)
+/docs/screenshots/
+/playwright-report/
+/playwright/.results/
+/playwright/.cache/
+/test-results/

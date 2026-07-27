@@ -19,9 +19,19 @@ const agentWebSocketHost = ["0.0.0.0", "::"].includes(
   : configuredAgentWebSocketHost;
 const agentWebSocketPort = process.env.AGENT_WS_PORT ?? "3091";
 
+// The on-demand screenshot build sets NEXT_DIST_DIR to an isolated output dir. That build is a
+// visual artifact, not a CI gate, so skip type-checking (the primary `.next` build still
+// enforces it) to keep it fast and resilient to unrelated app-wide issues.
+const isolatedScreenshotBuild =
+  !!process.env.NEXT_DIST_DIR && process.env.NEXT_DIST_DIR !== ".next";
+
 const nextConfig: NextConfig = {
   allowedDevOrigins,
   output: "standalone",
+  // Allow an isolated build output (e.g. the on-demand screenshot build) so it never clobbers
+  // the primary `.next` directory used by a running dev server.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  typescript: { ignoreBuildErrors: isolatedScreenshotBuild },
   outputFileTracingIncludes: {
     "/*": [
       "node_modules/@napi-rs/keyring/**/*",

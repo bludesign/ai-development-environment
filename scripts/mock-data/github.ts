@@ -1,0 +1,258 @@
+import type { PrismaClient } from "../../src/generated/prisma/client";
+
+import { ids } from "./ids";
+import { daysFromNow, hoursAgo, minutesAgo } from "./time";
+
+const WEB_GITHUB_ID = "R_kgACMEweb";
+const WEB_HEAD_SHA = "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081";
+
+export async function seedGitHub(prisma: PrismaClient): Promise<void> {
+  await prisma.gitHubRepository.createMany({
+    data: [
+      {
+        id: "github-repo-web",
+        githubId: WEB_GITHUB_ID,
+        owner: "acme",
+        name: "web-app",
+        nameWithOwner: "acme/web-app",
+        url: "https://github.com/acme/web-app",
+      },
+      {
+        id: "github-repo-ios",
+        githubId: "R_kgACMEios",
+        owner: "acme",
+        name: "ios-app",
+        nameWithOwner: "acme/ios-app",
+        url: "https://github.com/acme/ios-app",
+      },
+      {
+        id: "github-repo-api",
+        githubId: "R_kgACMEapi",
+        owner: "acme",
+        name: "api",
+        nameWithOwner: "acme/api",
+        url: "https://github.com/acme/api",
+      },
+    ],
+  });
+
+  await prisma.gitHubPipelineSnapshot.create({
+    data: {
+      id: "pipeline-snapshot-web",
+      repositoryGithubId: WEB_GITHUB_ID,
+      repositoryNameWithOwner: "acme/web-app",
+      repositoryUrl: "https://github.com/acme/web-app",
+      headSha: WEB_HEAD_SHA,
+      pipelineStatus: "FAILURE",
+      graphqlRollupStatus: "FAILURE",
+      lastObservedAt: minutesAgo(6),
+      records: {
+        create: [
+          {
+            id: "pipeline-record-build",
+            identityKey: "workflow:build",
+            githubPipelineId: "9876543210",
+            name: "Build",
+            status: "SUCCESS",
+            url: "https://github.com/acme/web-app/actions/runs/9876543210",
+            workflowRunId: "9876543210",
+            workflowId: "build.yml",
+            runNumber: 412,
+            runAttempt: 1,
+            jobsJson: JSON.stringify([
+              { id: "gh-job-build", name: "build", status: "SUCCESS", canRetry: false, steps: [] },
+            ]),
+            source: "WEBHOOK",
+            sourceFetchedAt: minutesAgo(6),
+            lastObservedAt: minutesAgo(6),
+          },
+          {
+            id: "pipeline-record-test",
+            identityKey: "workflow:test",
+            githubPipelineId: "9876543211",
+            name: "Test",
+            status: "FAILURE",
+            url: "https://github.com/acme/web-app/actions/runs/9876543211",
+            workflowRunId: "9876543211",
+            workflowId: "test.yml",
+            runNumber: 412,
+            runAttempt: 1,
+            canRetry: true,
+            jobsJson: JSON.stringify([
+              { id: "gh-job-unit", name: "unit", status: "FAILURE", canRetry: true, steps: [] },
+              { id: "gh-job-e2e", name: "e2e", status: "SUCCESS", canRetry: false, steps: [] },
+            ]),
+            source: "WEBHOOK",
+            sourceFetchedAt: minutesAgo(6),
+            lastObservedAt: minutesAgo(6),
+          },
+          {
+            id: "pipeline-record-lint",
+            identityKey: "workflow:lint",
+            githubPipelineId: "9876543212",
+            name: "Lint",
+            status: "SUCCESS",
+            url: "https://github.com/acme/web-app/actions/runs/9876543212",
+            workflowRunId: "9876543212",
+            workflowId: "lint.yml",
+            runNumber: 412,
+            runAttempt: 1,
+            jobsJson: JSON.stringify([
+              { id: "gh-job-eslint", name: "eslint", status: "SUCCESS", canRetry: false, steps: [] },
+            ]),
+            source: "WEBHOOK",
+            sourceFetchedAt: minutesAgo(6),
+            lastObservedAt: minutesAgo(6),
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.gitHubWorkflowRunObservation.create({
+    data: {
+      id: "workflow-run-observation-web-test",
+      codebaseRepositoryId: ids.repositories.web,
+      workflowRunId: "9876543211",
+      runAttempt: 1,
+      workflowId: "test.yml",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      githubUpdatedAt: minutesAgo(6),
+      source: "WEBHOOK",
+      lastObservedAt: minutesAgo(6),
+    },
+  });
+
+  await prisma.gitHubActionsPollingState.create({
+    data: {
+      codebaseRepositoryId: ids.repositories.web,
+      initializedAt: hoursAgo(48),
+      lastPollStartedAt: minutesAgo(1),
+      lastPollCompletedAt: minutesAgo(1),
+      lastPollSucceededAt: minutesAgo(1),
+    },
+  });
+
+  await prisma.gitHubGraphqlCacheEntry.create({
+    data: {
+      id: ids.githubCacheEntries.pullRequests,
+      cacheKey: "github:acme/web-app:pull-requests",
+      authentication: "GITHUB_APP",
+      endpoint: "https://api.github.com/graphql",
+      operation: "PullRequests",
+      query: "query PullRequests($owner:String!,$name:String!){ repository(owner:$owner,name:$name){ pullRequests(first:20){ nodes { number title } } } }",
+      variablesJson: JSON.stringify({ owner: "acme", name: "web-app" }),
+      responseJson: JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              nodes: [
+                { number: 42, title: "Add quick search to the global navigation bar" },
+              ],
+            },
+          },
+        },
+      }),
+      pointCost: 1,
+      fetchedAt: minutesAgo(4),
+    },
+  });
+
+  await prisma.gitHubApiCallLog.createMany({
+    data: [
+      {
+        id: "github-api-log-1",
+        authentication: "GITHUB_APP",
+        operation: "PullRequests",
+        source: "LIVE",
+        durationMs: 284,
+        statusCode: 200,
+        pointCost: 1,
+        rateLimitLimit: 5000,
+        rateLimitRemaining: 4993,
+        rateLimitUsed: 7,
+        rateLimitResetAt: daysFromNow(0),
+        createdAt: minutesAgo(4),
+      },
+      {
+        id: "github-api-log-2",
+        authentication: "GITHUB_APP",
+        operation: "PullRequests",
+        source: "CACHE",
+        durationMs: 3,
+        servedStale: false,
+        pointsAvoided: 1,
+        createdAt: minutesAgo(2),
+      },
+      {
+        id: "github-api-log-3",
+        authentication: "GITHUB_APP",
+        operation: "CheckRuns",
+        source: "LIVE",
+        durationMs: 331,
+        statusCode: 200,
+        pointCost: 1,
+        createdAt: minutesAgo(6),
+      },
+    ],
+  });
+
+  await prisma.gitHubRateLimitSnapshot.createMany({
+    data: [
+      {
+        id: "github-rate-graphql",
+        authentication: "GITHUB_APP",
+        resource: "graphql",
+        limit: 5000,
+        remaining: 4993,
+        used: 7,
+        resetAt: daysFromNow(0),
+        observedAt: minutesAgo(4),
+      },
+      {
+        id: "github-rate-core",
+        authentication: "GITHUB_APP",
+        resource: "core",
+        limit: 15000,
+        remaining: 14980,
+        used: 20,
+        resetAt: daysFromNow(0),
+        observedAt: minutesAgo(4),
+      },
+    ],
+  });
+
+  await prisma.gitHubWebhookDelivery.createMany({
+    data: [
+      {
+        deliveryId: "webhook-delivery-1",
+        event: "workflow_run",
+        action: "completed",
+        repositoryName: "acme/web-app",
+        workflowRunId: "9876543211",
+        outcome: "PROCESSED",
+        receivedAt: minutesAgo(6),
+        processedAt: minutesAgo(6),
+      },
+      {
+        deliveryId: "webhook-delivery-2",
+        event: "check_suite",
+        action: "completed",
+        repositoryName: "acme/web-app",
+        outcome: "PROCESSED",
+        receivedAt: minutesAgo(6),
+        processedAt: minutesAgo(6),
+      },
+      {
+        deliveryId: "webhook-delivery-3",
+        event: "pull_request",
+        action: "synchronize",
+        repositoryName: "acme/web-app",
+        outcome: "IGNORED",
+        receivedAt: minutesAgo(12),
+        processedAt: minutesAgo(12),
+      },
+    ],
+  });
+}
