@@ -21,7 +21,8 @@ export async function seedTools(prisma: PrismaClient): Promise<void> {
     data: {
       id: ids.mcpPresets.core,
       name: "Core Tools",
-      description: "Issue tracking and repository automation for day-to-day work.",
+      description:
+        "Issue tracking and repository automation for day-to-day work.",
       iconKey: "wrench",
       enabledForPlans: true,
       enabledForSessions: true,

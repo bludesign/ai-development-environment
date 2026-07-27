@@ -9,6 +9,7 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-mock/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
@@ -18,6 +19,16 @@ const eslintConfig = defineConfig([
     // npm publish staging output (assembled by scripts/prepare-npm-server-package.mjs).
     ".npm-staging/**",
   ]),
+  // Underscore-prefixed parameters are the codebase's marker for "part of the
+  // signature, deliberately unused" (resolver roots, event handler args, mocks).
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_" },
+      ],
+    },
+  },
   // CommonJS launcher scripts shipped inside the npm server package.
   {
     files: ["scripts/npm/**/*.cjs"],

@@ -93,7 +93,10 @@ export const routes: RouteEntry[] = [
   { name: "skills", path: "/skills" },
   { name: "skill-detail", path: `/skills/${ids.skills.lint}` },
   { name: "skill-groups", path: "/skills/groups" },
-  { name: "skill-group-detail", path: `/skills/groups/${ids.skillGroups.core}` },
+  {
+    name: "skill-group-detail",
+    path: `/skills/groups/${ids.skillGroups.core}`,
+  },
   { name: "skill-sync-run", path: `/skills/sync/${ids.skillSyncRuns.latest}` },
 
   // Tools

@@ -1,7 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { displayNumbers, ids } from "./ids";
-import { daysAgo, hoursAgo, minutesAgo } from "./time";
+import { daysAgo, minutesAgo } from "./time";
 
 const definition = {
   format: "aide.workflow",

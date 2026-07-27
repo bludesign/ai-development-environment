@@ -327,7 +327,9 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
         id: "audit-2",
         agentId: ids.agents.studio,
         action: "agent.configuration.updated",
-        details: JSON.stringify({ baseRepoDirectory: "/Users/acme/Repositories" }),
+        details: JSON.stringify({
+          baseRepoDirectory: "/Users/acme/Repositories",
+        }),
         ipAddress: "192.168.1.24",
         createdAt: daysAgo(44),
       },

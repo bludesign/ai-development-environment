@@ -57,6 +57,10 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       "packages/control-agent/**",
+      // Playwright owns everything under playwright/ (see testDir in playwright.config.ts).
+      // Its specs match Vitest's default `*.spec.ts` include, and loading them here makes
+      // test.describe() throw because Playwright's runner isn't the one executing them.
+      "playwright/**",
       ".next/**",
       ".npm-staging/**",
     ],

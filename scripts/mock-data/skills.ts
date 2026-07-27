@@ -1,7 +1,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { ids } from "./ids";
-import { daysAgo, hoursAgo, minutesAgo } from "./time";
+import { daysAgo, hoursAgo } from "./time";
 
 function skillFile(body: string) {
   return Buffer.from(body, "utf8");

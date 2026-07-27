@@ -26,7 +26,10 @@ import { seedJira } from "./mock-data/jira";
 import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
 
-type Seeder = { name: string; run: (prisma: ReturnType<typeof createMockPrismaClient>) => Promise<void> };
+type Seeder = {
+  name: string;
+  run: (prisma: ReturnType<typeof createMockPrismaClient>) => Promise<void>;
+};
 
 const seeders: Seeder[] = [
   { name: "settings", run: seedSettings },
