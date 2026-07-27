@@ -213,6 +213,42 @@ describe("GlobalSearchService", () => {
     ).toHaveLength(0);
   });
 
+  test("nests one child per run when a worktree is linked by several attempts", async () => {
+    prisma.worktree.findMany.mockResolvedValue([
+      {
+        id: "worktree/one",
+        branch: "feature/AIDE-42-search",
+        relativePath: "AIDE-search",
+        folder: "/repos/AIDE-search",
+        availability: "AVAILABLE",
+        updatedAt: new Date("2026-06-01T00:00:00.000Z"),
+        codebase: {
+          repository: { name: "AIDE" },
+          agent: { name: "Studio Mac" },
+        },
+        pullRequest: null,
+      },
+    ]);
+    const run = {
+      id: "workflow/run",
+      displayNumber: 19,
+      status: "SUCCEEDED",
+      updatedAt: new Date("2026-06-02T00:00:00.000Z"),
+      workflow: { name: "Release" },
+    };
+    prisma.workflowRunResourceLink.findMany.mockResolvedValue([
+      { resourceId: "worktree/one", runId: run.id, run },
+      { resourceId: "worktree/one", runId: run.id, run },
+    ]);
+    prisma.build.findMany.mockResolvedValue([]);
+
+    const result = await new GlobalSearchService().search("AIDE-42", 5, 3);
+
+    expect(result.items[0]?.children).toEqual([
+      expect.objectContaining({ key: "workflow-run:workflow/run" }),
+    ]);
+  });
+
   test("builds encoded detail routes for every remaining primary resource kind", async () => {
     const updatedAt = new Date("2026-06-01T00:00:00.000Z");
     prisma.jiraCachedTicket.findMany.mockResolvedValue([

@@ -40,7 +40,7 @@ const subscriptions = vi.mocked(controlPlaneSubscriptions);
 
 const sidebarStatus = {
   usageToday: { totalCost: 1.25, collectedAt: null },
-  activity: { plans: 0, sessions: 0, builds: 0, workflows: 0 },
+  activity: { plans: 1, sessions: 2, builds: 3, workflows: 4, commands: 5 },
   diskSpace: {
     settings: {
       normalThresholdGiB: 40,
@@ -147,6 +147,29 @@ describe("SidebarStatusFooter", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  test("leads the activity grid with Action Center items", async () => {
+    render(<SidebarStatusFooter />);
+
+    await screen.findByText("$1.25");
+    const activity = ["Actions", "Workflows", "Plans", "Sessions", "Builds"];
+    for (const [index, label] of activity.entries()) {
+      const link = screen.getByRole("link", { name: new RegExp(label) });
+      expect(link.getAttribute("href")).toBe(
+        index === 0 ? "/" : `/${label.toLowerCase()}`,
+      );
+    }
+    // Without an ActionCenterProvider the footer falls back to zero items.
+    expect(screen.getByRole("link", { name: /Actions/ }).textContent).toContain(
+      "0",
+    );
+    expect(
+      screen.getByRole("link", { name: /Commands/ }).getAttribute("href"),
+    ).toBe("/commands");
+    expect(
+      screen.getByRole("link", { name: /Commands/ }).textContent,
+    ).toContain("5");
   });
 
   test("fills multi-agent circles with used disk space", async () => {

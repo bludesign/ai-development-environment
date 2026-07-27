@@ -107,6 +107,7 @@ type SidebarActivityCounts {
   sessions: Int!
   builds: Int!
   workflows: Int!
+  commands: Int!
 }
 
 type SidebarUsageToday {

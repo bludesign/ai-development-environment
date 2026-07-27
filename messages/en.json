@@ -10,7 +10,6 @@
   },
   "shell": {
     "productName": "AI Development Environment",
-    "welcome": "Welcome",
     "dashboard": "Dashboard",
     "ai": "AI",
     "navigation": "Navigation",
@@ -106,7 +105,7 @@
   },
   "actionCenter": {
     "title": "Action Center",
-    "description": "Live work, decisions, failures, and iOS builds waiting to run.",
+    "description": "Live work, decisions, failures, and builds waiting to run.",
     "refresh": "Refresh Action Center",
     "totalCount": "{count, plural, one {# item} other {# items}}",
     "attentionCount": "{count, plural, one {# needs attention} other {# need attention}}",

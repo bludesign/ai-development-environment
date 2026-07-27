@@ -9,6 +9,7 @@ import {
   COMMAND_RUNS_CHANGED_TOPIC,
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   COMMANDS_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
   commandRunChangedTopic,
   commandRunOutputTopic,
@@ -154,6 +155,9 @@ function publishRun(run: { id: string }): void {
   });
   agentEventBus.publish(commandRunChangedTopic(run.id), {
     commandRunChanged: run,
+  });
+  agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
+    sidebarStatusChanged: true,
   });
 }
 

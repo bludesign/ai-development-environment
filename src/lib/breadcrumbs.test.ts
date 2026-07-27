@@ -47,7 +47,6 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   unifiedEvents: "Unified View",
   usage: "Usage",
   webhooks: "Webhooks",
-  welcome: "Welcome",
   workflows: "Workflows",
   worktrees: "Worktrees",
 };
@@ -55,9 +54,9 @@ const labels: Record<BreadcrumbLabelKey, string> = {
 const translate = (key: BreadcrumbLabelKey) => labels[key];
 
 describe("buildAppBreadcrumbs", () => {
-  test("returns the localized welcome crumb for the root route", () => {
+  test("returns the localized Action Center crumb for the root route", () => {
     expect(buildAppBreadcrumbs("/", translate)).toEqual([
-      { isCurrent: true, label: "Welcome" },
+      { isCurrent: true, label: "Action Center" },
     ]);
   });
 

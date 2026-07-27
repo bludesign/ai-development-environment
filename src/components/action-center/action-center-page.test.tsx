@@ -315,7 +315,7 @@ describe("MiniActionCenter", () => {
     expect(screen.queryByRole("button", { name: "Submit answer" })).toBeNull();
     expect(
       screen.getByRole("link", { name: "Action Center" }).getAttribute("href"),
-    ).toBe("/action-center");
+    ).toBe("/");
     const compactItem = document.querySelector(
       '[data-slot="action-center-compact-item"]',
     );

@@ -10,7 +10,6 @@
   },
   "shell": {
     "productName": "AI Development Environment",
-    "welcome": "Bienvenue",
     "dashboard": "Tableau de bord",
     "ai": "IA",
     "navigation": "Navigation",
@@ -106,7 +105,7 @@
   },
   "actionCenter": {
     "title": "Centre d’actions",
-    "description": "Travail en cours, décisions, échecs et builds iOS prêts à être exécutés.",
+    "description": "Travail en cours, décisions, échecs et builds prêts à être exécutés.",
     "refresh": "Actualiser le centre d’actions",
     "totalCount": "{count, plural, one {# élément} other {# éléments}}",
     "attentionCount": "{count, plural, one {# nécessite une attention} other {# nécessitent une attention}}",

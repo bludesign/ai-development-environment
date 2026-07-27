@@ -46,6 +46,7 @@ describe("SystemStatusService", () => {
     const agentRunCount = vi.fn().mockResolvedValueOnce(2).mockResolvedValue(3);
     const buildCount = vi.fn().mockResolvedValue(4);
     const workflowCount = vi.fn().mockResolvedValue(5);
+    const commandCount = vi.fn().mockResolvedValue(6);
     getPrismaClient.mockResolvedValue({
       sidebarUsageSummary: {
         findUnique: vi.fn().mockResolvedValue({
@@ -57,6 +58,7 @@ describe("SystemStatusService", () => {
       agentRun: { count: agentRunCount },
       build: { count: buildCount },
       workflowRun: { count: workflowCount },
+      commandRun: { count: commandCount },
     });
     const { ccusage, diskSpace, polling } = dependencies();
 
@@ -71,6 +73,7 @@ describe("SystemStatusService", () => {
       sessions: 3,
       builds: 4,
       workflows: 5,
+      commands: 6,
     });
     expect(agentRunCount).toHaveBeenNthCalledWith(1, {
       where: {
@@ -102,6 +105,9 @@ describe("SystemStatusService", () => {
       where: { status: { in: ["PREPARING", "RUNNING"] } },
     });
     expect(workflowCount).toHaveBeenCalledWith({
+      where: { archivedAt: null, status: "RUNNING" },
+    });
+    expect(commandCount).toHaveBeenCalledWith({
       where: { archivedAt: null, status: "RUNNING" },
     });
   });

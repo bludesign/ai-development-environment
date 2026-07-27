@@ -62,8 +62,11 @@ describe("GlobalSearch", () => {
     render(<GlobalSearch features={features} />);
 
     const trigger = screen.getByRole("button", { name: "Open global search" });
+    // Container-query widths so the trigger collapses to an icon button when
+    // the header is narrow, regardless of how wide the viewport is.
     expect(trigger.className).toContain("w-10");
-    expect(trigger.className).toContain("sm:w-48");
+    expect(trigger.className).toContain("@xl:w-48");
+    expect(trigger.className).toContain("@3xl:w-64");
 
     const shortcutEvent = openWithShortcut();
     expect(shortcutEvent.defaultPrevented).toBe(true);

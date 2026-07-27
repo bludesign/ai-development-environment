@@ -40,7 +40,6 @@ export type BreadcrumbLabelKey =
   | "unifiedEvents"
   | "usage"
   | "webhooks"
-  | "welcome"
   | "workflows"
   | "worktrees";
 
@@ -53,7 +52,6 @@ export type AppBreadcrumb = {
 type BreadcrumbTranslator = (key: BreadcrumbLabelKey) => string;
 
 const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
-  "action-center": "actionCenter",
   actions: "actions",
   "actions-cache": "actionsCache",
   agents: "agents",
@@ -130,7 +128,6 @@ const STATIC_NESTED_PATH_PATTERNS = [
 ];
 
 const ROUTABLE_STATIC_PATHS = new Set([
-  "/action-center",
   "/actions",
   "/actions-cache",
   "/agents",
@@ -222,7 +219,7 @@ export function buildAppBreadcrumbs(
   const segments = path.split("/").filter(Boolean);
 
   if (segments.length === 0) {
-    return [{ isCurrent: true, label: translate("welcome") }];
+    return [{ isCurrent: true, label: translate("actionCenter") }];
   }
 
   return segments.map((segment, index) => {

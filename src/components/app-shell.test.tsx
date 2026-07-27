@@ -115,7 +115,7 @@ describe("AppShell", () => {
     expect(
       screen
         .getAllByRole("link", { name: "Action Center" })
-        .some((link) => link.getAttribute("href") === "/action-center"),
+        .some((link) => link.getAttribute("href") === "/"),
     ).toBe(true);
     expect(
       screen.getByRole("link", { name: "Comments" }).getAttribute("href"),
@@ -219,11 +219,13 @@ describe("AppShell", () => {
     });
 
     expect(
-      within(breadcrumb).getByText("Welcome").getAttribute("aria-current"),
+      within(breadcrumb)
+        .getByText("Action Center")
+        .getAttribute("aria-current"),
     ).toBe("page");
-    expect(within(breadcrumb).getByText("Welcome").className).not.toContain(
-      "max-w-",
-    );
+    expect(
+      within(breadcrumb).getByText("Action Center").className,
+    ).not.toContain("max-w-");
     expect(breadcrumb.className).toContain("flex-1");
     expect(
       navigationToggle.compareDocumentPosition(breadcrumb) &

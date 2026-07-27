@@ -218,7 +218,9 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 shrink-0 border-b bg-background/90 backdrop-blur-xl backdrop-saturate-150 supports-backdrop-filter:bg-background/70">
       <div aria-hidden="true" className="h-[env(safe-area-inset-top)]" />
-      <div className="flex h-14 items-center gap-2 pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
+      {/* @container so the search trigger sizes off the header's own width,
+          which shrinks as the sidebars open, rather than off the viewport. */}
+      <div className="@container flex h-14 items-center gap-2 pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))]">
         <SidebarToggle
           expanded={leftOpen}
           hideLabel={t("hideNavigation")}

@@ -1086,23 +1086,23 @@ export class GlobalSearchService {
     for (const item of items) {
       const id = item.key.slice("worktree:".length);
       const seenRuns = new Set<string>();
-      const runChildren = links
-        .filter((link) => link.resourceId === id && !seenRuns.has(link.runId))
-        .map((link) => {
-          seenRuns.add(link.runId);
-          return {
-            key: `workflow-run:${link.run.id}`,
-            kind: "WORKFLOW_RUN" as const,
-            group: "WORKFLOWS" as const,
-            title: `${link.run.workflow.name} #${link.run.displayNumber}`,
-            subtitle: null,
-            href: `/workflows/runs/${segment(link.run.id)}`,
-            status: link.run.status,
-            updatedAt: iso(link.run.updatedAt),
-            children: [],
-          };
-        })
-        .slice(0, relatedFirst);
+      const runChildren = [];
+      for (const link of links) {
+        if (link.resourceId !== id || seenRuns.has(link.runId)) continue;
+        seenRuns.add(link.runId);
+        runChildren.push({
+          key: `workflow-run:${link.run.id}`,
+          kind: "WORKFLOW_RUN" as const,
+          group: "WORKFLOWS" as const,
+          title: `${link.run.workflow.name} #${link.run.displayNumber}`,
+          subtitle: null,
+          href: `/workflows/runs/${segment(link.run.id)}`,
+          status: link.run.status,
+          updatedAt: iso(link.run.updatedAt),
+          children: [],
+        });
+        if (runChildren.length === relatedFirst) break;
+      }
       const buildChildren = builds
         .filter((build) => build.worktreeId === id)
         .slice(0, relatedFirst)

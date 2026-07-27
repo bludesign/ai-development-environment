@@ -10,7 +10,6 @@
   },
   "shell": {
     "productName": "AI Development Environment",
-    "welcome": "Willkommen",
     "dashboard": "Übersicht",
     "ai": "KI",
     "navigation": "Navigation",
@@ -106,7 +105,7 @@
   },
   "actionCenter": {
     "title": "Aktionszentrum",
-    "description": "Laufende Arbeit, Entscheidungen, Fehler und ausführbereite iOS-Builds.",
+    "description": "Laufende Arbeit, Entscheidungen, Fehler und ausführbereite Builds.",
     "refresh": "Aktionszentrum aktualisieren",
     "totalCount": "{count, plural, one {# Element} other {# Elemente}}",
     "attentionCount": "{count, plural, one {# erfordert Aufmerksamkeit} other {# erfordern Aufmerksamkeit}}",

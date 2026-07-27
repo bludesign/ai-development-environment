@@ -28,7 +28,7 @@ export function MiniActionCenter() {
         <ListTodo className="size-4" />
         <Link
           className="min-w-0 flex-1 truncate text-xs font-semibold hover:underline"
-          href="/action-center"
+          href="/"
         >
           {t("title")}
         </Link>

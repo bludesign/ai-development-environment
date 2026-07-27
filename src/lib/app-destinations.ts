@@ -14,7 +14,6 @@ import {
   GitPullRequest,
   Hammer,
   HardDrive,
-  House,
   KeyRound,
   ListTodo,
   MessageSquareText,
@@ -67,24 +66,15 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
 
 export const APP_DESTINATIONS: AppDestination[] = [
   {
-    key: "welcome",
-    href: "/",
-    labelKey: "welcome",
-    aliases: ["home"],
-    icon: House,
-    section: "dashboard",
-    sidebar: true,
-    exact: true,
-  },
-  {
     key: "action-center",
-    href: "/action-center",
+    href: "/",
     labelKey: "actionCenter",
-    aliases: ["attention", "tasks"],
+    aliases: ["attention", "tasks", "home"],
     icon: ListTodo,
     section: "dashboard",
     sidebar: true,
     common: true,
+    exact: true,
   },
   {
     key: "notifications",

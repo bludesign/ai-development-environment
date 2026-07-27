@@ -395,17 +395,17 @@ export function GlobalSearch({ features }: { features: NavigationFeatures }) {
     <>
       <Button
         aria-label={t("open")}
-        className="h-10 w-10 justify-center gap-2 px-0 sm:w-48 sm:justify-start sm:px-3 lg:w-64"
+        className="h-10 w-10 justify-center gap-2 px-0 @xl:w-48 @xl:justify-start @xl:px-3 @3xl:w-64"
         onClick={() => changeOpen(true)}
         title={`${t("open")} (${shortcut})`}
         type="button"
         variant="outline"
       >
         <Search className="size-4 shrink-0" />
-        <span className="hidden min-w-0 flex-1 truncate text-left text-muted-foreground sm:inline">
+        <span className="hidden min-w-0 flex-1 truncate text-left text-muted-foreground @xl:inline">
           {t("button")}
         </span>
-        <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground lg:inline">
+        <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground @3xl:inline">
           {shortcut}
         </kbd>
       </Button>
