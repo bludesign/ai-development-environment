@@ -57,6 +57,7 @@
     "screenshots:browsers": "playwright install chromium",
     "screenshots": "npm run generate && npm run screenshots:browsers && npm run mock:db && npm run mock:seed && npm run screenshots:build && playwright test",
     "screenshots:run": "playwright test",
+    "screenshots:walkthrough": "playwright test playwright/walkthrough.spec.ts",
     "screenshots:copy": "node scripts/copy-screenshots.mjs",
     "full-check": "npm run generate && npm run format && npm run lint:fix && npm run type-check:generated && npm run test:run && npm run agent:test:run && npm run check-translations && npm run build:generated && npm run postbuild",
     "full-check:ci": "npm run generate && npm run format:check && npm run lint && npm run type-check:generated && npm run test:run && npm run agent:test:run && npm run check-translations && npm run build:generated && npm run postbuild",

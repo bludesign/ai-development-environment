@@ -130,10 +130,17 @@
     },
     {
       "type": "shell",
+      "label": "screenshots:walkthrough",
+      "group": "test",
+      "command": "npm run screenshots:walkthrough",
+      "detail": "Record only the walkthrough screencasts against the existing mock build"
+    },
+    {
+      "type": "shell",
       "label": "screenshots:copy",
       "group": "test",
       "command": "npm run screenshots:copy -- '${input:docsDirectory}'",
-      "detail": "Copy the desktop light and dark screenshots into the docs project"
+      "detail": "Copy the desktop light and dark captures into the docs project"
     },
     {
       "type": "shell",

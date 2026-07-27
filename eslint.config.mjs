@@ -42,6 +42,14 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-require-imports": "off",
     },
   },
+  // Playwright names the callback that supplies a fixture's value `use`, which the React rule
+  // reads as a hook called outside a component. There is no React in the capture suite.
+  {
+    files: ["playwright/**/*.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

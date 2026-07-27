@@ -5,7 +5,7 @@
  *   npm run screenshots:copy               # prompts for the docs directory
  *   npm run screenshots:copy -- ../elsewhere
  *
- * Only the desktop projects are copied — the docs site renders one image per theme and
+ * Only the desktop projects are copied — the docs site renders one asset per theme and
  * swaps them with `dark:hidden` / `hidden dark:block`, so `desktop-light` maps onto
  * `images/light/` and `desktop-dark` onto `images/dark/`. Mobile captures stay local.
  */
@@ -15,11 +15,15 @@ import { basename, isAbsolute, resolve } from "node:path";
 
 const DEFAULT_TARGET = "../ai-development-environment-docs";
 
-// Playwright project -> path within the docs project that its PNGs belong in.
+// Playwright project -> path within the docs project that its captures belong in.
 const PROJECT_DESTINATIONS = [
   { project: "desktop-light", destination: "images/light" },
   { project: "desktop-dark", destination: "images/dark" },
 ];
+
+// The route stills are PNGs; the walkthrough screencast from walkthrough.spec.ts is a WebM.
+// Both live in the same per-theme directory, and the docs pages pick whichever they need.
+const PUBLISHED_EXTENSIONS = [".png", ".webm"];
 
 const sourceRoot = resolve(process.cwd(), "screenshots");
 
@@ -85,15 +89,15 @@ for (const { project, destination } of PROJECT_DESTINATIONS) {
   const targetDirectory = resolve(targetRoot, destination);
   await mkdir(targetDirectory, { recursive: true });
 
-  const pngs = (await readdir(sourceDirectory)).filter((name) =>
-    name.endsWith(".png"),
+  const captures = (await readdir(sourceDirectory)).filter((name) =>
+    PUBLISHED_EXTENSIONS.some((extension) => name.endsWith(extension)),
   );
-  for (const name of pngs) {
+  for (const name of captures) {
     await cp(resolve(sourceDirectory, name), resolve(targetDirectory, name));
   }
 
-  copiedCount += pngs.length;
-  console.log(`${project} -> ${destination}: ${pngs.length} PNG(s)`);
+  copiedCount += captures.length;
+  console.log(`${project} -> ${destination}: ${captures.length} file(s)`);
 }
 
-console.log(`Copied ${copiedCount} screenshot(s) into ${basename(targetRoot)}`);
+console.log(`Copied ${copiedCount} capture(s) into ${basename(targetRoot)}`);
