@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   CalendarDays,
   ChevronDown,
   ChevronRight,
@@ -272,14 +271,8 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <Button asChild className="mb-3 -ml-2" variant="ghost">
-            <Link href="/jira/tickets">
-              <ArrowLeft /> {t("back")}
-            </Link>
-          </Button>
-          <p className="text-sm text-muted-foreground">{ticket.key}</p>
           {summaryEditing ? (
-            <form className="mt-1 flex max-w-3xl gap-2" onSubmit={saveSummary}>
+            <form className="flex max-w-3xl gap-2" onSubmit={saveSummary}>
               <Input
                 aria-label={t("summary")}
                 autoFocus
@@ -315,6 +308,7 @@ export function JiraTicketDetailPage({ issueKey }: { issueKey: string }) {
               )}
             </div>
           )}
+          <p className="mt-1 text-sm text-muted-foreground">{ticket.key}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge>{ticket.status}</Badge>
             {ticket.issueType && <Badge>{ticket.issueType}</Badge>}

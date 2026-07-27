@@ -136,7 +136,6 @@ const mockTranslations = {
     hideAgents: "Hide agents using {model}",
   },
   agentDetail: {
-    back: "Agents",
     loading: "Loading agent…",
     notFound: "Agent not found.",
     version: "Version",
@@ -281,7 +280,6 @@ const mockTranslations = {
     },
   },
   jobs: {
-    back: "Agents",
     open: "Open job",
     cancel: "Cancel",
     loading: "Loading job…",
@@ -566,7 +564,6 @@ const mockTranslations = {
     next: "Next",
   },
   githubCacheDetail: {
-    back: "GitHub Cache",
     title: "Cached GraphQL entry",
     description: "Cached GitHub GraphQL response",
     refresh: "Force refresh",
@@ -636,7 +633,6 @@ const mockTranslations = {
     next: "Next",
   },
   jiraCacheDetail: {
-    back: "Jira Cache",
     description: "Cached Jira ticket data",
     refresh: "Refresh ticket",
     delete: "Delete from cache",
@@ -1654,7 +1650,6 @@ const mockTranslations = {
     saveSettings: "Save settings",
     skillNotFound: "Skill not found.",
     loadingSkill: "Loading skill…",
-    backToSkills: "Back to skills",
     newSkill: "New skill",
     editorDescription: "Edit metadata and every file in this skill package.",
     delete: "Delete",
@@ -1691,7 +1686,6 @@ const mockTranslations = {
     createGroup: "Create group",
     groupNotFound: "Skill group not found.",
     loadingGroup: "Loading skill group…",
-    backToGroups: "Back to skill groups",
     groupSettingsDescription:
       "Manage membership, repository assignments, and deployment.",
     deleteGroupDescription:

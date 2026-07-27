@@ -1,12 +1,11 @@
 "use client";
 
-import { ArrowLeft, Smartphone } from "lucide-react";
+import { Smartphone } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -104,11 +103,6 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
   if (error) {
     return (
       <section className="mx-auto w-full max-w-[1500px] space-y-4">
-        <Button asChild variant="ghost">
-          <Link href="/provisioning-profiles">
-            <ArrowLeft /> {t("backToProfiles")}
-          </Link>
-        </Button>
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -119,11 +113,6 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
   if (!profile) {
     return (
       <section className="mx-auto w-full max-w-[1500px] space-y-4">
-        <Button asChild variant="ghost">
-          <Link href="/provisioning-profiles">
-            <ArrowLeft /> {t("backToProfiles")}
-          </Link>
-        </Button>
         <Card>
           <CardContent className="p-8 text-center text-muted-foreground">
             {t("profileNotFound")}
@@ -144,12 +133,7 @@ export function ProvisioningProfileDetailPage({ id }: { id: string }) {
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href="/provisioning-profiles">
-            <ArrowLeft /> {t("backToProfiles")}
-          </Link>
-        </Button>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">
             {profile.name}
           </h1>

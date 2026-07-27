@@ -169,7 +169,6 @@
     "noDescription": "No description",
     "versionCount": "{count, plural, one {# version} other {# versions}}",
     "runCount": "{count, plural, one {# run} other {# runs}}",
-    "back": "Back",
     "editor": "Workflow editor",
     "editorDescription": "Drag steps onto the canvas, connect typed handles, then validate and publish.",
     "saveDraft": "Save draft",
@@ -492,7 +491,6 @@
     "attachments": "Attachments",
     "attachmentsTooLarge": "The selected attachments exceed the 100 MB input limit.",
     "auto": "Auto",
-    "backTo": "Back to {kind}",
     "cacheReadTokens": "Cache read",
     "cacheTokens": "Cache tokens",
     "cacheWriteTokens": "Cache write",
@@ -1070,7 +1068,6 @@
     "hideAgents": "Hide agents using {model}"
   },
   "agentDetail": {
-    "back": "Agents",
     "loading": "Loading agent…",
     "notFound": "Agent not found.",
     "version": "Version",
@@ -1387,7 +1384,6 @@
     "runMatch": "Run match"
   },
   "jobs": {
-    "back": "Agents",
     "open": "Open job",
     "cancel": "Cancel",
     "loading": "Loading job…",
@@ -1679,7 +1675,6 @@
     "next": "Next"
   },
   "githubCacheDetail": {
-    "back": "GitHub Cache",
     "title": "Cached GraphQL entry",
     "description": "Cached GitHub GraphQL response",
     "refresh": "Force refresh",
@@ -1748,7 +1743,6 @@
     "next": "Next"
   },
   "jiraCacheDetail": {
-    "back": "Jira Cache",
     "description": "Cached Jira ticket data",
     "refresh": "Refresh ticket",
     "delete": "Delete from cache",
@@ -2957,7 +2951,6 @@
     "saveSettings": "Save settings",
     "skillNotFound": "Skill not found.",
     "loadingSkill": "Loading skill…",
-    "backToSkills": "Back to skills",
     "newSkill": "New skill",
     "editorDescription": "Edit metadata and every file in this skill package.",
     "delete": "Delete",
@@ -2989,7 +2982,6 @@
     "createGroup": "Create group",
     "groupNotFound": "Skill group not found.",
     "loadingGroup": "Loading skill group…",
-    "backToGroups": "Back to skill groups",
     "groupSettingsDescription": "Manage membership, repository assignments, and deployment.",
     "deleteGroupDescription": "Delete {name} and remove copies no longer required by another group?",
     "deleteGroup": "Delete skill group?",
@@ -3760,7 +3752,6 @@
     "noLocalCertificates": "No local signing identities found.",
     "loadingPortal": "Loading Apple Developer resources…",
     "loadingProfile": "Loading provisioning profile…",
-    "backToProfiles": "Back to provisioning profiles",
     "profileNotFound": "This provisioning profile is no longer installed on an agent.",
     "profileDetails": "Profile details",
     "platforms": "Platforms",

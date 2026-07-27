@@ -201,11 +201,6 @@ describe("CodebaseDetailPage", () => {
     render(<CodebaseDetailPage codebaseId="codebase-1" />);
 
     expect(await screen.findByRole("heading", { name: "Codex" })).toBeDefined();
-    expect(
-      screen
-        .getByRole("link", { name: "Back to codebases" })
-        .getAttribute("href"),
-    ).toBe("/codebases");
     expect(screen.getByRole("table", { name: "Local branches" })).toBeDefined();
     expect(
       screen.getByRole("table", { name: "Remote origin branches" }),

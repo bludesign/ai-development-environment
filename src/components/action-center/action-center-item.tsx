@@ -160,9 +160,13 @@ export function ActionCenterItem({
         className={cn(
           "space-y-1.5 overflow-hidden border-b border-l-4 px-2 py-1.5 last:border-b-0",
           color
-            ? worktreeHighlightAccentClasses[color]
-            : "border-l-transparent",
-          color && worktreeHighlightBackgroundClasses[color],
+            ? cn(
+                worktreeHighlightAccentClasses[color],
+                worktreeHighlightBackgroundClasses[color],
+              )
+            : // Uncolored items keep the sidebar's neutral stripe and wash so
+              // every row reads as a card, matching the notifications feed.
+              "border-l-border bg-sidebar-accent/30 hover:bg-sidebar-accent/60",
         )}
         data-slot="action-center-compact-item"
       >

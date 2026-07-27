@@ -169,7 +169,6 @@
     "noDescription": "Sin descripción",
     "versionCount": "{count, plural, one {# versión} other {# versiones}}",
     "runCount": "{count, plural, one {# ejecución} other {# ejecuciones}}",
-    "back": "Volver",
     "editor": "Editor de flujos",
     "editorDescription": "Arrastra pasos al lienzo, conecta controles tipados, valida y publica.",
     "saveDraft": "Guardar borrador",
@@ -492,7 +491,6 @@
     "attachments": "Archivos adjuntos",
     "attachmentsTooLarge": "Los archivos seleccionados superan el límite de entrada de 100 MB.",
     "auto": "Automático",
-    "backTo": "Volver a {kind}",
     "cacheReadTokens": "Caché leída",
     "cacheTokens": "Tokens de caché",
     "cacheWriteTokens": "Caché escrita",
@@ -1070,7 +1068,6 @@
     "hideAgents": "Ocultar agentes que usan {model}"
   },
   "agentDetail": {
-    "back": "Agentes",
     "loading": "Cargando agente…",
     "notFound": "No se encontró el agente.",
     "version": "Versión",
@@ -1387,7 +1384,6 @@
     "runMatch": "Ejecutar coincidencia"
   },
   "jobs": {
-    "back": "Agentes",
     "open": "Abrir trabajo",
     "cancel": "Cancelar",
     "loading": "Cargando trabajo…",
@@ -1679,7 +1675,6 @@
     "next": "Siguiente"
   },
   "githubCacheDetail": {
-    "back": "Caché de GitHub",
     "title": "Entrada GraphQL en caché",
     "description": "Respuesta GraphQL de GitHub en caché",
     "refresh": "Forzar actualización",
@@ -1748,7 +1743,6 @@
     "next": "Siguiente"
   },
   "jiraCacheDetail": {
-    "back": "Caché de Jira",
     "description": "Datos almacenados de la incidencia",
     "refresh": "Actualizar incidencia",
     "delete": "Eliminar de la caché",
@@ -2957,7 +2951,6 @@
     "saveSettings": "Guardar configuración",
     "skillNotFound": "Habilidad no encontrada.",
     "loadingSkill": "Cargando habilidad…",
-    "backToSkills": "Volver a habilidades",
     "newSkill": "Nueva habilidad",
     "editorDescription": "Edita los metadatos y todos los archivos del paquete.",
     "delete": "Eliminar",
@@ -2989,7 +2982,6 @@
     "createGroup": "Crear grupo",
     "groupNotFound": "Grupo no encontrado.",
     "loadingGroup": "Cargando grupo…",
-    "backToGroups": "Volver a grupos",
     "groupSettingsDescription": "Gestiona miembros, repositorios y despliegue.",
     "deleteGroupDescription": "¿Eliminar {name} y las copias que ningún otro grupo necesite?",
     "deleteGroup": "¿Eliminar grupo?",
@@ -3760,7 +3752,6 @@
     "noLocalCertificates": "No se encontraron identidades de firma locales.",
     "loadingPortal": "Cargando recursos de Apple Developer…",
     "loadingProfile": "Cargando perfil de aprovisionamiento…",
-    "backToProfiles": "Volver a perfiles de aprovisionamiento",
     "profileNotFound": "Este perfil de aprovisionamiento ya no está instalado en ningún agente.",
     "profileDetails": "Detalles del perfil",
     "platforms": "Plataformas",

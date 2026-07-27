@@ -52,6 +52,32 @@ npm run dev:all
 
 For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
 
+### Screenshots
+
+`npm run screenshots` captures every app route at four combinations of viewport and colour scheme, and records a walkthrough screencast at each of them. It installs the Chromium build Playwright needs, rebuilds `prisma/mock.db` from the seed modules in `scripts/mock-data/`, produces an isolated Next output in `.next-mock/`, and runs the capture suite. Everything lands in `screenshots/<project>/` and is gitignored — captures are generated on demand, not a committed baseline.
+
+```bash
+npm run screenshots              # full pipeline: browsers, seed, build, capture
+npm run screenshots:run          # capture only, against an existing .next-mock build
+npm run screenshots:walkthrough  # record only the walkthroughs
+npm run screenshots:copy         # publish the desktop captures to the docs project
+npm run mock:reset               # rebuild and reseed prisma/mock.db on its own
+```
+
+`npm run screenshots:copy` prompts for the docs project directory, defaulting to `../ai-development-environment-docs`, and copies `screenshots/desktop-light/` into its `images/light/` and `screenshots/desktop-dark/` into its `images/dark/` — the two directories the Mintlify pages swap between by theme. Pass the directory to skip the prompt: `npm run screenshots:copy -- ../elsewhere`. The mobile captures stay local.
+
+Nothing reaches the network: `scripts/mock-api-server.ts` stubs the GitHub and Jira APIs, and the capture server points at it with the `GITHUB_API_BASE_URL` / `GITHUB_GRAPHQL_URL` overrides.
+
+Routes are listed in `playwright/routes.ts`, keyed to the deterministic IDs the seed writes, so detail pages always resolve to a populated record. A route fails if it returns HTTP 4xx/5xx or raises an uncaught page error; the screenshot is still written first so failures stay diagnosable. The seeder refuses to write to any database not named `mock.db` — override with `MOCK_SEED_ALLOW_ANY_DATABASE=1` only if you mean it.
+
+#### Walkthrough screencasts
+
+`playwright/walkthrough.spec.ts` writes `walkthrough.webm` alongside the stills — a ~13s click-through of the Action Center, Worktrees, a worktree's detail page and Sessions, ending where it began so the docs landing page can loop it seamlessly. The stops live in `playwright/walkthrough.ts`, each reached by clicking either its primary navigation entry or the plain surface of a worktree card, the way a reader would. That is also what keeps the recording honest: a stop that stops being reachable fails the test rather than quietly filming the wrong page.
+
+There is no cursor in the recording. Each click is marked by a dot that pops, holds, and fades, drawn by an init script in `walkthrough.ts` — Playwright's own video overlay can draw one, but only bundled with a cursor sprite and an action label, and the option controlling how long it lingers delays every action, so a pointer move costs as much as a click. Marking clicks from inside the page also covers the taps on the mobile projects.
+
+The desktop projects record at their full 1920x1080; the mobile ones at their viewport's 390x664, because Playwright only ever scales a recorded frame down into the size it is asked for. The mobile screencasts are captured but not published — Mintlify has no responsive-asset story to use them with.
+
 ## GraphQL API
 
 An Apollo Server (Federation subgraph) is mounted at `/api/graphql` through a Next.js route handler. Outside production — or when `APOLLO_SANDBOX=true` — introspection and the Apollo sandbox are enabled; open `/api/graphql` in a browser to explore the schema.

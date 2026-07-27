@@ -334,11 +334,6 @@ describe("WorktreeDetailPage", () => {
     expect(summary.className).toContain("bg-blue-500/10");
     expect(summary.className).toContain("border-l-blue-500");
     expect(
-      screen
-        .getByRole("link", { name: "Back to worktrees" })
-        .getAttribute("href"),
-    ).toBe("/worktrees");
-    expect(
       screen.getByRole("link", { name: "Codex" }).getAttribute("href"),
     ).toBe("/codebases/codebase-1");
     expect(screen.getByText("Studio Mac · studio.local")).toBeDefined();

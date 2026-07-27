@@ -231,13 +231,6 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
   }
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-      <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href={`/builds/${buildId}`}>
-            <ArrowLeft /> {t("backToBuild")}
-          </Link>
-        </Button>
-      </div>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -249,8 +242,10 @@ export function CoverageReportPage({ buildId }: { buildId: string }) {
         </Alert>
       )}
       <div>
-        <p className="text-sm text-muted-foreground">{t("coverageReport")}</p>
         <h1 className="text-2xl font-semibold">{buildName}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("coverageReport")}
+        </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric

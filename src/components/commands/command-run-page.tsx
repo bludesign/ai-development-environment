@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   Check,
   CircleStop,
   Copy,
@@ -308,11 +307,6 @@ export function CommandRunPage({ runId }: { runId: string }) {
         )}
         data-testid="command-run-summary"
       >
-        <Button asChild size="icon" variant="ghost">
-          <Link href="/commands">
-            <ArrowLeft />
-          </Link>
-        </Button>
         <div className="mr-auto">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold">{run.snapshotName}</h1>

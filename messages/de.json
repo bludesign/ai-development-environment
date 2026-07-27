@@ -169,7 +169,6 @@
     "noDescription": "Keine Beschreibung",
     "versionCount": "{count, plural, one {# Version} other {# Versionen}}",
     "runCount": "{count, plural, one {# Lauf} other {# Läufe}}",
-    "back": "Zurück",
     "editor": "Workflow-Editor",
     "editorDescription": "Schritte auf die Fläche ziehen, typisierte Anschlüsse verbinden, validieren und veröffentlichen.",
     "saveDraft": "Entwurf speichern",
@@ -492,7 +491,6 @@
     "attachments": "Anhänge",
     "attachmentsTooLarge": "Die ausgewählten Anhänge überschreiten das Eingabelimit von 100 MB.",
     "auto": "Automatisch",
-    "backTo": "Zurück zu {kind}",
     "cacheReadTokens": "Cache-Lesevorgänge",
     "cacheTokens": "Cache-Token",
     "cacheWriteTokens": "Cache-Schreibvorgänge",
@@ -1070,7 +1068,6 @@
     "hideAgents": "Agenten mit {model} ausblenden"
   },
   "agentDetail": {
-    "back": "Agenten",
     "loading": "Agent wird geladen…",
     "notFound": "Agent nicht gefunden.",
     "version": "Version",
@@ -1387,7 +1384,6 @@
     "runMatch": "Abgleich ausführen"
   },
   "jobs": {
-    "back": "Agenten",
     "open": "Auftrag öffnen",
     "cancel": "Abbrechen",
     "loading": "Auftrag wird geladen…",
@@ -1679,7 +1675,6 @@
     "next": "Weiter"
   },
   "githubCacheDetail": {
-    "back": "GitHub-Cache",
     "title": "GraphQL-Cache-Eintrag",
     "description": "Zwischengespeicherte GitHub-GraphQL-Antwort",
     "refresh": "Neu abrufen",
@@ -1748,7 +1743,6 @@
     "next": "Weiter"
   },
   "jiraCacheDetail": {
-    "back": "Jira-Zwischenspeicher",
     "description": "Gespeicherte Jira-Vorgangsdaten",
     "refresh": "Vorgang aktualisieren",
     "delete": "Aus dem Cache löschen",
@@ -2957,7 +2951,6 @@
     "saveSettings": "Einstellungen speichern",
     "skillNotFound": "Fähigkeit nicht gefunden.",
     "loadingSkill": "Fähigkeit wird geladen…",
-    "backToSkills": "Zurück zu Fähigkeiten",
     "newSkill": "Neue Fähigkeit",
     "editorDescription": "Metadaten und alle Dateien des Pakets bearbeiten.",
     "delete": "Löschen",
@@ -2989,7 +2982,6 @@
     "createGroup": "Gruppe erstellen",
     "groupNotFound": "Fähigkeitsgruppe nicht gefunden.",
     "loadingGroup": "Fähigkeitsgruppe wird geladen…",
-    "backToGroups": "Zurück zu Fähigkeitsgruppen",
     "groupSettingsDescription": "Mitgliedschaft, Repository-Zuweisungen und Bereitstellung verwalten.",
     "deleteGroupDescription": "{name} löschen und nicht mehr benötigte Kopien entfernen?",
     "deleteGroup": "Fähigkeitsgruppe löschen?",
@@ -3760,7 +3752,6 @@
     "noLocalCertificates": "Keine lokalen Signieridentitäten gefunden.",
     "loadingPortal": "Apple-Developer-Ressourcen werden geladen…",
     "loadingProfile": "Bereitstellungsprofil wird geladen…",
-    "backToProfiles": "Zurück zu den Bereitstellungsprofilen",
     "profileNotFound": "Dieses Bereitstellungsprofil ist auf keinem Agenten mehr installiert.",
     "profileDetails": "Profildetails",
     "platforms": "Plattformen",

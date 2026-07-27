@@ -586,14 +586,6 @@ function LoadedWorktreeDetail({
 
   return (
     <section className="flex w-full flex-col gap-5">
-      <div>
-        <Button asChild className="-ml-2" size="sm" variant="ghost">
-          <Link href="/worktrees">
-            <ArrowLeft /> {t("back")}
-          </Link>
-        </Button>
-      </div>
-
       <div
         className={cn(
           "flex flex-wrap items-start justify-between gap-4",

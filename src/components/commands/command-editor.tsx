@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArrowLeft, ChevronDown, CircleOff, Save } from "lucide-react";
+import { Archive, ChevronDown, CircleOff, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Link, useRouter } from "@/i18n/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import {
@@ -177,11 +177,6 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <div className="flex flex-wrap items-center gap-3">
-        <Button asChild size="icon" variant="ghost">
-          <Link href="/commands">
-            <ArrowLeft />
-          </Link>
-        </Button>
         <div className="mr-auto">
           <h1 className="text-2xl font-semibold">
             {commandId ? t("editCommand") : t("newCommand")}

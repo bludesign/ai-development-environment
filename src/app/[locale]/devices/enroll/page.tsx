@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Link } from "@/i18n/navigation";
 import { resolvePublicOrigin } from "@/lib/public-origin";
 
 export default async function EnrollDevicePage() {
@@ -17,10 +16,7 @@ export default async function EnrollDevicePage() {
   return (
     <section className="flex w-full flex-col gap-6">
       <div>
-        <Link className="text-sm text-primary hover:underline" href="/devices">
-          {t("back")}
-        </Link>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-semibold tracking-tight">
           {t("enrollTitle")}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">

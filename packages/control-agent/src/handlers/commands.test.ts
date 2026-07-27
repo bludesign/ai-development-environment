@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { CommandOutputChunk } from "@ai-development-environment/agent-contract/commands";
 
@@ -23,6 +23,10 @@ const payload = (script: string) => ({
 });
 
 describe("saved command handler", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("falls back to the POSIX shell when SHELL is unset", async () => {
     const shell = process.env.SHELL;
     delete process.env.SHELL;
@@ -77,6 +81,7 @@ describe("saved command handler", () => {
   });
 
   test("retries output in order before reporting completion", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     let calls = 0;
     const sequences: number[] = [];
     const result = await runCommand(
@@ -95,6 +100,11 @@ describe("saved command handler", () => {
       [...sequences].sort((left, right) => left - right),
     );
     expect(result.exitCode).toBe(0);
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith(
+      "Could not append command output; retrying in 500ms:",
+      "temporary upload failure",
+    );
   });
 
   test("terminates the detached process group on cancellation", async () => {
@@ -116,6 +126,7 @@ describe("saved command handler", () => {
 
   test("does not keep retrying output when shutdown cancels the command", async () => {
     const controller = new AbortController();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const append = vi.fn().mockRejectedValue(new Error("server closed"));
     const running = runCommand(
       payload("printf ready; sleep 30"),
@@ -124,10 +135,17 @@ describe("saved command handler", () => {
       vi.fn(),
       context(append),
     );
-    await vi.waitFor(() => expect(append).toHaveBeenCalled());
+    // Waiting on the retry log rather than the failed call itself guarantees the
+    // abort below lands while the upload is waiting to retry.
+    await vi.waitFor(() => expect(errors).toHaveBeenCalled());
 
     controller.abort();
 
     await expect(running).resolves.toMatchObject({ cancelled: true });
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith(
+      "Could not append command output; retrying in 500ms:",
+      "server closed",
+    );
   });
 });

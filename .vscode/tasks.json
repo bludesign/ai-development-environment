@@ -116,6 +116,34 @@
     },
     {
       "type": "shell",
+      "label": "screenshots",
+      "group": "test",
+      "command": "npm run screenshots",
+      "detail": "Generate, reset the mock database, build, and run the Playwright screenshot tests"
+    },
+    {
+      "type": "shell",
+      "label": "screenshots:run",
+      "group": "test",
+      "command": "npm run screenshots:run",
+      "detail": "Run the Playwright screenshot tests against the existing mock build"
+    },
+    {
+      "type": "shell",
+      "label": "screenshots:walkthrough",
+      "group": "test",
+      "command": "npm run screenshots:walkthrough",
+      "detail": "Record only the walkthrough screencasts against the existing mock build"
+    },
+    {
+      "type": "shell",
+      "label": "screenshots:copy",
+      "group": "test",
+      "command": "npm run screenshots:copy -- '${input:docsDirectory}'",
+      "detail": "Copy the desktop light and dark captures into the docs project"
+    },
+    {
+      "type": "shell",
       "label": "check-translations",
       "group": "test",
       "command": "npm run check-translations",
@@ -284,6 +312,14 @@
       "group": "build",
       "command": "npm run upgrade:check --workspace @ai-development-environment/control-agent",
       "detail": "Show available control agent dependency upgrades without modifying package.json"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "docsDirectory",
+      "type": "promptString",
+      "description": "Docs project directory to copy screenshots into",
+      "default": "../ai-development-environment-docs"
     }
   ]
 }

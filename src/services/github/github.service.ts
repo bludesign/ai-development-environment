@@ -72,6 +72,7 @@ import {
 import { normalizePipelineState } from "./pipeline-status";
 import type { PollingService } from "@/services/polling";
 import { GitHubCache } from "./github-cache";
+import { GITHUB_API_BASE_URL, GITHUB_GRAPHQL_URL } from "./github-endpoints";
 import {
   extractGitHubGraphqlCost,
   prepareGitHubGraphql,
@@ -88,8 +89,6 @@ import {
 
 const SETTINGS_ID = "default";
 const GITHUB_APP_SETTINGS_ID = "default";
-const GITHUB_API_BASE_URL = "https://api.github.com";
-const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const SEARCH_RESULT_LIMIT = 1000;
 const ACTIONS_PAGE_SIZE = 25;
 const PULL_REQUEST_PAGE_SIZE = 25;

@@ -13,6 +13,7 @@ import type { PollingService } from "@/services/polling";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 
 import { GitHubCache } from "./github-cache";
+import { GITHUB_API_BASE_URL } from "./github-endpoints";
 import {
   observeGitHubRateLimit,
   type GitHubRateLimitMetadata,
@@ -881,7 +882,7 @@ export class GitHubActionsNotificationsService {
   ): Promise<WorkflowRun[]> {
     const runs: WorkflowRun[] = [];
     for (let page = 1; ; page += 1) {
-      const url = `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
+      const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/actions/runs?per_page=${GITHUB_RUNS_PAGE_SIZE}&page=${page}`;
       const startedAt = Date.now();
       const record = (input: {
         statusCode?: number | null;

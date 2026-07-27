@@ -19,7 +19,6 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
-  ArrowLeft,
   Copy,
   Download,
   Eye,
@@ -104,7 +103,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Link, useRouter } from "@/i18n/navigation";
+import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   computeWorkflowPathAvailability,
@@ -945,19 +944,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button asChild size="icon" variant="ghost">
-                <Link
-                  href={workflow ? `/workflows/${workflow.id}` : "/workflows"}
-                  aria-label={t("back")}
-                >
-                  <ArrowLeft />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("back")}</TooltipContent>
-          </Tooltip>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               {t("editor")}

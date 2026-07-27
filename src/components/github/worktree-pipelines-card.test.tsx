@@ -103,7 +103,9 @@ describe("WorktreePipelinesCard", () => {
     ).toBe(
       "/actions?repository=codebase-repository-1&branch=feature%2FAPP-1&pipeline=workflow-1",
     );
-    fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
     expect(screen.getByText("1 jobs")).toBeDefined();
 
     const showSteps = screen.getByRole("button", {

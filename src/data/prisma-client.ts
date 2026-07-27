@@ -34,6 +34,9 @@ async function createPrismaClient(): Promise<PrismaClient> {
   // database operation. Keeping this out of module evaluation prevents `next build` from
   // creating or mutating the configured runtime database.
   try {
+    // No busy_timeout pragma here: better-sqlite3 already applies one via its `timeout`
+    // constructor option, which defaults to 5000ms, so setting it again would be a no-op.
+    // Change it by passing `timeout` to the adapter, not with a pragma.
     await client.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
     await client.$queryRawUnsafe("PRAGMA synchronous = NORMAL;");
   } catch (error: unknown) {

@@ -446,14 +446,6 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <Button asChild size="sm" variant="ghost">
-          <Link href="/codebases">
-            <ArrowLeft /> {t("back")}
-          </Link>
-        </Button>
-      </div>
-
       {loadError && (
         <Alert variant="destructive">
           <AlertDescription>{loadError}</AlertDescription>
@@ -482,66 +474,63 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
         </Alert>
       )}
 
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {codebase.repository.name}
+            </h1>
+            <Badge>{codebaseT(`sync.${codebase.syncState}`)}</Badge>
+            {gitState?.dirty && (
+              <Badge variant="destructive">{t("dirty")}</Badge>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {codebase.agent.name} · {codebase.agent.hostname}
+          </p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {codebase.folder}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/codebases/repositories/${codebase.repository.id}`}>
+              <Settings2 /> {t("repositorySettings")}
+            </Link>
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              codebase.agent.connectionStatus !== "ONLINE" ||
+              !codebase.agent.capabilities.includes(CODEBASE_REFRESH_JOB_KIND)
+            }
+            onClick={() => void queueBatch("refreshCodebases")}
+            variant="outline"
+          >
+            {busy ? <Spinner /> : <RefreshCw />} {t("refresh")}
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              codebase.agent.connectionStatus !== "ONLINE" ||
+              codebase.availability !== "AVAILABLE" ||
+              !codebase.agent.capabilities.includes(CODEBASE_FETCH_JOB_KIND)
+            }
+            onClick={() => void queueBatch("fetchCodebases")}
+            variant="outline"
+          >
+            {activeJob?.kind === CODEBASE_FETCH_JOB_KIND ? (
+              <Spinner />
+            ) : (
+              <Download />
+            )}{" "}
+            {t("fetch")}
+          </Button>
+        </div>
+      </div>
+
       <Card>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  {codebase.repository.name}
-                </h1>
-                <Badge>{codebaseT(`sync.${codebase.syncState}`)}</Badge>
-                {gitState?.dirty && (
-                  <Badge variant="destructive">{t("dirty")}</Badge>
-                )}
-              </div>
-              <p className="mt-1 font-mono text-xs text-muted-foreground">
-                {codebase.folder}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {codebase.agent.name} · {codebase.agent.hostname}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="outline">
-                <Link
-                  href={`/codebases/repositories/${codebase.repository.id}`}
-                >
-                  <Settings2 /> {t("repositorySettings")}
-                </Link>
-              </Button>
-              <Button
-                disabled={
-                  busy ||
-                  codebase.agent.connectionStatus !== "ONLINE" ||
-                  !codebase.agent.capabilities.includes(
-                    CODEBASE_REFRESH_JOB_KIND,
-                  )
-                }
-                onClick={() => void queueBatch("refreshCodebases")}
-                variant="outline"
-              >
-                {busy ? <Spinner /> : <RefreshCw />} {t("refresh")}
-              </Button>
-              <Button
-                disabled={
-                  busy ||
-                  codebase.agent.connectionStatus !== "ONLINE" ||
-                  codebase.availability !== "AVAILABLE" ||
-                  !codebase.agent.capabilities.includes(CODEBASE_FETCH_JOB_KIND)
-                }
-                onClick={() => void queueBatch("fetchCodebases")}
-                variant="outline"
-              >
-                {activeJob?.kind === CODEBASE_FETCH_JOB_KIND ? (
-                  <Spinner />
-                ) : (
-                  <Download />
-                )}{" "}
-                {t("fetch")}
-              </Button>
-            </div>
-          </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <Info label={t("origin")} value={codebase.observedOrigin} mono />
             <Info

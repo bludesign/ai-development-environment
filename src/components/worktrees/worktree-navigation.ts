@@ -6,7 +6,12 @@ import type {
   WorktreeOverview,
 } from "./types";
 
-const INTERACTIVE_SELECTOR = [
+/**
+ * Everything on a worktree surface that owns its own click, so `shouldNavigateWorktreeSurface`
+ * leaves it alone. Exported because `playwright/walkthrough.spec.ts` has to find a part of a
+ * card that *does* navigate, and applying the same rule keeps it from drifting from this one.
+ */
+export const INTERACTIVE_SELECTOR = [
   "a",
   "button",
   "input",

@@ -656,6 +656,7 @@ type GitHubPullRequestDetail {
   reviewThreads: [GitHubReviewThread!]!
   baseRefName: String!
   headRefName: String!
+  headRefOid: String!
   state: String!
   isDraft: Boolean!
   mergeable: String!
