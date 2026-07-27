@@ -3,6 +3,14 @@ import type { PrismaClient } from "../../src/generated/prisma/client";
 import { daysAgo, hoursAgo } from "./time";
 
 /**
+ * Jira and the Actions cache server read their host from the database rather than an
+ * environment variable, so they point at the local stub (scripts/mock-api-server.ts) that the
+ * screenshot run starts. MOCK_API_BASE_URL lets a manual seed target a different port.
+ */
+const MOCK_API_BASE_URL =
+  process.env.MOCK_API_BASE_URL ?? "http://127.0.0.1:4322";
+
+/**
  * Singleton configuration rows. Seeding these makes integration-dependent pages
  * (GitHub, Jira, push notifications, costs, cache server) render as "configured"
  * instead of their empty setup states.
@@ -50,7 +58,7 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
   await prisma.jiraSettings.create({
     data: {
       id: "default",
-      siteUrl: "https://acme.atlassian.net",
+      siteUrl: MOCK_API_BASE_URL,
       email: "dev-bot@acme.example.com",
       cacheTtlSeconds: 300,
     },
@@ -60,7 +68,7 @@ export async function seedSettings(prisma: PrismaClient): Promise<void> {
   await prisma.cacheServerSettings.create({
     data: {
       id: "default",
-      baseUrl: "https://cache.acme.example.com",
+      baseUrl: `${MOCK_API_BASE_URL}/cache-server`,
       headerNamesJson: JSON.stringify(["x-acme-cache", "x-acme-region"]),
     },
   });

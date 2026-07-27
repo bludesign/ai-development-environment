@@ -39,8 +39,8 @@ export async function seedSigning(prisma: PrismaClient): Promise<void> {
     data: {
       id: ids.signing.profileAppStore,
       agentId: ids.agents.build,
-      uuid: "acme0000-1111-2222-3333-444455556666",
-      contentHash: "sha256-appstore-profile-0001",
+      uuid: ids.signing.profileAppStoreUuid,
+      contentHash: ids.signing.profileAppStoreContentHash,
       name: "Acme App Store",
       profileType: "APP_STORE",
       bundleId: "com.acme.app",

@@ -74,7 +74,7 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
       overlapPolicy: "QUEUE",
       maxConcurrentRuns: 1,
       quickActionKind: "STANDARD",
-      quickActionIconKey: "bot",
+      quickActionIconKey: "sparkles",
       createdAt: daysAgo(15),
     },
   });

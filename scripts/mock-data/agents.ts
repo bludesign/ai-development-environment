@@ -8,6 +8,13 @@ const GIB = 1024 * 1024 * 1024;
 /** Large heartbeat interval keeps every seeded agent inside its ONLINE window for hours. */
 const HEARTBEAT_INTERVAL_SECONDS = 86_400;
 
+/**
+ * Deliberately omits the live git-inspection capabilities (`codebase.git.inspect`,
+ * `worktree.git.inspect`). Pages that see them on an ONLINE agent dispatch an inspection job
+ * and await its result; with no real agent connected that promise never settles and the page
+ * is stuck on its loading spinner. Without them the pages fall back to the persisted branch
+ * and status data seeded below, which is what the screenshots should show.
+ */
 const AGENT_CAPABILITIES = [
   "command.run",
   "ccusage.report",
@@ -18,12 +25,10 @@ const AGENT_CAPABILITIES = [
   "codebase.inspect",
   "codebase.refresh",
   "codebase.fetch",
-  "codebase.git.inspect",
   "codebase.git.operation",
   "codebase.reconcile.requested",
   "worktree.inspect",
   "worktree.operation",
-  "worktree.git.inspect",
   "worktree.diff.inspect",
   "skills.scan",
   "skills.read",

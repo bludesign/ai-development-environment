@@ -138,7 +138,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
     data: {
       id: ids.githubCacheEntries.pullRequests,
       cacheKey: "github:acme/web-app:pull-requests",
-      authentication: "GITHUB_APP",
+      authentication: "APP",
       endpoint: "https://api.github.com/graphql",
       operation: "PullRequests",
       query: "query PullRequests($owner:String!,$name:String!){ repository(owner:$owner,name:$name){ pullRequests(first:20){ nodes { number title } } } }",
@@ -163,7 +163,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
     data: [
       {
         id: "github-api-log-1",
-        authentication: "GITHUB_APP",
+        authentication: "APP",
         operation: "PullRequests",
         source: "LIVE",
         durationMs: 284,
@@ -177,7 +177,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
       },
       {
         id: "github-api-log-2",
-        authentication: "GITHUB_APP",
+        authentication: "APP",
         operation: "PullRequests",
         source: "CACHE",
         durationMs: 3,
@@ -187,7 +187,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
       },
       {
         id: "github-api-log-3",
-        authentication: "GITHUB_APP",
+        authentication: "APP",
         operation: "CheckRuns",
         source: "LIVE",
         durationMs: 331,
@@ -202,7 +202,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
     data: [
       {
         id: "github-rate-graphql",
-        authentication: "GITHUB_APP",
+        authentication: "APP",
         resource: "graphql",
         limit: 5000,
         remaining: 4993,
@@ -212,7 +212,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
       },
       {
         id: "github-rate-core",
-        authentication: "GITHUB_APP",
+        authentication: "APP",
         resource: "core",
         limit: 15000,
         remaining: 14980,

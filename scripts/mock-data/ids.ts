@@ -94,6 +94,8 @@ export const ids = {
   },
   signing: {
     profileAppStore: "signing-profile-app-store",
+    profileAppStoreUuid: "acme0000-1111-2222-3333-444455556666",
+    profileAppStoreContentHash: "sha256-appstore-profile-0001",
     certificateDistribution: "signing-cert-distribution",
   },
   githubCacheEntries: {

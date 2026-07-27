@@ -15,7 +15,7 @@ export async function seedCommands(prisma: PrismaClient): Promise<void> {
       restartPolicy: "ON_FAILURE",
       restartLimit: 2,
       quickActionEnabled: true,
-      quickActionIconKey: "flask-conical",
+      quickActionIconKey: "test-tube",
       notificationsEnabled: true,
       createdAt: daysAgo(25),
     },

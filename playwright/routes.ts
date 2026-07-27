@@ -104,8 +104,9 @@ export const routes: RouteEntry[] = [
   // Signing
   { name: "provisioning-profiles", path: "/provisioning-profiles" },
   {
+    // Signing profiles are addressed by their composite `uuid:contentHash`, not the row id.
     name: "provisioning-profile-detail",
-    path: `/provisioning-profiles/${ids.signing.profileAppStore}`,
+    path: `/provisioning-profiles/${ids.signing.profileAppStoreUuid}:${ids.signing.profileAppStoreContentHash}`,
   },
 
   // Observability

@@ -34,6 +34,9 @@ async function createPrismaClient(): Promise<PrismaClient> {
   // database operation. Keeping this out of module evaluation prevents `next build` from
   // creating or mutating the configured runtime database.
   try {
+    // Wait for a competing writer instead of failing immediately. Without this, concurrent
+    // requests surface raw "database table is locked" errors in the UI.
+    await client.$queryRawUnsafe("PRAGMA busy_timeout = 5000;");
     await client.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
     await client.$queryRawUnsafe("PRAGMA synchronous = NORMAL;");
   } catch (error: unknown) {

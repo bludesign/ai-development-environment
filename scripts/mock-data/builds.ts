@@ -5,6 +5,187 @@ import { daysAgo, hoursAgo, minutesAgo } from "./time";
 
 const BUILDS_DIR = "/Users/acme/Repositories/Builds";
 
+/**
+ * Report payloads must match the GraphQL shapes in schemas/builds.graphql: `BuildReport.tests`
+ * reads `data.tests` as `BuildTestCase`, and the coverage report reads `data.files` /
+ * `data.changedFiles`. Both are only surfaced when the report status is READY.
+ */
+const COVERAGE_FILES = [
+  {
+    target: "AcmeApp",
+    name: "CheckoutViewModel.swift",
+    path: "AcmeApp/Checkout/CheckoutViewModel.swift",
+    coveredLines: 412,
+    executableLines: 468,
+    lineCoverage: 0.8803,
+  },
+  {
+    target: "AcmeApp",
+    name: "SearchCoordinator.swift",
+    path: "AcmeApp/Search/SearchCoordinator.swift",
+    coveredLines: 286,
+    executableLines: 374,
+    lineCoverage: 0.7647,
+  },
+  {
+    target: "AcmeApp",
+    name: "AppDelegate.swift",
+    path: "AcmeApp/AppDelegate.swift",
+    coveredLines: 74,
+    executableLines: 132,
+    lineCoverage: 0.5606,
+  },
+  {
+    target: "AcmeKit",
+    name: "AuthTokenStore.swift",
+    path: "AcmeKit/Auth/AuthTokenStore.swift",
+    coveredLines: 318,
+    executableLines: 332,
+    lineCoverage: 0.9578,
+  },
+  {
+    target: "AcmeKit",
+    name: "NetworkClient.swift",
+    path: "AcmeKit/Networking/NetworkClient.swift",
+    coveredLines: 504,
+    executableLines: 548,
+    lineCoverage: 0.9197,
+  },
+  {
+    target: "AcmeKit",
+    name: "CacheStore.swift",
+    path: "AcmeKit/Storage/CacheStore.swift",
+    coveredLines: 196,
+    executableLines: 244,
+    lineCoverage: 0.8033,
+  },
+];
+
+const CHANGED_COVERAGE_FILES = [
+  {
+    path: "AcmeApp/Search/SearchCoordinator.swift",
+    changeType: "MODIFIED",
+    changedCoveredLines: 148,
+    changedExecutableLines: 176,
+    changedLineCoverage: 0.8409,
+  },
+  {
+    path: "AcmeKit/Auth/AuthTokenStore.swift",
+    changeType: "MODIFIED",
+    changedCoveredLines: 212,
+    changedExecutableLines: 236,
+    changedLineCoverage: 0.8983,
+  },
+  {
+    path: "AcmeApp/Checkout/CheckoutSummaryView.swift",
+    changeType: "ADDED",
+    changedCoveredLines: 52,
+    changedExecutableLines: 74,
+    changedLineCoverage: 0.7027,
+  },
+];
+
+const TEST_SUMMARY = {
+  total: 128,
+  passed: 124,
+  failed: 3,
+  skipped: 1,
+  expectedFailures: 0,
+  unknown: 0,
+  durationSeconds: 312.48,
+};
+
+const TEST_CASES = [
+  {
+    identifier: "AcmeAppTests/CheckoutTests/testCheckoutFlow",
+    name: "testCheckoutFlow",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeAppTests",
+    suite: "CheckoutTests",
+    result: "FAILED",
+    durationSeconds: 4.82,
+    tags: ["checkout", "regression"],
+    details: [
+      "XCTAssertEqual failed: (\"$41.98\") is not equal to (\"$39.99\") — CheckoutTests.swift:142",
+    ],
+  },
+  {
+    identifier: "AcmeAppTests/SearchTests/testSearchDebounce",
+    name: "testSearchDebounce",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeAppTests",
+    suite: "SearchTests",
+    result: "FAILED",
+    durationSeconds: 2.14,
+    tags: ["search"],
+    details: [
+      "Asynchronous wait failed: Exceeded timeout of 2 seconds — SearchTests.swift:88",
+    ],
+  },
+  {
+    identifier: "AcmeKitTests/AuthTests/testAuthToken",
+    name: "testAuthToken",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeKitTests",
+    suite: "AuthTests",
+    result: "FAILED",
+    durationSeconds: 0.96,
+    tags: ["auth"],
+    details: ["XCTAssertNotNil failed — AuthTests.swift:57"],
+  },
+  {
+    identifier: "AcmeAppTests/CheckoutTests/testApplyPromotionCode",
+    name: "testApplyPromotionCode",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeAppTests",
+    suite: "CheckoutTests",
+    result: "PASSED",
+    durationSeconds: 1.27,
+    tags: ["checkout"],
+    details: [],
+  },
+  {
+    identifier: "AcmeAppTests/SearchTests/testSearchRanking",
+    name: "testSearchRanking",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeAppTests",
+    suite: "SearchTests",
+    result: "PASSED",
+    durationSeconds: 3.41,
+    tags: ["search"],
+    details: [],
+  },
+  {
+    identifier: "AcmeKitTests/NetworkTests/testRetryPolicy",
+    name: "testRetryPolicy",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeKitTests",
+    suite: "NetworkTests",
+    result: "PASSED",
+    durationSeconds: 5.63,
+    tags: ["networking"],
+    details: [],
+  },
+  {
+    identifier: "AcmeKitTests/StorageTests/testCacheEvictionUnderPressure",
+    name: "testCacheEvictionUnderPressure",
+    plan: "AcmeApp",
+    configuration: "Debug",
+    bundle: "AcmeKitTests",
+    suite: "StorageTests",
+    result: "SKIPPED",
+    durationSeconds: 0,
+    tags: ["storage"],
+    details: ["Requires a physical device"],
+  },
+];
+
 export async function seedBuilds(prisma: PrismaClient): Promise<void> {
   await prisma.codebaseProject.create({
     data: {
@@ -128,19 +309,22 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
         create: [
           {
             id: "report-archive-coverage",
-            kind: "COVERAGE",
-            source: "XCRESULT",
-            status: "SUCCEEDED",
+            kind: "CODE_COVERAGE",
+            source: "AUTOMATIC",
+            status: "READY",
             summaryJson: JSON.stringify({
-              lineCoverage: 0.82,
               coveredLines: 8420,
               executableLines: 10270,
+              lineCoverage: 0.8199,
+              targetCount: 2,
+              fileCount: COVERAGE_FILES.length,
+              changedCoveredLines: 412,
+              changedExecutableLines: 486,
+              changedLineCoverage: 0.8477,
             }),
             dataJson: JSON.stringify({
-              targets: [
-                { name: "AcmeApp", lineCoverage: 0.82 },
-                { name: "AcmeKit", lineCoverage: 0.91 },
-              ],
+              files: COVERAGE_FILES,
+              changedFiles: CHANGED_COVERAGE_FILES,
             }),
             finishedAt: hoursAgo(3),
           },
@@ -264,16 +448,10 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
           {
             id: "report-test-results",
             kind: "TEST_RESULTS",
-            source: "XCRESULT",
-            status: "SUCCEEDED",
-            summaryJson: JSON.stringify({
-              total: 128,
-              passed: 125,
-              failed: 3,
-            }),
-            dataJson: JSON.stringify({
-              failures: ["testCheckoutFlow", "testSearchDebounce", "testAuthToken"],
-            }),
+            source: "AUTOMATIC",
+            status: "READY",
+            summaryJson: JSON.stringify(TEST_SUMMARY),
+            dataJson: JSON.stringify({ tests: TEST_CASES }),
             finishedAt: minutesAgo(44),
           },
         ],
