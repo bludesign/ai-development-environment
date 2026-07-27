@@ -82,7 +82,7 @@ export default defineConfig({
       timeout: 120_000,
       reuseExistingServer: false,
       env: {
-        NEXT_DIST_DIR: ".next-mock",
+        SCREENSHOT_DIST_DIR: ".next-mock",
         DATABASE_URL: mockDatabaseUrl,
         NODE_ENV: "production",
         // Use a dedicated agent WebSocket port so the capture server never collides with a

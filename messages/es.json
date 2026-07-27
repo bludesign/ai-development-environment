@@ -169,7 +169,6 @@
     "noDescription": "Sin descripción",
     "versionCount": "{count, plural, one {# versión} other {# versiones}}",
     "runCount": "{count, plural, one {# ejecución} other {# ejecuciones}}",
-    "back": "Volver",
     "editor": "Editor de flujos",
     "editorDescription": "Arrastra pasos al lienzo, conecta controles tipados, valida y publica.",
     "saveDraft": "Guardar borrador",
@@ -1069,7 +1068,6 @@
     "hideAgents": "Ocultar agentes que usan {model}"
   },
   "agentDetail": {
-    "back": "Agentes",
     "loading": "Cargando agente…",
     "notFound": "No se encontró el agente.",
     "version": "Versión",
@@ -1386,7 +1384,6 @@
     "runMatch": "Ejecutar coincidencia"
   },
   "jobs": {
-    "back": "Agentes",
     "open": "Abrir trabajo",
     "cancel": "Cancelar",
     "loading": "Cargando trabajo…",
@@ -1678,7 +1675,6 @@
     "next": "Siguiente"
   },
   "githubCacheDetail": {
-    "back": "Caché de GitHub",
     "title": "Entrada GraphQL en caché",
     "description": "Respuesta GraphQL de GitHub en caché",
     "refresh": "Forzar actualización",
@@ -1747,7 +1743,6 @@
     "next": "Siguiente"
   },
   "jiraCacheDetail": {
-    "back": "Caché de Jira",
     "description": "Datos almacenados de la incidencia",
     "refresh": "Actualizar incidencia",
     "delete": "Eliminar de la caché",

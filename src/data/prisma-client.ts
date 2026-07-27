@@ -34,9 +34,9 @@ async function createPrismaClient(): Promise<PrismaClient> {
   // database operation. Keeping this out of module evaluation prevents `next build` from
   // creating or mutating the configured runtime database.
   try {
-    // Wait for a competing writer instead of failing immediately. Without this, concurrent
-    // requests surface raw "database table is locked" errors in the UI.
-    await client.$queryRawUnsafe("PRAGMA busy_timeout = 5000;");
+    // No busy_timeout pragma here: better-sqlite3 already applies one via its `timeout`
+    // constructor option, which defaults to 5000ms, so setting it again would be a no-op.
+    // Change it by passing `timeout` to the adapter, not with a pragma.
     await client.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
     await client.$queryRawUnsafe("PRAGMA synchronous = NORMAL;");
   } catch (error: unknown) {

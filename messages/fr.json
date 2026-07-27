@@ -169,7 +169,6 @@
     "noDescription": "Aucune description",
     "versionCount": "{count, plural, one {# version} other {# versions}}",
     "runCount": "{count, plural, one {# exécution} other {# exécutions}}",
-    "back": "Retour",
     "editor": "Éditeur de workflow",
     "editorDescription": "Faites glisser les étapes, reliez les poignées typées, puis validez et publiez.",
     "saveDraft": "Enregistrer le brouillon",
@@ -1069,7 +1068,6 @@
     "hideAgents": "Masquer les agents utilisant {model}"
   },
   "agentDetail": {
-    "back": "Agents",
     "loading": "Chargement de l’agent…",
     "notFound": "Agent introuvable.",
     "version": "Version",
@@ -1386,7 +1384,6 @@
     "runMatch": "Lancer la correspondance"
   },
   "jobs": {
-    "back": "Agents",
     "open": "Ouvrir la tâche",
     "cancel": "Annuler",
     "loading": "Chargement de la tâche…",
@@ -1678,7 +1675,6 @@
     "next": "Suivant"
   },
   "githubCacheDetail": {
-    "back": "Cache GitHub",
     "title": "Entrée GraphQL en cache",
     "description": "Réponse GraphQL GitHub en cache",
     "refresh": "Forcer l’actualisation",
@@ -1747,7 +1743,6 @@
     "next": "Suivant"
   },
   "jiraCacheDetail": {
-    "back": "Cache Jira",
     "description": "Données Jira du ticket en cache",
     "refresh": "Actualiser le ticket",
     "delete": "Supprimer du cache",

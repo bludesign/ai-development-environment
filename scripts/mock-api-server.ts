@@ -1442,6 +1442,7 @@ const server = createServer(
     const raw = await readBody(request);
 
     let payload: unknown = {};
+    let status = 200;
     try {
       if (url.pathname === "/graphql") {
         payload = githubGraphql(raw ? JSON.parse(raw) : {});
@@ -1451,12 +1452,20 @@ const server = createServer(
         payload = githubRest(url.pathname, url.searchParams);
       }
     } catch (error) {
+      // A throw here is a bug in this stub, not a scenario under test. Answering 200 with an
+      // empty body would render as an innocuous "no data" state and hide it, so surface a 5xx
+      // that the capture assertions and the app's own error handling can both see.
       console.error(`[mock-api] ${url.pathname} failed:`, error);
-      payload = {};
+      status = 500;
+      payload = {
+        message: `Mock API handler for ${url.pathname} threw: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
     }
 
     const body = JSON.stringify(payload ?? {});
-    response.writeHead(200, {
+    response.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
       // Mirror GitHub's rate-limit headers so the app records realistic telemetry.
       "x-ratelimit-limit": String(RATE_LIMIT.limit),

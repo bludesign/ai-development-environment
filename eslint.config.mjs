@@ -19,13 +19,19 @@ const eslintConfig = defineConfig([
     // npm publish staging output (assembled by scripts/prepare-npm-server-package.mjs).
     ".npm-staging/**",
   ]),
-  // Underscore-prefixed parameters are the codebase's marker for "part of the
-  // signature, deliberately unused" (resolver roots, event handler args, mocks).
+  // An underscore prefix is the codebase's marker for "deliberately unused": resolver roots,
+  // event handler args, mocks, discarded destructured fields, and ignored catch bindings.
+  // Severity stays at eslint-config-next's `warn`; only the ignore patterns are added.
   {
     rules: {
       "@typescript-eslint/no-unused-vars": [
         "warn",
-        { argsIgnorePattern: "^_" },
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
       ],
     },
   },

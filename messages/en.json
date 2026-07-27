@@ -169,7 +169,6 @@
     "noDescription": "No description",
     "versionCount": "{count, plural, one {# version} other {# versions}}",
     "runCount": "{count, plural, one {# run} other {# runs}}",
-    "back": "Back",
     "editor": "Workflow editor",
     "editorDescription": "Drag steps onto the canvas, connect typed handles, then validate and publish.",
     "saveDraft": "Save draft",
@@ -1069,7 +1068,6 @@
     "hideAgents": "Hide agents using {model}"
   },
   "agentDetail": {
-    "back": "Agents",
     "loading": "Loading agent…",
     "notFound": "Agent not found.",
     "version": "Version",
@@ -1386,7 +1384,6 @@
     "runMatch": "Run match"
   },
   "jobs": {
-    "back": "Agents",
     "open": "Open job",
     "cancel": "Cancel",
     "loading": "Loading job…",
@@ -1678,7 +1675,6 @@
     "next": "Next"
   },
   "githubCacheDetail": {
-    "back": "GitHub Cache",
     "title": "Cached GraphQL entry",
     "description": "Cached GitHub GraphQL response",
     "refresh": "Force refresh",
@@ -1747,7 +1743,6 @@
     "next": "Next"
   },
   "jiraCacheDetail": {
-    "back": "Jira Cache",
     "description": "Cached Jira ticket data",
     "refresh": "Refresh ticket",
     "delete": "Delete from cache",

@@ -19,19 +19,23 @@ const agentWebSocketHost = ["0.0.0.0", "::"].includes(
   : configuredAgentWebSocketHost;
 const agentWebSocketPort = process.env.AGENT_WS_PORT ?? "3091";
 
-// The on-demand screenshot build sets NEXT_DIST_DIR to an isolated output dir. That build is a
-// visual artifact, not a CI gate, so skip type-checking (the primary `.next` build still
-// enforces it) to keep it fast and resilient to unrelated app-wide issues.
-const isolatedScreenshotBuild =
-  !!process.env.NEXT_DIST_DIR && process.env.NEXT_DIST_DIR !== ".next";
+// The on-demand screenshot build sets SCREENSHOT_DIST_DIR to an isolated output dir so it
+// never clobbers the primary `.next` directory a dev server may be serving from. That build is
+// a visual artifact, not a CI gate, so it also skips type-checking (the primary build still
+// enforces it) to stay fast and resilient to unrelated app-wide issues.
+//
+// The name is deliberately screenshot-specific: a generic NEXT_DIST_DIR left in the
+// environment would silently redirect `npm run build` and disable its type-checking too.
+const screenshotDistDir =
+  process.env.SCREENSHOT_DIST_DIR && process.env.SCREENSHOT_DIST_DIR !== ".next"
+    ? process.env.SCREENSHOT_DIST_DIR
+    : undefined;
 
 const nextConfig: NextConfig = {
   allowedDevOrigins,
   output: "standalone",
-  // Allow an isolated build output (e.g. the on-demand screenshot build) so it never clobbers
-  // the primary `.next` directory used by a running dev server.
-  distDir: process.env.NEXT_DIST_DIR || ".next",
-  typescript: { ignoreBuildErrors: isolatedScreenshotBuild },
+  distDir: screenshotDistDir ?? ".next",
+  typescript: { ignoreBuildErrors: !!screenshotDistDir },
   outputFileTracingIncludes: {
     "/*": [
       "node_modules/@napi-rs/keyring/**/*",

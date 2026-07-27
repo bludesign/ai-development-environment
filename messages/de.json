@@ -169,7 +169,6 @@
     "noDescription": "Keine Beschreibung",
     "versionCount": "{count, plural, one {# Version} other {# Versionen}}",
     "runCount": "{count, plural, one {# Lauf} other {# Läufe}}",
-    "back": "Zurück",
     "editor": "Workflow-Editor",
     "editorDescription": "Schritte auf die Fläche ziehen, typisierte Anschlüsse verbinden, validieren und veröffentlichen.",
     "saveDraft": "Entwurf speichern",
@@ -1069,7 +1068,6 @@
     "hideAgents": "Agenten mit {model} ausblenden"
   },
   "agentDetail": {
-    "back": "Agenten",
     "loading": "Agent wird geladen…",
     "notFound": "Agent nicht gefunden.",
     "version": "Version",
@@ -1386,7 +1384,6 @@
     "runMatch": "Abgleich ausführen"
   },
   "jobs": {
-    "back": "Agenten",
     "open": "Auftrag öffnen",
     "cancel": "Abbrechen",
     "loading": "Auftrag wird geladen…",
@@ -1678,7 +1675,6 @@
     "next": "Weiter"
   },
   "githubCacheDetail": {
-    "back": "GitHub-Cache",
     "title": "GraphQL-Cache-Eintrag",
     "description": "Zwischengespeicherte GitHub-GraphQL-Antwort",
     "refresh": "Neu abrufen",
@@ -1747,7 +1743,6 @@
     "next": "Weiter"
   },
   "jiraCacheDetail": {
-    "back": "Jira-Zwischenspeicher",
     "description": "Gespeicherte Jira-Vorgangsdaten",
     "refresh": "Vorgang aktualisieren",
     "delete": "Aus dem Cache löschen",

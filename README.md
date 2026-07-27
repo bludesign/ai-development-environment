@@ -52,6 +52,20 @@ npm run dev:all
 
 For agent-only development, `CONTROL_AGENT_DEV_SERVER`, `CONTROL_AGENT_DEV_WEBSOCKET_SERVER`, and `CONTROL_AGENT_DEV_CONFIG` override the local endpoints and dedicated credential path. Automatic development enrollment refuses non-loopback server addresses.
 
+### Screenshots
+
+`npm run screenshots` captures every app route at four combinations of viewport and colour scheme. It installs the Chromium build Playwright needs, rebuilds `prisma/mock.db` from the seed modules in `scripts/mock-data/`, produces an isolated Next output in `.next-mock/`, and runs the capture suite. PNGs land in `docs/screenshots/<project>/` and are gitignored — they are generated on demand, not a committed baseline.
+
+```bash
+npm run screenshots           # full pipeline: browsers, seed, build, capture
+npm run screenshots:run       # capture only, against an existing .next-mock build
+npm run mock:reset            # rebuild and reseed prisma/mock.db on its own
+```
+
+Nothing reaches the network: `scripts/mock-api-server.ts` stubs the GitHub and Jira APIs, and the capture server points at it with the `GITHUB_API_BASE_URL` / `GITHUB_GRAPHQL_URL` overrides.
+
+Routes are listed in `playwright/routes.ts`, keyed to the deterministic IDs the seed writes, so detail pages always resolve to a populated record. A route fails if it returns HTTP 4xx/5xx or raises an uncaught page error; the screenshot is still written first so failures stay diagnosable. The seeder refuses to write to any database not named `mock.db` — override with `MOCK_SEED_ALLOW_ANY_DATABASE=1` only if you mean it.
+
 ## GraphQL API
 
 An Apollo Server (Federation subgraph) is mounted at `/api/graphql` through a Next.js route handler. Outside production — or when `APOLLO_SANDBOX=true` — introspection and the Apollo sandbox are enabled; open `/api/graphql` in a browser to explore the schema.
